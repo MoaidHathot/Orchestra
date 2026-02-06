@@ -1,0 +1,29 @@
+{
+  "name": "Story Generator",
+  "steps": [
+    {
+      "name": "Generate Premise",
+      "systemPrompt": "You are a creative writing assistant. Generate a compelling story premise.",
+      "userPrompt": "Create a unique story premise for a short science fiction story. Include the setting, main character, and central conflict.",
+      "toolList": [],
+      "dependentOn": [],
+      "model": "claude-opus-4.6"
+    },
+    {
+      "name": "Develop Outline",
+      "systemPrompt": "You are a story structure expert. Create detailed story outlines.",
+      "userPrompt": "Based on this premise, create a three-act story outline with key plot points for each act.",
+      "toolList": [],
+      "dependentOn": ["Generate Premise"],
+      "model": "claude-opus-4.6"
+    },
+    {
+      "name": "Write Opening",
+      "systemPrompt": "You are a skilled fiction writer. Write engaging story openings.",
+      "userPrompt": "Write an engaging opening paragraph (approximately 200 words) that hooks the reader and establishes the story's tone.",
+      "toolList": [],
+      "dependentOn": ["Develop Outline"],
+      "model": "claude-opus-4.6"
+    }
+  ]
+}

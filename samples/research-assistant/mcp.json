@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "type": "local",
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-filesystem", "{{workingDirectory}}"]
+    },
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp"
+    }
+  }
+}

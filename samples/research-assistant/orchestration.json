@@ -1,0 +1,47 @@
+{
+  "name": "Codebase Research Assistant",
+  "steps": [
+    {
+      "name": "Understand Request",
+      "systemPrompt": "You are a research planning assistant. Help users clarify and structure their research questions about codebases.",
+      "userPrompt": "I need to research a codebase. Please help me understand and clarify my research question.",
+      "toolList": [],
+      "dependentOn": [],
+      "model": "claude-opus-4.6",
+      "handleInput": true
+    },
+    {
+      "name": "Explore Structure",
+      "systemPrompt": "You are a codebase explorer. Use the filesystem tools to understand project structure and organization.",
+      "userPrompt": "Explore the codebase structure at {{workingDirectory}}. Identify the main directories, key files, and overall architecture. Focus on understanding how the codebase is organized.",
+      "toolList": ["filesystem"],
+      "dependentOn": ["Understand Request"],
+      "model": "claude-opus-4.6"
+    },
+    {
+      "name": "Analyze Patterns",
+      "systemPrompt": "You are a code pattern analyst. Identify design patterns, coding conventions, and architectural decisions in codebases.",
+      "userPrompt": "Based on the structure exploration, analyze the codebase for: 1) Design patterns used, 2) Coding conventions, 3) Dependency management approach, 4) Key abstractions and interfaces.",
+      "toolList": ["filesystem"],
+      "dependentOn": ["Explore Structure"],
+      "model": "claude-opus-4.6"
+    },
+    {
+      "name": "Find Relevant Code",
+      "systemPrompt": "You are a code search specialist. Find specific code sections relevant to user queries.",
+      "userPrompt": "Search for code relevant to the user's original research question. Read and analyze the most relevant files. Identify key functions, classes, and their relationships.",
+      "toolList": ["filesystem"],
+      "dependentOn": ["Analyze Patterns"],
+      "model": "claude-opus-4.6"
+    },
+    {
+      "name": "Generate Summary",
+      "systemPrompt": "You are a technical documentation writer. Create clear, comprehensive summaries of code research findings.",
+      "userPrompt": "Create a comprehensive research summary that includes: 1) Codebase overview, 2) Architecture summary, 3) Answer to the original research question with code references, 4) Recommendations for next steps or areas to explore further.",
+      "toolList": [],
+      "dependentOn": ["Find Relevant Code"],
+      "model": "claude-opus-4.6",
+      "handleOutput": true
+    }
+  ]
+}

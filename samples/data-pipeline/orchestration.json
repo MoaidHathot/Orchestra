@@ -1,0 +1,47 @@
+{
+  "name": "Stock Analyzer",
+  "steps": [
+    {
+      "name": "Gather Market Data",
+      "systemPrompt": "You are a financial data researcher. Use the available tools to fetch the latest stock data, recent news, and market information for a given ticker. Focus on gathering factual, recent data including price movements, volume, earnings, analyst ratings, and relevant headlines.",
+      "userPrompt": "Research the stock ticker MSFT (Microsoft). Fetch the latest stock price, recent price history, recent news headlines, and any relevant financial data. Use the fetch tool to look up information from financial sites like finance.yahoo.com and other public sources. Gather as much recent factual data as possible.",
+      "toolList": ["fetch"],
+      "dependentOn": [],
+      "model": "claude-opus-4.6"
+    },
+    {
+      "name": "Analyze Movement",
+      "systemPrompt": "You are an experienced stock analyst. Given raw market data, your job is to analyze recent price movements and explain the key drivers behind them. Be specific about catalysts, events, and market conditions. Reference actual data points, dates, and percentages.",
+      "userPrompt": "Based on the gathered market data, analyze Microsoft's recent stock performance. Answer these questions:\n1. What is the current price and how has it moved over the past week/month?\n2. What are the primary reasons the stock is up or down recently?\n3. Are there specific catalysts (earnings, product launches, market trends, macro events) driving the movement?\n4. How does the current movement compare to the broader market (S&P 500, Nasdaq)?",
+      "toolList": [],
+      "dependentOn": ["Gather Market Data"],
+      "model": "claude-opus-4.6"
+    },
+    {
+      "name": "Forecast Outlook",
+      "systemPrompt": "You are a forward-looking market strategist. Based on analysis of recent trends, catalysts, and market conditions, provide a short-term outlook. Be balanced, mention both bull and bear cases, and clearly state that this is analysis, not financial advice. Include specific price levels and scenarios where possible.",
+      "userPrompt": "Based on the movement analysis, provide a 1-2 week outlook for Microsoft stock:\n1. Bull case: What could push the stock higher? Target price range.\n2. Bear case: What risks could pull it lower? Support levels.\n3. Key upcoming events that could impact the price (earnings dates, product announcements, macro data releases).\n4. Overall assessment: Is the short-term momentum bullish, bearish, or neutral?",
+      "toolList": [],
+      "dependentOn": ["Analyze Movement"],
+      "model": "claude-opus-4.6"
+    },
+    {
+      "name": "Generate Report",
+      "systemPrompt": "You are a financial report writer. Create a clear, well-structured investment brief that combines data, analysis, and outlook into a concise report. Use a professional tone. Always include a disclaimer that this is AI-generated analysis and not financial advice.",
+      "userPrompt": "Create a concise stock analysis report for Microsoft (MSFT) that includes:\n1. Current Price & Performance Summary\n2. Key Drivers (why is it up/down)\n3. Short-Term Outlook (1-2 weeks)\n4. Bull/Bear Scenarios with price targets\n5. Key Events to Watch\n\nEnd with a clear disclaimer that this is AI-generated analysis for informational purposes only and should not be considered financial advice.",
+      "toolList": [],
+      "dependentOn": ["Forecast Outlook"],
+      "model": "claude-opus-4.6",
+      "handleOutput": true,
+      "handleOutputPrompt": "Format the report as a clean markdown document with clear headers, bullet points, and a prominent disclaimer section at the end."
+    },
+    {
+      "name": "Save Report",
+      "systemPrompt": "You are a file management assistant. Your job is to save content to files using the filesystem tools. Write the file exactly as provided, preserving all formatting.",
+      "userPrompt": "Save the generated stock analysis report to a file named 'result.md' in the current working directory ({{workingDirectory}}). Write the complete report content as-is, preserving all markdown formatting.",
+      "toolList": ["filesystem"],
+      "dependentOn": ["Generate Report"],
+      "model": "claude-opus-4.6"
+    }
+  ]
+}
