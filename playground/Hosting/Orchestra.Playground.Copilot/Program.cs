@@ -3,7 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Orchestra.Engine;
 using Orchestra.Playground.Copilot;
 
-var (orchestrationPath, mcpPath) = ParseArgs(args);
+var (orchestrationPath, mcpPath, parameters, printResult) = ParseArgs(args);
 
 var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath);
 var mcps = OrchestrationParser.ParseMcpFile(mcpPath);
@@ -22,22 +22,37 @@ builder.Services.Configure<OrchestraOptions>(options =>
 var host = builder.Build();
 
 var worker = host.Services.GetRequiredService<OrchestraWorker>();
-await worker.RunAsync();
+await worker.RunAsync(parameters, printResult);
 
-static (string orchestration, string mcp) ParseArgs(string[] args)
+static (string orchestration, string mcp, Dictionary<string, string> parameters, bool printResult) ParseArgs(string[] args)
 {
 	string? orchestration = null;
 	string? mcp = null;
+	var parameters = new Dictionary<string, string>();
+	var printResult = false;
 
-	for (var i = 0; i < args.Length - 1; i++)
+	for (var i = 0; i < args.Length; i++)
 	{
 		switch (args[i])
 		{
-			case "-orchestration":
+			case "-orchestration" when i + 1 < args.Length:
 				orchestration = args[++i];
 				break;
-			case "-mcp":
+			case "-mcp" when i + 1 < args.Length:
 				mcp = args[++i];
+				break;
+			case "-param" when i + 1 < args.Length:
+				var param = args[++i];
+				var eqIndex = param.IndexOf('=');
+				if (eqIndex > 0)
+				{
+					var key = param[..eqIndex];
+					var value = param[(eqIndex + 1)..];
+					parameters[key] = value;
+				}
+				break;
+			case "-print":
+				printResult = true;
 				break;
 		}
 	}
@@ -45,5 +60,5 @@ static (string orchestration, string mcp) ParseArgs(string[] args)
 	ArgumentException.ThrowIfNullOrWhiteSpace(orchestration, "-orchestration");
 	ArgumentException.ThrowIfNullOrWhiteSpace(mcp, "-mcp");
 
-	return (orchestration, mcp);
+	return (orchestration, mcp, parameters, printResult);
 }

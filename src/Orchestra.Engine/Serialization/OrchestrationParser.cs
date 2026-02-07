@@ -127,9 +127,12 @@ public static class OrchestrationParser
 				InputHandlerPrompt = root.TryGetProperty("inputHandlerPrompt", out var ihp) ? ihp.GetString() : null,
 				OutputHandlerPrompt = root.TryGetProperty("outputHandlerPrompt", out var ohp) ? ohp.GetString() : null,
 				Model = root.GetProperty("model").GetString()!,
-				AllowedMcps = root.TryGetProperty("mcps", out var mcps)
-					? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-					: [],
+			AllowedMcps = root.TryGetProperty("mcps", out var mcps)
+				? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
+				: [],
+			Parameters = root.TryGetProperty("parameters", out var parameters)
+				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
+				: [],
 			};
 		}
 	}
