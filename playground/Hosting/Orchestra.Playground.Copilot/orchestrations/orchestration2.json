@@ -1,0 +1,73 @@
+{
+  "name": "stock-analysis",
+  "description": "Analyzes Microsoft (MSFT) stock by gathering news, historical performance, financials, and competitor data in parallel, then synthesizes everything into an investment recommendation.",
+  "steps": [
+    {
+      "name": "search-news",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a financial news analyst. Search for and summarize the most recent and relevant news about the specified company. Focus on events that could impact stock price: earnings reports, product launches, regulatory actions, partnerships, leadership changes, and market-moving announcements.",
+      "userPrompt": "Search for the latest news about Microsoft (MSFT). Find at least 5-10 recent news items. For each, provide the headline, date, source, a brief summary, and your assessment of whether it is bullish, bearish, or neutral for the stock.",
+      "mcps": ["web-search"],
+      "model": "claude-opus.4.5"
+    },
+    {
+      "name": "historical-performance",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a quantitative financial analyst specializing in technical analysis and historical stock performance. Use available tools to research stock data and price history.",
+      "userPrompt": "Research Microsoft (MSFT) historical stock performance. Cover the following: 1) Price trend over the last 12 months (key highs, lows, current price). 2) 52-week range. 3) Key technical indicators if available (moving averages, RSI, volume trends). 4) How MSFT has performed relative to the S&P 500 and NASDAQ over the same period. 5) Any notable price patterns or support/resistance levels.",
+      "mcps": ["web-search"],
+      "model": "claude-opus.4.5"
+    },
+    {
+      "name": "financial-fundamentals",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a fundamental analyst. Research and analyze the company's financial health using publicly available financial data. Focus on key metrics that drive valuation and investment decisions.",
+      "userPrompt": "Research Microsoft (MSFT) financial fundamentals. Analyze: 1) Revenue and earnings growth (last 4 quarters, year-over-year). 2) Profit margins (gross, operating, net). 3) P/E ratio and how it compares to sector average. 4) Free cash flow and balance sheet strength. 5) Dividend yield and history. 6) Key growth drivers (Azure, AI, Office 365, Gaming). Provide concrete numbers where possible.",
+      "mcps": ["web-search"],
+      "model": "claude-opus.4.5"
+    },
+    {
+      "name": "competitor-landscape",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a competitive intelligence analyst. Evaluate the company's market position relative to its key competitors across its major business segments.",
+      "userPrompt": "Analyze Microsoft's competitive landscape. Cover: 1) Cloud computing (Azure vs AWS vs GCP — market share, growth rates). 2) AI and generative AI positioning (Copilot, OpenAI partnership vs Google, Meta, Amazon). 3) Productivity software (Office 365 vs Google Workspace). 4) Gaming (Xbox, Activision Blizzard acquisition impact). 5) Any emerging competitive threats or advantages. Summarize Microsoft's overall competitive moat strength.",
+      "mcps": ["web-search"],
+      "model": "claude-opus.4.5"
+    },
+    {
+      "name": "risk-assessment",
+      "type": "Prompt",
+      "dependsOn": ["search-news", "financial-fundamentals", "competitor-landscape"],
+      "systemPrompt": "You are a risk analyst specializing in equity investments. Evaluate potential risks based on the provided news, financial, and competitive data.",
+      "userPrompt": "Based on the gathered data, identify and assess the key risks for Microsoft (MSFT) stock. Cover: 1) Regulatory and antitrust risks. 2) Valuation risk (is it overvalued at current levels?). 3) Macroeconomic risks (interest rates, recession). 4) Execution risks (AI monetization, cloud growth deceleration). 5) Competitive risks. Rate each risk as low, medium, or high, and explain the potential impact on stock price.",
+      "inputHandlerPrompt": "Extract key risk-relevant information from the news, financial fundamentals, and competitor analysis outputs.",
+      "mcps": [],
+      "model": "claude-opus.4.5"
+    },
+    {
+      "name": "sentiment-analysis",
+      "type": "Prompt",
+      "dependsOn": ["search-news"],
+      "systemPrompt": "You are a market sentiment analyst. Analyze the overall market sentiment toward the company based on recent news coverage and market signals.",
+      "userPrompt": "Based on the recent news about Microsoft (MSFT), determine the overall market sentiment. Provide: 1) A sentiment score from -10 (extremely bearish) to +10 (extremely bullish). 2) Breakdown of bullish vs bearish signals. 3) Analyst consensus if mentioned in the news. 4) Social/market sentiment indicators. 5) Short-term vs long-term sentiment outlook.",
+      "inputHandlerPrompt": "Extract all news items and their bullish/bearish/neutral assessments from the news search output.",
+      "mcps": [],
+      "model": "claude-opus.4.5"
+    },
+    {
+      "name": "generate-recommendation",
+      "type": "Prompt",
+      "dependsOn": ["historical-performance", "financial-fundamentals", "competitor-landscape", "risk-assessment", "sentiment-analysis"],
+      "systemPrompt": "You are a senior investment advisor producing a final stock recommendation report. Synthesize all available analysis into a clear, actionable recommendation. Be direct and specific with your recommendation. Back every claim with data from the provided analyses.",
+      "userPrompt": "Based on all the gathered analysis, produce a final investment recommendation report for Microsoft (MSFT). The report must include: 1) Executive Summary — one-paragraph overview. 2) Investment Thesis — bull case and bear case. 3) Final Recommendation — one of: Strong Buy, Buy, Hold, Sell, Strong Sell. 4) Price Target — estimated 12-month price target with reasoning. 5) Key Catalysts — upcoming events that could move the stock. 6) Risk Summary — top 3 risks to the recommendation. 7) Conclusion — final thoughts and suggested position sizing (conservative, moderate, aggressive).",
+      "inputHandlerPrompt": "Organize all analysis outputs into clearly labeled sections: Historical Performance, Financial Fundamentals, Competitive Landscape, Risk Assessment, and Market Sentiment.",
+      "outputHandlerPrompt": "Ensure the output is well-structured markdown. The recommendation (Strong Buy/Buy/Hold/Sell/Strong Sell) must appear prominently at the top. Limit to 3000 words.",
+      "mcps": ["filesystem"],
+      "model": "claude-opus.4.5"
+    }
+  ]
+}

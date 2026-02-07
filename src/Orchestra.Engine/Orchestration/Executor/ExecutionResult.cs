@@ -1,7 +1,6 @@
 namespace Orchestra.Engine;
 
-public class ExecutionResult<TResult>
+public class ExecutionResult
 {
-	public required TResult Result { get; init; }
+	public required string Content { get; init; }
 }
-
