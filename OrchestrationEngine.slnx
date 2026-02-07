@@ -3,4 +3,7 @@
     <Project Path="src/Orchestra.Engine/Orchestra.Engine.csproj" />
     <Project Path="src/Orchestra.Copilot/Orchestra.Copilot.csproj" />
   </Folder>
+  <Folder Name="/playground/">
+    <Project Path="playground/Hosting/Orchestra.Playground.Copilot/Orchestra.Playground.Copilot.csproj" />
+  </Folder>
 </Solution>
