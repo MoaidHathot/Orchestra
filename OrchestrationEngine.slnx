@@ -1,7 +1,5 @@
 <Solution>
   <Folder Name="/src/">
-    <Project Path="src/OrchestrationEngine.Console/OrchestrationEngine.Console.csproj" />
-    <Project Path="src/OrchestrationEngine.Copilot/OrchestrationEngine.Copilot.csproj" />
-    <Project Path="src/OrchestrationEngine.Core/OrchestrationEngine.Core.csproj" />
+    <Project Path="src/Orchestra.Engine/Orchestra.Engine.csproj" />
   </Folder>
 </Solution>
