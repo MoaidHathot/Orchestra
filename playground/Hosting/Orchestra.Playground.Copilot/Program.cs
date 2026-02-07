@@ -1,13 +1,18 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Orchestra.Copilot;
+using Orchestra.Engine;
 using Orchestra.Playground.Copilot;
 
 var (orchestrationPath, mcpPath) = ParseArgs(args);
 
+var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath);
+var mcps = OrchestrationParser.ParseMcpFile(mcpPath);
+
 var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddOrchestra();
+builder.Services.AddSingleton(orchestration);
+builder.Services.AddSingleton(mcps);
 builder.Services.Configure<OrchestraOptions>(options =>
 {
 	options.OrchestrationPath = orchestrationPath;
@@ -15,7 +20,9 @@ builder.Services.Configure<OrchestraOptions>(options =>
 });
 
 var host = builder.Build();
-await host.RunAsync();
+
+var worker = host.Services.GetRequiredService<OrchestraWorker>();
+await worker.RunAsync();
 
 static (string orchestration, string mcp) ParseArgs(string[] args)
 {

@@ -1,0 +1,36 @@
+{
+  "name": "code-review",
+  "description": "A simple orchestration that analyzes code, identifies issues, and produces a summary report.",
+  "steps": [
+    {
+      "name": "analyze-code",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a senior software engineer specializing in code analysis. Examine the provided code for bugs, performance issues, and security vulnerabilities.",
+      "userPrompt": "Analyze the following code and identify any bugs, performance issues, or security vulnerabilities. List each issue with its severity (critical, warning, info).",
+      "mcps": ["filesystem"],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "suggest-improvements",
+      "type": "Prompt",
+      "dependsOn": ["analyze-code"],
+      "systemPrompt": "You are a senior software engineer. Based on the analysis provided, suggest concrete improvements with code examples.",
+      "userPrompt": "Given the identified issues, suggest specific improvements for each one. Include refactored code snippets where applicable.",
+      "inputHandlerPrompt": "Extract the list of issues from the previous step's output and format them as a numbered list.",
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "generate-report",
+      "type": "Prompt",
+      "dependsOn": ["analyze-code", "suggest-improvements"],
+      "systemPrompt": "You are a technical writer. Produce a clear, well-structured markdown report from the provided analysis and suggestions.",
+      "userPrompt": "Compile the code analysis findings and improvement suggestions into a final markdown report with sections: Summary, Issues Found, Recommendations, and Conclusion.",
+      "inputHandlerPrompt": "Combine the outputs from the analysis and suggestions steps into a single structured input.",
+      "outputHandlerPrompt": "Ensure the output is valid markdown and does not exceed 2000 words.",
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    }
+  ]
+}

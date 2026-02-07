@@ -9,6 +9,8 @@ public static class ServiceCollectionExtensions
 	public static IServiceCollection AddOrchestra(this IServiceCollection services)
 	{
 		services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
+		services.AddSingleton<IScheduler, OrchestrationScheduler>();
+		services.AddSingleton<OrchestraWorker>();
 
 		return services;
 	}
