@@ -1,6 +1,6 @@
 namespace Orchestra.Engine;
 
-public interface IAgent<TResult, TEvent>
+public interface IAgent
 {
-    AgentTask<TResult, TEvent> SendAsync(string prompt, CancellationToken cancellationToken = default);
+    AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default);
 }

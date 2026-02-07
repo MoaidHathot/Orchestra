@@ -1,8 +1,8 @@
 ﻿namespace Orchestra.Engine;
 
-public class PromptExecutor : Executor<PromptOrchestrationStep>
+public class PromptExecutor : Executor<PromptOrchestrationStep, string>
 {
-    public override Task<ExecutionResult> ExecuteAsync(PromptOrchestrationStep step, ExecutionContext context)
+    public override Task<ExecutionResult<string>> ExecuteAsync(PromptOrchestrationStep step, ExecutionContext context)
     {
         throw new NotImplementedException();
     }
