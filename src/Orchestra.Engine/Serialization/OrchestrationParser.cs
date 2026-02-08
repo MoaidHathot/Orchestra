@@ -56,18 +56,18 @@ public static class OrchestrationParser
 
 		foreach (var step in orchestration.Steps)
 		{
-			if (step is PromptOrchestrationStep promptStep && promptStep.AllowedMcpNames.Length > 0)
+			if (step is PromptOrchestrationStep promptStep && promptStep.McpNames.Length > 0)
 			{
-				var resolved = new Mcp[promptStep.AllowedMcpNames.Length];
-				for (var i = 0; i < promptStep.AllowedMcpNames.Length; i++)
+				var resolved = new Mcp[promptStep.McpNames.Length];
+				for (var i = 0; i < promptStep.McpNames.Length; i++)
 				{
-					var name = promptStep.AllowedMcpNames[i];
+					var name = promptStep.McpNames[i];
 					if (!lookup.TryGetValue(name, out var mcp))
 						throw new InvalidOperationException(
 							$"MCP '{name}' referenced by step '{step.Name}' is not defined in MCP configuration.");
 					resolved[i] = mcp;
 				}
-				promptStep.AllowedMcps = resolved;
+				promptStep.Mcps = resolved;
 			}
 		}
 	}
@@ -152,10 +152,16 @@ public static class OrchestrationParser
 				InputHandlerPrompt = root.TryGetProperty("inputHandlerPrompt", out var ihp) ? ihp.GetString() : null,
 				OutputHandlerPrompt = root.TryGetProperty("outputHandlerPrompt", out var ohp) ? ohp.GetString() : null,
 				Model = root.GetProperty("model").GetString()!,
-			AllowedMcpNames = root.TryGetProperty("mcps", out var mcps)
-				? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-			Parameters = root.TryGetProperty("parameters", out var parameters)
+				McpNames = root.TryGetProperty("mcps", out var mcps)
+					? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
+					: [],
+				ReasoningLevel = root.TryGetProperty("reasoningLevel", out var rl)
+					? Enum.Parse<ReasoningLevel>(rl.GetString()!, ignoreCase: true)
+					: null,
+				SystemPromptMode = root.TryGetProperty("systemPromptMode", out var spm)
+					? Enum.Parse<SystemPromptMode>(spm.GetString()!, ignoreCase: true)
+					: null,
+				Parameters = root.TryGetProperty("parameters", out var parameters)
 				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
 			};

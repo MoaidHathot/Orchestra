@@ -24,7 +24,9 @@ public class OrchestraWorker
 		bool printResult = false,
 		CancellationToken cancellationToken = default)
 	{
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 		var result = await _executor.ExecuteAsync(_orchestration, parameters, cancellationToken);
+		stopwatch.Stop();
 
 		if (result.Status == ExecutionStatus.Succeeded)
 		{
@@ -55,6 +57,8 @@ public class OrchestraWorker
 			_logger.LogError("Orchestration failed. Terminal steps with issues: {Steps}",
 				string.Join(", ", failedSteps));
 		}
+
+		_logger.LogInformation("Orchestration completed in {Elapsed}.", stopwatch.Elapsed);
 
 		return result;
 	}
