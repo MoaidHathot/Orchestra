@@ -16,16 +16,19 @@ public static class OrchestrationParser
 		},
 	};
 
-	public static Orchestration ParseOrchestration(string json)
+	public static Orchestration ParseOrchestration(string json, Mcp[] availableMcps)
 	{
-		return JsonSerializer.Deserialize<Orchestration>(json, s_options)
+		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, s_options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+
+		ResolveStepMcps(orchestration, availableMcps);
+		return orchestration;
 	}
 
-	public static Orchestration ParseOrchestrationFile(string path)
+	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps)
 	{
 		var json = File.ReadAllText(path);
-		return ParseOrchestration(json);
+		return ParseOrchestration(json, availableMcps);
 	}
 
 	public static Mcp[] ParseMcps(string json)
@@ -45,6 +48,28 @@ public static class OrchestrationParser
 	private sealed class McpConfigDocument
 	{
 		public required Mcp[] Mcps { get; init; }
+	}
+
+	private static void ResolveStepMcps(Orchestration orchestration, Mcp[] availableMcps)
+	{
+		var lookup = availableMcps.ToDictionary(m => m.Name, StringComparer.OrdinalIgnoreCase);
+
+		foreach (var step in orchestration.Steps)
+		{
+			if (step is PromptOrchestrationStep promptStep && promptStep.AllowedMcpNames.Length > 0)
+			{
+				var resolved = new Mcp[promptStep.AllowedMcpNames.Length];
+				for (var i = 0; i < promptStep.AllowedMcpNames.Length; i++)
+				{
+					var name = promptStep.AllowedMcpNames[i];
+					if (!lookup.TryGetValue(name, out var mcp))
+						throw new InvalidOperationException(
+							$"MCP '{name}' referenced by step '{step.Name}' is not defined in MCP configuration.");
+					resolved[i] = mcp;
+				}
+				promptStep.AllowedMcps = resolved;
+			}
+		}
 	}
 
 	private sealed class McpConverter : JsonConverter<Mcp>
@@ -127,7 +152,7 @@ public static class OrchestrationParser
 				InputHandlerPrompt = root.TryGetProperty("inputHandlerPrompt", out var ihp) ? ihp.GetString() : null,
 				OutputHandlerPrompt = root.TryGetProperty("outputHandlerPrompt", out var ohp) ? ohp.GetString() : null,
 				Model = root.GetProperty("model").GetString()!,
-			AllowedMcps = root.TryGetProperty("mcps", out var mcps)
+			AllowedMcpNames = root.TryGetProperty("mcps", out var mcps)
 				? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
 			Parameters = root.TryGetProperty("parameters", out var parameters)

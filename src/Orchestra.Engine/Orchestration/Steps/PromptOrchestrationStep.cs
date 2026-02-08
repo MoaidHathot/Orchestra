@@ -7,5 +7,10 @@ public class PromptOrchestrationStep : OrchestrationStep
 	public string? InputHandlerPrompt { get; init; }
 	public string? OutputHandlerPrompt { get; init; }
 	public required string Model { get; init; }
-	public required string[] AllowedMcps { get; init; } = [];
+	public Mcp[] AllowedMcps { get; internal set; } = [];
+
+	/// <summary>
+	/// Raw MCP names from JSON, used internally during parsing to resolve to <see cref="AllowedMcps"/>.
+	/// </summary>
+	internal string[] AllowedMcpNames { get; init; } = [];
 }
