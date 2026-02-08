@@ -23,7 +23,9 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 			var agent = await _agentBuilder
 				.WithModel(step.Model)
 				.WithSystemPrompt(step.SystemPrompt)
-				.WithMcp(step.AllowedMcps)
+				.WithMcp(step.Mcps)
+				.WithReasoningLevel(step.ReasoningLevel)
+				.WithSystemPromptMode(step.SystemPromptMode)
 				.BuildAgentAsync(cancellationToken);
 
 			var task = agent.SendAsync(userPrompt, cancellationToken);
@@ -47,6 +49,16 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 
 			var result = await task.GetResultAsync();
 			var content = result.Content;
+
+			// Log model and usage metadata if available
+			if (result.ActualModel is not null)
+			{
+				Console.WriteLine($"  [{step.Name}] Model used: {result.ActualModel}");
+			}
+			if (result.Usage is not null)
+			{
+				Console.WriteLine($"  [{step.Name}] Tokens — in: {result.Usage.InputTokens}, out: {result.Usage.OutputTokens}, cache-read: {result.Usage.CacheReadTokens}");
+			}
 
 			// Apply output handler if specified
 			if (step.OutputHandlerPrompt is not null)

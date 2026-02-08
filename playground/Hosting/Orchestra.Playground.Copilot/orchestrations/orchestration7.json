@@ -1,6 +1,6 @@
 {
-  "name": "math-aggregate",
-  "description": "Simple aggregation test: starts with an input number and adds 1 in each of 4 sequential steps.",
+  "name": "math-aggregate-fast-mode",
+  "description": "Same as orchestration5 but uses Claude Opus 4.6 fast mode to benchmark speed improvement.",
   "steps": [
     {
       "name": "step-1",
@@ -10,7 +10,8 @@
       "userPrompt": "{{number}}",
       "parameters": ["number"],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.6-fast",
+      "systemPromptMode": "replace"
     },
     {
       "name": "step-2",
@@ -20,7 +21,8 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.6-fast",
+      "systemPromptMode": "replace"
     },
     {
       "name": "step-3",
@@ -30,7 +32,8 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.6-fast",
+      "systemPromptMode": "replace"
     },
     {
       "name": "step-4",
@@ -40,7 +43,8 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.6-fast",
+      "systemPromptMode": "replace"
     }
   ]
 }

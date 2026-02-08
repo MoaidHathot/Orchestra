@@ -10,4 +10,7 @@ public enum AgentEventType
 	ToolExecutionComplete,
 	SessionIdle,
 	Error,
+	SessionStart,
+	ModelChange,
+	Usage,
 }
