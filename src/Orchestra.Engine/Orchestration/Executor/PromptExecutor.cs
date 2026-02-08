@@ -16,9 +16,6 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 	{
 		try
 		{
-			// Resolve MCP names to full Mcp objects
-			var mcps = ResolveMcps(step.AllowedMcps, context.Mcps);
-
 			// Build the user prompt, incorporating dependency outputs and parameters
 			var userPrompt = BuildUserPrompt(step, context);
 
@@ -26,7 +23,7 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 			var agent = await _agentBuilder
 				.WithModel(step.Model)
 				.WithSystemPrompt(step.SystemPrompt)
-				.WithMcp(mcps)
+				.WithMcp(step.AllowedMcps)
 				.BuildAgentAsync(cancellationToken);
 
 			var task = agent.SendAsync(userPrompt, cancellationToken);
@@ -64,26 +61,6 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 			Console.Error.WriteLine($"\n[Step '{step.Name}' failed] {ex.Message}");
 			return ExecutionResult.Failed(ex.Message);
 		}
-	}
-
-	private static Mcp[] ResolveMcps(string[] allowedMcpNames, Mcp[] availableMcps)
-	{
-		if (allowedMcpNames.Length == 0)
-			return [];
-
-		var lookup = availableMcps.ToDictionary(m => m.Name, StringComparer.OrdinalIgnoreCase);
-		var resolved = new Mcp[allowedMcpNames.Length];
-
-		for (var i = 0; i < allowedMcpNames.Length; i++)
-		{
-			var name = allowedMcpNames[i];
-			if (!lookup.TryGetValue(name, out var mcp))
-				throw new InvalidOperationException($"MCP '{name}' referenced by step is not defined in MCP configuration.");
-
-			resolved[i] = mcp;
-		}
-
-		return resolved;
 	}
 
 	private static string BuildUserPrompt(PromptOrchestrationStep step, OrchestrationExecutionContext context)

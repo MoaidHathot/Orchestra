@@ -1,18 +1,27 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Console;
 using Orchestra.Engine;
 using Orchestra.Playground.Copilot;
 
 var (orchestrationPath, mcpPath, parameters, printResult) = ParseArgs(args);
 
-var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath);
 var mcps = OrchestrationParser.ParseMcpFile(mcpPath);
+var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath, mcps);
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.Logging.AddSimpleConsole(options =>
+{
+	options.SingleLine = true;
+	options.IncludeScopes = false;
+	options.TimestampFormat = "HH:mm:ss ";
+	options.ColorBehavior = LoggerColorBehavior.Enabled;
+});
+
 builder.Services.AddOrchestra();
 builder.Services.AddSingleton(orchestration);
-builder.Services.AddSingleton(mcps);
 builder.Services.Configure<OrchestraOptions>(options =>
 {
 	options.OrchestrationPath = orchestrationPath;

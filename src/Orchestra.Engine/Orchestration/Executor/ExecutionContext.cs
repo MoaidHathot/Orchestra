@@ -2,7 +2,6 @@ namespace Orchestra.Engine;
 
 public class OrchestrationExecutionContext
 {
-	public required Mcp[] Mcps { get; init; }
 	public Dictionary<string, string> Parameters { get; init; } = [];
 
 	private readonly Dictionary<string, ExecutionResult> _results = new();
