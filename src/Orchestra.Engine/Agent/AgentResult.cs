@@ -19,6 +19,11 @@ public class AgentResult
 	/// Token usage statistics for the session.
 	/// </summary>
 	public AgentUsage? Usage { get; init; }
+
+	/// <summary>
+	/// Available models reported by the server. Populated when a model mismatch is detected.
+	/// </summary>
+	public IReadOnlyList<AvailableModelInfo>? AvailableModels { get; init; }
 }
 
 public class AgentUsage

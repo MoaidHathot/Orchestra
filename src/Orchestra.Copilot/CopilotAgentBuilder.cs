@@ -19,7 +19,8 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			systemPrompt: SystemPrompt,
 			mcps: Mcps,
 			reasoningLevel: ReasoningLevel,
-			systemPromptMode: SystemPromptMode
+			systemPromptMode: SystemPromptMode,
+			reporter: Reporter
 		);
 	}
 

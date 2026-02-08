@@ -3,10 +3,12 @@ namespace Orchestra.Engine;
 public class PromptExecutor : Executor<PromptOrchestrationStep>
 {
 	private readonly AgentBuilder _agentBuilder;
+	private readonly IOrchestrationReporter _reporter;
 
-	public PromptExecutor(AgentBuilder agentBuilder)
+	public PromptExecutor(AgentBuilder agentBuilder, IOrchestrationReporter reporter)
 	{
 		_agentBuilder = agentBuilder;
+		_reporter = reporter;
 	}
 
 	public override async Task<ExecutionResult> ExecuteAsync(
@@ -26,39 +28,41 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 				.WithMcp(step.Mcps)
 				.WithReasoningLevel(step.ReasoningLevel)
 				.WithSystemPromptMode(step.SystemPromptMode)
+				.WithReporter(_reporter)
 				.BuildAgentAsync(cancellationToken);
 
 			var task = agent.SendAsync(userPrompt, cancellationToken);
 
-		// Consume events — only log execution-relevant events, not content
+		// Consume events — only report execution-relevant events, not content
 		await foreach (var evt in task.WithCancellation(cancellationToken))
 		{
 			switch (evt.Type)
 			{
 				case AgentEventType.ToolExecutionStart:
-					Console.WriteLine($"  [{step.Name}] Tool executing...");
+					_reporter.ReportToolExecutionStarted(step.Name);
 					break;
 				case AgentEventType.ToolExecutionComplete:
-					Console.WriteLine($"  [{step.Name}] Tool execution complete.");
+					_reporter.ReportToolExecutionCompleted(step.Name);
 					break;
 				case AgentEventType.Error:
-					Console.Error.WriteLine($"  [{step.Name}] Error: {evt.ErrorMessage}");
+					_reporter.ReportStepError(step.Name, evt.ErrorMessage ?? "Unknown error");
 					break;
 			}
 		}
 
 			var result = await task.GetResultAsync();
-			var content = result.Content;
 
-			// Log model and usage metadata if available
+			// Report model and usage metadata if available
 			if (result.ActualModel is not null)
 			{
-				Console.WriteLine($"  [{step.Name}] Model used: {result.ActualModel}");
+				_reporter.ReportStepCompleted(step.Name, result);
 			}
-			if (result.Usage is not null)
+			if (result.Usage is not null && result.ActualModel is not null)
 			{
-				Console.WriteLine($"  [{step.Name}] Tokens — in: {result.Usage.InputTokens}, out: {result.Usage.OutputTokens}, cache-read: {result.Usage.CacheReadTokens}");
+				_reporter.ReportUsage(step.Name, result.ActualModel, result.Usage);
 			}
+
+			var content = result.Content;
 
 			// Apply output handler if specified
 			if (step.OutputHandlerPrompt is not null)
@@ -70,7 +74,7 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 		}
 		catch (Exception ex)
 		{
-			Console.Error.WriteLine($"\n[Step '{step.Name}' failed] {ex.Message}");
+			_reporter.ReportStepError(step.Name, ex.Message);
 			return ExecutionResult.Failed(ex.Message);
 		}
 	}
@@ -143,6 +147,7 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 			.WithModel(model)
 			.WithSystemPrompt(systemPrompt)
 			.WithMcp()
+			.WithReporter(_reporter)
 			.BuildAgentAsync(cancellationToken);
 
 		var task = agent.SendAsync(content, cancellationToken);
