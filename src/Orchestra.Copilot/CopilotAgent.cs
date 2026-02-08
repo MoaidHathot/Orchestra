@@ -12,6 +12,7 @@ public class CopilotAgent : IAgent
 	private readonly Mcp[] _mcps;
 	private readonly ReasoningLevel? _reasoningLevel;
 	private readonly SystemPromptMode? _systemPromptMode;
+	private readonly IOrchestrationReporter _reporter;
 
 	internal CopilotAgent(
 		CopilotClient client,
@@ -19,7 +20,8 @@ public class CopilotAgent : IAgent
 		string? systemPrompt,
 		Mcp[] mcps,
 		ReasoningLevel? reasoningLevel,
-		SystemPromptMode? systemPromptMode)
+		SystemPromptMode? systemPromptMode,
+		IOrchestrationReporter reporter)
 	{
 		_client = client;
 		_model = model;
@@ -27,6 +29,7 @@ public class CopilotAgent : IAgent
 		_mcps = mcps;
 		_reasoningLevel = reasoningLevel;
 		_systemPromptMode = systemPromptMode;
+		_reporter = reporter;
 	}
 
 	public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
@@ -43,7 +46,8 @@ public class CopilotAgent : IAgent
 	{
 		try
 		{
-			Console.WriteLine($"Creating Copilot session with model '{_model}'...");
+			_reporter.ReportSessionStarted(_model, selectedModel: null);
+
 			var config = new SessionConfig
 			{
 				Model = _model,
@@ -89,10 +93,7 @@ public class CopilotAgent : IAgent
 			{
 				case SessionStartEvent start:
 					selectedModel = start.Data.SelectedModel;
-					if (selectedModel is not null)
-					{
-						Console.WriteLine($"  Session started — selected model: {selectedModel}");
-					}
+					_reporter.ReportSessionStarted(_model, selectedModel);
 					writer.TryWrite(new AgentEvent
 					{
 						Type = AgentEventType.SessionStart,
@@ -101,7 +102,7 @@ public class CopilotAgent : IAgent
 					break;
 
 				case SessionModelChangeEvent modelChange:
-					Console.WriteLine($"  Model changed: {modelChange.Data.PreviousModel} -> {modelChange.Data.NewModel}");
+					_reporter.ReportModelChange(modelChange.Data.PreviousModel, modelChange.Data.NewModel);
 					writer.TryWrite(new AgentEvent
 					{
 						Type = AgentEventType.ModelChange,
@@ -121,7 +122,6 @@ public class CopilotAgent : IAgent
 						Cost = usageEvt.Data.Cost,
 						Duration = usageEvt.Data.Duration,
 					};
-					Console.WriteLine($"  Usage — model: {actualModel}, in: {usage.InputTokens}, out: {usage.OutputTokens}, cache-read: {usage.CacheReadTokens}, cache-write: {usage.CacheWriteTokens}");
 					writer.TryWrite(new AgentEvent
 					{
 						Type = AgentEventType.Usage,
@@ -200,42 +200,46 @@ public class CopilotAgent : IAgent
 		using var registration = cancellationToken.Register(() => done.TrySetCanceled(cancellationToken));
 		await done.Task;
 
+		// Build available models list and report mismatch if detected
+		IReadOnlyList<AvailableModelInfo>? availableModels = null;
+
 		if (actualModel is not null && !string.Equals(actualModel, _model, StringComparison.OrdinalIgnoreCase))
 		{
-			Console.WriteLine();
-			Console.WriteLine($"  ╔══════════════════════════════════════════════════════════════");
-			Console.WriteLine($"  ║ MODEL MISMATCH DETECTED");
-			Console.WriteLine($"  ╠══════════════════════════════════════════════════════════════");
-			Console.WriteLine($"  ║ Configured model : {_model}");
-			Console.WriteLine($"  ║ Actual model used: {actualModel}");
-			Console.WriteLine($"  ║");
-			Console.WriteLine($"  ║ Step configuration:");
-			Console.WriteLine($"  ║   System prompt mode: {(_systemPromptMode?.ToString() ?? "(SDK default)")}");
-			Console.WriteLine($"  ║   Reasoning level   : {(_reasoningLevel?.ToString() ?? "(none)")}");
-			Console.WriteLine($"  ║   System prompt      : {(_systemPrompt is not null ? $"{_systemPrompt[..Math.Min(_systemPrompt.Length, 80)]}..." : "(none)")}");
-			Console.WriteLine($"  ║   MCP servers        : {(_mcps.Length > 0 ? string.Join(", ", _mcps.Select(m => m.Name)) : "(none)")}");
-			Console.WriteLine($"  ║");
-
 			try
 			{
 				var models = await _client.ListModelsAsync(cancellationToken);
-				Console.WriteLine($"  ║ Available models ({models.Count}):");
-				foreach (var m in models.OrderBy(m => m.Id))
-				{
-					var billing = m.Billing is not null ? $" [{m.Billing.Multiplier}x]" : "";
-					var reasoning = m.SupportedReasoningEfforts is { Count: > 0 }
-						? $" reasoning:[{string.Join(",", m.SupportedReasoningEfforts)}]"
-						: "";
-					Console.WriteLine($"  ║   - {m.Id,-40} {m.Name}{billing}{reasoning}");
-				}
+				availableModels = models
+					.OrderBy(m => m.Id)
+					.Select(m => new AvailableModelInfo
+					{
+						Id = m.Id,
+						Name = m.Name,
+						BillingMultiplier = m.Billing?.Multiplier,
+						ReasoningEfforts = m.SupportedReasoningEfforts is { Count: > 0 }
+							? [.. m.SupportedReasoningEfforts]
+							: null,
+					})
+					.ToList();
 			}
-			catch (Exception ex)
+			catch
 			{
-				Console.WriteLine($"  ║ (Could not list available models: {ex.Message})");
+				// Unable to list models — continue without them
 			}
 
-			Console.WriteLine($"  ╚══════════════════════════════════════════════════════════════");
-			Console.WriteLine();
+			_reporter.ReportModelMismatch(new ModelMismatchInfo
+			{
+				ConfiguredModel = _model,
+				ActualModel = actualModel,
+				SystemPromptMode = _systemPromptMode?.ToString() ?? "(SDK default)",
+				ReasoningLevel = _reasoningLevel?.ToString() ?? "(none)",
+				SystemPromptPreview = _systemPrompt is not null
+					? $"{_systemPrompt[..Math.Min(_systemPrompt.Length, 80)]}..."
+					: "(none)",
+				McpServers = _mcps.Length > 0
+					? _mcps.Select(m => m.Name).ToArray()
+					: null,
+				AvailableModels = availableModels,
+			});
 		}
 
 		return new AgentResult
@@ -244,6 +248,7 @@ public class CopilotAgent : IAgent
 			SelectedModel = selectedModel,
 			ActualModel = actualModel,
 			Usage = usage,
+			AvailableModels = availableModels,
 		};
 		}
 		finally

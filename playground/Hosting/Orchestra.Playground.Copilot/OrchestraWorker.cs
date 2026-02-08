@@ -7,15 +7,18 @@ public class OrchestraWorker
 {
 	private readonly Orchestration _orchestration;
 	private readonly OrchestrationExecutor _executor;
+	private readonly IOrchestrationReporter _reporter;
 	private readonly ILogger<OrchestraWorker> _logger;
 
 	public OrchestraWorker(
 		Orchestration orchestration,
 		OrchestrationExecutor executor,
+		IOrchestrationReporter reporter,
 		ILogger<OrchestraWorker> logger)
 	{
 		_orchestration = orchestration;
 		_executor = executor;
+		_reporter = reporter;
 		_logger = logger;
 	}
 
@@ -42,8 +45,7 @@ public class OrchestraWorker
 
 				if (printResult)
 				{
-					Console.WriteLine();
-					Console.WriteLine(stepResult.Content);
+					_reporter.ReportStepOutput(stepName, stepResult.Content);
 				}
 			}
 		}

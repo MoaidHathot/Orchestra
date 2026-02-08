@@ -7,6 +7,7 @@ public abstract class AgentBuilder
 	protected Mcp[] Mcps { get; private set; } = [];
 	protected ReasoningLevel? ReasoningLevel { get; private set; }
 	protected SystemPromptMode? SystemPromptMode { get; private set; }
+	protected IOrchestrationReporter Reporter { get; private set; } = NullOrchestrationReporter.Instance;
 
 	public AgentBuilder WithModel(string model)
 	{
@@ -35,6 +36,12 @@ public abstract class AgentBuilder
 	public AgentBuilder WithSystemPromptMode(SystemPromptMode? systemPromptMode)
 	{
 		SystemPromptMode = systemPromptMode;
+		return this;
+	}
+
+	public AgentBuilder WithReporter(IOrchestrationReporter reporter)
+	{
+		Reporter = reporter;
 		return this;
 	}
 

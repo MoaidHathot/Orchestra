@@ -6,15 +6,18 @@ public class OrchestrationExecutor
 {
 	private readonly IScheduler _scheduler;
 	private readonly AgentBuilder _agentBuilder;
+	private readonly IOrchestrationReporter _reporter;
 	private readonly ILogger<OrchestrationExecutor> _logger;
 
 	public OrchestrationExecutor(
 		IScheduler scheduler,
 		AgentBuilder agentBuilder,
+		IOrchestrationReporter reporter,
 		ILogger<OrchestrationExecutor> logger)
 	{
 		_scheduler = scheduler;
 		_agentBuilder = agentBuilder;
+		_reporter = reporter;
 		_logger = logger;
 	}
 
@@ -33,7 +36,7 @@ public class OrchestrationExecutor
 		{
 			Parameters = parameters ?? [],
 		};
-		var executor = new PromptExecutor(_agentBuilder);
+		var executor = new PromptExecutor(_agentBuilder, _reporter);
 		var stepResults = new Dictionary<string, ExecutionResult>();
 
 		for (var i = 0; i < schedule.Entries.Length; i++)
