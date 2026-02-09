@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Threading.Channels;
 using GitHub.Copilot.SDK;
 using Orchestra.Engine;
@@ -44,10 +45,8 @@ public class CopilotAgent : IAgent
 		ChannelWriter<AgentEvent> writer,
 		CancellationToken cancellationToken)
 	{
-		try
+	try
 		{
-			_reporter.ReportSessionStarted(_model, selectedModel: null);
-
 			var config = new SessionConfig
 			{
 				Model = _model,
@@ -86,6 +85,7 @@ public class CopilotAgent : IAgent
 		string? selectedModel = null;
 		string? actualModel = null;
 		AgentUsage? usage = null;
+		var toolCallNames = new Dictionary<string, string>();
 
 		session.On(evt =>
 		{
@@ -163,17 +163,42 @@ public class CopilotAgent : IAgent
 					});
 					break;
 
-				case ToolExecutionStartEvent toolStart:
+			case ToolExecutionStartEvent toolStart:
+					var startToolName = toolStart.Data.McpToolName ?? toolStart.Data.ToolName;
+					if (toolStart.Data.ToolCallId is not null)
+						toolCallNames[toolStart.Data.ToolCallId] = startToolName;
+
+					string? serializedArgs = null;
+					if (toolStart.Data.Arguments is not null)
+					{
+						try { serializedArgs = JsonSerializer.Serialize(toolStart.Data.Arguments); }
+						catch { /* ignore serialization failures */ }
+					}
+
 					writer.TryWrite(new AgentEvent
 					{
 						Type = AgentEventType.ToolExecutionStart,
+						ToolCallId = toolStart.Data.ToolCallId,
+						ToolName = startToolName,
+						ToolArguments = serializedArgs,
+						McpServerName = toolStart.Data.McpServerName,
 					});
 					break;
 
-				case ToolExecutionCompleteEvent toolComplete:
+			case ToolExecutionCompleteEvent toolComplete:
+					// Correlate tool name from start event via ToolCallId
+					string? completeToolName = null;
+					if (toolComplete.Data.ToolCallId is not null)
+						toolCallNames.TryGetValue(toolComplete.Data.ToolCallId, out completeToolName);
+
 					writer.TryWrite(new AgentEvent
 					{
 						Type = AgentEventType.ToolExecutionComplete,
+						ToolCallId = toolComplete.Data.ToolCallId,
+						ToolName = completeToolName,
+						ToolSuccess = toolComplete.Data.Success,
+						ToolResult = toolComplete.Data.Result?.Content ?? toolComplete.Data.Result?.DetailedContent,
+						ToolError = toolComplete.Data.Error?.Message,
 					});
 					break;
 

@@ -26,14 +26,38 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		Console.WriteLine($"  [{stepName}] Tokens — in: {usage.InputTokens}, out: {usage.OutputTokens}, cache-read: {usage.CacheReadTokens}");
 	}
 
-	public void ReportToolExecutionStarted(string stepName)
+	public void ReportContentDelta(string stepName, string chunk)
 	{
-		Console.WriteLine($"  [{stepName}] Tool executing...");
+		// Content deltas are streamed — don't print each chunk to avoid flooding the console.
+		// The final content is reported via ReportStepOutput.
 	}
 
-	public void ReportToolExecutionCompleted(string stepName)
+	public void ReportReasoningDelta(string stepName, string chunk)
 	{
-		Console.WriteLine($"  [{stepName}] Tool execution complete.");
+		// Reasoning deltas are streamed — don't print each chunk to avoid flooding the console.
+	}
+
+	public void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer)
+	{
+		var server = mcpServer is not null ? $" (MCP: {mcpServer})" : "";
+		Console.WriteLine($"  [{stepName}] Tool '{toolName}'{server} executing...");
+		if (arguments is not null)
+		{
+			var preview = arguments.Length > 200 ? arguments[..200] + "..." : arguments;
+			Console.WriteLine($"           Args: {preview}");
+		}
+	}
+
+	public void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error)
+	{
+		if (success)
+		{
+			Console.WriteLine($"  [{stepName}] Tool '{toolName}' completed successfully.");
+		}
+		else
+		{
+			Console.Error.WriteLine($"  [{stepName}] Tool '{toolName}' failed: {error ?? "unknown error"}");
+		}
 	}
 
 	public void ReportStepError(string stepName, string errorMessage)
@@ -90,5 +114,15 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 	{
 		Console.WriteLine();
 		Console.WriteLine(content);
+	}
+
+	public void ReportStepStarted(string stepName)
+	{
+		Console.WriteLine($"  [{stepName}] Starting...");
+	}
+
+	public void ReportStepSkipped(string stepName, string reason)
+	{
+		Console.WriteLine($"  [{stepName}] Skipped: {reason}");
 	}
 }

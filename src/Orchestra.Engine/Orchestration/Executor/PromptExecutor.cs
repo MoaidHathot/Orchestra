@@ -33,16 +33,22 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 
 			var task = agent.SendAsync(userPrompt, cancellationToken);
 
-		// Consume events — only report execution-relevant events, not content
+		// Consume events — report deltas, tools, and errors
 		await foreach (var evt in task.WithCancellation(cancellationToken))
 		{
 			switch (evt.Type)
 			{
+				case AgentEventType.MessageDelta:
+					_reporter.ReportContentDelta(step.Name, evt.Content ?? string.Empty);
+					break;
+				case AgentEventType.ReasoningDelta:
+					_reporter.ReportReasoningDelta(step.Name, evt.Content ?? string.Empty);
+					break;
 				case AgentEventType.ToolExecutionStart:
-					_reporter.ReportToolExecutionStarted(step.Name);
+					_reporter.ReportToolExecutionStarted(step.Name, evt.ToolName ?? "unknown", evt.ToolArguments, evt.McpServerName);
 					break;
 				case AgentEventType.ToolExecutionComplete:
-					_reporter.ReportToolExecutionCompleted(step.Name);
+					_reporter.ReportToolExecutionCompleted(step.Name, evt.ToolName ?? "unknown", evt.ToolSuccess ?? false, evt.ToolResult, evt.ToolError);
 					break;
 				case AgentEventType.Error:
 					_reporter.ReportStepError(step.Name, evt.ErrorMessage ?? "Unknown error");
