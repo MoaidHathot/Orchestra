@@ -1,0 +1,146 @@
+using System.Text.Json;
+using System.Threading.Channels;
+using Orchestra.Engine;
+
+namespace Orchestra.Playground.Copilot.Web;
+
+/// <summary>
+/// An IOrchestrationReporter that writes structured SSE events to a channel.
+/// Each execution creates its own instance tied to a specific SSE response stream.
+/// </summary>
+public class WebOrchestrationReporter : IOrchestrationReporter
+{
+	private static readonly JsonSerializerOptions s_jsonOptions = new()
+	{
+		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+	};
+
+	private readonly Channel<SseEvent> _channel = Channel.CreateUnbounded<SseEvent>(
+		new UnboundedChannelOptions { SingleReader = true });
+
+	public ChannelReader<SseEvent> Events => _channel.Reader;
+
+	public void Complete() => _channel.Writer.TryComplete();
+
+	public void ReportSessionStarted(string requestedModel, string? selectedModel)
+	{
+		Write("session-started", new { requestedModel, selectedModel });
+	}
+
+	public void ReportModelChange(string? previousModel, string newModel)
+	{
+		Write("model-change", new { previousModel, newModel });
+	}
+
+	public void ReportUsage(string stepName, string model, AgentUsage usage)
+	{
+		Write("usage", new
+		{
+			stepName,
+			model,
+			inputTokens = usage.InputTokens,
+			outputTokens = usage.OutputTokens,
+			cacheReadTokens = usage.CacheReadTokens,
+			cacheWriteTokens = usage.CacheWriteTokens,
+			cost = usage.Cost,
+			duration = usage.Duration,
+		});
+	}
+
+	public void ReportContentDelta(string stepName, string chunk)
+	{
+		Write("content-delta", new { stepName, chunk });
+	}
+
+	public void ReportReasoningDelta(string stepName, string chunk)
+	{
+		Write("reasoning-delta", new { stepName, chunk });
+	}
+
+	public void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer)
+	{
+		Write("tool-started", new { stepName, toolName, arguments, mcpServer });
+	}
+
+	public void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error)
+	{
+		Write("tool-completed", new { stepName, toolName, success, result, error });
+	}
+
+	public void ReportStepError(string stepName, string errorMessage)
+	{
+		Write("step-error", new { stepName, error = errorMessage });
+	}
+
+	public void ReportStepCompleted(string stepName, AgentResult result)
+	{
+		Write("step-completed", new
+		{
+			stepName,
+			actualModel = result.ActualModel,
+			selectedModel = result.SelectedModel,
+			contentPreview = result.Content.Length > 500
+				? result.Content[..500] + "..."
+				: result.Content,
+		});
+	}
+
+	public void ReportModelMismatch(ModelMismatchInfo mismatch)
+	{
+		Write("model-mismatch", new
+		{
+			configuredModel = mismatch.ConfiguredModel,
+			actualModel = mismatch.ActualModel,
+			systemPromptMode = mismatch.SystemPromptMode,
+			reasoningLevel = mismatch.ReasoningLevel,
+		});
+	}
+
+	public void ReportStepOutput(string stepName, string content)
+	{
+		Write("step-output", new { stepName, content });
+	}
+
+	public void ReportStepSkipped(string stepName, string reason)
+	{
+		Write("step-skipped", new { stepName, reason });
+	}
+
+	public void ReportStepStarted(string stepName)
+	{
+		Write("step-started", new { stepName });
+	}
+
+	/// <summary>
+	/// Reports the final orchestration result.
+	/// Not part of IOrchestrationReporter — called directly by the execution endpoint.
+	/// </summary>
+	public void ReportOrchestrationDone(OrchestrationResult orchestrationResult)
+	{
+		var results = orchestrationResult.StepResults.ToDictionary(
+			kv => kv.Key,
+			kv => new
+			{
+				status = kv.Value.Status.ToString(),
+				contentPreview = kv.Value.Content.Length > 1000
+					? kv.Value.Content[..1000] + "..."
+					: kv.Value.Content,
+				error = kv.Value.ErrorMessage,
+			});
+
+		Write("orchestration-done", new
+		{
+			status = orchestrationResult.Status.ToString(),
+			results,
+		});
+	}
+
+	private void Write(string eventType, object data)
+	{
+		var json = JsonSerializer.Serialize(data, s_jsonOptions);
+		_channel.Writer.TryWrite(new SseEvent(eventType, json));
+	}
+}
+
+public record SseEvent(string Type, string Data);

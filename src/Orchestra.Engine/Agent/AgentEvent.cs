@@ -20,4 +20,41 @@ public class AgentEvent
 	/// Token usage data (used by Usage event).
 	/// </summary>
 	public AgentUsage? Usage { get; init; }
+
+	// ── Tool execution data (used by ToolExecutionStart / ToolExecutionComplete) ──
+
+	/// <summary>
+	/// Unique identifier for this tool call, used to correlate start/complete events.
+	/// </summary>
+	public string? ToolCallId { get; init; }
+
+	/// <summary>
+	/// The name of the tool being executed.
+	/// </summary>
+	public string? ToolName { get; init; }
+
+	/// <summary>
+	/// Serialized arguments passed to the tool.
+	/// </summary>
+	public string? ToolArguments { get; init; }
+
+	/// <summary>
+	/// The MCP server that owns this tool (if any).
+	/// </summary>
+	public string? McpServerName { get; init; }
+
+	/// <summary>
+	/// Whether the tool execution succeeded (used by ToolExecutionComplete).
+	/// </summary>
+	public bool? ToolSuccess { get; init; }
+
+	/// <summary>
+	/// The result content returned by the tool (used by ToolExecutionComplete).
+	/// </summary>
+	public string? ToolResult { get; init; }
+
+	/// <summary>
+	/// The error message if the tool failed (used by ToolExecutionComplete).
+	/// </summary>
+	public string? ToolError { get; init; }
 }

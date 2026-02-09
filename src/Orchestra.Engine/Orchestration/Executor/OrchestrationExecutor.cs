@@ -125,12 +125,14 @@ public class OrchestrationExecutor
 					r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped)
 				.ToArray();
 
-			var reason = $"Skipped because dependencies failed or were skipped: [{string.Join(", ", failedDeps)}]";
+		var reason = $"Skipped because dependencies failed or were skipped: [{string.Join(", ", failedDeps)}]";
 			_logger.LogWarning("  Skipping step '{StepName}': {Reason}", step.Name, reason);
+			_reporter.ReportStepSkipped(step.Name, reason);
 			return ExecutionResult.Skipped(reason);
 		}
 
 		_logger.LogInformation("  Running step '{StepName}'...", step.Name);
+		_reporter.ReportStepStarted(step.Name);
 		var result = await executor.ExecuteAsync(step, context, cancellationToken);
 
 		if (result.Status == ExecutionStatus.Succeeded)

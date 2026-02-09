@@ -1,0 +1,1945 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Orchestra — Orchestration Playground</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --surface2: #1c2128;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --orange: #d29922;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 320px;
+    min-width: 320px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .sidebar h1 {
+    font-size: 18px;
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .sidebar h1 span { color: var(--accent); }
+
+  .section {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .section h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+  }
+
+  label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  input[type="text"], input[type="number"] {
+    width: 100%;
+    padding: 6px 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 13px;
+    margin-bottom: 8px;
+    outline: none;
+  }
+
+  input:focus { border-color: var(--accent); }
+
+  button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  button:hover { border-color: var(--accent); background: var(--surface); }
+
+  button.primary {
+    background: #238636;
+    border-color: #2ea043;
+    font-weight: 600;
+  }
+
+  button.primary:hover { background: #2ea043; }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  button.danger {
+    background: #8e1519;
+    border-color: #f85149;
+    font-weight: 600;
+  }
+
+  button.danger:hover { background: #a61d21; }
+
+  .btn-row { display: flex; gap: 8px; margin-top: 4px; }
+
+  /* ── File browser ── */
+  .browse-row {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+
+  .browse-row input { flex: 1; margin-bottom: 0; }
+  .browse-row button { padding: 6px 10px; font-size: 12px; white-space: nowrap; }
+
+  .file-list {
+    list-style: none;
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+  }
+
+  .file-list:empty { display: none; }
+
+  .file-item {
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .file-item:last-child { border-bottom: none; }
+  .file-item:hover { background: var(--surface2); }
+
+  .file-item .file-icon { color: var(--accent); font-size: 11px; }
+  .file-item .file-size { color: var(--text-muted); font-size: 11px; margin-left: auto; }
+
+  /* MCP list */
+  .mcp-list { list-style: none; }
+  .mcp-item {
+    padding: 6px 8px;
+    font-size: 13px;
+    border-radius: 4px;
+    margin-bottom: 4px;
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .mcp-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .mcp-badge.local { background: #1f3a1f; color: var(--green); }
+  .mcp-badge.remote { background: #1a2a3f; color: var(--blue); }
+
+  /* Parameters */
+  .param-inputs { display: flex; flex-direction: column; gap: 4px; }
+
+  /* ── Main area ── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* Toolbar */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .toolbar .title {
+    font-weight: 600;
+    font-size: 15px;
+    flex: 1;
+  }
+
+  .toolbar .timer {
+    font-family: monospace;
+    font-size: 13px;
+    color: var(--accent);
+    min-width: 60px;
+    text-align: right;
+  }
+
+  .view-toggle {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .view-toggle button {
+    border: none;
+    border-radius: 0;
+    padding: 4px 12px;
+    font-size: 12px;
+  }
+
+  .view-toggle button.active {
+    background: var(--accent);
+    color: #fff;
+  }
+
+  /* Diagram container */
+  .diagram-container {
+    flex: 1;
+    overflow: auto;
+    padding: 24px;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  .diagram-container svg { max-width: 100%; }
+
+  /* Detail panel (appears on click) */
+  .detail-overlay {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 100;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .detail-overlay.visible { display: flex; }
+
+  .detail-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    width: 700px;
+    max-width: 90vw;
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 24px;
+  }
+
+  .detail-panel h3 {
+    font-size: 16px;
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .detail-panel .close-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  .detail-row {
+    display: flex;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+
+  .detail-row .key {
+    width: 140px;
+    min-width: 140px;
+    color: var(--text-muted);
+  }
+
+  .detail-row .value {
+    flex: 1;
+    word-break: break-word;
+  }
+
+  .detail-row pre {
+    background: var(--bg);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  /* Status badge */
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .status-badge.pending { background: #2d333b; color: var(--text-muted); }
+  .status-badge.running { background: #1a2a3f; color: var(--blue); }
+  .status-badge.succeeded { background: #1f3a1f; color: var(--green); }
+  .status-badge.failed { background: #3d1f1f; color: var(--red); }
+  .status-badge.skipped { background: #3d2f0f; color: var(--orange); }
+
+  /* ── Token/cost summary bar ── */
+  .summary-bar {
+    display: none;
+    padding: 8px 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface2);
+    font-size: 12px;
+    font-family: monospace;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .summary-bar.visible { display: flex; }
+
+  .summary-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .summary-item .summary-label { color: var(--text-muted); }
+  .summary-item .summary-value { color: var(--text); font-weight: 600; }
+  .summary-item .summary-value.cost { color: var(--green); }
+  .summary-item .summary-value.duration { color: var(--accent); }
+
+  /* ── Results panel at bottom ── */
+  .results-panel {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    max-height: 350px;
+    overflow-y: auto;
+    display: none;
+  }
+
+  .results-panel.visible { display: block; }
+
+  .results-panel h2 {
+    font-size: 13px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    position: sticky;
+    top: 0;
+    background: var(--surface);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 2;
+  }
+
+  /* Collapsible result entries */
+  .result-entry {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .result-header {
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    user-select: none;
+  }
+
+  .result-header:hover { background: var(--surface2); }
+
+  .result-header .chevron {
+    font-size: 10px;
+    color: var(--text-muted);
+    transition: transform 0.15s;
+    width: 14px;
+    text-align: center;
+  }
+
+  .result-header .chevron.expanded { transform: rotate(90deg); }
+
+  .result-header .step-name { font-weight: 600; }
+
+  .result-header .step-duration {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: monospace;
+  }
+
+  .result-body {
+    display: none;
+    padding: 0 16px 12px 38px;
+  }
+
+  .result-body.expanded { display: block; }
+
+  .result-body pre {
+    background: var(--bg);
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+    line-height: 1.5;
+  }
+
+  /* Event log */
+  .event-log {
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 12px;
+    font-family: monospace;
+    padding: 8px;
+  }
+
+  .event-log .entry {
+    padding: 2px 0;
+    color: var(--text-muted);
+  }
+
+  .event-log .entry.error { color: var(--red); }
+  .event-log .entry.success { color: var(--green); }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    gap: 12px;
+    font-size: 14px;
+  }
+
+  .empty-state .icon { font-size: 48px; opacity: 0.3; }
+
+  /* Mermaid overrides */
+  .mermaid .node rect,
+  .mermaid .node circle,
+  .mermaid .node polygon {
+    cursor: pointer !important;
+  }
+
+  .node:hover rect,
+  .node:hover polygon {
+    filter: brightness(1.3);
+  }
+
+  @keyframes pulse-running {
+    0%, 100% { stroke-opacity: 1; filter: drop-shadow(0 0 4px rgba(88, 166, 255, 0.5)); }
+    50% { stroke-opacity: 0.5; filter: drop-shadow(0 0 12px rgba(88, 166, 255, 0.9)); }
+  }
+
+  .node-running rect,
+  .node-running polygon {
+    animation: pulse-running 1.5s ease-in-out infinite;
+  }
+
+  /* Tooltip */
+  .step-tooltip {
+    display: none;
+    position: fixed;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    max-width: 350px;
+    z-index: 50;
+    pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+
+  .step-tooltip.visible { display: block; }
+  .step-tooltip .tt-row { margin-bottom: 4px; }
+  .step-tooltip .tt-key { color: var(--text-muted); }
+
+  /* ── Streaming content area ── */
+  .streaming-area {
+    margin: 0 16px 8px 16px;
+    padding: 10px 14px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+    font-family: monospace;
+    white-space: pre-wrap;
+    max-height: 150px;
+    overflow-y: auto;
+    display: none;
+    line-height: 1.5;
+  }
+
+  .streaming-area.visible { display: block; }
+  .streaming-area .stream-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+
+  .streaming-area .stream-content { color: var(--text); }
+
+  /* ── Tool call entries in detail panel ── */
+  .tool-calls { margin-top: 8px; }
+  .tool-call-entry {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    margin-bottom: 6px;
+    font-size: 12px;
+  }
+
+  .tool-call-entry .tool-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    font-weight: 600;
+  }
+
+  .tool-call-entry .tool-header .tool-status-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  .tool-call-entry .tool-header .tool-status-dot.success { background: var(--green); }
+  .tool-call-entry .tool-header .tool-status-dot.failure { background: var(--red); }
+  .tool-call-entry .tool-header .tool-status-dot.running { background: var(--blue); }
+
+  .tool-call-entry .tool-mcp { color: var(--purple); font-size: 11px; font-weight: normal; }
+  .tool-call-entry .tool-args,
+  .tool-call-entry .tool-result {
+    font-family: monospace;
+    font-size: 11px;
+    white-space: pre-wrap;
+    max-height: 100px;
+    overflow-y: auto;
+    background: var(--surface2);
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+  }
+
+  .tool-call-entry .tool-error {
+    color: var(--red);
+    font-size: 11px;
+    margin-top: 4px;
+  }
+
+  /* ── Export buttons ── */
+  .export-row {
+    display: flex;
+    gap: 6px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .export-row button { font-size: 11px; padding: 4px 10px; }
+
+  /* ── Reasoning collapsible in detail ── */
+  .reasoning-section {
+    margin-top: 8px;
+  }
+
+  .reasoning-toggle {
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 12px;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .reasoning-toggle .chevron {
+    font-size: 10px;
+    transition: transform 0.15s;
+  }
+
+  .reasoning-toggle .chevron.expanded { transform: rotate(90deg); }
+
+  .reasoning-content {
+    display: none;
+    background: var(--bg);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 4px;
+  }
+
+  .reasoning-content.expanded { display: block; }
+
+  /* ── History sidebar ── */
+  .history-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    max-height: 300px;
+    overflow-y: auto;
+  }
+
+  .history-item {
+    padding: 8px 10px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+
+  .history-item:hover { background: var(--surface2); }
+  .history-item:last-child { border-bottom: none; }
+
+  .history-item .history-name { font-weight: 600; margin-bottom: 2px; }
+  .history-item .history-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .history-item .history-delete {
+    margin-left: auto;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 4px;
+    background: none;
+    border: none;
+    line-height: 1;
+  }
+  .history-item .history-delete:hover { color: var(--red); }
+
+  .history-status {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .history-status.succeeded { background: rgba(166,227,161,0.2); color: var(--green); }
+  .history-status.failed { background: rgba(243,139,168,0.2); color: var(--red); }
+  .history-status.running { background: rgba(137,180,250,0.2); color: var(--blue); }
+  .history-status.unknown { background: rgba(166,173,200,0.2); color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ── -->
+<div class="sidebar">
+  <h1><span>&#9835;</span> Orchestra</h1>
+
+  <!-- File browser -->
+  <div class="section">
+    <h2>Browse Files</h2>
+    <label for="browseDir">Directory</label>
+    <div class="browse-row">
+      <input type="text" id="browseDir" placeholder="C:\path\to\orchestrations">
+      <button onclick="browseFiles()">Browse</button>
+    </div>
+    <ul class="file-list" id="fileList"></ul>
+  </div>
+
+  <div class="section">
+    <h2>Load Orchestration</h2>
+    <label for="orchestrationPath">Orchestration JSON path</label>
+    <input type="text" id="orchestrationPath" placeholder="C:\path\to\orchestration.json">
+    <label for="mcpPath">MCP JSON path (optional)</label>
+    <input type="text" id="mcpPath" placeholder="C:\path\to\mcp.json">
+    <div class="btn-row">
+      <button class="primary" id="loadBtn" onclick="loadOrchestration()">Load</button>
+    </div>
+  </div>
+
+  <div class="section" id="mcpSection" style="display:none">
+    <h2>MCP Servers</h2>
+    <ul class="mcp-list" id="mcpList"></ul>
+  </div>
+
+  <div class="section" id="paramSection" style="display:none">
+    <h2>Parameters</h2>
+    <div class="param-inputs" id="paramInputs"></div>
+  </div>
+
+  <div class="section" id="execSection" style="display:none">
+    <h2>Execute</h2>
+    <div class="btn-row">
+      <button class="primary" id="executeBtn" onclick="executeOrchestration()">Run Orchestration</button>
+      <button class="danger" id="cancelBtn" onclick="cancelExecution()" style="display:none">Cancel</button>
+    </div>
+  </div>
+
+  <div class="section" id="logSection" style="display:none">
+    <h2>Event Log</h2>
+    <div class="event-log" id="eventLog"></div>
+  </div>
+
+  <div class="section" id="historySection">
+    <h2>Execution History <button onclick="loadHistory()" style="float:right;padding:2px 8px;font-size:11px;cursor:pointer">&#8635; Refresh</button></h2>
+    <ul class="history-list" id="historyList">
+      <li style="padding:8px 10px;color:var(--text-muted);font-size:12px">Loading...</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ── Main ── -->
+<div class="main">
+  <div class="toolbar" id="toolbar" style="display:none">
+    <div class="title" id="orchestrationTitle"></div>
+    <div class="timer" id="executionTimer"></div>
+    <div class="view-toggle">
+      <button class="active" id="depViewBtn" onclick="setView('dependency')">Dependencies</button>
+      <button id="layerViewBtn" onclick="setView('layers')">Layers</button>
+    </div>
+  </div>
+
+  <div class="diagram-container" id="diagramContainer">
+    <div class="empty-state">
+      <div class="icon">&#9835;</div>
+      <div>Load an orchestration to get started</div>
+    </div>
+  </div>
+
+  <!-- Streaming content area (live output during execution) -->
+  <div class="streaming-area" id="streamingArea">
+    <div class="stream-label">Live Output — <span id="streamingStepName"></span></div>
+    <div class="stream-content" id="streamingContent"></div>
+  </div>
+
+  <!-- Token/cost summary bar -->
+  <div class="summary-bar" id="summaryBar">
+    <div class="summary-item"><span class="summary-label">In:</span> <span class="summary-value" id="sumIn">0</span></div>
+    <div class="summary-item"><span class="summary-label">Out:</span> <span class="summary-value" id="sumOut">0</span></div>
+    <div class="summary-item"><span class="summary-label">Cache:</span> <span class="summary-value" id="sumCache">0</span></div>
+    <div class="summary-item"><span class="summary-label">Cost:</span> <span class="summary-value cost" id="sumCost">$0.000000</span></div>
+    <div class="summary-item"><span class="summary-label">Duration:</span> <span class="summary-value duration" id="sumDuration">0.0s</span></div>
+    <div class="summary-item"><span class="summary-label">Steps:</span> <span class="summary-value" id="sumSteps">0/0</span></div>
+  </div>
+
+  <div class="results-panel" id="resultsPanel">
+    <h2>
+      <span>Results</span>
+      <span class="status-badge" id="overallStatus"></span>
+    </h2>
+    <div id="resultsContent"></div>
+  </div>
+</div>
+
+<!-- ── Detail overlay ── -->
+<div class="detail-overlay" id="detailOverlay" onclick="if(event.target===this)closeDetail()">
+  <div class="detail-panel" id="detailPanel"></div>
+</div>
+
+<!-- ── Tooltip ── -->
+<div class="step-tooltip" id="stepTooltip"></div>
+
+<script>
+  // ── State ──
+  let orchestrationData = null;
+  let currentView = 'dependency';
+  let stepStatuses = {};    // stepName -> { status, content, error, model, usage, startTime, endTime }
+  let stepOutputs = {};     // stepName -> full content (from step-output events)
+  let streamingContent = {};  // stepName -> accumulated content string (from content-delta events)
+  let streamingReasoning = {}; // stepName -> accumulated reasoning string (from reasoning-delta events)
+  let toolCalls = {};         // stepName -> [{toolName, arguments, mcpServer, success, result, error, status}]
+  let currentExecutionId = null;
+  let abortController = null;
+  let timerInterval = null;
+  let executionStartTime = null;
+
+  // ── Mermaid init ──
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: 'dark',
+    themeVariables: {
+      primaryColor: '#1f6feb',
+      primaryTextColor: '#e6edf3',
+      primaryBorderColor: '#388bfd',
+      lineColor: '#8b949e',
+      secondaryColor: '#161b22',
+      tertiaryColor: '#21262d',
+      background: '#0d1117',
+      mainBkg: '#161b22',
+      nodeBorder: '#30363d',
+    },
+    flowchart: {
+      htmlLabels: true,
+      curve: 'basis',
+      padding: 15,
+    },
+    securityLevel: 'loose',
+  });
+
+  // ── Browse files ──
+  async function browseFiles() {
+    const dir = document.getElementById('browseDir').value.trim();
+    if (!dir) return;
+
+    const list = document.getElementById('fileList');
+    list.innerHTML = '<li class="file-item" style="color:var(--text-muted)">Loading...</li>';
+
+    try {
+      const res = await fetch('/api/browse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directory: dir }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        list.innerHTML = `<li class="file-item" style="color:var(--red)">${esc(data.error)}</li>`;
+        return;
+      }
+
+      list.innerHTML = '';
+      if (data.files.length === 0) {
+        list.innerHTML = '<li class="file-item" style="color:var(--text-muted)">No .json files found</li>';
+        return;
+      }
+
+      data.files.forEach(f => {
+        const li = document.createElement('li');
+        li.className = 'file-item';
+        const sizeKb = (f.size / 1024).toFixed(1);
+        li.innerHTML = `<span class="file-icon">&#128196;</span> ${esc(f.name)} <span class="file-size">${sizeKb}KB</span>`;
+        li.addEventListener('click', () => selectFile(f));
+        list.appendChild(li);
+      });
+    } catch (e) {
+      list.innerHTML = `<li class="file-item" style="color:var(--red)">${esc(e.message)}</li>`;
+    }
+  }
+
+  function selectFile(file) {
+    const name = file.name.toLowerCase();
+    if (name.includes('mcp')) {
+      document.getElementById('mcpPath').value = file.path;
+    } else {
+      document.getElementById('orchestrationPath').value = file.path;
+    }
+  }
+
+  // ── Load orchestration ──
+  async function loadOrchestration() {
+    const orchPath = document.getElementById('orchestrationPath').value.trim();
+    const mcpPathVal = document.getElementById('mcpPath').value.trim();
+
+    if (!orchPath) return;
+
+    const loadBtn = document.getElementById('loadBtn');
+    loadBtn.disabled = true;
+    loadBtn.textContent = 'Loading...';
+
+    try {
+      const res = await fetch('/api/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orchestrationPath: orchPath, mcpPath: mcpPathVal || null }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Failed to load');
+        return;
+      }
+
+      orchestrationData = data;
+      stepStatuses = {};
+      stepOutputs = {};
+      data.steps.forEach(s => {
+        stepStatuses[s.name] = { status: 'pending' };
+      });
+
+      renderMcps(data.mcps);
+      renderParams(data.parameters);
+      renderToolbar(data);
+      renderDiagram();
+
+      document.getElementById('execSection').style.display = '';
+      document.getElementById('resultsPanel').classList.remove('visible');
+      document.getElementById('summaryBar').classList.remove('visible');
+      document.getElementById('logSection').style.display = 'none';
+      document.getElementById('eventLog').innerHTML = '';
+      document.getElementById('executionTimer').textContent = '';
+    } catch (e) {
+      alert('Error: ' + e.message);
+    } finally {
+      loadBtn.disabled = false;
+      loadBtn.textContent = 'Load';
+    }
+  }
+
+  // ── Render MCPs ──
+  function renderMcps(mcps) {
+    const section = document.getElementById('mcpSection');
+    const list = document.getElementById('mcpList');
+    list.innerHTML = '';
+
+    if (!mcps || mcps.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+
+    section.style.display = '';
+    mcps.forEach(m => {
+      const li = document.createElement('li');
+      li.className = 'mcp-item';
+      li.innerHTML = `<span class="mcp-badge ${m.type.toLowerCase()}">${m.type}</span> ${esc(m.name)}`;
+      list.appendChild(li);
+    });
+  }
+
+  // ── Render parameters ──
+  function renderParams(params) {
+    const section = document.getElementById('paramSection');
+    const container = document.getElementById('paramInputs');
+    container.innerHTML = '';
+
+    if (!params || params.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+
+    section.style.display = '';
+    params.forEach(p => {
+      const label = document.createElement('label');
+      label.textContent = p;
+      label.setAttribute('for', `param-${p}`);
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.id = `param-${p}`;
+      input.dataset.param = p;
+      input.placeholder = `Value for {{${p}}}`;
+      container.appendChild(label);
+      container.appendChild(input);
+    });
+  }
+
+  // ── Toolbar ──
+  function renderToolbar(data) {
+    document.getElementById('toolbar').style.display = '';
+    document.getElementById('orchestrationTitle').textContent = `${data.name} — ${data.description}`;
+  }
+
+  // ── View toggle ──
+  function setView(view) {
+    currentView = view;
+    document.getElementById('depViewBtn').classList.toggle('active', view === 'dependency');
+    document.getElementById('layerViewBtn').classList.toggle('active', view === 'layers');
+    renderDiagram();
+  }
+
+  // ── Timer ──
+  function startTimer() {
+    executionStartTime = Date.now();
+    const timerEl = document.getElementById('executionTimer');
+    timerEl.textContent = '0.0s';
+    timerInterval = setInterval(() => {
+      const elapsed = (Date.now() - executionStartTime) / 1000;
+      timerEl.textContent = formatDuration(elapsed);
+    }, 100);
+  }
+
+  function stopTimer() {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+  }
+
+  function formatDuration(seconds) {
+    if (seconds < 60) return seconds.toFixed(1) + 's';
+    const m = Math.floor(seconds / 60);
+    const s = (seconds % 60).toFixed(1);
+    return `${m}m ${s}s`;
+  }
+
+  // ── Generate Mermaid diagram ──
+  function buildMermaidDef() {
+    if (!orchestrationData) return '';
+    const { steps, layers } = orchestrationData;
+
+    let lines = [];
+
+    if (currentView === 'dependency') {
+      lines.push('graph LR');
+      // Node definitions
+      steps.forEach(s => {
+        const label = `${s.name}\\n${s.model || ''}`;
+        lines.push(`  ${nodeId(s.name)}["${label}"]`);
+      });
+      // Edges from dependencies
+      steps.forEach(s => {
+        s.dependsOn.forEach(dep => {
+          lines.push(`  ${nodeId(dep)} --> ${nodeId(s.name)}`);
+        });
+      });
+    } else {
+      lines.push('graph TD');
+      layers.forEach(layer => {
+        lines.push(`  subgraph Layer_${layer.layer}["Layer ${layer.layer}"]`);
+        layer.steps.forEach(name => {
+          const step = steps.find(s => s.name === name);
+          const label = `${name}\\n${step?.model || ''}`;
+          lines.push(`    ${nodeId(name)}["${label}"]`);
+        });
+        lines.push('  end');
+      });
+      // Edges
+      steps.forEach(s => {
+        s.dependsOn.forEach(dep => {
+          lines.push(`  ${nodeId(dep)} --> ${nodeId(s.name)}`);
+        });
+      });
+    }
+
+    // Status class definitions
+    lines.push('  classDef pending fill:#2d333b,stroke:#484f58,color:#8b949e');
+    lines.push('  classDef running fill:#0d419d,stroke:#58a6ff,color:#fff,stroke-width:2px');
+    lines.push('  classDef succeeded fill:#1a7f37,stroke:#3fb950,color:#fff');
+    lines.push('  classDef failed fill:#8e1519,stroke:#f85149,color:#fff');
+    lines.push('  classDef skipped fill:#6d5d0f,stroke:#d29922,color:#fff');
+
+    // Apply status classes
+    steps.forEach(s => {
+      const st = stepStatuses[s.name]?.status || 'pending';
+      lines.push(`  class ${nodeId(s.name)} ${st}`);
+    });
+
+    return lines.join('\n');
+  }
+
+  function nodeId(name) {
+    return name.replace(/[^a-zA-Z0-9]/g, '_');
+  }
+
+  async function renderDiagram() {
+    const container = document.getElementById('diagramContainer');
+    const def = buildMermaidDef();
+    if (!def) return;
+
+    const id = 'mermaid-' + Date.now();
+    try {
+      const { svg } = await mermaid.render(id, def);
+      container.innerHTML = svg;
+
+      // Status color map (fill, stroke)
+      const statusColors = {
+        pending:   { fill: '#2d333b', stroke: '#484f58', text: '#8b949e' },
+        running:   { fill: '#0d419d', stroke: '#58a6ff', text: '#ffffff' },
+        succeeded: { fill: '#1a7f37', stroke: '#3fb950', text: '#ffffff' },
+        failed:    { fill: '#8e1519', stroke: '#f85149', text: '#ffffff' },
+        skipped:   { fill: '#6d5d0f', stroke: '#d29922', text: '#ffffff' },
+      };
+
+      // Find all .node groups in the rendered SVG
+      const svgEl = container.querySelector('svg');
+      if (!svgEl) return;
+      const nodeGroups = svgEl.querySelectorAll('.node');
+
+      nodeGroups.forEach(nodeGroup => {
+        let step = null;
+
+        // Strategy 1: Match by Mermaid node group ID (e.g. "flowchart-nodeId-0")
+        const groupId = nodeGroup.id || '';
+        const match = groupId.match(/^flowchart-(.+)-\d+$/);
+        if (match) {
+          const nid = match[1];
+          step = orchestrationData.steps.find(s => nodeId(s.name) === nid);
+        }
+
+        // Strategy 2: Fallback — match by label text content
+        if (!step) {
+          const labelEl = nodeGroup.querySelector('.nodeLabel') || nodeGroup.querySelector('text');
+          if (labelEl) {
+            const labelText = (labelEl.textContent || '').trim();
+            step = orchestrationData.steps.find(s => labelText.startsWith(s.name));
+          }
+        }
+
+        if (!step) return;
+
+        const st = stepStatuses[step.name]?.status || 'pending';
+        const colors = statusColors[st] || statusColors.pending;
+
+        // Apply colors directly to the rect/polygon inside the node
+        const shapes = nodeGroup.querySelectorAll('rect, polygon, circle');
+        shapes.forEach(shape => {
+          shape.style.fill = colors.fill;
+          shape.style.stroke = colors.stroke;
+          shape.style.strokeWidth = st === 'running' ? '2px' : '1px';
+        });
+
+        // Apply text color
+        const texts = nodeGroup.querySelectorAll('.nodeLabel, text, span, p, foreignObject *');
+        texts.forEach(t => {
+          t.style.color = colors.text;
+          t.style.fill = colors.text;
+        });
+
+        // Add/remove running animation class
+        nodeGroup.classList.toggle('node-running', st === 'running');
+
+        // Cursor
+        nodeGroup.style.cursor = 'pointer';
+
+        // Event handlers
+        nodeGroup.addEventListener('click', () => showDetail(step.name));
+        nodeGroup.addEventListener('dblclick', () => showDetail(step.name));
+        nodeGroup.addEventListener('mouseenter', (e) => showTooltip(e, step.name));
+        nodeGroup.addEventListener('mouseleave', hideTooltip);
+      });
+    } catch (e) {
+      container.innerHTML = `<div class="empty-state"><div>Diagram render error: ${esc(e.message)}</div></div>`;
+    }
+  }
+
+  // ── Tooltip ──
+  function showTooltip(event, stepName) {
+    const step = orchestrationData.steps.find(s => s.name === stepName);
+    if (!step) return;
+    const st = stepStatuses[stepName] || {};
+
+    const tooltip = document.getElementById('stepTooltip');
+    let html = `<div class="tt-row"><strong>${esc(stepName)}</strong></div>`;
+    html += `<div class="tt-row"><span class="tt-key">Model:</span> ${esc(step.model || 'N/A')}</div>`;
+    if (step.reasoningLevel) html += `<div class="tt-row"><span class="tt-key">Reasoning:</span> ${esc(step.reasoningLevel)}</div>`;
+    if (step.mcps?.length) html += `<div class="tt-row"><span class="tt-key">MCPs:</span> ${step.mcps.map(m => esc(m.name)).join(', ')}</div>`;
+    html += `<div class="tt-row"><span class="tt-key">Status:</span> <span class="status-badge ${st.status || 'pending'}">${st.status || 'pending'}</span></div>`;
+    if (st.model) html += `<div class="tt-row"><span class="tt-key">Actual model:</span> ${esc(st.model)}</div>`;
+    if (st.stepDuration != null) html += `<div class="tt-row"><span class="tt-key">Duration:</span> ${formatDuration(st.stepDuration)}</div>`;
+
+    tooltip.innerHTML = html;
+    tooltip.classList.add('visible');
+
+    // Position relative to the node group, not the inner element
+    const nodeGroup = event.currentTarget;
+    const rect = nodeGroup.getBoundingClientRect();
+    tooltip.style.left = Math.min(rect.right + 10, window.innerWidth - 370) + 'px';
+    tooltip.style.top = rect.top + 'px';
+  }
+
+  function hideTooltip() {
+    document.getElementById('stepTooltip').classList.remove('visible');
+  }
+
+  // ── Detail panel ──
+  function showDetail(stepName) {
+    const step = orchestrationData.steps.find(s => s.name === stepName);
+    if (!step) return;
+    const st = stepStatuses[stepName] || {};
+    const output = stepOutputs[stepName];
+
+    let html = `<h3>${esc(stepName)} <button class="close-btn" onclick="closeDetail()">&times;</button></h3>`;
+    html += detailRow('Status', `<span class="status-badge ${st.status || 'pending'}">${st.status || 'pending'}</span>`);
+    html += detailRow('Model', esc(step.model || 'N/A'));
+    if (st.model) html += detailRow('Actual Model', esc(st.model));
+    if (step.reasoningLevel) html += detailRow('Reasoning', esc(step.reasoningLevel));
+    if (step.systemPromptMode) html += detailRow('Prompt Mode', esc(step.systemPromptMode));
+    html += detailRow('Dependencies', step.dependsOn.length ? step.dependsOn.map(esc).join(', ') : 'None');
+    if (step.mcps?.length) html += detailRow('MCPs', step.mcps.map(m => esc(m.name)).join(', '));
+    if (step.parameters?.length) html += detailRow('Parameters', step.parameters.map(esc).join(', '));
+    if (step.systemPrompt) html += detailRow('System Prompt', `<pre>${esc(step.systemPrompt)}</pre>`);
+    if (step.userPrompt) html += detailRow('User Prompt', `<pre>${esc(step.userPrompt)}</pre>`);
+    if (step.inputHandlerPrompt) html += detailRow('Input Handler', `<pre>${esc(step.inputHandlerPrompt)}</pre>`);
+    if (step.outputHandlerPrompt) html += detailRow('Output Handler', `<pre>${esc(step.outputHandlerPrompt)}</pre>`);
+
+    if (st.stepDuration != null) html += detailRow('Step Duration', formatDuration(st.stepDuration));
+
+    if (st.usage) {
+      html += detailRow('Input Tokens', st.usage.inputTokens ?? 'N/A');
+      html += detailRow('Output Tokens', st.usage.outputTokens ?? 'N/A');
+      if (st.usage.cacheReadTokens) html += detailRow('Cache Read', st.usage.cacheReadTokens);
+      if (st.usage.cost) html += detailRow('Cost', `$${st.usage.cost.toFixed(6)}`);
+      if (st.usage.duration) html += detailRow('Duration', `${st.usage.duration.toFixed(1)}s`);
+    }
+
+    if (st.error) html += detailRow('Error', `<pre style="color:var(--red)">${esc(st.error)}</pre>`);
+    if (output) html += detailRow('Output', `<pre>${esc(output)}</pre>`);
+    else if (streamingContent[stepName]) html += detailRow('Output', `<pre>${esc(streamingContent[stepName])}</pre>`);
+    else if (st.content) html += detailRow('Output Preview', `<pre>${esc(st.content)}</pre>`);
+
+    // Tool calls section
+    const calls = toolCalls[stepName];
+    if (calls && calls.length > 0) {
+      let toolHtml = '<div class="tool-calls">';
+      calls.forEach(tc => {
+        const dotClass = tc.status === 'running' ? 'running' : (tc.success ? 'success' : 'failure');
+        toolHtml += '<div class="tool-call-entry">';
+        toolHtml += `<div class="tool-header">`;
+        toolHtml += `<span class="tool-status-dot ${dotClass}"></span>`;
+        toolHtml += `<span>${esc(tc.toolName)}</span>`;
+        if (tc.mcpServer) toolHtml += `<span class="tool-mcp">${esc(tc.mcpServer)}</span>`;
+        toolHtml += `</div>`;
+        if (tc.arguments) {
+          let argsDisplay = tc.arguments;
+          try { argsDisplay = JSON.stringify(JSON.parse(tc.arguments), null, 2); } catch (_) {}
+          toolHtml += `<div class="tool-args">${esc(argsDisplay)}</div>`;
+        }
+        if (tc.result) toolHtml += `<div class="tool-result">${esc(tc.result.length > 500 ? tc.result.substring(0, 500) + '...' : tc.result)}</div>`;
+        if (tc.error) toolHtml += `<div class="tool-error">${esc(tc.error)}</div>`;
+        toolHtml += '</div>';
+      });
+      toolHtml += '</div>';
+      html += detailRow(`Tools (${calls.length})`, toolHtml);
+    }
+
+    // Reasoning section
+    const reasoning = streamingReasoning[stepName];
+    if (reasoning) {
+      const reasoningHtml = `<div class="reasoning-section">
+        <div class="reasoning-toggle" onclick="toggleReasoning(this)">
+          <span class="chevron">&#9654;</span> Show reasoning (${reasoning.length} chars)
+        </div>
+        <div class="reasoning-content"><pre style="margin:0;background:transparent;padding:0;max-height:none">${esc(reasoning)}</pre></div>
+      </div>`;
+      html += detailRow('Reasoning', reasoningHtml);
+    }
+
+    document.getElementById('detailPanel').innerHTML = html;
+    document.getElementById('detailOverlay').classList.add('visible');
+  }
+
+  function closeDetail() {
+    document.getElementById('detailOverlay').classList.remove('visible');
+  }
+
+  function detailRow(key, value) {
+    return `<div class="detail-row"><div class="key">${key}</div><div class="value">${value}</div></div>`;
+  }
+
+  // ── Cancel execution ──
+  async function cancelExecution() {
+    if (abortController) {
+      abortController.abort();
+    }
+    if (currentExecutionId) {
+      try {
+        await fetch(`/api/cancel/${currentExecutionId}`, { method: 'POST' });
+      } catch (_) {
+        // Best-effort cancel
+      }
+    }
+    addLog('Execution cancelled by user.', 'error');
+  }
+
+  // ── Execute orchestration ──
+  async function executeOrchestration() {
+    if (!orchestrationData) return;
+
+    const orchPath = document.getElementById('orchestrationPath').value.trim();
+    const mcpPathVal = document.getElementById('mcpPath').value.trim();
+
+    // Collect parameters
+    const params = {};
+    document.querySelectorAll('#paramInputs input').forEach(input => {
+      const key = input.dataset.param;
+      const val = input.value.trim();
+      if (key && val) params[key] = val;
+    });
+
+    // Reset statuses
+    orchestrationData.steps.forEach(s => {
+      stepStatuses[s.name] = { status: 'pending' };
+    });
+    stepOutputs = {};
+    streamingContent = {};
+    streamingReasoning = {};
+    toolCalls = {};
+    currentExecutionId = null;
+    hideStreamingArea();
+    renderDiagram();
+
+    // Show log
+    document.getElementById('logSection').style.display = '';
+    const log = document.getElementById('eventLog');
+    log.innerHTML = '';
+
+    // Hide results + summary
+    document.getElementById('resultsPanel').classList.remove('visible');
+    document.getElementById('summaryBar').classList.remove('visible');
+
+    // Show cancel button, disable execute
+    const execBtn = document.getElementById('executeBtn');
+    const cancelBtn = document.getElementById('cancelBtn');
+    execBtn.disabled = true;
+    execBtn.textContent = 'Running...';
+    cancelBtn.style.display = '';
+
+    // Start timer
+    startTimer();
+
+    // Create AbortController for fetch
+    abortController = new AbortController();
+
+    // Start SSE via fetch (POST SSE — EventSource only supports GET, so we use fetch + ReadableStream)
+    try {
+      const res = await fetch('/api/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orchestrationPath: orchPath,
+          mcpPath: mcpPathVal || null,
+          parameters: Object.keys(params).length > 0 ? params : null,
+        }),
+        signal: abortController.signal,
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Parse SSE events from buffer
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop(); // keep incomplete part
+
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let eventType = '';
+          let data = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) eventType = line.slice(7);
+            else if (line.startsWith('data: ')) data = line.slice(6);
+          }
+          if (eventType && data) {
+            handleSseEvent(eventType, JSON.parse(data));
+          }
+        }
+      }
+
+      // Process remaining buffer
+      if (buffer.trim()) {
+        const lines = buffer.split('\n');
+        let eventType = '';
+        let data = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) eventType = line.slice(7);
+          else if (line.startsWith('data: ')) data = line.slice(6);
+        }
+        if (eventType && data) {
+          handleSseEvent(eventType, JSON.parse(data));
+        }
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        addLog('Connection aborted.', 'error');
+      } else {
+        addLog(`Connection error: ${e.message}`, 'error');
+      }
+    } finally {
+      stopTimer();
+      execBtn.disabled = false;
+      execBtn.textContent = 'Run Orchestration';
+      cancelBtn.style.display = 'none';
+      abortController = null;
+      currentExecutionId = null;
+      // Refresh history after execution completes
+      loadHistory();
+    }
+  }
+
+  // ── Handle SSE events ──
+  function handleSseEvent(type, data) {
+    switch (type) {
+      case 'execution-started':
+        currentExecutionId = data.executionId;
+        addLog(`Execution started (ID: ${data.executionId})`);
+        break;
+
+      case 'session-started':
+        addLog(`Session started — model: ${data.requestedModel}${data.selectedModel ? ` (selected: ${data.selectedModel})` : ''}`);
+        break;
+
+      case 'step-started':
+        stepStatuses[data.stepName] = {
+          ...stepStatuses[data.stepName],
+          status: 'running',
+          startTime: Date.now(),
+        };
+        streamingContent[data.stepName] = '';
+        addLog(`[${data.stepName}] Started`);
+        showStreamingArea(data.stepName);
+        renderDiagram();
+        break;
+
+      case 'step-completed':
+        const prevStart = stepStatuses[data.stepName]?.startTime;
+        const stepDuration = prevStart ? (Date.now() - prevStart) / 1000 : null;
+        stepStatuses[data.stepName] = {
+          ...stepStatuses[data.stepName],
+          status: 'succeeded',
+          model: data.actualModel,
+          content: data.contentPreview,
+          endTime: Date.now(),
+          stepDuration,
+        };
+        addLog(`[${data.stepName}] Completed${stepDuration ? ` (${formatDuration(stepDuration)})` : ''} (model: ${data.actualModel || 'N/A'})`, 'success');
+        hideStreamingArea();
+        renderDiagram();
+        break;
+
+      case 'step-error':
+        stepStatuses[data.stepName] = {
+          ...stepStatuses[data.stepName],
+          status: 'failed',
+          error: data.error,
+          endTime: Date.now(),
+        };
+        addLog(`[${data.stepName}] Error: ${data.error}`, 'error');
+        hideStreamingArea();
+        renderDiagram();
+        break;
+
+      case 'step-skipped':
+        stepStatuses[data.stepName] = {
+          ...stepStatuses[data.stepName],
+          status: 'skipped',
+          error: data.reason,
+        };
+        addLog(`[${data.stepName}] Skipped: ${data.reason}`);
+        renderDiagram();
+        break;
+
+      case 'step-output':
+        stepOutputs[data.stepName] = data.content;
+        break;
+
+      case 'content-delta':
+        if (!streamingContent[data.stepName]) streamingContent[data.stepName] = '';
+        streamingContent[data.stepName] += data.chunk;
+        updateStreamingArea(data.stepName, streamingContent[data.stepName]);
+        break;
+
+      case 'reasoning-delta':
+        if (!streamingReasoning[data.stepName]) streamingReasoning[data.stepName] = '';
+        streamingReasoning[data.stepName] += data.chunk;
+        break;
+
+      case 'tool-started':
+        if (!toolCalls[data.stepName]) toolCalls[data.stepName] = [];
+        toolCalls[data.stepName].push({
+          toolName: data.toolName,
+          arguments: data.arguments,
+          mcpServer: data.mcpServer,
+          success: null,
+          result: null,
+          error: null,
+          status: 'running',
+        });
+        addLog(`[${data.stepName}] Tool: ${data.toolName}${data.mcpServer ? ` (${data.mcpServer})` : ''}`);
+        break;
+
+      case 'tool-completed': {
+        const calls = toolCalls[data.stepName];
+        if (calls) {
+          // Find matching running tool call (last one with same name still running)
+          for (let i = calls.length - 1; i >= 0; i--) {
+            if (calls[i].toolName === data.toolName && calls[i].status === 'running') {
+              calls[i].success = data.success;
+              calls[i].result = data.result;
+              calls[i].error = data.error;
+              calls[i].status = 'done';
+              break;
+            }
+          }
+        }
+        const statusMsg = data.success ? 'succeeded' : `failed: ${data.error || 'unknown'}`;
+        addLog(`[${data.stepName}] Tool ${data.toolName} ${statusMsg}`, data.success ? '' : 'error');
+        break;
+      }
+
+      case 'usage':
+        stepStatuses[data.stepName] = {
+          ...stepStatuses[data.stepName],
+          usage: data,
+        };
+        addLog(`[${data.stepName}] Tokens in:${data.inputTokens} out:${data.outputTokens}`);
+        break;
+
+      case 'model-mismatch':
+        addLog(`Model mismatch: configured=${data.configuredModel} actual=${data.actualModel}`, 'error');
+        break;
+
+      case 'model-change':
+        addLog(`Model changed: ${data.previousModel} -> ${data.newModel}`);
+        break;
+
+      case 'orchestration-done':
+        showResults(data);
+        updateSummaryBar();
+        addLog(`Orchestration ${data.status}`, data.status === 'Succeeded' ? 'success' : 'error');
+        break;
+    }
+  }
+
+  // ── Token/cost summary bar ──
+  function updateSummaryBar() {
+    let totalIn = 0, totalOut = 0, totalCache = 0, totalCost = 0, totalDuration = 0;
+    let stepsCompleted = 0, stepsTotal = 0;
+
+    if (orchestrationData) {
+      stepsTotal = orchestrationData.steps.length;
+      for (const step of orchestrationData.steps) {
+        const st = stepStatuses[step.name];
+        if (st && st.status === 'succeeded') stepsCompleted++;
+
+        if (st && st.usage) {
+          totalIn += st.usage.inputTokens || 0;
+          totalOut += st.usage.outputTokens || 0;
+          totalCache += st.usage.cacheReadTokens || 0;
+          totalCost += st.usage.cost || 0;
+          totalDuration += st.usage.duration || 0;
+        }
+      }
+    }
+
+    document.getElementById('sumIn').textContent = totalIn.toLocaleString();
+    document.getElementById('sumOut').textContent = totalOut.toLocaleString();
+    document.getElementById('sumCache').textContent = totalCache.toLocaleString();
+    document.getElementById('sumCost').textContent = `$${totalCost.toFixed(6)}`;
+    document.getElementById('sumDuration').textContent = formatDuration(totalDuration);
+    document.getElementById('sumSteps').textContent = `${stepsCompleted}/${stepsTotal}`;
+    document.getElementById('summaryBar').classList.add('visible');
+  }
+
+  // ── Show final results (collapsible) ──
+  let lastOrchestrationResult = null; // stored for export
+
+  function showResults(data) {
+    lastOrchestrationResult = data;
+    const panel = document.getElementById('resultsPanel');
+    const content = document.getElementById('resultsContent');
+    const statusEl = document.getElementById('overallStatus');
+
+    statusEl.className = `status-badge ${data.status.toLowerCase()}`;
+    statusEl.textContent = data.status;
+
+    const entries = Object.entries(data.results);
+
+    // Export row
+    let html = '<div class="export-row">';
+    html += '<button onclick="copyMarkdown()">Copy Markdown</button>';
+    html += '<button onclick="downloadJSON()">Download JSON</button>';
+    html += '</div>';
+
+    entries.forEach(([name, result], index) => {
+      const output = stepOutputs[name] || result.contentPreview || '';
+      const st = stepStatuses[name] || {};
+      const isLast = index === entries.length - 1;
+      const durationStr = st.stepDuration ? formatDuration(st.stepDuration) : '';
+
+      html += `<div class="result-entry">`;
+      html += `<div class="result-header" onclick="toggleResult(this)">`;
+      html += `<span class="chevron ${isLast ? 'expanded' : ''}">&#9654;</span>`;
+      html += `<span class="step-name">${esc(name)}</span>`;
+      html += `<span class="status-badge ${result.status.toLowerCase()}">${result.status}</span>`;
+      if (durationStr) html += `<span class="step-duration">${durationStr}</span>`;
+      html += `<button onclick="event.stopPropagation();copyStepOutput('${esc(name)}')" style="margin-left:8px;font-size:10px;padding:2px 6px">Copy</button>`;
+      html += `</div>`;
+      html += `<div class="result-body ${isLast ? 'expanded' : ''}">`;
+      if (result.error) {
+        html += `<pre style="color:var(--red)">${esc(result.error)}</pre>`;
+      } else if (output) {
+        html += `<pre>${esc(output)}</pre>`;
+      }
+      html += `</div>`;
+      html += `</div>`;
+    });
+
+    content.innerHTML = html;
+    panel.classList.add('visible');
+  }
+
+  function toggleResult(header) {
+    const chevron = header.querySelector('.chevron');
+    const body = header.nextElementSibling;
+    chevron.classList.toggle('expanded');
+    body.classList.toggle('expanded');
+  }
+
+  // ── Streaming area ──
+  function showStreamingArea(stepName) {
+    const area = document.getElementById('streamingArea');
+    document.getElementById('streamingStepName').textContent = stepName;
+    document.getElementById('streamingContent').textContent = '';
+    area.classList.add('visible');
+  }
+
+  function updateStreamingArea(stepName, content) {
+    const area = document.getElementById('streamingArea');
+    const contentEl = document.getElementById('streamingContent');
+    document.getElementById('streamingStepName').textContent = stepName;
+    contentEl.textContent = content;
+    area.classList.add('visible');
+    // Auto-scroll
+    area.scrollTop = area.scrollHeight;
+  }
+
+  function hideStreamingArea() {
+    document.getElementById('streamingArea').classList.remove('visible');
+  }
+
+  // ── Reasoning toggle ──
+  function toggleReasoning(toggleEl) {
+    const chevron = toggleEl.querySelector('.chevron');
+    const content = toggleEl.nextElementSibling;
+    chevron.classList.toggle('expanded');
+    content.classList.toggle('expanded');
+  }
+
+  // ── Export functions ──
+  function copyStepOutput(stepName) {
+    const output = stepOutputs[stepName] || streamingContent[stepName] || '';
+    navigator.clipboard.writeText(output).then(() => {
+      // Brief visual feedback via the button text
+      const btns = document.querySelectorAll('.result-header button');
+      for (const btn of btns) {
+        if (btn.onclick && btn.getAttribute('onclick')?.includes(stepName)) {
+          const orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(() => btn.textContent = orig, 1200);
+          break;
+        }
+      }
+    });
+  }
+
+  function copyMarkdown() {
+    if (!lastOrchestrationResult) return;
+    const data = lastOrchestrationResult;
+    const timestamp = new Date().toISOString();
+    let md = `# ${orchestrationData?.name || 'Orchestration'} Run\n\n`;
+    md += `**Status:** ${data.status}  \n`;
+    md += `**Date:** ${timestamp}  \n\n`;
+
+    // Per-step results
+    const entries = Object.entries(data.results);
+    entries.forEach(([name, result]) => {
+      const st = stepStatuses[name] || {};
+      const output = stepOutputs[name] || streamingContent[name] || result.contentPreview || '';
+      const durationStr = st.stepDuration ? formatDuration(st.stepDuration) : '';
+
+      md += `## ${name}\n\n`;
+      md += `**Status:** ${result.status}`;
+      if (durationStr) md += ` | **Duration:** ${durationStr}`;
+      if (st.model) md += ` | **Model:** ${st.model}`;
+      md += `\n\n`;
+
+      if (result.error) {
+        md += `**Error:**\n\`\`\`\n${result.error}\n\`\`\`\n\n`;
+      } else if (output) {
+        md += `${output}\n\n`;
+      }
+
+      // Tool calls
+      const calls = toolCalls[name];
+      if (calls && calls.length > 0) {
+        md += `### Tools (${calls.length})\n\n`;
+        calls.forEach(tc => {
+          const icon = tc.success ? '✓' : '✗';
+          md += `- ${icon} **${tc.toolName}**`;
+          if (tc.mcpServer) md += ` _(${tc.mcpServer})_`;
+          md += `\n`;
+        });
+        md += `\n`;
+      }
+
+      // Reasoning
+      const reasoning = streamingReasoning[name];
+      if (reasoning) {
+        md += `<details><summary>Reasoning (${reasoning.length} chars)</summary>\n\n${reasoning}\n\n</details>\n\n`;
+      }
+    });
+
+    // Token/cost summary
+    md += `---\n\n### Summary\n\n`;
+    let totalIn = 0, totalOut = 0, totalCache = 0, totalCost = 0, totalDuration = 0;
+    if (orchestrationData) {
+      for (const step of orchestrationData.steps) {
+        const st = stepStatuses[step.name];
+        if (st && st.usage) {
+          totalIn += st.usage.inputTokens || 0;
+          totalOut += st.usage.outputTokens || 0;
+          totalCache += st.usage.cacheReadTokens || 0;
+          totalCost += st.usage.cost || 0;
+          totalDuration += st.usage.duration || 0;
+        }
+      }
+    }
+    md += `| Metric | Value |\n|--------|-------|\n`;
+    md += `| Input Tokens | ${totalIn.toLocaleString()} |\n`;
+    md += `| Output Tokens | ${totalOut.toLocaleString()} |\n`;
+    md += `| Cache Tokens | ${totalCache.toLocaleString()} |\n`;
+    md += `| Cost | $${totalCost.toFixed(6)} |\n`;
+    md += `| Duration | ${formatDuration(totalDuration)} |\n`;
+
+    navigator.clipboard.writeText(md).then(() => {
+      const btn = document.querySelector('.export-row button');
+      if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = orig, 1200);
+      }
+    });
+  }
+
+  function downloadJSON() {
+    if (!lastOrchestrationResult) return;
+    const exportData = {
+      exportedAt: new Date().toISOString(),
+      orchestration: {
+        name: orchestrationData?.name || 'Unknown',
+        description: orchestrationData?.description || '',
+        steps: orchestrationData?.steps?.map(s => s.name) || [],
+      },
+      result: lastOrchestrationResult,
+      stepStatuses: stepStatuses,
+      stepOutputs: stepOutputs,
+      toolCalls: toolCalls,
+      reasoning: streamingReasoning,
+    };
+
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    a.href = url;
+    a.download = `orchestra-run-${timestamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Event log ──
+  function addLog(msg, cls = '') {
+    const log = document.getElementById('eventLog');
+    const div = document.createElement('div');
+    div.className = `entry ${cls}`;
+    const time = new Date().toLocaleTimeString();
+    div.textContent = `[${time}] ${msg}`;
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  // ── Escape HTML ──
+  function esc(str) {
+    if (str == null) return '';
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── History ──
+  async function loadHistory() {
+    const list = document.getElementById('historyList');
+    list.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">Loading...</li>';
+
+    try {
+      const res = await fetch('/api/history');
+      if (!res.ok) {
+        list.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">Failed to load history</li>';
+        return;
+      }
+
+      const data = await res.json();
+      if (!data.runs || data.runs.length === 0) {
+        list.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">No runs yet</li>';
+        return;
+      }
+
+      list.innerHTML = '';
+      for (const run of data.runs) {
+        const li = document.createElement('li');
+        li.className = 'history-item';
+        li.onclick = () => loadHistoryRun(run.id);
+
+        const statusCls = (run.status || 'unknown').toLowerCase();
+        const timeStr = run.startedAt
+          ? new Date(run.startedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : 'unknown time';
+
+        li.innerHTML = `
+          <div class="history-name">${esc(run.orchestrationName || run.id)}</div>
+          <div class="history-meta">
+            <span class="history-status ${statusCls}">${esc(run.status || 'Unknown')}</span>
+            <span>${timeStr}</span>
+            <span>${run.stepCount || 0} steps</span>
+            <button class="history-delete" onclick="deleteHistoryRun('${esc(run.id)}', event)" title="Delete run">&times;</button>
+          </div>
+        `;
+        list.appendChild(li);
+      }
+    } catch (e) {
+      list.innerHTML = `<li style="padding:8px 10px;color:var(--red);font-size:12px">Error: ${esc(e.message)}</li>`;
+    }
+  }
+
+  async function loadHistoryRun(runId) {
+    try {
+      const res = await fetch(`/api/history/${encodeURIComponent(runId)}`);
+      if (!res.ok) {
+        addLog(`Failed to load run ${runId}`, 'error');
+        return;
+      }
+
+      const run = await res.json();
+
+      // Reset state
+      stepStatuses = {};
+      stepOutputs = {};
+      streamingContent = {};
+      streamingReasoning = {};
+      toolCalls = {};
+
+      // Build minimal orchestration data from run if needed
+      const stepNames = run.results ? Object.keys(run.results) : [];
+      orchestrationData = {
+        name: run.orchestrationName || 'Historical Run',
+        description: run.orchestrationDescription || '',
+        steps: stepNames.map(name => ({
+          name: name,
+          type: 'Prompt',
+          dependsOn: [],
+        })),
+        mcps: [],
+        parameters: [],
+      };
+
+      // Populate stepStatuses and stepOutputs from run results
+      for (const [name, result] of Object.entries(run.results || {})) {
+        const status = (result.status || 'unknown').toLowerCase();
+        stepStatuses[name] = {
+          status: status,
+        };
+        if (result.content) {
+          stepOutputs[name] = result.content;
+        }
+      }
+
+      // Render toolbar
+      renderToolbar(orchestrationData);
+
+      // Show results
+      const resultData = {
+        status: run.status || 'Unknown',
+        results: {},
+      };
+      for (const [name, result] of Object.entries(run.results || {})) {
+        resultData.results[name] = {
+          status: result.status || 'Unknown',
+          contentPreview: result.content || '',
+          error: result.error || null,
+        };
+      }
+      showResults(resultData);
+      updateSummaryBar();
+
+      // Render diagram with historical status
+      renderDiagram();
+
+      // Show relevant UI sections
+      document.getElementById('execSection').style.display = '';
+      document.getElementById('logSection').style.display = 'none';
+      document.getElementById('eventLog').innerHTML = '';
+      document.getElementById('executionTimer').textContent = '';
+
+      addLog(`Loaded historical run: ${run.orchestrationName || runId}`, 'success');
+      document.getElementById('logSection').style.display = '';
+    } catch (e) {
+      addLog(`Error loading run: ${e.message}`, 'error');
+    }
+  }
+
+  async function deleteHistoryRun(runId, event) {
+    event.stopPropagation();
+    if (!confirm('Delete this run?')) return;
+
+    try {
+      const res = await fetch(`/api/history/${encodeURIComponent(runId)}`, { method: 'DELETE' });
+      if (res.ok) {
+        loadHistory();
+      } else {
+        addLog(`Failed to delete run ${runId}`, 'error');
+      }
+    } catch (e) {
+      addLog(`Error deleting run: ${e.message}`, 'error');
+    }
+  }
+
+  // ── Keyboard shortcut ──
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeDetail();
+  });
+
+  // ── Auto-load history on page load ──
+  loadHistory();
+</script>
+</body>
+</html>
