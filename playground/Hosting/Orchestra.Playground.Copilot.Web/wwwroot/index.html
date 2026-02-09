@@ -121,6 +121,20 @@
   .btn-row { display: flex; gap: 8px; margin-top: 4px; }
 
   /* ── File browser ── */
+  .open-file-btn {
+    width: 100%;
+    padding: 8px 12px;
+    margin-bottom: 10px;
+    font-size: 13px;
+    cursor: pointer;
+    background: var(--blue);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    transition: opacity .15s;
+  }
+  .open-file-btn:hover { opacity: .85; }
+
   .browse-row {
     display: flex;
     gap: 6px;
@@ -132,6 +146,8 @@
 
   .file-list {
     list-style: none;
+    padding: 0;
+    margin: 0;
     max-height: 200px;
     overflow-y: auto;
     border: 1px solid var(--border);
@@ -140,6 +156,42 @@
   }
 
   .file-list:empty { display: none; }
+
+  .browse-breadcrumb {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 2px;
+    font-size: 11px;
+    padding: 6px 8px;
+    margin-bottom: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-height: 28px;
+  }
+  .browse-breadcrumb span.crumb {
+    color: var(--blue);
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 3px;
+  }
+  .browse-breadcrumb span.crumb:hover { background: var(--surface2); }
+  .browse-breadcrumb span.sep { color: var(--text-muted); }
+  .browse-breadcrumb span.current { color: var(--text); font-weight: 600; }
+
+  .dir-item {
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 1px solid var(--border);
+    color: var(--blue);
+  }
+  .dir-item:hover { background: var(--surface2); }
+  .dir-item .dir-icon { font-size: 11px; }
 
   .file-item {
     padding: 6px 10px;
@@ -683,6 +735,179 @@
   .history-status.failed { background: rgba(243,139,168,0.2); color: var(--red); }
   .history-status.running { background: rgba(137,180,250,0.2); color: var(--blue); }
   .history-status.unknown { background: rgba(166,173,200,0.2); color: var(--text-muted); }
+
+  /* ── Validation results ── */
+  .validation-results { margin-top: 8px; border-radius: 6px; overflow: hidden; font-size: 12px; }
+  .validation-header {
+    padding: 8px 10px; font-weight: 600; display: flex; align-items: center; gap: 6px;
+  }
+  .validation-header.valid { background: rgba(166,227,161,0.15); color: var(--green); }
+  .validation-header.invalid { background: rgba(243,139,168,0.15); color: var(--red); }
+  .validation-items { max-height: 200px; overflow-y: auto; }
+  .validation-item {
+    padding: 4px 10px 4px 24px; border-top: 1px solid var(--border);
+    display: flex; align-items: flex-start; gap: 6px; line-height: 1.4;
+  }
+  .validation-item.error { color: var(--red); }
+  .validation-item.warning { color: var(--yellow); }
+  .validation-item .val-field { font-weight: 600; min-width: 80px; font-size: 11px; opacity: 0.7; flex-shrink: 0; }
+  .validation-item .val-msg { flex: 1; }
+  #validateBtn { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  #validateBtn:hover { background: var(--overlay0); }
+
+  /* ── Editor styles ── */
+  .editor-toggle { display: inline-flex; gap: 0; margin-left: 12px; }
+  .editor-toggle button {
+    padding: 3px 12px; font-size: 12px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text-muted); cursor: pointer;
+  }
+  .editor-toggle button:first-child { border-radius: 4px 0 0 4px; }
+  .editor-toggle button:last-child { border-radius: 0 4px 4px 0; border-left: none; }
+  .editor-toggle button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  .editor-panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 16px; margin: 12px 0; max-height: calc(100vh - 280px); overflow-y: auto;
+  }
+  .editor-panel h3 { font-size: 14px; margin-bottom: 12px; color: var(--accent); }
+
+  .editor-field { margin-bottom: 10px; }
+  .editor-field label {
+    display: block; font-size: 11px; color: var(--text-muted);
+    margin-bottom: 3px; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .editor-field input, .editor-field select {
+    width: 100%; padding: 6px 8px; font-size: 13px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 4px; color: var(--text);
+  }
+  .editor-field textarea {
+    width: 100%; padding: 6px 8px; font-size: 12px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 4px; color: var(--text);
+    font-family: 'Cascadia Code', 'Fira Code', monospace; resize: vertical; min-height: 60px;
+  }
+
+  .step-list { list-style: none; margin: 0 0 12px 0; padding: 0; }
+  .step-list-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px;
+    margin-bottom: 4px; cursor: pointer; font-size: 13px; transition: background 0.15s;
+  }
+  .step-list-item:hover { background: var(--surface2); }
+  .step-list-item.active { background: var(--surface2); border-color: var(--accent); }
+  .step-list-item .step-name { flex: 1; }
+  .step-list-item .step-model { font-size: 11px; color: var(--text-muted); margin: 0 8px; }
+  .step-list-item .step-actions { display: flex; gap: 4px; }
+  .step-list-item .step-actions button {
+    padding: 2px 6px; font-size: 11px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-muted); border-radius: 3px; cursor: pointer;
+  }
+  .step-list-item .step-actions button:hover { background: var(--surface2); }
+  .step-list-item .step-actions button.delete:hover { color: var(--red); border-color: var(--red); }
+
+  .step-form { border: 1px solid var(--border); border-radius: 6px; padding: 12px; background: var(--bg); }
+  .step-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .step-form-grid .full-width { grid-column: 1 / -1; }
+
+  .deps-container { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .dep-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 8px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 12px; font-size: 11px; color: var(--text);
+  }
+  .dep-tag button {
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    font-size: 13px; line-height: 1; padding: 0;
+  }
+  .dep-tag button:hover { color: var(--red); }
+
+  .editor-btn-row { display: flex; gap: 8px; margin-top: 12px; }
+  .editor-btn-row button {
+    padding: 6px 16px; font-size: 13px; border-radius: 4px; cursor: pointer; border: none;
+  }
+  .editor-btn-row .btn-add { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .editor-btn-row .btn-add:hover { background: var(--border); }
+  .editor-btn-row .btn-save { background: var(--green); color: #fff; }
+  .editor-btn-row .btn-save:hover { opacity: 0.9; }
+  .editor-btn-row .btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .editor-save-status {
+    font-size: 12px; margin-left: 12px; line-height: 30px;
+  }
+  .editor-save-status.success { color: var(--green); }
+  .editor-save-status.error { color: var(--red); }
+
+  /* ── Comparison styles ── */
+  .compare-panel {
+    padding: 16px; display: none; overflow-y: auto;
+    max-height: calc(100vh - 120px);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    margin: 12px;
+  }
+  .compare-panel h3 { margin: 0 0 12px 0; font-size: 15px; color: var(--text); }
+  .compare-setup { margin-bottom: 16px; }
+  .compare-runs-list { list-style: none; padding: 0; margin: 0 0 12px 0; }
+  .compare-runs-list li {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 8px; position: relative;
+  }
+  .compare-run-header {
+    display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;
+  }
+  .compare-run-label { font-weight: 600; font-size: 13px; color: var(--blue); }
+  .compare-run-remove {
+    background: none; border: none; color: var(--red); cursor: pointer; font-size: 16px; padding: 0 4px;
+  }
+  .compare-run-overrides { display: flex; flex-direction: column; gap: 6px; }
+  .compare-override-row { display: flex; gap: 6px; align-items: center; font-size: 12px; }
+  .compare-override-row label { min-width: 100px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .compare-override-row select {
+    flex: 1; padding: 3px 6px; font-size: 12px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 3px;
+  }
+  .compare-btn-row { display: flex; gap: 8px; }
+  .compare-btn-row button {
+    padding: 6px 16px; font-size: 13px; border-radius: 4px; cursor: pointer; border: none;
+  }
+  .compare-btn-add { background: var(--surface2); color: var(--text); border: 1px solid var(--border) !important; }
+  .compare-btn-add:hover { background: var(--border); }
+  .compare-btn-run { background: var(--blue); color: #fff; }
+  .compare-btn-run:hover { opacity: 0.9; }
+  .compare-btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+  .compare-status { font-size: 12px; margin-left: 12px; line-height: 30px; color: var(--text-muted); }
+
+  /* Comparison results */
+  .compare-results { margin-top: 16px; }
+  .compare-summary-table {
+    width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 16px;
+  }
+  .compare-summary-table th, .compare-summary-table td {
+    padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border);
+  }
+  .compare-summary-table th { color: var(--text-muted); font-weight: 600; background: var(--surface2); }
+  .compare-summary-table td { color: var(--text); }
+  .compare-summary-table .best { color: var(--green); font-weight: 600; }
+  .compare-summary-table .worst { color: var(--red); }
+
+  .compare-step-results { margin-top: 16px; }
+  .compare-step-section { margin-bottom: 20px; }
+  .compare-step-section h4 {
+    font-size: 13px; color: var(--text-muted); margin: 0 0 8px 0;
+    border-bottom: 1px solid var(--border); padding-bottom: 4px;
+  }
+  .compare-outputs { display: flex; gap: 12px; flex-wrap: wrap; }
+  .compare-output-card {
+    flex: 1; min-width: 280px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; max-height: 400px; overflow-y: auto;
+  }
+  .compare-output-card-header {
+    font-size: 12px; font-weight: 600; color: var(--blue); margin-bottom: 6px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .compare-output-card-model { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+  .compare-output-card pre {
+    margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word;
+    color: var(--text); line-height: 1.5;
+  }
 </style>
 </head>
 <body>
@@ -694,11 +919,14 @@
   <!-- File browser -->
   <div class="section">
     <h2>Browse Files</h2>
-    <label for="browseDir">Directory</label>
+    <input type="file" id="nativeFilePicker" accept=".json" multiple style="display:none">
+    <button class="open-file-btn" onclick="document.getElementById('nativeFilePicker').click()">&#128196; Open File&hellip;</button>
+    <div id="uploadStatus"></div>
     <div class="browse-row">
       <input type="text" id="browseDir" placeholder="C:\path\to\orchestrations">
-      <button onclick="browseFiles()">Browse</button>
+      <button onclick="browseFiles()">&#128194; Browse</button>
     </div>
+    <div id="browseBreadcrumb" class="browse-breadcrumb" style="display:none"></div>
     <ul class="file-list" id="fileList"></ul>
   </div>
 
@@ -710,7 +938,9 @@
     <input type="text" id="mcpPath" placeholder="C:\path\to\mcp.json">
     <div class="btn-row">
       <button class="primary" id="loadBtn" onclick="loadOrchestration()">Load</button>
+      <button id="validateBtn" onclick="validateOrchestration()">Validate</button>
     </div>
+    <div id="validationResults" class="validation-results"></div>
   </div>
 
   <div class="section" id="mcpSection" style="display:none">
@@ -727,6 +957,7 @@
     <h2>Execute</h2>
     <div class="btn-row">
       <button class="primary" id="executeBtn" onclick="executeOrchestration()">Run Orchestration</button>
+      <button class="primary" id="compareBtn" onclick="openComparePanel()" style="background:var(--purple,#a371f7)">Compare</button>
       <button class="danger" id="cancelBtn" onclick="cancelExecution()" style="display:none">Cancel</button>
     </div>
   </div>
@@ -738,6 +969,7 @@
 
   <div class="section" id="historySection">
     <h2>Execution History <button onclick="loadHistory()" style="float:right;padding:2px 8px;font-size:11px;cursor:pointer">&#8635; Refresh</button></h2>
+    <div id="runsDirInfo" style="font-size:11px;color:var(--text-muted);padding:2px 10px 4px;word-break:break-all;display:none"></div>
     <ul class="history-list" id="historyList">
       <li style="padding:8px 10px;color:var(--text-muted);font-size:12px">Loading...</li>
     </ul>
@@ -749,6 +981,10 @@
   <div class="toolbar" id="toolbar" style="display:none">
     <div class="title" id="orchestrationTitle"></div>
     <div class="timer" id="executionTimer"></div>
+    <div class="editor-toggle">
+      <button class="active" id="viewModeBtn" onclick="setEditorMode('view')">View</button>
+      <button id="editModeBtn" onclick="setEditorMode('edit')">Edit</button>
+    </div>
     <div class="view-toggle">
       <button class="active" id="depViewBtn" onclick="setView('dependency')">Dependencies</button>
       <button id="layerViewBtn" onclick="setView('layers')">Layers</button>
@@ -760,6 +996,46 @@
       <div class="icon">&#9835;</div>
       <div>Load an orchestration to get started</div>
     </div>
+  </div>
+
+  <!-- ── Editor Panel ── -->
+  <div class="editor-panel" id="editorPanel" style="display:none">
+    <h3>Orchestration Editor</h3>
+    <div class="step-form-grid" style="margin-bottom:14px">
+      <div class="editor-field">
+        <label>Name</label>
+        <input type="text" id="editorOrchName" placeholder="orchestration-name" oninput="onEditorMetaChange()">
+      </div>
+      <div class="editor-field">
+        <label>Description</label>
+        <input type="text" id="editorOrchDesc" placeholder="Description of orchestration" oninput="onEditorMetaChange()">
+      </div>
+    </div>
+
+    <h3>Steps</h3>
+    <ul class="step-list" id="editorStepList"></ul>
+
+    <div id="editorStepForm"></div>
+
+    <div class="editor-btn-row">
+      <button class="btn-add" onclick="editorAddStep()">+ Add Step</button>
+      <button class="btn-save" id="editorSaveBtn" onclick="editorSave()">Save to Disk</button>
+      <span class="editor-save-status" id="editorSaveStatus"></span>
+    </div>
+  </div>
+
+  <!-- ── Comparison Panel ── -->
+  <div class="compare-panel" id="comparePanel">
+    <h3>Multi-Model Comparison</h3>
+    <div class="compare-setup" id="compareSetup">
+      <ul class="compare-runs-list" id="compareRunsList"></ul>
+      <div class="compare-btn-row">
+        <button class="compare-btn-add" onclick="compareAddRun()">+ Add Run</button>
+        <button class="compare-btn-run" id="compareRunBtn" onclick="runComparison()">Run Comparison</button>
+        <span class="compare-status" id="compareStatus"></span>
+      </div>
+    </div>
+    <div class="compare-results" id="compareResults"></div>
   </div>
 
   <!-- Streaming content area (live output during execution) -->
@@ -809,6 +1085,10 @@
   let timerInterval = null;
   let executionStartTime = null;
 
+  // ── Comparison state ──
+  let compareRuns = []; // [{label, modelOverrides: {stepName: modelId}}]
+  let compareResultsData = null;
+
   // ── Mermaid init ──
   mermaid.initialize({
     startOnLoad: false,
@@ -832,12 +1112,78 @@
     securityLevel: 'loose',
   });
 
-  // ── Browse files ──
-  async function browseFiles() {
-    const dir = document.getElementById('browseDir').value.trim();
-    if (!dir) return;
+  // ── Native file picker ──
+  document.getElementById('nativeFilePicker').addEventListener('change', async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
+    const statusEl = document.getElementById('uploadStatus');
+    statusEl.innerHTML = '<span style="color:var(--text-muted);font-size:12px">Uploading...</span>';
+
+    let uploaded = 0;
+    let errors = 0;
+
+    for (const file of files) {
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) {
+          errors++;
+          statusEl.innerHTML = `<span style="color:var(--red);font-size:12px">${esc(data.error || 'Upload failed')}</span>`;
+          continue;
+        }
+        uploaded++;
+        const name = data.name.toLowerCase();
+        if (name.includes('mcp')) {
+          document.getElementById('mcpPath').value = data.path;
+        } else {
+          document.getElementById('orchestrationPath').value = data.path;
+        }
+      } catch (err) {
+        errors++;
+        statusEl.innerHTML = `<span style="color:var(--red);font-size:12px">${esc(err.message)}</span>`;
+      }
+    }
+
+    if (errors === 0) {
+      statusEl.innerHTML = `<span style="color:var(--green);font-size:12px">${uploaded} file${uploaded > 1 ? 's' : ''} loaded</span>`;
+      setTimeout(() => { statusEl.innerHTML = ''; }, 3000);
+    }
+
+    // Reset so re-selecting the same file triggers change again
+    e.target.value = '';
+  });
+
+  // ── Browse files ──
+  async function browseFiles(dirOverride) {
+    let dir = dirOverride || document.getElementById('browseDir').value.trim();
     const list = document.getElementById('fileList');
+    const breadcrumb = document.getElementById('browseBreadcrumb');
+
+    // If no directory specified, open native OS folder picker
+    if (!dir) {
+      list.innerHTML = '<li class="file-item" style="color:var(--text-muted)">Opening folder dialog...</li>';
+      try {
+        const dlgRes = await fetch('/api/browse-dialog', { method: 'POST' });
+        const dlgData = await dlgRes.json();
+        if (!dlgRes.ok) {
+          list.innerHTML = `<li class="file-item" style="color:var(--red)">${esc(dlgData.error || 'Dialog failed')}</li>`;
+          return;
+        }
+        if (dlgData.cancelled || !dlgData.directory) {
+          list.innerHTML = '<li class="file-item" style="color:var(--text-muted)">No folder selected</li>';
+          return;
+        }
+        dir = dlgData.directory;
+      } catch (e) {
+        list.innerHTML = `<li class="file-item" style="color:var(--red)">${esc(e.message)}</li>`;
+        return;
+      }
+    }
+
+    document.getElementById('browseDir').value = dir;
     list.innerHTML = '<li class="file-item" style="color:var(--text-muted)">Loading...</li>';
 
     try {
@@ -848,27 +1194,86 @@
       });
       const data = await res.json();
       if (!res.ok) {
-        list.innerHTML = `<li class="file-item" style="color:var(--red)">${esc(data.error)}</li>`;
+        list.innerHTML = `<li class="file-item" style="color:var(--red)">${esc(data.error || 'Browse failed')}</li>`;
+        breadcrumb.style.display = 'none';
         return;
       }
+
+      // Render breadcrumb path
+      renderBreadcrumb(data.directory, data.parent);
 
       list.innerHTML = '';
-      if (data.files.length === 0) {
-        list.innerHTML = '<li class="file-item" style="color:var(--text-muted)">No .json files found</li>';
-        return;
+
+      // Parent directory link
+      if (data.parent) {
+        const li = document.createElement('li');
+        li.className = 'dir-item';
+        li.innerHTML = '<span class="dir-icon">&#8592;</span> ..';
+        li.addEventListener('click', () => browseFiles(data.parent));
+        list.appendChild(li);
       }
 
-      data.files.forEach(f => {
+      // Subdirectories
+      if (data.subdirectories) {
+        data.subdirectories.forEach(d => {
+          const li = document.createElement('li');
+          li.className = 'dir-item';
+          li.innerHTML = `<span class="dir-icon">&#128193;</span> ${esc(d.name)}`;
+          li.addEventListener('click', () => browseFiles(d.path));
+          list.appendChild(li);
+        });
+      }
+
+      // JSON files
+      if (data.files && data.files.length > 0) {
+        data.files.forEach(f => {
+          const li = document.createElement('li');
+          li.className = 'file-item';
+          const sizeKb = (f.size / 1024).toFixed(1);
+          li.innerHTML = `<span class="file-icon">&#128196;</span> ${esc(f.name)} <span class="file-size">${sizeKb}KB</span>`;
+          li.addEventListener('click', () => selectFile(f));
+          list.appendChild(li);
+        });
+      }
+
+      // Show empty state only if no subdirs AND no files (parent link doesn't count)
+      if ((!data.subdirectories || data.subdirectories.length === 0) && (!data.files || data.files.length === 0)) {
         const li = document.createElement('li');
         li.className = 'file-item';
-        const sizeKb = (f.size / 1024).toFixed(1);
-        li.innerHTML = `<span class="file-icon">&#128196;</span> ${esc(f.name)} <span class="file-size">${sizeKb}KB</span>`;
-        li.addEventListener('click', () => selectFile(f));
+        li.style.color = 'var(--text-muted)';
+        li.textContent = 'Empty directory';
         list.appendChild(li);
-      });
+      }
     } catch (e) {
-      list.innerHTML = `<li class="file-item" style="color:var(--red)">${esc(e.message)}</li>`;
+      list.innerHTML = `<li class="file-item" style="color:var(--red)">Request failed: ${esc(e.message)}</li>`;
+      breadcrumb.style.display = 'none';
     }
+  }
+
+  function renderBreadcrumb(fullPath, parentPath) {
+    const el = document.getElementById('browseBreadcrumb');
+    // Split path into segments (handle both / and \)
+    const sep = fullPath.includes('\\') ? '\\' : '/';
+    const parts = fullPath.split(/[/\\]/).filter(Boolean);
+
+    let html = '';
+    for (let i = 0; i < parts.length; i++) {
+      if (i > 0) html += '<span class="sep">&#9656;</span>';
+      // Build the path up to this segment
+      const partPath = parts.slice(0, i + 1).join(sep) + (i === 0 && fullPath.match(/^[A-Za-z]:/) ? sep : '');
+      // Add drive separator if needed (e.g., "C:" -> "C:\")
+      const reconstructed = fullPath.match(/^[/]/) ? '/' + parts.slice(0, i + 1).join(sep) : parts.slice(0, i + 1).join(sep);
+      // Ensure drive letter paths get trailing sep
+      const navPath = fullPath.startsWith('/') ? '/' + parts.slice(0, i + 1).join('/') : parts.slice(0, i + 1).join(sep);
+
+      if (i === parts.length - 1) {
+        html += `<span class="current">${esc(parts[i])}</span>`;
+      } else {
+        html += `<span class="crumb" onclick="browseFiles('${esc(navPath)}')">${esc(parts[i])}</span>`;
+      }
+    }
+    el.innerHTML = html;
+    el.style.display = 'flex';
   }
 
   function selectFile(file) {
@@ -1026,7 +1431,7 @@
       lines.push('graph LR');
       // Node definitions
       steps.forEach(s => {
-        const label = `${s.name}\\n${s.model || ''}`;
+        const label = s.model ? `${s.name}<br/>${s.model}` : s.name;
         lines.push(`  ${nodeId(s.name)}["${label}"]`);
       });
       // Edges from dependencies
@@ -1041,7 +1446,7 @@
         lines.push(`  subgraph Layer_${layer.layer}["Layer ${layer.layer}"]`);
         layer.steps.forEach(name => {
           const step = steps.find(s => s.name === name);
-          const label = `${name}\\n${step?.model || ''}`;
+          const label = step?.model ? `${name}<br/>${step.model}` : name;
           lines.push(`    ${nodeId(name)}["${label}"]`);
         });
         lines.push('  end');
@@ -1584,7 +1989,11 @@
     const entries = Object.entries(data.results);
 
     // Export row
+    const lastEntry = entries.length > 0 ? entries[entries.length - 1] : null;
     let html = '<div class="export-row">';
+    if (lastEntry) {
+      html += `<button onclick="copyStepOutput('${esc(lastEntry[0])}')">Copy Final Output</button>`;
+    }
     html += '<button onclick="copyMarkdown()">Copy Markdown</button>';
     html += '<button onclick="downloadJSON()">Download JSON</button>';
     html += '</div>';
@@ -1796,6 +2205,51 @@
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // ── Validation ──
+  async function validateOrchestration() {
+    const orchPath = document.getElementById('orchestrationPath').value.trim();
+    if (!orchPath) { alert('Enter an orchestration path first.'); return; }
+    const mcpPath = document.getElementById('mcpPath').value.trim() || null;
+    const container = document.getElementById('validationResults');
+    container.innerHTML = '<div class="validation-header" style="color:var(--text-muted)">Validating...</div>';
+
+    try {
+      const res = await fetch('/api/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orchestrationPath: orchPath, mcpPath: mcpPath })
+      });
+      const data = await res.json();
+
+      let html = '';
+      if (data.valid) {
+        html += '<div class="validation-header valid">&#10003; Valid orchestration</div>';
+      } else {
+        html += '<div class="validation-header invalid">&#10007; Invalid orchestration</div>';
+      }
+
+      const errors = data.errors || [];
+      const warnings = data.warnings || [];
+
+      if (errors.length > 0 || warnings.length > 0) {
+        html += '<div class="validation-items">';
+        for (const e of errors) {
+          html += `<div class="validation-item error"><span class="val-field">${esc(e.field)}</span><span class="val-msg">${esc(e.message)}</span></div>`;
+        }
+        for (const w of warnings) {
+          html += `<div class="validation-item warning"><span class="val-field">${esc(w.field)}</span><span class="val-msg">${esc(w.message)}</span></div>`;
+        }
+        html += '</div>';
+      } else if (data.valid) {
+        html += '<div class="validation-item" style="color:var(--green);padding:4px 10px">No errors or warnings found.</div>';
+      }
+
+      container.innerHTML = html;
+    } catch (err) {
+      container.innerHTML = `<div class="validation-header invalid">&#10007; Validation request failed: ${esc(String(err))}</div>`;
+    }
+  }
+
   // ── History ──
   async function loadHistory() {
     const list = document.getElementById('historyList');
@@ -1858,19 +2312,33 @@
       streamingReasoning = {};
       toolCalls = {};
 
-      // Build minimal orchestration data from run if needed
+      // Build orchestration data from enriched run history (or fallback for old runs)
       const stepNames = run.results ? Object.keys(run.results) : [];
-      orchestrationData = {
-        name: run.orchestrationName || 'Historical Run',
-        description: run.orchestrationDescription || '',
-        steps: stepNames.map(name => ({
-          name: name,
-          type: 'Prompt',
-          dependsOn: [],
-        })),
-        mcps: [],
-        parameters: [],
-      };
+      if (run.steps && run.steps.length > 0) {
+        // Enriched history — use full step metadata and layers
+        orchestrationData = {
+          name: run.orchestrationName || 'Historical Run',
+          description: run.orchestrationDescription || '',
+          steps: run.steps,
+          layers: run.layers || [],
+          mcps: [],
+          parameters: (run.steps || []).flatMap(s => s.parameters || []).filter((v, i, a) => a.indexOf(v) === i),
+        };
+      } else {
+        // Legacy history (pre-enrichment) — minimal fallback
+        orchestrationData = {
+          name: run.orchestrationName || 'Historical Run',
+          description: run.orchestrationDescription || '',
+          steps: stepNames.map(name => ({
+            name: name,
+            type: 'Prompt',
+            dependsOn: [],
+          })),
+          layers: [],
+          mcps: [],
+          parameters: [],
+        };
+      }
 
       // Populate stepStatuses and stepOutputs from run results
       for (const [name, result] of Object.entries(run.results || {})) {
@@ -1933,6 +2401,595 @@
     }
   }
 
+  // ── Editor state & functions ──
+  let editorMode = 'view';
+  let editorSteps = []; // working copy of steps for editing
+  let editorSelectedIndex = -1;
+  let availableModels = [];
+
+  function setEditorMode(mode) {
+    editorMode = mode;
+    document.getElementById('viewModeBtn').classList.toggle('active', mode === 'view');
+    document.getElementById('editModeBtn').classList.toggle('active', mode === 'edit');
+    document.getElementById('editorPanel').style.display = mode === 'edit' ? '' : 'none';
+
+    if (mode === 'edit' && orchestrationData) {
+      // Deep clone steps into editor working copy
+      editorSteps = JSON.parse(JSON.stringify(orchestrationData.steps || []));
+      document.getElementById('editorOrchName').value = orchestrationData.name || '';
+      document.getElementById('editorOrchDesc').value = orchestrationData.description || '';
+      editorSelectedIndex = editorSteps.length > 0 ? 0 : -1;
+      loadModelList();
+      renderEditorStepList();
+      renderEditorStepForm();
+    }
+  }
+
+  async function loadModelList() {
+    if (availableModels.length > 0) return;
+    try {
+      const res = await fetch('/api/models');
+      if (res.ok) {
+        const data = await res.json();
+        availableModels = data.models || [];
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  function renderEditorStepList() {
+    const list = document.getElementById('editorStepList');
+    list.innerHTML = '';
+    editorSteps.forEach((step, i) => {
+      const li = document.createElement('li');
+      li.className = 'step-list-item' + (i === editorSelectedIndex ? ' active' : '');
+      li.innerHTML = `
+        <span class="step-name">${esc(step.name || '(unnamed)')}</span>
+        <span class="step-model">${esc(step.model || '')}</span>
+        <span class="step-actions">
+          <button onclick="editorMoveStep(${i},-1)" title="Move up">&uarr;</button>
+          <button onclick="editorMoveStep(${i},1)" title="Move down">&darr;</button>
+          <button class="delete" onclick="editorDeleteStep(${i})" title="Delete">&times;</button>
+        </span>`;
+      li.addEventListener('click', (e) => {
+        if (e.target.tagName === 'BUTTON') return;
+        editorSelectedIndex = i;
+        renderEditorStepList();
+        renderEditorStepForm();
+      });
+      list.appendChild(li);
+    });
+  }
+
+  function renderEditorStepForm() {
+    const container = document.getElementById('editorStepForm');
+    if (editorSelectedIndex < 0 || editorSelectedIndex >= editorSteps.length) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:12px;padding:8px">Select or add a step to edit</div>';
+      return;
+    }
+    const step = editorSteps[editorSelectedIndex];
+    const otherSteps = editorSteps.filter((_, i) => i !== editorSelectedIndex);
+    const deps = step.dependsOn || [];
+
+    const modelOptions = availableModels.map(m =>
+      `<option value="${esc(m.id)}" ${m.id === step.model ? 'selected' : ''}>${esc(m.name)} (${esc(m.provider)})</option>`
+    ).join('');
+
+    const depTags = deps.map((d, di) =>
+      `<span class="dep-tag">${esc(d)} <button onclick="editorRemoveDep(${di})">&times;</button></span>`
+    ).join('');
+
+    const availDeps = otherSteps.filter(s => !deps.includes(s.name)).map(s =>
+      `<option value="${esc(s.name)}">${esc(s.name)}</option>`
+    ).join('');
+
+    container.innerHTML = `
+      <div class="step-form">
+        <div class="step-form-grid">
+          <div class="editor-field">
+            <label>Step Name</label>
+            <input type="text" value="${esc(step.name || '')}" oninput="editorUpdateField('name', this.value)">
+          </div>
+          <div class="editor-field">
+            <label>Model</label>
+            <select onchange="editorUpdateField('model', this.value)">
+              <option value="">-- select model --</option>
+              ${modelOptions}
+              ${step.model && !availableModels.find(m => m.id === step.model)
+                ? `<option value="${esc(step.model)}" selected>${esc(step.model)} (custom)</option>` : ''}
+            </select>
+          </div>
+          <div class="editor-field full-width">
+            <label>System Prompt</label>
+            <textarea rows="3" oninput="editorUpdateField('systemPrompt', this.value)">${esc(step.systemPrompt || '')}</textarea>
+          </div>
+          <div class="editor-field full-width">
+            <label>User Prompt</label>
+            <textarea rows="3" oninput="editorUpdateField('userPrompt', this.value)">${esc(step.userPrompt || '')}</textarea>
+          </div>
+          <div class="editor-field full-width">
+            <label>Input Handler Prompt (optional)</label>
+            <textarea rows="2" oninput="editorUpdateField('inputHandlerPrompt', this.value)">${esc(step.inputHandlerPrompt || '')}</textarea>
+          </div>
+          <div class="editor-field full-width">
+            <label>Output Handler Prompt (optional)</label>
+            <textarea rows="2" oninput="editorUpdateField('outputHandlerPrompt', this.value)">${esc(step.outputHandlerPrompt || '')}</textarea>
+          </div>
+          <div class="editor-field">
+            <label>Reasoning Level</label>
+            <select onchange="editorUpdateField('reasoningLevel', this.value || null)">
+              <option value="" ${!step.reasoningLevel ? 'selected' : ''}>None</option>
+              <option value="Low" ${step.reasoningLevel === 'Low' ? 'selected' : ''}>Low</option>
+              <option value="Medium" ${step.reasoningLevel === 'Medium' ? 'selected' : ''}>Medium</option>
+              <option value="High" ${step.reasoningLevel === 'High' ? 'selected' : ''}>High</option>
+            </select>
+          </div>
+          <div class="editor-field">
+            <label>System Prompt Mode</label>
+            <select onchange="editorUpdateField('systemPromptMode', this.value || null)">
+              <option value="" ${!step.systemPromptMode ? 'selected' : ''}>Default</option>
+              <option value="Append" ${step.systemPromptMode === 'Append' ? 'selected' : ''}>Append</option>
+              <option value="Replace" ${step.systemPromptMode === 'Replace' ? 'selected' : ''}>Replace</option>
+            </select>
+          </div>
+          <div class="editor-field full-width">
+            <label>Depends On</label>
+            <div class="deps-container">${depTags}</div>
+            ${availDeps ? `<select style="margin-top:6px;width:auto;padding:3px 8px;font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text)" onchange="editorAddDep(this.value);this.value=''">
+              <option value="">+ add dependency...</option>
+              ${availDeps}
+            </select>` : ''}
+          </div>
+          <div class="editor-field full-width">
+            <label>MCPs (comma-separated names)</label>
+            <input type="text" value="${(step.mcps || []).map(m => typeof m === 'string' ? m : m.name).join(', ')}" oninput="editorUpdateMcps(this.value)">
+          </div>
+        </div>
+      </div>`;
+  }
+
+  function editorUpdateField(field, value) {
+    if (editorSelectedIndex < 0) return;
+    editorSteps[editorSelectedIndex][field] = value;
+    // Update step list to show name/model changes
+    if (field === 'name' || field === 'model') renderEditorStepList();
+    editorSyncToOrchestration();
+  }
+
+  function editorUpdateMcps(value) {
+    if (editorSelectedIndex < 0) return;
+    const names = value.split(',').map(s => s.trim()).filter(Boolean);
+    editorSteps[editorSelectedIndex].mcps = names.map(n => ({ name: n, type: 'Local' }));
+    editorSyncToOrchestration();
+  }
+
+  function editorAddDep(name) {
+    if (editorSelectedIndex < 0 || !name) return;
+    const step = editorSteps[editorSelectedIndex];
+    if (!step.dependsOn) step.dependsOn = [];
+    if (!step.dependsOn.includes(name)) {
+      step.dependsOn.push(name);
+      renderEditorStepForm();
+      editorSyncToOrchestration();
+    }
+  }
+
+  function editorRemoveDep(depIndex) {
+    if (editorSelectedIndex < 0) return;
+    editorSteps[editorSelectedIndex].dependsOn.splice(depIndex, 1);
+    renderEditorStepForm();
+    editorSyncToOrchestration();
+  }
+
+  function editorAddStep() {
+    const newStep = {
+      name: `step-${editorSteps.length + 1}`,
+      type: 'Prompt',
+      dependsOn: [],
+      model: '',
+      systemPrompt: '',
+      userPrompt: '',
+      inputHandlerPrompt: null,
+      outputHandlerPrompt: null,
+      reasoningLevel: null,
+      systemPromptMode: null,
+      mcps: [],
+      parameters: [],
+    };
+    editorSteps.push(newStep);
+    editorSelectedIndex = editorSteps.length - 1;
+    renderEditorStepList();
+    renderEditorStepForm();
+    editorSyncToOrchestration();
+  }
+
+  function editorDeleteStep(index) {
+    const name = editorSteps[index].name;
+    if (!confirm(`Delete step "${name}"?`)) return;
+    editorSteps.splice(index, 1);
+    // Remove from dependsOn of other steps
+    editorSteps.forEach(s => {
+      if (s.dependsOn) s.dependsOn = s.dependsOn.filter(d => d !== name);
+    });
+    if (editorSelectedIndex >= editorSteps.length) editorSelectedIndex = editorSteps.length - 1;
+    renderEditorStepList();
+    renderEditorStepForm();
+    editorSyncToOrchestration();
+  }
+
+  function editorMoveStep(index, direction) {
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= editorSteps.length) return;
+    [editorSteps[index], editorSteps[newIndex]] = [editorSteps[newIndex], editorSteps[index]];
+    if (editorSelectedIndex === index) editorSelectedIndex = newIndex;
+    else if (editorSelectedIndex === newIndex) editorSelectedIndex = index;
+    renderEditorStepList();
+    renderEditorStepForm();
+  }
+
+  function onEditorMetaChange() {
+    if (!orchestrationData) return;
+    orchestrationData.name = document.getElementById('editorOrchName').value;
+    orchestrationData.description = document.getElementById('editorOrchDesc').value;
+    renderToolbar(orchestrationData);
+  }
+
+  function editorSyncToOrchestration() {
+    // Sync editor steps back to orchestrationData and re-render diagram
+    if (!orchestrationData) return;
+    orchestrationData.steps = JSON.parse(JSON.stringify(editorSteps));
+    // Re-compute simple layers (topological ordering)
+    orchestrationData.layers = computeEditorLayers(editorSteps);
+    // Reset step statuses to pending for all steps
+    stepStatuses = {};
+    editorSteps.forEach(s => { stepStatuses[s.name] = { status: 'pending' }; });
+    renderDiagram();
+  }
+
+  function computeEditorLayers(steps) {
+    // Simple topological layer assignment using Kahn's algorithm
+    const inDeg = {};
+    const adj = {};
+    const nameSet = new Set(steps.map(s => s.name));
+    steps.forEach(s => { inDeg[s.name] = 0; adj[s.name] = []; });
+    steps.forEach(s => {
+      (s.dependsOn || []).forEach(d => {
+        if (nameSet.has(d)) {
+          adj[d].push(s.name);
+          inDeg[s.name]++;
+        }
+      });
+    });
+    const layers = [];
+    let queue = Object.keys(inDeg).filter(k => inDeg[k] === 0);
+    while (queue.length > 0) {
+      layers.push({ layer: layers.length + 1, steps: [...queue] });
+      const next = [];
+      queue.forEach(n => {
+        adj[n].forEach(m => {
+          inDeg[m]--;
+          if (inDeg[m] === 0) next.push(m);
+        });
+      });
+      queue = next;
+    }
+    return layers;
+  }
+
+  async function editorSave() {
+    const savePath = document.getElementById('orchestrationPath').value.trim();
+    if (!savePath) {
+      alert('Set orchestration path first (in the Load section).');
+      return;
+    }
+    const saveBtn = document.getElementById('editorSaveBtn');
+    const statusEl = document.getElementById('editorSaveStatus');
+    saveBtn.disabled = true;
+    statusEl.textContent = 'Saving...';
+    statusEl.className = 'editor-save-status';
+
+    // Build orchestration JSON matching the file format
+    const orch = {
+      name: document.getElementById('editorOrchName').value.trim(),
+      description: document.getElementById('editorOrchDesc').value.trim(),
+      steps: editorSteps.map(s => {
+        const step = {
+          name: s.name,
+          type: s.type || 'Prompt',
+          dependsOn: s.dependsOn || [],
+          systemPrompt: s.systemPrompt || '',
+          userPrompt: s.userPrompt || '',
+          model: s.model || '',
+        };
+        if (s.inputHandlerPrompt) step.inputHandlerPrompt = s.inputHandlerPrompt;
+        if (s.outputHandlerPrompt) step.outputHandlerPrompt = s.outputHandlerPrompt;
+        if (s.reasoningLevel) step.reasoningLevel = s.reasoningLevel;
+        if (s.systemPromptMode) step.systemPromptMode = s.systemPromptMode;
+        if (s.mcps && s.mcps.length > 0) {
+          step.mcps = s.mcps.map(m => typeof m === 'string' ? m : m.name);
+        }
+        if (s.parameters && s.parameters.length > 0) step.parameters = s.parameters;
+        return step;
+      }),
+    };
+
+    try {
+      const res = await fetch('/api/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: savePath, orchestration: orch }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        statusEl.textContent = 'Saved!';
+        statusEl.className = 'editor-save-status success';
+      } else {
+        statusEl.textContent = data.error || 'Save failed';
+        statusEl.className = 'editor-save-status error';
+      }
+    } catch (e) {
+      statusEl.textContent = e.message;
+      statusEl.className = 'editor-save-status error';
+    } finally {
+      saveBtn.disabled = false;
+      setTimeout(() => { statusEl.textContent = ''; }, 4000);
+    }
+  }
+
+  // ── Comparison ──
+
+  function openComparePanel() {
+    if (!orchestrationData) {
+      alert('Load an orchestration first.');
+      return;
+    }
+    // Hide editor panel, show compare panel
+    document.getElementById('editorPanel').style.display = 'none';
+    const panel = document.getElementById('comparePanel');
+    const isVisible = panel.style.display === 'block';
+    if (isVisible) {
+      panel.style.display = 'none';
+      return;
+    }
+    panel.style.display = 'block';
+
+    // Ensure model list is loaded
+    loadModelList();
+
+    // Initialize with 2 default runs if empty
+    if (compareRuns.length === 0) {
+      const defaultOverrides = {};
+      orchestrationData.steps.forEach(s => {
+        if (s.model) defaultOverrides[s.name] = s.model;
+      });
+      compareRuns = [
+        { label: 'Run A', modelOverrides: { ...defaultOverrides } },
+        { label: 'Run B', modelOverrides: { ...defaultOverrides } },
+      ];
+    }
+    renderCompareSetup();
+  }
+
+  function compareAddRun() {
+    const defaultOverrides = {};
+    orchestrationData.steps.forEach(s => {
+      if (s.model) defaultOverrides[s.name] = s.model;
+    });
+    compareRuns.push({
+      label: `Run ${String.fromCharCode(65 + compareRuns.length)}`,
+      modelOverrides: { ...defaultOverrides },
+    });
+    renderCompareSetup();
+  }
+
+  function compareRemoveRun(index) {
+    if (compareRuns.length <= 2) {
+      alert('At least 2 runs are required for comparison.');
+      return;
+    }
+    compareRuns.splice(index, 1);
+    renderCompareSetup();
+  }
+
+  function compareUpdateLabel(index, value) {
+    compareRuns[index].label = value;
+  }
+
+  function compareUpdateModel(index, stepName, modelId) {
+    compareRuns[index].modelOverrides[stepName] = modelId;
+  }
+
+  function renderCompareSetup() {
+    const list = document.getElementById('compareRunsList');
+    list.innerHTML = '';
+    compareRuns.forEach((run, i) => {
+      const li = document.createElement('li');
+
+      // Header: label input + remove button
+      let headerHtml = `<div class="compare-run-header">
+        <input class="compare-run-label" value="${esc(run.label)}"
+               oninput="compareUpdateLabel(${i}, this.value)"
+               style="border:none;background:transparent;outline:none;font-size:13px;font-weight:600;color:var(--blue);width:120px;">
+        <button class="compare-run-remove" onclick="compareRemoveRun(${i})" title="Remove run">&times;</button>
+      </div>`;
+
+      // Per-step model override dropdowns
+      let overridesHtml = '<div class="compare-run-overrides">';
+      orchestrationData.steps.forEach(step => {
+        const currentModel = run.modelOverrides[step.name] || step.model || '';
+        let options = `<option value="${esc(step.model || '')}">${esc(step.model || '(default)')}</option>`;
+        availableModels.forEach(m => {
+          if (m.id !== step.model) {
+            const selected = m.id === currentModel ? ' selected' : '';
+            options += `<option value="${esc(m.id)}"${selected}>${esc(m.name || m.id)}</option>`;
+          } else if (m.id === currentModel) {
+            // Re-select the default if it matches
+            options = options.replace(`value="${esc(m.id)}"`, `value="${esc(m.id)}" selected`);
+          }
+        });
+        overridesHtml += `<div class="compare-override-row">
+          <label title="${esc(step.name)}">${esc(step.name)}</label>
+          <select onchange="compareUpdateModel(${i}, '${esc(step.name)}', this.value)">
+            ${options}
+          </select>
+        </div>`;
+      });
+      overridesHtml += '</div>';
+
+      li.innerHTML = headerHtml + overridesHtml;
+      list.appendChild(li);
+    });
+  }
+
+  async function runComparison() {
+    if (!orchestrationData || compareRuns.length < 2) return;
+
+    const orchPath = document.getElementById('orchestrationPath').value.trim();
+    const mcpPath = document.getElementById('mcpPath').value.trim() || null;
+
+    // Collect parameters
+    const params = {};
+    document.querySelectorAll('#paramInputs input').forEach(input => {
+      const key = input.dataset.param;
+      const val = input.value.trim();
+      if (key && val) params[key] = val;
+    });
+
+    const btn = document.getElementById('compareRunBtn');
+    const status = document.getElementById('compareStatus');
+    btn.disabled = true;
+    status.textContent = 'Running comparison... This may take a while.';
+    document.getElementById('compareResults').innerHTML = '';
+
+    try {
+      const res = await fetch('/api/compare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orchestrationPath: orchPath,
+          mcpPath: mcpPath,
+          parameters: Object.keys(params).length > 0 ? params : null,
+          runs: compareRuns.map(r => ({
+            label: r.label,
+            modelOverrides: r.modelOverrides,
+          })),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        status.textContent = data.error || 'Comparison failed.';
+        return;
+      }
+      compareResultsData = data;
+      status.textContent = `Done in ${data.totalDurationSeconds}s (${data.runCount} runs)`;
+      renderCompareResults(data);
+    } catch (e) {
+      status.textContent = 'Error: ' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function renderCompareResults(data) {
+    const container = document.getElementById('compareResults');
+    if (!data || !data.runs || data.runs.length === 0) {
+      container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;">No results.</div>';
+      return;
+    }
+
+    const runs = data.runs;
+
+    // Find best/worst for highlighting
+    const durations = runs.map(r => r.durationSeconds);
+    const costs = runs.map(r => r.totalCost);
+    const tokens = runs.map(r => r.totalInputTokens + r.totalOutputTokens);
+    const minDuration = Math.min(...durations);
+    const maxDuration = Math.max(...durations);
+    const minCost = Math.min(...costs);
+    const maxCost = Math.max(...costs);
+    const minTokens = Math.min(...tokens);
+    const maxTokens = Math.max(...tokens);
+
+    function cls(val, min, max) {
+      if (min === max) return '';
+      if (val === min) return 'best';
+      if (val === max) return 'worst';
+      return '';
+    }
+
+    // Summary table
+    let tableHtml = `<table class="compare-summary-table">
+      <thead><tr>
+        <th>Run</th><th>Status</th><th>Duration</th>
+        <th>Tokens In</th><th>Tokens Out</th><th>Total Tokens</th>
+        <th>Cost</th>
+      </tr></thead><tbody>`;
+
+    runs.forEach(r => {
+      const totalTok = r.totalInputTokens + r.totalOutputTokens;
+      tableHtml += `<tr>
+        <td><strong>${esc(r.label)}</strong></td>
+        <td>${r.status === 'Succeeded' ? '<span style="color:var(--green)">Succeeded</span>' : '<span style="color:var(--red)">' + esc(r.error || r.status) + '</span>'}</td>
+        <td class="${cls(r.durationSeconds, minDuration, maxDuration)}">${r.durationSeconds}s</td>
+        <td>${Math.round(r.totalInputTokens).toLocaleString()}</td>
+        <td>${Math.round(r.totalOutputTokens).toLocaleString()}</td>
+        <td class="${cls(totalTok, minTokens, maxTokens)}">${Math.round(totalTok).toLocaleString()}</td>
+        <td class="${cls(r.totalCost, minCost, maxCost)}">$${r.totalCost.toFixed(6)}</td>
+      </tr>`;
+    });
+    tableHtml += '</tbody></table>';
+
+    // Per-step side-by-side results
+    let stepHtml = '<div class="compare-step-results">';
+
+    // Gather all step names from first successful run
+    const stepNames = [];
+    for (const r of runs) {
+      if (r.stepResults && Object.keys(r.stepResults).length > 0) {
+        Object.keys(r.stepResults).forEach(sn => {
+          if (!stepNames.includes(sn)) stepNames.push(sn);
+        });
+        break;
+      }
+    }
+    // Fallback: gather from all runs
+    if (stepNames.length === 0) {
+      runs.forEach(r => {
+        if (r.stepResults) {
+          Object.keys(r.stepResults).forEach(sn => {
+            if (!stepNames.includes(sn)) stepNames.push(sn);
+          });
+        }
+      });
+    }
+
+    stepNames.forEach(stepName => {
+      stepHtml += `<div class="compare-step-section">
+        <h4>${esc(stepName)}</h4>
+        <div class="compare-outputs">`;
+
+      runs.forEach(r => {
+        const sr = r.stepResults ? r.stepResults[stepName] : null;
+        const content = sr ? (sr.content || sr.error || '(no output)') : '(not executed)';
+        // Find model used for this step from perStepUsage
+        const usage = (r.perStepUsage || []).find(u => u.stepName === stepName);
+        const model = usage ? usage.model : (r.modelOverrides ? r.modelOverrides[stepName] : '');
+
+        stepHtml += `<div class="compare-output-card">
+          <div class="compare-output-card-header">
+            <span>${esc(r.label)}</span>
+            <span class="compare-output-card-model">${esc(model || '')}</span>
+          </div>
+          <pre>${esc(content)}</pre>
+        </div>`;
+      });
+
+      stepHtml += '</div></div>';
+    });
+    stepHtml += '</div>';
+
+    container.innerHTML = tableHtml + stepHtml;
+  }
+
   // ── Keyboard shortcut ──
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeDetail();
@@ -1940,6 +2997,15 @@
 
   // ── Auto-load history on page load ──
   loadHistory();
+
+  // ── Load runs directory path ──
+  fetch('/api/runs-dir').then(r => r.ok ? r.json() : null).then(data => {
+    if (data && data.path) {
+      const el = document.getElementById('runsDirInfo');
+      el.textContent = 'Saved to: ' + data.path;
+      el.style.display = 'block';
+    }
+  }).catch(() => {});
 </script>
 </body>
 </html>
