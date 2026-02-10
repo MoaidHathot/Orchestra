@@ -291,10 +291,11 @@
     overflow: auto;
     padding: 24px;
     display: flex;
-    justify-content: center;
-    align-items: flex-start;
+    flex-direction: column;
+    align-items: center;
   }
 
+  .diagram-svg-wrapper { width: 100%; display: flex; justify-content: center; }
   .diagram-container svg { max-width: 100%; }
 
   /* Detail panel (appears on click) */
@@ -908,6 +909,186 @@
     margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word;
     color: var(--text); line-height: 1.5;
   }
+
+  /* ── Folder Mode ── */
+  .mode-toggle {
+    display: flex; border-bottom: 1px solid var(--border); background: var(--surface2);
+  }
+  .mode-toggle button {
+    flex: 1; padding: 8px; font-size: 12px; font-weight: 600; cursor: pointer;
+    background: transparent; color: var(--text-muted); border: none; border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .mode-toggle button.active { color: var(--blue); border-bottom-color: var(--blue); background: var(--surface); }
+  .mode-toggle button:hover:not(.active) { color: var(--text); }
+
+  .folder-section { padding: 12px 16px; }
+  .folder-input-row {
+    display: flex; gap: 6px; margin-bottom: 8px;
+  }
+  .folder-input-row input {
+    flex: 1; font-size: 12px; padding: 6px 8px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+  }
+  .folder-input-row button {
+    padding: 6px 10px; font-size: 12px; cursor: pointer; background: var(--blue); color: #fff;
+    border: none; border-radius: 4px; white-space: nowrap;
+  }
+
+  .folder-controls {
+    display: flex; gap: 6px; align-items: center; margin-bottom: 10px; flex-wrap: wrap;
+  }
+  .folder-controls button {
+    padding: 5px 10px; font-size: 11px; cursor: pointer; border: none; border-radius: 4px;
+  }
+  .folder-controls .btn-run-all { background: var(--green); color: #fff; }
+  .folder-controls .btn-run-all:disabled { opacity: 0.5; cursor: not-allowed; }
+  .folder-controls .btn-cancel-all { background: var(--red); color: #fff; }
+  .folder-controls .btn-rescan { background: var(--surface2); color: var(--text); border: 1px solid var(--border) !important; }
+
+  .folder-auto-discover {
+    display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); margin-bottom: 10px;
+  }
+  .folder-auto-discover input[type="checkbox"] { accent-color: var(--blue); }
+
+  .folder-file-list { list-style: none; max-height: 320px; overflow-y: auto; }
+  .folder-file-item {
+    padding: 6px 10px; border-bottom: 1px solid var(--border); display: flex;
+    align-items: center; gap: 8px; font-size: 12px; cursor: pointer; transition: background 0.1s;
+  }
+  .folder-file-item:hover { background: var(--surface2); }
+  .folder-file-item.active { background: var(--surface2); border-left: 2px solid var(--blue); }
+  .folder-file-item.invalid { opacity: 0.5; cursor: not-allowed; }
+  .folder-file-item .file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .folder-file-item .file-meta { font-size: 10px; color: var(--text-muted); }
+  .folder-file-item.added { border-left: 2px solid var(--green); }
+  .folder-file-item.added.active { border-left: 2px solid var(--blue); }
+  .folder-file-item.previewing { border-left: 2px solid var(--purple); background: rgba(139,92,246,0.06); }
+  .folder-file-item.previewing.added { border-left: 2px solid var(--purple); }
+
+  .folder-item-actions {
+    display: flex; gap: 2px; flex-shrink: 0; margin-left: auto;
+  }
+  .folder-item-btn {
+    width: 24px; height: 24px; border: none; border-radius: 4px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; line-height: 1; transition: all 0.12s;
+    background: transparent; color: var(--text-muted);
+  }
+  .folder-item-btn:hover { background: var(--surface2); color: var(--text); }
+  .folder-item-btn.add-btn:hover { color: var(--blue); }
+  .folder-item-btn.run-btn:hover { color: var(--green); }
+  .folder-item-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+  .folder-item-btn:disabled:hover { background: transparent; color: var(--text-muted); }
+
+  .folder-status-badge {
+    display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.3px;
+  }
+  .folder-status-badge.not-started { background: var(--surface2); color: var(--text-muted); }
+  .folder-status-badge.running { background: #1a3a5c; color: var(--blue); }
+  .folder-status-badge.succeeded { background: #1a3a1a; color: var(--green); }
+  .folder-status-badge.failed { background: #3a1a1a; color: var(--red); }
+  .folder-status-badge.cancelled { background: #3a2a1a; color: var(--orange); }
+
+  /* ── Tab Bar (folder mode) ── */
+  .tab-bar {
+    display: flex; background: var(--surface); border-bottom: 1px solid var(--border);
+    overflow-x: auto; min-height: 36px; flex-shrink: 0;
+  }
+  .tab-bar::-webkit-scrollbar { height: 3px; }
+  .tab-bar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .tab-item {
+    display: flex; align-items: center; gap: 6px; padding: 6px 14px; font-size: 12px;
+    color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent;
+    white-space: nowrap; transition: all 0.15s; flex-shrink: 0;
+  }
+  .tab-item:hover { color: var(--text); background: var(--surface2); }
+  .tab-item.active { color: var(--text); border-bottom-color: var(--blue); background: var(--surface2); }
+  .tab-item .tab-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  }
+  .tab-dot.not-started { background: var(--text-muted); }
+  .tab-dot.running { background: var(--blue); animation: pulse 1.2s infinite; }
+  .tab-dot.succeeded { background: var(--green); }
+  .tab-dot.failed { background: var(--red); }
+  .tab-dot.cancelled { background: var(--orange); }
+  .tab-close {
+    font-size: 14px; color: var(--text-muted); cursor: pointer; margin-left: 4px;
+    opacity: 0; transition: opacity 0.15s;
+  }
+  .tab-item:hover .tab-close { opacity: 1; }
+  .tab-close:hover { color: var(--red); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .folder-summary-bar {
+    display: flex; gap: 12px; align-items: center; padding: 4px 10px;
+    font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border);
+    background: var(--surface2);
+  }
+  .folder-summary-bar .count { font-weight: 600; }
+  .folder-summary-bar .count.green { color: var(--green); }
+  .folder-summary-bar .count.red { color: var(--red); }
+  .folder-summary-bar .count.blue { color: var(--blue); }
+
+  /* ── Tab cancel button ── */
+  .tab-cancel {
+    font-size: 14px; color: var(--text-muted); cursor: pointer; margin-left: 4px;
+    transition: color 0.15s;
+  }
+  .tab-cancel:hover { color: var(--red); }
+
+  /* ── Folder tab run overlay (for not-started tabs) ── */
+  .folder-tab-run-overlay {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px; padding: 40px 24px; text-align: center;
+  }
+  .folder-tab-run-overlay .run-desc {
+    font-size: 13px; color: var(--text-muted); max-width: 400px;
+  }
+  .folder-tab-run-overlay .run-btn-big {
+    padding: 10px 28px; font-size: 14px; font-weight: 600; cursor: pointer;
+    background: var(--green); color: #fff; border: none; border-radius: 6px;
+    transition: opacity 0.15s;
+  }
+  .folder-tab-run-overlay .run-btn-big:hover { opacity: 0.85; }
+  .folder-tab-run-overlay .run-btn-big:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── Folder param inputs ── */
+  .folder-param-inputs {
+    display: flex; flex-direction: column; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    padding: 16px; width: 100%; max-width: 420px;
+  }
+  .folder-param-inputs h4 {
+    margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--text);
+  }
+  .folder-param-row {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .folder-param-row label {
+    font-size: 12px; font-weight: 600; color: var(--text-muted); min-width: 90px;
+  }
+  .folder-param-row input {
+    flex: 1; font-size: 12px; padding: 6px 8px; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 4px;
+  }
+
+  /* ── Preview action buttons in main area ── */
+  .folder-preview-actions {
+    display: flex; gap: 8px; justify-content: center; margin-top: 12px;
+  }
+  .folder-preview-actions button {
+    padding: 6px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+    border: none; border-radius: 4px; transition: opacity 0.15s;
+  }
+  .folder-preview-actions .preview-add-btn { background: var(--blue); color: #fff; }
+  .folder-preview-actions .preview-run-btn { background: var(--green); color: #fff; }
+  .folder-preview-actions button:hover { opacity: 0.85; }
 </style>
 </head>
 <body>
@@ -915,6 +1096,15 @@
 <!-- ── Sidebar ── -->
 <div class="sidebar">
   <h1><span>&#9835;</span> Orchestra</h1>
+
+  <!-- Mode toggle -->
+  <div class="mode-toggle">
+    <button id="modeSingleBtn" onclick="setAppMode('single')">Single File</button>
+    <button class="active" id="modeFolderBtn" onclick="setAppMode('folder')">Folder Mode</button>
+  </div>
+
+  <!-- ── Single-file mode sections ── -->
+  <div id="singleModeContent" style="display:none">
 
   <!-- File browser -->
   <div class="section">
@@ -974,13 +1164,46 @@
       <li style="padding:8px 10px;color:var(--text-muted);font-size:12px">Loading...</li>
     </ul>
   </div>
+
+  </div><!-- end singleModeContent -->
+
+  <!-- ── Folder mode sections ── -->
+  <div id="folderModeContent">
+    <div class="folder-section">
+      <div class="folder-input-row">
+        <input type="text" id="folderPath" placeholder="C:\path\to\orchestrations">
+        <button onclick="scanFolder()">Scan</button>
+      </div>
+      <div class="folder-auto-discover">
+        <input type="checkbox" id="autoDiscoverCheck" onchange="toggleAutoDiscover()">
+        <label for="autoDiscoverCheck">Auto-discover new files (poll every 5s)</label>
+      </div>
+      <div class="folder-controls" id="folderControls" style="display:none">
+        <button class="btn-run-all" id="folderRunSelectedBtn" onclick="folderRunSelected()">Run Selected</button>
+        <button class="btn-cancel-all" id="folderCancelAllBtn" onclick="folderCancelAll()" style="display:none">Cancel All</button>
+        <button class="btn-rescan" onclick="scanFolder()">Rescan</button>
+        <span id="folderStatusText" style="font-size:11px;color:var(--text-muted)"></span>
+      </div>
+      <ul class="folder-file-list" id="folderFileList"></ul>
+    </div>
+  </div><!-- end folderModeContent -->
+
 </div>
 
 <!-- ── Main ── -->
 <div class="main">
+  <!-- Folder mode tab bar -->
+  <div class="tab-bar" id="folderTabBar"></div>
+
+  <!-- Folder mode summary bar -->
+  <div class="folder-summary-bar" id="folderSummaryBar"></div>
+
   <div class="toolbar" id="toolbar" style="display:none">
     <div class="title" id="orchestrationTitle"></div>
     <div class="timer" id="executionTimer"></div>
+    <div class="view-toggle">
+      <button id="liveOutputToggle" onclick="toggleLiveOutput()" title="Toggle live output panel">Live Output</button>
+    </div>
     <div class="editor-toggle">
       <button class="active" id="viewModeBtn" onclick="setEditorMode('view')">View</button>
       <button id="editModeBtn" onclick="setEditorMode('edit')">Edit</button>
@@ -1079,6 +1302,7 @@
   let stepOutputs = {};     // stepName -> full content (from step-output events)
   let streamingContent = {};  // stepName -> accumulated content string (from content-delta events)
   let streamingReasoning = {}; // stepName -> accumulated reasoning string (from reasoning-delta events)
+  let showLiveOutput = false;  // toggle for live output panel (off by default to avoid flicker)
   let toolCalls = {};         // stepName -> [{toolName, arguments, mcpServer, success, result, error, status}]
   let currentExecutionId = null;
   let abortController = null;
@@ -1088,6 +1312,825 @@
   // ── Comparison state ──
   let compareRuns = []; // [{label, modelOverrides: {stepName: modelId}}]
   let compareResultsData = null;
+
+  // ── Folder mode state ──
+  let appMode = 'folder'; // 'single' | 'folder'
+  let folderOrchestrations = []; // [{path, fileName, name, description, stepCount, steps, parameters, valid}]
+  let folderTabs = {};   // path -> { status, executionId, abortController, orchestrationData, stepStatuses, stepOutputs, streamingContent, streamingReasoning, toolCalls, lastResult, timerInterval, startTime, eventLog }
+  let activeFolderTab = null; // path of currently viewed tab
+  let folderPreviewPath = null; // path being previewed (not yet added as tab)
+  let autoDiscoverInterval = null;
+
+  // ── App mode switching ──
+  function setAppMode(mode) {
+    appMode = mode;
+    document.getElementById('modeSingleBtn').classList.toggle('active', mode === 'single');
+    document.getElementById('modeFolderBtn').classList.toggle('active', mode === 'folder');
+    document.getElementById('singleModeContent').style.display = mode === 'single' ? '' : 'none';
+    document.getElementById('folderModeContent').style.display = mode === 'folder' ? '' : 'none';
+    document.getElementById('folderTabBar').style.display = mode === 'folder' ? 'flex' : 'none';
+    document.getElementById('folderSummaryBar').style.display = mode === 'folder' ? 'flex' : 'none';
+
+    // Hide editor panel and compare panel in folder mode
+    const editorToggle = document.querySelector('.editor-toggle');
+    const editorPanel = document.getElementById('editorPanel');
+    const comparePanel = document.getElementById('comparePanel');
+    if (mode === 'folder') {
+      if (editorToggle) editorToggle.style.display = 'none';
+      if (editorPanel) editorPanel.style.display = 'none';
+      if (comparePanel) comparePanel.style.display = 'none';
+    } else {
+      if (editorToggle) editorToggle.style.display = '';
+    }
+
+    if (mode === 'single') {
+      // Restore single-mode main area visibility
+      document.getElementById('toolbar').style.display = orchestrationData ? '' : 'none';
+      document.getElementById('diagramContainer').style.display = '';
+    } else {
+      // In folder mode, show/hide based on active tab
+      renderFolderTabContent();
+    }
+  }
+
+  // ── Folder scan ──
+  async function scanFolder() {
+    const dir = document.getElementById('folderPath').value.trim();
+    if (!dir) {
+      // Open native folder dialog if no path
+      try {
+        const res = await fetch('/api/browse-dialog', { method: 'POST' });
+        const data = await res.json();
+        if (data.cancelled) return;
+        document.getElementById('folderPath').value = data.directory;
+        return scanFolder();
+      } catch (e) { return; }
+    }
+
+    try {
+      const res = await fetch('/api/folder/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ directory: dir }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Scan failed');
+        return;
+      }
+
+      // Remove tabs for files that no longer exist on disk (but keep running ones)
+      const newPaths = new Set(data.orchestrations.map(o => o.path));
+      for (const path of Object.keys(folderTabs)) {
+        if (!newPaths.has(path) && folderTabs[path].status !== 'running') {
+          delete folderTabs[path];
+          if (activeFolderTab === path) activeFolderTab = null;
+        }
+      }
+
+      folderOrchestrations = data.orchestrations;
+      document.getElementById('folderControls').style.display = 'flex';
+      renderFolderFileList();
+      renderFolderTabs();
+      updateFolderSummary();
+    } catch (e) {
+      alert('Scan error: ' + e.message);
+    }
+  }
+
+  // ── Render folder file list in sidebar ──
+  function renderFolderFileList() {
+    const list = document.getElementById('folderFileList');
+    list.innerHTML = '';
+    for (const orch of folderOrchestrations) {
+      const isAdded = !!folderTabs[orch.path];
+      const tab = folderTabs[orch.path];
+      const status = tab ? tab.status : '';
+      const isPreviewing = folderPreviewPath === orch.path && !isAdded;
+      const isActive = orch.path === activeFolderTab;
+
+      const li = document.createElement('li');
+      let cls = 'folder-file-item';
+      if (!orch.valid) cls += ' invalid';
+      if (isAdded) cls += ' added';
+      if (isActive) cls += ' active';
+      if (isPreviewing) cls += ' previewing';
+      li.className = cls;
+
+      // Clicking the item previews it (or selects its tab if added)
+      li.onclick = () => {
+        if (!orch.valid) return;
+        if (isAdded) {
+          selectFolderTab(orch.path);
+        } else {
+          previewFolderOrchestration(orch.path);
+        }
+      };
+
+      // Build action buttons for valid items
+      let actionsHtml = '';
+      if (orch.valid) {
+        const addDisabled = isAdded ? ' disabled' : '';
+        actionsHtml = `<span class="folder-item-actions">
+          <button class="folder-item-btn add-btn" title="Add to tabs" onclick="event.stopPropagation(); folderAddItem('${jsStr(orch.path)}')"${addDisabled}>+</button>
+          <button class="folder-item-btn run-btn" title="Add &amp; Run" onclick="event.stopPropagation(); folderAddAndRunItem('${jsStr(orch.path)}')"${addDisabled && status === 'running' ? ' disabled' : ''}>&#9654;</button>
+        </span>`;
+      }
+
+      // Status badge for added items
+      const badge = isAdded && status ? `<span class="folder-status-badge ${status}">${status.replace('-', ' ')}</span>` : '';
+      const errorTip = !orch.valid && orch.error ? ` title="${esc(orch.error)}"` : '';
+      const metaText = orch.valid ? orch.stepCount + ' steps' : 'invalid';
+
+      li.innerHTML = `
+        ${badge}
+        <span class="file-name"${errorTip} title="${esc(orch.path)}">${esc(orch.name || orch.fileName)}</span>
+        <span class="file-meta">${metaText}</span>
+        ${actionsHtml}
+      `;
+      list.appendChild(li);
+    }
+  }
+
+  // ── Render tab bar (only added orchestrations) ──
+  function renderFolderTabs() {
+    const bar = document.getElementById('folderTabBar');
+    bar.innerHTML = '';
+    for (const orch of folderOrchestrations) {
+      if (!orch.valid || !folderTabs[orch.path]) continue;
+      const tab = folderTabs[orch.path];
+      const status = tab.status;
+      const escapedPath = jsStr(orch.path);
+      const div = document.createElement('div');
+      div.className = `tab-item${orch.path === activeFolderTab ? ' active' : ''}`;
+      div.onclick = () => selectFolderTab(orch.path);
+
+      // Running tabs show a cancel button; others show a close button
+      let actionBtn;
+      if (status === 'running') {
+        actionBtn = `<span class="tab-cancel" title="Cancel execution" onclick="folderCancelTab('${escapedPath}', event)">&#9632;</span>`;
+      } else {
+        actionBtn = `<span class="tab-close" title="Remove tab" onclick="folderRemoveTab('${escapedPath}', event)">&times;</span>`;
+      }
+
+      div.innerHTML = `
+        <span class="tab-dot ${status}"></span>
+        <span>${esc(orch.name || orch.fileName)}</span>
+        ${actionBtn}
+      `;
+      bar.appendChild(div);
+    }
+  }
+
+  // ── Select a folder tab ──
+  function selectFolderTab(path) {
+    activeFolderTab = path;
+    renderFolderFileList();
+    renderFolderTabs();
+    renderFolderTabContent();
+  }
+
+  // ── Render the main content area for the active folder tab ──
+  function renderFolderTabContent() {
+    // If no active tab, check for preview mode
+    if (!activeFolderTab || !folderTabs[activeFolderTab]) {
+      // If previewing (handled by previewFolderOrchestration), leave the diagram as-is
+      if (folderPreviewPath && !folderTabs[folderPreviewPath]) {
+        // Preview mode is handled by previewFolderOrchestration() directly
+        // Just make sure exec section is hidden
+        document.getElementById('execSection').style.display = 'none';
+        return;
+      }
+      document.getElementById('toolbar').style.display = 'none';
+      document.getElementById('diagramContainer').innerHTML = '<div class="empty-state"><div class="icon">&#128194;</div><div>Select an orchestration from the folder</div></div>';
+      document.getElementById('logSection').style.display = 'none';
+      document.getElementById('resultsPanel').classList.remove('visible');
+      document.getElementById('summaryBar').classList.remove('visible');
+      document.getElementById('streamingArea').classList.remove('visible');
+      document.getElementById('execSection').style.display = 'none';
+      return;
+    }
+
+    // Clear preview since we're showing a tab
+    folderPreviewPath = null;
+
+    const tab = folderTabs[activeFolderTab];
+    const orch = folderOrchestrations.find(o => o.path === activeFolderTab);
+    if (!orch) return;
+
+    // Swap global state to this tab's state so existing rendering functions work
+    swapToTabState(activeFolderTab);
+
+    // Show toolbar with orchestration name
+    document.getElementById('toolbar').style.display = '';
+    document.getElementById('orchestrationTitle').textContent = orch.name || orch.fileName;
+
+    // If orchestration data isn't loaded yet for this tab, load it
+    if (!tab.orchestrationData) {
+      loadFolderTabOrchestration(activeFolderTab);
+    } else {
+      orchestrationData = tab.orchestrationData;
+      renderDiagram();
+    }
+
+    // Render event log
+    const logSection = document.getElementById('logSection');
+    const logEl = document.getElementById('eventLog');
+    if (tab.eventLog.length > 0) {
+      logSection.style.display = '';
+      logEl.innerHTML = tab.eventLog.join('');
+    } else {
+      logSection.style.display = 'none';
+    }
+
+    // Render results if we have them
+    if (tab.lastResult) {
+      showResults(tab.lastResult);
+      updateSummaryBar();
+    } else {
+      document.getElementById('resultsPanel').classList.remove('visible');
+      document.getElementById('summaryBar').classList.remove('visible');
+    }
+
+    // Render parameter inputs + run/cancel controls inside diagramContainer
+    // (folderExecSection was removed — the main area has overflow:hidden and diagram has flex:1,
+    //  so anything outside diagramContainer gets clipped. We append inside it instead.)
+    const dc = document.getElementById('diagramContainer');
+
+    // Remove any stale overlay first
+    let oldOverlay = dc.querySelector('.folder-tab-run-overlay');
+    if (oldOverlay) oldOverlay.remove();
+
+    if (tab.status === 'not-started') {
+      // Build param + run overlay
+      const hasParams = orch.parameters && orch.parameters.length > 0;
+      let overlayHtml = '<div class="folder-tab-run-overlay">';
+
+      if (hasParams) {
+        overlayHtml += '<div class="folder-param-inputs"><h4>Parameters</h4>';
+        for (const p of orch.parameters) {
+          const val = tab.parameters[p] || '';
+          overlayHtml += `<div class="folder-param-row">
+            <label>${esc(p)}</label>
+            <input type="text" data-param="${esc(p)}" value="${esc(val)}" placeholder="Enter ${esc(p)}" oninput="folderUpdateParam('${jsStr(activeFolderTab)}', '${jsStr(p)}', this.value)">
+          </div>`;
+        }
+        overlayHtml += '</div>';
+      }
+
+      const escapedPath = jsStr(activeFolderTab);
+      overlayHtml += `<button class="run-btn-big" onclick="folderAddAndRunItem('${escapedPath}')">&#9654; Run Orchestration</button>`;
+      if (hasParams) {
+        overlayHtml += `<div class="run-desc">Fill in parameters above, then click Run.</div>`;
+      }
+      overlayHtml += '</div>';
+
+      dc.insertAdjacentHTML('beforeend', overlayHtml);
+    }
+
+    // Streaming area
+    if (tab.status !== 'running') {
+      hideStreamingArea();
+    }
+  }
+
+  // ── Swap global state to/from a tab ──
+  function swapToTabState(path) {
+    const tab = folderTabs[path];
+    if (!tab) return;
+    stepStatuses = tab.stepStatuses;
+    stepOutputs = tab.stepOutputs;
+    streamingContent = tab.streamingContent;
+    streamingReasoning = tab.streamingReasoning;
+    toolCalls = tab.toolCalls;
+    currentExecutionId = tab.executionId;
+    lastOrchestrationResult = tab.lastResult;
+    if (tab.orchestrationData) orchestrationData = tab.orchestrationData;
+  }
+
+  // ── Load orchestration data for a tab ──
+  async function loadFolderTabOrchestration(path) {
+    try {
+      const res = await fetch('/api/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orchestrationPath: path, mcpPath: null }),
+      });
+      const data = await res.json();
+      if (!res.ok) return;
+
+      const tab = folderTabs[path];
+      if (tab) {
+        tab.orchestrationData = data;
+        // Initialize step statuses
+        data.steps.forEach(s => {
+          if (!tab.stepStatuses[s.name]) tab.stepStatuses[s.name] = { status: 'pending' };
+        });
+      }
+
+      if (path === activeFolderTab) {
+        orchestrationData = data;
+        renderDiagram();
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // ── Run a single folder tab orchestration ──
+  async function folderExecuteTab(path) {
+    const tab = folderTabs[path];
+    const orch = folderOrchestrations.find(o => o.path === path);
+    if (!tab || !orch || !orch.valid) return;
+    if (tab.status === 'running') return;
+
+    // Load orchestration data if not yet loaded
+    if (!tab.orchestrationData) {
+      await loadFolderTabOrchestration(path);
+    }
+
+    // Reset tab state
+    tab.status = 'running';
+    tab.executionId = null;
+    tab.lastResult = null;
+    tab.eventLog = [];
+    tab.stepStatuses = {};
+    tab.stepOutputs = {};
+    tab.streamingContent = {};
+    tab.streamingReasoning = {};
+    tab.toolCalls = {};
+    tab.startTime = Date.now();
+
+    if (tab.orchestrationData) {
+      tab.orchestrationData.steps.forEach(s => {
+        tab.stepStatuses[s.name] = { status: 'pending' };
+      });
+    }
+
+    renderFolderTabs();
+    renderFolderFileList();
+    updateFolderSummary();
+    if (path === activeFolderTab) {
+      swapToTabState(path);
+      renderFolderTabContent();
+    }
+
+    // Create abort controller
+    tab.abortController = new AbortController();
+
+    try {
+      const res = await fetch('/api/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orchestrationPath: path,
+          mcpPath: null,
+          parameters: tab.parameters && Object.keys(tab.parameters).length > 0 ? tab.parameters : null,
+        }),
+        signal: tab.abortController.signal,
+      });
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop();
+
+        for (const part of parts) {
+          const lines = part.split('\n');
+          let eventType = '';
+          let data = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) eventType = line.slice(7);
+            else if (line.startsWith('data: ')) data = line.slice(6);
+          }
+          if (eventType && data) {
+            handleFolderSseEvent(path, eventType, JSON.parse(data));
+          }
+        }
+      }
+
+      // Process remaining buffer
+      if (buffer.trim()) {
+        const lines = buffer.split('\n');
+        let eventType = '';
+        let data = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) eventType = line.slice(7);
+          else if (line.startsWith('data: ')) data = line.slice(6);
+        }
+        if (eventType && data) {
+          handleFolderSseEvent(path, eventType, JSON.parse(data));
+        }
+      }
+    } catch (e) {
+      if (e.name === 'AbortError') {
+        tab.status = 'cancelled';
+        folderTabLog(path, 'Execution cancelled.', 'error');
+      } else {
+        tab.status = 'failed';
+        folderTabLog(path, `Connection error: ${e.message}`, 'error');
+      }
+    } finally {
+      tab.abortController = null;
+      renderFolderTabs();
+      renderFolderFileList();
+      updateFolderSummary();
+      if (path === activeFolderTab) renderFolderTabContent();
+      loadHistory();
+    }
+  }
+
+  // ── Handle SSE events for a specific folder tab ──
+  function handleFolderSseEvent(path, type, data) {
+    const tab = folderTabs[path];
+    if (!tab) return;
+
+    switch (type) {
+      case 'execution-started':
+        tab.executionId = data.executionId;
+        folderTabLog(path, `Execution started (ID: ${data.executionId})`);
+        break;
+
+      case 'session-started':
+        folderTabLog(path, `Session — model: ${data.requestedModel}`);
+        break;
+
+      case 'step-started':
+        tab.stepStatuses[data.stepName] = { status: 'running', startTime: Date.now() };
+        tab.streamingContent[data.stepName] = '';
+        tab.streamingReasoning[data.stepName] = '';
+        folderTabLog(path, `[${data.stepName}] Started`);
+        if (path === activeFolderTab) {
+          swapToTabState(path);
+          renderDiagram();
+          showStreamingArea(data.stepName);
+        }
+        break;
+
+      case 'step-completed':
+        tab.stepStatuses[data.stepName] = {
+          ...tab.stepStatuses[data.stepName],
+          status: 'succeeded',
+          actualModel: data.actualModel,
+          contentPreview: data.contentPreview,
+          endTime: Date.now(),
+          stepDuration: tab.stepStatuses[data.stepName]?.startTime
+            ? (Date.now() - tab.stepStatuses[data.stepName].startTime) / 1000
+            : 0,
+        };
+        folderTabLog(path, `[${data.stepName}] Completed`);
+        if (path === activeFolderTab) {
+          swapToTabState(path);
+          hideStreamingArea();
+          renderDiagram();
+        }
+        break;
+
+      case 'step-error':
+        tab.stepStatuses[data.stepName] = {
+          ...tab.stepStatuses[data.stepName],
+          status: 'failed',
+          error: data.error,
+        };
+        folderTabLog(path, `[${data.stepName}] Error: ${data.error}`, 'error');
+        if (path === activeFolderTab) {
+          swapToTabState(path);
+          hideStreamingArea();
+          renderDiagram();
+        }
+        break;
+
+      case 'step-skipped':
+        tab.stepStatuses[data.stepName] = { status: 'skipped' };
+        folderTabLog(path, `[${data.stepName}] Skipped: ${data.reason}`);
+        if (path === activeFolderTab) { swapToTabState(path); renderDiagram(); }
+        break;
+
+      case 'step-output':
+        tab.stepOutputs[data.stepName] = data.content;
+        break;
+
+      case 'content-delta':
+        if (!tab.streamingContent[data.stepName]) tab.streamingContent[data.stepName] = '';
+        tab.streamingContent[data.stepName] += data.chunk;
+        if (path === activeFolderTab) {
+          swapToTabState(path);
+          updateStreamingArea(data.stepName, tab.streamingContent[data.stepName]);
+        }
+        break;
+
+      case 'reasoning-delta':
+        if (!tab.streamingReasoning[data.stepName]) tab.streamingReasoning[data.stepName] = '';
+        tab.streamingReasoning[data.stepName] += data.chunk;
+        break;
+
+      case 'tool-started':
+        if (!tab.toolCalls[data.stepName]) tab.toolCalls[data.stepName] = [];
+        tab.toolCalls[data.stepName].push({
+          toolName: data.toolName, arguments: data.arguments,
+          mcpServer: data.mcpServer, success: null, result: null, error: null, status: 'running',
+        });
+        folderTabLog(path, `[${data.stepName}] Tool: ${data.toolName}`);
+        break;
+
+      case 'tool-completed': {
+        const calls = tab.toolCalls[data.stepName];
+        if (calls) {
+          for (let i = calls.length - 1; i >= 0; i--) {
+            if (calls[i].toolName === data.toolName && calls[i].status === 'running') {
+              calls[i].success = data.success;
+              calls[i].result = data.result;
+              calls[i].error = data.error;
+              calls[i].status = 'done';
+              break;
+            }
+          }
+        }
+        break;
+      }
+
+      case 'usage':
+        tab.stepStatuses[data.stepName] = {
+          ...tab.stepStatuses[data.stepName],
+          usage: data,
+        };
+        break;
+
+      case 'model-mismatch':
+        folderTabLog(path, `Model mismatch: ${data.configuredModel} vs ${data.actualModel}`, 'error');
+        break;
+
+      case 'orchestration-done':
+        tab.status = data.status === 'Succeeded' ? 'succeeded' : 'failed';
+        tab.lastResult = data;
+        folderTabLog(path, `Orchestration ${data.status}`, data.status === 'Succeeded' ? 'success' : 'error');
+        renderFolderTabs();
+        renderFolderFileList();
+        updateFolderSummary();
+        if (path === activeFolderTab) {
+          swapToTabState(path);
+          showResults(data);
+          updateSummaryBar();
+        }
+        break;
+    }
+  }
+
+  // ── Folder tab logging ──
+  function folderTabLog(path, msg, cls = '') {
+    const tab = folderTabs[path];
+    if (!tab) return;
+    const ts = new Date().toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    tab.eventLog.push(`<div class="log-entry ${cls}"><span class="log-time">${ts}</span> ${esc(msg)}</div>`);
+
+    // If this is the active tab, also update the visible log
+    if (path === activeFolderTab) {
+      const logEl = document.getElementById('eventLog');
+      const logSection = document.getElementById('logSection');
+      logSection.style.display = '';
+      logEl.innerHTML = tab.eventLog.join('');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  }
+
+  // ── Preview an orchestration (without adding as tab) ──
+  async function previewFolderOrchestration(path) {
+    folderPreviewPath = path;
+    activeFolderTab = null; // deselect any active tab
+    renderFolderFileList();
+    renderFolderTabs();
+
+    // Show loading state in main area
+    document.getElementById('toolbar').style.display = 'none';
+    document.getElementById('logSection').style.display = 'none';
+    document.getElementById('resultsPanel').classList.remove('visible');
+    document.getElementById('summaryBar').classList.remove('visible');
+    document.getElementById('streamingArea').classList.remove('visible');
+    document.getElementById('execSection').style.display = 'none';
+
+    const orch = folderOrchestrations.find(o => o.path === path);
+    const container = document.getElementById('diagramContainer');
+    container.innerHTML = `<div class="empty-state"><div class="icon">&#8987;</div><div>Loading preview...</div></div>`;
+
+    try {
+      const res = await fetch('/api/load', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orchestrationPath: path, mcpPath: null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        container.innerHTML = `<div class="empty-state"><div class="icon">&#9888;</div><div>Failed to load: ${esc(data.error || 'Unknown error')}</div></div>`;
+        return;
+      }
+
+      // Store the loaded data temporarily and render diagram
+      orchestrationData = data;
+      document.getElementById('toolbar').style.display = '';
+      document.getElementById('orchestrationTitle').textContent = (orch ? orch.name || orch.fileName : data.name) + ' (preview)';
+      renderDiagram();
+
+      // If still previewing this path, show action buttons below the diagram
+      if (folderPreviewPath === path) {
+        const existingActions = container.querySelector('.folder-preview-actions');
+        if (!existingActions) {
+          const actDiv = document.createElement('div');
+          actDiv.className = 'folder-preview-actions';
+          const escapedPath = jsStr(path);
+          actDiv.innerHTML = `
+            <button class="preview-add-btn" onclick="folderAddItem('${escapedPath}')">+ Add to Tabs</button>
+            <button class="preview-run-btn" onclick="folderAddAndRunItem('${escapedPath}')">&#9654; Add &amp; Run</button>
+          `;
+          container.appendChild(actDiv);
+        }
+      }
+    } catch (e) {
+      container.innerHTML = `<div class="empty-state"><div class="icon">&#9888;</div><div>Error: ${esc(e.message)}</div></div>`;
+    }
+  }
+
+  // ── Add a single orchestration as a tab ──
+  function folderAddItem(path) {
+    if (folderTabs[path]) {
+      // Already added — just select it
+      selectFolderTab(path);
+      return;
+    }
+    const orch = folderOrchestrations.find(o => o.path === path);
+    if (!orch || !orch.valid) return;
+
+    // Build parameters object from orchestration metadata
+    const params = {};
+    if (orch.parameters && orch.parameters.length > 0) {
+      orch.parameters.forEach(p => { params[p] = ''; });
+    }
+
+    folderTabs[path] = {
+      status: 'not-started',
+      executionId: null,
+      abortController: null,
+      orchestrationData: null,
+      stepStatuses: {},
+      stepOutputs: {},
+      streamingContent: {},
+      streamingReasoning: {},
+      toolCalls: {},
+      lastResult: null,
+      timerInterval: null,
+      startTime: null,
+      eventLog: [],
+      parameters: params,
+    };
+
+    folderPreviewPath = null; // clear preview since we now have a tab
+    selectFolderTab(path);
+    updateFolderSummary();
+  }
+
+  // ── Add a single orchestration as a tab AND run it immediately ──
+  function folderAddAndRunItem(path) {
+    const orch = folderOrchestrations.find(o => o.path === path);
+    if (!orch || !orch.valid) return;
+
+    // Add if not already added
+    if (!folderTabs[path]) {
+      folderAddItem(path);
+    }
+
+    const tab = folderTabs[path];
+    // If parameters are required and empty, show the tab so user can fill them in
+    if (orch.parameters && orch.parameters.length > 0) {
+      const allFilled = orch.parameters.every(p => tab.parameters[p] && tab.parameters[p].trim() !== '');
+      if (!allFilled) {
+        selectFolderTab(path);
+        // The renderFolderTabContent will show parameter inputs
+        return;
+      }
+    }
+
+    // Run immediately
+    if (tab.status !== 'running') {
+      folderExecuteTab(path);
+    }
+  }
+
+  // ── Cancel a single running tab ──
+  function folderCancelTab(path, evt) {
+    if (evt) evt.stopPropagation();
+    const tab = folderTabs[path];
+    if (!tab || tab.status !== 'running') return;
+    if (tab.abortController) {
+      tab.abortController.abort();
+    }
+    if (tab.executionId) {
+      fetch(`/api/cancel/${tab.executionId}`, { method: 'POST' }).catch(() => {});
+    }
+  }
+
+  // ── Update a parameter value for a folder tab ──
+  function folderUpdateParam(path, paramName, value) {
+    const tab = folderTabs[path];
+    if (!tab) return;
+    tab.parameters[paramName] = value;
+  }
+
+  // ── (Removed: folderAddSelected — replaced by per-item folderAddItem/folderAddAndRunItem) ──
+
+  // ── Remove a tab (close it) ──
+  function folderRemoveTab(path, evt) {
+    if (evt) evt.stopPropagation();
+    const tab = folderTabs[path];
+    if (!tab) return;
+    // Don't remove running tabs
+    if (tab.status === 'running') return;
+    delete folderTabs[path];
+    if (activeFolderTab === path) {
+      // Switch to another open tab or clear
+      const openPaths = Object.keys(folderTabs);
+      activeFolderTab = openPaths.length > 0 ? openPaths[0] : null;
+    }
+    renderFolderFileList();
+    renderFolderTabs();
+    updateFolderSummary();
+    renderFolderTabContent();
+  }
+
+  // ── Run all added (non-running) tabs in parallel ──
+  function folderRunSelected() {
+    const toRun = Object.entries(folderTabs).filter(([_, t]) => t.status !== 'running');
+    if (toRun.length === 0) return;
+
+    document.getElementById('folderRunSelectedBtn').disabled = true;
+    document.getElementById('folderCancelAllBtn').style.display = '';
+
+    const promises = toRun.map(([path]) => folderExecuteTab(path));
+    Promise.allSettled(promises).then(() => {
+      document.getElementById('folderRunSelectedBtn').disabled = false;
+      document.getElementById('folderCancelAllBtn').style.display = 'none';
+    });
+  }
+
+  // ── Cancel All running orchestrations ──
+  function folderCancelAll() {
+    for (const [path, tab] of Object.entries(folderTabs)) {
+      if (tab.status === 'running' && tab.abortController) {
+        tab.abortController.abort();
+        // Also call server-side cancel
+        if (tab.executionId) {
+          fetch(`/api/cancel/${tab.executionId}`, { method: 'POST' }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  // ── Update folder summary bar ──
+  function updateFolderSummary() {
+    const bar = document.getElementById('folderSummaryBar');
+    const addedPaths = Object.keys(folderTabs);
+    const total = addedPaths.length;
+    let running = 0, succeeded = 0, failed = 0, notStarted = 0;
+    for (const path of addedPaths) {
+      const s = folderTabs[path].status;
+      if (s === 'running') running++;
+      else if (s === 'succeeded') succeeded++;
+      else if (s === 'failed' || s === 'cancelled') failed++;
+      else notStarted++;
+    }
+    const scanned = folderOrchestrations.filter(o => o.valid).length;
+    bar.innerHTML = `
+      <span>Scanned: <span class="count">${scanned}</span></span>
+      <span>Added: <span class="count">${total}</span></span>
+      ${running > 0 ? `<span>Running: <span class="count blue">${running}</span></span>` : ''}
+      ${succeeded > 0 ? `<span>Succeeded: <span class="count green">${succeeded}</span></span>` : ''}
+      ${failed > 0 ? `<span>Failed: <span class="count red">${failed}</span></span>` : ''}
+      ${notStarted > 0 ? `<span>Pending: <span class="count">${notStarted}</span></span>` : ''}
+    `;
+    document.getElementById('folderStatusText').textContent = `${scanned} orchestrations found`;
+  }
+
+  // ── Auto-discover toggle ──
+  function toggleAutoDiscover() {
+    const checked = document.getElementById('autoDiscoverCheck').checked;
+    if (checked) {
+      autoDiscoverInterval = setInterval(() => {
+        if (document.getElementById('folderPath').value.trim()) {
+          scanFolder();
+        }
+      }, 5000);
+    } else {
+      if (autoDiscoverInterval) {
+        clearInterval(autoDiscoverInterval);
+        autoDiscoverInterval = null;
+      }
+    }
+  }
+
+
 
   // ── Mermaid init ──
   mermaid.initialize({
@@ -1487,7 +2530,15 @@
     const id = 'mermaid-' + Date.now();
     try {
       const { svg } = await mermaid.render(id, def);
-      container.innerHTML = svg;
+
+      // Replace only the diagram wrapper, preserving any overlays (e.g. folder param inputs)
+      let wrapper = container.querySelector('.diagram-svg-wrapper');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'diagram-svg-wrapper';
+        container.prepend(wrapper);
+      }
+      wrapper.innerHTML = svg;
 
       // Status color map (fill, stroke)
       const statusColors = {
@@ -1556,7 +2607,13 @@
         nodeGroup.addEventListener('mouseleave', hideTooltip);
       });
     } catch (e) {
-      container.innerHTML = `<div class="empty-state"><div>Diagram render error: ${esc(e.message)}</div></div>`;
+      let wrapper = container.querySelector('.diagram-svg-wrapper');
+      if (!wrapper) {
+        wrapper = document.createElement('div');
+        wrapper.className = 'diagram-svg-wrapper';
+        container.prepend(wrapper);
+      }
+      wrapper.innerHTML = `<div class="empty-state"><div>Diagram render error: ${esc(e.message)}</div></div>`;
     }
   }
 
@@ -1676,6 +2733,24 @@
 
   // ── Cancel execution ──
   async function cancelExecution() {
+    // In folder mode, cancel the active tab instead
+    if (appMode === 'folder' && activeFolderTab) {
+      const tab = folderTabs[activeFolderTab];
+      if (tab && tab.status === 'running') {
+        if (tab.abortController) tab.abortController.abort();
+        if (tab.executionId) {
+          try { await fetch(`/api/cancel/${tab.executionId}`, { method: 'POST' }); } catch (_) {}
+        }
+        tab.status = 'failed';
+        folderTabLog(activeFolderTab, 'Execution cancelled by user.', 'error');
+        renderFolderFileList();
+        renderFolderTabs();
+        renderFolderTabContent();
+        updateFolderSummary();
+      }
+      return;
+    }
+
     if (abortController) {
       abortController.abort();
     }
@@ -1691,6 +2766,12 @@
 
   // ── Execute orchestration ──
   async function executeOrchestration() {
+    // In folder mode, delegate to folder tab execution
+    if (appMode === 'folder' && activeFolderTab) {
+      folderExecuteTab(activeFolderTab);
+      return;
+    }
+
     if (!orchestrationData) return;
 
     const orchPath = document.getElementById('orchestrationPath').value.trim();
@@ -2035,6 +3116,7 @@
 
   // ── Streaming area ──
   function showStreamingArea(stepName) {
+    if (!showLiveOutput) return;
     const area = document.getElementById('streamingArea');
     document.getElementById('streamingStepName').textContent = stepName;
     document.getElementById('streamingContent').textContent = '';
@@ -2042,6 +3124,7 @@
   }
 
   function updateStreamingArea(stepName, content) {
+    if (!showLiveOutput) return;
     const area = document.getElementById('streamingArea');
     const contentEl = document.getElementById('streamingContent');
     document.getElementById('streamingStepName').textContent = stepName;
@@ -2053,6 +3136,15 @@
 
   function hideStreamingArea() {
     document.getElementById('streamingArea').classList.remove('visible');
+  }
+
+  function toggleLiveOutput() {
+    showLiveOutput = !showLiveOutput;
+    const btn = document.getElementById('liveOutputToggle');
+    btn.classList.toggle('active', showLiveOutput);
+    if (!showLiveOutput) {
+      hideStreamingArea();
+    }
   }
 
   // ── Reasoning toggle ──
@@ -2203,6 +3295,12 @@
   function esc(str) {
     if (str == null) return '';
     return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ── Escape a string for safe embedding in a JS single-quoted string inside an HTML attribute ──
+  function jsStr(str) {
+    if (str == null) return '';
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   }
 
   // ── Validation ──
