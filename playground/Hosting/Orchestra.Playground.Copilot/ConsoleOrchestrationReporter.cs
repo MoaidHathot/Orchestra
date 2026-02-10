@@ -125,4 +125,9 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 	{
 		Console.WriteLine($"  [{stepName}] Skipped: {reason}");
 	}
+
+	public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations)
+	{
+		Console.WriteLine($"  [{checkerStepName}] Loop iteration {iteration}/{maxIterations} — re-running '{targetStepName}' with feedback");
+	}
 }

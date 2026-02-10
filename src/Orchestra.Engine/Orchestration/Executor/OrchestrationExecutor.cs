@@ -39,6 +39,10 @@ public class OrchestrationExecutor
 		var executor = new PromptExecutor(_agentBuilder, _reporter);
 		var stepResults = new Dictionary<string, ExecutionResult>();
 
+		// Build a lookup of all steps for loop target resolution
+		var allStepsByName = orchestration.Steps
+			.ToDictionary(s => s.Name, s => (PromptOrchestrationStep)s);
+
 		for (var i = 0; i < schedule.Entries.Length; i++)
 		{
 			var entry = schedule.Entries[i];
@@ -51,6 +55,12 @@ public class OrchestrationExecutor
 				var result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, cancellationToken);
 				context.AddResult(step.Name, result);
 				stepResults[step.Name] = result;
+
+				// Handle loop if configured
+				if (step.Loop is not null && result.Status == ExecutionStatus.Succeeded)
+				{
+					await HandleLoopAsync(step, allStepsByName, executor, context, stepResults, cancellationToken);
+				}
 			}
 			else
 			{
@@ -58,15 +68,24 @@ public class OrchestrationExecutor
 				{
 					var step = (PromptOrchestrationStep)s;
 					var result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, cancellationToken);
-					return (step.Name, result);
+					return (step, result);
 				}).ToArray();
 
 				var results = await Task.WhenAll(tasks);
 
-				foreach (var (name, result) in results)
+				foreach (var (step, result) in results)
 				{
-					context.AddResult(name, result);
-					stepResults[name] = result;
+					context.AddResult(step.Name, result);
+					stepResults[step.Name] = result;
+				}
+
+				// Handle loops for any steps in this layer that have loop configs
+				foreach (var (step, result) in results)
+				{
+					if (step.Loop is not null && result.Status == ExecutionStatus.Succeeded)
+					{
+						await HandleLoopAsync(step, allStepsByName, executor, context, stepResults, cancellationToken);
+					}
 				}
 			}
 		}
@@ -145,5 +164,83 @@ public class OrchestrationExecutor
 		}
 
 		return result;
+	}
+
+	private async Task HandleLoopAsync(
+		PromptOrchestrationStep checkerStep,
+		Dictionary<string, PromptOrchestrationStep> allStepsByName,
+		PromptExecutor executor,
+		OrchestrationExecutionContext context,
+		Dictionary<string, ExecutionResult> stepResults,
+		CancellationToken cancellationToken)
+	{
+		var loop = checkerStep.Loop!;
+
+		if (!allStepsByName.TryGetValue(loop.Target, out var targetStep))
+		{
+			_logger.LogWarning("Loop target '{Target}' not found for checker '{Checker}', skipping loop.",
+				loop.Target, checkerStep.Name);
+			return;
+		}
+
+		for (var iteration = 1; iteration <= loop.MaxIterations; iteration++)
+		{
+			// Check exit condition on the checker's current result
+			var checkerResult = context.GetResult(checkerStep.Name);
+			if (checkerResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
+			{
+				_logger.LogInformation("  [{Checker}] Loop exit condition met after {Iterations} iteration(s).",
+					checkerStep.Name, iteration - 1);
+				return;
+			}
+
+			_logger.LogInformation("  [{Checker}] Loop iteration {Iteration}/{Max} — re-running '{Target}' with feedback.",
+				checkerStep.Name, iteration, loop.MaxIterations, loop.Target);
+			_reporter.ReportLoopIteration(checkerStep.Name, loop.Target, iteration, loop.MaxIterations);
+
+			// Inject checker's feedback into the target step's context
+			context.SetLoopFeedback(loop.Target, checkerResult.Content);
+
+			// Re-execute the target step
+			context.ClearResult(loop.Target);
+			_reporter.ReportStepStarted(loop.Target);
+			var targetResult = await executor.ExecuteAsync(targetStep, context, cancellationToken);
+			context.AddResult(loop.Target, targetResult);
+			stepResults[loop.Target] = targetResult;
+
+			if (targetResult.Status != ExecutionStatus.Succeeded)
+			{
+				_logger.LogWarning("  [{Target}] Failed during loop iteration {Iteration}, stopping loop.",
+					loop.Target, iteration);
+				return;
+			}
+
+			// Re-execute the checker step
+			context.ClearResult(checkerStep.Name);
+			_reporter.ReportStepStarted(checkerStep.Name);
+			var newCheckerResult = await executor.ExecuteAsync(checkerStep, context, cancellationToken);
+			context.AddResult(checkerStep.Name, newCheckerResult);
+			stepResults[checkerStep.Name] = newCheckerResult;
+
+			if (newCheckerResult.Status != ExecutionStatus.Succeeded)
+			{
+				_logger.LogWarning("  [{Checker}] Failed during loop iteration {Iteration}, stopping loop.",
+					checkerStep.Name, iteration);
+				return;
+			}
+		}
+
+		// Check exit condition one final time after exhausting all iterations
+		var finalResult = context.GetResult(checkerStep.Name);
+		if (finalResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
+		{
+			_logger.LogInformation("  [{Checker}] Loop exit condition met after {Max} iteration(s).",
+				checkerStep.Name, loop.MaxIterations);
+		}
+		else
+		{
+			_logger.LogWarning("  [{Checker}] Loop exhausted {Max} iterations without meeting exit condition. Using last result.",
+				checkerStep.Name, loop.MaxIterations);
+		}
 	}
 }

@@ -5,6 +5,7 @@ public class OrchestrationExecutionContext
 	public Dictionary<string, string> Parameters { get; init; } = [];
 
 	private readonly Dictionary<string, ExecutionResult> _results = new();
+	private readonly Dictionary<string, string> _loopFeedback = new();
 
 	public void AddResult(string stepName, ExecutionResult result)
 	{
@@ -45,5 +46,33 @@ public class OrchestrationExecutionContext
 
 		return string.Join("\n\n---\n\n",
 			succeeded.Select(dep => $"## Output from '{dep}':\n{_results[dep].Content}"));
+	}
+
+	/// <summary>
+	/// Removes a step's result so it can be re-executed during a loop iteration.
+	/// </summary>
+	public void ClearResult(string stepName)
+	{
+		_results.Remove(stepName);
+	}
+
+	/// <summary>
+	/// Stores feedback from a checker step to be injected into the target step's prompt
+	/// during a loop re-execution.
+	/// </summary>
+	public void SetLoopFeedback(string stepName, string feedback)
+	{
+		_loopFeedback[stepName] = feedback;
+	}
+
+	/// <summary>
+	/// Retrieves and clears loop feedback for a step, if any.
+	/// Returns null if no feedback is pending.
+	/// </summary>
+	public string? ConsumeLoopFeedback(string stepName)
+	{
+		if (_loopFeedback.Remove(stepName, out var feedback))
+			return feedback;
+		return null;
 	}
 }

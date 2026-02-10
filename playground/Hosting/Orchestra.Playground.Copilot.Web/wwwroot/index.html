@@ -1811,6 +1811,17 @@
         if (path === activeFolderTab) { swapToTabState(path); renderDiagram(); }
         break;
 
+      case 'loop-iteration':
+        tab.stepStatuses[data.targetStepName] = {
+          ...tab.stepStatuses[data.targetStepName],
+          status: 'looping',
+          loopIteration: data.iteration,
+          loopMax: data.maxIterations,
+        };
+        folderTabLog(path, `[${data.checkerStepName}] Loop ${data.iteration}/${data.maxIterations} — re-running '${data.targetStepName}'`);
+        if (path === activeFolderTab) { swapToTabState(path); renderDiagram(); }
+        break;
+
       case 'step-output':
         tab.stepOutputs[data.stepName] = data.content;
         break;

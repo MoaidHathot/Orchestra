@@ -112,6 +112,11 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 		Write("step-started", new { stepName });
 	}
 
+	public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations)
+	{
+		Write("loop-iteration", new { checkerStepName, targetStepName, iteration, maxIterations });
+	}
+
 	/// <summary>
 	/// Reports the final orchestration result.
 	/// Not part of IOrchestrationReporter — called directly by the execution endpoint.
