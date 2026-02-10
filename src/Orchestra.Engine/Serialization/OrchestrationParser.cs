@@ -31,6 +31,25 @@ public static class OrchestrationParser
 		return ParseOrchestration(json, availableMcps);
 	}
 
+	/// <summary>
+	/// Parses orchestration structure without resolving MCP references.
+	/// Useful for metadata extraction (e.g., folder scan) where MCP configs are unavailable.
+	/// </summary>
+	public static Orchestration ParseOrchestrationMetadataOnly(string json)
+	{
+		return JsonSerializer.Deserialize<Orchestration>(json, s_options)
+			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+	}
+
+	/// <summary>
+	/// Parses orchestration structure from file without resolving MCP references.
+	/// </summary>
+	public static Orchestration ParseOrchestrationFileMetadataOnly(string path)
+	{
+		var json = File.ReadAllText(path);
+		return ParseOrchestrationMetadataOnly(json);
+	}
+
 	public static Mcp[] ParseMcps(string json)
 	{
 		var doc = JsonSerializer.Deserialize<McpConfigDocument>(json, s_options)

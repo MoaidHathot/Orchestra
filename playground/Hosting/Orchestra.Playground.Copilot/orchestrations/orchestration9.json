@@ -1,0 +1,133 @@
+{
+  "name": "deep-stock-analysis",
+  "description": "Comprehensive stock analysis for investment decisions. Researches company fundamentals, price history, earnings, news, and industry context in parallel, then performs competitive, financial, sentiment, risk, and valuation analysis before producing a final Buy/Sell/Hold recommendation report.",
+  "steps": [
+    {
+      "name": "company-overview",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a senior equity research analyst. Produce a concise company profile. Focus on facts and data. Keep your response under 800 words.",
+      "userPrompt": "Research {{company}} and provide a structured company overview: 1) Business description — what the company does, core products/services, revenue segments. 2) Market capitalization and current stock price. 3) Sector and industry classification. 4) Key executives (CEO, CFO). 5) Number of employees and global presence. 6) Recent major strategic initiatives (M&A, restructuring, new markets). Keep it factual and data-driven.",
+      "outputHandlerPrompt": "Condense the output to the most important facts only. Remove any filler or caveats. Limit to 600 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "price-history",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a quantitative technical analyst. Analyze stock price data and technical indicators. Be precise with numbers. Keep your response under 800 words.",
+      "userPrompt": "Analyze {{company}} stock price history and technical profile: 1) Current price, 52-week high/low, and YTD performance. 2) Price trend over the last 12 months — identify key inflection points. 3) Key moving averages (50-day, 200-day) and whether the stock is above/below them. 4) Volume trends — any unusual volume spikes. 5) Relative performance vs S&P 500 and sector ETF over 6 and 12 months. 6) Key support and resistance levels. Use specific numbers wherever possible.",
+      "outputHandlerPrompt": "Keep only the numerical data, trend descriptions, and key technical levels. Remove explanations of what indicators are. Limit to 600 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "recent-news",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a financial news analyst. Find and summarize stock-moving news. For each item, assess directional impact. Keep your response under 1000 words.",
+      "userPrompt": "Find the most recent and impactful news about {{company}} from the last 3 months. For each item provide: headline, approximate date, and whether it is bullish/bearish/neutral for the stock with a one-sentence explanation. Cover: earnings announcements, product launches, regulatory actions, analyst upgrades/downgrades, insider transactions, partnerships, lawsuits, and macro events affecting the company. List at least 8 items, prioritized by likely stock impact.",
+      "outputHandlerPrompt": "Format as a compact numbered list. Each item: date, headline, impact (bullish/bearish/neutral), one-line reason. Remove any lengthy explanations. Limit to 700 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "quarterly-earnings",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a fundamental financial analyst specializing in earnings analysis. Focus on concrete numbers and trends across quarters. Keep your response under 1000 words.",
+      "userPrompt": "Analyze {{company}} quarterly earnings for the last 4-6 reported quarters: 1) Revenue per quarter — actual vs estimates, beat/miss. 2) EPS per quarter — actual vs estimates, beat/miss. 3) Revenue growth rate (QoQ and YoY). 4) Earnings growth rate (QoQ and YoY). 5) Gross margin, operating margin, net margin trends. 6) Forward guidance — what did management guide for next quarter/year? 7) Any notable one-time charges or adjustments. Present data in a structured format with specific numbers.",
+      "outputHandlerPrompt": "Present as a compact table or structured list with only the numbers. Remove narrative explanations. Keep margins, growth rates, and beat/miss data. Limit to 700 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "industry-analysis",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are an industry research analyst. Analyze sector dynamics and macro trends. Keep your response under 800 words.",
+      "userPrompt": "Analyze the industry and sector context for {{company}}: 1) Total addressable market (TAM) size and growth rate. 2) Industry growth drivers and headwinds. 3) Regulatory environment — current and upcoming regulations that could impact the sector. 4) Technology disruption risks or opportunities. 5) Cyclical vs defensive characteristics of the sector. 6) How the sector is currently valued relative to historical averages. Focus on factors most relevant to an investment decision.",
+      "outputHandlerPrompt": "Keep only the market sizing data, growth rates, key regulatory items, and sector valuation context. Remove generic industry descriptions. Limit to 600 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "competitive-position",
+      "type": "Prompt",
+      "dependsOn": ["company-overview", "industry-analysis"],
+      "systemPrompt": "You are a competitive strategy analyst. Evaluate the company's competitive moat and market position using the provided company and industry data. Keep your response under 800 words.",
+      "userPrompt": "Using the company overview and industry analysis, evaluate {{company}}'s competitive position: 1) Market share in primary segments and trend direction. 2) Top 3-5 competitors and how {{company}} compares on revenue, margins, and growth. 3) Competitive moat assessment — brand, network effects, switching costs, scale, IP/patents. Rate moat strength: none/narrow/wide. 4) Threats from disruptors or new entrants. 5) Key competitive advantages and vulnerabilities. Be specific about why the moat is durable or fragile.",
+      "inputHandlerPrompt": "From the company-overview output, extract: business segments, revenue breakdown, market cap, strategic initiatives. From the industry-analysis output, extract: TAM, growth drivers, competitive dynamics, regulatory factors. Present as two labeled sections.",
+      "outputHandlerPrompt": "Focus on the moat assessment, market share data, and competitive comparison. Remove generic strategy frameworks. Limit to 600 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "financial-health",
+      "type": "Prompt",
+      "dependsOn": ["quarterly-earnings", "company-overview"],
+      "systemPrompt": "You are a credit and equity analyst evaluating financial strength. Use the provided earnings data and company profile to assess balance sheet health and cash flow quality. Keep your response under 800 words.",
+      "userPrompt": "Assess {{company}}'s financial health and trajectory: 1) Balance sheet strength — total debt, cash position, debt-to-equity ratio, interest coverage. 2) Cash flow analysis — operating cash flow trend, free cash flow, FCF yield, capex intensity. 3) Capital allocation — buybacks, dividends, R&D spending, M&A activity. 4) Working capital efficiency. 5) Earnings quality — are earnings backed by cash flow or driven by accounting? 6) Financial trajectory — is the company's financial position improving or deteriorating? Provide specific numbers.",
+      "inputHandlerPrompt": "From quarterly-earnings, extract: revenue/EPS trends, margin data, guidance. From company-overview, extract: market cap, business segments, strategic initiatives. Present as two labeled sections.",
+      "outputHandlerPrompt": "Keep the numerical assessments, ratios, and trajectory conclusions. Remove definitions of financial terms. Limit to 600 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "sentiment-momentum",
+      "type": "Prompt",
+      "dependsOn": ["recent-news", "price-history"],
+      "systemPrompt": "You are a market sentiment and momentum analyst. Combine news sentiment with price action to gauge market psychology. Keep your response under 700 words.",
+      "userPrompt": "Analyze market sentiment and momentum for {{company}}: 1) News sentiment score: -10 (extremely bearish) to +10 (extremely bullish) with justification. 2) Analyst consensus — count of buy/hold/sell ratings and average price target if available. 3) Institutional ownership trends — increasing or decreasing. 4) Short interest — level and trend. 5) Price momentum — is the stock in an uptrend, downtrend, or range-bound? 6) Catalyst calendar — upcoming events that could move the stock (earnings date, product launches, conferences). 7) Overall sentiment verdict: bullish, neutral, or bearish, with confidence level.",
+      "inputHandlerPrompt": "From recent-news, extract: the numbered list of news items with their bullish/bearish/neutral ratings. From price-history, extract: current price, trend direction, moving average positions, relative performance data. Present as two labeled sections.",
+      "outputHandlerPrompt": "Keep the sentiment score, analyst data, momentum assessment, and catalyst calendar. Remove explanations of methodology. Limit to 500 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "risk-assessment",
+      "type": "Prompt",
+      "dependsOn": ["competitive-position", "financial-health", "sentiment-momentum"],
+      "systemPrompt": "You are a risk analyst specializing in equity investments. Identify, categorize, and rate risks using the provided analysis. Be specific about probability and impact. Keep your response under 800 words.",
+      "userPrompt": "Produce a comprehensive risk assessment for {{company}} stock: 1) Valuation risk — is the stock overvalued/fairly valued/undervalued at current levels? 2) Execution risk — can management deliver on guidance and strategy? 3) Competitive risk — threat of market share loss. 4) Regulatory/legal risk — pending litigation, regulatory changes. 5) Macro risk — interest rate sensitivity, recession exposure, currency risk. 6) Concentration risk — customer, geographic, or product concentration. 7) Balance sheet risk — leverage, liquidity concerns. For each risk: rate as Low/Medium/High, estimate probability, and describe the potential stock price impact (e.g., 10-20% downside).",
+      "inputHandlerPrompt": "From competitive-position, extract: moat assessment, competitive threats, market share trends. From financial-health, extract: debt levels, cash flow quality, financial trajectory. From sentiment-momentum, extract: sentiment score, short interest, analyst consensus. Present as three labeled sections.",
+      "outputHandlerPrompt": "Format as a structured risk register. Each risk: name, rating (Low/Medium/High), probability, potential impact. End with an overall risk score. Limit to 600 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "valuation-analysis",
+      "type": "Prompt",
+      "dependsOn": ["financial-health", "price-history", "competitive-position"],
+      "systemPrompt": "You are a valuation specialist. Estimate intrinsic value using multiple methodologies. Be explicit about your assumptions. Keep your response under 800 words.",
+      "userPrompt": "Perform a valuation analysis of {{company}}: 1) Relative valuation — P/E, P/S, EV/EBITDA, PEG ratio vs sector peers and historical averages. State whether each metric suggests overvalued/fairly valued/undervalued. 2) DCF estimation — provide a simplified DCF with stated assumptions (growth rate, discount rate, terminal multiple). Give a price range. 3) Sum-of-parts if the company has distinct segments. 4) Price target synthesis — combine methodologies into a 12-month price target range (bear/base/bull cases with specific prices). 5) Margin of safety — what discount to intrinsic value does the current price offer? State your assumptions clearly.",
+      "inputHandlerPrompt": "From financial-health, extract: revenue/earnings growth rates, margins, FCF, debt levels. From price-history, extract: current price, 52-week range, technical levels. From competitive-position, extract: moat rating, market share position, peer comparison. Present as three labeled sections.",
+      "outputHandlerPrompt": "Keep the valuation multiples comparison, DCF assumptions and result, and the bear/base/bull price targets. Remove textbook explanations of valuation methods. Limit to 600 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "investment-report",
+      "type": "Prompt",
+      "dependsOn": ["risk-assessment", "valuation-analysis", "sentiment-momentum", "competitive-position", "financial-health"],
+      "systemPrompt": "You are a senior portfolio manager producing a final investment recommendation. Synthesize all research into a clear, actionable report. Every claim must be backed by specific data from the provided analyses. Be decisive — do not hedge excessively. The investor reading this needs a clear answer.",
+      "userPrompt": "Produce the final investment recommendation report for {{company}}. Structure as follows:\n\n## Recommendation\nState one of: STRONG BUY / BUY / HOLD / SELL / STRONG SELL\nInclude 12-month price target (bear/base/bull) and current price for context.\n\n## Executive Summary\nOne paragraph summarizing the investment thesis in 3-4 sentences.\n\n## Bull Case\nTop 3-5 reasons to be bullish. Use specific data points.\n\n## Bear Case\nTop 3-5 reasons to be bearish. Use specific data points.\n\n## Financial Snapshot\nKey financial metrics: revenue growth, margins, P/E, FCF yield, debt/equity.\n\n## Valuation\nIs the stock cheap or expensive? Reference the valuation analysis.\n\n## Key Risks\nTop 3 risks with ratings from the risk assessment.\n\n## Catalysts & Timeline\nUpcoming events that could move the stock, with approximate dates.\n\n## Position Sizing Suggestion\n- Conservative investor: suggested allocation\n- Moderate investor: suggested allocation\n- Aggressive investor: suggested allocation\n\n## Conclusion\nFinal 2-3 sentence verdict.",
+      "inputHandlerPrompt": "Organize all inputs into clearly labeled sections: 1) RISK ASSESSMENT — extract the risk register with ratings and overall score. 2) VALUATION — extract the bear/base/bull price targets, key multiples, and DCF result. 3) SENTIMENT & MOMENTUM — extract sentiment score, analyst consensus, catalyst calendar. 4) COMPETITIVE POSITION — extract moat rating, market share, key advantages/threats. 5) FINANCIAL HEALTH — extract growth rates, margins, cash flow data, balance sheet metrics. Keep each section concise — data points only, no narrative.",
+      "outputHandlerPrompt": "Ensure the output is well-structured markdown. The recommendation (STRONG BUY/BUY/HOLD/SELL/STRONG SELL) must be the very first thing, bolded and prominent. Use proper markdown headings (##), bullet points, and bold for key figures. Do not wrap in code fences. Limit to 2000 words.",
+      "parameters": ["company"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    }
+  ]
+}

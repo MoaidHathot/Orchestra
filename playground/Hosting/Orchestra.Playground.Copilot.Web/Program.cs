@@ -512,6 +512,71 @@ app.MapDelete("/api/history/{runId}", (string runId) =>
 // Returns the server-side path where execution history JSON files are saved
 app.MapGet("/api/runs-dir", () => Results.Json(new { path = runsDir }));
 
+// ── POST /api/folder/scan ───────────────────────────────────────────────
+// Scans a folder for orchestration JSON files and returns metadata for each
+app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
+{
+	try
+	{
+		if (string.IsNullOrWhiteSpace(request.Directory))
+			return Results.BadRequest(new { error = "Directory path is required" });
+
+		if (!Directory.Exists(request.Directory))
+			return Results.BadRequest(new { error = $"Directory not found: {request.Directory}" });
+
+		var files = Directory.GetFiles(request.Directory, "*.json", SearchOption.TopDirectoryOnly);
+		var orchestrations = new List<object>();
+
+		foreach (var file in files.OrderBy(f => f))
+		{
+			try
+			{
+				// Parse metadata only (no MCP resolution) to extract structure
+				var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(file);
+				orchestrations.Add(new
+				{
+					path = file,
+					fileName = Path.GetFileName(file),
+					name = orchestration.Name,
+					description = orchestration.Description,
+					stepCount = orchestration.Steps.Length,
+					steps = orchestration.Steps.Select(s => s.Name).ToArray(),
+					parameters = orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray(),
+					valid = true,
+					error = (string?)null,
+				});
+			}
+			catch (Exception ex)
+			{
+				// File exists but isn't a valid orchestration — include it with an error flag
+				orchestrations.Add(new
+				{
+					path = file,
+					fileName = Path.GetFileName(file),
+					name = (string?)null,
+					description = (string?)null,
+					stepCount = 0,
+					steps = Array.Empty<string>(),
+					parameters = Array.Empty<string>(),
+					valid = false,
+					error = ex.Message,
+				});
+			}
+		}
+
+		return Results.Json(new
+		{
+			directory = request.Directory,
+			count = orchestrations.Count,
+			orchestrations,
+		}, jsonOptions);
+	}
+	catch (Exception ex)
+	{
+		return Results.BadRequest(new { error = ex.Message });
+	}
+});
+
 // ── POST /api/validate ──────────────────────────────────────────────────
 // Validates orchestration + MCP files, returns structured validation results
 app.MapPost("/api/validate", (LoadRequest request) =>
@@ -1006,3 +1071,4 @@ record BrowseRequest(string? Directory);
 record SaveRequest(string Path, JsonElement? Orchestration);
 record CompareRequest(string OrchestrationPath, string? McpPath, Dictionary<string, string>? Parameters, CompareRun[] Runs);
 record CompareRun(string? Label, Dictionary<string, string>? ModelOverrides);
+record FolderScanRequest(string? Directory);
