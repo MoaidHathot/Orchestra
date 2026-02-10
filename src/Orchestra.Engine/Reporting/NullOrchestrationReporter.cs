@@ -17,4 +17,5 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	public void ReportStepOutput(string stepName, string content) { }
 	public void ReportStepStarted(string stepName) { }
 	public void ReportStepSkipped(string stepName, string reason) { }
+	public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations) { }
 }

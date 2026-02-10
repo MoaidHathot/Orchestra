@@ -89,13 +89,14 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 	{
 		var userPrompt = InjectParameters(step.UserPrompt, step.Parameters, context.Parameters);
 		var dependencyOutputs = context.GetDependencyOutputs(step.DependsOn);
+		var loopFeedback = context.ConsumeLoopFeedback(step.Name);
 
-		if (string.IsNullOrEmpty(dependencyOutputs))
+		if (string.IsNullOrEmpty(dependencyOutputs) && loopFeedback is null)
 			return userPrompt;
 
 		if (step.InputHandlerPrompt is not null)
 		{
-			return $"""
+			var prompt = $"""
 				{step.InputHandlerPrompt}
 
 				---
@@ -106,15 +107,41 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 				Task:
 				{userPrompt}
 				""";
+
+			if (loopFeedback is not null)
+			{
+				prompt += $"""
+
+
+					---
+					Feedback from previous attempt (use this to improve your output):
+					{loopFeedback}
+					""";
+			}
+
+			return prompt;
 		}
 
-		return $"""
+		var result = $"""
 			{userPrompt}
 
 			---
 			Context from previous steps:
 			{dependencyOutputs}
 			""";
+
+		if (loopFeedback is not null)
+		{
+			result += $"""
+
+
+				---
+				Feedback from previous attempt (use this to improve your output):
+				{loopFeedback}
+				""";
+		}
+
+		return result;
 	}
 
 	private static string InjectParameters(string prompt, string[] parameterNames, Dictionary<string, string> parameters)

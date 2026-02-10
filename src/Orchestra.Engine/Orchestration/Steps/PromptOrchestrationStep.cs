@@ -12,6 +12,14 @@ public class PromptOrchestrationStep : OrchestrationStep
 	public Mcp[] Mcps { get; internal set; } = [];
 
 	/// <summary>
+	/// Optional loop configuration for retry/check patterns.
+	/// When set, after this step runs the executor checks if the output matches
+	/// <see cref="LoopConfig.ExitPattern"/>. If not, it re-runs the target step
+	/// with feedback and re-checks, up to <see cref="LoopConfig.MaxIterations"/> times.
+	/// </summary>
+	public LoopConfig? Loop { get; init; }
+
+	/// <summary>
 	/// Raw MCP names from JSON, used internally during parsing to resolve to <see cref="Mcps"/>.
 	/// </summary>
 	internal string[] McpNames { get; init; } = [];

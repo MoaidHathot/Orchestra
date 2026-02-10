@@ -15,4 +15,5 @@ public interface IOrchestrationReporter
 	void ReportStepOutput(string stepName, string content);
 	void ReportStepStarted(string stepName);
 	void ReportStepSkipped(string stepName, string reason);
+	void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations);
 }

@@ -183,6 +183,19 @@ public static class OrchestrationParser
 				Parameters = root.TryGetProperty("parameters", out var parameters)
 				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
+				Loop = root.TryGetProperty("loop", out var loop)
+					? DeserializeLoopConfig(loop)
+					: null,
+			};
+		}
+
+		private static LoopConfig DeserializeLoopConfig(JsonElement element)
+		{
+			return new LoopConfig
+			{
+				Target = element.GetProperty("target").GetString()!,
+				MaxIterations = element.GetProperty("maxIterations").GetInt32(),
+				ExitPattern = element.GetProperty("exitPattern").GetString()!,
 			};
 		}
 	}
