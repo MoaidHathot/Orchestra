@@ -1,0 +1,8 @@
+{
+  "orchestrationPath": "P:\\Github\\Orchestra\\playground\\Hosting\\Orchestra.Playground.Copilot\\orchestrations\\orchestration7.json",
+  "mcpPath": "P:\\Github\\Orchestra\\playground\\Hosting\\Orchestra.Playground.Copilot\\orchestrations\\mcp.json",
+  "trigger": {
+    "type": 0,
+    "enabled": true
+  }
+}

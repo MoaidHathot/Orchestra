@@ -1,0 +1,105 @@
+{
+  "name": "intelligent-content-pipeline",
+  "description": "Advanced orchestration combining all 4 features. (F1) Parameters: accepts 'topic' and 'audience' via manual fire dialog. (F2) Input Handler Prompt: webhook trigger with LLM-powered input normalization that extracts topic/audience from arbitrary payloads. (F3) View State: scheduler trigger enables periodic execution whose results are viewable via the trigger dashboard's View Run button. (F4) MCP Detection: the 'publish' step uses the filesystem MCP defined inline below to save the final output. When the folder also contains mcp.json, external definitions are merged (and override inline ones on name conflicts). This is a 7-step DAG: 3 parallel research steps fan out, 2 analysis steps synthesize, a quality checker iterates with the draft, and a final publisher step writes the result to disk.",
+  "mcps": [
+    {
+      "name": "filesystem",
+      "type": "local",
+      "command": "npx",
+      "arguments": ["-y", "@anthropic/mcp-server-filesystem", "{{workingDirectory}}"]
+    }
+  ],
+  "steps": [
+    {
+      "name": "research-topic",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a subject matter researcher. You produce thorough, factual research briefs on any topic. Focus on key facts, recent developments, and authoritative perspectives. Keep your response under 600 words.",
+      "userPrompt": "Research the topic '{{topic}}' and produce a comprehensive brief covering: 1) Definition and core concepts. 2) Current state and recent developments (last 1-2 years). 3) Key players, organizations, or technologies involved. 4) Common misconceptions. 5) Quantitative data points (statistics, market size, adoption rates) where available.",
+      "outputHandlerPrompt": "Keep only factual content. Remove hedging language and caveats. Ensure all claims are specific, not vague. Limit to 500 words.",
+      "parameters": ["topic"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "analyze-audience",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are an audience analysis specialist. You understand different audience segments and how to tailor content for maximum engagement and comprehension.",
+      "userPrompt": "Analyze the target audience '{{audience}}' and produce a content strategy profile: 1) Knowledge level (beginner, intermediate, expert). 2) Primary interests and pain points. 3) Preferred content format and length. 4) Tone and vocabulary recommendations. 5) What to emphasize vs. what to skip. 6) Engagement hooks that work for this audience.",
+      "outputHandlerPrompt": "Format as a concise profile card. Keep under 300 words.",
+      "parameters": ["audience"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "gather-examples",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a content strategist who finds compelling examples, case studies, and analogies. You make complex topics accessible through real-world illustrations.",
+      "userPrompt": "Find 3-5 compelling examples, analogies, or mini case studies that illustrate '{{topic}}' effectively for a '{{audience}}' audience. For each example: 1) Brief description (2-3 sentences). 2) Why it's relevant. 3) The key takeaway it demonstrates. Prioritize recent, relatable examples.",
+      "outputHandlerPrompt": "Number each example. Keep each to 3-4 sentences max. Total under 400 words.",
+      "parameters": ["topic", "audience"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "create-outline",
+      "type": "Prompt",
+      "dependsOn": ["research-topic", "analyze-audience"],
+      "systemPrompt": "You are a content architect. You design article structures that are logical, engaging, and tailored to the target audience. Your outlines serve as precise blueprints.",
+      "userPrompt": "Create a detailed content outline for an article about '{{topic}}' targeted at '{{audience}}'. Include: 1) A working title (compelling, audience-appropriate). 2) Section-by-section outline with: heading, 2-3 bullet points of what to cover, estimated word count. 3) Where to place examples and data points. 4) Call-to-action or conclusion strategy. Target total article length: 1500-2000 words.",
+      "inputHandlerPrompt": "From research-topic, extract the key facts, developments, data points, and concepts. From analyze-audience, extract the knowledge level, tone recommendations, content preferences, and engagement hooks. Present as two labeled sections: RESEARCH and AUDIENCE PROFILE.",
+      "outputHandlerPrompt": "Format as a clean markdown outline with section numbers and bullet points. Keep under 400 words.",
+      "parameters": ["topic", "audience"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "write-draft",
+      "type": "Prompt",
+      "dependsOn": ["create-outline", "gather-examples"],
+      "systemPrompt": "You are a professional content writer. You produce polished, engaging articles that follow a provided outline precisely. You weave in examples naturally, match the audience's level, and maintain a consistent voice throughout.",
+      "userPrompt": "Write the full article following the outline from the previous step. Requirements: 1) Follow the outline structure exactly. 2) Integrate the provided examples naturally into relevant sections. 3) Use the recommended tone and vocabulary for the '{{audience}}' audience. 4) Include data points from the research where they strengthen arguments. 5) Write a compelling introduction that hooks the reader. 6) End with a strong conclusion and call-to-action. Target: 1500-2000 words.",
+      "inputHandlerPrompt": "From create-outline, extract the complete section-by-section outline with headings and bullet points. From gather-examples, extract the numbered examples with their descriptions and takeaways. Present as two labeled sections: OUTLINE and EXAMPLES.",
+      "parameters": ["audience"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "quality-review",
+      "type": "Prompt",
+      "dependsOn": ["write-draft"],
+      "systemPrompt": "You are a senior editor with exacting standards. You evaluate articles against a strict quality checklist. If ALL criteria are met, respond with PUBLISH as the first word. If ANY criterion fails, explain exactly what needs to change. Do NOT say PUBLISH unless every criterion passes.",
+      "userPrompt": "Review the article against this editorial checklist:\n\n1) STRUCTURE: Does the article follow the planned outline with clear section headings?\n2) AUDIENCE FIT: Is the tone, vocabulary, and depth appropriate for '{{audience}}'?\n3) EXAMPLES: Are at least 3 examples or case studies integrated naturally?\n4) DATA: Are specific data points or statistics included (not vague claims)?\n5) ENGAGEMENT: Does the introduction hook the reader within the first 2 sentences?\n6) CONCLUSION: Does it end with a clear call-to-action or key takeaway?\n7) LENGTH: Is the article between 1200-2200 words?\n8) FLOW: Do paragraphs transition smoothly without abrupt topic changes?\n\nIf ALL 8 criteria pass, start with: PUBLISH\nIf ANY criterion fails, start with: REVISE and list specific fixes.",
+      "inputHandlerPrompt": "Extract the complete article text. Present it as-is for review.",
+      "outputHandlerPrompt": "Ensure PUBLISH or REVISE is the first word. Keep the review under 500 words.",
+      "parameters": ["audience"],
+      "mcps": [],
+      "model": "gpt-4o",
+      "loop": {
+        "target": "write-draft",
+        "maxIterations": 3,
+        "exitPattern": "PUBLISH"
+      }
+    },
+    {
+      "name": "publish",
+      "type": "Prompt",
+      "dependsOn": ["quality-review", "write-draft"],
+      "systemPrompt": "You are a publishing coordinator. You prepare final content for distribution, adding metadata and formatting touches. You also have filesystem access to save the final article.",
+      "userPrompt": "Prepare the final article for publication: 1) Add front matter: title, author ('Orchestra AI Pipeline'), date (today), target audience, estimated reading time. 2) Clean up any formatting issues. 3) Add a 'Key Takeaways' box at the top with 3-4 bullet points. 4) Ensure all markdown formatting is correct. If you have filesystem tools available, save the final article as 'output-{{topic}}.md' in the current directory.",
+      "inputHandlerPrompt": "From write-draft, extract the final approved article. From quality-review, extract the verdict (PUBLISH/REVISE) and any final notes. Present both.",
+      "outputHandlerPrompt": "Output the complete formatted article with front matter. This is the final published version.",
+      "parameters": ["topic"],
+      "mcps": ["filesystem"],
+      "model": "gpt-4o"
+    }
+  ],
+  "trigger": {
+    "type": "webhook",
+    "enabled": true,
+    "inputHandlerPrompt": "You will receive a raw JSON payload from an external system. Extract two fields:\n\n1. 'topic' - The subject to write about. Look for fields like 'topic', 'subject', 'title', 'query', 'keyword', or 'theme'. If the payload is from a CMS, look in 'content.topic' or 'article.subject'. If it's free-form text, summarize the main topic in 3-5 words.\n\n2. 'audience' - The target audience. Look for fields like 'audience', 'target', 'segment', 'persona', or 'readership'. If not found, default to 'general technology professionals'.\n\nReturn ONLY a JSON object with 'topic' and 'audience' keys.",
+    "maxConcurrent": 2
+  }
+}

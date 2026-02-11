@@ -1,0 +1,45 @@
+{
+  "name": "codebase-explorer",
+  "description": "Demonstrates inline MCP definitions and folder-level MCP detection. The 'filesystem' MCP is defined inline in this orchestration, so it works standalone without an external mcp.json. When the folder also contains mcp.json, those external definitions are merged (and override inline ones on name conflicts).",
+  "mcps": [
+    {
+      "name": "filesystem",
+      "type": "local",
+      "command": "npx",
+      "arguments": ["-y", "@anthropic/mcp-server-filesystem", "{{workingDirectory}}"]
+    }
+  ],
+  "steps": [
+    {
+      "name": "discover-structure",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a code archaeologist. You explore codebases to understand their structure, architecture, and conventions. Use the filesystem tools available to you to read directory listings and key files.",
+      "userPrompt": "Using the filesystem tools, explore the current working directory and produce a project structure overview: 1) List the top-level directories and their purposes. 2) Identify the programming language(s) and framework(s) used. 3) Find the main entry point(s). 4) Note any configuration files (package.json, .csproj, Dockerfile, etc.). 5) Identify the test directory if present.",
+      "outputHandlerPrompt": "Present as a clean markdown tree structure followed by a brief analysis. Keep under 500 words.",
+      "mcps": ["filesystem"],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "analyze-dependencies",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a dependency analyst. You examine project dependency files to assess the dependency landscape. Use the filesystem tools to read package manifests and lock files.",
+      "userPrompt": "Using the filesystem tools, find and read the project's dependency files (package.json, .csproj, requirements.txt, go.mod, Cargo.toml, etc.). Then produce a dependency report: 1) Total number of direct dependencies. 2) Key dependencies and their purposes. 3) Any outdated or potentially risky dependencies. 4) Development vs production dependency split.",
+      "outputHandlerPrompt": "Format as a markdown table for dependencies plus a brief risk assessment. Keep under 400 words.",
+      "mcps": ["filesystem"],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "produce-report",
+      "type": "Prompt",
+      "dependsOn": ["discover-structure", "analyze-dependencies"],
+      "systemPrompt": "You are a technical writer producing codebase documentation. Combine structural and dependency analysis into a cohesive project overview document.",
+      "userPrompt": "Combine the project structure analysis and dependency report into a single 'Codebase Overview' document with sections: 1) Project Summary. 2) Architecture & Structure. 3) Technology Stack. 4) Dependencies. 5) Getting Started (inferred from the project structure). 6) Recommendations for improvement.",
+      "inputHandlerPrompt": "From discover-structure, extract the directory tree, languages, frameworks, and entry points. From analyze-dependencies, extract the dependency table and risk assessment. Present as two labeled sections.",
+      "outputHandlerPrompt": "Format as a polished markdown document suitable for a project README. Keep under 800 words.",
+      "mcps": [],
+      "model": "gpt-4o"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "travel-planner",
+  "description": "Demonstrates Feature 1: Manual Fire with Parameters. When fired via a trigger, the UI prompts for 'destination' and 'duration' parameters. Two parallel research steps fan out, then a final step synthesizes the itinerary.",
+  "steps": [
+    {
+      "name": "research-attractions",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a travel expert specializing in tourist attractions and cultural experiences. Provide practical, up-to-date recommendations. Keep your response under 500 words.",
+      "userPrompt": "List the top 10 must-visit attractions and experiences in {{destination}}. For each, include: name, why it's worth visiting, best time to go, and approximate cost. Group them by category (cultural, nature, food, entertainment).",
+      "parameters": ["destination"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "research-logistics",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a travel logistics specialist. Focus on practical details: transport, accommodation, budget, and local tips. Keep your response under 500 words.",
+      "userPrompt": "Provide a logistics guide for a {{duration}} trip to {{destination}}: 1) Best neighborhoods to stay in (budget, mid-range, luxury). 2) Getting around (public transport, rideshare, walking). 3) Estimated daily budget breakdown (accommodation, food, transport, activities). 4) Essential local tips (currency, tipping, safety, SIM cards). 5) Best time of year to visit.",
+      "parameters": ["destination", "duration"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "build-itinerary",
+      "type": "Prompt",
+      "dependsOn": ["research-attractions", "research-logistics"],
+      "systemPrompt": "You are a travel planner who creates detailed day-by-day itineraries. Combine attraction recommendations with logistical realities to produce a practical, enjoyable plan.",
+      "userPrompt": "Create a detailed day-by-day itinerary for a {{duration}} trip to {{destination}}. For each day include: morning, afternoon, and evening activities with specific attractions from the research, meal recommendations, transport between locations, and estimated costs. End with a total trip budget estimate.",
+      "inputHandlerPrompt": "From research-attractions, extract the categorized list of attractions with costs. From research-logistics, extract the accommodation areas, transport options, daily budget, and local tips. Present as two labeled sections: ATTRACTIONS and LOGISTICS.",
+      "outputHandlerPrompt": "Format as clean markdown with day headers (## Day 1, ## Day 2, etc.). Include a budget summary table at the end. Keep under 1500 words.",
+      "parameters": ["destination", "duration"],
+      "mcps": [],
+      "model": "gpt-4o"
+    }
+  ],
+  "trigger": {
+    "type": "webhook",
+    "enabled": true
+  }
+}
