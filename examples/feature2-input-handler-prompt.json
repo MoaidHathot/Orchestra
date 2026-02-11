@@ -1,0 +1,34 @@
+{
+  "name": "smart-webhook-processor",
+  "description": "Demonstrates Feature 2: Input Handler Prompt on triggers. The webhook trigger has an inputHandlerPrompt that uses an LLM to extract structured parameters from arbitrary incoming webhook payloads (e.g., GitHub issue events, Slack messages, or free-form JSON). The LLM intelligently maps messy external data to the orchestration's expected 'title' and 'body' parameters.",
+  "steps": [
+    {
+      "name": "analyze-request",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a request triage analyst. You categorize incoming requests by urgency and type, then produce a structured assessment.",
+      "userPrompt": "Analyze the following request and produce a triage report:\n\nTitle: {{title}}\nBody: {{body}}\n\nProvide: 1) Category (bug, feature-request, question, incident, other). 2) Urgency (critical, high, medium, low). 3) Key entities mentioned (people, systems, services). 4) One-sentence summary. 5) Suggested next actions (2-3 bullet points).",
+      "outputHandlerPrompt": "Format as a concise markdown report with clear section headers. Keep under 300 words.",
+      "parameters": ["title", "body"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "draft-response",
+      "type": "Prompt",
+      "dependsOn": ["analyze-request"],
+      "systemPrompt": "You are a professional communications specialist. Draft appropriate responses based on triage analysis. Match tone to urgency: critical = direct and action-oriented, low = friendly and helpful.",
+      "userPrompt": "Based on the triage analysis, draft a professional response to the request. The response should: 1) Acknowledge the request. 2) Confirm the category and urgency assessment. 3) Outline the next steps. 4) Provide an estimated timeline for resolution. Keep the tone appropriate to the urgency level.",
+      "inputHandlerPrompt": "Extract the category, urgency, summary, and suggested actions from the triage report. Present as labeled fields.",
+      "outputHandlerPrompt": "Keep the response professional and concise. Under 200 words.",
+      "mcps": [],
+      "model": "gpt-4o"
+    }
+  ],
+  "trigger": {
+    "type": "webhook",
+    "enabled": true,
+    "inputHandlerPrompt": "You will receive a raw webhook payload as JSON. This could be from any source: a GitHub issue event, a Slack message, a Jira notification, a PagerDuty alert, or arbitrary JSON. Your job is to extract two fields:\n\n1. 'title' - A short descriptive title for the request (max 100 chars). If there's a 'title', 'subject', 'summary', or 'name' field, use it. If it's a GitHub issue, use the issue title. If it's a Slack message, summarize the text.\n\n2. 'body' - The main content/description. If there's a 'body', 'description', 'text', 'message', or 'content' field, use it. Combine multiple relevant fields if needed.\n\nReturn ONLY a JSON object with 'title' and 'body' keys. No other text.",
+    "maxConcurrent": 3
+  }
+}

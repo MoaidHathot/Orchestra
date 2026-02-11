@@ -1,0 +1,56 @@
+{
+  "name": "iterative-code-generation",
+  "description": "Demonstrates the loop/checker pattern. Generates a C# utility function, then a reviewer checks it against quality criteria. If the reviewer doesn't approve, the generator re-runs with the reviewer's feedback, iterating up to 3 times until the code meets all standards.",
+  "steps": [
+    {
+      "name": "gather-requirements",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a software architect. You take a high-level feature request and produce a clear, concise specification. Focus on inputs, outputs, edge cases, and constraints. Keep your response under 300 words.",
+      "userPrompt": "Write a specification for the following feature request: {{feature}}. Include: 1) Function signature (C# method). 2) Input validation rules. 3) Expected behavior with examples. 4) Edge cases to handle. 5) Performance constraints if any.",
+      "outputHandlerPrompt": "Keep only the specification. Remove any preamble or commentary. Ensure the function signature and edge cases are clearly listed.",
+      "parameters": ["feature"],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "generate-code",
+      "type": "Prompt",
+      "dependsOn": ["gather-requirements"],
+      "systemPrompt": "You are a senior C# developer. You write clean, well-documented, production-ready code. Follow C# conventions: PascalCase for public members, XML doc comments, guard clauses for validation. Include unit test examples using xUnit.",
+      "userPrompt": "Based on the specification from the previous step, implement the C# function. Include:\n1) The complete method with XML doc comments.\n2) Input validation with descriptive exceptions.\n3) At least 3 xUnit test methods covering normal cases and edge cases.\n\nReturn ONLY the code — no explanations outside of code comments.",
+      "inputHandlerPrompt": "Extract the full specification: function signature, validation rules, expected behavior, edge cases, and constraints. Present it as a clear spec document.",
+      "parameters": [],
+      "mcps": [],
+      "model": "gpt-4o"
+    },
+    {
+      "name": "review-code",
+      "type": "Prompt",
+      "dependsOn": ["generate-code"],
+      "systemPrompt": "You are a strict code reviewer. You evaluate C# code against a quality checklist. You must be thorough and specific. If ALL criteria are met, respond with APPROVED as the first word. If ANY criterion is not met, explain exactly what is wrong and how to fix it. Do NOT say APPROVED unless every single criterion passes.",
+      "userPrompt": "Review the code from the previous step against this checklist:\n\n1) VALIDATION: Does the method validate all inputs with guard clauses and throw ArgumentException/ArgumentNullException with descriptive messages?\n2) DOCUMENTATION: Does the method have XML doc comments (summary, param, returns, exception tags)?\n3) NAMING: Are all public members PascalCase and parameters camelCase?\n4) TESTS: Are there at least 3 xUnit tests covering: a normal case, a boundary case, and an invalid input case?\n5) CORRECTNESS: Does the implementation match the specification from gather-requirements?\n6) EDGE CASES: Are the edge cases from the spec handled in both the code and the tests?\n\nIf ALL 6 criteria pass, start your response with: APPROVED\nFollowed by a brief summary of what was reviewed.\n\nIf ANY criterion fails, start with: NEEDS REVISION\nThen list each failing criterion with a specific description of what is wrong and exactly how to fix it.",
+      "inputHandlerPrompt": "Extract the complete code output including the method implementation and all test methods. Present it as-is without modification.",
+      "outputHandlerPrompt": "Keep the full review. Ensure APPROVED or NEEDS REVISION is the first word of the output.",
+      "parameters": [],
+      "mcps": [],
+      "model": "gpt-4o",
+      "loop": {
+        "target": "generate-code",
+        "maxIterations": 3,
+        "exitPattern": "APPROVED"
+      }
+    },
+    {
+      "name": "final-summary",
+      "type": "Prompt",
+      "dependsOn": ["review-code", "generate-code"],
+      "systemPrompt": "You are a technical writer. You produce clear, concise summaries of development outcomes.",
+      "userPrompt": "Summarize the code generation and review process:\n1) What was the original feature request?\n2) Present the final approved code.\n3) Note whether it passed on the first attempt or required revisions, and if so, what was changed.\n4) List the quality criteria that were verified.\n\nFormat the output as a clean markdown document.",
+      "inputHandlerPrompt": "From generate-code, extract the final version of the code. From review-code, extract the review verdict (APPROVED/NEEDS REVISION) and any feedback given. Present both clearly.",
+      "parameters": [],
+      "mcps": [],
+      "model": "gpt-4o"
+    }
+  ]
+}

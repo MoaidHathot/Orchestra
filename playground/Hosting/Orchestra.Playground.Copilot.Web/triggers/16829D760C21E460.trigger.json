@@ -1,0 +1,7 @@
+{
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\advanced-combined-features.json",
+  "trigger": {
+    "type": 0,
+    "enabled": true
+  }
+}

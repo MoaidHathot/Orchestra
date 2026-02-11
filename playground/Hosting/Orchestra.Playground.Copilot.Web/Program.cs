@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging.Console;
@@ -20,6 +22,25 @@ builder.Logging.AddSimpleConsole(options =>
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 builder.Services.AddSingleton<IScheduler, OrchestrationScheduler>();
 
+// Shared active executions dictionary (used by both direct execution and TriggerManager)
+var activeExecutions = new ConcurrentDictionary<string, CancellationTokenSource>();
+builder.Services.AddSingleton(activeExecutions);
+
+// Register TriggerManager as a hosted background service
+builder.Services.AddSingleton<TriggerManager>(sp =>
+{
+	var runsPath = Path.Combine(builder.Environment.ContentRootPath, "runs");
+	Directory.CreateDirectory(runsPath);
+	return new TriggerManager(
+		sp.GetRequiredService<ConcurrentDictionary<string, CancellationTokenSource>>(),
+		sp.GetRequiredService<AgentBuilder>(),
+		sp.GetRequiredService<IScheduler>(),
+		sp.GetRequiredService<ILoggerFactory>(),
+		sp.GetRequiredService<ILogger<TriggerManager>>(),
+		runsPath);
+});
+builder.Services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
+
 var app = builder.Build();
 
 // Ensure runs directory exists for execution history
@@ -33,9 +54,6 @@ var jsonOptions = new JsonSerializerOptions
 	PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 	DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
 };
-
-// Track active executions for cancel support
-var activeExecutions = new ConcurrentDictionary<string, CancellationTokenSource>();
 
 // ── POST /api/load ──────────────────────────────────────────────────────
 // Loads orchestration + MCP files, returns metadata for the frontend
@@ -91,15 +109,53 @@ app.MapPost("/api/load", (LoadRequest request, IScheduler scheduler) =>
 			.Distinct()
 			.ToArray();
 
-		// MCP info
-		var mcpInfo = mcps.Select(m => new
+		// MCP info — merge inline (from orchestration) + external (from mcp.json file)
+		// External takes priority on name conflicts (same as engine behavior)
+		var mergedMcpLookup = new Dictionary<string, Mcp>(StringComparer.OrdinalIgnoreCase);
+		foreach (var m in orchestration.Mcps)
+			mergedMcpLookup[m.Name] = m;
+		foreach (var m in mcps)
+			mergedMcpLookup[m.Name] = m;
+		var mcpInfo = mergedMcpLookup.Values.Select(m => new
 		{
 			name = m.Name,
 			type = m.Type.ToString(),
 			endpoint = (m as RemoteMcp)?.Endpoint,
 			command = (m as LocalMcp)?.Command,
 			arguments = (m as LocalMcp)?.Arguments,
+			source = orchestration.Mcps.Any(im => im.Name.Equals(m.Name, StringComparison.OrdinalIgnoreCase))
+				? (mcps.Any(em => em.Name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) ? "override" : "inline")
+				: "external",
 		}).ToArray();
+
+		// Include trigger info if present
+		object? triggerInfo = orchestration.Trigger switch
+		{
+			SchedulerTriggerConfig s => new
+			{
+				type = "scheduler",
+				enabled = s.Enabled,
+				cron = s.Cron,
+				intervalSeconds = s.IntervalSeconds,
+				maxRuns = s.MaxRuns,
+			},
+			LoopTriggerConfig l => new
+			{
+				type = "loop",
+				enabled = l.Enabled,
+				delaySeconds = l.DelaySeconds,
+				maxIterations = l.MaxIterations,
+				continueOnFailure = l.ContinueOnFailure,
+			},
+			WebhookTriggerConfig w => new
+			{
+				type = "webhook",
+				enabled = w.Enabled,
+				secret = (string?)null, // Don't expose secret
+				maxConcurrent = w.MaxConcurrent,
+			},
+			_ => null,
+		};
 
 		return Results.Json(new
 		{
@@ -109,6 +165,7 @@ app.MapPost("/api/load", (LoadRequest request, IScheduler scheduler) =>
 			layers,
 			parameters = allParameters,
 			mcps = mcpInfo,
+			trigger = triggerInfo,
 		}, jsonOptions);
 	}
 	catch (Exception ex)
@@ -527,13 +584,58 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 		var files = Directory.GetFiles(request.Directory, "*.json", SearchOption.TopDirectoryOnly);
 		var orchestrations = new List<object>();
 
+		// Auto-detect mcp.json in the scanned directory
+		string? detectedMcpPath = null;
+		var mcpCandidate = Path.Combine(request.Directory, "mcp.json");
+		if (File.Exists(mcpCandidate))
+			detectedMcpPath = mcpCandidate;
+
 		foreach (var file in files.OrderBy(f => f))
 		{
+			// Skip the mcp.json file itself — it's not an orchestration
+			if (Path.GetFileName(file).Equals("mcp.json", StringComparison.OrdinalIgnoreCase))
+				continue;
+
 			try
 			{
 				// Parse metadata only (no MCP resolution) to extract structure
 				var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(file);
-				orchestrations.Add(new
+
+				// Extract trigger info if present
+				object? triggerInfo = orchestration.Trigger switch
+				{
+					SchedulerTriggerConfig s => new
+					{
+						type = "scheduler",
+						enabled = s.Enabled,
+						cron = s.Cron,
+						intervalSeconds = s.IntervalSeconds,
+						maxRuns = s.MaxRuns,
+					},
+					LoopTriggerConfig l => new
+					{
+						type = "loop",
+						enabled = l.Enabled,
+						delaySeconds = l.DelaySeconds,
+						maxIterations = l.MaxIterations,
+						continueOnFailure = l.ContinueOnFailure,
+					},
+					WebhookTriggerConfig w => new
+					{
+						type = "webhook",
+						enabled = w.Enabled,
+						maxConcurrent = w.MaxConcurrent,
+					},
+					_ => null,
+				};
+
+				// Check for per-orchestration mcp file: {name}.mcp.json
+			var perFileMcp = Path.Combine(
+				Path.GetDirectoryName(file)!,
+				Path.GetFileNameWithoutExtension(file) + ".mcp.json");
+			var orchMcpPath = File.Exists(perFileMcp) ? perFileMcp : detectedMcpPath;
+
+			orchestrations.Add(new
 				{
 					path = file,
 					fileName = Path.GetFileName(file),
@@ -542,6 +644,10 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 					stepCount = orchestration.Steps.Length,
 					steps = orchestration.Steps.Select(s => s.Name).ToArray(),
 					parameters = orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray(),
+					trigger = triggerInfo,
+					mcpPath = orchMcpPath,
+					hasInlineMcps = orchestration.Mcps.Length > 0,
+					inlineMcpNames = orchestration.Mcps.Select(m => m.Name).ToArray(),
 					valid = true,
 					error = (string?)null,
 				});
@@ -558,6 +664,8 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 					stepCount = 0,
 					steps = Array.Empty<string>(),
 					parameters = Array.Empty<string>(),
+					hasInlineMcps = false,
+					inlineMcpNames = Array.Empty<string>(),
 					valid = false,
 					error = ex.Message,
 				});
@@ -568,6 +676,7 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 		{
 			directory = request.Directory,
 			count = orchestrations.Count,
+			mcpPath = detectedMcpPath,
 			orchestrations,
 		}, jsonOptions);
 	}
@@ -1058,10 +1167,399 @@ static void WriteWithModelOverrides(Utf8JsonWriter writer, JsonElement element, 
 	}
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// ── TRIGGER API ENDPOINTS ────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════
+
+// ── GET /api/triggers ───────────────────────────────────────────────────
+// Lists all registered triggers with their runtime state
+app.MapGet("/api/triggers", (TriggerManager triggerManager) =>
+{
+	var triggers = triggerManager.GetAllTriggers().Select(t =>
+	{
+		// Flatten common + type-specific config fields for easier frontend access
+		var flat = new Dictionary<string, object?>
+		{
+			["id"] = t.Id,
+			["orchestrationPath"] = t.OrchestrationPath,
+			["orchestrationName"] = t.OrchestrationName,
+			["orchestrationDescription"] = t.OrchestrationDescription,
+			["mcpPath"] = t.McpPath,
+			["triggerType"] = t.Config.Type.ToString().ToLowerInvariant(),
+			["enabled"] = t.Config.Enabled,
+			["inputHandlerPrompt"] = t.Config.InputHandlerPrompt,
+			["status"] = t.Status.ToString(),
+			["source"] = t.Source.ToString().ToLowerInvariant(),
+			["nextFireTime"] = t.NextFireTime?.ToString("o"),
+			["lastFireTime"] = t.LastFireTime?.ToString("o"),
+			["runCount"] = t.RunCount,
+			["lastError"] = t.LastError,
+			["activeExecutionId"] = t.ActiveExecutionId,
+			["lastExecutionId"] = t.LastExecutionId,
+			["config"] = FormatTriggerConfig(t.Config),
+			["parameters"] = GetOrchestrationParameterNames(t.OrchestrationPath),
+		};
+
+		// Also flatten type-specific fields so frontend can access them directly
+		switch (t.Config)
+		{
+			case SchedulerTriggerConfig s:
+				flat["cron"] = s.Cron;
+				flat["intervalSeconds"] = s.IntervalSeconds;
+				flat["maxRuns"] = s.MaxRuns;
+				break;
+			case LoopTriggerConfig l:
+				flat["delaySeconds"] = l.DelaySeconds;
+				flat["maxIterations"] = l.MaxIterations;
+				flat["continueOnFailure"] = l.ContinueOnFailure;
+				break;
+			case WebhookTriggerConfig w:
+				flat["maxConcurrent"] = w.MaxConcurrent;
+				break;
+		}
+
+		return flat;
+	}).ToArray();
+
+	return Results.Json(new { count = triggers.Length, triggers }, jsonOptions);
+});
+
+// ── GET /api/triggers/{id} ──────────────────────────────────────────────
+// Gets a specific trigger's state
+app.MapGet("/api/triggers/{id}", (string id, TriggerManager triggerManager) =>
+{
+	var t = triggerManager.GetTrigger(id);
+	if (t == null)
+		return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+
+	return Results.Json(new
+	{
+		id = t.Id,
+		orchestrationPath = t.OrchestrationPath,
+		orchestrationName = t.OrchestrationName,
+		orchestrationDescription = t.OrchestrationDescription,
+		mcpPath = t.McpPath,
+		triggerType = t.Config.Type.ToString().ToLowerInvariant(),
+		enabled = t.Config.Enabled,
+		inputHandlerPrompt = t.Config.InputHandlerPrompt,
+		status = t.Status.ToString(),
+		source = t.Source.ToString().ToLowerInvariant(),
+		nextFireTime = t.NextFireTime?.ToString("o"),
+		lastFireTime = t.LastFireTime?.ToString("o"),
+		runCount = t.RunCount,
+		lastError = t.LastError,
+		activeExecutionId = t.ActiveExecutionId,
+		lastExecutionId = t.LastExecutionId,
+		config = FormatTriggerConfig(t.Config),
+		webhookUrl = t.Config is WebhookTriggerConfig ? $"/api/webhook/{t.Id}" : null,
+		parameters = GetOrchestrationParameterNames(t.OrchestrationPath),
+	}, jsonOptions);
+});
+
+// ── POST /api/triggers ──────────────────────────────────────────────────
+// Registers or updates a trigger from the UI
+app.MapPost("/api/triggers", (TriggerCreateRequest request, TriggerManager triggerManager) =>
+{
+	try
+	{
+		if (string.IsNullOrWhiteSpace(request.OrchestrationPath))
+			return Results.BadRequest(new { error = "orchestrationPath is required." });
+
+		if (!File.Exists(request.OrchestrationPath))
+			return Results.BadRequest(new { error = $"Orchestration file not found: {request.OrchestrationPath}" });
+
+		// Parse trigger config from the request
+		var config = ParseTriggerConfigFromRequest(request);
+		if (config == null)
+			return Results.BadRequest(new { error = $"Invalid trigger type: '{request.TriggerType}'. Expected: scheduler, loop, or webhook." });
+
+		var reg = triggerManager.RegisterTrigger(
+			request.OrchestrationPath,
+			request.McpPath,
+			config,
+			request.Parameters,
+			TriggerSource.User);
+
+		return Results.Json(new
+		{
+			id = reg.Id,
+			orchestrationPath = reg.OrchestrationPath,
+			triggerType = reg.Config.Type.ToString().ToLowerInvariant(),
+			enabled = reg.Config.Enabled,
+			status = reg.Status.ToString(),
+			webhookUrl = reg.Config is WebhookTriggerConfig ? $"/api/webhook/{reg.Id}" : null,
+		}, jsonOptions);
+	}
+	catch (Exception ex)
+	{
+		return Results.BadRequest(new { error = ex.Message });
+	}
+});
+
+// ── DELETE /api/triggers/{id} ───────────────────────────────────────────
+// Removes a trigger registration
+app.MapDelete("/api/triggers/{id}", (string id, TriggerManager triggerManager) =>
+{
+	if (triggerManager.RemoveTrigger(id))
+		return Results.Ok(new { deleted = true, id });
+
+	return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+});
+
+// ── POST /api/triggers/{id}/enable ──────────────────────────────────────
+// Enables a trigger
+app.MapPost("/api/triggers/{id}/enable", (string id, TriggerManager triggerManager) =>
+{
+	if (triggerManager.SetTriggerEnabled(id, true))
+	{
+		var t = triggerManager.GetTrigger(id);
+		return Results.Ok(new
+		{
+			id,
+			enabled = true,
+			status = t?.Status.ToString(),
+			nextFireTime = t?.NextFireTime?.ToString("o"),
+		});
+	}
+	return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+});
+
+// ── POST /api/triggers/{id}/disable ─────────────────────────────────────
+// Disables a trigger
+app.MapPost("/api/triggers/{id}/disable", (string id, TriggerManager triggerManager) =>
+{
+	if (triggerManager.SetTriggerEnabled(id, false))
+	{
+		var t = triggerManager.GetTrigger(id);
+		return Results.Ok(new
+		{
+			id,
+			enabled = false,
+			status = t?.Status.ToString(),
+		});
+	}
+	return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+});
+
+// ── POST /api/triggers/{id}/fire ────────────────────────────────────────
+// Manually fires a trigger (any type), optionally with parameters
+app.MapPost("/api/triggers/{id}/fire", async (HttpContext httpContext, string id, TriggerManager triggerManager) =>
+{
+	var t = triggerManager.GetTrigger(id);
+	if (t == null)
+		return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+
+	// Read optional parameters from request body
+	Dictionary<string, string>? parameters = null;
+	try
+	{
+		if (httpContext.Request.ContentLength > 0 || httpContext.Request.ContentType?.Contains("json") == true)
+		{
+			var body = await JsonSerializer.DeserializeAsync<JsonElement>(httpContext.Request.Body, jsonOptions);
+			if (body.TryGetProperty("parameters", out var paramsEl) && paramsEl.ValueKind == JsonValueKind.Object)
+			{
+				parameters = new Dictionary<string, string>();
+				foreach (var prop in paramsEl.EnumerateObject())
+					parameters[prop.Name] = prop.Value.GetString() ?? "";
+			}
+		}
+	}
+	catch { /* no body or invalid JSON — fire without parameters */ }
+
+	var (found, executionId) = await triggerManager.FireTriggerAsync(id, parameters);
+	if (!found)
+		return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+
+	return Results.Json(new
+	{
+		fired = true,
+		id,
+		executionId,
+	}, jsonOptions);
+});
+
+// ── POST /api/webhook/{id} ──────────────────────────────────────────────
+// Webhook receiver endpoint for external systems (Power Automate, Zapier, etc.)
+app.MapPost("/api/webhook/{id}", async (HttpContext httpContext, string id, TriggerManager triggerManager) =>
+{
+	var t = triggerManager.GetTrigger(id);
+	if (t == null)
+		return Results.NotFound(new { error = $"Webhook trigger '{id}' not found." });
+
+	if (t.Config is not WebhookTriggerConfig webhookConfig)
+		return Results.BadRequest(new { error = $"Trigger '{id}' is not a webhook trigger." });
+
+	// Validate webhook secret if configured
+	if (!string.IsNullOrWhiteSpace(webhookConfig.Secret))
+	{
+		var providedSecret = httpContext.Request.Headers["X-Webhook-Secret"].FirstOrDefault()
+			?? httpContext.Request.Query["secret"].FirstOrDefault();
+
+		if (providedSecret != webhookConfig.Secret)
+			return Results.Unauthorized();
+	}
+
+	// Parse parameters from webhook body
+	Dictionary<string, string>? webhookParams = null;
+	if (httpContext.Request.ContentLength > 0)
+	{
+		try
+		{
+			using var reader = new StreamReader(httpContext.Request.Body);
+			var body = await reader.ReadToEndAsync();
+			if (!string.IsNullOrWhiteSpace(body))
+			{
+				webhookParams = JsonSerializer.Deserialize<Dictionary<string, string>>(body, jsonOptions);
+			}
+		}
+		catch
+		{
+			// Best-effort body parsing — continue without params
+		}
+	}
+
+	var (found, executionId) = await triggerManager.FireWebhookTriggerAsync(id, webhookParams);
+	if (!found)
+		return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+
+	return Results.Json(new
+	{
+		accepted = true,
+		triggerId = id,
+		executionId,
+	}, jsonOptions);
+});
+
+// ── POST /api/triggers/scan ─────────────────────────────────────────────
+// Scans a folder for orchestration files with JSON-defined triggers
+app.MapPost("/api/triggers/scan", (TriggerScanRequest request, TriggerManager triggerManager) =>
+{
+	try
+	{
+		if (string.IsNullOrWhiteSpace(request.Directory))
+			return Results.BadRequest(new { error = "Directory path is required." });
+
+		if (!Directory.Exists(request.Directory))
+			return Results.BadRequest(new { error = $"Directory not found: {request.Directory}" });
+
+		triggerManager.ScanForJsonTriggers(request.Directory);
+
+		var triggers = triggerManager.GetAllTriggers().Select(t => new
+		{
+			id = t.Id,
+			orchestrationPath = t.OrchestrationPath,
+			orchestrationName = t.OrchestrationName,
+			triggerType = t.Config.Type.ToString().ToLowerInvariant(),
+			enabled = t.Config.Enabled,
+			status = t.Status.ToString(),
+			source = t.Source.ToString().ToLowerInvariant(),
+		}).ToArray();
+
+		return Results.Json(new { scanned = true, directory = request.Directory, count = triggers.Length, triggers }, jsonOptions);
+	}
+	catch (Exception ex)
+	{
+		return Results.BadRequest(new { error = ex.Message });
+	}
+});
+
 // ── Fallback: serve index.html ──────────────────────────────────────────
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+// ── Helper methods (must be before type declarations) ───────────────────
+
+/// <summary>
+/// Extracts parameter names from an orchestration file (e.g., {{topic}}, {{context}}).
+/// Returns an empty array if the file doesn't exist or has no parameters.
+/// </summary>
+static string[] GetOrchestrationParameterNames(string? orchestrationPath)
+{
+	if (string.IsNullOrEmpty(orchestrationPath) || !File.Exists(orchestrationPath))
+		return [];
+
+	try
+	{
+		var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
+		return orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray();
+	}
+	catch
+	{
+		return [];
+	}
+}
+
+static TriggerConfig? ParseTriggerConfigFromRequest(TriggerCreateRequest request)
+{
+	var typeStr = request.TriggerType?.Trim().ToLowerInvariant();
+	var enabled = request.Enabled ?? true;
+
+	return typeStr switch
+	{
+		"scheduler" => new SchedulerTriggerConfig
+		{
+			Type = TriggerType.Scheduler,
+			Enabled = enabled,
+			InputHandlerPrompt = request.InputHandlerPrompt,
+			Cron = request.Cron,
+			IntervalSeconds = request.IntervalSeconds,
+			MaxRuns = request.MaxRuns,
+		},
+		"loop" => new LoopTriggerConfig
+		{
+			Type = TriggerType.Loop,
+			Enabled = enabled,
+			InputHandlerPrompt = request.InputHandlerPrompt,
+			DelaySeconds = request.DelaySeconds ?? 0,
+			MaxIterations = request.MaxIterations,
+			ContinueOnFailure = request.ContinueOnFailure ?? false,
+		},
+		"webhook" => new WebhookTriggerConfig
+		{
+			Type = TriggerType.Webhook,
+			Enabled = enabled,
+			InputHandlerPrompt = request.InputHandlerPrompt,
+			Secret = request.Secret,
+			MaxConcurrent = request.MaxConcurrent ?? 1,
+		},
+		_ => null,
+	};
+}
+
+static object FormatTriggerConfig(TriggerConfig config)
+{
+	return config switch
+	{
+		SchedulerTriggerConfig s => new
+		{
+			type = "scheduler",
+			enabled = s.Enabled,
+			inputHandlerPrompt = s.InputHandlerPrompt,
+			cron = s.Cron,
+			intervalSeconds = s.IntervalSeconds,
+			maxRuns = s.MaxRuns,
+		},
+		LoopTriggerConfig l => new
+		{
+			type = "loop",
+			enabled = l.Enabled,
+			inputHandlerPrompt = l.InputHandlerPrompt,
+			delaySeconds = l.DelaySeconds,
+			maxIterations = l.MaxIterations,
+			continueOnFailure = l.ContinueOnFailure,
+		},
+		WebhookTriggerConfig w => new
+		{
+			type = "webhook",
+			enabled = w.Enabled,
+			inputHandlerPrompt = w.InputHandlerPrompt,
+			secret = (string?)null, // Never expose secret in API responses
+			maxConcurrent = w.MaxConcurrent,
+		},
+		_ => new { type = config.Type.ToString().ToLowerInvariant(), enabled = config.Enabled },
+	};
+}
 
 // ── Request DTOs ────────────────────────────────────────────────────────
 
@@ -1072,3 +1570,25 @@ record SaveRequest(string Path, JsonElement? Orchestration);
 record CompareRequest(string OrchestrationPath, string? McpPath, Dictionary<string, string>? Parameters, CompareRun[] Runs);
 record CompareRun(string? Label, Dictionary<string, string>? ModelOverrides);
 record FolderScanRequest(string? Directory);
+
+// ── Trigger DTOs ────────────────────────────────────────────────────────
+record TriggerCreateRequest(
+	string OrchestrationPath,
+	string? McpPath,
+	string TriggerType,
+	bool? Enabled,
+	Dictionary<string, string>? Parameters,
+	string? InputHandlerPrompt,
+	// Scheduler fields
+	string? Cron,
+	int? IntervalSeconds,
+	int? MaxRuns,
+	// Loop fields
+	int? DelaySeconds,
+	int? MaxIterations,
+	bool? ContinueOnFailure,
+	// Webhook fields
+	string? Secret,
+	int? MaxConcurrent);
+
+record TriggerScanRequest(string? Directory);

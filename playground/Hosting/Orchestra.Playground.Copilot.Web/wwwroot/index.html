@@ -991,6 +991,12 @@
   .folder-status-badge.failed { background: #3a1a1a; color: var(--red); }
   .folder-status-badge.cancelled { background: #3a2a1a; color: var(--orange); }
 
+  .mcp-badge {
+    display: inline-block; font-size: 9px; font-weight: 600; padding: 1px 4px;
+    border-radius: 3px; background: #1a2a3a; color: var(--blue); margin-left: 4px;
+    vertical-align: middle; letter-spacing: 0.5px;
+  }
+
   /* ── Tab Bar (folder mode) ── */
   .tab-bar {
     display: flex; background: var(--surface); border-bottom: 1px solid var(--border);
@@ -1089,6 +1095,218 @@
   .folder-preview-actions .preview-add-btn { background: var(--blue); color: #fff; }
   .folder-preview-actions .preview-run-btn { background: var(--green); color: #fff; }
   .folder-preview-actions button:hover { opacity: 0.85; }
+
+  /* ══════════════════════════════════════════════════════════════════════════
+     ── Trigger System Styles ──
+     ══════════════════════════════════════════════════════════════════════════ */
+
+  /* ── Trigger sidebar section ── */
+  .trigger-list {
+    list-style: none; padding: 0; margin: 0;
+    max-height: 280px; overflow-y: auto;
+  }
+  .trigger-item {
+    padding: 8px 10px; cursor: pointer;
+    border-bottom: 1px solid var(--border); font-size: 12px;
+  }
+  .trigger-item:hover { background: var(--surface2); }
+  .trigger-item:last-child { border-bottom: none; }
+  .trigger-item.active { background: var(--surface2); border-left: 2px solid var(--accent); }
+  .trigger-item .trigger-name { font-weight: 600; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .trigger-item .trigger-meta {
+    color: var(--text-muted); font-size: 11px;
+    display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
+  }
+  .trigger-item .trigger-actions {
+    display: flex; gap: 4px; margin-left: auto;
+  }
+  .trigger-item .trigger-actions button {
+    background: none; border: none; color: var(--text-muted); cursor: pointer;
+    font-size: 13px; padding: 0 3px; line-height: 1;
+  }
+  .trigger-item .trigger-actions button:hover { color: var(--text); }
+  .trigger-item .trigger-actions button.trigger-delete:hover { color: var(--red); }
+
+  /* ── Trigger type/status badges ── */
+  .trigger-type-badge {
+    display: inline-block; padding: 1px 5px; border-radius: 3px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+  }
+  .trigger-type-badge.scheduler { background: rgba(137,180,250,0.2); color: var(--blue); }
+  .trigger-type-badge.loop { background: rgba(166,227,161,0.2); color: var(--green); }
+  .trigger-type-badge.webhook { background: rgba(188,140,255,0.2); color: var(--purple); }
+
+  .trigger-status-badge {
+    display: inline-block; padding: 1px 5px; border-radius: 3px;
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+  }
+  .trigger-status-badge.idle { background: rgba(166,173,200,0.15); color: var(--text-muted); }
+  .trigger-status-badge.waiting { background: rgba(137,180,250,0.2); color: var(--blue); }
+  .trigger-status-badge.running { background: rgba(210,153,34,0.2); color: var(--orange); }
+  .trigger-status-badge.paused { background: rgba(166,173,200,0.2); color: var(--text-muted); }
+  .trigger-status-badge.completed { background: rgba(166,227,161,0.2); color: var(--green); }
+  .trigger-status-badge.error { background: rgba(243,139,168,0.2); color: var(--red); }
+
+  .trigger-error-msg {
+    display: block; font-size: 11px; color: var(--red); margin-top: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 210px; cursor: help;
+  }
+  .trigger-card .trigger-error-msg {
+    white-space: normal; max-width: none; font-size: 12px;
+    margin-top: 6px; padding: 6px 8px; border-radius: 4px;
+    background: rgba(243,139,168,0.08); border-left: 3px solid var(--red);
+    word-break: break-word;
+  }
+
+  .trigger-enabled-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 2px;
+  }
+  .trigger-enabled-dot.on { background: var(--green); }
+  .trigger-enabled-dot.off { background: var(--text-muted); }
+
+  /* ── Trigger dashboard panel (main area) ── */
+  .trigger-dashboard {
+    display: none; padding: 24px; overflow-y: auto; flex: 1;
+  }
+  .trigger-dashboard.visible { display: block; }
+  .trigger-dashboard h2 {
+    font-size: 16px; font-weight: 700; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .trigger-dashboard-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 12px;
+  }
+  .trigger-card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+    padding: 14px 16px; position: relative;
+  }
+  .trigger-card:hover { border-color: var(--accent); }
+  .trigger-card .trigger-card-header {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+  }
+  .trigger-card .trigger-card-name {
+    font-weight: 600; font-size: 13px; flex: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .trigger-card .trigger-card-body {
+    font-size: 12px; color: var(--text-muted);
+  }
+  .trigger-card .trigger-card-body .tc-row {
+    display: flex; justify-content: space-between; padding: 3px 0;
+    border-bottom: 1px solid rgba(48,54,61,0.5);
+  }
+  .trigger-card .trigger-card-body .tc-row:last-child { border-bottom: none; }
+  .trigger-card .tc-key { color: var(--text-muted); }
+  .trigger-card .tc-val { color: var(--text); font-weight: 500; }
+  .trigger-card .trigger-card-actions {
+    display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap;
+  }
+  .trigger-card .trigger-card-actions button {
+    padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 4px; background: var(--surface2); color: var(--text);
+  }
+  .trigger-card .trigger-card-actions button:hover { border-color: var(--accent); }
+  .trigger-card .trigger-card-actions .tc-btn-fire { background: var(--green); color: #fff; border-color: var(--green); }
+  .trigger-card .trigger-card-actions .tc-btn-fire:hover { opacity: 0.85; }
+  .trigger-card .trigger-card-actions .tc-btn-delete { color: var(--red); }
+  .trigger-card .trigger-card-actions .tc-btn-delete:hover { background: rgba(248,81,73,0.15); border-color: var(--red); }
+  .trigger-card .trigger-card-actions .tc-btn-view { background: var(--blue); color: #fff; border-color: var(--blue); }
+  .trigger-card .trigger-card-actions .tc-btn-view:hover { opacity: 0.85; }
+  .trigger-card .trigger-card-actions .tc-btn-view:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* ── Webhook URL display ── */
+  .trigger-webhook-url {
+    margin-top: 6px; padding: 6px 8px; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 4px; font-family: monospace; font-size: 11px; color: var(--accent);
+    word-break: break-all; cursor: pointer; position: relative;
+  }
+  .trigger-webhook-url:hover::after {
+    content: 'Click to copy'; position: absolute; right: 6px; top: 4px;
+    font-size: 9px; color: var(--text-muted); font-family: sans-serif;
+  }
+
+  /* ── Trigger create/edit form (modal overlay) ── */
+  .trigger-form-overlay {
+    display: none; position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.5); justify-content: center; align-items: center;
+  }
+  .trigger-form-overlay.visible { display: flex; }
+  .trigger-form-panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    width: 440px; max-height: 80vh; overflow-y: auto; padding: 20px 24px;
+  }
+  .trigger-form-panel h3 {
+    font-size: 15px; font-weight: 700; margin-bottom: 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .trigger-form-panel .tf-group {
+    margin-bottom: 10px;
+  }
+  .trigger-form-panel .tf-group label {
+    display: block; font-size: 12px; font-weight: 600; color: var(--text-muted);
+    margin-bottom: 3px;
+  }
+  .trigger-form-panel .tf-group input,
+  .trigger-form-panel .tf-group select {
+    width: 100%; padding: 6px 10px; font-size: 12px;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px;
+  }
+  .trigger-form-panel .tf-group input:focus,
+  .trigger-form-panel .tf-group select:focus { border-color: var(--accent); outline: none; }
+  .trigger-form-panel .tf-group .tf-hint {
+    font-size: 10px; color: var(--text-muted); margin-top: 2px;
+  }
+  .trigger-form-panel .tf-group .tf-checkbox-row {
+    display: flex; align-items: center; gap: 6px;
+  }
+  .trigger-form-panel .tf-group .tf-checkbox-row input[type="checkbox"] {
+    width: auto;
+  }
+  .trigger-form-panel .tf-actions {
+    display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;
+  }
+  .trigger-form-panel .tf-actions button {
+    padding: 6px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 4px;
+  }
+  .trigger-form-panel .tf-actions .tf-save { background: var(--green); color: #fff; border-color: var(--green); }
+  .trigger-form-panel .tf-actions .tf-cancel { background: var(--surface2); color: var(--text); }
+
+  /* ── Trigger type-specific field groups ── */
+  .tf-scheduler-fields, .tf-loop-fields, .tf-webhook-fields { display: none; }
+  .tf-scheduler-fields.visible, .tf-loop-fields.visible, .tf-webhook-fields.visible { display: block; }
+
+  /* ── Fire params modal ── */
+  .fire-params-overlay {
+    display: none; position: fixed; inset: 0; z-index: 210;
+    background: rgba(0,0,0,0.5); justify-content: center; align-items: center;
+  }
+  .fire-params-overlay.visible { display: flex; }
+  .fire-params-panel {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    width: 400px; max-height: 70vh; overflow-y: auto; padding: 20px 24px;
+  }
+  .fire-params-panel h3 { font-size: 15px; font-weight: 700; margin-bottom: 14px; }
+  .fire-params-panel .fp-group { margin-bottom: 10px; }
+  .fire-params-panel .fp-group label {
+    display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 3px;
+  }
+  .fire-params-panel .fp-group input {
+    width: 100%; padding: 6px 10px; font-size: 12px;
+    background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px;
+  }
+  .fire-params-panel .fp-group input:focus { border-color: var(--accent); outline: none; }
+  .fire-params-panel .fp-actions {
+    display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;
+  }
+  .fire-params-panel .fp-actions button {
+    padding: 6px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 4px;
+  }
+  .fire-params-panel .fp-actions .fp-fire { background: var(--orange); color: #fff; border-color: var(--orange); }
+  .fire-params-panel .fp-actions .fp-cancel { background: var(--surface2); color: var(--text); }
 </style>
 </head>
 <body>
@@ -1188,6 +1406,18 @@
     </div>
   </div><!-- end folderModeContent -->
 
+  <!-- ── Triggers section (always visible) ── -->
+  <div class="section" id="triggerSection">
+    <h2>Triggers
+      <button onclick="loadTriggers()" style="float:right;padding:2px 8px;font-size:11px;cursor:pointer">&#8635;</button>
+      <button onclick="openTriggerDashboard()" style="float:right;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:4px" title="Dashboard">&#9635;</button>
+      <button onclick="openTriggerForm()" style="float:right;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:4px" title="Add trigger">+</button>
+    </h2>
+    <ul class="trigger-list" id="triggerList">
+      <li style="padding:8px 10px;color:var(--text-muted);font-size:12px">No triggers</li>
+    </ul>
+  </div>
+
 </div>
 
 <!-- ── Main ── -->
@@ -1261,6 +1491,12 @@
     <div class="compare-results" id="compareResults"></div>
   </div>
 
+  <!-- Trigger dashboard panel -->
+  <div class="trigger-dashboard" id="triggerDashboard">
+    <h2>&#9881; Trigger Dashboard <button onclick="loadTriggers()" style="padding:2px 8px;font-size:11px;cursor:pointer">&#8635; Refresh</button></h2>
+    <div class="trigger-dashboard-grid" id="triggerDashboardGrid"></div>
+  </div>
+
   <!-- Streaming content area (live output during execution) -->
   <div class="streaming-area" id="streamingArea">
     <div class="stream-label">Live Output — <span id="streamingStepName"></span></div>
@@ -1294,6 +1530,114 @@
 <!-- ── Tooltip ── -->
 <div class="step-tooltip" id="stepTooltip"></div>
 
+<!-- ── Trigger form modal ── -->
+<div class="trigger-form-overlay" id="triggerFormOverlay" onclick="if(event.target===this)closeTriggerForm()">
+  <div class="trigger-form-panel">
+    <h3 id="triggerFormTitle">&#9881; Add Trigger</h3>
+    <input type="hidden" id="tfEditId">
+
+    <div class="tf-group">
+      <label>Orchestration</label>
+      <select id="tfOrchestrationPath"></select>
+      <div class="tf-hint">Select the orchestration file to trigger</div>
+    </div>
+
+    <div class="tf-group">
+      <label>MCP Config (optional)</label>
+      <input type="text" id="tfMcpPath" placeholder="C:\path\to\mcp.json">
+    </div>
+
+    <div class="tf-group">
+      <label>Trigger Type</label>
+      <select id="tfTriggerType" onchange="triggerFormTypeChanged()">
+        <option value="scheduler">Scheduler</option>
+        <option value="loop">Loop</option>
+        <option value="webhook">Webhook</option>
+      </select>
+    </div>
+
+    <div class="tf-group">
+      <div class="tf-checkbox-row">
+        <input type="checkbox" id="tfEnabled" checked>
+        <label for="tfEnabled" style="margin-bottom:0">Enabled</label>
+      </div>
+    </div>
+
+    <div class="tf-group">
+      <label>Input Handler Prompt <span style="color:var(--text-muted);font-weight:normal;font-size:11px">(optional)</span></label>
+      <textarea id="tfInputHandlerPrompt" rows="4" placeholder="LLM prompt to transform raw trigger input into orchestration parameters. E.g.: Extract the topic and language from the user input. Return JSON with keys: topic, language." style="resize:vertical;min-height:60px"></textarea>
+      <div class="tf-hint">When set, raw trigger input (webhook body / manual params) is sent to an LLM with this prompt to produce the orchestration's expected parameters.</div>
+    </div>
+
+    <!-- Scheduler-specific fields -->
+    <div class="tf-scheduler-fields visible" id="tfSchedulerFields">
+      <div class="tf-group">
+        <label>Cron Expression</label>
+        <input type="text" id="tfCron" placeholder="*/5 * * * *">
+        <div class="tf-hint">Standard cron (minute hour day month weekday). Leave empty to use interval.</div>
+      </div>
+      <div class="tf-group">
+        <label>Interval (seconds)</label>
+        <input type="number" id="tfIntervalSeconds" placeholder="300" min="5">
+        <div class="tf-hint">Alternative to cron: run every N seconds</div>
+      </div>
+      <div class="tf-group">
+        <label>Max Runs (0 = unlimited)</label>
+        <input type="number" id="tfMaxRuns" placeholder="0" min="0">
+      </div>
+    </div>
+
+    <!-- Loop-specific fields -->
+    <div class="tf-loop-fields" id="tfLoopFields">
+      <div class="tf-group">
+        <label>Delay Between Runs (seconds)</label>
+        <input type="number" id="tfDelaySeconds" placeholder="0" min="0">
+      </div>
+      <div class="tf-group">
+        <label>Max Iterations (0 = unlimited)</label>
+        <input type="number" id="tfMaxIterations" placeholder="0" min="0">
+      </div>
+      <div class="tf-group">
+        <div class="tf-checkbox-row">
+          <input type="checkbox" id="tfContinueOnFailure">
+          <label for="tfContinueOnFailure" style="margin-bottom:0">Continue on failure</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Webhook-specific fields -->
+    <div class="tf-webhook-fields" id="tfWebhookFields">
+      <div class="tf-group">
+        <label>Secret (optional)</label>
+        <input type="text" id="tfSecret" placeholder="my-webhook-secret">
+        <div class="tf-hint">Callers must send this in X-Webhook-Secret header or ?secret= query</div>
+      </div>
+      <div class="tf-group">
+        <label>Max Concurrent (0 = unlimited)</label>
+        <input type="number" id="tfMaxConcurrent" placeholder="1" min="0">
+      </div>
+    </div>
+
+    <div class="tf-actions">
+      <button class="tf-cancel" onclick="closeTriggerForm()">Cancel</button>
+      <button class="tf-save" onclick="saveTrigger()">Save Trigger</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Fire trigger params modal ── -->
+<div class="fire-params-overlay" id="fireParamsOverlay" onclick="if(event.target===this)closeFireParams()">
+  <div class="fire-params-panel">
+    <h3>&#9889; Fire Trigger with Parameters</h3>
+    <input type="hidden" id="fpTriggerId">
+    <div id="fpParamFields"></div>
+    <div class="fp-actions">
+      <button class="fp-cancel" onclick="closeFireParams()">Cancel</button>
+      <button class="fp-fire" onclick="submitFireParams()">&#9889; Fire</button>
+    </div>
+  </div>
+</div>
+
 <script>
   // ── State ──
   let orchestrationData = null;
@@ -1319,7 +1663,12 @@
   let folderTabs = {};   // path -> { status, executionId, abortController, orchestrationData, stepStatuses, stepOutputs, streamingContent, streamingReasoning, toolCalls, lastResult, timerInterval, startTime, eventLog }
   let activeFolderTab = null; // path of currently viewed tab
   let folderPreviewPath = null; // path being previewed (not yet added as tab)
+  let folderMcpPath = null; // auto-detected mcp.json path for the folder
   let autoDiscoverInterval = null;
+
+  // ── Trigger state ──
+  let triggersData = []; // [{id, orchestrationPath, orchestrationName, triggerType, enabled, status, source, ...}]
+  let triggerPollInterval = null;
 
   // ── App mode switching ──
   function setAppMode(mode) {
@@ -1342,6 +1691,9 @@
     } else {
       if (editorToggle) editorToggle.style.display = '';
     }
+
+    // Close trigger dashboard when switching modes
+    closeTriggerDashboard();
 
     if (mode === 'single') {
       // Restore single-mode main area visibility
@@ -1389,6 +1741,7 @@
       }
 
       folderOrchestrations = data.orchestrations;
+      folderMcpPath = data.mcpPath || null;
       document.getElementById('folderControls').style.display = 'flex';
       renderFolderFileList();
       renderFolderTabs();
@@ -1441,11 +1794,12 @@
       const badge = isAdded && status ? `<span class="folder-status-badge ${status}">${status.replace('-', ' ')}</span>` : '';
       const errorTip = !orch.valid && orch.error ? ` title="${esc(orch.error)}"` : '';
       const metaText = orch.valid ? orch.stepCount + ' steps' : 'invalid';
+      const mcpBadge = (orch.mcpPath || orch.hasInlineMcps) ? '<span class="mcp-badge" title="' + (orch.mcpPath ? 'MCP: ' + esc(orch.mcpPath) : '') + (orch.hasInlineMcps ? (orch.mcpPath ? ' + ' : '') + 'Inline: ' + (orch.inlineMcpNames || []).join(', ') : '') + '">MCP</span>' : '';
 
       li.innerHTML = `
         ${badge}
         <span class="file-name"${errorTip} title="${esc(orch.path)}">${esc(orch.name || orch.fileName)}</span>
-        <span class="file-meta">${metaText}</span>
+        <span class="file-meta">${metaText}${mcpBadge}</span>
         ${actionsHtml}
       `;
       list.appendChild(li);
@@ -1611,10 +1965,13 @@
   // ── Load orchestration data for a tab ──
   async function loadFolderTabOrchestration(path) {
     try {
+      // Use per-orchestration MCP path if available, else folder-level
+      const orch = folderOrchestrations.find(o => o.path === path);
+      const mcpPath = (orch && orch.mcpPath) || folderMcpPath || null;
       const res = await fetch('/api/load', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orchestrationPath: path, mcpPath: null }),
+        body: JSON.stringify({ orchestrationPath: path, mcpPath }),
       });
       const data = await res.json();
       if (!res.ok) return;
@@ -1682,7 +2039,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           orchestrationPath: path,
-          mcpPath: null,
+          mcpPath: (orch && orch.mcpPath) || folderMcpPath || null,
           parameters: tab.parameters && Object.keys(tab.parameters).length > 0 ? tab.parameters : null,
         }),
         signal: tab.abortController.signal,
@@ -1929,10 +2286,11 @@
     container.innerHTML = `<div class="empty-state"><div class="icon">&#8987;</div><div>Loading preview...</div></div>`;
 
     try {
+      const mcpPath = (orch && orch.mcpPath) || folderMcpPath || null;
       const res = await fetch('/api/load', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orchestrationPath: path, mcpPath: null }),
+        body: JSON.stringify({ orchestrationPath: path, mcpPath }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -2381,6 +2739,7 @@
       document.getElementById('logSection').style.display = 'none';
       document.getElementById('eventLog').innerHTML = '';
       document.getElementById('executionTimer').textContent = '';
+      closeTriggerDashboard();
     } catch (e) {
       alert('Error: ' + e.message);
     } finally {
@@ -2404,7 +2763,11 @@
     mcps.forEach(m => {
       const li = document.createElement('li');
       li.className = 'mcp-item';
-      li.innerHTML = `<span class="mcp-badge ${m.type.toLowerCase()}">${m.type}</span> ${esc(m.name)}`;
+      const sourceTag = m.source === 'inline' ? ' <span style="color:var(--dim);font-size:0.85em">(inline)</span>'
+        : m.source === 'override' ? ' <span style="color:var(--yellow);font-size:0.85em">(overridden)</span>'
+        : m.source === 'external' ? ' <span style="color:var(--dim);font-size:0.85em">(external)</span>'
+        : '';
+      li.innerHTML = `<span class="mcp-badge ${m.type.toLowerCase()}">${m.type}</span> ${esc(m.name)}${sourceTag}`;
       list.appendChild(li);
     });
   }
@@ -4099,13 +4462,424 @@
     container.innerHTML = tableHtml + stepHtml;
   }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // ── TRIGGER SYSTEM ─────────────────────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════════
+
+  async function loadTriggers() {
+    try {
+      const res = await fetch('/api/triggers');
+      if (!res.ok) return;
+      const data = await res.json();
+      triggersData = data.triggers || [];
+      renderTriggerList();
+      renderTriggerDashboard();
+    } catch (e) { console.error('Failed to load triggers:', e); }
+  }
+
+  function renderTriggerList() {
+    const ul = document.getElementById('triggerList');
+    if (!triggersData.length) {
+      ul.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">No triggers configured</li>';
+      return;
+    }
+    ul.innerHTML = triggersData.map(t => {
+      const typeCls = (t.triggerType || '').toLowerCase();
+      const statusCls = (t.status || 'idle').toLowerCase();
+      const name = t.orchestrationName || t.orchestrationPath?.split(/[\\/]/).pop() || 'Unknown';
+      return `<li class="trigger-item" onclick="viewTriggerDetail('${t.id}')">
+        <div class="trigger-name">
+          <span class="trigger-enabled-dot ${t.enabled ? 'on' : 'off'}"></span>
+          ${escHtml(name)}
+        </div>
+        <div class="trigger-meta">
+          <span class="trigger-type-badge ${typeCls}">${typeCls}</span>
+          <span class="trigger-status-badge ${statusCls}">${t.status || 'idle'}</span>
+          ${t.runCount ? `<span>${t.runCount} runs</span>` : ''}
+          <span class="trigger-actions">
+            <button onclick="event.stopPropagation();toggleTrigger('${t.id}',${!t.enabled})" title="${t.enabled ? 'Disable' : 'Enable'}">${t.enabled ? '&#9724;' : '&#9654;'}</button>
+            <button onclick="event.stopPropagation();fireTrigger('${t.id}')" title="Fire now">&#9889;</button>
+            <button class="trigger-delete" onclick="event.stopPropagation();deleteTrigger('${t.id}')" title="Delete">&#10005;</button>
+          </span>
+        </div>
+        ${t.lastError ? `<span class="trigger-error-msg" title="${escHtml(t.lastError)}">${escHtml(t.lastError)}</span>` : ''}
+      </li>`;
+    }).join('');
+  }
+
+  function renderTriggerDashboard() {
+    const grid = document.getElementById('triggerDashboardGrid');
+    if (!grid) return;
+    if (!triggersData.length) {
+      grid.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:16px">No triggers configured. Click <strong>+</strong> in the sidebar to add one.</div>';
+      return;
+    }
+    grid.innerHTML = triggersData.map(t => {
+      const typeCls = (t.triggerType || '').toLowerCase();
+      const statusCls = (t.status || 'idle').toLowerCase();
+      const name = t.orchestrationName || t.orchestrationPath?.split(/[\\/]/).pop() || 'Unknown';
+      let detailRows = `
+        <div class="tc-row"><span class="tc-key">Source</span><span class="tc-val">${t.source || 'user'}</span></div>
+        <div class="tc-row"><span class="tc-key">Runs</span><span class="tc-val">${t.runCount ?? 0}</span></div>`;
+      if (t.nextFireTime) detailRows += `<div class="tc-row"><span class="tc-key">Next fire</span><span class="tc-val">${formatTriggerTime(t.nextFireTime)}</span></div>`;
+      if (t.lastFireTime) detailRows += `<div class="tc-row"><span class="tc-key">Last fire</span><span class="tc-val">${formatTriggerTime(t.lastFireTime)}</span></div>`;
+      // Type-specific details
+      if (typeCls === 'scheduler') {
+        if (t.cron) detailRows += `<div class="tc-row"><span class="tc-key">Cron</span><span class="tc-val">${escHtml(t.cron)}</span></div>`;
+        if (t.intervalSeconds) detailRows += `<div class="tc-row"><span class="tc-key">Interval</span><span class="tc-val">${t.intervalSeconds}s</span></div>`;
+        if (t.maxRuns) detailRows += `<div class="tc-row"><span class="tc-key">Max runs</span><span class="tc-val">${t.maxRuns}</span></div>`;
+      } else if (typeCls === 'loop') {
+        detailRows += `<div class="tc-row"><span class="tc-key">Delay</span><span class="tc-val">${t.delaySeconds ?? 0}s</span></div>`;
+        if (t.maxIterations) detailRows += `<div class="tc-row"><span class="tc-key">Max iterations</span><span class="tc-val">${t.maxIterations}</span></div>`;
+        detailRows += `<div class="tc-row"><span class="tc-key">Continue on fail</span><span class="tc-val">${t.continueOnFailure ? 'Yes' : 'No'}</span></div>`;
+      } else if (typeCls === 'webhook') {
+        if (t.webhookUrl) detailRows += `<div class="tc-row"><span class="tc-key">Max concurrent</span><span class="tc-val">${t.maxConcurrent ?? 1}</span></div>`;
+      }
+      if (t.inputHandlerPrompt) detailRows += `<div class="tc-row"><span class="tc-key">Input handler</span><span class="tc-val" title="${escHtml(t.inputHandlerPrompt)}" style="color:var(--accent)">Active</span></div>`;
+      let webhookHtml = '';
+      if (typeCls === 'webhook' && t.webhookUrl) {
+        webhookHtml = `<div class="trigger-webhook-url" onclick="copyWebhookUrl(this)" title="Click to copy">${escHtml(t.webhookUrl)}</div>`;
+      }
+      let errorHtml = '';
+      if (t.lastError) {
+        errorHtml = `<div class="trigger-error-msg">${escHtml(t.lastError)}</div>`;
+      }
+      return `<div class="trigger-card">
+        <div class="trigger-card-header">
+          <span class="trigger-enabled-dot ${t.enabled ? 'on' : 'off'}"></span>
+          <span class="trigger-card-name" title="${escHtml(t.orchestrationPath || '')}">${escHtml(name)}</span>
+          <span class="trigger-type-badge ${typeCls}">${typeCls}</span>
+          <span class="trigger-status-badge ${statusCls}">${t.status || 'idle'}</span>
+        </div>
+        <div class="trigger-card-body">${detailRows}</div>
+        ${errorHtml}
+        ${webhookHtml}
+        <div class="trigger-card-actions">
+          <button onclick="toggleTrigger('${t.id}',${!t.enabled})">${t.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="tc-btn-fire" onclick="fireTrigger('${t.id}')">&#9889; Fire</button>
+          ${(t.lastExecutionId || t.activeExecutionId) ? `<button class="tc-btn-view" onclick="viewTriggerRun('${t.lastExecutionId || t.activeExecutionId}')">&#128065; View Run</button>` : `<button class="tc-btn-view" disabled>&#128065; View Run</button>`}
+          <button onclick="editTrigger('${t.id}')">Edit</button>
+          <button class="tc-btn-delete" onclick="deleteTrigger('${t.id}')">Delete</button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+
+  function formatTriggerTime(isoStr) {
+    if (!isoStr) return '';
+    try {
+      const d = new Date(isoStr);
+      return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + ' ' + d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+    } catch { return isoStr; }
+  }
+
+  function escHtml(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function openTriggerDashboard() {
+    // Hide other main panels, show trigger dashboard
+    document.getElementById('diagramContainer').style.display = 'none';
+    document.getElementById('editorPanel').style.display = 'none';
+    document.getElementById('comparePanel').style.display = 'none';
+    document.getElementById('triggerDashboard').classList.add('visible');
+    document.getElementById('toolbar').style.display = 'none';
+    loadTriggers();
+    // Start polling while dashboard is open
+    startTriggerPolling();
+  }
+
+  function closeTriggerDashboard() {
+    document.getElementById('triggerDashboard').classList.remove('visible');
+    document.getElementById('diagramContainer').style.display = '';
+    document.getElementById('toolbar').style.display = '';
+    stopTriggerPolling();
+  }
+
+  function startTriggerPolling() {
+    stopTriggerPolling();
+    triggerPollInterval = setInterval(loadTriggers, 5000);
+  }
+
+  function stopTriggerPolling() {
+    if (triggerPollInterval) { clearInterval(triggerPollInterval); triggerPollInterval = null; }
+  }
+
+  function viewTriggerDetail(triggerId) {
+    openTriggerDashboard();
+  }
+
+  function viewTriggerRun(runId) {
+    if (!runId) return;
+    closeTriggerDashboard();
+    loadHistoryRun(runId);
+  }
+
+  // ── Trigger form ──
+
+  function openTriggerForm(orchestrationPath) {
+    const overlay = document.getElementById('triggerFormOverlay');
+    document.getElementById('tfEditId').value = '';
+    document.getElementById('triggerFormTitle').innerHTML = '&#9881; Add Trigger';
+
+    // Populate orchestration dropdown
+    populateTriggerOrchestrationDropdown(orchestrationPath);
+
+    // Reset form fields
+    document.getElementById('tfMcpPath').value = '';
+    document.getElementById('tfTriggerType').value = 'scheduler';
+    document.getElementById('tfEnabled').checked = true;
+    document.getElementById('tfInputHandlerPrompt').value = '';
+    document.getElementById('tfCron').value = '';
+    document.getElementById('tfIntervalSeconds').value = '';
+    document.getElementById('tfMaxRuns').value = '';
+    document.getElementById('tfDelaySeconds').value = '';
+    document.getElementById('tfMaxIterations').value = '';
+    document.getElementById('tfContinueOnFailure').checked = false;
+    document.getElementById('tfSecret').value = '';
+    document.getElementById('tfMaxConcurrent').value = '1';
+    triggerFormTypeChanged();
+    overlay.classList.add('visible');
+  }
+
+  function closeTriggerForm() {
+    document.getElementById('triggerFormOverlay').classList.remove('visible');
+  }
+
+  function populateTriggerOrchestrationDropdown(selectedPath) {
+    const sel = document.getElementById('tfOrchestrationPath');
+    sel.innerHTML = '';
+
+    // Collect known orchestrations from various sources
+    const paths = new Set();
+
+    // From folder mode
+    if (folderOrchestrations && folderOrchestrations.length) {
+      folderOrchestrations.forEach(o => { if (o.path) paths.add(o.path); });
+    }
+    // From single mode
+    const singlePath = document.getElementById('orchestrationPath')?.value;
+    if (singlePath) paths.add(singlePath);
+    // From existing triggers
+    triggersData.forEach(t => { if (t.orchestrationPath) paths.add(t.orchestrationPath); });
+
+    if (paths.size === 0) {
+      sel.innerHTML = '<option value="">-- Load an orchestration first --</option>';
+      return;
+    }
+
+    paths.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p;
+      opt.textContent = p.split(/[\\/]/).pop();
+      opt.title = p;
+      if (p === selectedPath) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    // Add manual entry option
+    const manualOpt = document.createElement('option');
+    manualOpt.value = '__manual__';
+    manualOpt.textContent = '-- Enter path manually --';
+    sel.appendChild(manualOpt);
+
+    sel.onchange = function() {
+      if (this.value === '__manual__') {
+        const path = prompt('Enter orchestration JSON path:');
+        if (path) {
+          const opt = document.createElement('option');
+          opt.value = path;
+          opt.textContent = path.split(/[\\/]/).pop();
+          sel.insertBefore(opt, manualOpt);
+          sel.value = path;
+        } else {
+          sel.value = selectedPath || '';
+        }
+      }
+    };
+  }
+
+  function triggerFormTypeChanged() {
+    const type = document.getElementById('tfTriggerType').value;
+    document.getElementById('tfSchedulerFields').classList.toggle('visible', type === 'scheduler');
+    document.getElementById('tfLoopFields').classList.toggle('visible', type === 'loop');
+    document.getElementById('tfWebhookFields').classList.toggle('visible', type === 'webhook');
+  }
+
+  async function saveTrigger() {
+    const orchestrationPath = document.getElementById('tfOrchestrationPath').value;
+    if (!orchestrationPath || orchestrationPath === '__manual__') {
+      alert('Please select an orchestration file.');
+      return;
+    }
+
+    const triggerType = document.getElementById('tfTriggerType').value;
+    const body = {
+      orchestrationPath,
+      mcpPath: document.getElementById('tfMcpPath').value || null,
+      triggerType,
+      enabled: document.getElementById('tfEnabled').checked,
+      inputHandlerPrompt: document.getElementById('tfInputHandlerPrompt').value.trim() || null,
+    };
+
+    if (triggerType === 'scheduler') {
+      const cron = document.getElementById('tfCron').value.trim();
+      const interval = parseInt(document.getElementById('tfIntervalSeconds').value) || null;
+      const maxRuns = parseInt(document.getElementById('tfMaxRuns').value) || null;
+      if (!cron && !interval) { alert('Please provide a cron expression or interval.'); return; }
+      body.cron = cron || null;
+      body.intervalSeconds = interval;
+      body.maxRuns = maxRuns;
+    } else if (triggerType === 'loop') {
+      body.delaySeconds = parseInt(document.getElementById('tfDelaySeconds').value) || 0;
+      body.maxIterations = parseInt(document.getElementById('tfMaxIterations').value) || null;
+      body.continueOnFailure = document.getElementById('tfContinueOnFailure').checked;
+    } else if (triggerType === 'webhook') {
+      body.secret = document.getElementById('tfSecret').value || null;
+      body.maxConcurrent = parseInt(document.getElementById('tfMaxConcurrent').value) || 1;
+    }
+
+    try {
+      const res = await fetch('/api/triggers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { alert('Error: ' + (data.error || 'Unknown error')); return; }
+      closeTriggerForm();
+      await loadTriggers();
+
+      // If webhook, show the URL
+      if (triggerType === 'webhook' && data.webhookUrl) {
+        alert('Webhook trigger created!\n\nWebhook URL:\n' + data.webhookUrl + '\n\nThis URL is also shown in the dashboard.');
+      }
+    } catch (e) {
+      alert('Error creating trigger: ' + e.message);
+    }
+  }
+
+  function editTrigger(triggerId) {
+    const t = triggersData.find(x => x.id === triggerId);
+    if (!t) return;
+
+    openTriggerForm(t.orchestrationPath);
+    document.getElementById('tfEditId').value = triggerId;
+    document.getElementById('triggerFormTitle').innerHTML = '&#9881; Edit Trigger';
+    document.getElementById('tfTriggerType').value = (t.triggerType || 'scheduler').toLowerCase();
+    document.getElementById('tfEnabled').checked = t.enabled !== false;
+    document.getElementById('tfInputHandlerPrompt').value = t.inputHandlerPrompt || '';
+
+    // Fill type-specific fields
+    if (t.triggerType === 'scheduler') {
+      document.getElementById('tfCron').value = t.cron || '';
+      document.getElementById('tfIntervalSeconds').value = t.intervalSeconds || '';
+      document.getElementById('tfMaxRuns').value = t.maxRuns || '';
+    } else if (t.triggerType === 'loop') {
+      document.getElementById('tfDelaySeconds').value = t.delaySeconds || '0';
+      document.getElementById('tfMaxIterations').value = t.maxIterations || '';
+      document.getElementById('tfContinueOnFailure').checked = t.continueOnFailure === true;
+    } else if (t.triggerType === 'webhook') {
+      document.getElementById('tfSecret').value = ''; // never pre-fill secrets
+      document.getElementById('tfMaxConcurrent').value = t.maxConcurrent || '1';
+    }
+
+    triggerFormTypeChanged();
+  }
+
+  async function toggleTrigger(triggerId, enable) {
+    try {
+      const endpoint = enable ? `/api/triggers/${triggerId}/enable` : `/api/triggers/${triggerId}/disable`;
+      await fetch(endpoint, { method: 'POST' });
+      await loadTriggers();
+    } catch (e) { console.error('Toggle trigger failed:', e); }
+  }
+
+  async function fireTrigger(triggerId) {
+    // Find the trigger to check if it has parameters
+    const trigger = triggersData.find(t => t.id === triggerId);
+    if (trigger && trigger.parameters && trigger.parameters.length > 0) {
+      // Show parameter input dialog
+      document.getElementById('fpTriggerId').value = triggerId;
+      const fields = document.getElementById('fpParamFields');
+      fields.innerHTML = trigger.parameters.map(p => `
+        <div class="fp-group">
+          <label>${escHtml(p)}</label>
+          <input type="text" data-param="${escHtml(p)}" placeholder="Enter value for ${escHtml(p)}">
+        </div>
+      `).join('');
+      document.getElementById('fireParamsOverlay').classList.add('visible');
+      // Focus first input
+      const firstInput = fields.querySelector('input');
+      if (firstInput) firstInput.focus();
+      return;
+    }
+    // No parameters — fire immediately
+    await doFireTrigger(triggerId, null);
+  }
+
+  function closeFireParams() {
+    document.getElementById('fireParamsOverlay').classList.remove('visible');
+  }
+
+  async function submitFireParams() {
+    const triggerId = document.getElementById('fpTriggerId').value;
+    const inputs = document.getElementById('fpParamFields').querySelectorAll('input[data-param]');
+    const parameters = {};
+    inputs.forEach(inp => {
+      const name = inp.getAttribute('data-param');
+      if (inp.value.trim()) parameters[name] = inp.value.trim();
+    });
+    closeFireParams();
+    await doFireTrigger(triggerId, Object.keys(parameters).length > 0 ? parameters : null);
+  }
+
+  async function doFireTrigger(triggerId, parameters) {
+    try {
+      const opts = { method: 'POST' };
+      if (parameters) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify({ parameters });
+      }
+      const res = await fetch(`/api/triggers/${triggerId}/fire`, opts);
+      const data = await res.json();
+      if (!res.ok) { alert('Error: ' + (data.error || 'Unknown')); return; }
+      await loadTriggers();
+    } catch (e) { alert('Fire trigger failed: ' + e.message); }
+  }
+
+  async function deleteTrigger(triggerId) {
+    if (!confirm('Delete this trigger?')) return;
+    try {
+      await fetch(`/api/triggers/${triggerId}`, { method: 'DELETE' });
+      await loadTriggers();
+    } catch (e) { alert('Delete failed: ' + e.message); }
+  }
+
+  function copyWebhookUrl(el) {
+    const text = el.textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const orig = el.style.borderColor;
+      el.style.borderColor = 'var(--green)';
+      setTimeout(() => { el.style.borderColor = orig; }, 1000);
+    });
+  }
+
   // ── Keyboard shortcut ──
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeDetail();
+    if (e.key === 'Escape') {
+      closeDetail();
+      closeTriggerForm();
+      if (document.getElementById('triggerDashboard').classList.contains('visible')) {
+        closeTriggerDashboard();
+      }
+    }
   });
 
-  // ── Auto-load history on page load ──
+  // ── Auto-load history and triggers on page load ──
   loadHistory();
+  loadTriggers();
 
   // ── Load runs directory path ──
   fetch('/api/runs-dir').then(r => r.ok ? r.json() : null).then(data => {

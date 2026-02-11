@@ -12,6 +12,7 @@ public static class OrchestrationParser
 		{
 			new OrchestrationStepConverter(),
 			new McpConverter(),
+			new TriggerConfigConverter(),
 			new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
 		},
 	};
@@ -71,7 +72,13 @@ public static class OrchestrationParser
 
 	private static void ResolveStepMcps(Orchestration orchestration, Mcp[] availableMcps)
 	{
-		var lookup = availableMcps.ToDictionary(m => m.Name, StringComparer.OrdinalIgnoreCase);
+		// Merge inline MCPs from orchestration with externally provided MCPs.
+		// External MCPs take priority on name conflicts (override inline definitions).
+		var lookup = new Dictionary<string, Mcp>(StringComparer.OrdinalIgnoreCase);
+		foreach (var mcp in orchestration.Mcps)
+			lookup[mcp.Name] = mcp;
+		foreach (var mcp in availableMcps)
+			lookup[mcp.Name] = mcp; // external overrides inline
 
 		foreach (var step in orchestration.Steps)
 		{
@@ -197,6 +204,63 @@ public static class OrchestrationParser
 				MaxIterations = element.GetProperty("maxIterations").GetInt32(),
 				ExitPattern = element.GetProperty("exitPattern").GetString()!,
 			};
+		}
+	}
+
+	private sealed class TriggerConfigConverter : JsonConverter<TriggerConfig>
+	{
+		public override TriggerConfig Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+		{
+			using var doc = JsonDocument.ParseValue(ref reader);
+			var root = doc.RootElement;
+
+			var type = root.TryGetProperty("type", out var typeProp)
+				? Enum.Parse<TriggerType>(typeProp.GetString()!, ignoreCase: true)
+				: throw new JsonException("Missing 'type' property on trigger configuration.");
+
+			var enabled = root.TryGetProperty("enabled", out var enabledProp)
+				? enabledProp.GetBoolean()
+				: true;
+
+			var inputHandlerPrompt = root.TryGetProperty("inputHandlerPrompt", out var ihpProp)
+				? ihpProp.GetString()
+				: null;
+
+			return type switch
+			{
+				TriggerType.Scheduler => new SchedulerTriggerConfig
+				{
+					Type = TriggerType.Scheduler,
+					Enabled = enabled,
+					InputHandlerPrompt = inputHandlerPrompt,
+					Cron = root.TryGetProperty("cron", out var cron) ? cron.GetString() : null,
+					IntervalSeconds = root.TryGetProperty("intervalSeconds", out var interval) ? interval.GetInt32() : null,
+					MaxRuns = root.TryGetProperty("maxRuns", out var maxRuns) ? maxRuns.GetInt32() : null,
+				},
+				TriggerType.Loop => new LoopTriggerConfig
+				{
+					Type = TriggerType.Loop,
+					Enabled = enabled,
+					InputHandlerPrompt = inputHandlerPrompt,
+					DelaySeconds = root.TryGetProperty("delaySeconds", out var delay) ? delay.GetInt32() : 0,
+					MaxIterations = root.TryGetProperty("maxIterations", out var maxIter) ? maxIter.GetInt32() : null,
+					ContinueOnFailure = root.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
+				},
+				TriggerType.Webhook => new WebhookTriggerConfig
+				{
+					Type = TriggerType.Webhook,
+					Enabled = enabled,
+					InputHandlerPrompt = inputHandlerPrompt,
+					Secret = root.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
+					MaxConcurrent = root.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
+				},
+				_ => throw new JsonException($"Unknown trigger type: '{type}'."),
+			};
+		}
+
+		public override void Write(Utf8JsonWriter writer, TriggerConfig value, JsonSerializerOptions options)
+		{
+			JsonSerializer.Serialize(writer, value, value.GetType(), options);
 		}
 	}
 }
