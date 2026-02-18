@@ -1,0 +1,10 @@
+{
+  "stepName": "check-system-status",
+  "status": "Succeeded",
+  "startedAt": "2026-02-11T11:50:46.6835483+00:00",
+  "completedAt": "2026-02-11T11:51:32.0561847+00:00",
+  "duration": "00:00:45.3726364",
+  "content": "# \uD83D\uDDA5\uFE0F System Status Dashboard\n\n**Last Updated:** 2026-02-11 11:51 UTC\n\n---\n\n## Overall Status: \u26A0\uFE0F ATTENTION REQUIRED\n\n| Service | Status | Details |\n|---------|--------|---------|\n| Database Cluster | \uD83D\uDFE1 DEGRADED | Replication lag elevated |\n| Storage Service | \uD83D\uDD34 CRITICAL | Capacity threshold exceeded |\n\n---\n\n## \uD83D\uDFE1 Database Cluster \u2014 DEGRADED\n\n**Issues Detected:**\n- Replication lag: **847ms** (above normal threshold)\n- Connection pool utilization: **93.5%** (near saturation)\n\n**Risk:** Potential query latency and failover delays\n\n---\n\n## \uD83D\uDD34 Storage Service \u2014 CRITICAL\n\n**Issues Detected:**\n- Disk capacity: **91%** utilized\n- Time to full: **~4 days**\n\n**Risk:** Service outage if capacity exhausted\n\n---\n\n## \uD83D\uDD27 Recommended Actions\n\n| Priority | Action | Service |\n|----------|--------|---------|\n| **P1** | Expand storage capacity immediately | Storage |\n| **P2** | Investigate replica sync delays | Database |\n\n---\n\n*2 issues require attention \u2022 Next check scheduled automatically*",
+  "rawContent": "**Health Check Complete** \u2014 2 issues require attention:\n\n1. **\uD83D\uDFE1 Database Cluster (DEGRADED)**: Replication lag at 847ms and connection pool at 93.5% utilization\n2. **\uD83D\uDD34 Storage Service (CRITICAL)**: Disk at 91% capacity, projected full in 4 days\n\nRecommended immediate actions: expand storage capacity and investigate DB replica sync delays.",
+  "parameters": {}
+}

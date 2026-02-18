@@ -1,0 +1,10 @@
+{
+  "stepName": "generate-summary",
+  "status": "Succeeded",
+  "startedAt": "2026-02-11T11:51:32.0562147+00:00",
+  "completedAt": "2026-02-11T11:51:45.5567737+00:00",
+  "duration": "00:00:13.5005590",
+  "content": "**\u26A0\uFE0F SYSTEM ALERT: 1 Critical, 1 Degraded Service \u2014 Immediate Action Required**\n\n| System | Status | Key Issue |\n|--------|--------|-----------|\n| Storage Service | \uD83D\uDD34 CRITICAL | Disk at 91%, ~4 days to full |\n| Database Cluster | \uD83D\uDFE1 DEGRADED | Replication lag 847ms, connections at 93.5% |\n\n**Priority Actions:**\n1. **P1:** Expand storage capacity immediately (4-day runway)\n2. **P2:** Investigate database replication delays\n\n**Trend:** \uD83D\uDCC8 Above baseline \u2014 both metrics have degraded from normal ranges. Intervention needed within 24-48 hours to prevent service impact.",
+  "rawContent": "## System Status Summary\n\n| System | Status | Alert |\n|--------|--------|-------|\n| Database Cluster | \uD83D\uDFE1 DEGRADED | Replication lag 847ms, connection pool at 93.5% |\n| Storage Service | \uD83D\uDD34 CRITICAL | Disk at 91%, ~4 days to full |\n\n---\n\n## Executive Summary\n\n**1. Overall Health:** \u26A0\uFE0F System requires immediate attention \u2014 1 critical, 1 degraded service.\n\n**2. Systems Requiring Attention:**\n- **Storage Service (CRITICAL):** Disk capacity exhaustion imminent\n- **Database Cluster (DEGRADED):** Elevated replication lag and near-saturated connections\n\n**3. Recommended Actions:**\n| Priority | Action |\n|----------|--------|\n| P1 | Expand storage capacity immediately (4-day runway) |\n| P2 | Investigate and resolve database replication delays |\n\n**4. Trend vs. Typical:** \uD83D\uDCC8 *Above baseline* \u2014 Storage and database metrics have degraded from normal operating ranges. Immediate intervention recommended to prevent escalation.\n\n---\n*Action required within 24-48 hours to avoid service impact.*",
+  "parameters": {}
+}

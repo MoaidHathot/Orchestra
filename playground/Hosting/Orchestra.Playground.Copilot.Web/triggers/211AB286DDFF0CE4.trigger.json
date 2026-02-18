@@ -1,0 +1,8 @@
+{
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\feature3-view-trigger-runs.json",
+  "mcpPath": "P:\\Github\\Orchestra\\examples\\mcp.json",
+  "trigger": {
+    "type": 0,
+    "enabled": true
+  }
+}

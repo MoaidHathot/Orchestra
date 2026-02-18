@@ -736,6 +736,83 @@
   .history-status.failed { background: rgba(243,139,168,0.2); color: var(--red); }
   .history-status.running { background: rgba(137,180,250,0.2); color: var(--blue); }
   .history-status.unknown { background: rgba(166,173,200,0.2); color: var(--text-muted); }
+  .history-status.skipped { background: rgba(166,173,200,0.2); color: var(--text-muted); }
+
+  /* ── Run history (new /api/runs) ── */
+  .run-history-list {
+    list-style: none; padding: 0; margin: 0;
+    max-height: 350px; overflow-y: auto;
+  }
+  .run-history-item {
+    padding: 8px 10px; cursor: pointer;
+    border-bottom: 1px solid var(--border); font-size: 12px;
+  }
+  .run-history-item:hover { background: var(--surface2); }
+  .run-history-item:last-child { border-bottom: none; }
+  .run-history-item .rh-name { font-weight: 600; margin-bottom: 2px; }
+  .run-history-item .rh-meta {
+    color: var(--text-muted); font-size: 11px;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+  .run-history-item .rh-duration { font-size: 10px; color: var(--text-muted); }
+  .run-history-item .rh-trigger-tag {
+    font-size: 9px; padding: 1px 4px; border-radius: 3px;
+    background: rgba(137,180,250,0.15); color: var(--blue);
+  }
+
+  /* ── Per-trigger inline run history ── */
+  .trigger-item-expandable { position: relative; }
+  .trigger-runs-toggle {
+    font-size: 10px; color: var(--text-muted); cursor: pointer;
+    margin-left: 4px; opacity: 0.7;
+  }
+  .trigger-runs-toggle:hover { opacity: 1; color: var(--accent); }
+  .trigger-run-list {
+    list-style: none; padding: 0; margin: 4px 0 0 12px;
+    border-left: 2px solid var(--border);
+  }
+  .trigger-run-item {
+    padding: 4px 8px; cursor: pointer; font-size: 11px;
+    border-bottom: 1px solid var(--border);
+  }
+  .trigger-run-item:hover { background: var(--surface2); }
+  .trigger-run-item:last-child { border-bottom: none; }
+  .trigger-run-item .tr-meta {
+    display: flex; gap: 6px; align-items: center; color: var(--text-muted);
+  }
+
+  /* ── Run detail panel (main area) ── */
+  .run-detail-panel {
+    padding: 20px; max-width: 900px;
+  }
+  .run-detail-panel h2 { margin: 0 0 16px; font-size: 18px; }
+  .run-detail-header {
+    display: grid; grid-template-columns: auto auto; gap: 4px 16px;
+    font-size: 13px; margin-bottom: 16px; padding: 12px;
+    background: var(--surface2); border-radius: 8px;
+  }
+  .run-detail-header .rdh-key { color: var(--text-muted); font-weight: 600; }
+  .run-detail-steps { margin-top: 12px; }
+  .run-detail-step {
+    margin-bottom: 12px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+  }
+  .run-detail-step-header {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; background: var(--surface); cursor: pointer;
+  }
+  .run-detail-step-header:hover { background: var(--surface2); }
+  .run-detail-step-header .rds-name { font-weight: 600; font-size: 13px; }
+  .run-detail-step-header .rds-duration { font-size: 11px; color: var(--text-muted); margin-left: auto; }
+  .run-detail-step-body {
+    padding: 12px 14px; border-top: 1px solid var(--border);
+    font-size: 12px; white-space: pre-wrap; word-break: break-word;
+    max-height: 300px; overflow-y: auto; background: var(--bg);
+  }
+  .run-detail-step-body.collapsed { display: none; }
+  .run-detail-step-meta {
+    display: flex; gap: 12px; font-size: 11px; color: var(--text-muted);
+    padding: 6px 14px; border-top: 1px solid var(--border); background: var(--surface);
+  }
 
   /* ── Validation results ── */
   .validation-results { margin-top: 8px; border-radius: 6px; overflow: hidden; font-size: 12px; }
@@ -1092,8 +1169,8 @@
     padding: 6px 16px; font-size: 12px; font-weight: 600; cursor: pointer;
     border: none; border-radius: 4px; transition: opacity 0.15s;
   }
-  .folder-preview-actions .preview-add-btn { background: var(--blue); color: #fff; }
-  .folder-preview-actions .preview-run-btn { background: var(--green); color: #fff; }
+  .folder-preview-actions .preview-activate-btn { background: var(--orange); color: #fff; }
+  .folder-preview-actions .preview-execute-btn { background: var(--green); color: #fff; }
   .folder-preview-actions button:hover { opacity: 0.85; }
 
   /* ══════════════════════════════════════════════════════════════════════════
@@ -1418,6 +1495,16 @@
     </ul>
   </div>
 
+  <!-- ── Run History section (always visible, uses /api/runs) ── -->
+  <div class="section" id="runHistorySection">
+    <h2>Run History
+      <button onclick="loadRunHistory()" style="float:right;padding:2px 8px;font-size:11px;cursor:pointer">&#8635;</button>
+    </h2>
+    <ul class="run-history-list" id="runHistoryList">
+      <li style="padding:8px 10px;color:var(--text-muted);font-size:12px">Loading...</li>
+    </ul>
+  </div>
+
 </div>
 
 <!-- ── Main ── -->
@@ -1496,6 +1583,9 @@
     <h2>&#9881; Trigger Dashboard <button onclick="loadTriggers()" style="padding:2px 8px;font-size:11px;cursor:pointer">&#8635; Refresh</button></h2>
     <div class="trigger-dashboard-grid" id="triggerDashboardGrid"></div>
   </div>
+
+  <!-- Run detail panel (shown when clicking a historical run) -->
+  <div class="run-detail-panel" id="runDetailPanel" style="display:none"></div>
 
   <!-- Streaming content area (live output during execution) -->
   <div class="streaming-area" id="streamingArea">
@@ -1839,6 +1929,8 @@
   // ── Select a folder tab ──
   function selectFolderTab(path) {
     activeFolderTab = path;
+    closeTriggerDashboard(); // Ensure trigger dashboard is hidden when switching to an orchestration tab
+    closeRunDetail(); // Ensure run detail panel is hidden
     renderFolderFileList();
     renderFolderTabs();
     renderFolderTabContent();
@@ -1933,9 +2025,12 @@
       }
 
       const escapedPath = jsStr(activeFolderTab);
-      overlayHtml += `<button class="run-btn-big" onclick="folderAddAndRunItem('${escapedPath}')">&#9654; Run Orchestration</button>`;
+      overlayHtml += `<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">`;
+      overlayHtml += `<button class="run-btn-big" onclick="folderExecuteTab('${escapedPath}')" style="flex:1;min-width:140px;">&#9654; Execute</button>`;
+      overlayHtml += `<button class="run-btn-big" onclick="activateOrchestration('${escapedPath}')" style="flex:1;min-width:140px;background:var(--orange);">&#9881; Activate</button>`;
+      overlayHtml += `</div>`;
       if (hasParams) {
-        overlayHtml += `<div class="run-desc">Fill in parameters above, then click Run.</div>`;
+        overlayHtml += `<div class="run-desc">Fill in parameters above, then click Execute to run once, or Activate to create a trigger.</div>`;
       }
       overlayHtml += '</div>';
 
@@ -2099,6 +2194,7 @@
       updateFolderSummary();
       if (path === activeFolderTab) renderFolderTabContent();
       loadHistory();
+      loadRunHistory();
     }
   }
 
@@ -2312,8 +2408,8 @@
           actDiv.className = 'folder-preview-actions';
           const escapedPath = jsStr(path);
           actDiv.innerHTML = `
-            <button class="preview-add-btn" onclick="folderAddItem('${escapedPath}')">+ Add to Tabs</button>
-            <button class="preview-run-btn" onclick="folderAddAndRunItem('${escapedPath}')">&#9654; Add &amp; Run</button>
+            <button class="preview-activate-btn" onclick="activateOrchestration('${escapedPath}')">&#9881; Activate</button>
+            <button class="preview-execute-btn" onclick="executeOrchestrationDirect('${escapedPath}')">&#9654; Execute</button>
           `;
           container.appendChild(actDiv);
         }
@@ -2383,6 +2479,129 @@
     }
 
     // Run immediately
+    if (tab.status !== 'running') {
+      folderExecuteTab(path);
+    }
+  }
+
+  // ── Activate: create a trigger for this orchestration ──
+  function activateOrchestration(path) {
+    const orch = folderOrchestrations.find(o => o.path === path);
+    if (!orch || !orch.valid) return;
+
+    const hasParams = orch.parameters && orch.parameters.length > 0;
+    const hasTrigger = orch.trigger && orch.trigger.type;
+
+    // If orchestration has a pre-defined trigger with all required data and no params, auto-create
+    if (!hasParams && hasTrigger) {
+      autoCreateTrigger(path, orch);
+      return;
+    }
+
+    // Otherwise, open the trigger form pre-filled with this orchestration's path and trigger config
+    openTriggerForm(path);
+
+    // If orchestration has a pre-defined trigger type, pre-fill the form fields
+    if (hasTrigger) {
+      const t = orch.trigger;
+      document.getElementById('tfTriggerType').value = t.type;
+      triggerFormTypeChanged();
+
+      if (t.type === 'scheduler') {
+        if (t.cron) document.getElementById('tfCron').value = t.cron;
+        if (t.intervalSeconds) document.getElementById('tfIntervalSeconds').value = t.intervalSeconds;
+        if (t.maxRuns) document.getElementById('tfMaxRuns').value = t.maxRuns;
+      } else if (t.type === 'loop') {
+        if (t.delaySeconds != null) document.getElementById('tfDelaySeconds').value = t.delaySeconds;
+        if (t.maxIterations) document.getElementById('tfMaxIterations').value = t.maxIterations;
+        document.getElementById('tfContinueOnFailure').checked = !!t.continueOnFailure;
+      } else if (t.type === 'webhook') {
+        if (t.maxConcurrent) document.getElementById('tfMaxConcurrent').value = t.maxConcurrent;
+      }
+
+      document.getElementById('tfEnabled').checked = t.enabled !== false;
+    }
+
+    // Pre-fill MCP path if available
+    const mcpPath = orch.mcpPath || folderMcpPath || '';
+    if (mcpPath) document.getElementById('tfMcpPath').value = mcpPath;
+  }
+
+  // ── Auto-create a trigger without showing the form ──
+  async function autoCreateTrigger(path, orch) {
+    const t = orch.trigger;
+    const body = {
+      orchestrationPath: path,
+      mcpPath: orch.mcpPath || folderMcpPath || null,
+      triggerType: t.type,
+      enabled: t.enabled !== false,
+    };
+
+    if (t.type === 'scheduler') {
+      body.cron = t.cron || null;
+      body.intervalSeconds = t.intervalSeconds || null;
+      body.maxRuns = t.maxRuns || null;
+    } else if (t.type === 'loop') {
+      body.delaySeconds = t.delaySeconds || 0;
+      body.maxIterations = t.maxIterations || null;
+      body.continueOnFailure = !!t.continueOnFailure;
+    } else if (t.type === 'webhook') {
+      body.maxConcurrent = t.maxConcurrent || 1;
+    }
+
+    try {
+      const res = await fetch('/api/triggers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert('Error creating trigger: ' + (data.error || 'Unknown error'));
+        return;
+      }
+      await loadTriggers();
+
+      if (t.type === 'webhook' && data.webhookUrl) {
+        alert('Trigger activated!\n\nWebhook URL:\n' + data.webhookUrl);
+      } else {
+        // Brief visual confirmation
+        const container = document.getElementById('diagramContainer');
+        const notice = document.createElement('div');
+        notice.className = 'folder-preview-actions';
+        notice.innerHTML = '<div style="color:var(--green);font-weight:600;font-size:13px;">&#10003; Trigger activated successfully</div>';
+        const existing = container.querySelector('.folder-preview-actions');
+        if (existing) existing.replaceWith(notice);
+        setTimeout(() => { if (notice.parentNode) notice.remove(); }, 3000);
+      }
+    } catch (e) {
+      alert('Error activating trigger: ' + e.message);
+    }
+  }
+
+  // ── Execute: run once immediately without creating a trigger ──
+  function executeOrchestrationDirect(path) {
+    const orch = folderOrchestrations.find(o => o.path === path);
+    if (!orch || !orch.valid) return;
+
+    // Add as a tab if not already there
+    if (!folderTabs[path]) {
+      folderAddItem(path);
+    }
+
+    const tab = folderTabs[path];
+    const hasParams = orch.parameters && orch.parameters.length > 0;
+
+    if (hasParams) {
+      // Parameters needed — show tab so user can fill them in, then click Execute
+      const allFilled = orch.parameters.every(p => tab.parameters[p] && tab.parameters[p].trim() !== '');
+      if (!allFilled) {
+        selectFolderTab(path);
+        return; // renderFolderTabContent will show parameter inputs + Execute button
+      }
+    }
+
+    // No params or all filled — run immediately
     if (tab.status !== 'running') {
       folderExecuteTab(path);
     }
@@ -2703,6 +2922,7 @@
     const mcpPathVal = document.getElementById('mcpPath').value.trim();
 
     if (!orchPath) return;
+    closeTriggerDashboard(); // Ensure trigger dashboard is hidden when loading an orchestration
 
     const loadBtn = document.getElementById('loadBtn');
     loadBtn.disabled = true;
@@ -3262,6 +3482,7 @@
       currentExecutionId = null;
       // Refresh history after execution completes
       loadHistory();
+      loadRunHistory();
     }
   }
 
@@ -3865,11 +4086,236 @@
       const res = await fetch(`/api/history/${encodeURIComponent(runId)}`, { method: 'DELETE' });
       if (res.ok) {
         loadHistory();
+        loadRunHistory();
       } else {
         addLog(`Failed to delete run ${runId}`, 'error');
       }
     } catch (e) {
       addLog(`Error deleting run: ${e.message}`, 'error');
+    }
+  }
+
+  // ── Run History (new /api/runs) ──
+
+  async function loadRunHistory() {
+    const list = document.getElementById('runHistoryList');
+    list.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">Loading...</li>';
+
+    try {
+      const res = await fetch('/api/runs?limit=50');
+      if (!res.ok) {
+        list.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">Failed to load run history</li>';
+        return;
+      }
+      const data = await res.json();
+      if (!data.runs || data.runs.length === 0) {
+        list.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">No runs yet</li>';
+        return;
+      }
+
+      list.innerHTML = '';
+      for (const run of data.runs) {
+        const li = document.createElement('li');
+        li.className = 'run-history-item';
+        li.onclick = () => openRunDetail(run.orchestrationName, run.runId);
+
+        const statusCls = (run.status || 'unknown').toLowerCase();
+        const timeStr = run.startedAt
+          ? new Date(run.startedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : 'unknown time';
+        const durationStr = run.durationSeconds != null ? `${run.durationSeconds}s` : '';
+        const triggerTag = run.triggerId ? `<span class="rh-trigger-tag">trigger</span>` : '';
+
+        li.innerHTML = `
+          <div class="rh-name">${escHtml(run.orchestrationName || run.runId)}</div>
+          <div class="rh-meta">
+            <span class="history-status ${statusCls}">${escHtml(run.status || 'Unknown')}</span>
+            <span>${timeStr}</span>
+            <span>${run.stepCount || 0} steps</span>
+            ${durationStr ? `<span class="rh-duration">${durationStr}</span>` : ''}
+            ${triggerTag}
+          </div>
+        `;
+        list.appendChild(li);
+      }
+    } catch (e) {
+      list.innerHTML = `<li style="padding:8px 10px;color:var(--red);font-size:12px">Error: ${escHtml(e.message)}</li>`;
+    }
+  }
+
+  async function openRunDetail(orchestrationName, runId) {
+    const panel = document.getElementById('runDetailPanel');
+    panel.style.display = 'block';
+    panel.innerHTML = '<div style="padding:20px;color:var(--text-muted)">Loading run details...</div>';
+
+    // Hide other main panels
+    document.getElementById('diagramContainer').style.display = 'none';
+    document.getElementById('editorPanel').style.display = 'none';
+    document.getElementById('comparePanel').style.display = 'none';
+    document.getElementById('toolbar').style.display = 'none';
+    if (document.getElementById('triggerDashboard').classList.contains('visible')) {
+      document.getElementById('triggerDashboard').classList.remove('visible');
+    }
+
+    try {
+      const res = await fetch(`/api/runs/${encodeURIComponent(orchestrationName)}/${encodeURIComponent(runId)}`);
+      if (!res.ok) {
+        panel.innerHTML = `<div style="padding:20px;color:var(--red)">Failed to load run (${res.status})</div>`;
+        return;
+      }
+      const run = await res.json();
+      renderRunDetail(panel, run);
+    } catch (e) {
+      panel.innerHTML = `<div style="padding:20px;color:var(--red)">Error: ${escHtml(e.message)}</div>`;
+    }
+  }
+
+  function renderRunDetail(panel, run) {
+    const statusCls = (run.status || 'unknown').toLowerCase();
+    const startStr = run.startedAt ? new Date(run.startedAt).toLocaleString() : 'N/A';
+    const endStr = run.completedAt ? new Date(run.completedAt).toLocaleString() : 'N/A';
+    const durationStr = run.durationSeconds != null ? `${run.durationSeconds}s` : 'N/A';
+    const triggerStr = run.triggerId || 'None (direct execution)';
+    const paramsStr = run.parameters && Object.keys(run.parameters).length > 0
+      ? Object.entries(run.parameters).map(([k,v]) => `<span class="rdh-key">${escHtml(k)}</span><span>${escHtml(String(v))}</span>`).join('')
+      : '';
+
+    // Build steps HTML
+    const steps = run.steps || [];
+    const stepsHtml = steps.map((step, i) => {
+      const sCls = (step.status || 'unknown').toLowerCase();
+      const sDur = step.durationSeconds != null ? `${step.durationSeconds}s` : '';
+      const content = step.content || step.rawContent || '';
+      const errorHtml = step.errorMessage ? `<div style="color:var(--red);padding:8px 14px;border-top:1px solid var(--border);font-size:12px"><strong>Error:</strong> ${escHtml(step.errorMessage)}</div>` : '';
+      const loopTag = step.loopIteration != null ? `<span style="font-size:10px;color:var(--text-muted)">iteration ${step.loopIteration}</span>` : '';
+
+      return `<div class="run-detail-step">
+        <div class="run-detail-step-header" onclick="this.nextElementSibling.classList.toggle('collapsed');if(this.nextElementSibling.nextElementSibling)this.nextElementSibling.nextElementSibling.classList.toggle('collapsed')">
+          <span class="history-status ${sCls}">${escHtml(step.status || 'Unknown')}</span>
+          <span class="rds-name">${escHtml(step.name)}</span>
+          ${loopTag}
+          <span class="rds-duration">${sDur}</span>
+        </div>
+        <div class="run-detail-step-body">${escHtml(content) || '<em style="color:var(--text-muted)">No content</em>'}</div>
+        ${errorHtml}
+        ${step.rawContent && step.rawContent !== step.content ? `<div class="run-detail-step-meta collapsed"><strong>Raw:</strong> ${escHtml(step.rawContent.substring(0, 500))}${step.rawContent.length > 500 ? '...' : ''}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    panel.innerHTML = `
+      <h2>
+        <span class="history-status ${statusCls}" style="font-size:12px">${escHtml(run.status || 'Unknown')}</span>
+        ${escHtml(run.orchestrationName || run.runId)}
+        <button onclick="closeRunDetail()" style="float:right;padding:4px 10px;font-size:12px;cursor:pointer;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--text)">Close</button>
+      </h2>
+      <div class="run-detail-header">
+        <span class="rdh-key">Run ID</span><span style="font-size:11px;word-break:break-all">${escHtml(run.runId)}</span>
+        <span class="rdh-key">Started</span><span>${startStr}</span>
+        <span class="rdh-key">Completed</span><span>${endStr}</span>
+        <span class="rdh-key">Duration</span><span>${durationStr}</span>
+        <span class="rdh-key">Trigger</span><span>${escHtml(triggerStr)}</span>
+        ${paramsStr}
+      </div>
+      ${run.finalContent ? `<div style="margin-bottom:16px;padding:12px;background:var(--surface);border-radius:8px;border:1px solid var(--border)"><strong style="font-size:12px">Final Output:</strong><div style="font-size:12px;white-space:pre-wrap;margin-top:6px;max-height:200px;overflow-y:auto">${escHtml(run.finalContent)}</div></div>` : ''}
+      <h3 style="font-size:14px;margin-bottom:8px">Steps (${steps.length})</h3>
+      <div class="run-detail-steps">${stepsHtml || '<div style="color:var(--text-muted);font-size:12px">No step data available</div>'}</div>
+    `;
+  }
+
+  function closeRunDetail() {
+    document.getElementById('runDetailPanel').style.display = 'none';
+    document.getElementById('runDetailPanel').innerHTML = '';
+    // Restore diagram if we have data
+    if (orchestrationData) {
+      document.getElementById('diagramContainer').style.display = '';
+      document.getElementById('toolbar').style.display = '';
+    }
+  }
+
+  // ── Per-trigger run history ──
+
+  let expandedTriggerId = null;
+
+  function renderTriggerListWithHistory() {
+    const ul = document.getElementById('triggerList');
+    if (!triggersData.length) {
+      ul.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">No triggers configured</li>';
+      return;
+    }
+    ul.innerHTML = triggersData.map(t => {
+      const typeCls = (t.triggerType || '').toLowerCase();
+      const statusCls = (t.status || 'idle').toLowerCase();
+      const name = t.orchestrationName || t.orchestrationPath?.split(/[\\/]/).pop() || 'Unknown';
+      const isExpanded = expandedTriggerId === t.id;
+      return `<li class="trigger-item trigger-item-expandable" onclick="viewTriggerDetail('${t.id}')">
+        <div class="trigger-name">
+          <span class="trigger-enabled-dot ${t.enabled ? 'on' : 'off'}"></span>
+          ${escHtml(name)}
+          <span class="trigger-runs-toggle" onclick="event.stopPropagation();toggleTriggerHistory('${t.id}')" title="Show run history">${isExpanded ? '&#9660;' : '&#9654;'} runs</span>
+        </div>
+        <div class="trigger-meta">
+          <span class="trigger-type-badge ${typeCls}">${typeCls}</span>
+          <span class="trigger-status-badge ${statusCls}">${t.status || 'idle'}</span>
+          ${t.runCount ? `<span>${t.runCount} runs</span>` : ''}
+          <span class="trigger-actions">
+            <button onclick="event.stopPropagation();toggleTrigger('${t.id}',${!t.enabled})" title="${t.enabled ? 'Disable' : 'Enable'}">${t.enabled ? '&#9724;' : '&#9654;'}</button>
+            <button onclick="event.stopPropagation();fireTrigger('${t.id}')" title="Fire now">&#9889;</button>
+            <button class="trigger-delete" onclick="event.stopPropagation();deleteTrigger('${t.id}')" title="Delete">&#10005;</button>
+          </span>
+        </div>
+        ${t.lastError ? `<span class="trigger-error-msg" title="${escHtml(t.lastError)}">${escHtml(t.lastError)}</span>` : ''}
+        <ul class="trigger-run-list" id="triggerRuns_${t.id}" style="display:${isExpanded ? 'block' : 'none'}"></ul>
+      </li>`;
+    }).join('');
+
+    // If a trigger is expanded, load its runs
+    if (expandedTriggerId) {
+      loadTriggerRuns(expandedTriggerId);
+    }
+  }
+
+  async function toggleTriggerHistory(triggerId) {
+    if (expandedTriggerId === triggerId) {
+      expandedTriggerId = null;
+    } else {
+      expandedTriggerId = triggerId;
+    }
+    renderTriggerListWithHistory();
+  }
+
+  async function loadTriggerRuns(triggerId) {
+    const runList = document.getElementById('triggerRuns_' + triggerId);
+    if (!runList) return;
+    runList.innerHTML = '<li style="padding:4px 8px;color:var(--text-muted);font-size:11px">Loading...</li>';
+
+    try {
+      const res = await fetch(`/api/runs/trigger/${encodeURIComponent(triggerId)}?limit=10`);
+      if (!res.ok) {
+        runList.innerHTML = '<li style="padding:4px 8px;color:var(--text-muted);font-size:11px">Failed to load</li>';
+        return;
+      }
+      const data = await res.json();
+      if (!data.runs || data.runs.length === 0) {
+        runList.innerHTML = '<li style="padding:4px 8px;color:var(--text-muted);font-size:11px">No runs yet</li>';
+        return;
+      }
+      runList.innerHTML = data.runs.map(r => {
+        const sCls = (r.status || 'unknown').toLowerCase();
+        const timeStr = r.startedAt
+          ? new Date(r.startedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+          : '';
+        const dur = r.durationSeconds != null ? `${r.durationSeconds}s` : '';
+        return `<li class="trigger-run-item" onclick="event.stopPropagation();openRunDetail('${escHtml(r.orchestrationName)}','${escHtml(r.runId)}')">
+          <div class="tr-meta">
+            <span class="history-status ${sCls}">${escHtml(r.status || '?')}</span>
+            <span>${timeStr}</span>
+            <span>${r.stepCount || 0} steps</span>
+            <span>${dur}</span>
+          </div>
+        </li>`;
+      }).join('');
+    } catch (e) {
+      runList.innerHTML = `<li style="padding:4px 8px;color:var(--red);font-size:11px">Error: ${escHtml(e.message)}</li>`;
     }
   }
 
@@ -4472,39 +4918,13 @@
       if (!res.ok) return;
       const data = await res.json();
       triggersData = data.triggers || [];
-      renderTriggerList();
+      renderTriggerListWithHistory();
       renderTriggerDashboard();
     } catch (e) { console.error('Failed to load triggers:', e); }
   }
 
   function renderTriggerList() {
-    const ul = document.getElementById('triggerList');
-    if (!triggersData.length) {
-      ul.innerHTML = '<li style="padding:8px 10px;color:var(--text-muted);font-size:12px">No triggers configured</li>';
-      return;
-    }
-    ul.innerHTML = triggersData.map(t => {
-      const typeCls = (t.triggerType || '').toLowerCase();
-      const statusCls = (t.status || 'idle').toLowerCase();
-      const name = t.orchestrationName || t.orchestrationPath?.split(/[\\/]/).pop() || 'Unknown';
-      return `<li class="trigger-item" onclick="viewTriggerDetail('${t.id}')">
-        <div class="trigger-name">
-          <span class="trigger-enabled-dot ${t.enabled ? 'on' : 'off'}"></span>
-          ${escHtml(name)}
-        </div>
-        <div class="trigger-meta">
-          <span class="trigger-type-badge ${typeCls}">${typeCls}</span>
-          <span class="trigger-status-badge ${statusCls}">${t.status || 'idle'}</span>
-          ${t.runCount ? `<span>${t.runCount} runs</span>` : ''}
-          <span class="trigger-actions">
-            <button onclick="event.stopPropagation();toggleTrigger('${t.id}',${!t.enabled})" title="${t.enabled ? 'Disable' : 'Enable'}">${t.enabled ? '&#9724;' : '&#9654;'}</button>
-            <button onclick="event.stopPropagation();fireTrigger('${t.id}')" title="Fire now">&#9889;</button>
-            <button class="trigger-delete" onclick="event.stopPropagation();deleteTrigger('${t.id}')" title="Delete">&#10005;</button>
-          </span>
-        </div>
-        ${t.lastError ? `<span class="trigger-error-msg" title="${escHtml(t.lastError)}">${escHtml(t.lastError)}</span>` : ''}
-      </li>`;
-    }).join('');
+    renderTriggerListWithHistory();
   }
 
   function renderTriggerDashboard() {
@@ -4749,6 +5169,7 @@
       const data = await res.json();
       if (!res.ok) { alert('Error: ' + (data.error || 'Unknown error')); return; }
       closeTriggerForm();
+      closeTriggerDashboard(); // Restore diagram view so UI doesn't get stuck
       await loadTriggers();
 
       // If webhook, show the URL
@@ -4871,6 +5292,9 @@
     if (e.key === 'Escape') {
       closeDetail();
       closeTriggerForm();
+      if (document.getElementById('runDetailPanel').style.display !== 'none') {
+        closeRunDetail();
+      }
       if (document.getElementById('triggerDashboard').classList.contains('visible')) {
         closeTriggerDashboard();
       }
@@ -4879,6 +5303,7 @@
 
   // ── Auto-load history and triggers on page load ──
   loadHistory();
+  loadRunHistory();
   loadTriggers();
 
   // ── Load runs directory path ──

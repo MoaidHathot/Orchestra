@@ -6,10 +6,17 @@ public class ExecutionResult
 	public required ExecutionStatus Status { get; init; }
 	public string? ErrorMessage { get; init; }
 
-	public static ExecutionResult Succeeded(string content) => new()
+	/// <summary>
+	/// The raw content before output handler was applied.
+	/// Null when no output handler exists or for non-succeeded results.
+	/// </summary>
+	public string? RawContent { get; init; }
+
+	public static ExecutionResult Succeeded(string content, string? rawContent = null) => new()
 	{
 		Content = content,
 		Status = ExecutionStatus.Succeeded,
+		RawContent = rawContent,
 	};
 
 	public static ExecutionResult Failed(string errorMessage) => new()

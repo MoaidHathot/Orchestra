@@ -1,0 +1,10 @@
+{
+  "stepName": "check-system-status",
+  "status": "Succeeded",
+  "startedAt": "2026-02-11T12:00:32.4262116+00:00",
+  "completedAt": "2026-02-11T12:01:16.2866012+00:00",
+  "duration": "00:00:43.8603896",
+  "content": "# \uD83D\uDDA5\uFE0F SYSTEM STATUS DASHBOARD\n**Last Updated:** 2026-02-11 12:01:09 UTC\n\n---\n\n## Overall Status: \u26A0\uFE0F DEGRADED\n\n---\n\n### Service Health\n\n| Service | Status | Details |\n|---------|--------|---------|\n| API Gateway | \u2705 Healthy | Operating normally |\n| Cache | \u2705 Healthy | Operating normally |\n| Message Queue | \u2705 Healthy | Operating normally |\n| Storage | \u2705 Healthy | Operating normally |\n| Database Cluster | \u26A0\uFE0F Degraded | 2 active alerts |\n\n---\n\n### \uD83D\uDEA8 Active Alerts\n\n**\u26A0\uFE0F ALERT 1: Replication Lag**\n- **Affected:** replica-2\n- **Current Lag:** 1.8 seconds\n- **Impact:** May cause stale reads\n\n**\u26A0\uFE0F ALERT 2: Connection Pool Utilization**\n- **Current:** 87%\n- **Status:** Approaching capacity\n- **Action:** Monitor closely; consider scaling\n\n---\n\n### Summary\n- **Services Monitored:** 5\n- **Healthy:** 4\n- **Degraded:** 1\n- **Critical:** 0",
+  "rawContent": "**Health check complete.** The Database Cluster is showing **degraded** status with two alerts requiring attention:\n1. **Replication lag** on replica-2 (1.8s) may cause stale reads\n2. **Connection pool** at 87% utilization - approaching capacity\n\nAll other systems (API Gateway, Cache, Message Queue, Storage) are operating within normal parameters.",
+  "parameters": {}
+}

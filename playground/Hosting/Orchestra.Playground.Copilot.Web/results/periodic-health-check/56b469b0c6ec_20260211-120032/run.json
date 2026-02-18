@@ -1,0 +1,55 @@
+{
+  "runId": "56b469b0c6ec",
+  "orchestrationName": "periodic-health-check",
+  "startedAt": "2026-02-11T12:00:32.4261651+00:00",
+  "completedAt": "2026-02-11T12:01:30.6244571+00:00",
+  "duration": "00:00:58.1982920",
+  "status": "Succeeded",
+  "parameters": {},
+  "triggerId": "211ab286ddff0ce4",
+  "stepRecords": {
+    "check-system-status": {
+      "stepName": "check-system-status",
+      "status": "Succeeded",
+      "startedAt": "2026-02-11T12:00:32.4262116+00:00",
+      "completedAt": "2026-02-11T12:01:16.2866012+00:00",
+      "duration": "00:00:43.8603896",
+      "content": "# \uD83D\uDDA5\uFE0F SYSTEM STATUS DASHBOARD\n**Last Updated:** 2026-02-11 12:01:09 UTC\n\n---\n\n## Overall Status: \u26A0\uFE0F DEGRADED\n\n---\n\n### Service Health\n\n| Service | Status | Details |\n|---------|--------|---------|\n| API Gateway | \u2705 Healthy | Operating normally |\n| Cache | \u2705 Healthy | Operating normally |\n| Message Queue | \u2705 Healthy | Operating normally |\n| Storage | \u2705 Healthy | Operating normally |\n| Database Cluster | \u26A0\uFE0F Degraded | 2 active alerts |\n\n---\n\n### \uD83D\uDEA8 Active Alerts\n\n**\u26A0\uFE0F ALERT 1: Replication Lag**\n- **Affected:** replica-2\n- **Current Lag:** 1.8 seconds\n- **Impact:** May cause stale reads\n\n**\u26A0\uFE0F ALERT 2: Connection Pool Utilization**\n- **Current:** 87%\n- **Status:** Approaching capacity\n- **Action:** Monitor closely; consider scaling\n\n---\n\n### Summary\n- **Services Monitored:** 5\n- **Healthy:** 4\n- **Degraded:** 1\n- **Critical:** 0",
+      "rawContent": "**Health check complete.** The Database Cluster is showing **degraded** status with two alerts requiring attention:\n1. **Replication lag** on replica-2 (1.8s) may cause stale reads\n2. **Connection pool** at 87% utilization - approaching capacity\n\nAll other systems (API Gateway, Cache, Message Queue, Storage) are operating within normal parameters.",
+      "parameters": {}
+    },
+    "generate-summary": {
+      "stepName": "generate-summary",
+      "status": "Succeeded",
+      "startedAt": "2026-02-11T12:01:16.286798+00:00",
+      "completedAt": "2026-02-11T12:01:30.6244084+00:00",
+      "duration": "00:00:14.3376104",
+      "content": "**System DEGRADED \u2014 4/5 services healthy, database cluster experiencing performance issues.**\n\n**Attention Required:**\n- **Database Cluster** \u2014 2 active alerts:\n  - \u0060replica-2\u0060 replication lag (1.8s) \u2192 stale read risk\n  - Connection pool at 87% \u2192 capacity pressure\n\n**Recommended Actions:**\n| Priority | Action |\n|----------|--------|\n| \uD83D\uDD34 High | Investigate replica-2 lag; check network/disk I/O |\n| \uD83D\uDFE1 Medium | Scale connection pool or optimize query load |\n| \uD83D\uDFE2 Low | Set up alerting threshold at 80% pool usage |\n\n**Trend:** \u26A0\uFE0F Slightly below baseline \u2014 connection pool creeping up suggests increased traffic or connection leaks. Monitor over next 2-4 hours.\n\n**Bottom Line:** No outages, but database strain warrants proactive scaling before peak hours.",
+      "rawContent": "## \uD83D\uDCCA Executive Summary\n\n**1. Overall Health:** System DEGRADED \u2014 4/5 services healthy, database cluster experiencing performance issues.\n\n**2. Systems Requiring Attention:**\n- **Database Cluster** \u2014 2 active alerts:\n  - \u0060replica-2\u0060 replication lag (1.8s) \u2192 stale read risk\n  - Connection pool at 87% \u2192 capacity pressure\n\n**3. Recommended Actions:**\n| Priority | Action |\n|----------|--------|\n| \uD83D\uDD34 High | Investigate replica-2 lag; check network/disk I/O |\n| \uD83D\uDFE1 Medium | Scale connection pool or optimize query load |\n| \uD83D\uDFE2 Low | Set up alerting threshold at 80% pool usage |\n\n**4. Trend:** \u26A0\uFE0F *Slightly below baseline* \u2014 typical checks show all-green. Connection pool creeping up suggests increased traffic or connection leaks. Monitor over next 2-4 hours.\n\n---\n**Bottom Line:** No outages, but database strain warrants proactive scaling before peak hours.",
+      "parameters": {}
+    }
+  },
+  "allStepRecords": {
+    "check-system-status": {
+      "stepName": "check-system-status",
+      "status": "Succeeded",
+      "startedAt": "2026-02-11T12:00:32.4262116+00:00",
+      "completedAt": "2026-02-11T12:01:16.2866012+00:00",
+      "duration": "00:00:43.8603896",
+      "content": "# \uD83D\uDDA5\uFE0F SYSTEM STATUS DASHBOARD\n**Last Updated:** 2026-02-11 12:01:09 UTC\n\n---\n\n## Overall Status: \u26A0\uFE0F DEGRADED\n\n---\n\n### Service Health\n\n| Service | Status | Details |\n|---------|--------|---------|\n| API Gateway | \u2705 Healthy | Operating normally |\n| Cache | \u2705 Healthy | Operating normally |\n| Message Queue | \u2705 Healthy | Operating normally |\n| Storage | \u2705 Healthy | Operating normally |\n| Database Cluster | \u26A0\uFE0F Degraded | 2 active alerts |\n\n---\n\n### \uD83D\uDEA8 Active Alerts\n\n**\u26A0\uFE0F ALERT 1: Replication Lag**\n- **Affected:** replica-2\n- **Current Lag:** 1.8 seconds\n- **Impact:** May cause stale reads\n\n**\u26A0\uFE0F ALERT 2: Connection Pool Utilization**\n- **Current:** 87%\n- **Status:** Approaching capacity\n- **Action:** Monitor closely; consider scaling\n\n---\n\n### Summary\n- **Services Monitored:** 5\n- **Healthy:** 4\n- **Degraded:** 1\n- **Critical:** 0",
+      "rawContent": "**Health check complete.** The Database Cluster is showing **degraded** status with two alerts requiring attention:\n1. **Replication lag** on replica-2 (1.8s) may cause stale reads\n2. **Connection pool** at 87% utilization - approaching capacity\n\nAll other systems (API Gateway, Cache, Message Queue, Storage) are operating within normal parameters.",
+      "parameters": {}
+    },
+    "generate-summary": {
+      "stepName": "generate-summary",
+      "status": "Succeeded",
+      "startedAt": "2026-02-11T12:01:16.286798+00:00",
+      "completedAt": "2026-02-11T12:01:30.6244084+00:00",
+      "duration": "00:00:14.3376104",
+      "content": "**System DEGRADED \u2014 4/5 services healthy, database cluster experiencing performance issues.**\n\n**Attention Required:**\n- **Database Cluster** \u2014 2 active alerts:\n  - \u0060replica-2\u0060 replication lag (1.8s) \u2192 stale read risk\n  - Connection pool at 87% \u2192 capacity pressure\n\n**Recommended Actions:**\n| Priority | Action |\n|----------|--------|\n| \uD83D\uDD34 High | Investigate replica-2 lag; check network/disk I/O |\n| \uD83D\uDFE1 Medium | Scale connection pool or optimize query load |\n| \uD83D\uDFE2 Low | Set up alerting threshold at 80% pool usage |\n\n**Trend:** \u26A0\uFE0F Slightly below baseline \u2014 connection pool creeping up suggests increased traffic or connection leaks. Monitor over next 2-4 hours.\n\n**Bottom Line:** No outages, but database strain warrants proactive scaling before peak hours.",
+      "rawContent": "## \uD83D\uDCCA Executive Summary\n\n**1. Overall Health:** System DEGRADED \u2014 4/5 services healthy, database cluster experiencing performance issues.\n\n**2. Systems Requiring Attention:**\n- **Database Cluster** \u2014 2 active alerts:\n  - \u0060replica-2\u0060 replication lag (1.8s) \u2192 stale read risk\n  - Connection pool at 87% \u2192 capacity pressure\n\n**3. Recommended Actions:**\n| Priority | Action |\n|----------|--------|\n| \uD83D\uDD34 High | Investigate replica-2 lag; check network/disk I/O |\n| \uD83D\uDFE1 Medium | Scale connection pool or optimize query load |\n| \uD83D\uDFE2 Low | Set up alerting threshold at 80% pool usage |\n\n**4. Trend:** \u26A0\uFE0F *Slightly below baseline* \u2014 typical checks show all-green. Connection pool creeping up suggests increased traffic or connection leaks. Monitor over next 2-4 hours.\n\n---\n**Bottom Line:** No outages, but database strain warrants proactive scaling before peak hours.",
+      "parameters": {}
+    }
+  },
+  "finalContent": "**System DEGRADED \u2014 4/5 services healthy, database cluster experiencing performance issues.**\n\n**Attention Required:**\n- **Database Cluster** \u2014 2 active alerts:\n  - \u0060replica-2\u0060 replication lag (1.8s) \u2192 stale read risk\n  - Connection pool at 87% \u2192 capacity pressure\n\n**Recommended Actions:**\n| Priority | Action |\n|----------|--------|\n| \uD83D\uDD34 High | Investigate replica-2 lag; check network/disk I/O |\n| \uD83D\uDFE1 Medium | Scale connection pool or optimize query load |\n| \uD83D\uDFE2 Low | Set up alerting threshold at 80% pool usage |\n\n**Trend:** \u26A0\uFE0F Slightly below baseline \u2014 connection pool creeping up suggests increased traffic or connection leaks. Monitor over next 2-4 hours.\n\n**Bottom Line:** No outages, but database strain warrants proactive scaling before peak hours."
+}

@@ -8,87 +8,161 @@ public class OrchestrationExecutor
 	private readonly AgentBuilder _agentBuilder;
 	private readonly IOrchestrationReporter _reporter;
 	private readonly ILogger<OrchestrationExecutor> _logger;
+	private readonly IRunStore _runStore;
 
 	public OrchestrationExecutor(
 		IScheduler scheduler,
 		AgentBuilder agentBuilder,
 		IOrchestrationReporter reporter,
-		ILogger<OrchestrationExecutor> logger)
+		ILogger<OrchestrationExecutor> logger,
+		IRunStore? runStore = null)
 	{
 		_scheduler = scheduler;
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
 		_logger = logger;
+		_runStore = runStore ?? NullRunStore.Instance;
 	}
 
 	public async Task<OrchestrationResult> ExecuteAsync(
 		Orchestration orchestration,
 		Dictionary<string, string>? parameters = null,
+		string? triggerId = null,
 		CancellationToken cancellationToken = default)
 	{
 		_logger.LogInformation("Starting orchestration '{Name}'...", orchestration.Name);
 
 		ValidateParameters(orchestration, parameters);
 
-		var schedule = _scheduler.Schedule(orchestration);
+		// Scheduler validates the DAG (detects cycles, missing deps)
+		_ = _scheduler.Schedule(orchestration);
+
+		var runId = Guid.NewGuid().ToString("N")[..12];
+		var runStartedAt = DateTimeOffset.UtcNow;
+		var effectiveParams = parameters ?? [];
 
 		var context = new OrchestrationExecutionContext
 		{
-			Parameters = parameters ?? [],
+			Parameters = effectiveParams,
 		};
 		var executor = new PromptExecutor(_agentBuilder, _reporter);
 		var stepResults = new Dictionary<string, ExecutionResult>();
+		var stepRecords = new Dictionary<string, StepRunRecord>();
+		var allStepRecords = new Dictionary<string, StepRunRecord>();
+		var gate = new object();
 
-		// Build a lookup of all steps for loop target resolution
-		var allStepsByName = orchestration.Steps
+		// Build step lookup and dependency graph
+		var allSteps = orchestration.Steps
 			.ToDictionary(s => s.Name, s => (PromptOrchestrationStep)s);
 
-		for (var i = 0; i < schedule.Entries.Length; i++)
+		// Track completion via TaskCompletionSource per step
+		var completionSources = new Dictionary<string, TaskCompletionSource<ExecutionResult>>();
+		foreach (var step in orchestration.Steps)
 		{
-			var entry = schedule.Entries[i];
-			var stepNames = string.Join(", ", entry.Steps.Select(s => s.Name));
-			_logger.LogInformation("Executing layer {Layer}/{Total}: [{Steps}]", i + 1, schedule.Entries.Length, stepNames);
+			completionSources[step.Name] = new TaskCompletionSource<ExecutionResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+		}
 
-			if (entry.Steps.Length == 1)
+		// Build reverse dependency map: step -> list of steps that depend on it
+		var dependents = new Dictionary<string, List<string>>();
+		foreach (var step in orchestration.Steps)
+		{
+			dependents[step.Name] = [];
+		}
+		foreach (var step in orchestration.Steps)
+		{
+			foreach (var dep in step.DependsOn)
 			{
-				var step = (PromptOrchestrationStep)entry.Steps[0];
-				var result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, cancellationToken);
-				context.AddResult(step.Name, result);
-				stepResults[step.Name] = result;
-
-				// Handle loop if configured
-				if (step.Loop is not null && result.Status == ExecutionStatus.Succeeded)
-				{
-					await HandleLoopAsync(step, allStepsByName, executor, context, stepResults, cancellationToken);
-				}
-			}
-			else
-			{
-				var tasks = entry.Steps.Select(async s =>
-				{
-					var step = (PromptOrchestrationStep)s;
-					var result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, cancellationToken);
-					return (step, result);
-				}).ToArray();
-
-				var results = await Task.WhenAll(tasks);
-
-				foreach (var (step, result) in results)
-				{
-					context.AddResult(step.Name, result);
-					stepResults[step.Name] = result;
-				}
-
-				// Handle loops for any steps in this layer that have loop configs
-				foreach (var (step, result) in results)
-				{
-					if (step.Loop is not null && result.Status == ExecutionStatus.Succeeded)
-					{
-						await HandleLoopAsync(step, allStepsByName, executor, context, stepResults, cancellationToken);
-					}
-				}
+				dependents[dep].Add(step.Name);
 			}
 		}
+
+		// Launch a step when all its dependencies are complete
+		void TryLaunchStep(string stepName)
+		{
+			_ = Task.Run(async () =>
+			{
+				var step = allSteps[stepName];
+				var stepStartedAt = DateTimeOffset.UtcNow;
+
+				try
+				{
+					var result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, gate, cancellationToken);
+
+					lock (gate)
+					{
+						context.AddResult(step.Name, result);
+						stepResults[step.Name] = result;
+
+						var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
+						stepRecords[step.Name] = record;
+						allStepRecords[step.Name] = record;
+					}
+
+					// Handle loop if configured
+					if (step.Loop is not null && result.Status == ExecutionStatus.Succeeded)
+					{
+						await HandleLoopAsync(step, allSteps, executor, context, stepResults, stepRecords, allStepRecords, effectiveParams, gate, cancellationToken);
+					}
+
+					completionSources[step.Name].TrySetResult(stepResults[step.Name]);
+				}
+				catch (OperationCanceledException)
+				{
+					var cancelled = ExecutionResult.Failed("Cancelled");
+					lock (gate)
+					{
+						context.AddResult(step.Name, cancelled);
+						stepResults[step.Name] = cancelled;
+						var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
+						stepRecords[step.Name] = record;
+						allStepRecords[step.Name] = record;
+					}
+					completionSources[step.Name].TrySetResult(cancelled);
+				}
+				catch (Exception ex)
+				{
+					var failed = ExecutionResult.Failed(ex.Message);
+					lock (gate)
+					{
+						context.AddResult(step.Name, failed);
+						stepResults[step.Name] = failed;
+						var record = BuildStepRecord(step, failed, effectiveParams, stepStartedAt);
+						stepRecords[step.Name] = record;
+						allStepRecords[step.Name] = record;
+					}
+					completionSources[step.Name].TrySetResult(failed);
+				}
+
+				// After this step completes, check all dependents — launch any that are now ready
+				foreach (var dependent in dependents[stepName])
+				{
+					bool allDepsComplete;
+					lock (gate)
+					{
+						allDepsComplete = allSteps[dependent].DependsOn
+							.All(dep => stepResults.ContainsKey(dep));
+					}
+
+					if (allDepsComplete)
+					{
+						TryLaunchStep(dependent);
+					}
+				}
+			}, cancellationToken);
+		}
+
+		// Start all steps that have zero dependencies
+		foreach (var step in orchestration.Steps)
+		{
+			if (step.DependsOn.Length == 0)
+			{
+				_logger.LogInformation("Launching step '{StepName}' (no dependencies)", step.Name);
+				TryLaunchStep(step.Name);
+			}
+		}
+
+		// Wait for all steps to complete
+		await Task.WhenAll(completionSources.Values.Select(tcs => tcs.Task));
 
 		var orchestrationResult = OrchestrationResult.From(orchestration, stepResults);
 
@@ -99,6 +173,33 @@ public class OrchestrationExecutor
 		else
 		{
 			_logger.LogWarning("Orchestration '{Name}' completed with failures.", orchestration.Name);
+		}
+
+		// Build and persist the run record
+		var runCompletedAt = DateTimeOffset.UtcNow;
+		var finalContent = BuildFinalContent(orchestrationResult);
+
+		var runRecord = new OrchestrationRunRecord
+		{
+			RunId = runId,
+			OrchestrationName = orchestration.Name,
+			StartedAt = runStartedAt,
+			CompletedAt = runCompletedAt,
+			Status = orchestrationResult.Status,
+			Parameters = effectiveParams,
+			TriggerId = triggerId,
+			StepRecords = stepRecords,
+			AllStepRecords = allStepRecords,
+			FinalContent = finalContent,
+		};
+
+		try
+		{
+			await _runStore.SaveRunAsync(runRecord, cancellationToken);
+		}
+		catch (Exception ex)
+		{
+			_logger.LogError(ex, "Failed to save run record for orchestration '{Name}', run '{RunId}'.", orchestration.Name, runId);
 		}
 
 		return orchestrationResult;
@@ -134,17 +235,27 @@ public class OrchestrationExecutor
 		PromptExecutor executor,
 		OrchestrationExecutionContext context,
 		Dictionary<string, ExecutionResult> stepResults,
+		object gate,
 		CancellationToken cancellationToken)
 	{
 		// Check if any dependency failed or was skipped
-		if (context.HasAnyDependencyFailed(step.DependsOn))
-		{
-			var failedDeps = step.DependsOn
-				.Where(dep => stepResults.TryGetValue(dep, out var r) &&
-					r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped)
-				.ToArray();
+		bool shouldSkip;
+		string[] failedDeps;
 
-		var reason = $"Skipped because dependencies failed or were skipped: [{string.Join(", ", failedDeps)}]";
+		lock (gate)
+		{
+			shouldSkip = context.HasAnyDependencyFailed(step.DependsOn);
+			failedDeps = shouldSkip
+				? step.DependsOn
+					.Where(dep => stepResults.TryGetValue(dep, out var r) &&
+						r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped)
+					.ToArray()
+				: [];
+		}
+
+		if (shouldSkip)
+		{
+			var reason = $"Skipped because dependencies failed or were skipped: [{string.Join(", ", failedDeps)}]";
 			_logger.LogWarning("  Skipping step '{StepName}': {Reason}", step.Name, reason);
 			_reporter.ReportStepSkipped(step.Name, reason);
 			return ExecutionResult.Skipped(reason);
@@ -172,6 +283,10 @@ public class OrchestrationExecutor
 		PromptExecutor executor,
 		OrchestrationExecutionContext context,
 		Dictionary<string, ExecutionResult> stepResults,
+		Dictionary<string, StepRunRecord> stepRecords,
+		Dictionary<string, StepRunRecord> allStepRecords,
+		Dictionary<string, string> effectiveParams,
+		object gate,
 		CancellationToken cancellationToken)
 	{
 		var loop = checkerStep.Loop!;
@@ -186,7 +301,12 @@ public class OrchestrationExecutor
 		for (var iteration = 1; iteration <= loop.MaxIterations; iteration++)
 		{
 			// Check exit condition on the checker's current result
-			var checkerResult = context.GetResult(checkerStep.Name);
+			ExecutionResult checkerResult;
+			lock (gate)
+			{
+				checkerResult = context.GetResult(checkerStep.Name);
+			}
+
 			if (checkerResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
 			{
 				_logger.LogInformation("  [{Checker}] Loop exit condition met after {Iterations} iteration(s).",
@@ -199,14 +319,26 @@ public class OrchestrationExecutor
 			_reporter.ReportLoopIteration(checkerStep.Name, loop.Target, iteration, loop.MaxIterations);
 
 			// Inject checker's feedback into the target step's context
-			context.SetLoopFeedback(loop.Target, checkerResult.Content);
+			lock (gate)
+			{
+				context.SetLoopFeedback(loop.Target, checkerResult.Content);
+				context.ClearResult(loop.Target);
+			}
 
 			// Re-execute the target step
-			context.ClearResult(loop.Target);
+			var targetStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(loop.Target);
 			var targetResult = await executor.ExecuteAsync(targetStep, context, cancellationToken);
-			context.AddResult(loop.Target, targetResult);
-			stepResults[loop.Target] = targetResult;
+
+			lock (gate)
+			{
+				context.AddResult(loop.Target, targetResult);
+				stepResults[loop.Target] = targetResult;
+
+				var targetRecord = BuildStepRecord(targetStep, targetResult, effectiveParams, targetStartedAt, iteration);
+				stepRecords[loop.Target] = targetRecord;
+				allStepRecords[$"{loop.Target}:iteration-{iteration}"] = targetRecord;
+			}
 
 			if (targetResult.Status != ExecutionStatus.Succeeded)
 			{
@@ -216,11 +348,24 @@ public class OrchestrationExecutor
 			}
 
 			// Re-execute the checker step
-			context.ClearResult(checkerStep.Name);
+			lock (gate)
+			{
+				context.ClearResult(checkerStep.Name);
+			}
+
+			var checkerStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(checkerStep.Name);
 			var newCheckerResult = await executor.ExecuteAsync(checkerStep, context, cancellationToken);
-			context.AddResult(checkerStep.Name, newCheckerResult);
-			stepResults[checkerStep.Name] = newCheckerResult;
+
+			lock (gate)
+			{
+				context.AddResult(checkerStep.Name, newCheckerResult);
+				stepResults[checkerStep.Name] = newCheckerResult;
+
+				var checkerRecord = BuildStepRecord(checkerStep, newCheckerResult, effectiveParams, checkerStartedAt, iteration);
+				stepRecords[checkerStep.Name] = checkerRecord;
+				allStepRecords[$"{checkerStep.Name}:iteration-{iteration}"] = checkerRecord;
+			}
 
 			if (newCheckerResult.Status != ExecutionStatus.Succeeded)
 			{
@@ -231,7 +376,12 @@ public class OrchestrationExecutor
 		}
 
 		// Check exit condition one final time after exhausting all iterations
-		var finalResult = context.GetResult(checkerStep.Name);
+		ExecutionResult finalResult;
+		lock (gate)
+		{
+			finalResult = context.GetResult(checkerStep.Name);
+		}
+
 		if (finalResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
 		{
 			_logger.LogInformation("  [{Checker}] Loop exit condition met after {Max} iteration(s).",
@@ -242,5 +392,49 @@ public class OrchestrationExecutor
 			_logger.LogWarning("  [{Checker}] Loop exhausted {Max} iterations without meeting exit condition. Using last result.",
 				checkerStep.Name, loop.MaxIterations);
 		}
+	}
+
+	private static StepRunRecord BuildStepRecord(
+		PromptOrchestrationStep step,
+		ExecutionResult result,
+		Dictionary<string, string> allParams,
+		DateTimeOffset startedAt,
+		int? loopIteration = null)
+	{
+		// Extract only the parameters relevant to this step
+		var stepParams = new Dictionary<string, string>();
+		foreach (var paramName in step.Parameters)
+		{
+			if (allParams.TryGetValue(paramName, out var value))
+			{
+				stepParams[paramName] = value;
+			}
+		}
+
+		return new StepRunRecord
+		{
+			StepName = step.Name,
+			Status = result.Status,
+			StartedAt = startedAt,
+			CompletedAt = DateTimeOffset.UtcNow,
+			Content = result.Content,
+			RawContent = result.RawContent,
+			ErrorMessage = result.ErrorMessage,
+			Parameters = stepParams,
+			LoopIteration = loopIteration,
+		};
+	}
+
+	private static string BuildFinalContent(OrchestrationResult orchestrationResult)
+	{
+		if (orchestrationResult.Results.Count == 1)
+		{
+			return orchestrationResult.Results.Values.First().Content;
+		}
+
+		return string.Join("\n\n---\n\n",
+			orchestrationResult.Results
+				.Where(kv => kv.Value.Status == ExecutionStatus.Succeeded)
+				.Select(kv => $"## {kv.Key}\n{kv.Value.Content}"));
 	}
 }
