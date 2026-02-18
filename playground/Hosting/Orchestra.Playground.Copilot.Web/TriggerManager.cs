@@ -57,6 +57,7 @@ public class TriggerManager : BackgroundService
 	private readonly ILogger<TriggerManager> _logger;
 	private readonly string _runsDir;
 	private readonly string _triggersDir;
+	private readonly IRunStore _runStore;
 	private readonly JsonSerializerOptions _jsonOptions;
 
 	public TriggerManager(
@@ -65,7 +66,8 @@ public class TriggerManager : BackgroundService
 		IScheduler scheduler,
 		ILoggerFactory loggerFactory,
 		ILogger<TriggerManager> logger,
-		string runsDir)
+		string runsDir,
+		IRunStore runStore)
 	{
 		_activeExecutions = activeExecutions;
 		_agentBuilder = agentBuilder;
@@ -74,6 +76,7 @@ public class TriggerManager : BackgroundService
 		_logger = logger;
 		_runsDir = runsDir;
 		_triggersDir = Path.Combine(Path.GetDirectoryName(runsDir)!, "triggers");
+		_runStore = runStore;
 		Directory.CreateDirectory(_triggersDir);
 
 		_jsonOptions = new JsonSerializerOptions
@@ -499,14 +502,14 @@ public class TriggerManager : BackgroundService
 			// Create executor
 			var reporter = new NullOrchestrationReporter();
 			var logger = _loggerFactory.CreateLogger<OrchestrationExecutor>();
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, logger);
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, logger, _runStore);
 
 			using var cts = new CancellationTokenSource();
 			_activeExecutions[executionId] = cts;
 
 			try
 			{
-				var result = await executor.ExecuteAsync(orchestration, parameters, cts.Token);
+				var result = await executor.ExecuteAsync(orchestration, parameters, triggerId: reg.Id, cancellationToken: cts.Token);
 
 				// Persist history
 				try

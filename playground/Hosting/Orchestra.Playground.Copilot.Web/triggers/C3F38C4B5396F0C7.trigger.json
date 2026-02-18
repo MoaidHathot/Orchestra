@@ -1,0 +1,7 @@
+{
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\feature4-folder-mcp-detection.json",
+  "trigger": {
+    "type": 0,
+    "enabled": true
+  }
+}

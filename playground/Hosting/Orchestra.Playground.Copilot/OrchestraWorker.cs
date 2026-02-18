@@ -28,7 +28,7 @@ public class OrchestraWorker
 		CancellationToken cancellationToken = default)
 	{
 		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-		var result = await _executor.ExecuteAsync(_orchestration, parameters, cancellationToken);
+		var result = await _executor.ExecuteAsync(_orchestration, parameters, cancellationToken: cancellationToken);
 		stopwatch.Stop();
 
 		if (result.Status == ExecutionStatus.Succeeded)

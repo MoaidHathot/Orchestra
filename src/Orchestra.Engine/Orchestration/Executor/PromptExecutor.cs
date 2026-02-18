@@ -68,15 +68,17 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 				_reporter.ReportUsage(step.Name, result.ActualModel, result.Usage);
 			}
 
-			var content = result.Content;
+		var content = result.Content;
+			string? rawContent = null;
 
 			// Apply output handler if specified
 			if (step.OutputHandlerPrompt is not null)
 			{
+				rawContent = content;
 				content = await RunHandlerAsync(step.OutputHandlerPrompt, content, step.Model, cancellationToken);
 			}
 
-			return ExecutionResult.Succeeded(content);
+			return ExecutionResult.Succeeded(content, rawContent);
 		}
 		catch (Exception ex)
 		{

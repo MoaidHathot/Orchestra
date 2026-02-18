@@ -1,0 +1,10 @@
+{
+  "stepName": "check-system-status",
+  "status": "Succeeded",
+  "startedAt": "2026-02-11T11:54:36.0868512+00:00",
+  "completedAt": "2026-02-11T11:55:17.6928646+00:00",
+  "duration": "00:00:41.6060134",
+  "content": "# \uD83D\uDCCA System Status Dashboard\n**Last Updated:** 2026-02-11 11:55 UTC\n\n---\n\n## Overall Health: 4/5 Systems Operational\n\n| System | Status | Details |\n|--------|--------|---------|\n| \uD83D\uDFE2 API Gateway | Healthy | Operating normally |\n| \uD83D\uDFE1 Database Cluster | Degraded | Connection pool at 93.5% capacity |\n| \uD83D\uDFE2 Cache | Healthy | Operating normally |\n| \uD83D\uDFE2 Message Queue | Healthy | Operating normally |\n| \uD83D\uDFE2 Storage | Healthy | Operating normally |\n\n---\n\n## \u26A0\uFE0F Alerts\n\n### Database Cluster \u2014 Degraded\n- **Connection Pool:** 93.5% capacity (threshold: 90%)\n- **Replica-2 Lag:** 2.3s replication delay detected\n\n---\n\n## \uD83D\uDD27 Recommended Actions\n\n1. **Scale DB Connections** \u2014 Increase connection pool capacity\n2. **Investigate Replica Lag** \u2014 Check replica-2 for performance issues\n\n---\n\n**Legend:** \uD83D\uDFE2 Healthy | \uD83D\uDFE1 Degraded | \uD83D\uDD34 Critical",
+  "rawContent": "**Health Check Complete** \u2014 4/5 systems healthy, 1 degraded.\n\n**Key Findings:**\n- **Database Cluster** requires attention: connection pool at 93.5% capacity and replica-2 showing 2.3s replication lag\n- All other systems (API Gateway, Cache, Message Queue, Storage) operating within normal parameters\n- Recommended immediate actions: scale DB connections and investigate replica lag",
+  "parameters": {}
+}

@@ -1,0 +1,10 @@
+{
+  "stepName": "generate-summary",
+  "status": "Succeeded",
+  "startedAt": "2026-02-11T12:01:16.286798+00:00",
+  "completedAt": "2026-02-11T12:01:30.6244084+00:00",
+  "duration": "00:00:14.3376104",
+  "content": "**System DEGRADED \u2014 4/5 services healthy, database cluster experiencing performance issues.**\n\n**Attention Required:**\n- **Database Cluster** \u2014 2 active alerts:\n  - \u0060replica-2\u0060 replication lag (1.8s) \u2192 stale read risk\n  - Connection pool at 87% \u2192 capacity pressure\n\n**Recommended Actions:**\n| Priority | Action |\n|----------|--------|\n| \uD83D\uDD34 High | Investigate replica-2 lag; check network/disk I/O |\n| \uD83D\uDFE1 Medium | Scale connection pool or optimize query load |\n| \uD83D\uDFE2 Low | Set up alerting threshold at 80% pool usage |\n\n**Trend:** \u26A0\uFE0F Slightly below baseline \u2014 connection pool creeping up suggests increased traffic or connection leaks. Monitor over next 2-4 hours.\n\n**Bottom Line:** No outages, but database strain warrants proactive scaling before peak hours.",
+  "rawContent": "## \uD83D\uDCCA Executive Summary\n\n**1. Overall Health:** System DEGRADED \u2014 4/5 services healthy, database cluster experiencing performance issues.\n\n**2. Systems Requiring Attention:**\n- **Database Cluster** \u2014 2 active alerts:\n  - \u0060replica-2\u0060 replication lag (1.8s) \u2192 stale read risk\n  - Connection pool at 87% \u2192 capacity pressure\n\n**3. Recommended Actions:**\n| Priority | Action |\n|----------|--------|\n| \uD83D\uDD34 High | Investigate replica-2 lag; check network/disk I/O |\n| \uD83D\uDFE1 Medium | Scale connection pool or optimize query load |\n| \uD83D\uDFE2 Low | Set up alerting threshold at 80% pool usage |\n\n**4. Trend:** \u26A0\uFE0F *Slightly below baseline* \u2014 typical checks show all-green. Connection pool creeping up suggests increased traffic or connection leaks. Monitor over next 2-4 hours.\n\n---\n**Bottom Line:** No outages, but database strain warrants proactive scaling before peak hours.",
+  "parameters": {}
+}

@@ -22,6 +22,11 @@ builder.Logging.AddSimpleConsole(options =>
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 builder.Services.AddSingleton<IScheduler, OrchestrationScheduler>();
 
+// Run results storage — defaults to "results" subfolder, override via --results-path
+var resultsPath = builder.Configuration["results-path"]
+	?? Path.Combine(builder.Environment.ContentRootPath, "results");
+builder.Services.AddSingleton<IRunStore>(new FileSystemRunStore(resultsPath));
+
 // Shared active executions dictionary (used by both direct execution and TriggerManager)
 var activeExecutions = new ConcurrentDictionary<string, CancellationTokenSource>();
 builder.Services.AddSingleton(activeExecutions);
@@ -37,7 +42,8 @@ builder.Services.AddSingleton<TriggerManager>(sp =>
 		sp.GetRequiredService<IScheduler>(),
 		sp.GetRequiredService<ILoggerFactory>(),
 		sp.GetRequiredService<ILogger<TriggerManager>>(),
-		runsPath);
+		runsPath,
+		sp.GetRequiredService<IRunStore>());
 });
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
 
@@ -181,7 +187,8 @@ app.MapPost("/api/execute", async (
 	ExecuteRequest request,
 	AgentBuilder agentBuilder,
 	IScheduler scheduler,
-	ILoggerFactory loggerFactory) =>
+	ILoggerFactory loggerFactory,
+	IRunStore runStore) =>
 {
 	try
 	{
@@ -232,7 +239,7 @@ app.MapPost("/api/execute", async (
 
 		// Create a per-request executor
 		var logger = loggerFactory.CreateLogger<OrchestrationExecutor>();
-		var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, logger);
+		var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, logger, runStore);
 
 		var cancellationToken = cts.Token;
 
@@ -244,7 +251,7 @@ app.MapPost("/api/execute", async (
 				var result = await executor.ExecuteAsync(
 					orchestration,
 					request.Parameters,
-					cancellationToken);
+					cancellationToken: cancellationToken);
 
 				// Send full step results as step-output events
 				foreach (var (stepName, stepResult) in result.StepResults)
@@ -947,7 +954,8 @@ app.MapPost("/api/compare", async (
 	CompareRequest request,
 	AgentBuilder agentBuilder,
 	IScheduler scheduler,
-	ILoggerFactory loggerFactory) =>
+	ILoggerFactory loggerFactory,
+	IRunStore runStore) =>
 {
 	try
 	{
@@ -1003,7 +1011,7 @@ app.MapPost("/api/compare", async (
 			// Create a per-run reporter (we collect events but don't stream them)
 			var reporter = new WebOrchestrationReporter();
 			var logger = loggerFactory.CreateLogger<OrchestrationExecutor>();
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, logger);
+			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, logger, runStore);
 
 			var runStartTime = DateTime.UtcNow;
 			OrchestrationResult? result = null;
@@ -1024,7 +1032,7 @@ app.MapPost("/api/compare", async (
 				result = await executor.ExecuteAsync(
 					orchestration,
 					request.Parameters,
-					httpContext.RequestAborted);
+					cancellationToken: httpContext.RequestAborted);
 
 				// Send step outputs to reporter so they appear in events
 				foreach (var (stepName, stepResult) in result.StepResults)
@@ -1461,6 +1469,120 @@ app.MapPost("/api/triggers/scan", (TriggerScanRequest request, TriggerManager tr
 	{
 		return Results.BadRequest(new { error = ex.Message });
 	}
+});
+
+// ── GET /api/runs ────────────────────────────────────────────────────────
+// Lists all run records across all orchestrations (global history)
+app.MapGet("/api/runs", async (IRunStore runStore, int? limit) =>
+{
+	var runs = await runStore.ListAllRunsAsync(limit ?? 50);
+	return Results.Json(new
+	{
+		count = runs.Count,
+		runs = runs.Select(r => new
+		{
+			runId = r.RunId,
+			orchestrationName = r.OrchestrationName,
+			startedAt = r.StartedAt,
+			completedAt = r.CompletedAt,
+			durationSeconds = Math.Round(r.Duration.TotalSeconds, 2),
+			status = r.Status.ToString(),
+			triggerId = r.TriggerId,
+			stepCount = r.StepRecords.Count,
+		})
+	}, jsonOptions);
+});
+
+// ── GET /api/runs/{orchestrationName} ───────────────────────────────────
+// Lists run records for a specific orchestration
+app.MapGet("/api/runs/{orchestrationName}", async (string orchestrationName, IRunStore runStore, int? limit) =>
+{
+	var runs = await runStore.ListRunsAsync(orchestrationName, limit ?? 50);
+	return Results.Json(new
+	{
+		orchestrationName,
+		count = runs.Count,
+		runs = runs.Select(r => new
+		{
+			runId = r.RunId,
+			startedAt = r.StartedAt,
+			completedAt = r.CompletedAt,
+			durationSeconds = Math.Round(r.Duration.TotalSeconds, 2),
+			status = r.Status.ToString(),
+			triggerId = r.TriggerId,
+			stepCount = r.StepRecords.Count,
+		})
+	}, jsonOptions);
+});
+
+// ── GET /api/runs/{orchestrationName}/{runId} ───────────────────────────
+// Gets a specific run record with full step details
+app.MapGet("/api/runs/{orchestrationName}/{runId}", async (string orchestrationName, string runId, IRunStore runStore) =>
+{
+	var record = await runStore.GetRunAsync(orchestrationName, runId);
+	if (record is null)
+		return Results.NotFound(new { error = $"Run '{runId}' not found for orchestration '{orchestrationName}'." });
+
+	return Results.Json(new
+	{
+		runId = record.RunId,
+		orchestrationName = record.OrchestrationName,
+		startedAt = record.StartedAt,
+		completedAt = record.CompletedAt,
+		durationSeconds = Math.Round(record.Duration.TotalSeconds, 2),
+		status = record.Status.ToString(),
+		triggerId = record.TriggerId,
+		parameters = record.Parameters,
+		finalContent = record.FinalContent,
+		steps = record.StepRecords.Select(kv => new
+		{
+			name = kv.Key,
+			status = kv.Value.Status.ToString(),
+			startedAt = kv.Value.StartedAt,
+			completedAt = kv.Value.CompletedAt,
+			durationSeconds = Math.Round(kv.Value.Duration.TotalSeconds, 2),
+			content = kv.Value.Content,
+			rawContent = kv.Value.RawContent,
+			errorMessage = kv.Value.ErrorMessage,
+			parameters = kv.Value.Parameters,
+			loopIteration = kv.Value.LoopIteration,
+		}).ToArray(),
+		allSteps = record.AllStepRecords.Select(kv => new
+		{
+			key = kv.Key,
+			name = kv.Value.StepName,
+			status = kv.Value.Status.ToString(),
+			startedAt = kv.Value.StartedAt,
+			completedAt = kv.Value.CompletedAt,
+			durationSeconds = Math.Round(kv.Value.Duration.TotalSeconds, 2),
+			content = kv.Value.Content,
+			rawContent = kv.Value.RawContent,
+			errorMessage = kv.Value.ErrorMessage,
+			loopIteration = kv.Value.LoopIteration,
+		}).ToArray(),
+	}, jsonOptions);
+});
+
+// ── GET /api/runs/trigger/{triggerId} ───────────────────────────────────
+// Lists run records for a specific trigger
+app.MapGet("/api/runs/trigger/{triggerId}", async (string triggerId, IRunStore runStore, int? limit) =>
+{
+	var runs = await runStore.ListRunsByTriggerAsync(triggerId, limit ?? 50);
+	return Results.Json(new
+	{
+		triggerId,
+		count = runs.Count,
+		runs = runs.Select(r => new
+		{
+			runId = r.RunId,
+			orchestrationName = r.OrchestrationName,
+			startedAt = r.StartedAt,
+			completedAt = r.CompletedAt,
+			durationSeconds = Math.Round(r.Duration.TotalSeconds, 2),
+			status = r.Status.ToString(),
+			stepCount = r.StepRecords.Count,
+		})
+	}, jsonOptions);
 });
 
 // ── Fallback: serve index.html ──────────────────────────────────────────
