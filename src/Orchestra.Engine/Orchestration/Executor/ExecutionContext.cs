@@ -49,6 +49,23 @@ public class OrchestrationExecutionContext
 	}
 
 	/// <summary>
+	/// Gets raw dependency outputs as a dictionary (step name -> raw content before any handlers).
+	/// </summary>
+	public Dictionary<string, string> GetRawDependencyOutputs(string[] dependsOn)
+	{
+		var outputs = new Dictionary<string, string>();
+		foreach (var dep in dependsOn)
+		{
+			if (_results.TryGetValue(dep, out var result) && result.Status == ExecutionStatus.Succeeded)
+			{
+				// Use RawContent if available (content before output handler), otherwise use Content
+				outputs[dep] = result.RawContent ?? result.Content;
+			}
+		}
+		return outputs;
+	}
+
+	/// <summary>
 	/// Removes a step's result so it can be re-executed during a loop iteration.
 	/// </summary>
 	public void ClearResult(string stepName)

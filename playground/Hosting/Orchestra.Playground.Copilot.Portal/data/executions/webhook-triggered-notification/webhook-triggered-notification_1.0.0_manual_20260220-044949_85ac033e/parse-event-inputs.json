@@ -1,0 +1,7 @@
+{
+  "parameters": {
+    "eventType": "alert",
+    "eventData": "{\u0022severity\u0022:\u0022high\u0022,\u0022message\u0022:\u0022CPU usage exceeded 90%\u0022,\u0022host\u0022:\u0022server-01\u0022}"
+  },
+  "rawDependencyOutputs": {}
+}

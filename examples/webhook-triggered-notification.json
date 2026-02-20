@@ -1,0 +1,39 @@
+{
+  "name": "webhook-triggered-notification",
+  "description": "An orchestration triggered by a webhook that processes incoming events, analyzes them, and generates a formatted notification response. Demonstrates webhook trigger with input handler prompt for payload parsing.",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "name": "parse-event",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are an event parser. Your job is to extract and structure key information from incoming event data. Be concise and factual.",
+      "userPrompt": "Parse the following event and extract the key details:\n\nEvent Type: {{eventType}}\nEvent Data: {{eventData}}\n\nProvide a structured summary with:\n1. Event category (e.g., alert, notification, update)\n2. Priority level (low, medium, high, critical)\n3. Key entities involved\n4. Timestamp or time reference if available\n5. Brief description of what happened",
+      "model": "claude-code-4.5",
+      "parameters": ["eventType", "eventData"]
+    },
+    {
+      "name": "analyze-impact",
+      "type": "Prompt",
+      "dependsOn": ["parse-event"],
+      "systemPrompt": "You are an impact analyst. Assess the significance and potential consequences of events. Be analytical and forward-thinking.",
+      "userPrompt": "Based on the parsed event information, analyze:\n\n1. What is the immediate impact?\n2. Are there any downstream effects to consider?\n3. What actions might be needed?\n4. Who should be notified?\n\nKeep your analysis under 200 words.",
+      "model": "claude-code-4.5"
+    },
+    {
+      "name": "generate-notification",
+      "type": "Prompt",
+      "dependsOn": ["parse-event", "analyze-impact"],
+      "systemPrompt": "You are a notification composer. Create clear, actionable notifications that convey the right urgency level. Use professional but accessible language.",
+      "userPrompt": "Using the event details and impact analysis, compose a notification message that includes:\n\n1. A clear subject line\n2. A brief summary (2-3 sentences)\n3. Key details in bullet points\n4. Recommended next steps\n5. Priority indicator\n\nFormat the output as a structured notification ready to be sent.",
+      "model": "claude-code-4.5",
+      "inputHandlerPrompt": "Combine the parsed event information and the impact analysis into a cohesive context. Label each section clearly."
+    }
+  ],
+  "trigger": {
+    "type": "webhook",
+    "enabled": true,
+    "maxConcurrent": 5,
+    "inputHandlerPrompt": "You will receive a raw JSON payload from a webhook. Extract the following parameters:\n- eventType: The type of event (look for fields like 'type', 'event', 'action', or 'eventType')\n- eventData: A JSON string representation of the relevant event data (include all important fields)\n\nIf the payload contains nested data, flatten the important information into eventData. Return the parameters in a format the orchestration can use."
+  }
+}

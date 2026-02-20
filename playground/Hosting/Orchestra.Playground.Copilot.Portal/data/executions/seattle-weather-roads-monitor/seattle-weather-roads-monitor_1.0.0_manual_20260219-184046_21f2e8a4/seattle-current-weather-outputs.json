@@ -1,0 +1,4 @@
+{
+  "rawContent": "## Current Weather in Seattle, Washington\n\n| Condition | Value |\n|-----------|-------|\n| **Temperature** | 38\u00B0F (3\u00B0C) |\n| **Feels Like** | 31\u00B0F (0\u00B0C) |\n| **Humidity** | 73% |\n| **Wind Speed** | 10 mph (15 km/h) from the North |\n| **Conditions** | Overcast (100% cloud cover) |\n| **Visibility** | 9 miles |\n\n*Observation time: 10:40 AM local (February 19, 2026)*",
+  "content": "## \uD83C\uDF25\uFE0F Seattle, WA\n\n**38\u00B0F** (feels like 31\u00B0F)\n\nOvercast skies with 73% humidity. Winds from the North at 10 mph.\n\n*Updated: Feb 19, 2026 at 10:40 AM*"
+}

@@ -16,6 +16,9 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 		OrchestrationExecutionContext context,
 		CancellationToken cancellationToken = default)
 	{
+		// Capture raw dependency outputs before building the prompt
+		var rawDependencyOutputs = context.GetRawDependencyOutputs(step.DependsOn);
+
 		try
 		{
 			// Build the user prompt, incorporating dependency outputs and parameters
@@ -78,12 +81,29 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 				content = await RunHandlerAsync(step.OutputHandlerPrompt, content, step.Model, cancellationToken);
 			}
 
-			return ExecutionResult.Succeeded(content, rawContent);
+			// Convert usage to our TokenUsage type
+			TokenUsage? tokenUsage = null;
+			if (result.Usage is not null)
+			{
+				tokenUsage = new TokenUsage
+				{
+					InputTokens = (int)(result.Usage.InputTokens ?? 0),
+					OutputTokens = (int)(result.Usage.OutputTokens ?? 0)
+				};
+			}
+
+			return ExecutionResult.Succeeded(
+				content,
+				rawContent,
+				rawDependencyOutputs,
+				userPrompt,
+				result.ActualModel,
+				tokenUsage);
 		}
 		catch (Exception ex)
 		{
 			_reporter.ReportStepError(step.Name, ex.Message);
-			return ExecutionResult.Failed(ex.Message);
+			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs);
 		}
 	}
 

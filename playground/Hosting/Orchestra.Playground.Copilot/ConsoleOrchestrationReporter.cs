@@ -65,6 +65,11 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		Console.Error.WriteLine($"  [{stepName}] Error: {errorMessage}");
 	}
 
+	public void ReportStepCancelled(string stepName)
+	{
+		Console.WriteLine($"  [{stepName}] Cancelled");
+	}
+
 	public void ReportStepCompleted(string stepName, AgentResult result)
 	{
 		if (result.ActualModel is not null)

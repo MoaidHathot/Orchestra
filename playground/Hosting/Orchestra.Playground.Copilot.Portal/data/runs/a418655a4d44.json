@@ -1,0 +1,34 @@
+{
+  "id": "a418655a4d44",
+  "orchestrationName": "seattle-weather-roads-monitor",
+  "orchestrationDescription": "Multi-step orchestration that checks current weather in Seattle, tomorrow\u0027s forecast for Seattle and Orcas Island, and road conditions in Washington State. Triggered every 60 seconds.",
+  "orchestrationVersion": "1.0.0",
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\weather-roads-seattle.json",
+  "triggerId": "e4eb849d619edb26",
+  "triggerType": "Scheduler",
+  "startedAt": "2026-02-19T17:39:01.8330139Z",
+  "status": "Succeeded",
+  "stepCount": 5,
+  "results": {
+    "seattle-current-weather": {
+      "status": "Succeeded",
+      "content": "**Seattle, Washington**\n*Feb 19, 2026 \u2022 9:02 AM*\n\n\u2601\uFE0F **Overcast** | 37\u00B0F (3\u00B0C)\nFeels like 30\u00B0F (-1\u00B0C)\n\n\uD83D\uDCA8 Wind: 9 mph N\n\uD83D\uDCA7 Humidity: 89%\n\uD83D\uDC41\uFE0F Visibility: 9 mi"
+    },
+    "orcas-island-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "**\uD83C\uDFDD\uFE0F Orcas Island Forecast \u2013 Friday, Feb 20**\n\n**Highs near 41\u00B0F**, mostly cloudy. Light SE winds ~5 mph.\n\n**\uD83D\uDEA2 Ferry Outlook: EXCELLENT** \u2013 Calm seas with waves 1 ft or less in San Juan Channel. Today\u0027s Small Craft Advisory lifts at 10 AM. Light variable winds make for smooth crossings all day.\n\n**\uD83E\uDD7E Outdoor Activities:** Good conditions for hiking and exploring. Dry during the day (only 10% rain chance). Evening brings a chance of rain/snow mix after 10 PM\u2014plan outdoor activities for daytime.\n\n**Bottom line:** Great day to visit the island!"
+    },
+    "seattle-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "## Seattle Tomorrow (Fri, Feb 20)\n\n**Morning:** Cold start near 29\u00B0F with partly cloudy skies becoming overcast by 9 AM. Bundle up\u2014wind chill around 25\u00B0F.\n\n**Afternoon:** Cloudy with highs reaching 41\u00B0F. Dry conditions, no rain expected.\n\n**Evening:** Staying cloudy and cool, temperatures settling around 39-40\u00B0F.\n\n\u2600\uFE0F Sunrise 7:06 AM | \uD83C\uDF05 Sunset 5:41 PM\n\n**Bottom line:** A dry, cold day with early clearing giving way to clouds. Layer up for the chill\u2014feels colder than it looks!"
+    },
+    "wa-road-conditions": {
+      "status": "Succeeded",
+      "content": "## Washington State Road Conditions \u2013 Feb 19, 2026\n\n**I-5 Seattle Corridor**\n\u26A0\uFE0F DELAYS \u2013 Northbound reduced to 2 lanes (Ship Canal Bridge) through June 5. Use transit recommended.\n\n**I-90 Snoqualmie Pass**\n\u26A0\uFE0F CAUTION \u2013 Winter conditions, snow showers, 27\u00B0F. Chains may be required. Heavy snow expected Saturday-Tuesday.\n\n**Highway 20 North Cascades**\n\uD83D\uDEAB CLOSED \u2013 Seasonal closure at milepost 134 (Ross Dam). Reopens April/May.\n\n**Cascade River Road**\n\uD83D\uDEAB CLOSED \u2013 Milepost 21 due to flooding/landslides.\n\n**Stehekin Valley Road**\n\uD83D\uDEAB CLOSED \u2013 Landslides since Dec 10.\n\n**SR-20 to Anacortes**\n\u2705 CLEAR \u2013 Ferry terminal access open.\n\n**San Juan Islands Ferry**\n\u2705 CLEAR \u2013 No service disruptions. 3% card fee starts March 1.\n\n---\n*Check WSDOT.com for real-time updates. Carry chains for mountain passes.*"
+    },
+    "travel-summary": {
+      "status": "Succeeded",
+      "content": "# TRAVEL ADVISORY: Seattle \u2192 Orcas Island\n**Friday, February 20, 2026**\n\n---\n\n## OVERALL RECOMMENDATION: GOOD TRAVEL DAY \u2705\n\nConditions favor your trip. Ferry crossings will be smooth with calm seas (\u003C1 ft waves, light 5 mph winds). Orcas Island stays dry with only 10% rain chance until evening.\n\n**KEY CONSIDERATIONS:**\n\n**Driving (Seattle \u2192 Anacortes):**\n- I-5 Ship Canal Bridge reduced to 2 lanes\u2014expect 20-30 min delays\n- SR-20 to ferry terminal clear\n\n**Ferry Service:**\n- Operating normally, excellent conditions\n- No disruptions expected\n\n**Weather:**\n- Morning: 29\u00B0F (wind chill 25\u00B0F)\u2014dress warmly\n- Orcas Island high: 41\u00B0F, mostly cloudy\n- Rain/snow mix possible after 10 PM\n\n**RECOMMENDED DEPARTURE: 7:00\u20138:00 AM**\n\nEarly start compensates for I-5 delays, catches mid-morning ferry, and maximizes daylight on the island.\n\n**PACK:**\n- Warm layers, gloves, hat (cold ferry deck)\n- Rain jacket (evening precaution)\n- Full gas tank (limited island options)\n\n**ALERTS:**\n- \uD83D\uDFE1 I-5 construction\u2014allow extra time\n- \uD83D\uDFE2 Cold start\u2014bundle up\n- \uD83D\uDFE2 Return before 10 PM to avoid weather change\n\n**BOTTOM LINE:** Smooth sailing ahead. The only real obstacle is highway construction delays. Depart early, dress warm, and enjoy excellent island conditions."
+    }
+  }
+}

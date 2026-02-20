@@ -7,4 +7,5 @@ public enum ExecutionStatus
 	Succeeded,
 	Failed,
 	Skipped,
+	Cancelled,
 }

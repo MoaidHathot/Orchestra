@@ -1,0 +1,102 @@
+{
+  "runId": "32bf3880c0ab",
+  "orchestrationName": "math-aggregate",
+  "startedAt": "2026-02-18T10:17:00.0105728+00:00",
+  "completedAt": "2026-02-18T10:17:13.6509974+00:00",
+  "duration": "00:00:13.6404246",
+  "status": "Succeeded",
+  "orchestrationVersion": "1.0.0",
+  "triggeredBy": "manual",
+  "parameters": {
+    "number": "0"
+  },
+  "stepRecords": {
+    "step-1": {
+      "stepName": "step-1",
+      "status": "Succeeded",
+      "startedAt": "2026-02-18T10:17:00.0126735+00:00",
+      "completedAt": "2026-02-18T10:17:06.1584534+00:00",
+      "duration": "00:00:06.1457799",
+      "content": "1",
+      "parameters": {
+        "number": "0"
+      },
+      "rawDependencyOutputs": {}
+    },
+    "step-2": {
+      "stepName": "step-2",
+      "status": "Succeeded",
+      "startedAt": "2026-02-18T10:17:06.1589379+00:00",
+      "completedAt": "2026-02-18T10:17:08.526502+00:00",
+      "duration": "00:00:02.3675641",
+      "content": "2",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "step-3": {
+      "stepName": "step-3",
+      "status": "Succeeded",
+      "startedAt": "2026-02-18T10:17:08.527341+00:00",
+      "completedAt": "2026-02-18T10:17:11.2583676+00:00",
+      "duration": "00:00:02.7310266",
+      "content": "3",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "step-4": {
+      "stepName": "step-4",
+      "status": "Succeeded",
+      "startedAt": "2026-02-18T10:17:11.2583991+00:00",
+      "completedAt": "2026-02-18T10:17:13.6454005+00:00",
+      "duration": "00:00:02.3870014",
+      "content": "4",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "allStepRecords": {
+    "step-1": {
+      "stepName": "step-1",
+      "status": "Succeeded",
+      "startedAt": "2026-02-18T10:17:00.0126735+00:00",
+      "completedAt": "2026-02-18T10:17:06.1584534+00:00",
+      "duration": "00:00:06.1457799",
+      "content": "1",
+      "parameters": {
+        "number": "0"
+      },
+      "rawDependencyOutputs": {}
+    },
+    "step-2": {
+      "stepName": "step-2",
+      "status": "Succeeded",
+      "startedAt": "2026-02-18T10:17:06.1589379+00:00",
+      "completedAt": "2026-02-18T10:17:08.526502+00:00",
+      "duration": "00:00:02.3675641",
+      "content": "2",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "step-3": {
+      "stepName": "step-3",
+      "status": "Succeeded",
+      "startedAt": "2026-02-18T10:17:08.527341+00:00",
+      "completedAt": "2026-02-18T10:17:11.2583676+00:00",
+      "duration": "00:00:02.7310266",
+      "content": "3",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "step-4": {
+      "stepName": "step-4",
+      "status": "Succeeded",
+      "startedAt": "2026-02-18T10:17:11.2583991+00:00",
+      "completedAt": "2026-02-18T10:17:13.6454005+00:00",
+      "duration": "00:00:02.3870014",
+      "content": "4",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "finalContent": "4"
+}

@@ -1,0 +1,60 @@
+{
+  "runId": "c1fe9952cc10",
+  "orchestrationName": "math-aggregate",
+  "startedAt": "2026-02-19T11:50:43.1045936+00:00",
+  "completedAt": "2026-02-19T11:50:50.3468214+00:00",
+  "duration": "00:00:07.2422278",
+  "status": "Cancelled",
+  "orchestrationVersion": "1.0.0",
+  "triggeredBy": "manual",
+  "parameters": {
+    "number": "0"
+  },
+  "stepRecords": {
+    "step-1": {
+      "stepName": "step-1",
+      "status": "Succeeded",
+      "startedAt": "2026-02-19T11:50:43.1045936+00:00",
+      "completedAt": "2026-02-19T11:50:50.3468214+00:00",
+      "duration": "00:00:07.2422278",
+      "content": "",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "step-2": {
+      "stepName": "step-2",
+      "status": "Cancelled",
+      "startedAt": "2026-02-19T11:50:43.1045936+00:00",
+      "completedAt": "2026-02-19T11:50:50.3468214+00:00",
+      "duration": "00:00:07.2422278",
+      "content": "[Cancelled]",
+      "errorMessage": "The operation was canceled.",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "allStepRecords": {
+    "step-1": {
+      "stepName": "step-1",
+      "status": "Succeeded",
+      "startedAt": "2026-02-19T11:50:43.1045936+00:00",
+      "completedAt": "2026-02-19T11:50:50.3468214+00:00",
+      "duration": "00:00:07.2422278",
+      "content": "",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "step-2": {
+      "stepName": "step-2",
+      "status": "Cancelled",
+      "startedAt": "2026-02-19T11:50:43.1045936+00:00",
+      "completedAt": "2026-02-19T11:50:50.3468214+00:00",
+      "duration": "00:00:07.2422278",
+      "content": "[Cancelled]",
+      "errorMessage": "The operation was canceled.",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "finalContent": "Orchestration was cancelled.\r\nCompleted steps: step-1\r\nIn-progress steps when cancelled: step-2\r\n"
+}

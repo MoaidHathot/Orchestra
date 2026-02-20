@@ -1,0 +1,86 @@
+{
+  "runId": "85ac033e3b08",
+  "orchestrationName": "webhook-triggered-notification",
+  "startedAt": "2026-02-20T04:49:49.2103504+00:00",
+  "completedAt": "2026-02-20T04:50:12.4718331+00:00",
+  "duration": "00:00:23.2614827",
+  "status": "Succeeded",
+  "orchestrationVersion": "1.0.0",
+  "triggeredBy": "manual",
+  "parameters": {
+    "eventType": "alert",
+    "eventData": "{\u0022severity\u0022:\u0022high\u0022,\u0022message\u0022:\u0022CPU usage exceeded 90%\u0022,\u0022host\u0022:\u0022server-01\u0022}"
+  },
+  "triggerId": "webhook-triggered-notification-7d80",
+  "stepRecords": {
+    "parse-event": {
+      "stepName": "parse-event",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:49:49.212343+00:00",
+      "completedAt": "2026-02-20T04:49:53.1318611+00:00",
+      "duration": "00:00:03.9195181",
+      "content": "## Event Summary\n\n| Field | Value |\n|-------|-------|\n| **Category** | Alert |\n| **Priority** | High |\n| **Key Entities** | Host: \u0060server-01\u0060 |\n| **Timestamp** | Not provided in event data |\n| **Description** | CPU usage on server-01 exceeded 90% threshold |",
+      "parameters": {
+        "eventType": "alert",
+        "eventData": "{\u0022severity\u0022:\u0022high\u0022,\u0022message\u0022:\u0022CPU usage exceeded 90%\u0022,\u0022host\u0022:\u0022server-01\u0022}"
+      },
+      "rawDependencyOutputs": {}
+    },
+    "analyze-impact": {
+      "stepName": "analyze-impact",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:49:53.132193+00:00",
+      "completedAt": "2026-02-20T04:50:03.3206649+00:00",
+      "duration": "00:00:10.1884719",
+      "content": "## Impact Analysis: High CPU Alert on server-01\n\n### 1. Immediate Impact\n- **Service degradation**: Applications on server-01 may experience slowdowns, timeouts, or failures\n- **User experience**: End users could face latency or unresponsive services\n- **Resource contention**: Other processes competing for limited CPU cycles\n\n### 2. Downstream Effects\n- **Dependent services**: Any systems relying on server-01 (databases, APIs, microservices) may cascade fail\n- **Load balancers**: May route traffic away, increasing load on other nodes\n- **Queue buildup**: Message queues or job processors may accumulate backlogs\n- **Monitoring noise**: Could trigger secondary alerts from dependent health checks\n\n### 3. Recommended Actions\n- Investigate top CPU-consuming processes (\u0060top\u0060, \u0060htop\u0060)\n- Check for runaway processes, memory leaks, or infinite loops\n- Review recent deployments or configuration changes\n- Consider scaling horizontally or vertically if load is legitimate\n- Restart problematic services if safe to do so\n\n### 4. Notification List\n- **Immediate**: On-call infrastructure engineer, SRE team\n- **Escalation**: Application owners for services hosted on server-01\n- **Awareness**: NOC/operations dashboard\n\n**Severity**: High \u2014 requires prompt investigation to prevent potential outage.",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "generate-notification": {
+      "stepName": "generate-notification",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:50:03.3209087+00:00",
+      "completedAt": "2026-02-20T04:50:12.4695614+00:00",
+      "duration": "00:00:09.1486527",
+      "content": "## Structured Notification\n\n---\n\n**SUBJECT:** \uD83D\uDD34 [HIGH PRIORITY] CPU Alert: server-01 Exceeded 90% Threshold\n\n---\n\n### Priority: HIGH \u26A0\uFE0F\n\n---\n\n### Summary\nCPU usage on **server-01** has exceeded the 90% threshold, indicating potential service degradation. Immediate investigation is required to prevent cascading failures to dependent systems and potential service outages.\n\n---\n\n### Key Details\n- **Host:** \u0060server-01\u0060\n- **Category:** Alert\n- **Condition:** CPU usage \u003E 90%\n- **Risk:** Service slowdowns, timeouts, and downstream cascade failures\n- **Affected:** Applications, dependent APIs, databases, and microservices on this host\n\n---\n\n### Immediate Impact\n- End users may experience latency or unresponsive services\n- Load balancers may redistribute traffic, stressing other nodes\n- Message queues and job processors may accumulate backlogs\n\n---\n\n### Recommended Next Steps\n1. **Investigate** \u2014 Run \u0060top\u0060 or \u0060htop\u0060 to identify CPU-consuming processes\n2. **Review** \u2014 Check recent deployments or configuration changes\n3. **Remediate** \u2014 Restart problematic services if safe; consider scaling if load is legitimate\n4. **Monitor** \u2014 Watch for secondary alerts from dependent health checks\n\n---\n\n### Notification Recipients\n| Level | Recipients |\n|-------|------------|\n| **Immediate** | On-call infrastructure engineer, SRE team |\n| **Escalation** | Application owners for server-01 services |\n| **Awareness** | NOC/operations dashboard |\n\n---\n\n**Action Required:** Prompt investigation to prevent potential outage.",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "allStepRecords": {
+    "parse-event": {
+      "stepName": "parse-event",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:49:49.212343+00:00",
+      "completedAt": "2026-02-20T04:49:53.1318611+00:00",
+      "duration": "00:00:03.9195181",
+      "content": "## Event Summary\n\n| Field | Value |\n|-------|-------|\n| **Category** | Alert |\n| **Priority** | High |\n| **Key Entities** | Host: \u0060server-01\u0060 |\n| **Timestamp** | Not provided in event data |\n| **Description** | CPU usage on server-01 exceeded 90% threshold |",
+      "parameters": {
+        "eventType": "alert",
+        "eventData": "{\u0022severity\u0022:\u0022high\u0022,\u0022message\u0022:\u0022CPU usage exceeded 90%\u0022,\u0022host\u0022:\u0022server-01\u0022}"
+      },
+      "rawDependencyOutputs": {}
+    },
+    "analyze-impact": {
+      "stepName": "analyze-impact",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:49:53.132193+00:00",
+      "completedAt": "2026-02-20T04:50:03.3206649+00:00",
+      "duration": "00:00:10.1884719",
+      "content": "## Impact Analysis: High CPU Alert on server-01\n\n### 1. Immediate Impact\n- **Service degradation**: Applications on server-01 may experience slowdowns, timeouts, or failures\n- **User experience**: End users could face latency or unresponsive services\n- **Resource contention**: Other processes competing for limited CPU cycles\n\n### 2. Downstream Effects\n- **Dependent services**: Any systems relying on server-01 (databases, APIs, microservices) may cascade fail\n- **Load balancers**: May route traffic away, increasing load on other nodes\n- **Queue buildup**: Message queues or job processors may accumulate backlogs\n- **Monitoring noise**: Could trigger secondary alerts from dependent health checks\n\n### 3. Recommended Actions\n- Investigate top CPU-consuming processes (\u0060top\u0060, \u0060htop\u0060)\n- Check for runaway processes, memory leaks, or infinite loops\n- Review recent deployments or configuration changes\n- Consider scaling horizontally or vertically if load is legitimate\n- Restart problematic services if safe to do so\n\n### 4. Notification List\n- **Immediate**: On-call infrastructure engineer, SRE team\n- **Escalation**: Application owners for services hosted on server-01\n- **Awareness**: NOC/operations dashboard\n\n**Severity**: High \u2014 requires prompt investigation to prevent potential outage.",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "generate-notification": {
+      "stepName": "generate-notification",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:50:03.3209087+00:00",
+      "completedAt": "2026-02-20T04:50:12.4695614+00:00",
+      "duration": "00:00:09.1486527",
+      "content": "## Structured Notification\n\n---\n\n**SUBJECT:** \uD83D\uDD34 [HIGH PRIORITY] CPU Alert: server-01 Exceeded 90% Threshold\n\n---\n\n### Priority: HIGH \u26A0\uFE0F\n\n---\n\n### Summary\nCPU usage on **server-01** has exceeded the 90% threshold, indicating potential service degradation. Immediate investigation is required to prevent cascading failures to dependent systems and potential service outages.\n\n---\n\n### Key Details\n- **Host:** \u0060server-01\u0060\n- **Category:** Alert\n- **Condition:** CPU usage \u003E 90%\n- **Risk:** Service slowdowns, timeouts, and downstream cascade failures\n- **Affected:** Applications, dependent APIs, databases, and microservices on this host\n\n---\n\n### Immediate Impact\n- End users may experience latency or unresponsive services\n- Load balancers may redistribute traffic, stressing other nodes\n- Message queues and job processors may accumulate backlogs\n\n---\n\n### Recommended Next Steps\n1. **Investigate** \u2014 Run \u0060top\u0060 or \u0060htop\u0060 to identify CPU-consuming processes\n2. **Review** \u2014 Check recent deployments or configuration changes\n3. **Remediate** \u2014 Restart problematic services if safe; consider scaling if load is legitimate\n4. **Monitor** \u2014 Watch for secondary alerts from dependent health checks\n\n---\n\n### Notification Recipients\n| Level | Recipients |\n|-------|------------|\n| **Immediate** | On-call infrastructure engineer, SRE team |\n| **Escalation** | Application owners for server-01 services |\n| **Awareness** | NOC/operations dashboard |\n\n---\n\n**Action Required:** Prompt investigation to prevent potential outage.",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "finalContent": "## Structured Notification\n\n---\n\n**SUBJECT:** \uD83D\uDD34 [HIGH PRIORITY] CPU Alert: server-01 Exceeded 90% Threshold\n\n---\n\n### Priority: HIGH \u26A0\uFE0F\n\n---\n\n### Summary\nCPU usage on **server-01** has exceeded the 90% threshold, indicating potential service degradation. Immediate investigation is required to prevent cascading failures to dependent systems and potential service outages.\n\n---\n\n### Key Details\n- **Host:** \u0060server-01\u0060\n- **Category:** Alert\n- **Condition:** CPU usage \u003E 90%\n- **Risk:** Service slowdowns, timeouts, and downstream cascade failures\n- **Affected:** Applications, dependent APIs, databases, and microservices on this host\n\n---\n\n### Immediate Impact\n- End users may experience latency or unresponsive services\n- Load balancers may redistribute traffic, stressing other nodes\n- Message queues and job processors may accumulate backlogs\n\n---\n\n### Recommended Next Steps\n1. **Investigate** \u2014 Run \u0060top\u0060 or \u0060htop\u0060 to identify CPU-consuming processes\n2. **Review** \u2014 Check recent deployments or configuration changes\n3. **Remediate** \u2014 Restart problematic services if safe; consider scaling if load is legitimate\n4. **Monitor** \u2014 Watch for secondary alerts from dependent health checks\n\n---\n\n### Notification Recipients\n| Level | Recipients |\n|-------|------------|\n| **Immediate** | On-call infrastructure engineer, SRE team |\n| **Escalation** | Application owners for server-01 services |\n| **Awareness** | NOC/operations dashboard |\n\n---\n\n**Action Required:** Prompt investigation to prevent potential outage."
+}

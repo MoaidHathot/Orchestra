@@ -117,6 +117,7 @@ public class OrchestrationExecutor
 						stepRecords[step.Name] = record;
 						allStepRecords[step.Name] = record;
 					}
+					_reporter.ReportStepCancelled(step.Name);
 					completionSources[step.Name].TrySetResult(cancelled);
 				}
 				catch (Exception ex)
@@ -148,7 +149,7 @@ public class OrchestrationExecutor
 						TryLaunchStep(dependent);
 					}
 				}
-			}, cancellationToken);
+			}); // Don't pass cancellationToken to Task.Run - let step handle cancellation internally
 		}
 
 		// Start all steps that have zero dependencies
@@ -238,6 +239,14 @@ public class OrchestrationExecutor
 		object gate,
 		CancellationToken cancellationToken)
 	{
+		// Check for cancellation before starting
+		if (cancellationToken.IsCancellationRequested)
+		{
+			_logger.LogWarning("  Step '{StepName}' cancelled before starting.", step.Name);
+			_reporter.ReportStepSkipped(step.Name, "Cancelled");
+			return ExecutionResult.Failed("Cancelled");
+		}
+
 		// Check if any dependency failed or was skipped
 		bool shouldSkip;
 		string[] failedDeps;

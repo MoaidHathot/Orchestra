@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Orchestra.Playground.Copilot.Portal</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\Orchestra.Engine\Orchestra.Engine.csproj" />
+    <ProjectReference Include="..\..\..\src\Orchestra.Copilot\Orchestra.Copilot.csproj" />
+  </ItemGroup>
+
+</Project>

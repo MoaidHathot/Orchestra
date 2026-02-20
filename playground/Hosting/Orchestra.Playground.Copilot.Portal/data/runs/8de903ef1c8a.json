@@ -1,0 +1,34 @@
+{
+  "id": "8de903ef1c8a",
+  "orchestrationName": "seattle-weather-roads-monitor",
+  "orchestrationDescription": "Multi-step orchestration that checks current weather in Seattle, tomorrow\u0027s forecast for Seattle and Orcas Island, and road conditions in Washington State. Triggered every 60 seconds.",
+  "orchestrationVersion": "1.0.0",
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\weather-roads-seattle.json",
+  "triggerId": "e4eb849d619edb26",
+  "triggerType": "Scheduler",
+  "startedAt": "2026-02-19T15:34:47.8920305Z",
+  "status": "Succeeded",
+  "stepCount": 5,
+  "results": {
+    "seattle-current-weather": {
+      "status": "Succeeded",
+      "content": "## \uD83C\uDF25\uFE0F Seattle, WA\n\n**36\u00B0F** (Feels like 28\u00B0F)\n\nOvercast skies with 92% humidity. Winds from the NNW at 11 mph.\n\n*Updated: Feb 19, 2026 \u2022 7:24 AM*"
+    },
+    "orcas-island-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "**\uD83C\uDFDD\uFE0F Orcas Island Forecast \u2013 Friday, Feb 20**\n\n**Highs near 40\u00B0F**, mostly cloudy with light SE winds 3-6 mph.\n\n**\u26F4\uFE0F Ferry Travel:** Excellent conditions expected. Calm winds all day\u2014a significant improvement from Thursday\u0027s gusty 25 mph gusts. Smooth crossings likely.\n\n**\uD83E\uDD7E Outdoor Activities:** Good hiking weather but dress in layers for temps hovering around 40\u00B0F. Mostly dry until late evening.\n\n**\u26A0\uFE0F Evening Note:** Mixed rain/snow showers possible after 4am (30% chance). Minimal accumulation expected. Plan to return before late night if weather-sensitive.\n\n**Bottom line:** Ideal day for island exploration!"
+    },
+    "seattle-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "**Seattle Tomorrow (Fri, Feb 20)**\n\n**Morning:** Mostly cloudy with calm winds. Dry conditions, low around 36\u00B0F.\n\n**Afternoon:** Continued mostly cloudy skies with light south winds around 5 mph. High near 43\u00B0F.\n\n**Evening:** Slight chance of rain showers developing before 10pm, increasing to 30% chance of mixed rain and snow showers overnight. Little to no snow accumulation expected.\n\n*Bottom line: A dry, mild day turning damp by nightfall. Grab a light jacket for the clouds and an umbrella for evening plans.*"
+    },
+    "wa-road-conditions": {
+      "status": "Succeeded",
+      "content": "# Washington State Road Conditions\n**February 19, 2026**\n\n## I-90 Snoqualmie Pass\n**\u26A0\uFE0F CAUTION** - Open with winter conditions. Snow showers likely (60%), temps 12-27\u00B0F. Chains required.\n\n## SR-20 North Cascades Highway\n**\uD83D\uDD34 CLOSED** - Seasonal closure at MP 134 (Ross Dam Trailhead). Reopens April/May.\n\n## Cascade River Road\n**\uD83D\uDD34 CLOSED** - Flooding/landslides at MP 21.\n\n## Stehekin Valley Road\n**\uD83D\uDD34 CLOSED** - Landslides since December.\n\n## I-5 Seattle Corridor\n**\u2705 CLEAR** - No incidents reported. Normal traffic patterns.\n\n## SR-20 to Anacortes\n**\u2705 CLEAR** - Open to ferry terminal. Ferries operating normally; reservations recommended.\n\n## Ferry Alerts\n- **\u26A0\uFE0F DELAYS** - Kingston terminal construction through July; expect 20-30 min delays\n- Seattle/Bremerton 10:15pm sailing canceled Feb 20\n\n---\n*Check WSDOT real-time map before travel: wsdot.com/travel/real-time/map*"
+    },
+    "travel-summary": {
+      "status": "Succeeded",
+      "content": "**TRAVEL ADVISORY: Seattle \u2192 Orcas Island**\n**Friday, February 20, 2026**\n\n---\n\n**Overall Recommendation: GOOD TRAVEL DAY** \u2705\n\nConditions are favorable for your Seattle to Orcas Island trip. Clear roads, calm waters, and dry weather through the afternoon make this an ideal window for travel.\n\n**Route Status:**\n- I-5 and SR-20 to Anacortes: Clear, no incidents\n- Anacortes-Orcas Ferry: Operating normally, calm seas (3-6 mph winds)\n\n**Weather:** 36-43\u00B0F, mostly cloudy, dry until evening. Mixed rain/snow develops after 10 PM in Seattle, after 4 AM on Orcas.\n\n**Recommended Departure:** 7:00 AM - 12:00 PM from Seattle. Avoid departures after 3:00 PM due to evening weather deterioration.\n\n**Action Items:**\n- Book ferry reservations immediately (per WSDOT)\n- Pack warm layers, rain gear, and waterproof footwear\n- Bring phone charger for travel updates\n\n**Alerts:**\n- Evening mixed precipitation expected\u2014plan to arrive before nightfall\n- Kingston terminal experiencing delays (does not affect your Anacortes route)\n- Snoqualmie Pass requires chains (not on your route)\n\n**Bottom Line:** Depart by late morning for optimal conditions. Roads are clear, ferries running smoothly, and you\u0027ll beat the evening weather change. An excellent day for island travel.\n\n---\n*232 words*"
+    }
+  }
+}
