@@ -13,6 +13,16 @@ public class OrchestrationRunRecord
 	public required ExecutionStatus Status { get; init; }
 
 	/// <summary>
+	/// Version of the orchestration at the time of execution.
+	/// </summary>
+	public string OrchestrationVersion { get; init; } = "1.0.0";
+
+	/// <summary>
+	/// What triggered this execution (e.g., "manual", "scheduler", "webhook", "loop").
+	/// </summary>
+	public string TriggeredBy { get; init; } = "manual";
+
+	/// <summary>
 	/// Parameters provided for this run.
 	/// </summary>
 	public Dictionary<string, string> Parameters { get; init; } = [];

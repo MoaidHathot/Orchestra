@@ -12,6 +12,7 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	public void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer) { }
 	public void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error) { }
 	public void ReportStepError(string stepName, string errorMessage) { }
+	public void ReportStepCancelled(string stepName) { }
 	public void ReportStepCompleted(string stepName, AgentResult result) { }
 	public void ReportModelMismatch(ModelMismatchInfo mismatch) { }
 	public void ReportStepOutput(string stepName, string content) { }

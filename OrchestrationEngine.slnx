@@ -5,5 +5,11 @@
   </Folder>
   <Folder Name="/playground/">
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot/Orchestra.Playground.Copilot.csproj" />
+    <Project Path="playground/Hosting/Orchestra.Playground.Copilot.Web/Orchestra.Playground.Copilot.Web.csproj" />
+    <Project Path="playground/Hosting/Orchestra.Playground.Copilot.Portal/Orchestra.Playground.Copilot.Portal.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj" />
+    <Project Path="tests/Orchestra.Portal.E2E/Orchestra.Portal.E2E.csproj" />
   </Folder>
 </Solution>

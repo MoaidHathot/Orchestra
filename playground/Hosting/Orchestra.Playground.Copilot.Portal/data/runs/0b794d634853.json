@@ -1,0 +1,34 @@
+{
+  "id": "0b794d634853",
+  "orchestrationName": "seattle-weather-roads-monitor",
+  "orchestrationDescription": "Multi-step orchestration that checks current weather in Seattle, tomorrow\u0027s forecast for Seattle and Orcas Island, and road conditions in Washington State. Triggered every 60 seconds.",
+  "orchestrationVersion": "1.0.0",
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\weather-roads-seattle.json",
+  "triggerId": "e4eb849d619edb26",
+  "triggerType": "Scheduler",
+  "startedAt": "2026-02-19T16:36:49.3825464Z",
+  "status": "Succeeded",
+  "stepCount": 5,
+  "results": {
+    "seattle-current-weather": {
+      "status": "Succeeded",
+      "content": "## \uD83C\uDF25\uFE0F Seattle, WA\n\n**36\u00B0F** (Feels like 29\u00B0F)\n\nOvercast skies with 92% humidity. Winds NNW at 10 mph.\n\n*Updated: Feb 19, 2026 at 8:13 AM*"
+    },
+    "seattle-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "**Seattle Tomorrow (Friday, Feb 20)**\n\n**Morning:** Mostly cloudy, cool start around 36\u00B0F with calm winds.\n\n**Afternoon:** Continued cloud cover, highs near 43\u00B0F. Light southerly winds around 5 mph developing.\n\n**Evening:** Increasing precipitation chances (30%). Possible rain showers before 10pm, transitioning to rain/snow mix overnight. Minimal snow accumulation expected.\n\n*Bottom line: Dry through most of the day\u2014grab a jacket for evening plans.*"
+    },
+    "orcas-island-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "## \uD83C\uDFDD\uFE0F Orcas Island Forecast \u2014 Friday, Feb 20\n\n**High 42\u00B0F / Low 38\u00B0F** | Mostly cloudy\n\n\u2600\uFE0F **Daytime:** Dry with light SE winds (~6 mph). Only 10% rain chance.\n\n\u26F4\uFE0F **Ferry Outlook:** EXCELLENT \u2014 Calm seas (waves \u22641 ft), light winds under 5 kt. Small Craft Advisory lifted Thursday morning.\n\n\uD83E\uDD7E **Outdoor Activities:** Great conditions for hiking, kayaking, or exploring. Dress in layers.\n\n\u26A0\uFE0F **Evening Alert:** Conditions worsen after 10pm \u2014 increasing winds (up to 12 mph) and chance of rain/snow mix. Plan outdoor activities for daylight hours.\n\n**Bottom line:** Ideal day for island travel; return before nightfall."
+    },
+    "wa-road-conditions": {
+      "status": "Succeeded",
+      "content": "## Washington State Road Conditions \u2014 Feb 19, 2026\n\n**I-5 (Seattle Corridor)**\n\uD83D\uDFE2 **CLEAR** \u2014 Normal operations. 20% chance rain/snow showers. Active construction zones at 179th St interchange and Colman Dock.\n\n**I-90 (Snoqualmie Pass)**\n\uD83D\uDFE1 **CAUTION** \u2014 Winter driving conditions. 60% chance snow, high 27\u00B0F. Icy/snowy surfaces likely. Chains may be required.\n\n**Highway 20 (North Cascades)**\n\uD83D\uDD34 **CLOSED** \u2014 Seasonal closure in effect (MP 134-171) due to avalanche danger.\n\n**SR-20 (Anacortes/Ferry Terminal)**\n\uD83D\uDFE2 **CLEAR** \u2014 Mostly cloudy, winds 10-13 mph with gusts to 20.\n\n**Ferry Alerts:**\n- Seattle-Bremerton 10:15pm Feb 20: CANCELED\n- Kingston Terminal: 20-30 min delays on evening sailings (construction)\n- March 1: 3% card payment fee begins\n\n**Reminders:** Carry chains, pack emergency kit, check 511 for updates."
+    },
+    "travel-summary": {
+      "status": "Succeeded",
+      "content": "**TRAVEL ADVISORY: Seattle \u2192 Orcas Island**\n**Friday, February 20, 2026**\n\n---\n\n**OVERALL RECOMMENDATION: GOOD TRAVEL DAY \u2705**\n\nExcellent conditions for your trip with calm seas, clear roads, and dry weather through the afternoon.\n\n---\n\n**CONDITIONS SUMMARY**\n\nAll segments show low risk. I-5 and SR-20 are clear with light winds. Ferry crossing conditions are ideal\u2014seas under 1 ft with winds below 5 knots. Orcas Island expects a dry 42\u00B0F high with only 10% rain chance.\n\n**TIMING**\n\nDepart Seattle between 7:00\u20139:00 AM. Allow 1.5 hours to Anacortes. Book return ferry no later than 6:00 PM.\n\n**CRITICAL ALERT**\n\nWeather deteriorates after 10pm with rain/snow mix and stronger winds. Complete all travel before dark.\n\n**ROUTE NOTES**\n- Highway 20 North Cascades: CLOSED \u2014 use I-5 to SR-20\n- Minor construction delays at I-5/179th St and Colman Dock\n- Kingston Terminal delays do not affect this route\n\n**ESSENTIALS**\n- Warm layers, waterproof jacket, hat/gloves\n- Ferry reservation confirmation\n- Optional: tire chains and emergency kit\n\n---\n\n**BOTTOM LINE:** This is your window. Dry roads, smooth crossing, and pleasant island weather until evening. Depart early and return before sunset for an ideal trip."
+    }
+  }
+}

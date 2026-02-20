@@ -36,4 +36,35 @@ public class StepRunRecord
 	/// Loop iteration number (null if not a loop iteration, 0 for the initial run).
 	/// </summary>
 	public int? LoopIteration { get; init; }
+
+	/// <summary>
+	/// The raw dependency outputs before any prompt construction.
+	/// Key is dependency step name, value is the raw output from that step.
+	/// </summary>
+	public Dictionary<string, string> RawDependencyOutputs { get; init; } = [];
+
+	/// <summary>
+	/// The actual prompt that was sent to the LLM (after all substitutions and handlers).
+	/// </summary>
+	public string? PromptSent { get; init; }
+
+	/// <summary>
+	/// The actual model identifier used for this step execution.
+	/// </summary>
+	public string? ActualModel { get; init; }
+
+	/// <summary>
+	/// Token usage statistics for this step (input tokens, output tokens, total).
+	/// </summary>
+	public TokenUsage? Usage { get; init; }
+}
+
+/// <summary>
+/// Token usage statistics for an LLM call.
+/// </summary>
+public class TokenUsage
+{
+	public int InputTokens { get; init; }
+	public int OutputTokens { get; init; }
+	public int TotalTokens => InputTokens + OutputTokens;
 }

@@ -1,0 +1,3 @@
+{
+  "content": "## Event Summary\n\n| Field | Value |\n|-------|-------|\n| **Category** | Alert |\n| **Priority** | High |\n| **Key Entities** | Host: \u0060server-01\u0060 |\n| **Timestamp** | Not provided in event data |\n| **Description** | CPU usage on server-01 exceeded 90% threshold |"
+}

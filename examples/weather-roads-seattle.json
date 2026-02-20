@@ -1,0 +1,70 @@
+{
+  "name": "seattle-weather-roads-monitor",
+  "description": "Multi-step orchestration that checks current weather in Seattle, tomorrow's forecast for Seattle and Orcas Island, and road conditions in Washington State. Triggered every 60 seconds.",
+  "mcps": [
+    {
+      "name": "web-fetch",
+      "type": "local",
+      "command": "npx",
+      "arguments": ["-y", "@anthropic/mcp-fetch"]
+    }
+  ],
+  "steps": [
+    {
+      "name": "seattle-current-weather",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a weather information assistant. Use the web fetch tools available to retrieve current weather data. Be concise and factual.",
+      "userPrompt": "Using the fetch tools, get the current weather conditions for Seattle, Washington. Include: temperature, humidity, wind speed, and general conditions (sunny, cloudy, rainy, etc.).",
+      "outputHandlerPrompt": "Present as a brief weather card with current conditions. Include the city name and timestamp. Keep under 100 words.",
+      "mcps": ["web-fetch"],
+      "model": "claude-code-4.5"
+    },
+    {
+      "name": "seattle-tomorrow-forecast",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a weather forecasting assistant. Use the web fetch tools to retrieve weather forecast data. Focus on tomorrow's conditions.",
+      "userPrompt": "Using the fetch tools, get tomorrow's weather forecast for Seattle, Washington. Include: expected high and low temperatures, precipitation chance, and general conditions throughout the day.",
+      "outputHandlerPrompt": "Present as a tomorrow forecast summary. Include morning, afternoon, and evening outlook if available. Keep under 100 words.",
+      "mcps": ["web-fetch"],
+      "model": "claude-code-4.5"
+    },
+    {
+      "name": "orcas-island-tomorrow-forecast",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a weather forecasting assistant. Use the web fetch tools to retrieve weather forecast data for island destinations.",
+      "userPrompt": "Using the fetch tools, get tomorrow's weather forecast for Orcas Island, Washington (San Juan Islands). Include: expected high and low temperatures, precipitation chance, wind conditions (important for island travel), and marine conditions if available.",
+      "outputHandlerPrompt": "Present as an island weather forecast. Highlight any conditions relevant for ferry travel or outdoor activities. Keep under 100 words.",
+      "mcps": ["web-fetch"],
+      "model": "claude-code-4.5"
+    },
+    {
+      "name": "wa-road-conditions",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a road conditions and traffic assistant. Use the web fetch tools to retrieve current road conditions and travel advisories for Washington State.",
+      "userPrompt": "Using the fetch tools, check the current road conditions for major routes in Washington State, particularly: I-5 (Seattle corridor), I-90 (Snoqualmie Pass), Highway 20 (North Cascades), and SR-20 to Anacortes (ferry terminal for San Juan Islands). Report any closures, delays, construction, or weather-related advisories.",
+      "outputHandlerPrompt": "Present as a road conditions summary organized by route. Use status indicators (clear, delays, caution, closed). Keep under 150 words.",
+      "mcps": ["web-fetch"],
+      "model": "claude-code-4.5"
+    },
+    {
+      "name": "travel-summary",
+      "type": "Prompt",
+      "dependsOn": ["seattle-current-weather", "seattle-tomorrow-forecast", "orcas-island-tomorrow-forecast", "wa-road-conditions"],
+      "systemPrompt": "You are a travel planning assistant. Synthesize weather and road information to provide actionable travel guidance.",
+      "userPrompt": "Based on the weather data for Seattle (current and tomorrow), Orcas Island (tomorrow), and the road conditions, create a comprehensive travel advisory for someone planning to travel from Seattle to Orcas Island tomorrow. Include: 1) Current conditions summary 2) Tomorrow's travel outlook 3) Recommended departure time 4) What to pack/prepare 5) Any alerts or concerns.",
+      "inputHandlerPrompt": "Extract key data from each step: current Seattle weather, tomorrow's forecasts for both locations, and road status for each route. Highlight any concerning conditions.",
+      "outputHandlerPrompt": "Format as a travel advisory brief. Lead with overall recommendation (good/fair/poor travel day). Keep under 250 words.",
+      "mcps": [],
+      "model": "claude-code-4.5"
+    }
+  ],
+  "trigger": {
+    "type": "scheduler",
+    "enabled": true,
+    "intervalSeconds": 3600
+  }
+}

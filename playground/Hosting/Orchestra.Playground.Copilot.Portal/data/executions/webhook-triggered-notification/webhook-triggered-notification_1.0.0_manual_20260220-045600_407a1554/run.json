@@ -1,0 +1,86 @@
+{
+  "runId": "407a1554e6a1",
+  "orchestrationName": "webhook-triggered-notification",
+  "startedAt": "2026-02-20T04:56:00.7262086+00:00",
+  "completedAt": "2026-02-20T04:56:24.2292654+00:00",
+  "duration": "00:00:23.5030568",
+  "status": "Succeeded",
+  "orchestrationVersion": "1.0.0",
+  "triggeredBy": "manual",
+  "parameters": {
+    "eventType": "alert",
+    "eventData": "{\u0022severity\u0022:\u0022high\u0022,\u0022message\u0022:\u0022CPU usage exceeded 90%\u0022,\u0022host\u0022:\u0022server-01\u0022}"
+  },
+  "triggerId": "webhook-triggered-notification-ff4c",
+  "stepRecords": {
+    "parse-event": {
+      "stepName": "parse-event",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:56:00.7273116+00:00",
+      "completedAt": "2026-02-20T04:56:04.9257154+00:00",
+      "duration": "00:00:04.1984038",
+      "content": "## Event Summary\n\n| Field | Value |\n|-------|-------|\n| **Category** | Alert |\n| **Priority** | High |\n| **Key Entities** | Host: \u0060server-01\u0060 |\n| **Timestamp** | Not provided in event data |\n| **Description** | CPU usage exceeded 90% threshold on server-01 |\n\n### Raw Details\n- **Severity**: high\n- **Message**: CPU usage exceeded 90%\n- **Affected Host**: server-01",
+      "parameters": {
+        "eventType": "alert",
+        "eventData": "{\u0022severity\u0022:\u0022high\u0022,\u0022message\u0022:\u0022CPU usage exceeded 90%\u0022,\u0022host\u0022:\u0022server-01\u0022}"
+      },
+      "rawDependencyOutputs": {}
+    },
+    "analyze-impact": {
+      "stepName": "analyze-impact",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:56:04.9258786+00:00",
+      "completedAt": "2026-02-20T04:56:14.545504+00:00",
+      "duration": "00:00:09.6196254",
+      "content": "## Impact Analysis: High CPU Alert on server-01\n\n### 1. Immediate Impact\n- **Service degradation**: Applications on server-01 likely experiencing slow response times or timeouts\n- **User-facing issues**: Any services hosted may be unresponsive or sluggish\n- **Risk of escalation**: Sustained \u003E90% CPU could lead to process crashes or OOM conditions\n\n### 2. Downstream Effects\n- **Dependent services**: Any systems relying on server-01 APIs or data may fail or queue requests\n- **Load balancer impact**: If part of a cluster, other nodes may absorb traffic, risking cascade\n- **Database connections**: Long-running queries may timeout, causing transaction failures\n\n### 3. Recommended Actions\n1. **Immediate**: Identify top CPU-consuming processes (\u0060top\u0060, \u0060htop\u0060)\n2. **Short-term**: Scale horizontally or kill runaway processes if safe\n3. **Investigation**: Check for recent deployments, cron jobs, or traffic spikes\n4. **Monitoring**: Set up alerts at 80% to catch issues earlier\n\n### 4. Notification List\n| Role | Reason |\n|------|--------|\n| On-call SRE | Primary responder |\n| Application owner | Root cause investigation |\n| Platform team | Infrastructure decisions |\n\n**Severity Assessment**: Act within 15 minutes to prevent potential outage.",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "generate-notification": {
+      "stepName": "generate-notification",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:56:14.5455428+00:00",
+      "completedAt": "2026-02-20T04:56:24.2277664+00:00",
+      "duration": "00:00:09.6822236",
+      "content": "# \uD83D\uDD34 HIGH PRIORITY NOTIFICATION\n\n---\n\n## Subject: [HIGH] CPU Alert - server-01 Exceeding 90% Threshold\n\n---\n\n### Summary\nA high-severity CPU alert has been triggered on **server-01**, with usage exceeding the 90% threshold. Immediate investigation is required to prevent service degradation or potential outage. Action should be taken within **15 minutes**.\n\n---\n\n### Key Details\n- **Host**: server-01\n- **Issue**: CPU usage exceeded 90%\n- **Severity**: High\n- **Category**: Alert\n- **Immediate Risk**: Application slowdowns, timeouts, potential process crashes\n\n---\n\n### Impact\n- Services on server-01 may be unresponsive or experiencing latency\n- Dependent systems and APIs may fail or queue requests\n- Risk of cascade failure if part of a load-balanced cluster\n- Database connections may timeout causing transaction failures\n\n---\n\n### Recommended Next Steps\n1. **NOW**: SSH to server-01 and run \u0060top\u0060 or \u0060htop\u0060 to identify top CPU consumers\n2. **If safe**: Kill runaway processes or scale horizontally\n3. **Investigate**: Check recent deployments, scheduled cron jobs, or traffic anomalies\n4. **Follow-up**: Consider adding 80% threshold alert for earlier warning\n\n---\n\n### Notify\n| Role | Action Required |\n|------|-----------------|\n| On-call SRE | Respond immediately |\n| Application Owner | Root cause analysis |\n| Platform Team | Infrastructure review |\n\n---\n\n**Priority**: \uD83D\uDD34 **HIGH** \u2014 Respond within 15 minutes",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "allStepRecords": {
+    "parse-event": {
+      "stepName": "parse-event",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:56:00.7273116+00:00",
+      "completedAt": "2026-02-20T04:56:04.9257154+00:00",
+      "duration": "00:00:04.1984038",
+      "content": "## Event Summary\n\n| Field | Value |\n|-------|-------|\n| **Category** | Alert |\n| **Priority** | High |\n| **Key Entities** | Host: \u0060server-01\u0060 |\n| **Timestamp** | Not provided in event data |\n| **Description** | CPU usage exceeded 90% threshold on server-01 |\n\n### Raw Details\n- **Severity**: high\n- **Message**: CPU usage exceeded 90%\n- **Affected Host**: server-01",
+      "parameters": {
+        "eventType": "alert",
+        "eventData": "{\u0022severity\u0022:\u0022high\u0022,\u0022message\u0022:\u0022CPU usage exceeded 90%\u0022,\u0022host\u0022:\u0022server-01\u0022}"
+      },
+      "rawDependencyOutputs": {}
+    },
+    "analyze-impact": {
+      "stepName": "analyze-impact",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:56:04.9258786+00:00",
+      "completedAt": "2026-02-20T04:56:14.545504+00:00",
+      "duration": "00:00:09.6196254",
+      "content": "## Impact Analysis: High CPU Alert on server-01\n\n### 1. Immediate Impact\n- **Service degradation**: Applications on server-01 likely experiencing slow response times or timeouts\n- **User-facing issues**: Any services hosted may be unresponsive or sluggish\n- **Risk of escalation**: Sustained \u003E90% CPU could lead to process crashes or OOM conditions\n\n### 2. Downstream Effects\n- **Dependent services**: Any systems relying on server-01 APIs or data may fail or queue requests\n- **Load balancer impact**: If part of a cluster, other nodes may absorb traffic, risking cascade\n- **Database connections**: Long-running queries may timeout, causing transaction failures\n\n### 3. Recommended Actions\n1. **Immediate**: Identify top CPU-consuming processes (\u0060top\u0060, \u0060htop\u0060)\n2. **Short-term**: Scale horizontally or kill runaway processes if safe\n3. **Investigation**: Check for recent deployments, cron jobs, or traffic spikes\n4. **Monitoring**: Set up alerts at 80% to catch issues earlier\n\n### 4. Notification List\n| Role | Reason |\n|------|--------|\n| On-call SRE | Primary responder |\n| Application owner | Root cause investigation |\n| Platform team | Infrastructure decisions |\n\n**Severity Assessment**: Act within 15 minutes to prevent potential outage.",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "generate-notification": {
+      "stepName": "generate-notification",
+      "status": "Succeeded",
+      "startedAt": "2026-02-20T04:56:14.5455428+00:00",
+      "completedAt": "2026-02-20T04:56:24.2277664+00:00",
+      "duration": "00:00:09.6822236",
+      "content": "# \uD83D\uDD34 HIGH PRIORITY NOTIFICATION\n\n---\n\n## Subject: [HIGH] CPU Alert - server-01 Exceeding 90% Threshold\n\n---\n\n### Summary\nA high-severity CPU alert has been triggered on **server-01**, with usage exceeding the 90% threshold. Immediate investigation is required to prevent service degradation or potential outage. Action should be taken within **15 minutes**.\n\n---\n\n### Key Details\n- **Host**: server-01\n- **Issue**: CPU usage exceeded 90%\n- **Severity**: High\n- **Category**: Alert\n- **Immediate Risk**: Application slowdowns, timeouts, potential process crashes\n\n---\n\n### Impact\n- Services on server-01 may be unresponsive or experiencing latency\n- Dependent systems and APIs may fail or queue requests\n- Risk of cascade failure if part of a load-balanced cluster\n- Database connections may timeout causing transaction failures\n\n---\n\n### Recommended Next Steps\n1. **NOW**: SSH to server-01 and run \u0060top\u0060 or \u0060htop\u0060 to identify top CPU consumers\n2. **If safe**: Kill runaway processes or scale horizontally\n3. **Investigate**: Check recent deployments, scheduled cron jobs, or traffic anomalies\n4. **Follow-up**: Consider adding 80% threshold alert for earlier warning\n\n---\n\n### Notify\n| Role | Action Required |\n|------|-----------------|\n| On-call SRE | Respond immediately |\n| Application Owner | Root cause analysis |\n| Platform Team | Infrastructure review |\n\n---\n\n**Priority**: \uD83D\uDD34 **HIGH** \u2014 Respond within 15 minutes",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "finalContent": "# \uD83D\uDD34 HIGH PRIORITY NOTIFICATION\n\n---\n\n## Subject: [HIGH] CPU Alert - server-01 Exceeding 90% Threshold\n\n---\n\n### Summary\nA high-severity CPU alert has been triggered on **server-01**, with usage exceeding the 90% threshold. Immediate investigation is required to prevent service degradation or potential outage. Action should be taken within **15 minutes**.\n\n---\n\n### Key Details\n- **Host**: server-01\n- **Issue**: CPU usage exceeded 90%\n- **Severity**: High\n- **Category**: Alert\n- **Immediate Risk**: Application slowdowns, timeouts, potential process crashes\n\n---\n\n### Impact\n- Services on server-01 may be unresponsive or experiencing latency\n- Dependent systems and APIs may fail or queue requests\n- Risk of cascade failure if part of a load-balanced cluster\n- Database connections may timeout causing transaction failures\n\n---\n\n### Recommended Next Steps\n1. **NOW**: SSH to server-01 and run \u0060top\u0060 or \u0060htop\u0060 to identify top CPU consumers\n2. **If safe**: Kill runaway processes or scale horizontally\n3. **Investigate**: Check recent deployments, scheduled cron jobs, or traffic anomalies\n4. **Follow-up**: Consider adding 80% threshold alert for earlier warning\n\n---\n\n### Notify\n| Role | Action Required |\n|------|-----------------|\n| On-call SRE | Respond immediately |\n| Application Owner | Root cause analysis |\n| Platform Team | Infrastructure review |\n\n---\n\n**Priority**: \uD83D\uDD34 **HIGH** \u2014 Respond within 15 minutes"
+}

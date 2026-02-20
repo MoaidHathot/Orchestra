@@ -10,6 +10,7 @@ public interface IOrchestrationReporter
 	void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer);
 	void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error);
 	void ReportStepError(string stepName, string errorMessage);
+	void ReportStepCancelled(string stepName);
 	void ReportStepCompleted(string stepName, AgentResult result);
 	void ReportModelMismatch(ModelMismatchInfo mismatch);
 	void ReportStepOutput(string stepName, string content);

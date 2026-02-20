@@ -73,6 +73,11 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 		Write("step-error", new { stepName, error = errorMessage });
 	}
 
+	public void ReportStepCancelled(string stepName)
+	{
+		Write("step-cancelled", new { stepName });
+	}
+
 	public void ReportStepCompleted(string stepName, AgentResult result)
 	{
 		Write("step-completed", new

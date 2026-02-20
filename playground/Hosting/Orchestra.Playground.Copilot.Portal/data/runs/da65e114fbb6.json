@@ -1,0 +1,34 @@
+{
+  "id": "da65e114fbb6",
+  "orchestrationName": "seattle-weather-roads-monitor",
+  "orchestrationDescription": "Multi-step orchestration that checks current weather in Seattle, tomorrow\u0027s forecast for Seattle and Orcas Island, and road conditions in Washington State. Triggered every 60 seconds.",
+  "orchestrationVersion": "1.0.0",
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\weather-roads-seattle.json",
+  "triggerId": "e4eb849d619edb26",
+  "triggerType": "Scheduler",
+  "startedAt": "2026-02-19T18:40:46.4728715Z",
+  "status": "Succeeded",
+  "stepCount": 5,
+  "results": {
+    "seattle-current-weather": {
+      "status": "Succeeded",
+      "content": "## \uD83C\uDF25\uFE0F Seattle, WA\n\n**38\u00B0F** (feels like 31\u00B0F)\n\nOvercast skies with 73% humidity. Winds from the North at 10 mph.\n\n*Updated: Feb 19, 2026 at 10:40 AM*"
+    },
+    "orcas-island-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "## \uD83C\uDFDD\uFE0F Orcas Island Forecast \u2013 Friday, Feb 20\n\n**High 42\u00B0F / Low 37\u00B0F** | 30% chance of rain/snow showers (after 4am Saturday)\n\n### Ferry \u0026 Boating Conditions \u2693\n**Excellent** \u2013 Winds 5 kt or less, waves under 1 ft. Small Craft Advisory lifts Thursday 10am. Calm seas all day Friday.\n\n### Outdoor Activities\nLight SE winds (~6 mph) and dry conditions make Friday ideal for hiking, kayaking, or exploring. Bundle up for chilly temps.\n\n**Bottom line:** Perfect day for ferry crossings and outdoor adventures. Weather turns wet late Friday night."
+    },
+    "wa-road-conditions": {
+      "status": "Succeeded",
+      "content": "## Washington Road Conditions \u2014 Feb 19, 2026\n\n**I-5 Seattle Corridor** \u26A0\uFE0F DELAYS\n- Ship Canal Bridge: 2 NB lanes closed (through 2027)\n- Commute times doubled; midweek worst\n- Hwy 99 at 1st Ave S Bridge: 2 NB lanes closed, 25 mph limit\n\n**Highway 99** \u26A0\uFE0F CAUTION\n- Backup onto Hwy 509; no reopening ETA\n\n**I-90 Snoqualmie Pass** \u2705 CLEAR\n- No closures; winter conditions possible, check for chain requirements\n\n**Highway 20 (North Cascades)** \uD83D\uDEAB CLOSED\n- Closed at MP 134 eastward until April/May\n- Cascade River Road closed at MP 21\n- Stehekin Valley Road closed\n\n**SR-20 to Anacortes** \u2705 CLEAR\n- Ferry terminal accessible; ferries operating\n\n**Ferries** \u26A0\uFE0F CAUTION\n- Feb 20: Bremerton 10:15pm sailing canceled\n- Kingston terminal: construction delays through July\n\n\uD83D\uDCF1 Check WSDOT real-time map before travel"
+    },
+    "seattle-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "**Tomorrow\u0027s Forecast - Friday, Feb 20**\n\n\u2601\uFE0F **Cloudy \u0026 Dry All Day**\n\n**Morning:** Cold start at 30\u00B0F (feels like 26\u00B0F). Bundle up!\n\n**Afternoon:** Gradual warming to 35\u00B0F with continued overcast skies.\n\n**Evening:** Temperatures peak near 39\u00B0F, remaining cloudy with calm winds.\n\n**No rain expected** \u2013 0% precipitation chance throughout. Light northerly winds 2-6 mph. Visibility at 6 miles.\n\n*Grab a warm coat for the chilly morning commute!*"
+    },
+    "travel-summary": {
+      "status": "Succeeded",
+      "content": "**TRAVEL ADVISORY: Seattle \u2192 Orcas Island**\n**Friday, February 20, 2026**\n\n---\n\n**OVERALL RECOMMENDATION: GOOD TRAVEL DAY** \u2705\n\nDry weather, calm seas, and clear roads to Anacortes make this an excellent day for the trip. Primary challenge is Seattle-area traffic congestion.\n\n---\n\n**KEY CONDITIONS**\n\n- **Temperature:** 30\u00B0F morning (feels 26\u00B0F), rising to 35-42\u00B0F\n- **Precipitation:** 0% until late Friday night\n- **Ferry:** Excellent \u2014 calm seas, waves under 1 ft, light winds\n\n---\n\n**TRAFFIC ALERTS**\n\n- **HIGH:** I-5 Ship Canal Bridge construction (2 lanes closed) \u2014 expect doubled commute times\n- **MODERATE:** Hwy 99 congested \u2014 not recommended as alternate\n- SR-20 to Anacortes terminal is CLEAR\n\n---\n\n**RECOMMENDED DEPARTURE**\n\nLeave Seattle by **7:00-8:00 AM**. Budget 2\u002B hours for the 90-minute drive due to I-5 delays. Early departure ensures morning ferry and maximum island daylight.\n\n---\n\n**PACK LIST**\n\n- Warm winter coat, gloves, hat, layers\n- Hot beverages for ferry\n- WSDOT app for traffic updates\n- Full tank of gas (limited stations on Orcas)\n\n---\n\n**RETURN NOTE:** Weather turns wet late Friday night \u2014 plan return timing accordingly."
+    }
+  }
+}
