@@ -2,7 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/Orchestra.Engine/Orchestra.Engine.csproj" />
     <Project Path="src/Orchestra.Copilot/Orchestra.Copilot.csproj" />
-    <Project Path="src/Orchestra.Outlook/Orchestra.Outlook.csproj" />
+    <Project Path="src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj" />
   </Folder>
   <Folder Name="/playground/">
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot/Orchestra.Playground.Copilot.csproj" />
@@ -12,5 +12,6 @@
   <Folder Name="/tests/">
     <Project Path="tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj" />
     <Project Path="tests/Orchestra.Portal.E2E/Orchestra.Portal.E2E.csproj" />
+    <Project Path="tests/Orchestra.Mcp.Graph.Tests/Orchestra.Mcp.Graph.Tests.csproj" />
   </Folder>
 </Solution>

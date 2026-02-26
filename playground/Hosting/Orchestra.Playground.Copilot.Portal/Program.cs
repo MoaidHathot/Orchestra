@@ -62,30 +62,8 @@ builder.Services.AddSingleton<TriggerManager>(sp =>
 });
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
 
-// Portal status service for tracking Outlook connection state
+// Portal status service for tracking connection states
 builder.Services.AddSingleton<PortalStatusService>();
-
-// Microsoft Graph authentication options for Outlook
-// Uses DefaultAzureCredential which automatically tries: az login, managed identity, env vars, etc.
-// Configure via appsettings.json or environment variables: Graph:ClientId, Graph:TenantId
-var graphConfig = builder.Configuration.GetSection("Graph");
-var graphAuthOptions = new Orchestra.Outlook.GraphAuthOptions
-{
-	ClientId = graphConfig["ClientId"] ?? Environment.GetEnvironmentVariable("GRAPH_CLIENT_ID") ?? "",
-	TenantId = graphConfig["TenantId"] ?? Environment.GetEnvironmentVariable("GRAPH_TENANT_ID"),
-};
-builder.Services.AddSingleton(graphAuthOptions);
-
-// Email trigger manager for polling Outlook via Microsoft Graph
-builder.Services.AddSingleton<EmailTriggerManager>(sp =>
-{
-	return new EmailTriggerManager(
-		sp.GetRequiredService<TriggerManager>(),
-		sp.GetRequiredService<PortalStatusService>(),
-		sp.GetRequiredService<Orchestra.Outlook.GraphAuthOptions>(),
-		sp.GetRequiredService<ILogger<EmailTriggerManager>>());
-});
-builder.Services.AddHostedService(sp => sp.GetRequiredService<EmailTriggerManager>());
 
 var app = builder.Build();
 
@@ -1468,7 +1446,7 @@ app.MapGet("/api/models", () =>
 app.MapGet("/api/status", (OrchestrationRegistry registry, TriggerManager triggerManager, PortalRunStore runStore, PortalStatusService statusService) =>
 {
 	var triggers = triggerManager.GetAllTriggers();
-	var outlookStatus = statusService.GetStatus().Outlook;
+	var portalStatus = statusService.GetStatus();
 	return Results.Json(new
 	{
 		status = "running",
@@ -1476,7 +1454,7 @@ app.MapGet("/api/status", (OrchestrationRegistry registry, TriggerManager trigge
 		orchestrationCount = registry.Count,
 		activeTriggers = triggers.Count(t => t.Config.Enabled),
 		runningExecutions = activeExecutions.Count,
-		outlook = outlookStatus
+		uptimeSeconds = portalStatus.UptimeSeconds
 	}, jsonOptions);
 });
 
