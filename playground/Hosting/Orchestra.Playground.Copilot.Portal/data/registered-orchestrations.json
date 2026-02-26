@@ -2,5 +2,13 @@
   {
     "path": "P:\\Github\\Orchestra\\examples\\webhook-triggered-notification.json",
     "mcpPath": "P:\\Github\\Orchestra\\examples\\mcp.json"
+  },
+  {
+    "path": "P:\\Github\\Orchestra\\examples\\test-email-trigger-orchestration.json",
+    "mcpPath": "P:\\Github\\Orchestra\\examples\\mcp.json"
+  },
+  {
+    "path": "P:\\Github\\Orchestra\\examples\\email-trigger-example.json",
+    "mcpPath": "P:\\Github\\Orchestra\\examples\\mcp.json"
   }
 ]
