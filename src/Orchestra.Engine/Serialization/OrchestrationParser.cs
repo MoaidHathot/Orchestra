@@ -246,15 +246,26 @@ public static class OrchestrationParser
 					MaxIterations = root.TryGetProperty("maxIterations", out var maxIter) ? maxIter.GetInt32() : null,
 					ContinueOnFailure = root.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
 				},
-				TriggerType.Webhook => new WebhookTriggerConfig
-				{
-					Type = TriggerType.Webhook,
-					Enabled = enabled,
-					InputHandlerPrompt = inputHandlerPrompt,
-					Secret = root.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
-					MaxConcurrent = root.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
-				},
-				_ => throw new JsonException($"Unknown trigger type: '{type}'."),
+			TriggerType.Webhook => new WebhookTriggerConfig
+			{
+				Type = TriggerType.Webhook,
+				Enabled = enabled,
+				InputHandlerPrompt = inputHandlerPrompt,
+				Secret = root.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
+				MaxConcurrent = root.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
+			},
+			TriggerType.Email => new EmailTriggerConfig
+			{
+				Type = TriggerType.Email,
+				Enabled = enabled,
+				InputHandlerPrompt = inputHandlerPrompt,
+				FolderPath = root.TryGetProperty("folderPath", out var folderPath) ? folderPath.GetString() ?? "Inbox" : "Inbox",
+				PollIntervalSeconds = root.TryGetProperty("pollIntervalSeconds", out var pollInterval) ? pollInterval.GetInt32() : 60,
+				MaxItemsPerPoll = root.TryGetProperty("maxItemsPerPoll", out var maxItems) ? maxItems.GetInt32() : 10,
+				SubjectContains = root.TryGetProperty("subjectContains", out var subjectContains) ? subjectContains.GetString() : null,
+				SenderContains = root.TryGetProperty("senderContains", out var senderContains) ? senderContains.GetString() : null,
+			},
+			_ => throw new JsonException($"Unknown trigger type: '{type}'."),
 			};
 		}
 

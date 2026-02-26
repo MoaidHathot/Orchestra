@@ -62,6 +62,31 @@ builder.Services.AddSingleton<TriggerManager>(sp =>
 });
 builder.Services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
 
+// Portal status service for tracking Outlook connection state
+builder.Services.AddSingleton<PortalStatusService>();
+
+// Microsoft Graph authentication options for Outlook
+// Uses DefaultAzureCredential which automatically tries: az login, managed identity, env vars, etc.
+// Configure via appsettings.json or environment variables: Graph:ClientId, Graph:TenantId
+var graphConfig = builder.Configuration.GetSection("Graph");
+var graphAuthOptions = new Orchestra.Outlook.GraphAuthOptions
+{
+	ClientId = graphConfig["ClientId"] ?? Environment.GetEnvironmentVariable("GRAPH_CLIENT_ID") ?? "",
+	TenantId = graphConfig["TenantId"] ?? Environment.GetEnvironmentVariable("GRAPH_TENANT_ID"),
+};
+builder.Services.AddSingleton(graphAuthOptions);
+
+// Email trigger manager for polling Outlook via Microsoft Graph
+builder.Services.AddSingleton<EmailTriggerManager>(sp =>
+{
+	return new EmailTriggerManager(
+		sp.GetRequiredService<TriggerManager>(),
+		sp.GetRequiredService<PortalStatusService>(),
+		sp.GetRequiredService<Orchestra.Outlook.GraphAuthOptions>(),
+		sp.GetRequiredService<ILogger<EmailTriggerManager>>());
+});
+builder.Services.AddHostedService(sp => sp.GetRequiredService<EmailTriggerManager>());
+
 var app = builder.Build();
 
 // Load persisted orchestrations on startup
@@ -1440,16 +1465,18 @@ app.MapGet("/api/models", () =>
 });
 
 // GET /api/status - Server status
-app.MapGet("/api/status", (OrchestrationRegistry registry, TriggerManager triggerManager, PortalRunStore runStore) =>
+app.MapGet("/api/status", (OrchestrationRegistry registry, TriggerManager triggerManager, PortalRunStore runStore, PortalStatusService statusService) =>
 {
 	var triggers = triggerManager.GetAllTriggers();
+	var outlookStatus = statusService.GetStatus().Outlook;
 	return Results.Json(new
 	{
 		status = "running",
 		version = "1.0.0",
 		orchestrationCount = registry.Count,
 		activeTriggers = triggers.Count(t => t.Config.Enabled),
-		runningExecutions = activeExecutions.Count
+		runningExecutions = activeExecutions.Count,
+		outlook = outlookStatus
 	}, jsonOptions);
 });
 
@@ -1504,10 +1531,10 @@ app.MapGet("/api/active", (TriggerManager triggerManager, OrchestrationRegistry 
 		}
 	}
 
-	// Add pending/waiting triggers (scheduled and waiting for next fire, OR webhooks waiting for invocation)
+	// Add pending/waiting triggers (scheduled and waiting for next fire, OR webhooks waiting for invocation, OR email triggers)
 	var pendingTriggers = triggerManager.GetAllTriggers()
 		.Where(t => t.Config.Enabled && t.Status == TriggerStatus.Waiting && 
-			(t.NextFireTime.HasValue || t.Config is WebhookTriggerConfig));
+			(t.NextFireTime.HasValue || t.Config is WebhookTriggerConfig || t.Config is EmailTriggerConfig));
 
 	var pending = pendingTriggers.Select(t => {
 		// Look up the orchestration to get step count
@@ -1530,6 +1557,7 @@ app.MapGet("/api/active", (TriggerManager triggerManager, OrchestrationRegistry 
 				SchedulerTriggerConfig => "scheduler",
 				LoopTriggerConfig => "loop",
 				WebhookTriggerConfig => "webhook",
+				EmailTriggerConfig => "email",
 				_ => "trigger"
 			},
 			triggeredBy = t.Config switch
@@ -1537,11 +1565,15 @@ app.MapGet("/api/active", (TriggerManager triggerManager, OrchestrationRegistry 
 				SchedulerTriggerConfig => "scheduler",
 				LoopTriggerConfig => "loop",
 				WebhookTriggerConfig => "webhook",
+				EmailTriggerConfig => "email",
 				_ => "trigger"
 			},
 			source = "pending",
 			// Include webhook URL for webhook triggers
-			webhookUrl = t.Config is WebhookTriggerConfig ? $"/api/webhook/{t.Id}" : null
+			webhookUrl = t.Config is WebhookTriggerConfig ? $"/api/webhook/{t.Id}" : null,
+			// Include email trigger details for email triggers
+			emailFolder = t.Config is EmailTriggerConfig e ? e.FolderPath : null,
+			pollInterval = t.Config is EmailTriggerConfig em ? em.PollIntervalSeconds : (int?)null
 		};
 	});
 

@@ -767,6 +767,16 @@ public class TriggerManager : BackgroundService
 				Secret = w.Secret,
 				MaxConcurrent = w.MaxConcurrent,
 			},
+			EmailTriggerConfig e => new EmailTriggerConfig
+			{
+				Type = e.Type,
+				Enabled = enabled,
+				FolderPath = e.FolderPath,
+				PollIntervalSeconds = e.PollIntervalSeconds,
+				MaxItemsPerPoll = e.MaxItemsPerPoll,
+				SubjectContains = e.SubjectContains,
+				SenderContains = e.SenderContains,
+			},
 			_ => config,
 		};
 	}
@@ -806,6 +816,16 @@ public class TriggerManager : BackgroundService
 				Enabled = enabled,
 				Secret = element.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
 				MaxConcurrent = element.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
+			},
+			TriggerType.Email => new EmailTriggerConfig
+			{
+				Type = TriggerType.Email,
+				Enabled = enabled,
+				FolderPath = element.TryGetProperty("folderPath", out var folderPath) ? folderPath.GetString() ?? "Inbox" : "Inbox",
+				PollIntervalSeconds = element.TryGetProperty("pollIntervalSeconds", out var pollInterval) ? pollInterval.GetInt32() : 60,
+				MaxItemsPerPoll = element.TryGetProperty("maxItemsPerPoll", out var maxItems) ? maxItems.GetInt32() : 10,
+				SubjectContains = element.TryGetProperty("subjectContains", out var subjectContains) ? subjectContains.GetString() : null,
+				SenderContains = element.TryGetProperty("senderContains", out var senderContains) ? senderContains.GetString() : null,
 			},
 			_ => null,
 		};

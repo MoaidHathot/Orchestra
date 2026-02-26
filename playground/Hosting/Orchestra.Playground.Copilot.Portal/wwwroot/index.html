@@ -48,7 +48,7 @@
     /* Layout */
     .app-container {
       display: flex;
-      height: 100vh;
+      height: calc(100vh - 24px); /* Account for status bar */
       overflow: hidden;
     }
     .left-pane {
@@ -229,6 +229,7 @@
     .badge-trigger { background: rgba(163, 113, 247, 0.15); border-color: var(--purple); color: var(--purple); }
     .badge-scheduler { background: rgba(57, 197, 207, 0.15); border-color: var(--cyan); color: var(--cyan); }
     .badge-webhook { background: rgba(219, 109, 40, 0.15); border-color: var(--orange); color: var(--orange); }
+    .badge-email { background: rgba(88, 166, 255, 0.15); border-color: var(--accent); color: var(--accent); }
 
     /* Left Pane - History Section */
     .history-section {
@@ -723,6 +724,45 @@
       animation: pulse 1.5s ease-in-out infinite;
     }
 
+    /* Status Bar */
+    .status-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 24px;
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 11px;
+      color: var(--text-muted);
+      z-index: 100;
+      gap: 16px;
+    }
+    .status-bar-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-bar-item .status-indicator {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .status-bar-item .status-indicator.connected { background: var(--success); }
+    .status-bar-item .status-indicator.disconnected { background: var(--error); }
+    .status-bar-item .status-indicator.connecting { background: var(--warning); animation: pulse 1.5s infinite; }
+    .status-bar-item .status-indicator.not-configured { background: var(--text-dim); }
+    .status-bar-spacer { flex: 1; }
+    .status-bar-error {
+      color: var(--error);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
     /* Utility */
     .text-success { color: var(--success); }
     .text-error { color: var(--error); }
@@ -788,6 +828,7 @@
       Download: () => <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Zm-1.97-7.22a.749.749 0 0 1 0-1.06l5.25-5.25a.749.749 0 0 1 1.06 0l5.25 5.25a.749.749 0 1 1-1.06 1.06L8.5 4.06v6.19a.75.75 0 0 1-1.5 0V4.06L4.28 6.78a.749.749 0 0 1-1.06 0Z"/></svg>,
       Lock: () => <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 4a4 4 0 0 1 8 0v2h.25c.966 0 1.75.784 1.75 1.75v5.5A1.75 1.75 0 0 1 12.25 15h-8.5A1.75 1.75 0 0 1 2 13.25v-5.5C2 6.784 2.784 6 3.75 6H4Zm8.25 3.5h-8.5a.25.25 0 0 0-.25.25v5.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25v-5.5a.25.25 0 0 0-.25-.25ZM10.5 6V4a2.5 2.5 0 1 0-5 0v2Z"/></svg>,
       Sparkles: () => <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M7.53 1.282a.5.5 0 0 1 .94 0l.478 1.306a7.5 7.5 0 0 0 4.464 4.464l1.305.478a.5.5 0 0 1 0 .94l-1.305.478a7.5 7.5 0 0 0-4.464 4.464l-.478 1.306a.5.5 0 0 1-.94 0l-.478-1.306a7.5 7.5 0 0 0-4.464-4.464L1.282 8.47a.5.5 0 0 1 0-.94l1.306-.478a7.5 7.5 0 0 0 4.464-4.464Z"/></svg>,
+      Mail: () => <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 2h12.5c.966 0 1.75.784 1.75 1.75v8.5A1.75 1.75 0 0 1 14.25 14H1.75A1.75 1.75 0 0 1 0 12.25v-8.5C0 2.784.784 2 1.75 2ZM1.5 12.251c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V5.809L8.38 9.397a.75.75 0 0 1-.76 0L1.5 5.809v6.442Zm13-8.181v-.32a.25.25 0 0 0-.25-.25H1.75a.25.25 0 0 0-.25.25v.32L8 7.88l6.5-3.81Z"/></svg>,
     };
 
     // ─── Helper Functions ───────────────────────────────────────────────────────
@@ -824,6 +865,7 @@
         case 'scheduler': return <Icons.Clock />;
         case 'loop': return <Icons.Steps />;
         case 'webhook': return <Icons.Tool />;
+        case 'email': return <Icons.Mail />;
         default: return <Icons.Play />;
       }
     };
@@ -863,6 +905,14 @@
       const eventSourceRef = useRef(null); // Track EventSource for cleanup
       const [mcpsModal, setMcpsModal] = useState({ open: false });
       const [activeModal, setActiveModal] = useState({ open: false, data: null, loading: false });
+      
+      // Status bar state
+      const [serverStatus, setServerStatus] = useState({ 
+        outlook: null,  // { status: 'Connected'|'Disconnected'|'Connecting'|'NotConfigured', errorMessage?: string }
+        orchestrationCount: 0,
+        activeTriggers: 0,
+        runningExecutions: 0
+      });
 
       // Load data
       const loadData = useCallback(async () => {
@@ -918,6 +968,30 @@
           return () => clearInterval(interval);
         }
       }, [orchestrations]);
+
+      // Poll server status (including Outlook connection status) every 15 seconds
+      useEffect(() => {
+        const fetchStatus = async () => {
+          try {
+            const status = await api.get('/api/status');
+            setServerStatus({
+              outlook: status.outlook || null,
+              orchestrationCount: status.orchestrationCount || 0,
+              activeTriggers: status.activeTriggers || 0,
+              runningExecutions: status.runningExecutions || 0
+            });
+          } catch (err) {
+            console.error('Failed to fetch server status:', err);
+          }
+        };
+        
+        // Fetch immediately on mount
+        fetchStatus();
+        
+        // Then poll every 15 seconds
+        const interval = setInterval(fetchStatus, 15000);
+        return () => clearInterval(interval);
+      }, []);
 
       // Filter orchestrations
       const filteredOrchestrations = useMemo(() => {
@@ -1970,6 +2044,9 @@
               }
             }}
           />
+          
+          {/* Status Bar */}
+          <StatusBar status={serverStatus} />
         </div>
       );
     }
@@ -4105,6 +4182,69 @@
         console.error('Mermaid render error:', err);
         container.innerHTML = `<div class="empty-state"><div class="empty-text">Failed to render DAG: ${err.message}</div></div>`;
       }
+    }
+
+    // ─── Status Bar Component ──────────────────────────────────────────────────
+    function StatusBar({ status }) {
+      const getOutlookStatusClass = () => {
+        if (!status.outlook) return 'not-configured';
+        switch (status.outlook.status) {
+          case 'Connected': return 'connected';
+          case 'Disconnected': return 'disconnected';
+          case 'Connecting': return 'connecting';
+          case 'NotConfigured': return 'not-configured';
+          default: return 'not-configured';
+        }
+      };
+
+      const getOutlookStatusText = () => {
+        if (!status.outlook) return 'Not configured';
+        switch (status.outlook.status) {
+          case 'Connected': return 'Connected';
+          case 'Disconnected': return 'Disconnected';
+          case 'Connecting': return 'Connecting...';
+          case 'NotConfigured': return 'Not configured';
+          default: return status.outlook.status;
+        }
+      };
+
+      return (
+        <div className="status-bar">
+          {/* Outlook status (only show if configured) */}
+          {status.outlook && status.outlook.status !== 'NotConfigured' && (
+            <div className="status-bar-item" title={status.outlook.errorMessage || ''}>
+              <span className={`status-indicator ${getOutlookStatusClass()}`}></span>
+              <span>Outlook: {getOutlookStatusText()}</span>
+            </div>
+          )}
+          
+          {/* Show error message if any */}
+          {status.outlook?.errorMessage && (
+            <div className="status-bar-error" title={status.outlook.errorMessage}>
+              <Icons.X />
+              <span style={{ maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {status.outlook.errorMessage}
+              </span>
+            </div>
+          )}
+          
+          <div className="status-bar-spacer"></div>
+          
+          {/* Stats */}
+          <div className="status-bar-item">
+            <span>{status.orchestrationCount} orchestrations</span>
+          </div>
+          <div className="status-bar-item">
+            <span>{status.activeTriggers} active triggers</span>
+          </div>
+          {status.runningExecutions > 0 && (
+            <div className="status-bar-item">
+              <span className="status-indicator running" style={{ background: 'var(--warning)' }}></span>
+              <span>{status.runningExecutions} running</span>
+            </div>
+          )}
+        </div>
+      );
     }
 
     // ─── Render ────────────────────────────────────────────────────────────────

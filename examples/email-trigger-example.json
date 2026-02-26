@@ -1,0 +1,64 @@
+{
+  "name": "teams-notification-handler",
+  "description": "Processes Teams notifications that have been forwarded to email. Extracts the notification content, summarizes it, and can take automated actions.",
+  "trigger": {
+    "type": "Email",
+    "enabled": false,
+    "folderPath": "Inbox/Rule Based/Ignored/PowerAutomate",
+    "pollIntervalSeconds": 60,
+    "maxItemsPerPoll": 5,
+    "subjectContains": "Power Automate - Orchestration"
+  },
+  "parameters": [
+    {
+      "name": "emailSubject",
+      "type": "string",
+      "description": "The subject line of the incoming email"
+    },
+    {
+      "name": "emailBody",
+      "type": "string",
+      "description": "The body content of the incoming email"
+    },
+    {
+      "name": "emailSender",
+      "type": "string",
+      "description": "The sender email address"
+    },
+    {
+      "name": "emailReceivedTime",
+      "type": "string",
+      "description": "When the email was received (ISO 8601 format)"
+    }
+  ],
+  "steps": [
+    {
+      "name": "parse-notification",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are an assistant that parses Microsoft Teams email notifications. Extract the key information from the notification.",
+      "userPrompt": "Parse this Teams notification email and extract: 1) The type of notification (mention, message, meeting, etc.), 2) Who sent/triggered it, 3) The channel/chat name, 4) The actual message content, 5) Any action items or requests.\n\nSubject: {{emailSubject}}\n\nBody:\n{{emailBody}}",
+      "model": "claude-code-4.5"
+    },
+    {
+      "name": "categorize-and-prioritize",
+      "type": "Prompt",
+      "dependsOn": ["parse-notification"],
+      "systemPrompt": "You are an assistant that categorizes and prioritizes notifications. Based on the parsed notification, determine its urgency and category.",
+      "userPrompt": "Based on the parsed notification, determine:\n1) Category: [urgent-action | meeting-reminder | information | social | other]\n2) Priority: [high | medium | low]\n3) Requires response: [yes | no]\n4) Brief reason for categorization\n\nOutput as JSON with keys: category, priority, requiresResponse, reason",
+      "inputHandlerPrompt": "Take the parsed notification details from the previous step.",
+      "model": "claude-code-4.5"
+    },
+    {
+      "name": "generate-summary",
+      "type": "Prompt",
+      "dependsOn": ["parse-notification", "categorize-and-prioritize"],
+      "systemPrompt": "You are an assistant that creates concise summaries of notifications for quick review.",
+      "userPrompt": "Create a brief, actionable summary of this Teams notification. Include:\n- One-line summary\n- Key person(s) involved\n- Required action (if any)\n- Deadline (if mentioned)\n\nFormat as a clean, readable summary.",
+      "inputHandlerPrompt": "Combine the parsed notification content with the categorization from the previous steps.",
+      "outputHandlerPrompt": "Ensure the summary is concise (under 100 words) and actionable.",
+      "model": "claude-code-4.5"
+    }
+  ]
+}
+
