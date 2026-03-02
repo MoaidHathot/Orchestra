@@ -14,6 +14,7 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	public void ReportStepError(string stepName, string errorMessage) { }
 	public void ReportStepCancelled(string stepName) { }
 	public void ReportStepCompleted(string stepName, AgentResult result) { }
+	public void ReportStepTrace(string stepName, StepExecutionTrace trace) { }
 	public void ReportModelMismatch(ModelMismatchInfo mismatch) { }
 	public void ReportStepOutput(string stepName, string content) { }
 	public void ReportStepStarted(string stepName) { }

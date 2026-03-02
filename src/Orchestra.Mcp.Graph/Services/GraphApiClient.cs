@@ -63,7 +63,10 @@ public class GraphApiClient
 
         if (string.IsNullOrEmpty(token))
         {
-            throw new InvalidOperationException($"No {tokenType} token available. Call AuthenticateAsync() first.");
+            var errorMessage = tokenType == TokenType.AzureCli
+                ? "No Azure CLI token available. Please run 'az login' in your terminal first, then try again."
+                : "No OAuth token available. Please call the 'authenticate' tool first to log in.";
+            throw new InvalidOperationException(errorMessage);
         }
 
         var url = BuildUrl(_options.GraphBaseUrl, endpoint, parameters);
@@ -92,7 +95,7 @@ public class GraphApiClient
 
         if (string.IsNullOrEmpty(token))
         {
-            throw new InvalidOperationException("No OAuth token available. Call AuthenticateAsync() first.");
+            throw new InvalidOperationException("No OAuth token available. Please call the 'authenticate' tool first to log in.");
         }
 
         var baseUrl = useBeta ? _options.GraphBetaUrl : _options.GraphBaseUrl;
@@ -129,7 +132,10 @@ public class GraphApiClient
 
         if (string.IsNullOrEmpty(token))
         {
-            throw new InvalidOperationException($"No {tokenType} token available. Call AuthenticateAsync() first.");
+            var errorMessage = tokenType == TokenType.AzureCli
+                ? "No Azure CLI token available. Please run 'az login' in your terminal first, then try again."
+                : "No OAuth token available. Please call the 'authenticate' tool first to log in.";
+            throw new InvalidOperationException(errorMessage);
         }
 
         var results = new List<JsonNode>();

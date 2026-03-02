@@ -138,7 +138,13 @@ app.MapGet("/api/orchestrations", (OrchestrationRegistry registry, TriggerManage
 				{
 					name = m.Name,
 					type = m.Type
-				}).ToArray() : Array.Empty<object>()
+				}).ToArray() : Array.Empty<object>(),
+				loopConfig = s is PromptOrchestrationStep psLoop && psLoop.Loop is not null ? new
+				{
+					target = psLoop.Loop.Target,
+					maxIterations = psLoop.Loop.MaxIterations,
+					exitPattern = psLoop.Loop.ExitPattern
+				} : null
 			}).ToArray(),
 			parameters = parameterNames,
 			hasParameters = parameterNames.Length > 0,
@@ -152,6 +158,7 @@ app.MapGet("/api/orchestrations", (OrchestrationRegistry registry, TriggerManage
 			runCount = trigger?.RunCount ?? 0,
 			lastExecutionId = trigger?.LastExecutionId,
 			hasInlineMcps = o.Orchestration.Mcps.Length > 0,
+			mcps = o.Orchestration.Mcps.Select(m => m.Name).ToArray(),
 			models = o.Orchestration.Steps
 				.OfType<PromptOrchestrationStep>()
 				.Select(s => s.Model)
@@ -190,7 +197,21 @@ app.MapGet("/api/orchestrations/{id}", (string id, OrchestrationRegistry registr
 			userPrompt = ps?.UserPrompt,
 			inputHandlerPrompt = ps?.InputHandlerPrompt,
 			outputHandlerPrompt = ps?.OutputHandlerPrompt,
-			mcps = ps?.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray()
+			loop = ps?.Loop is not null ? new
+			{
+				target = ps.Loop.Target,
+				maxIterations = ps.Loop.MaxIterations,
+				exitPattern = ps.Loop.ExitPattern
+			} : null,
+			mcps = ps?.Mcps.Select(m => new 
+			{ 
+				name = m.Name, 
+				type = m.Type.ToString(),
+				endpoint = (m as RemoteMcp)?.Endpoint,
+				command = (m as LocalMcp)?.Command,
+				arguments = (m as LocalMcp)?.Arguments,
+				workingDirectory = (m as LocalMcp)?.WorkingDirectory
+			}).ToArray()
 		};
 	}).ToArray();
 
@@ -221,7 +242,9 @@ app.MapGet("/api/orchestrations/{id}", (string id, OrchestrationRegistry registr
 			name = m.Name,
 			type = m.Type.ToString(),
 			endpoint = (m as RemoteMcp)?.Endpoint,
-			command = (m as LocalMcp)?.Command
+			command = (m as LocalMcp)?.Command,
+			arguments = (m as LocalMcp)?.Arguments,
+			workingDirectory = (m as LocalMcp)?.WorkingDirectory
 		}).ToArray()
 	}, jsonOptions);
 });
@@ -272,6 +295,7 @@ app.MapGet("/api/mcps", (OrchestrationRegistry registry) =>
 		endpoint = (u.Mcp as RemoteMcp)?.Endpoint,
 		command = (u.Mcp as LocalMcp)?.Command,
 		arguments = (u.Mcp as LocalMcp)?.Arguments,
+		workingDirectory = (u.Mcp as LocalMcp)?.WorkingDirectory,
 		usedByCount = u.UsedBy.Count,
 		usedBy = u.UsedBy.ToArray()
 	}).OrderBy(m => m.name).ToArray();
@@ -506,9 +530,21 @@ app.MapGet("/api/orchestrations/{id}/run", async (
 		TriggeredBy = "manual",
 		CancellationTokenSource = cts,
 		Reporter = reporter,
-		Parameters = parameters
+		Parameters = parameters,
+		TotalSteps = entry.Orchestration.Steps.Length
 	};
 	activeExecutionInfos[executionId] = executionInfo;
+
+	// Set up progress callbacks
+	reporter.OnStepStarted = (stepName) =>
+	{
+		executionInfo.CurrentStep = stepName;
+	};
+	reporter.OnStepCompleted = (stepName) =>
+	{
+		executionInfo.CompletedSteps++;
+		executionInfo.CurrentStep = null;
+	};
 
 	// Send execution-started event
 	await httpContext.Response.WriteAsync($"event: execution-started\n");
@@ -1143,9 +1179,41 @@ app.MapGet("/api/history/{orchestrationName}/{runId}", async (string orchestrati
 				outputTokens = u.OutputTokens,
 				totalTokens = u.TotalTokens
 			} : null,
-			errorMessage = kv.Value.ErrorMessage
+			errorMessage = kv.Value.ErrorMessage,
+			trace = kv.Value.Trace is { } t ? new
+			{
+				systemPrompt = t.SystemPrompt,
+				userPromptRaw = t.UserPromptRaw,
+				userPromptProcessed = t.UserPromptProcessed,
+				reasoning = t.Reasoning,
+				toolCalls = t.ToolCalls.Select(tc => new
+				{
+					callId = tc.CallId,
+					mcpServer = tc.McpServer,
+					toolName = tc.ToolName,
+					arguments = tc.Arguments,
+					success = tc.Success,
+					result = tc.Result,
+					error = tc.Error,
+					startedAt = tc.StartedAt?.ToString("o"),
+					completedAt = tc.CompletedAt?.ToString("o")
+				}).ToArray(),
+				responseSegments = t.ResponseSegments,
+				finalResponse = t.FinalResponse,
+				outputHandlerResult = t.OutputHandlerResult
+			} : null
 		}).ToArray()
 	}, jsonOptions);
+});
+
+// DELETE /api/history/{orchestrationName}/{runId} - Delete a specific execution
+app.MapDelete("/api/history/{orchestrationName}/{runId}", async (string orchestrationName, string runId, PortalRunStore runStore) =>
+{
+	var deleted = await runStore.DeleteRunAsync(orchestrationName, runId);
+	if (!deleted)
+		return Results.NotFound(new { error = $"Run '{runId}' not found." });
+
+	return Results.Ok(new { deleted = true, runId, orchestrationName });
 });
 
 // ============================================================================
@@ -1304,6 +1372,66 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 			mcpPath = detectedMcpPath,
 			orchestrations
 		}, jsonOptions);
+	}
+	catch (Exception ex)
+	{
+		return Results.BadRequest(new { error = ex.Message });
+	}
+});
+
+// GET /api/folder/browse - Open folder browser dialog
+app.MapGet("/api/folder/browse", () =>
+{
+	try
+	{
+		string? selectedPath = null;
+		var thread = new Thread(() =>
+		{
+			using var dialog = new System.Windows.Forms.FolderBrowserDialog
+			{
+				Description = "Select folder containing orchestration files",
+				ShowNewFolderButton = false,
+				UseDescriptionForTitle = true
+			};
+			if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+			{
+				selectedPath = dialog.SelectedPath;
+			}
+		});
+		thread.SetApartmentState(ApartmentState.STA);
+		thread.Start();
+		thread.Join();
+
+		if (string.IsNullOrEmpty(selectedPath))
+		{
+			return Results.Ok(new { cancelled = true });
+		}
+
+		return Results.Ok(new { path = selectedPath, cancelled = false });
+	}
+	catch (Exception ex)
+	{
+		return Results.BadRequest(new { error = ex.Message });
+	}
+});
+
+// GET /api/file/read - Read a file's content (for preview in Add Modal)
+app.MapGet("/api/file/read", (string path) =>
+{
+	try
+	{
+		if (string.IsNullOrWhiteSpace(path))
+			return Results.BadRequest(new { error = "Path is required" });
+
+		if (!File.Exists(path))
+			return Results.NotFound(new { error = $"File not found: {path}" });
+
+		// Security: Only allow reading .json files
+		if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+			return Results.BadRequest(new { error = "Only JSON files can be read" });
+
+		var content = File.ReadAllText(path);
+		return Results.Text(content, "application/json");
 	}
 	catch (Exception ex)
 	{
@@ -1476,7 +1604,10 @@ app.MapGet("/api/active", (TriggerManager triggerManager, OrchestrationRegistry 
 			triggeredBy = info.TriggeredBy,
 			source = "manual",
 			status = info.Status,
-			parameters = info.Parameters
+			parameters = info.Parameters,
+			totalSteps = info.TotalSteps,
+			completedSteps = info.CompletedSteps,
+			currentStep = info.CurrentStep
 		});
 	}
 
@@ -1697,6 +1828,21 @@ public class ActiveExecutionInfo
 	/// Status: "Running", "Cancelling", "Cancelled", "Completed"
 	/// </summary>
 	public string Status { get; set; } = "Running";
+
+	/// <summary>
+	/// Total number of steps in the orchestration.
+	/// </summary>
+	public int TotalSteps { get; set; }
+
+	/// <summary>
+	/// Number of steps that have completed.
+	/// </summary>
+	public int CompletedSteps { get; set; }
+
+	/// <summary>
+	/// Name of the currently executing step.
+	/// </summary>
+	public string? CurrentStep { get; set; }
 }
 
 // ============================================================================

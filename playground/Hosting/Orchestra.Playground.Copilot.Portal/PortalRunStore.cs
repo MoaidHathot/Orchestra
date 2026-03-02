@@ -212,6 +212,47 @@ public class PortalRunStore : IRunStore
 	}
 
 	/// <summary>
+	/// Deletes a run record and its associated files.
+	/// </summary>
+	public async Task<bool> DeleteRunAsync(
+		string orchestrationName, string runId, CancellationToken cancellationToken = default)
+	{
+		await EnsureIndexLoadedAsync(cancellationToken);
+
+		if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
+			return false;
+
+		var match = indices.FirstOrDefault(i => i.RunId == runId);
+		if (match is null)
+			return false;
+
+		// Remove from indices
+		indices.Remove(match);
+
+		// Also remove from trigger index if applicable
+		if (match.TriggerId is { } tid && _indexByTrigger.TryGetValue(tid, out var triggerIndices))
+		{
+			triggerIndices.RemoveAll(i => i.RunId == runId);
+		}
+
+		// Delete the folder and all its contents
+		if (Directory.Exists(match.FolderPath))
+		{
+			try
+			{
+				Directory.Delete(match.FolderPath, recursive: true);
+			}
+			catch
+			{
+				// Folder deletion failed, but index was already updated
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/// <summary>
 	/// Gets lightweight run summaries for the history panel.
 	/// </summary>
 	public async Task<IReadOnlyList<RunIndex>> GetRunSummariesAsync(

@@ -11,16 +11,24 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(Model, nameof(Model));
 
+		// Capture state immediately to avoid race conditions with concurrent builder usage
+		var model = Model;
+		var systemPrompt = SystemPrompt;
+		var mcps = Mcps;
+		var reasoningLevel = ReasoningLevel;
+		var systemPromptMode = SystemPromptMode;
+		var reporter = Reporter;
+
 		await _client.StartAsync(cancellationToken);
 
 		return new CopilotAgent(
 			client: _client,
-			model: Model,
-			systemPrompt: SystemPrompt,
-			mcps: Mcps,
-			reasoningLevel: ReasoningLevel,
-			systemPromptMode: SystemPromptMode,
-			reporter: Reporter
+			model: model,
+			systemPrompt: systemPrompt,
+			mcps: mcps,
+			reasoningLevel: reasoningLevel,
+			systemPromptMode: systemPromptMode,
+			reporter: reporter
 		);
 	}
 

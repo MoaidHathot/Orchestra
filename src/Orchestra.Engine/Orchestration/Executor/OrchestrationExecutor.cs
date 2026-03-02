@@ -431,6 +431,11 @@ public class OrchestrationExecutor
 			ErrorMessage = result.ErrorMessage,
 			Parameters = stepParams,
 			LoopIteration = loopIteration,
+			RawDependencyOutputs = result.RawDependencyOutputs,
+			PromptSent = result.PromptSent,
+			ActualModel = result.ActualModel,
+			Usage = result.Usage,
+			Trace = result.Trace,
 		};
 	}
 

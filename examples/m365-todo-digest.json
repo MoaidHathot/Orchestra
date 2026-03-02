@@ -1,0 +1,71 @@
+{
+  "name": "m365-todo-digest",
+  "description": "Monitors Microsoft 365 activity every 10 minutes and extracts action items from recent meetings, emails, Teams messages, and mentions. Creates a consolidated todo list from all sources.",
+  "mcps": [
+    {
+      "name": "graph",
+      "type": "local",
+      "command": "dotnet",
+      "arguments": ["run", "--project", "src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj"],
+      "workingDirectory": "P:/Github/Orchestra"
+    }
+  ],
+  "steps": [
+    {
+      "name": "check-recent-meetings",
+      "type": "Prompt",
+      "dependsOn": [],
+      "mcps": ["graph"],
+      "model": "claude-opus-4.5",
+      "systemPrompt": "You are a meeting analyst assistant with access to Microsoft Graph API via MCP tools. Your job is to review recent meetings and extract any action items, tasks, or follow-ups that were discussed or implied.",
+      "userPrompt": "Use get_recent_meetings to check for any meetings that happened in the last 30 minutes. For each meeting found, analyze the meeting subject, attendees, and any preview text. Identify potential action items based on the meeting context. If no meetings found, report that clearly.",
+      "outputHandlerPrompt": "Extract and list any action items or tasks from the meetings. Format as:\n- Meeting: [subject]\n  - Action: [description]\n  - Owner: [if apparent from context]\n  - Due: [if mentioned]\n\nIf no action items found, state 'No action items from recent meetings.'"
+    },
+    {
+      "name": "check-recent-emails",
+      "type": "Prompt",
+      "dependsOn": [],
+      "mcps": ["graph"],
+      "model": "claude-opus-4.5",
+      "systemPrompt": "You are an email analyst assistant with access to Microsoft Graph API via MCP tools. Your job is to review recent emails and extract any action items, requests, or tasks directed at the user.",
+      "userPrompt": "Use get_mail to retrieve the 10 most recent emails. Analyze each email for:\n1. Direct requests or asks made to you\n2. Deadlines or due dates mentioned\n3. Questions that need responses\n4. Tasks or action items assigned\n\nFocus on actionable items, not just informational updates.",
+      "outputHandlerPrompt": "Extract and list any action items from emails. Format as:\n- From: [sender]\n  Subject: [subject]\n  - Action: [what needs to be done]\n  - Urgency: [high/medium/low based on language used]\n\nIf no action items found, state 'No action items from recent emails.'"
+    },
+    {
+      "name": "check-teams-mentions",
+      "type": "Prompt",
+      "dependsOn": [],
+      "mcps": ["graph"],
+      "model": "claude-opus-4.5",
+      "systemPrompt": "You are a Teams message analyst with access to Microsoft Graph API via MCP tools. Your job is to check recent Teams activity for mentions and messages that may require action.",
+      "userPrompt": "First use get_chats to list recent chats. Then for the most recent 3 active chats, use get_chat_messages to retrieve messages. Look for:\n1. Direct mentions or questions directed at the user\n2. Requests for help or input\n3. Pending items waiting for your response\n4. Action items discussed in conversations\n\nIf you find meeting chats, pay special attention as they often contain follow-up items.",
+      "outputHandlerPrompt": "Extract and list any action items from Teams messages. Format as:\n- Chat: [chat name or participants]\n  - Action: [what needs to be done]\n  - Context: [brief context of the request]\n\nIf no action items found, state 'No action items from Teams messages.'"
+    },
+    {
+      "name": "check-upcoming-meetings",
+      "type": "Prompt",
+      "dependsOn": [],
+      "mcps": ["graph"],
+      "model": "claude-opus-4.5",
+      "systemPrompt": "You are a calendar analyst assistant with access to Microsoft Graph API via MCP tools. Your job is to review upcoming meetings and identify preparation tasks needed.",
+      "userPrompt": "Use get_upcoming_meetings to check for meetings in the next 2 hours. For each upcoming meeting, identify:\n1. Any preparation needed before the meeting\n2. Documents or materials to review\n3. Updates or status reports expected from you\n4. Decisions you may need to be prepared to make",
+      "outputHandlerPrompt": "Extract preparation tasks for upcoming meetings. Format as:\n- Meeting: [subject] at [time]\n  - Prep: [what you should prepare or review]\n\nIf no upcoming meetings or no prep needed, state 'No preparation needed for upcoming meetings.'"
+    },
+    {
+      "name": "consolidate-todos",
+      "type": "Prompt",
+      "dependsOn": ["check-recent-meetings", "check-recent-emails", "check-teams-mentions", "check-upcoming-meetings"],
+      "mcps": [],
+      "model": "claude-opus-4.5",
+      "systemPrompt": "You are a productivity assistant that consolidates and prioritizes action items from multiple sources. You create clear, actionable todo lists.",
+      "userPrompt": "Review all the action items from:\n1. Recent meetings\n2. Recent emails\n3. Teams messages and mentions\n4. Upcoming meeting preparation\n\nConsolidate these into a single, prioritized todo list. Remove duplicates, group related items, and prioritize based on urgency and importance.",
+      "inputHandlerPrompt": "Parse the action items from each source (meetings, emails, Teams, upcoming meetings). Extract the key details: what action is needed, who it's from, any deadlines, and the urgency level.",
+      "outputHandlerPrompt": "Create a final todo list with the following format:\n\n## Priority: High (Do Now)\n- [ ] [Action item] - Source: [where it came from] - Due: [if known]\n\n## Priority: Medium (Do Today)\n- [ ] [Action item] - Source: [source]\n\n## Priority: Low (Do This Week)\n- [ ] [Action item] - Source: [source]\n\n## Upcoming Prep\n- [ ] [Preparation task] - For: [meeting name] at [time]\n\nIf no action items at all, output: 'All clear! No pending action items found.'\n\nEnd with a count: 'Total: X action items'"
+    }
+  ],
+  "trigger": {
+    "type": "scheduler",
+    "enabled": true,
+    "intervalSeconds": 300
+  }
+}

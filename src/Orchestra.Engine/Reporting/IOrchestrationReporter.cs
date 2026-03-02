@@ -12,6 +12,7 @@ public interface IOrchestrationReporter
 	void ReportStepError(string stepName, string errorMessage);
 	void ReportStepCancelled(string stepName);
 	void ReportStepCompleted(string stepName, AgentResult result);
+	void ReportStepTrace(string stepName, StepExecutionTrace trace);
 	void ReportModelMismatch(ModelMismatchInfo mismatch);
 	void ReportStepOutput(string stepName, string content);
 	void ReportStepStarted(string stepName);

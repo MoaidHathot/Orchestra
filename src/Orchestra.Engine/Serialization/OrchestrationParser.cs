@@ -75,15 +75,19 @@ public static class OrchestrationParser
 		// Merge inline MCPs from orchestration with externally provided MCPs.
 		// External MCPs take priority on name conflicts (override inline definitions).
 		var lookup = new Dictionary<string, Mcp>(StringComparer.OrdinalIgnoreCase);
+		Console.WriteLine($"[DEBUG] ResolveStepMcps: Orchestration has {orchestration.Mcps.Length} inline MCPs: [{string.Join(", ", orchestration.Mcps.Select(m => m.Name))}]");
+		Console.WriteLine($"[DEBUG] ResolveStepMcps: External MCPs count: {availableMcps.Length}, names: [{string.Join(", ", availableMcps.Select(m => m.Name))}]");
 		foreach (var mcp in orchestration.Mcps)
 			lookup[mcp.Name] = mcp;
 		foreach (var mcp in availableMcps)
 			lookup[mcp.Name] = mcp; // external overrides inline
+		Console.WriteLine($"[DEBUG] ResolveStepMcps: Final lookup has {lookup.Count} MCPs: [{string.Join(", ", lookup.Keys)}]");
 
 		foreach (var step in orchestration.Steps)
 		{
 			if (step is PromptOrchestrationStep promptStep && promptStep.McpNames.Length > 0)
 			{
+				Console.WriteLine($"[DEBUG] ResolveStepMcps: Step '{step.Name}' references MCPs: [{string.Join(", ", promptStep.McpNames)}]");
 				var resolved = new Mcp[promptStep.McpNames.Length];
 				for (var i = 0; i < promptStep.McpNames.Length; i++)
 				{
@@ -94,6 +98,7 @@ public static class OrchestrationParser
 					resolved[i] = mcp;
 				}
 				promptStep.Mcps = resolved;
+				Console.WriteLine($"[DEBUG] ResolveStepMcps: Step '{step.Name}' resolved {resolved.Length} MCPs");
 			}
 		}
 	}
@@ -121,6 +126,7 @@ public static class OrchestrationParser
 					Arguments = root.TryGetProperty("arguments", out var args)
 						? args.EnumerateArray().Select(e => e.GetString()!).ToArray()
 						: [],
+					WorkingDirectory = root.TryGetProperty("workingDirectory", out var wd) ? wd.GetString() : null,
 				},
 				McpType.Remote => new RemoteMcp
 				{

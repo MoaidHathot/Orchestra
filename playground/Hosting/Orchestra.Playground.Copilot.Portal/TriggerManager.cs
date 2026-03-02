@@ -526,9 +526,21 @@ public class TriggerManager : BackgroundService
 				TriggeredBy = reg.Config.Type.ToString().ToLowerInvariant(),
 				CancellationTokenSource = cts,
 				Reporter = reporter,
-				Parameters = parameters
+				Parameters = parameters,
+				TotalSteps = orchestration.Steps.Length
 			};
 			_activeExecutionInfos[executionId] = executionInfo;
+
+			// Set up progress callbacks for UI tracking
+			reporter.OnStepStarted = (stepName) =>
+			{
+				executionInfo.CurrentStep = stepName;
+			};
+			reporter.OnStepCompleted = (stepName) =>
+			{
+				executionInfo.CompletedSteps++;
+				executionInfo.CurrentStep = null;
+			};
 
 			try
 			{

@@ -51,6 +51,16 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 	}
 
 	/// <summary>
+	/// Callback invoked when a step starts. Parameters: stepName
+	/// </summary>
+	public Action<string>? OnStepStarted { get; set; }
+
+	/// <summary>
+	/// Callback invoked when a step completes. Parameters: stepName
+	/// </summary>
+	public Action<string>? OnStepCompleted { get; set; }
+
+	/// <summary>
 	/// Creates a new subscriber channel that will receive future events.
 	/// Call this to attach a new SSE client to the execution.
 	/// </summary>
@@ -180,6 +190,34 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 				? result.Content[..500] + "..."
 				: result.Content,
 		});
+		OnStepCompleted?.Invoke(stepName);
+	}
+
+	public void ReportStepTrace(string stepName, StepExecutionTrace trace)
+	{
+		Write("step-trace", new
+		{
+			stepName,
+			systemPrompt = trace.SystemPrompt,
+			userPromptRaw = trace.UserPromptRaw,
+			userPromptProcessed = trace.UserPromptProcessed,
+			reasoning = trace.Reasoning,
+			toolCalls = trace.ToolCalls.Select(tc => new
+			{
+				callId = tc.CallId,
+				mcpServer = tc.McpServer,
+				toolName = tc.ToolName,
+				arguments = tc.Arguments,
+				success = tc.Success,
+				result = tc.Result,
+				error = tc.Error,
+				startedAt = tc.StartedAt?.ToString("o"),
+				completedAt = tc.CompletedAt?.ToString("o")
+			}).ToArray(),
+			responseSegments = trace.ResponseSegments,
+			finalResponse = trace.FinalResponse,
+			outputHandlerResult = trace.OutputHandlerResult
+		});
 	}
 
 	public void ReportModelMismatch(ModelMismatchInfo mismatch)
@@ -206,6 +244,7 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 	public void ReportStepStarted(string stepName)
 	{
 		Write("step-started", new { stepName });
+		OnStepStarted?.Invoke(stepName);
 	}
 
 	public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations)

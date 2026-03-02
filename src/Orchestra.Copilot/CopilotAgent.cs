@@ -47,10 +47,11 @@ public class CopilotAgent : IAgent
 	{
 	try
 		{
-			var config = new SessionConfig
+		var config = new SessionConfig
 			{
 				Model = _model,
 				Streaming = true,
+				OnPermissionRequest = PermissionHandler.ApproveAll,
 			};
 
 			if (_reasoningLevel is not null)
@@ -73,9 +74,28 @@ public class CopilotAgent : IAgent
 				}
 			}
 
-			if (_mcps.Length > 0)
+			// Debug: Log MCP count before check
+		Console.WriteLine($"[MCP-DEBUG] Agent has {_mcps.Length} MCPs configured");
+		
+		if (_mcps.Length > 0)
 			{
 				config.McpServers = BuildMcpServers();
+				// Debug: Log MCP server configuration
+				foreach (var (name, serverConfig) in config.McpServers)
+				{
+					if (serverConfig is McpLocalServerConfig local)
+					{
+						Console.WriteLine($"[MCP] Configuring local server '{name}': Command={local.Command}, Args=[{string.Join(", ", local.Args ?? [])}], Cwd={local.Cwd ?? "(null)"}");
+					}
+					else if (serverConfig is McpRemoteServerConfig remote)
+					{
+						Console.WriteLine($"[MCP] Configuring remote server '{name}': Url={remote.Url}");
+					}
+				}
+			}
+		else
+			{
+				Console.WriteLine($"[MCP-DEBUG] No MCPs to configure for this agent");
 			}
 
 			await using var session = await _client.CreateSessionAsync(config, cancellationToken);
@@ -295,6 +315,7 @@ public class CopilotAgent : IAgent
 					{
 						Command = local.Command,
 						Args = [.. local.Arguments],
+						Cwd = local.WorkingDirectory,
 					};
 					break;
 

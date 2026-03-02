@@ -1,0 +1,34 @@
+{
+  "id": "46a8e3fc2adc",
+  "orchestrationName": "m365-todo-digest",
+  "orchestrationDescription": "Monitors Microsoft 365 activity every 10 minutes and extracts action items from recent meetings, emails, Teams messages, and mentions. Creates a consolidated todo list from all sources.",
+  "orchestrationVersion": "1.0.0",
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\m365-todo-digest.json",
+  "triggerId": "m365-todo-digest-666d",
+  "triggerType": "Scheduler",
+  "startedAt": "2026-02-28T12:24:05.8547506Z",
+  "status": "Succeeded",
+  "stepCount": 5,
+  "results": {
+    "check-teams-mentions": {
+      "status": "Succeeded",
+      "content": "No action items from Teams messages."
+    },
+    "check-upcoming-meetings": {
+      "status": "Succeeded",
+      "content": "No preparation needed for upcoming meetings."
+    },
+    "check-recent-meetings": {
+      "status": "Succeeded",
+      "content": "No action items from recent meetings."
+    },
+    "check-recent-emails": {
+      "status": "Succeeded",
+      "content": "No action items from recent emails.\n\n*Unable to retrieve emails - no mail access tools available. Install \u0060Microsoft.Graph.Mail\u0060 module or configure an MCP server with Graph API access to enable email retrieval.*"
+    },
+    "consolidate-todos": {
+      "status": "Succeeded",
+      "content": "## Priority: High (Do Now)\n*No items*\n\n## Priority: Medium (Do Today)\n*No items*\n\n## Priority: Low (Do This Week)\n*No items*\n\n## Upcoming Prep\n*No items*\n\n---\n\nAll clear! No pending action items found.\n\n\u26A0\uFE0F Note: Email source unavailable (missing Graph API access)\n\n**Total: 0 action items**"
+    }
+  }
+}

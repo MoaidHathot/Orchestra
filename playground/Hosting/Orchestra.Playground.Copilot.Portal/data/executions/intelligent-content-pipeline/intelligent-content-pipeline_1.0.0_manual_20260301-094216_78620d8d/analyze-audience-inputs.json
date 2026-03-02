@@ -1,0 +1,7 @@
+{
+  "parameters": {
+    "audience": "Public Health Researcher focusing on inequality and resiliance"
+  },
+  "rawDependencyOutputs": {},
+  "promptSent": "Analyze the target audience \u0027Public Health Researcher focusing on inequality and resiliance\u0027 and produce a content strategy profile: 1) Knowledge level (beginner, intermediate, expert). 2) Primary interests and pain points. 3) Preferred content format and length. 4) Tone and vocabulary recommendations. 5) What to emphasize vs. what to skip. 6) Engagement hooks that work for this audience."
+}

@@ -33,13 +33,19 @@ public class ExecutionResult
 	/// </summary>
 	public TokenUsage? Usage { get; init; }
 
+	/// <summary>
+	/// Detailed execution trace for debugging and inspection.
+	/// </summary>
+	public StepExecutionTrace? Trace { get; init; }
+
 	public static ExecutionResult Succeeded(
 		string content,
 		string? rawContent = null,
 		Dictionary<string, string>? rawDependencyOutputs = null,
 		string? promptSent = null,
 		string? actualModel = null,
-		TokenUsage? usage = null) => new()
+		TokenUsage? usage = null,
+		StepExecutionTrace? trace = null) => new()
 	{
 		Content = content,
 		Status = ExecutionStatus.Succeeded,
@@ -48,13 +54,15 @@ public class ExecutionResult
 		PromptSent = promptSent,
 		ActualModel = actualModel,
 		Usage = usage,
+		Trace = trace,
 	};
 
 	public static ExecutionResult Failed(
 		string errorMessage,
 		Dictionary<string, string>? rawDependencyOutputs = null,
 		string? promptSent = null,
-		string? actualModel = null) => new()
+		string? actualModel = null,
+		StepExecutionTrace? trace = null) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Failed,
@@ -62,6 +70,7 @@ public class ExecutionResult
 		RawDependencyOutputs = rawDependencyOutputs ?? [],
 		PromptSent = promptSent,
 		ActualModel = actualModel,
+		Trace = trace,
 	};
 
 	public static ExecutionResult Skipped(string reason) => new()

@@ -1,0 +1,4 @@
+{
+  "rawContent": "I don\u0027t have access to a \u0060get_upcoming_meetings\u0060 tool or Microsoft Graph API tools in this environment. My available tools are focused on local development tasks (file editing, shell commands, code search, etc.).\n\nTo check your upcoming Teams meetings, you could:\n\n1. **Use the Microsoft Teams app directly** - Check your calendar in Teams\n2. **Use Outlook** - Your calendar shows the same meetings\n3. **If you have Graph API access configured**, I could help you write a script to query meetings using \u0060powershell\u0060 with the Microsoft Graph PowerShell module\n\nWould you like me to help you set up a PowerShell script to query your calendar via Microsoft Graph API? You\u0027d need to authenticate first with appropriate permissions.",
+  "content": "No preparation needed for upcoming meetings."
+}

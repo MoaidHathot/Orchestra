@@ -1,14 +1,10 @@
 [
   {
-    "path": "P:\\Github\\Orchestra\\examples\\webhook-triggered-notification.json",
+    "path": "P:\\Github\\Orchestra\\examples\\weather-roads-seattle.json",
     "mcpPath": "P:\\Github\\Orchestra\\examples\\mcp.json"
   },
   {
-    "path": "P:\\Github\\Orchestra\\examples\\test-email-trigger-orchestration.json",
-    "mcpPath": "P:\\Github\\Orchestra\\examples\\mcp.json"
-  },
-  {
-    "path": "P:\\Github\\Orchestra\\examples\\email-trigger-example.json",
+    "path": "P:\\Github\\Orchestra\\examples\\advanced-combined-features.json",
     "mcpPath": "P:\\Github\\Orchestra\\examples\\mcp.json"
   }
 ]

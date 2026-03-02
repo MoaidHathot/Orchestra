@@ -21,4 +21,7 @@ public class NullRunStore : IRunStore
 
 	public Task<OrchestrationRunRecord?> GetRunAsync(string orchestrationName, string runId, CancellationToken cancellationToken = default)
 		=> Task.FromResult<OrchestrationRunRecord?>(null);
+
+	public Task<bool> DeleteRunAsync(string orchestrationName, string runId, CancellationToken cancellationToken = default)
+		=> Task.FromResult(false);
 }
