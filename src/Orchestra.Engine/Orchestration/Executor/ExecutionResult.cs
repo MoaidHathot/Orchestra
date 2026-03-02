@@ -16,7 +16,7 @@ public class ExecutionResult
 	/// The raw dependency outputs before any prompt construction.
 	/// Key is dependency step name, value is the raw output from that step.
 	/// </summary>
-	public Dictionary<string, string> RawDependencyOutputs { get; init; } = [];
+	public IReadOnlyDictionary<string, string> RawDependencyOutputs { get; init; } = new Dictionary<string, string>();
 
 	/// <summary>
 	/// The actual prompt that was sent to the LLM (after all substitutions and handlers).

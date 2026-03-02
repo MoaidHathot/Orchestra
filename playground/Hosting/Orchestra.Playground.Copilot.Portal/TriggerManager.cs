@@ -510,7 +510,7 @@ public class TriggerManager : BackgroundService
 
 			// Create executor with WebOrchestrationReporter for UI tracking
 			var reporter = new WebOrchestrationReporter();
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, _runStore);
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore);
 
 			using var cts = new CancellationTokenSource();
 			_activeExecutions[executionId] = cts;

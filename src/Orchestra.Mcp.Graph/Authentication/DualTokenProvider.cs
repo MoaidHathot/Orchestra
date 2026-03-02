@@ -6,7 +6,7 @@ namespace Orchestra.Mcp.Graph.Authentication;
 /// Dual-token provider that manages both Azure CLI and OAuth tokens.
 /// Provides the appropriate token based on the operation type.
 /// </summary>
-public class DualTokenProvider : ITokenProvider
+public partial class DualTokenProvider : ITokenProvider
 {
     private readonly AzureCliTokenProvider _azureCliProvider;
     private readonly OAuthTokenProvider _oauthProvider;
@@ -38,22 +38,22 @@ public class DualTokenProvider : ITokenProvider
     {
         var oauthSuccess = await _oauthProvider.AuthenticateAsync(force, cancellationToken);
 
-        if (!oauthSuccess)
-        {
-            _logger.LogWarning("OAuth authentication failed");
-            return false;
-        }
+		if (!oauthSuccess)
+		{
+			LogOAuthAuthenticationFailed();
+			return false;
+		}
 
-        // Also try to get Azure CLI token (non-blocking, optional)
-        var azToken = await _azureCliProvider.GetTokenAsync(cancellationToken);
-        if (azToken == null)
-        {
-            _logger.LogWarning("Azure CLI token not available. Some operations (listing teams/channels) may fail.");
-        }
-        else
-        {
-            _logger.LogDebug("Azure CLI token available");
-        }
+		// Also try to get Azure CLI token (non-blocking, optional)
+		var azToken = await _azureCliProvider.GetTokenAsync(cancellationToken);
+		if (azToken == null)
+		{
+			LogAzureCliTokenNotAvailable();
+		}
+		else
+		{
+			LogAzureCliTokenAvailable();
+		}
 
         return true;
     }
@@ -74,8 +74,21 @@ public class DualTokenProvider : ITokenProvider
     /// </summary>
     public AzureCliTokenProvider AzureCliProvider => _azureCliProvider;
 
-    /// <summary>
-    /// Gets the OAuth token provider directly.
-    /// </summary>
-    public OAuthTokenProvider OAuthProvider => _oauthProvider;
+	/// <summary>
+	/// Gets the OAuth token provider directly.
+	/// </summary>
+	public OAuthTokenProvider OAuthProvider => _oauthProvider;
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "OAuth authentication failed")]
+	private partial void LogOAuthAuthenticationFailed();
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Azure CLI token not available. Some operations (listing teams/channels) may fail.")]
+	private partial void LogAzureCliTokenNotAvailable();
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Azure CLI token available")]
+	private partial void LogAzureCliTokenAvailable();
+
+	#endregion
 }

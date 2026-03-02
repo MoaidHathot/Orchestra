@@ -8,7 +8,7 @@ namespace Orchestra.Mcp.Graph.Authentication;
 /// Provides access tokens from Azure CLI.
 /// Used for operations requiring broader permissions (Group.ReadWrite.All).
 /// </summary>
-public class AzureCliTokenProvider
+public partial class AzureCliTokenProvider
 {
     private readonly ILogger<AzureCliTokenProvider> _logger;
     private string? _cachedToken;
@@ -65,21 +65,21 @@ public class AzureCliTokenProvider
                 {
                     _cachedToken = token;
                     // Azure CLI tokens typically last 1 hour
-                    _tokenExpiry = DateTime.UtcNow.AddHours(1);
-                    _logger.LogDebug("Successfully obtained Azure CLI token");
-                    return token;
+				_tokenExpiry = DateTime.UtcNow.AddHours(1);
+					LogSuccessfullyObtainedAzureCliToken();
+					return token;
                 }
             }
 
-            var error = await errorTask;
-            _logger.LogWarning("Azure CLI token request failed: {Error}", error);
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to get Azure CLI token");
-            return null;
-        }
+		var error = await errorTask;
+			LogAzureCliTokenRequestFailed(error);
+			return null;
+		}
+		catch (Exception ex)
+		{
+			LogFailedToGetAzureCliToken(ex);
+			return null;
+		}
     }
 
     /// <summary>
@@ -87,12 +87,25 @@ public class AzureCliTokenProvider
     /// </summary>
     public bool HasToken => _cachedToken != null && DateTime.UtcNow < _tokenExpiry.AddMinutes(-5);
 
-    /// <summary>
-    /// Clears the cached token.
-    /// </summary>
-    public void ClearCache()
-    {
-        _cachedToken = null;
-        _tokenExpiry = DateTime.MinValue;
-    }
+	/// <summary>
+	/// Clears the cached token.
+	/// </summary>
+	public void ClearCache()
+	{
+		_cachedToken = null;
+		_tokenExpiry = DateTime.MinValue;
+	}
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Successfully obtained Azure CLI token")]
+	private partial void LogSuccessfullyObtainedAzureCliToken();
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Azure CLI token request failed: {Error}")]
+	private partial void LogAzureCliTokenRequestFailed(string error);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to get Azure CLI token")]
+	private partial void LogFailedToGetAzureCliToken(Exception ex);
+
+	#endregion
 }

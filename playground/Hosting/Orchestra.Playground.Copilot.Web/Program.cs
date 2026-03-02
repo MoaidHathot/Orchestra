@@ -238,7 +238,7 @@ app.MapPost("/api/execute", async (
 		var reporter = new WebOrchestrationReporter();
 
 		// Create a per-request executor
-		var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore);
+		var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore);
 
 		var cancellationToken = cts.Token;
 
@@ -1009,7 +1009,7 @@ app.MapPost("/api/compare", async (
 
 			// Create a per-run reporter (we collect events but don't stream them)
 			var reporter = new WebOrchestrationReporter();
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore);
+			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore);
 
 			var runStartTime = DateTime.UtcNow;
 			OrchestrationResult? result = null;
