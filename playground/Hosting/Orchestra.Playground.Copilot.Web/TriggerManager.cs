@@ -501,8 +501,7 @@ public class TriggerManager : BackgroundService
 
 			// Create executor
 			var reporter = new NullOrchestrationReporter();
-			var logger = _loggerFactory.CreateLogger<OrchestrationExecutor>();
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, logger, _runStore);
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, _runStore);
 
 			using var cts = new CancellationTokenSource();
 			_activeExecutions[executionId] = cts;

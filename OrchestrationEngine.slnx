@@ -12,6 +12,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj" />
     <Project Path="tests/Orchestra.Portal.E2E/Orchestra.Portal.E2E.csproj" />
+    <Project Path="tests/Orchestra.Engine.Tests/Orchestra.Engine.Tests.csproj" />
     <Project Path="tests/Orchestra.Mcp.Graph.Tests/Orchestra.Mcp.Graph.Tests.csproj" />
   </Folder>
 </Solution>

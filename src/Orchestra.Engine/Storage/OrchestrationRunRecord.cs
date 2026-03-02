@@ -36,12 +36,12 @@ public class OrchestrationRunRecord
 	/// All step records for this run, keyed by step name.
 	/// For looped steps, contains the final iteration's record.
 	/// </summary>
-	public required Dictionary<string, StepRunRecord> StepRecords { get; init; }
+	public required IReadOnlyDictionary<string, StepRunRecord> StepRecords { get; init; }
 
 	/// <summary>
 	/// All step records including each loop iteration, keyed by "stepName" or "stepName:iteration-N".
 	/// </summary>
-	public required Dictionary<string, StepRunRecord> AllStepRecords { get; init; }
+	public required IReadOnlyDictionary<string, StepRunRecord> AllStepRecords { get; init; }
 
 	/// <summary>
 	/// The final output content from the terminal step(s).

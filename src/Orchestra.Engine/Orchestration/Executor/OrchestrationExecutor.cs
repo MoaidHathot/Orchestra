@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 
 namespace Orchestra.Engine;
@@ -7,6 +8,7 @@ public class OrchestrationExecutor
 	private readonly IScheduler _scheduler;
 	private readonly AgentBuilder _agentBuilder;
 	private readonly IOrchestrationReporter _reporter;
+	private readonly ILoggerFactory _loggerFactory;
 	private readonly ILogger<OrchestrationExecutor> _logger;
 	private readonly IRunStore _runStore;
 
@@ -14,13 +16,14 @@ public class OrchestrationExecutor
 		IScheduler scheduler,
 		AgentBuilder agentBuilder,
 		IOrchestrationReporter reporter,
-		ILogger<OrchestrationExecutor> logger,
+		ILoggerFactory loggerFactory,
 		IRunStore? runStore = null)
 	{
 		_scheduler = scheduler;
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
-		_logger = logger;
+		_loggerFactory = loggerFactory;
+		_logger = loggerFactory.CreateLogger<OrchestrationExecutor>();
 		_runStore = runStore ?? NullRunStore.Instance;
 	}
 
@@ -45,11 +48,10 @@ public class OrchestrationExecutor
 		{
 			Parameters = effectiveParams,
 		};
-		var executor = new PromptExecutor(_agentBuilder, _reporter);
-		var stepResults = new Dictionary<string, ExecutionResult>();
-		var stepRecords = new Dictionary<string, StepRunRecord>();
-		var allStepRecords = new Dictionary<string, StepRunRecord>();
-		var gate = new object();
+		var executor = new PromptExecutor(_agentBuilder, _reporter, _loggerFactory.CreateLogger<PromptExecutor>());
+		var stepResults = new ConcurrentDictionary<string, ExecutionResult>();
+		var stepRecords = new ConcurrentDictionary<string, StepRunRecord>();
+		var allStepRecords = new ConcurrentDictionary<string, StepRunRecord>();
 
 		// Build step lookup and dependency graph
 		var allSteps = orchestration.Steps
@@ -86,22 +88,19 @@ public class OrchestrationExecutor
 
 				try
 				{
-					var result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, gate, cancellationToken);
+					var result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, cancellationToken);
 
-					lock (gate)
-					{
-						context.AddResult(step.Name, result);
-						stepResults[step.Name] = result;
+					context.AddResult(step.Name, result);
+					stepResults[step.Name] = result;
 
-						var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
-						stepRecords[step.Name] = record;
-						allStepRecords[step.Name] = record;
-					}
+					var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
+					stepRecords[step.Name] = record;
+					allStepRecords[step.Name] = record;
 
 					// Handle loop if configured
 					if (step.Loop is not null && result.Status == ExecutionStatus.Succeeded)
 					{
-						await HandleLoopAsync(step, allSteps, executor, context, stepResults, stepRecords, allStepRecords, effectiveParams, gate, cancellationToken);
+						await HandleLoopAsync(step, allSteps, executor, context, stepResults, stepRecords, allStepRecords, effectiveParams, cancellationToken);
 					}
 
 					completionSources[step.Name].TrySetResult(stepResults[step.Name]);
@@ -109,40 +108,30 @@ public class OrchestrationExecutor
 				catch (OperationCanceledException)
 				{
 					var cancelled = ExecutionResult.Failed("Cancelled");
-					lock (gate)
-					{
-						context.AddResult(step.Name, cancelled);
-						stepResults[step.Name] = cancelled;
-						var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
-						stepRecords[step.Name] = record;
-						allStepRecords[step.Name] = record;
-					}
+					context.AddResult(step.Name, cancelled);
+					stepResults[step.Name] = cancelled;
+					var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
+					stepRecords[step.Name] = record;
+					allStepRecords[step.Name] = record;
 					_reporter.ReportStepCancelled(step.Name);
 					completionSources[step.Name].TrySetResult(cancelled);
 				}
 				catch (Exception ex)
 				{
 					var failed = ExecutionResult.Failed(ex.Message);
-					lock (gate)
-					{
-						context.AddResult(step.Name, failed);
-						stepResults[step.Name] = failed;
-						var record = BuildStepRecord(step, failed, effectiveParams, stepStartedAt);
-						stepRecords[step.Name] = record;
-						allStepRecords[step.Name] = record;
-					}
+					context.AddResult(step.Name, failed);
+					stepResults[step.Name] = failed;
+					var record = BuildStepRecord(step, failed, effectiveParams, stepStartedAt);
+					stepRecords[step.Name] = record;
+					allStepRecords[step.Name] = record;
 					completionSources[step.Name].TrySetResult(failed);
 				}
 
 				// After this step completes, check all dependents — launch any that are now ready
 				foreach (var dependent in dependents[stepName])
 				{
-					bool allDepsComplete;
-					lock (gate)
-					{
-						allDepsComplete = allSteps[dependent].DependsOn
-							.All(dep => stepResults.ContainsKey(dep));
-					}
+					var allDepsComplete = allSteps[dependent].DependsOn
+						.All(dep => stepResults.ContainsKey(dep));
 
 					if (allDepsComplete)
 					{
@@ -235,8 +224,7 @@ public class OrchestrationExecutor
 		PromptOrchestrationStep step,
 		PromptExecutor executor,
 		OrchestrationExecutionContext context,
-		Dictionary<string, ExecutionResult> stepResults,
-		object gate,
+		ConcurrentDictionary<string, ExecutionResult> stepResults,
 		CancellationToken cancellationToken)
 	{
 		// Check for cancellation before starting
@@ -248,19 +236,13 @@ public class OrchestrationExecutor
 		}
 
 		// Check if any dependency failed or was skipped
-		bool shouldSkip;
-		string[] failedDeps;
-
-		lock (gate)
-		{
-			shouldSkip = context.HasAnyDependencyFailed(step.DependsOn);
-			failedDeps = shouldSkip
-				? step.DependsOn
-					.Where(dep => stepResults.TryGetValue(dep, out var r) &&
-						r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped)
-					.ToArray()
-				: [];
-		}
+		var shouldSkip = context.HasAnyDependencyFailed(step.DependsOn);
+		var failedDeps = shouldSkip
+			? step.DependsOn
+				.Where(dep => stepResults.TryGetValue(dep, out var r) &&
+					r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped)
+				.ToArray()
+			: [];
 
 		if (shouldSkip)
 		{
@@ -291,11 +273,10 @@ public class OrchestrationExecutor
 		Dictionary<string, PromptOrchestrationStep> allStepsByName,
 		PromptExecutor executor,
 		OrchestrationExecutionContext context,
-		Dictionary<string, ExecutionResult> stepResults,
-		Dictionary<string, StepRunRecord> stepRecords,
-		Dictionary<string, StepRunRecord> allStepRecords,
+		ConcurrentDictionary<string, ExecutionResult> stepResults,
+		ConcurrentDictionary<string, StepRunRecord> stepRecords,
+		ConcurrentDictionary<string, StepRunRecord> allStepRecords,
 		Dictionary<string, string> effectiveParams,
-		object gate,
 		CancellationToken cancellationToken)
 	{
 		var loop = checkerStep.Loop!;
@@ -310,11 +291,7 @@ public class OrchestrationExecutor
 		for (var iteration = 1; iteration <= loop.MaxIterations; iteration++)
 		{
 			// Check exit condition on the checker's current result
-			ExecutionResult checkerResult;
-			lock (gate)
-			{
-				checkerResult = context.GetResult(checkerStep.Name);
-			}
+			var checkerResult = context.GetResult(checkerStep.Name);
 
 			if (checkerResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
 			{
@@ -328,26 +305,20 @@ public class OrchestrationExecutor
 			_reporter.ReportLoopIteration(checkerStep.Name, loop.Target, iteration, loop.MaxIterations);
 
 			// Inject checker's feedback into the target step's context
-			lock (gate)
-			{
-				context.SetLoopFeedback(loop.Target, checkerResult.Content);
-				context.ClearResult(loop.Target);
-			}
+			context.SetLoopFeedback(loop.Target, checkerResult.Content);
+			context.ClearResult(loop.Target);
 
 			// Re-execute the target step
 			var targetStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(loop.Target);
 			var targetResult = await executor.ExecuteAsync(targetStep, context, cancellationToken);
 
-			lock (gate)
-			{
-				context.AddResult(loop.Target, targetResult);
-				stepResults[loop.Target] = targetResult;
+			context.AddResult(loop.Target, targetResult);
+			stepResults[loop.Target] = targetResult;
 
-				var targetRecord = BuildStepRecord(targetStep, targetResult, effectiveParams, targetStartedAt, iteration);
-				stepRecords[loop.Target] = targetRecord;
-				allStepRecords[$"{loop.Target}:iteration-{iteration}"] = targetRecord;
-			}
+			var targetRecord = BuildStepRecord(targetStep, targetResult, effectiveParams, targetStartedAt, iteration);
+			stepRecords[loop.Target] = targetRecord;
+			allStepRecords[$"{loop.Target}:iteration-{iteration}"] = targetRecord;
 
 			if (targetResult.Status != ExecutionStatus.Succeeded)
 			{
@@ -357,24 +328,18 @@ public class OrchestrationExecutor
 			}
 
 			// Re-execute the checker step
-			lock (gate)
-			{
-				context.ClearResult(checkerStep.Name);
-			}
+			context.ClearResult(checkerStep.Name);
 
 			var checkerStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(checkerStep.Name);
 			var newCheckerResult = await executor.ExecuteAsync(checkerStep, context, cancellationToken);
 
-			lock (gate)
-			{
-				context.AddResult(checkerStep.Name, newCheckerResult);
-				stepResults[checkerStep.Name] = newCheckerResult;
+			context.AddResult(checkerStep.Name, newCheckerResult);
+			stepResults[checkerStep.Name] = newCheckerResult;
 
-				var checkerRecord = BuildStepRecord(checkerStep, newCheckerResult, effectiveParams, checkerStartedAt, iteration);
-				stepRecords[checkerStep.Name] = checkerRecord;
-				allStepRecords[$"{checkerStep.Name}:iteration-{iteration}"] = checkerRecord;
-			}
+			var checkerRecord = BuildStepRecord(checkerStep, newCheckerResult, effectiveParams, checkerStartedAt, iteration);
+			stepRecords[checkerStep.Name] = checkerRecord;
+			allStepRecords[$"{checkerStep.Name}:iteration-{iteration}"] = checkerRecord;
 
 			if (newCheckerResult.Status != ExecutionStatus.Succeeded)
 			{
@@ -385,11 +350,7 @@ public class OrchestrationExecutor
 		}
 
 		// Check exit condition one final time after exhausting all iterations
-		ExecutionResult finalResult;
-		lock (gate)
-		{
-			finalResult = context.GetResult(checkerStep.Name);
-		}
+		var finalResult = context.GetResult(checkerStep.Name);
 
 		if (finalResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
 		{

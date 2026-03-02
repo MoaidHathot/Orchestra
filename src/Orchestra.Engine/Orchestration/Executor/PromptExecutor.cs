@@ -1,16 +1,18 @@
-using System.Text;
+using Microsoft.Extensions.Logging;
 
 namespace Orchestra.Engine;
 
-public class PromptExecutor : Executor<PromptOrchestrationStep>
+public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 {
 	private readonly AgentBuilder _agentBuilder;
 	private readonly IOrchestrationReporter _reporter;
+	private readonly ILogger<PromptExecutor> _logger;
 
-	public PromptExecutor(AgentBuilder agentBuilder, IOrchestrationReporter reporter)
+	public PromptExecutor(AgentBuilder agentBuilder, IOrchestrationReporter reporter, ILogger<PromptExecutor> logger)
 	{
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
+		_logger = logger;
 	}
 
 	public override async Task<ExecutionResult> ExecuteAsync(
@@ -24,21 +26,17 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Get the raw user prompt before input handler processing
 		var userPromptRaw = InjectParameters(step.UserPrompt, step.Parameters, context.Parameters);
 
-		// Trace data collectors
-		var reasoningBuilder = new StringBuilder();
-		var toolCalls = new List<ToolCallRecord>();
-		var responseSegments = new List<string>();
-		var currentResponseBuilder = new StringBuilder();
-		var pendingToolCalls = new Dictionary<string, (string ToolName, string? Arguments, string? McpServer, DateTimeOffset StartedAt)>();
+		// Create event processor to handle agent events and collect trace data
+		var eventProcessor = new AgentEventProcessor(_reporter, step.Name);
 
 		try
 		{
 			// Build the user prompt, incorporating dependency outputs and parameters
 			var userPrompt = BuildUserPrompt(step, context);
 
-			// Debug: Log step MCPs
-			Console.WriteLine($"[DEBUG] Step '{step.Name}' has {step.Mcps.Length} MCPs: [{string.Join(", ", step.Mcps.Select(m => m.Name))}]");
-			Console.WriteLine($"[DEBUG] Step '{step.Name}' McpNames: [{string.Join(", ", step.McpNames)}]");
+			// Log step MCPs for debugging
+			LogStepMcps(step.Name, step.Mcps.Length, string.Join(", ", step.Mcps.Select(m => m.Name)));
+			LogStepMcpNames(step.Name, string.Join(", ", step.McpNames));
 
 			// Build and run the agent
 			var agent = await _agentBuilder
@@ -52,100 +50,8 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 
 			var task = agent.SendAsync(userPrompt, cancellationToken);
 
-			// Consume events — report deltas, tools, and errors while collecting trace data
-			await foreach (var evt in task.WithCancellation(cancellationToken))
-			{
-				switch (evt.Type)
-				{
-					case AgentEventType.MessageDelta:
-						_reporter.ReportContentDelta(step.Name, evt.Content ?? string.Empty);
-						currentResponseBuilder.Append(evt.Content ?? string.Empty);
-						break;
-
-					case AgentEventType.ReasoningDelta:
-						_reporter.ReportReasoningDelta(step.Name, evt.Content ?? string.Empty);
-						reasoningBuilder.Append(evt.Content ?? string.Empty);
-						break;
-
-					case AgentEventType.ToolExecutionStart:
-						_reporter.ReportToolExecutionStarted(step.Name, evt.ToolName ?? "unknown", evt.ToolArguments, evt.McpServerName);
-
-						// Save current response segment before tool call (if any content)
-						if (currentResponseBuilder.Length > 0)
-						{
-							responseSegments.Add(currentResponseBuilder.ToString());
-							currentResponseBuilder.Clear();
-						}
-
-						// Track pending tool call
-						if (evt.ToolCallId is not null)
-						{
-							pendingToolCalls[evt.ToolCallId] = (
-								evt.ToolName ?? "unknown",
-								evt.ToolArguments,
-								evt.McpServerName,
-								DateTimeOffset.UtcNow
-							);
-						}
-						else
-						{
-							// No call ID, create record immediately
-							toolCalls.Add(new ToolCallRecord
-							{
-								ToolName = evt.ToolName ?? "unknown",
-								Arguments = evt.ToolArguments,
-								McpServer = evt.McpServerName,
-								StartedAt = DateTimeOffset.UtcNow,
-							});
-						}
-						break;
-
-					case AgentEventType.ToolExecutionComplete:
-						_reporter.ReportToolExecutionCompleted(step.Name, evt.ToolName ?? "unknown", evt.ToolSuccess ?? false, evt.ToolResult, evt.ToolError);
-
-						// Complete the pending tool call record
-						if (evt.ToolCallId is not null && pendingToolCalls.TryGetValue(evt.ToolCallId, out var pending))
-						{
-							pendingToolCalls.Remove(evt.ToolCallId);
-							toolCalls.Add(new ToolCallRecord
-							{
-								CallId = evt.ToolCallId,
-								ToolName = pending.ToolName,
-								Arguments = pending.Arguments,
-								McpServer = pending.McpServer,
-								Success = evt.ToolSuccess ?? false,
-								Result = evt.ToolResult,
-								Error = evt.ToolError,
-								StartedAt = pending.StartedAt,
-								CompletedAt = DateTimeOffset.UtcNow,
-							});
-						}
-						else
-						{
-							// No matching pending call, create complete record
-							toolCalls.Add(new ToolCallRecord
-							{
-								CallId = evt.ToolCallId,
-								ToolName = evt.ToolName ?? "unknown",
-								Success = evt.ToolSuccess ?? false,
-								Result = evt.ToolResult,
-								Error = evt.ToolError,
-								CompletedAt = DateTimeOffset.UtcNow,
-							});
-						}
-						break;
-
-					case AgentEventType.Error:
-						_reporter.ReportStepError(step.Name, evt.ErrorMessage ?? "Unknown error");
-						break;
-				}
-			}
-
-			// Save any remaining response content
-			if (currentResponseBuilder.Length > 0)
-			{
-				responseSegments.Add(currentResponseBuilder.ToString());
-			}
+			// Process all agent events, collecting trace data
+			await eventProcessor.ProcessEventsAsync(task, cancellationToken);
 
 			var result = await task.GetResultAsync();
 
@@ -182,18 +88,13 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 				};
 			}
 
-			// Build the execution trace
-			var trace = new StepExecutionTrace
-			{
-				SystemPrompt = step.SystemPrompt,
-				UserPromptRaw = userPromptRaw,
-				UserPromptProcessed = userPrompt,
-				Reasoning = reasoningBuilder.Length > 0 ? reasoningBuilder.ToString() : null,
-				ToolCalls = toolCalls,
-				ResponseSegments = responseSegments,
-				FinalResponse = rawContent ?? result.Content,
-				OutputHandlerResult = outputHandlerResult,
-			};
+			// Build the execution trace from collected data
+			var trace = eventProcessor.BuildTrace(
+				step.SystemPrompt,
+				userPromptRaw,
+				userPrompt,
+				rawContent ?? result.Content,
+				outputHandlerResult);
 
 			// Report the step trace for live trace viewing
 			_reporter.ReportStepTrace(step.Name, trace);
@@ -210,14 +111,7 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 		catch (Exception ex)
 		{
 			// Build partial trace even on failure
-			var trace = new StepExecutionTrace
-			{
-				SystemPrompt = step.SystemPrompt,
-				UserPromptRaw = userPromptRaw,
-				Reasoning = reasoningBuilder.Length > 0 ? reasoningBuilder.ToString() : null,
-				ToolCalls = toolCalls,
-				ResponseSegments = responseSegments,
-			};
+			var trace = eventProcessor.BuildPartialTrace(step.SystemPrompt, userPromptRaw);
 
 			// Report the partial trace for live trace viewing
 			_reporter.ReportStepTrace(step.Name, trace);
@@ -349,4 +243,20 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 
 		return result.Content;
 	}
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(
+		EventId = 1,
+		Level = LogLevel.Debug,
+		Message = "Step '{StepName}' has {McpCount} MCPs: [{McpNames}]")]
+	private partial void LogStepMcps(string stepName, int mcpCount, string mcpNames);
+
+	[LoggerMessage(
+		EventId = 2,
+		Level = LogLevel.Debug,
+		Message = "Step '{StepName}' McpNames configuration: [{McpNames}]")]
+	private partial void LogStepMcpNames(string stepName, string mcpNames);
+
+	#endregion
 }

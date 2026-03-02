@@ -1,4 +1,6 @@
 using GitHub.Copilot.SDK;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 
 namespace Orchestra.Copilot;
@@ -6,6 +8,12 @@ namespace Orchestra.Copilot;
 public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 {
 	private CopilotClient _client = new ();
+	private readonly ILoggerFactory _loggerFactory;
+
+	public CopilotAgentBuilder(ILoggerFactory? loggerFactory = null)
+	{
+		_loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+	}
 
 	public override async Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)
 	{
@@ -28,7 +36,8 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			mcps: mcps,
 			reasoningLevel: reasoningLevel,
 			systemPromptMode: systemPromptMode,
-			reporter: reporter
+			reporter: reporter,
+			logger: _loggerFactory.CreateLogger<CopilotAgent>()
 		);
 	}
 
