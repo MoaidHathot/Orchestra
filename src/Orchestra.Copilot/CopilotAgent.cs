@@ -1,11 +1,12 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using GitHub.Copilot.SDK;
+using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 
 namespace Orchestra.Copilot;
 
-public class CopilotAgent : IAgent
+public partial class CopilotAgent : IAgent
 {
 	private readonly CopilotClient _client;
 	private readonly string _model;
@@ -14,6 +15,7 @@ public class CopilotAgent : IAgent
 	private readonly ReasoningLevel? _reasoningLevel;
 	private readonly SystemPromptMode? _systemPromptMode;
 	private readonly IOrchestrationReporter _reporter;
+	private readonly ILogger<CopilotAgent> _logger;
 
 	internal CopilotAgent(
 		CopilotClient client,
@@ -22,7 +24,8 @@ public class CopilotAgent : IAgent
 		Mcp[] mcps,
 		ReasoningLevel? reasoningLevel,
 		SystemPromptMode? systemPromptMode,
-		IOrchestrationReporter reporter)
+		IOrchestrationReporter reporter,
+		ILogger<CopilotAgent> logger)
 	{
 		_client = client;
 		_model = model;
@@ -31,6 +34,7 @@ public class CopilotAgent : IAgent
 		_reasoningLevel = reasoningLevel;
 		_systemPromptMode = systemPromptMode;
 		_reporter = reporter;
+		_logger = logger;
 	}
 
 	public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
@@ -74,28 +78,28 @@ public class CopilotAgent : IAgent
 				}
 			}
 
-			// Debug: Log MCP count before check
-		Console.WriteLine($"[MCP-DEBUG] Agent has {_mcps.Length} MCPs configured");
-		
-		if (_mcps.Length > 0)
+			// Log MCP count for debugging
+			LogMcpCount(_mcps.Length);
+
+			if (_mcps.Length > 0)
 			{
 				config.McpServers = BuildMcpServers();
-				// Debug: Log MCP server configuration
+				// Log MCP server configuration
 				foreach (var (name, serverConfig) in config.McpServers)
 				{
 					if (serverConfig is McpLocalServerConfig local)
 					{
-						Console.WriteLine($"[MCP] Configuring local server '{name}': Command={local.Command}, Args=[{string.Join(", ", local.Args ?? [])}], Cwd={local.Cwd ?? "(null)"}");
+						LogLocalMcpServer(name, local.Command, string.Join(", ", local.Args ?? []), local.Cwd);
 					}
 					else if (serverConfig is McpRemoteServerConfig remote)
 					{
-						Console.WriteLine($"[MCP] Configuring remote server '{name}': Url={remote.Url}");
+						LogRemoteMcpServer(name, remote.Url);
 					}
 				}
 			}
-		else
+			else
 			{
-				Console.WriteLine($"[MCP-DEBUG] No MCPs to configure for this agent");
+				LogNoMcpsConfigured();
 			}
 
 			await using var session = await _client.CreateSessionAsync(config, cancellationToken);
@@ -331,4 +335,32 @@ public class CopilotAgent : IAgent
 
 		return servers;
 	}
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(
+		EventId = 1,
+		Level = LogLevel.Debug,
+		Message = "Agent has {McpCount} MCPs configured")]
+	private partial void LogMcpCount(int mcpCount);
+
+	[LoggerMessage(
+		EventId = 2,
+		Level = LogLevel.Debug,
+		Message = "Configuring local MCP server '{Name}': Command={Command}, Args=[{Args}], Cwd={WorkingDirectory}")]
+	private partial void LogLocalMcpServer(string name, string command, string args, string? workingDirectory);
+
+	[LoggerMessage(
+		EventId = 3,
+		Level = LogLevel.Debug,
+		Message = "Configuring remote MCP server '{Name}': Url={Url}")]
+	private partial void LogRemoteMcpServer(string name, string url);
+
+	[LoggerMessage(
+		EventId = 4,
+		Level = LogLevel.Debug,
+		Message = "No MCPs configured for this agent")]
+	private partial void LogNoMcpsConfigured();
+
+	#endregion
 }

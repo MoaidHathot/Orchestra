@@ -1,11 +1,13 @@
+using System.Collections.Concurrent;
+
 namespace Orchestra.Engine;
 
 public class OrchestrationExecutionContext
 {
 	public Dictionary<string, string> Parameters { get; init; } = [];
 
-	private readonly Dictionary<string, ExecutionResult> _results = new();
-	private readonly Dictionary<string, string> _loopFeedback = new();
+	private readonly ConcurrentDictionary<string, ExecutionResult> _results = new();
+	private readonly ConcurrentDictionary<string, string> _loopFeedback = new();
 
 	public void AddResult(string stepName, ExecutionResult result)
 	{
@@ -70,7 +72,7 @@ public class OrchestrationExecutionContext
 	/// </summary>
 	public void ClearResult(string stepName)
 	{
-		_results.Remove(stepName);
+		_results.TryRemove(stepName, out _);
 	}
 
 	/// <summary>
@@ -88,7 +90,7 @@ public class OrchestrationExecutionContext
 	/// </summary>
 	public string? ConsumeLoopFeedback(string stepName)
 	{
-		if (_loopFeedback.Remove(stepName, out var feedback))
+		if (_loopFeedback.TryRemove(stepName, out var feedback))
 			return feedback;
 		return null;
 	}

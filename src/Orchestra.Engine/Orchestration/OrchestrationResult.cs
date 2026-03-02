@@ -14,7 +14,7 @@ public class OrchestrationResult
 	/// </summary>
 	public required IReadOnlyDictionary<string, ExecutionResult> StepResults { get; init; }
 
-	public static OrchestrationResult From(Orchestration orchestration, Dictionary<string, ExecutionResult> stepResults)
+	public static OrchestrationResult From(Orchestration orchestration, IReadOnlyDictionary<string, ExecutionResult> stepResults)
 	{
 		// Terminal steps are those that no other step depends on
 		var dependedOn = new HashSet<string>(
