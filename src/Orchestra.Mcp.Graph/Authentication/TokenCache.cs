@@ -20,7 +20,7 @@ public class CachedTokenData
 /// <summary>
 /// Handles token caching to disk.
 /// </summary>
-public class TokenCache
+public partial class TokenCache
 {
     private readonly string _cachePath;
     private readonly ILogger<TokenCache> _logger;
@@ -40,24 +40,24 @@ public class TokenCache
     /// </summary>
     public CachedTokenData? Load()
     {
-        try
-        {
-            if (!File.Exists(_cachePath))
-            {
-                _logger.LogDebug("Token cache file does not exist: {Path}", _cachePath);
-                return null;
-            }
+		try
+		{
+			if (!File.Exists(_cachePath))
+			{
+				LogTokenCacheFileDoesNotExist(_cachePath);
+				return null;
+			}
 
-            var json = File.ReadAllText(_cachePath);
-            var data = JsonSerializer.Deserialize<CachedTokenData>(json);
-            _logger.LogDebug("Loaded token cache from {Path}", _cachePath);
-            return data;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to load token cache from {Path}", _cachePath);
-            return null;
-        }
+			var json = File.ReadAllText(_cachePath);
+			var data = JsonSerializer.Deserialize<CachedTokenData>(json);
+			LogLoadedTokenCache(_cachePath);
+			return data;
+		}
+		catch (Exception ex)
+		{
+			LogFailedToLoadTokenCache(ex, _cachePath);
+			return null;
+		}
     }
 
     /// <summary>
@@ -73,14 +73,14 @@ public class TokenCache
                 Directory.CreateDirectory(directory);
             }
 
-            var json = JsonSerializer.Serialize(data, _jsonOptions);
-            File.WriteAllText(_cachePath, json);
-            _logger.LogDebug("Saved token cache to {Path}", _cachePath);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to save token cache to {Path}", _cachePath);
-        }
+		var json = JsonSerializer.Serialize(data, _jsonOptions);
+			File.WriteAllText(_cachePath, json);
+			LogSavedTokenCache(_cachePath);
+		}
+		catch (Exception ex)
+		{
+			LogFailedToSaveTokenCache(ex, _cachePath);
+		}
     }
 
     /// <summary>
@@ -88,17 +88,42 @@ public class TokenCache
     /// </summary>
     public void Clear()
     {
-        try
-        {
-            if (File.Exists(_cachePath))
-            {
-                File.Delete(_cachePath);
-                _logger.LogDebug("Cleared token cache at {Path}", _cachePath);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to clear token cache at {Path}", _cachePath);
-        }
-    }
+		try
+		{
+			if (File.Exists(_cachePath))
+			{
+				File.Delete(_cachePath);
+				LogClearedTokenCache(_cachePath);
+			}
+		}
+		catch (Exception ex)
+		{
+			LogFailedToClearTokenCache(ex, _cachePath);
+		}
+	}
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Token cache file does not exist: {Path}")]
+	private partial void LogTokenCacheFileDoesNotExist(string path);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Loaded token cache from {Path}")]
+	private partial void LogLoadedTokenCache(string path);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load token cache from {Path}")]
+	private partial void LogFailedToLoadTokenCache(Exception ex, string path);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Saved token cache to {Path}")]
+	private partial void LogSavedTokenCache(string path);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to save token cache to {Path}")]
+	private partial void LogFailedToSaveTokenCache(Exception ex, string path);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Cleared token cache at {Path}")]
+	private partial void LogClearedTokenCache(string path);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to clear token cache at {Path}")]
+	private partial void LogFailedToClearTokenCache(Exception ex, string path);
+
+	#endregion
 }

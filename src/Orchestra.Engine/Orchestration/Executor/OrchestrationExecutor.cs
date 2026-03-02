@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Orchestra.Engine;
 
-public class OrchestrationExecutor
+public partial class OrchestrationExecutor
 {
 	private readonly IScheduler _scheduler;
 	private readonly AgentBuilder _agentBuilder;
@@ -36,7 +36,7 @@ public class OrchestrationExecutor
 		string? triggerId = null,
 		CancellationToken cancellationToken = default)
 	{
-		_logger.LogInformation("Starting orchestration '{Name}'...", orchestration.Name);
+		LogStartingOrchestration(orchestration.Name);
 
 		ValidateParameters(orchestration, parameters);
 
@@ -150,7 +150,7 @@ public class OrchestrationExecutor
 		{
 			if (step.DependsOn.Length == 0)
 			{
-				_logger.LogInformation("Launching step '{StepName}' (no dependencies)", step.Name);
+				LogLaunchingStep(step.Name);
 				TryLaunchStep(step.Name);
 			}
 		}
@@ -162,11 +162,11 @@ public class OrchestrationExecutor
 
 		if (orchestrationResult.Status == ExecutionStatus.Succeeded)
 		{
-			_logger.LogInformation("Orchestration '{Name}' completed successfully.", orchestration.Name);
+			LogOrchestrationSucceeded(orchestration.Name);
 		}
 		else
 		{
-			_logger.LogWarning("Orchestration '{Name}' completed with failures.", orchestration.Name);
+			LogOrchestrationFailed(orchestration.Name);
 		}
 
 		// Build and persist the run record
@@ -193,7 +193,7 @@ public class OrchestrationExecutor
 		}
 		catch (Exception ex)
 		{
-			_logger.LogError(ex, "Failed to save run record for orchestration '{Name}', run '{RunId}'.", orchestration.Name, runId);
+			LogRunStoreSaveFailed(ex, orchestration.Name, runId);
 		}
 
 		return orchestrationResult;
@@ -234,7 +234,7 @@ public class OrchestrationExecutor
 		// Check for cancellation before starting
 		if (cancellationToken.IsCancellationRequested)
 		{
-			_logger.LogWarning("  Step '{StepName}' cancelled before starting.", step.Name);
+			LogStepCancelledBeforeStart(step.Name);
 			_reporter.ReportStepSkipped(step.Name, "Cancelled");
 			return ExecutionResult.Failed("Cancelled");
 		}
@@ -251,22 +251,22 @@ public class OrchestrationExecutor
 		if (shouldSkip)
 		{
 			var reason = $"Skipped because dependencies failed or were skipped: [{string.Join(", ", failedDeps)}]";
-			_logger.LogWarning("  Skipping step '{StepName}': {Reason}", step.Name, reason);
+			LogSkippingStep(step.Name, reason);
 			_reporter.ReportStepSkipped(step.Name, reason);
 			return ExecutionResult.Skipped(reason);
 		}
 
-		_logger.LogInformation("  Running step '{StepName}'...", step.Name);
+		LogRunningStep(step.Name);
 		_reporter.ReportStepStarted(step.Name);
 		var result = await executor.ExecuteAsync(step, context, cancellationToken);
 
 		if (result.Status == ExecutionStatus.Succeeded)
 		{
-			_logger.LogInformation("  Step '{StepName}' completed successfully.", step.Name);
+			LogStepSucceeded(step.Name);
 		}
 		else
 		{
-			_logger.LogError("  Step '{StepName}' failed: {Error}", step.Name, result.ErrorMessage);
+			LogStepFailed(step.Name, result.ErrorMessage);
 		}
 
 		return result;
@@ -287,8 +287,7 @@ public class OrchestrationExecutor
 
 		if (!allStepsByName.TryGetValue(loop.Target, out var targetStep))
 		{
-			_logger.LogWarning("Loop target '{Target}' not found for checker '{Checker}', skipping loop.",
-				loop.Target, checkerStep.Name);
+			LogLoopTargetNotFound(loop.Target, checkerStep.Name);
 			return;
 		}
 
@@ -299,13 +298,11 @@ public class OrchestrationExecutor
 
 			if (checkerResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
 			{
-				_logger.LogInformation("  [{Checker}] Loop exit condition met after {Iterations} iteration(s).",
-					checkerStep.Name, iteration - 1);
+				LogLoopExitConditionMet(checkerStep.Name, iteration - 1);
 				return;
 			}
 
-			_logger.LogInformation("  [{Checker}] Loop iteration {Iteration}/{Max} — re-running '{Target}' with feedback.",
-				checkerStep.Name, iteration, loop.MaxIterations, loop.Target);
+			LogLoopIteration(checkerStep.Name, iteration, loop.MaxIterations, loop.Target);
 			_reporter.ReportLoopIteration(checkerStep.Name, loop.Target, iteration, loop.MaxIterations);
 
 			// Inject checker's feedback into the target step's context
@@ -326,8 +323,7 @@ public class OrchestrationExecutor
 
 			if (targetResult.Status != ExecutionStatus.Succeeded)
 			{
-				_logger.LogWarning("  [{Target}] Failed during loop iteration {Iteration}, stopping loop.",
-					loop.Target, iteration);
+				LogLoopTargetFailed(loop.Target, iteration);
 				return;
 			}
 
@@ -347,8 +343,7 @@ public class OrchestrationExecutor
 
 			if (newCheckerResult.Status != ExecutionStatus.Succeeded)
 			{
-				_logger.LogWarning("  [{Checker}] Failed during loop iteration {Iteration}, stopping loop.",
-					checkerStep.Name, iteration);
+				LogLoopCheckerFailed(checkerStep.Name, iteration);
 				return;
 			}
 		}
@@ -358,13 +353,11 @@ public class OrchestrationExecutor
 
 		if (finalResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
 		{
-			_logger.LogInformation("  [{Checker}] Loop exit condition met after {Max} iteration(s).",
-				checkerStep.Name, loop.MaxIterations);
+			LogLoopExitConditionMet(checkerStep.Name, loop.MaxIterations);
 		}
 		else
 		{
-			_logger.LogWarning("  [{Checker}] Loop exhausted {Max} iterations without meeting exit condition. Using last result.",
-				checkerStep.Name, loop.MaxIterations);
+			LogLoopExhausted(checkerStep.Name, loop.MaxIterations);
 		}
 	}
 
@@ -416,4 +409,56 @@ public class OrchestrationExecutor
 				.Where(kv => kv.Value.Status == ExecutionStatus.Succeeded)
 				.Select(kv => $"## {kv.Key}\n{kv.Value.Content}"));
 	}
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Starting orchestration '{Name}'...")]
+	private partial void LogStartingOrchestration(string name);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Launching step '{StepName}' (no dependencies)")]
+	private partial void LogLaunchingStep(string stepName);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Orchestration '{Name}' completed successfully.")]
+	private partial void LogOrchestrationSucceeded(string name);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Orchestration '{Name}' completed with failures.")]
+	private partial void LogOrchestrationFailed(string name);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to save run record for orchestration '{Name}', run '{RunId}'.")]
+	private partial void LogRunStoreSaveFailed(Exception ex, string name, string runId);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' cancelled before starting.")]
+	private partial void LogStepCancelledBeforeStart(string stepName);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Skipping step '{StepName}': {Reason}")]
+	private partial void LogSkippingStep(string stepName, string reason);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Running step '{StepName}'...")]
+	private partial void LogRunningStep(string stepName);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' completed successfully.")]
+	private partial void LogStepSucceeded(string stepName);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Step '{StepName}' failed: {Error}")]
+	private partial void LogStepFailed(string stepName, string? error);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Loop target '{Target}' not found for checker '{Checker}', skipping loop.")]
+	private partial void LogLoopTargetNotFound(string target, string checker);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "[{Checker}] Loop exit condition met after {Iterations} iteration(s).")]
+	private partial void LogLoopExitConditionMet(string checker, int iterations);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "[{Checker}] Loop iteration {Iteration}/{MaxIterations} — re-running '{Target}' with feedback.")]
+	private partial void LogLoopIteration(string checker, int iteration, int maxIterations, string target);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "[{Target}] Failed during loop iteration {Iteration}, stopping loop.")]
+	private partial void LogLoopTargetFailed(string target, int iteration);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "[{Checker}] Failed during loop iteration {Iteration}, stopping loop.")]
+	private partial void LogLoopCheckerFailed(string checker, int iteration);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "[{Checker}] Loop exhausted {MaxIterations} iterations without meeting exit condition. Using last result.")]
+	private partial void LogLoopExhausted(string checker, int maxIterations);
+
+	#endregion
 }

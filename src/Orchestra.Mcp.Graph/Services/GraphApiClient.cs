@@ -11,7 +11,7 @@ namespace Orchestra.Mcp.Graph.Services;
 /// <summary>
 /// HTTP client wrapper for Microsoft Graph API.
 /// </summary>
-public class GraphApiClient
+public partial class GraphApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly ITokenProvider _tokenProvider;
@@ -74,7 +74,7 @@ public class GraphApiClient
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-        _logger.LogDebug("GET {Url}", url);
+		LogGetRequest(url);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -109,7 +109,7 @@ public class GraphApiClient
             request.Content = JsonContent.Create(body, options: JsonOptions);
         }
 
-        _logger.LogDebug("POST {Url}", url);
+		LogPostRequest(url);
 
         var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -146,7 +146,7 @@ public class GraphApiClient
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
-            _logger.LogDebug("GET (paged) {Url}", url);
+			LogGetPagedRequest(url);
 
             var response = await _httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
@@ -190,17 +190,30 @@ public class GraphApiClient
         return [];
     }
 
-    private static string BuildUrl(string baseUrl, string endpoint, Dictionary<string, string>? parameters)
-    {
-        var url = $"{baseUrl}{endpoint}";
+	private static string BuildUrl(string baseUrl, string endpoint, Dictionary<string, string>? parameters)
+	{
+		var url = $"{baseUrl}{endpoint}";
 
-        if (parameters != null && parameters.Count > 0)
-        {
-            var queryString = string.Join("&", parameters.Select(p =>
-                $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}"));
-            url += $"?{queryString}";
-        }
+		if (parameters != null && parameters.Count > 0)
+		{
+			var queryString = string.Join("&", parameters.Select(p =>
+				$"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}"));
+			url += $"?{queryString}";
+		}
 
-        return url;
-    }
+		return url;
+	}
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "GET {Url}")]
+	private partial void LogGetRequest(string url);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "POST {Url}")]
+	private partial void LogPostRequest(string url);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "GET (paged) {Url}")]
+	private partial void LogGetPagedRequest(string url);
+
+	#endregion
 }

@@ -551,7 +551,7 @@ app.MapGet("/api/orchestrations/{id}/run", async (
 	await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { executionId }, jsonOptions)}\n\n");
 	await httpContext.Response.Body.FlushAsync();
 
-	var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore);
+	var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore);
 	var cancellationToken = cts.Token;
 	var runId = executionId; // Use executionId as runId for consistency
 	var runStartedAt = DateTimeOffset.UtcNow;

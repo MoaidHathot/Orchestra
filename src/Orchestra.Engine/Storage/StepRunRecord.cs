@@ -30,7 +30,7 @@ public class StepRunRecord
 	/// <summary>
 	/// The actual parameters that were injected into this step.
 	/// </summary>
-	public Dictionary<string, string> Parameters { get; init; } = [];
+	public IReadOnlyDictionary<string, string> Parameters { get; init; } = new Dictionary<string, string>();
 
 	/// <summary>
 	/// Loop iteration number (null if not a loop iteration, 0 for the initial run).
@@ -41,7 +41,7 @@ public class StepRunRecord
 	/// The raw dependency outputs before any prompt construction.
 	/// Key is dependency step name, value is the raw output from that step.
 	/// </summary>
-	public Dictionary<string, string> RawDependencyOutputs { get; init; } = [];
+	public IReadOnlyDictionary<string, string> RawDependencyOutputs { get; init; } = new Dictionary<string, string>();
 
 	/// <summary>
 	/// The actual prompt that was sent to the LLM (after all substitutions and handlers).

@@ -408,8 +408,8 @@ public class PortalRunStore : IRunStore
 /// </summary>
 public class StepInputsRecord
 {
-	public Dictionary<string, string> Parameters { get; init; } = [];
-	public Dictionary<string, string> RawDependencyOutputs { get; init; } = [];
+	public IReadOnlyDictionary<string, string> Parameters { get; init; } = new Dictionary<string, string>();
+	public IReadOnlyDictionary<string, string> RawDependencyOutputs { get; init; } = new Dictionary<string, string>();
 	public string? PromptSent { get; init; }
 }
 

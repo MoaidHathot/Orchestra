@@ -36,7 +36,7 @@ public class OAuthTokenResponse
 /// Provides OAuth tokens via interactive browser authentication.
 /// Used for reading messages, mail, etc.
 /// </summary>
-public class OAuthTokenProvider
+public partial class OAuthTokenProvider
 {
     private readonly GraphOptions _options;
     private readonly TokenCache _tokenCache;
@@ -69,7 +69,7 @@ public class OAuthTokenProvider
         {
             _accessToken = cached.AccessToken;
             _refreshToken = cached.RefreshToken;
-            _logger.LogDebug("Loaded cached OAuth tokens");
+			LogLoadedCachedOAuthTokens();
         }
     }
 
@@ -164,21 +164,21 @@ public class OAuthTokenProvider
                     _accessToken = tokenResponse.AccessToken;
                     _refreshToken = tokenResponse.RefreshToken ?? _refreshToken;
                     _tokenExpiry = DateTime.UtcNow.AddSeconds(tokenResponse.ExpiresIn ?? 3600);
-                    SaveTokens();
-                    _logger.LogDebug("Successfully refreshed OAuth token");
-                    return true;
+				SaveTokens();
+					LogSuccessfullyRefreshedOAuthToken();
+					return true;
                 }
             }
 
-            var error = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogWarning("Token refresh failed: {Error}", error);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to refresh OAuth token");
-            return false;
-        }
+		var error = await response.Content.ReadAsStringAsync(cancellationToken);
+			LogTokenRefreshFailed(error);
+			return false;
+		}
+		catch (Exception ex)
+		{
+			LogFailedToRefreshOAuthToken(ex);
+			return false;
+		}
     }
 
     /// <summary>
@@ -189,11 +189,11 @@ public class OAuthTokenProvider
         // Check if existing token is valid
         if (!force && _accessToken != null)
         {
-            if (await ValidateTokenAsync(cancellationToken))
-            {
-                _logger.LogDebug("Existing OAuth token is valid");
-                return true;
-            }
+		if (await ValidateTokenAsync(cancellationToken))
+			{
+				LogExistingOAuthTokenIsValid();
+				return true;
+			}
         }
 
         // Try refresh first
@@ -202,8 +202,8 @@ public class OAuthTokenProvider
             return true;
         }
 
-        // Interactive browser auth
-        _logger.LogInformation("Starting interactive browser authentication...");
+		// Interactive browser auth
+		LogStartingInteractiveBrowserAuthentication();
 
         var authUrl = BuildAuthorizationUrl();
 
@@ -218,11 +218,11 @@ public class OAuthTokenProvider
             TimeSpan.FromSeconds(_options.OAuthTimeoutSeconds),
             cancellationToken);
 
-        if (!callbackResult.Success)
-        {
-            _logger.LogError("OAuth callback failed: {Error}", callbackResult.Error);
-            return false;
-        }
+		if (!callbackResult.Success)
+		{
+			LogOAuthCallbackFailed(callbackResult.Error);
+			return false;
+		}
 
         // Exchange code for token
         return await ExchangeCodeForTokenAsync(callbackResult.AuthCode!, cancellationToken);
@@ -279,31 +279,65 @@ public class OAuthTokenProvider
                     _accessToken = tokenResponse.AccessToken;
                     _refreshToken = tokenResponse.RefreshToken;
                     _tokenExpiry = DateTime.UtcNow.AddSeconds(tokenResponse.ExpiresIn ?? 3600);
-                    SaveTokens();
-                    _logger.LogInformation("OAuth authentication successful");
-                    return true;
+				SaveTokens();
+					LogOAuthAuthenticationSuccessful();
+					return true;
                 }
             }
 
-            var error = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError("Token exchange failed: {Error}", error);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to exchange authorization code for token");
-            return false;
-        }
+		var error = await response.Content.ReadAsStringAsync(cancellationToken);
+			LogTokenExchangeFailed(error);
+			return false;
+		}
+		catch (Exception ex)
+		{
+			LogFailedToExchangeAuthorizationCode(ex);
+			return false;
+		}
     }
 
-    /// <summary>
-    /// Clears all cached tokens.
-    /// </summary>
-    public void ClearCache()
-    {
-        _accessToken = null;
-        _refreshToken = null;
-        _tokenExpiry = DateTime.MinValue;
-        _tokenCache.Clear();
-    }
+	/// <summary>
+	/// Clears all cached tokens.
+	/// </summary>
+	public void ClearCache()
+	{
+		_accessToken = null;
+		_refreshToken = null;
+		_tokenExpiry = DateTime.MinValue;
+		_tokenCache.Clear();
+	}
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Loaded cached OAuth tokens")]
+	private partial void LogLoadedCachedOAuthTokens();
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Successfully refreshed OAuth token")]
+	private partial void LogSuccessfullyRefreshedOAuthToken();
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Token refresh failed: {Error}")]
+	private partial void LogTokenRefreshFailed(string error);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to refresh OAuth token")]
+	private partial void LogFailedToRefreshOAuthToken(Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Existing OAuth token is valid")]
+	private partial void LogExistingOAuthTokenIsValid();
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Starting interactive browser authentication...")]
+	private partial void LogStartingInteractiveBrowserAuthentication();
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "OAuth callback failed: {Error}")]
+	private partial void LogOAuthCallbackFailed(string? error);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "OAuth authentication successful")]
+	private partial void LogOAuthAuthenticationSuccessful();
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Token exchange failed: {Error}")]
+	private partial void LogTokenExchangeFailed(string error);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to exchange authorization code for token")]
+	private partial void LogFailedToExchangeAuthorizationCode(Exception ex);
+
+	#endregion
 }
