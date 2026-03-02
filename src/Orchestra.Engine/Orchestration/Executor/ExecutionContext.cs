@@ -6,6 +6,13 @@ public class OrchestrationExecutionContext
 {
 	public Dictionary<string, string> Parameters { get; init; } = [];
 
+	/// <summary>
+	/// Default system prompt mode from the orchestration.
+	/// Steps can override this with their own SystemPromptMode.
+	/// When null, the SDK's default behavior is used.
+	/// </summary>
+	public SystemPromptMode? DefaultSystemPromptMode { get; init; }
+
 	private readonly ConcurrentDictionary<string, ExecutionResult> _results = new();
 	private readonly ConcurrentDictionary<string, string> _loopFeedback = new();
 
@@ -30,24 +37,20 @@ public class OrchestrationExecutionContext
 			result.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped);
 	}
 
-	public string GetDependencyOutputs(string[] dependsOn)
+	/// <summary>
+	/// Gets the processed content from succeeded dependencies as a dictionary.
+	/// </summary>
+	public IReadOnlyDictionary<string, string> GetDependencyOutputs(string[] dependsOn)
 	{
-		if (dependsOn.Length == 0)
-			return string.Empty;
-
-		// Only include outputs from succeeded dependencies
-		var succeeded = dependsOn
-			.Where(dep => _results.TryGetValue(dep, out var r) && r.Status == ExecutionStatus.Succeeded)
-			.ToArray();
-
-		if (succeeded.Length == 0)
-			return string.Empty;
-
-		if (succeeded.Length == 1)
-			return _results[succeeded[0]].Content;
-
-		return string.Join("\n\n---\n\n",
-			succeeded.Select(dep => $"## Output from '{dep}':\n{_results[dep].Content}"));
+		var outputs = new Dictionary<string, string>();
+		foreach (var dep in dependsOn)
+		{
+			if (_results.TryGetValue(dep, out var result) && result.Status == ExecutionStatus.Succeeded)
+			{
+				outputs[dep] = result.Content;
+			}
+		}
+		return outputs;
 	}
 
 	/// <summary>

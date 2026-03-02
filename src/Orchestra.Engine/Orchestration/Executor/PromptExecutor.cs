@@ -6,12 +6,18 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 {
 	private readonly AgentBuilder _agentBuilder;
 	private readonly IOrchestrationReporter _reporter;
+	private readonly IPromptFormatter _formatter;
 	private readonly ILogger<PromptExecutor> _logger;
 
-	public PromptExecutor(AgentBuilder agentBuilder, IOrchestrationReporter reporter, ILogger<PromptExecutor> logger)
+	public PromptExecutor(
+		AgentBuilder agentBuilder,
+		IOrchestrationReporter reporter,
+		IPromptFormatter formatter,
+		ILogger<PromptExecutor> logger)
 	{
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
+		_formatter = formatter;
 		_logger = logger;
 	}
 
@@ -44,7 +50,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				.WithSystemPrompt(step.SystemPrompt)
 				.WithMcp(step.Mcps)
 				.WithReasoningLevel(step.ReasoningLevel)
-				.WithSystemPromptMode(step.SystemPromptMode)
+				.WithSystemPromptMode(step.SystemPromptMode ?? context.DefaultSystemPromptMode)
 				.WithReporter(_reporter)
 				.BuildAgentAsync(cancellationToken);
 
@@ -121,63 +127,14 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		}
 	}
 
-	private static string BuildUserPrompt(PromptOrchestrationStep step, OrchestrationExecutionContext context)
+	private string BuildUserPrompt(PromptOrchestrationStep step, OrchestrationExecutionContext context)
 	{
 		var userPrompt = InjectParameters(step.UserPrompt, step.Parameters, context.Parameters);
-		var dependencyOutputs = context.GetDependencyOutputs(step.DependsOn);
+		var dependencyOutputsDict = context.GetDependencyOutputs(step.DependsOn);
+		var dependencyOutputs = _formatter.FormatDependencyOutputs(dependencyOutputsDict);
 		var loopFeedback = context.ConsumeLoopFeedback(step.Name);
 
-		if (string.IsNullOrEmpty(dependencyOutputs) && loopFeedback is null)
-			return userPrompt;
-
-		if (step.InputHandlerPrompt is not null)
-		{
-			var prompt = $"""
-				{step.InputHandlerPrompt}
-
-				---
-				Previous step outputs:
-				{dependencyOutputs}
-
-				---
-				Task:
-				{userPrompt}
-				""";
-
-			if (loopFeedback is not null)
-			{
-				prompt += $"""
-
-
-					---
-					Feedback from previous attempt (use this to improve your output):
-					{loopFeedback}
-					""";
-			}
-
-			return prompt;
-		}
-
-		var result = $"""
-			{userPrompt}
-
-			---
-			Context from previous steps:
-			{dependencyOutputs}
-			""";
-
-		if (loopFeedback is not null)
-		{
-			result += $"""
-
-
-				---
-				Feedback from previous attempt (use this to improve your output):
-				{loopFeedback}
-				""";
-		}
-
-		return result;
+		return _formatter.BuildUserPrompt(userPrompt, dependencyOutputs, loopFeedback, step.InputHandlerPrompt);
 	}
 
 	private static string InjectParameters(string prompt, string[] parameterNames, Dictionary<string, string> parameters)
@@ -203,23 +160,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		string model,
 		CancellationToken cancellationToken)
 	{
-		var systemPrompt = $"""
-			You are a stateless content transformation function.
-
-			CRITICAL RULES:
-			1. You receive INPUT CONTENT and TRANSFORMATION INSTRUCTIONS
-			2. You output ONLY the transformed content - nothing else
-			3. Do NOT engage in conversation, ask questions, or add commentary
-			4. Do NOT reference any external context, projects, or repositories
-			5. Do NOT add greetings, offers to help, or clarifying questions
-			6. Simply apply the transformation and output the result
-
-			TRANSFORMATION INSTRUCTIONS:
-			{handlerPrompt}
-
-			OUTPUT FORMAT:
-			Return ONLY the transformed content. No preamble. No commentary. No follow-up questions.
-			""";
+		var systemPrompt = _formatter.BuildTransformationSystemPrompt(handlerPrompt);
 
 		var agent = await _agentBuilder
 			.WithModel(model)
@@ -229,14 +170,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			.WithReporter(_reporter)
 			.BuildAgentAsync(cancellationToken);
 
-		// Wrap content in clear delimiters to prevent model from treating it as a conversation
-		var wrappedContent = $"""
-			<INPUT_CONTENT>
-			{content}
-			</INPUT_CONTENT>
-
-			Transform the content above according to your instructions. Output ONLY the transformed content.
-			""";
+		var wrappedContent = _formatter.WrapContentForTransformation(content);
 
 		var task = agent.SendAsync(wrappedContent, cancellationToken);
 		var result = await task.GetResultAsync();

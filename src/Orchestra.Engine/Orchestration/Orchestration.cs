@@ -24,4 +24,17 @@ public class Orchestration
 	/// (external definitions take priority on name conflicts).
 	/// </summary>
 	public Mcp[] Mcps { get; init; } = [];
+
+	/// <summary>
+	/// Default system prompt mode for all steps in the orchestration.
+	/// Individual steps can override this value with their own SystemPromptMode.
+	/// When null, the SDK's default behavior is used.
+	/// </summary>
+	/// <remarks>
+	/// Use <see cref="SystemPromptMode.Replace"/> to completely replace the SDK's
+	/// default system prompt (e.g., Copilot's coding instructions) with your custom prompt.
+	/// Use <see cref="SystemPromptMode.Append"/> to add your prompt to the SDK's default,
+	/// preserving built-in capabilities like coding assistance.
+	/// </remarks>
+	public SystemPromptMode? DefaultSystemPromptMode { get; init; }
 }

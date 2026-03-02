@@ -176,7 +176,7 @@ public class OrchestrationExecutionContextTests
 	#region GetDependencyOutputs
 
 	[Fact]
-	public void GetDependencyOutputs_WhenNoDependencies_ReturnsEmptyString()
+	public void GetDependencyOutputs_WhenNoDependencies_ReturnsEmptyDictionary()
 	{
 		// Arrange
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -189,7 +189,7 @@ public class OrchestrationExecutionContextTests
 	}
 
 	[Fact]
-	public void GetDependencyOutputs_SingleDependency_ReturnsContentDirectly()
+	public void GetDependencyOutputs_SingleDependency_ReturnsDictionaryWithContent()
 	{
 		// Arrange
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -199,11 +199,12 @@ public class OrchestrationExecutionContextTests
 		var result = context.GetDependencyOutputs(["dep1"]);
 
 		// Assert
-		result.Should().Be("output content");
+		result.Should().ContainKey("dep1");
+		result["dep1"].Should().Be("output content");
 	}
 
 	[Fact]
-	public void GetDependencyOutputs_MultipleDependencies_FormatsWithHeaders()
+	public void GetDependencyOutputs_MultipleDependencies_ReturnsDictionaryWithAllOutputs()
 	{
 		// Arrange
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -214,11 +215,11 @@ public class OrchestrationExecutionContextTests
 		var result = context.GetDependencyOutputs(["dep1", "dep2"]);
 
 		// Assert
-		result.Should().Contain("## Output from 'dep1':");
-		result.Should().Contain("output1");
-		result.Should().Contain("## Output from 'dep2':");
-		result.Should().Contain("output2");
-		result.Should().Contain("---"); // Separator
+		result.Should().HaveCount(2);
+		result.Should().ContainKey("dep1");
+		result["dep1"].Should().Be("output1");
+		result.Should().ContainKey("dep2");
+		result["dep2"].Should().Be("output2");
 	}
 
 	[Fact]
@@ -233,12 +234,13 @@ public class OrchestrationExecutionContextTests
 		var result = context.GetDependencyOutputs(["dep1", "dep2"]);
 
 		// Assert
-		result.Should().Contain("output1");
-		result.Should().NotContain("dep2");
+		result.Should().ContainKey("dep1");
+		result["dep1"].Should().Be("output1");
+		result.Should().NotContainKey("dep2");
 	}
 
 	[Fact]
-	public void GetDependencyOutputs_WhenAllFailed_ReturnsEmptyString()
+	public void GetDependencyOutputs_WhenAllFailed_ReturnsEmptyDictionary()
 	{
 		// Arrange
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -385,6 +387,48 @@ public class OrchestrationExecutionContextTests
 		// Assert
 		context.Parameters.Should().ContainKey("param1");
 		context.Parameters["param1"].Should().Be("value1");
+	}
+
+	#endregion
+
+	#region DefaultSystemPromptMode
+
+	[Fact]
+	public void DefaultSystemPromptMode_WhenNotSet_IsNull()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Assert
+		context.DefaultSystemPromptMode.Should().BeNull();
+	}
+
+	[Fact]
+	public void DefaultSystemPromptMode_WhenSetToReplace_ReturnsReplace()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			DefaultSystemPromptMode = SystemPromptMode.Replace
+		};
+
+		// Assert
+		context.DefaultSystemPromptMode.Should().Be(SystemPromptMode.Replace);
+	}
+
+	[Fact]
+	public void DefaultSystemPromptMode_WhenSetToAppend_ReturnsAppend()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			DefaultSystemPromptMode = SystemPromptMode.Append
+		};
+
+		// Assert
+		context.DefaultSystemPromptMode.Should().Be(SystemPromptMode.Append);
 	}
 
 	#endregion

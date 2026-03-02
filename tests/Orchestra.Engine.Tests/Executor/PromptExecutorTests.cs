@@ -8,6 +8,7 @@ namespace Orchestra.Engine.Tests.Executor;
 public class PromptExecutorTests
 {
 	private readonly ILogger<PromptExecutor> _logger = Substitute.For<ILogger<PromptExecutor>>();
+	private readonly IPromptFormatter _formatter = DefaultPromptFormatter.Instance;
 
 	#region Basic Execution
 
@@ -17,7 +18,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithResponse("Hello, world!");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -36,7 +37,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response content");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -54,7 +55,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithException(new Exception("Agent error"));
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -73,7 +74,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithException(new Exception("Agent error"));
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -103,7 +104,7 @@ public class PromptExecutorTests
 		});
 
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreateStepWithParameterizedPrompt(
 			"param-step",
@@ -140,7 +141,7 @@ public class PromptExecutorTests
 		});
 
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreateStepWithParameterizedPrompt(
 			"param-step",
@@ -177,7 +178,7 @@ public class PromptExecutorTests
 		});
 
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("consumer", dependsOn: ["producer"]);
 
@@ -205,7 +206,7 @@ public class PromptExecutorTests
 		});
 
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("consumer", dependsOn: ["dep1", "dep2"]);
 
@@ -241,7 +242,7 @@ public class PromptExecutorTests
 		});
 
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("looping-step");
 
@@ -262,7 +263,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithResponse("response");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("looping-step");
 
@@ -286,7 +287,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response content");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("traced-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -305,7 +306,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response content");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("traced-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -323,7 +324,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithResponse("response");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("consumer", dependsOn: ["producer"]);
 
@@ -372,7 +373,7 @@ public class PromptExecutorTests
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Final response", events);
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("tool-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -414,7 +415,7 @@ public class PromptExecutorTests
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Done", events);
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("tool-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -452,7 +453,7 @@ public class PromptExecutorTests
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response", events);
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("reasoning-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -489,7 +490,7 @@ public class PromptExecutorTests
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response", events);
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("reasoning-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -512,7 +513,7 @@ public class PromptExecutorTests
 		var usage = new AgentUsage { InputTokens = 100, OutputTokens = 50 };
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response", usage: usage, actualModel: "claude-opus-4.5");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("usage-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -531,7 +532,7 @@ public class PromptExecutorTests
 		var usage = new AgentUsage { InputTokens = 100, OutputTokens = 50 };
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response", usage: usage, actualModel: "model");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("usage-step");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -555,7 +556,7 @@ public class PromptExecutorTests
 		// Arrange
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response", actualModel: "gpt-4-turbo");
 		var reporter = Substitute.For<IOrchestrationReporter>();
-		var executor = new PromptExecutor(agentBuilder, reporter, _logger);
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("model-step", model: "gpt-4");
 		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
@@ -565,6 +566,125 @@ public class PromptExecutorTests
 
 		// Assert
 		result.ActualModel.Should().Be("gpt-4-turbo");
+	}
+
+	#endregion
+
+	#region SystemPromptMode
+
+	[Fact]
+	public async Task ExecuteAsync_StepSystemPromptMode_OverridesContextDefault()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStepWithSystemPromptMode(
+			"test-step",
+			SystemPromptMode.Append); // Step explicitly sets Append
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			DefaultSystemPromptMode = SystemPromptMode.Replace // Context default is Replace
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - Step's mode should override context default
+		agentBuilder.CapturedSystemPromptMode.Should().Be(SystemPromptMode.Append);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_NoStepSystemPromptMode_UsesContextDefault()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step"); // No SystemPromptMode set
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			DefaultSystemPromptMode = SystemPromptMode.Replace // Context default is Replace
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - Should use context's default
+		agentBuilder.CapturedSystemPromptMode.Should().Be(SystemPromptMode.Replace);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_NoStepModeNoContextDefault_UsesNull()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step"); // No SystemPromptMode set
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>()
+			// No DefaultSystemPromptMode set
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - Should be null (SDK default behavior)
+		agentBuilder.CapturedSystemPromptMode.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_StepModeReplace_PassesReplace()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStepWithSystemPromptMode(
+			"test-step",
+			SystemPromptMode.Replace);
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		agentBuilder.CapturedSystemPromptMode.Should().Be(SystemPromptMode.Replace);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ContextDefaultAppend_StepNullMode_UsesAppend()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step"); // No mode
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			DefaultSystemPromptMode = SystemPromptMode.Append
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		agentBuilder.CapturedSystemPromptMode.Should().Be(SystemPromptMode.Append);
 	}
 
 	#endregion
