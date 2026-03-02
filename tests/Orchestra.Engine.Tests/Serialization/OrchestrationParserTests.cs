@@ -76,6 +76,65 @@ public class OrchestrationParserTests
 		orchestration.Version.Should().Be("1.0.0");
 	}
 
+	[Fact]
+	public void ParseOrchestration_WithDefaultSystemPromptMode_ParsesMode()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "with-default-mode",
+				"description": "Test",
+				"defaultSystemPromptMode": "replace",
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.DefaultSystemPromptMode.Should().Be(SystemPromptMode.Replace);
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithDefaultSystemPromptModeAppend_ParsesMode()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "with-append-mode",
+				"description": "Test",
+				"defaultSystemPromptMode": "append",
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.DefaultSystemPromptMode.Should().Be(SystemPromptMode.Append);
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithoutDefaultSystemPromptMode_DefaultsToNull()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "no-default-mode",
+				"description": "Test",
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.DefaultSystemPromptMode.Should().BeNull();
+	}
+
 	#endregion
 
 	#region Step Parsing

@@ -11,6 +11,12 @@ public class MockAgentBuilder : AgentBuilder
 	private Func<string, CancellationToken, AgentTask>? _sendAsyncHandler;
 
 	/// <summary>
+	/// Gets the SystemPromptMode that was configured on this builder.
+	/// Useful for testing that the correct mode is passed through.
+	/// </summary>
+	public SystemPromptMode? CapturedSystemPromptMode => SystemPromptMode;
+
+	/// <summary>
 	/// Configures the mock agent to return specific events and result.
 	/// </summary>
 	public MockAgentBuilder WithResponse(string content, AgentEvent[]? events = null, AgentUsage? usage = null, string? actualModel = null)

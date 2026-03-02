@@ -8,6 +8,7 @@ public class OrchestrationExecutor
 	private readonly IScheduler _scheduler;
 	private readonly AgentBuilder _agentBuilder;
 	private readonly IOrchestrationReporter _reporter;
+	private readonly IPromptFormatter _promptFormatter;
 	private readonly ILoggerFactory _loggerFactory;
 	private readonly ILogger<OrchestrationExecutor> _logger;
 	private readonly IRunStore _runStore;
@@ -17,11 +18,13 @@ public class OrchestrationExecutor
 		AgentBuilder agentBuilder,
 		IOrchestrationReporter reporter,
 		ILoggerFactory loggerFactory,
+		IPromptFormatter? promptFormatter = null,
 		IRunStore? runStore = null)
 	{
 		_scheduler = scheduler;
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
+		_promptFormatter = promptFormatter ?? DefaultPromptFormatter.Instance;
 		_loggerFactory = loggerFactory;
 		_logger = loggerFactory.CreateLogger<OrchestrationExecutor>();
 		_runStore = runStore ?? NullRunStore.Instance;
@@ -47,8 +50,9 @@ public class OrchestrationExecutor
 		var context = new OrchestrationExecutionContext
 		{
 			Parameters = effectiveParams,
+			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
 		};
-		var executor = new PromptExecutor(_agentBuilder, _reporter, _loggerFactory.CreateLogger<PromptExecutor>());
+		var executor = new PromptExecutor(_agentBuilder, _reporter, _promptFormatter, _loggerFactory.CreateLogger<PromptExecutor>());
 		var stepResults = new ConcurrentDictionary<string, ExecutionResult>();
 		var stepRecords = new ConcurrentDictionary<string, StepRunRecord>();
 		var allStepRecords = new ConcurrentDictionary<string, StepRunRecord>();

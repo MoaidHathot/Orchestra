@@ -1,0 +1,37 @@
+{
+  "name": "system-prompt-mode-example",
+  "description": "Demonstrates defaultSystemPromptMode at orchestration level with step-level override. The default 'replace' mode removes SDK's built-in prompts (e.g., Copilot's coding instructions), while the code-reviewer step uses 'append' to keep coding capabilities.",
+  "defaultSystemPromptMode": "replace",
+  "steps": [
+    {
+      "name": "translator",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a professional translator. Translate the given text to French. Output only the translation, nothing else.",
+      "userPrompt": "Translate the following text:\n\n{{text}}",
+      "parameters": ["text"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "code-reviewer",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "Focus specifically on security vulnerabilities, SQL injection risks, and authentication issues.",
+      "systemPromptMode": "append",
+      "userPrompt": "Review the following code for security issues:\n\n{{code}}",
+      "parameters": ["code"],
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "summarizer",
+      "type": "Prompt",
+      "dependsOn": ["translator", "code-reviewer"],
+      "systemPrompt": "You are a concise summarizer. Combine information from multiple sources into a brief summary.",
+      "userPrompt": "Summarize the outputs from the previous steps into a single cohesive report.",
+      "mcps": [],
+      "model": "claude-opus-4.5"
+    }
+  ]
+}

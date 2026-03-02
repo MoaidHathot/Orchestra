@@ -204,4 +204,26 @@ public static class TestOrchestrations
 			Model = "claude-opus-4.5"
 		};
 	}
+
+	/// <summary>
+	/// Creates a step with a specific SystemPromptMode.
+	/// </summary>
+	public static PromptOrchestrationStep CreatePromptStepWithSystemPromptMode(
+		string name,
+		SystemPromptMode systemPromptMode,
+		string[]? dependsOn = null,
+		string model = "claude-opus-4.5")
+	{
+		return new PromptOrchestrationStep
+		{
+			Name = name,
+			Type = OrchestrationStepType.Prompt,
+			DependsOn = dependsOn ?? [],
+			Parameters = [],
+			SystemPrompt = "You are a test assistant.",
+			UserPrompt = "Test prompt",
+			Model = model,
+			SystemPromptMode = systemPromptMode
+		};
+	}
 }
