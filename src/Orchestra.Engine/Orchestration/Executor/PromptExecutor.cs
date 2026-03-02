@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace Orchestra.Engine;
 
 public class PromptExecutor : Executor<PromptOrchestrationStep>
@@ -19,10 +21,24 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Capture raw dependency outputs before building the prompt
 		var rawDependencyOutputs = context.GetRawDependencyOutputs(step.DependsOn);
 
+		// Get the raw user prompt before input handler processing
+		var userPromptRaw = InjectParameters(step.UserPrompt, step.Parameters, context.Parameters);
+
+		// Trace data collectors
+		var reasoningBuilder = new StringBuilder();
+		var toolCalls = new List<ToolCallRecord>();
+		var responseSegments = new List<string>();
+		var currentResponseBuilder = new StringBuilder();
+		var pendingToolCalls = new Dictionary<string, (string ToolName, string? Arguments, string? McpServer, DateTimeOffset StartedAt)>();
+
 		try
 		{
 			// Build the user prompt, incorporating dependency outputs and parameters
 			var userPrompt = BuildUserPrompt(step, context);
+
+			// Debug: Log step MCPs
+			Console.WriteLine($"[DEBUG] Step '{step.Name}' has {step.Mcps.Length} MCPs: [{string.Join(", ", step.Mcps.Select(m => m.Name))}]");
+			Console.WriteLine($"[DEBUG] Step '{step.Name}' McpNames: [{string.Join(", ", step.McpNames)}]");
 
 			// Build and run the agent
 			var agent = await _agentBuilder
@@ -36,28 +52,100 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 
 			var task = agent.SendAsync(userPrompt, cancellationToken);
 
-		// Consume events — report deltas, tools, and errors
-		await foreach (var evt in task.WithCancellation(cancellationToken))
-		{
-			switch (evt.Type)
+			// Consume events — report deltas, tools, and errors while collecting trace data
+			await foreach (var evt in task.WithCancellation(cancellationToken))
 			{
-				case AgentEventType.MessageDelta:
-					_reporter.ReportContentDelta(step.Name, evt.Content ?? string.Empty);
-					break;
-				case AgentEventType.ReasoningDelta:
-					_reporter.ReportReasoningDelta(step.Name, evt.Content ?? string.Empty);
-					break;
-				case AgentEventType.ToolExecutionStart:
-					_reporter.ReportToolExecutionStarted(step.Name, evt.ToolName ?? "unknown", evt.ToolArguments, evt.McpServerName);
-					break;
-				case AgentEventType.ToolExecutionComplete:
-					_reporter.ReportToolExecutionCompleted(step.Name, evt.ToolName ?? "unknown", evt.ToolSuccess ?? false, evt.ToolResult, evt.ToolError);
-					break;
-				case AgentEventType.Error:
-					_reporter.ReportStepError(step.Name, evt.ErrorMessage ?? "Unknown error");
-					break;
+				switch (evt.Type)
+				{
+					case AgentEventType.MessageDelta:
+						_reporter.ReportContentDelta(step.Name, evt.Content ?? string.Empty);
+						currentResponseBuilder.Append(evt.Content ?? string.Empty);
+						break;
+
+					case AgentEventType.ReasoningDelta:
+						_reporter.ReportReasoningDelta(step.Name, evt.Content ?? string.Empty);
+						reasoningBuilder.Append(evt.Content ?? string.Empty);
+						break;
+
+					case AgentEventType.ToolExecutionStart:
+						_reporter.ReportToolExecutionStarted(step.Name, evt.ToolName ?? "unknown", evt.ToolArguments, evt.McpServerName);
+
+						// Save current response segment before tool call (if any content)
+						if (currentResponseBuilder.Length > 0)
+						{
+							responseSegments.Add(currentResponseBuilder.ToString());
+							currentResponseBuilder.Clear();
+						}
+
+						// Track pending tool call
+						if (evt.ToolCallId is not null)
+						{
+							pendingToolCalls[evt.ToolCallId] = (
+								evt.ToolName ?? "unknown",
+								evt.ToolArguments,
+								evt.McpServerName,
+								DateTimeOffset.UtcNow
+							);
+						}
+						else
+						{
+							// No call ID, create record immediately
+							toolCalls.Add(new ToolCallRecord
+							{
+								ToolName = evt.ToolName ?? "unknown",
+								Arguments = evt.ToolArguments,
+								McpServer = evt.McpServerName,
+								StartedAt = DateTimeOffset.UtcNow,
+							});
+						}
+						break;
+
+					case AgentEventType.ToolExecutionComplete:
+						_reporter.ReportToolExecutionCompleted(step.Name, evt.ToolName ?? "unknown", evt.ToolSuccess ?? false, evt.ToolResult, evt.ToolError);
+
+						// Complete the pending tool call record
+						if (evt.ToolCallId is not null && pendingToolCalls.TryGetValue(evt.ToolCallId, out var pending))
+						{
+							pendingToolCalls.Remove(evt.ToolCallId);
+							toolCalls.Add(new ToolCallRecord
+							{
+								CallId = evt.ToolCallId,
+								ToolName = pending.ToolName,
+								Arguments = pending.Arguments,
+								McpServer = pending.McpServer,
+								Success = evt.ToolSuccess ?? false,
+								Result = evt.ToolResult,
+								Error = evt.ToolError,
+								StartedAt = pending.StartedAt,
+								CompletedAt = DateTimeOffset.UtcNow,
+							});
+						}
+						else
+						{
+							// No matching pending call, create complete record
+							toolCalls.Add(new ToolCallRecord
+							{
+								CallId = evt.ToolCallId,
+								ToolName = evt.ToolName ?? "unknown",
+								Success = evt.ToolSuccess ?? false,
+								Result = evt.ToolResult,
+								Error = evt.ToolError,
+								CompletedAt = DateTimeOffset.UtcNow,
+							});
+						}
+						break;
+
+					case AgentEventType.Error:
+						_reporter.ReportStepError(step.Name, evt.ErrorMessage ?? "Unknown error");
+						break;
+				}
 			}
-		}
+
+			// Save any remaining response content
+			if (currentResponseBuilder.Length > 0)
+			{
+				responseSegments.Add(currentResponseBuilder.ToString());
+			}
 
 			var result = await task.GetResultAsync();
 
@@ -71,14 +159,16 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 				_reporter.ReportUsage(step.Name, result.ActualModel, result.Usage);
 			}
 
-		var content = result.Content;
+			var content = result.Content;
 			string? rawContent = null;
+			string? outputHandlerResult = null;
 
 			// Apply output handler if specified
 			if (step.OutputHandlerPrompt is not null)
 			{
 				rawContent = content;
 				content = await RunHandlerAsync(step.OutputHandlerPrompt, content, step.Model, cancellationToken);
+				outputHandlerResult = content;
 			}
 
 			// Convert usage to our TokenUsage type
@@ -92,18 +182,48 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 				};
 			}
 
+			// Build the execution trace
+			var trace = new StepExecutionTrace
+			{
+				SystemPrompt = step.SystemPrompt,
+				UserPromptRaw = userPromptRaw,
+				UserPromptProcessed = userPrompt,
+				Reasoning = reasoningBuilder.Length > 0 ? reasoningBuilder.ToString() : null,
+				ToolCalls = toolCalls,
+				ResponseSegments = responseSegments,
+				FinalResponse = rawContent ?? result.Content,
+				OutputHandlerResult = outputHandlerResult,
+			};
+
+			// Report the step trace for live trace viewing
+			_reporter.ReportStepTrace(step.Name, trace);
+
 			return ExecutionResult.Succeeded(
 				content,
 				rawContent,
 				rawDependencyOutputs,
 				userPrompt,
 				result.ActualModel,
-				tokenUsage);
+				tokenUsage,
+				trace);
 		}
 		catch (Exception ex)
 		{
+			// Build partial trace even on failure
+			var trace = new StepExecutionTrace
+			{
+				SystemPrompt = step.SystemPrompt,
+				UserPromptRaw = userPromptRaw,
+				Reasoning = reasoningBuilder.Length > 0 ? reasoningBuilder.ToString() : null,
+				ToolCalls = toolCalls,
+				ResponseSegments = responseSegments,
+			};
+
+			// Report the partial trace for live trace viewing
+			_reporter.ReportStepTrace(step.Name, trace);
+
 			_reporter.ReportStepError(step.Name, ex.Message);
-			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs);
+			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace);
 		}
 	}
 
@@ -190,22 +310,41 @@ public class PromptExecutor : Executor<PromptOrchestrationStep>
 		CancellationToken cancellationToken)
 	{
 		var systemPrompt = $"""
-			You are a content transformer. Your ONLY job is to take the provided content and transform it according to the instructions below.
-			You MUST output the FULL transformed content. Do NOT summarize, truncate, or shorten the content.
-			Do NOT add conversational responses, commentary, or offers to help. Output ONLY the transformed content.
+			You are a stateless content transformation function.
 
-			Transformation instructions:
+			CRITICAL RULES:
+			1. You receive INPUT CONTENT and TRANSFORMATION INSTRUCTIONS
+			2. You output ONLY the transformed content - nothing else
+			3. Do NOT engage in conversation, ask questions, or add commentary
+			4. Do NOT reference any external context, projects, or repositories
+			5. Do NOT add greetings, offers to help, or clarifying questions
+			6. Simply apply the transformation and output the result
+
+			TRANSFORMATION INSTRUCTIONS:
 			{handlerPrompt}
+
+			OUTPUT FORMAT:
+			Return ONLY the transformed content. No preamble. No commentary. No follow-up questions.
 			""";
 
 		var agent = await _agentBuilder
 			.WithModel(model)
 			.WithSystemPrompt(systemPrompt)
+			.WithSystemPromptMode(SystemPromptMode.Replace)
 			.WithMcp()
 			.WithReporter(_reporter)
 			.BuildAgentAsync(cancellationToken);
 
-		var task = agent.SendAsync(content, cancellationToken);
+		// Wrap content in clear delimiters to prevent model from treating it as a conversation
+		var wrappedContent = $"""
+			<INPUT_CONTENT>
+			{content}
+			</INPUT_CONTENT>
+
+			Transform the content above according to your instructions. Output ONLY the transformed content.
+			""";
+
+		var task = agent.SendAsync(wrappedContent, cancellationToken);
 		var result = await task.GetResultAsync();
 
 		return result.Content;

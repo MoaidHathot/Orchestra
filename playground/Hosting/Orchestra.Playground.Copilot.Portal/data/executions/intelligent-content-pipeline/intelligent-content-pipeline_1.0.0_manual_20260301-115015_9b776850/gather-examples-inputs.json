@@ -1,0 +1,8 @@
+{
+  "parameters": {
+    "topic": "Claude Code",
+    "audience": "Public Health Researcher focusing on inequality and resilience"
+  },
+  "rawDependencyOutputs": {},
+  "promptSent": "Use the fetch tool to find 3-5 compelling real-world examples, case studies, or analogies that illustrate \u0027Claude Code\u0027 effectively for a \u0027Public Health Researcher focusing on inequality and resilience\u0027 audience. Search news sites, industry blogs, or documentation for recent examples. For each example: 1) Brief description (2-3 sentences). 2) Why it\u0027s relevant. 3) The key takeaway it demonstrates. Prioritize recent, relatable examples from authoritative sources."
+}

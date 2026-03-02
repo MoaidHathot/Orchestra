@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the weather forecast data I retrieved, here\u0027s **tomorrow\u0027s forecast for Seattle, Washington (Monday, March 2, 2026)**:\n\n**Temperature:**\n- **High:** 58\u00B0F (14\u00B0C)\n- **Low:** 36\u00B0F (2\u00B0C)\n\n**Precipitation:**\n- **Chance of rain:** 0% during the day, increasing to 30% after 4am Monday night\n\n**General Conditions Throughout the Day:**\n- **Morning:** Clear and sunny, starting around 36\u00B0F\n- **Afternoon:** Sunny and pleasant, reaching the high of 58\u00B0F with calm winds becoming south around 5 mph\n- **Evening:** Mostly clear initially, then increasing clouds overnight as a weather system approaches\n\nTomorrow looks like a beautiful early March day in Seattle with sunny skies and mild temperatures - perfect weather before rain moves in Monday night into Tuesday!",
+  "content": "**Tomorrow\u0027s Forecast for Seattle - Monday, March 2, 2026**\n\n**Morning:** Clear and sunny, starting at 36\u00B0F.\n\n**Afternoon:** Sunny and pleasant with temperatures climbing to 58\u00B0F. Light south winds around 5 mph.\n\n**Evening:** Mostly clear initially, then clouds increase overnight as a weather system approaches. Temperatures drop to 36\u00B0F with a 30% chance of rain developing after 4am.\n\nOverall, expect a beautiful early March day with sunshine and mild conditions before rain moves in late Monday night into Tuesday.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 21652,
+    "outputTokens": 199,
+    "totalTokens": 21851
+  }
+}

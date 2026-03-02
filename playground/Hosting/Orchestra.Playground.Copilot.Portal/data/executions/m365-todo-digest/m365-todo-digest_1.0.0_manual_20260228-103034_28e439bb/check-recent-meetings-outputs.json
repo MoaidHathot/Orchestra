@@ -1,0 +1,4 @@
+{
+  "rawContent": "**No Meetings Tool Available**\n\nI don\u0027t have access to a \u0060get_recent_meetings\u0060 MCP tool or Microsoft Graph API integration in this environment. The available tools in this session are:\n\n- File operations (view, edit, create, glob, grep)\n- PowerShell commands\n- Task agents (explore, code-review, etc.)\n- Web fetch\n\nTo check Teams meetings, you would need:\n1. A configured MCP server with Microsoft Graph API integration\n2. Proper OAuth authentication to your Microsoft 365 account\n3. The \u0060get_recent_meetings\u0060 tool registered in the MCP configuration\n\n**Would you like me to:**\n1. Help you set up a Microsoft Graph API integration for this project?\n2. Create a script that can query Teams meetings once credentials are configured?",
+  "content": "No action items from recent meetings."
+}

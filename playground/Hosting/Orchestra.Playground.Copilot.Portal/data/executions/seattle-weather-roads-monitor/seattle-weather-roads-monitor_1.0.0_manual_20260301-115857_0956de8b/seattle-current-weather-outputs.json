@@ -1,0 +1,10 @@
+{
+  "rawContent": "Perfect! Based on the data from Seattle-Tacoma International Airport (KSEA), here are the **current weather conditions for Seattle, Washington**:\n\n**As of 2:53 AM PST on March 1, 2026:**\n\n- **Temperature:** 39\u00B0F\n- **Humidity:** 93%\n- **Wind Speed:** 14 mph from the Northeast\n- **Conditions:** Partly Cloudy (scattered clouds at 20,000 feet)\n- **Visibility:** 10 miles\n- **Pressure:** 30.08 inches (1019.5 mb)\n\n**Today\u0027s Forecast:**\n- High near 54\u00B0F\n- Partly sunny, gradually becoming sunny\n- North northeast wind 3-6 mph\n\nSeattle is experiencing cool, mostly cloudy conditions with high humidity overnight, transitioning to a partly sunny and milder day ahead.",
+  "content": "**Seattle, Washington Weather**\n*March 1, 2026 at 2:53 AM PST*\n\n**Current Conditions:** Partly Cloudy  \n**Temperature:** 39\u00B0F  \n**Humidity:** 93%  \n**Wind:** 14 mph from NE  \n**Visibility:** 10 miles  \n**Pressure:** 30.08 in\n\n**Today\u0027s Outlook:** High near 54\u00B0F. Partly sunny, gradually becoming sunny with light north northeast winds 3-6 mph.\n\nCool overnight conditions with high humidity transitioning to a milder, sunny day ahead.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 17112,
+    "outputTokens": 202,
+    "totalTokens": 17314
+  }
+}

@@ -122,6 +122,31 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 		Write("loop-iteration", new { checkerStepName, targetStepName, iteration, maxIterations });
 	}
 
+	public void ReportStepTrace(string stepName, StepExecutionTrace trace)
+	{
+		Write("step-trace", new
+		{
+			stepName,
+			systemPrompt = trace.SystemPrompt,
+			userPromptRaw = trace.UserPromptRaw,
+			userPromptProcessed = trace.UserPromptProcessed,
+			reasoning = trace.Reasoning,
+			toolCalls = trace.ToolCalls?.Select(tc => new
+			{
+				tc.ToolName,
+				tc.McpServer,
+				tc.Arguments,
+				tc.Result,
+				tc.Error,
+				tc.StartedAt,
+				tc.CompletedAt,
+			}),
+			responseSegments = trace.ResponseSegments,
+			finalResponse = trace.FinalResponse,
+			outputHandlerResult = trace.OutputHandlerResult,
+		});
+	}
+
 	/// <summary>
 	/// Reports the final orchestration result.
 	/// Not part of IOrchestrationReporter — called directly by the execution endpoint.

@@ -135,4 +135,9 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 	{
 		Console.WriteLine($"  [{checkerStepName}] Loop iteration {iteration}/{maxIterations} — re-running '{targetStepName}' with feedback");
 	}
+
+	public void ReportStepTrace(string stepName, StepExecutionTrace trace)
+	{
+		// Console reporter doesn't output trace details — the step output is already shown.
+	}
 }

@@ -1,0 +1,87 @@
+{
+  "name": "intelligent-content-pipeline",
+  "description": "Advanced orchestration combining all 4 features. (F1) Parameters: accepts \u0027topic\u0027 and \u0027audience\u0027 via manual fire dialog. (F2) Input Handler Prompt: webhook trigger with LLM-powered input normalization that extracts topic/audience from arbitrary payloads. (F3) View State: scheduler trigger enables periodic execution whose results are viewable via the trigger dashboard\u0027s View Run button. (F4) MCP Detection: the \u0027publish\u0027 step uses the filesystem MCP defined inline below to save the final output. When the folder also contains mcp.json, external definitions are merged (and override inline ones on name conflicts). This is a 7-step DAG: 3 parallel research steps fan out, 2 analysis steps synthesize, a quality checker iterates with the draft, and a final publisher step writes the result to disk.",
+  "steps": [
+    {
+      "name": "research-topic",
+      "type": "Prompt",
+      "dependsOn": [],
+      "parameters": [
+        "topic"
+      ]
+    },
+    {
+      "name": "analyze-audience",
+      "type": "Prompt",
+      "dependsOn": [],
+      "parameters": [
+        "audience"
+      ]
+    },
+    {
+      "name": "gather-examples",
+      "type": "Prompt",
+      "dependsOn": [],
+      "parameters": [
+        "topic",
+        "audience"
+      ]
+    },
+    {
+      "name": "create-outline",
+      "type": "Prompt",
+      "dependsOn": [
+        "research-topic",
+        "analyze-audience"
+      ],
+      "parameters": [
+        "topic",
+        "audience"
+      ]
+    },
+    {
+      "name": "write-draft",
+      "type": "Prompt",
+      "dependsOn": [
+        "create-outline",
+        "gather-examples"
+      ],
+      "parameters": [
+        "audience"
+      ]
+    },
+    {
+      "name": "quality-review",
+      "type": "Prompt",
+      "dependsOn": [
+        "write-draft"
+      ],
+      "parameters": [
+        "audience"
+      ]
+    },
+    {
+      "name": "publish",
+      "type": "Prompt",
+      "dependsOn": [
+        "quality-review",
+        "write-draft"
+      ],
+      "parameters": [
+        "topic"
+      ]
+    }
+  ],
+  "version": "1.0.0",
+  "trigger": {
+    "type": "Webhook",
+    "enabled": true,
+    "inputHandlerPrompt": "You will receive a raw JSON payload from an external system. Extract two fields:\n\n1. \u0027topic\u0027 - The subject to write about. Look for fields like \u0027topic\u0027, \u0027subject\u0027, \u0027title\u0027, \u0027query\u0027, \u0027keyword\u0027, or \u0027theme\u0027. If the payload is from a CMS, look in \u0027content.topic\u0027 or \u0027article.subject\u0027. If it\u0027s free-form text, summarize the main topic in 3-5 words.\n\n2. \u0027audience\u0027 - The target audience. Look for fields like \u0027audience\u0027, \u0027target\u0027, \u0027segment\u0027, \u0027persona\u0027, or \u0027readership\u0027. If not found, default to \u0027general technology professionals\u0027.\n\nReturn ONLY a JSON object with \u0027topic\u0027 and \u0027audience\u0027 keys."
+  },
+  "mcps": [
+    {
+      "name": "filesystem",
+      "type": "Local"
+    }
+  ]
+}

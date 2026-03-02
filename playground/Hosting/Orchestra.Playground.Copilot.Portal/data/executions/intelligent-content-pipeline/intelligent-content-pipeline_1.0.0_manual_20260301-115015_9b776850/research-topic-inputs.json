@@ -1,0 +1,7 @@
+{
+  "parameters": {
+    "topic": "Claude Code"
+  },
+  "rawDependencyOutputs": {},
+  "promptSent": "Research the topic \u0027Claude Code\u0027 by fetching information from relevant web sources. Produce a comprehensive brief covering: 1) Definition and core concepts. 2) Current state and recent developments (last 1-2 years). 3) Key players, organizations, or technologies involved. 4) Common misconceptions. 5) Quantitative data points (statistics, market size, adoption rates) where available. Use the fetch tool to retrieve data from authoritative websites, news sources, or documentation sites."
+}

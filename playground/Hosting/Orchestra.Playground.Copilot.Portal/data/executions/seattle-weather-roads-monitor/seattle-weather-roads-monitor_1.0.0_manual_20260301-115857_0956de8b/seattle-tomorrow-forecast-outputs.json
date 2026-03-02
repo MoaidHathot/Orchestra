@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the National Weather Service forecast, **tomorrow (Sunday, March 2nd)** for Seattle:\n\n**\uD83C\uDF21\uFE0F Temperature:** High of 54\u00B0F, Low of 36\u00B0F (overnight into Sunday)\n\n**\u2614 Precipitation:** 0% chance - No rain expected\n\n**\u2600\uFE0F Conditions:** Partly sunny in the morning, gradually becoming sunny throughout the day. North northeast winds 3-6 mph. Clear conditions expected by Sunday night.\n\nIt looks like a pleasant early spring day with improving weather!",
+  "content": "**Tomorrow\u0027s Forecast - Sunday, March 2nd (Seattle)**\n\n**Morning:** Partly sunny skies with temperatures climbing from the mid-30s. Light north northeast winds at 3-6 mph.\n\n**Afternoon:** Gradually becoming sunny with a high of 54\u00B0F. Pleasant conditions with continued light winds.\n\n**Evening:** Clear skies as temperatures drop toward 36\u00B0F overnight. Calm conditions persist.\n\n**Summary:** A beautiful early spring day with improving weather throughout. No rain expected (0% chance). Perfect for outdoor activities with comfortable temperatures and increasing sunshine.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 12819,
+    "outputTokens": 121,
+    "totalTokens": 12940
+  }
+}

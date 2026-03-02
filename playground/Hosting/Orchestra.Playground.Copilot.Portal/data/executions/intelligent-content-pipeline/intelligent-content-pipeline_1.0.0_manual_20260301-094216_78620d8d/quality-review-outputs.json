@@ -1,0 +1,10 @@
+{
+  "rawContent": "**REVISE**\n\nI cannot locate a complete article to review. You\u0027ve provided:\n- **EXAMPLES section** (5 case studies)\n- A note that the **OUTLINE is missing**\n\nBut **no complete article text** is present in the conversation or the current directory.\n\n**Required to proceed:**\nPlease provide the full article text that needs editorial review, or clarify where the article is stored (file path, URL, or paste the complete text).",
+  "content": "**REVISE**\n\nI cannot locate a complete article to review. You\u0027ve provided:\n- **EXAMPLES section** (5 case studies)\n- A note that the **OUTLINE is missing**\n\nBut **no complete article text** is present in the conversation or the current directory.\n\n**Required to proceed:**\nPlease provide the full article text that needs editorial review, or clarify where the article is stored (file path, URL, or paste the complete text).",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 15051,
+    "outputTokens": 103,
+    "totalTokens": 15154
+  }
+}

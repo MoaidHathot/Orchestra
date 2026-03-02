@@ -1,0 +1,4 @@
+{
+  "rawContent": "I don\u0027t have access to Microsoft Graph API MCP tools in this environment. The tools available to me are:\n\n1. **File/code tools**: view, edit, create, grep, glob\n2. **Shell tools**: powershell, read_powershell, write_powershell, stop_powershell\n3. **Agent tools**: task, read_agent, list_agents\n4. **Web tools**: web_fetch\n5. **Memory tools**: store_memory\n\nTo check your Teams messages, you would need either:\n\n1. **MCP tools for Microsoft Graph** configured in your environment (e.g., a Teams MCP server)\n2. **A Teams integration** or API client set up in this project\n3. **Access to Microsoft Graph API** via OAuth tokens\n\n**Would you like me to:**\n- Help you set up a Microsoft Graph API client in this project to query Teams?\n- Check if there\u0027s an existing Teams integration in this codebase?\n- Explore an alternative approach to access your Teams data?",
+  "content": "No action items from Teams messages."
+}

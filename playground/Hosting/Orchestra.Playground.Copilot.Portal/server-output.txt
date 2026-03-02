@@ -1,0 +1,224 @@
+Using launch settings from P:\Github\Orchestra\playground\Hosting\Orchestra.Playground.Copilot.Portal\Properties\launchSettings.json...
+[DEBUG] ResolveStepMcps: Orchestration has 1 inline MCPs: [graph]
+[DEBUG] ResolveStepMcps: External MCPs count: 2, names: [filesystem, graph]
+[DEBUG] ResolveStepMcps: Final lookup has 2 MCPs: [graph, filesystem]
+[DEBUG] ResolveStepMcps: Step 'check-recent-meetings' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-recent-meetings' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-recent-emails' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-recent-emails' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-teams-mentions' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-teams-mentions' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-upcoming-meetings' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-upcoming-meetings' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Orchestration has 0 inline MCPs: []
+[DEBUG] ResolveStepMcps: External MCPs count: 2, names: [filesystem, graph]
+[DEBUG] ResolveStepMcps: Final lookup has 2 MCPs: [filesystem, graph]
+04:19:05 info: OrchestrationRegistry[0] Loaded 2 orchestrations from P:\Github\Orchestra\playground\Hosting\Orchestra.Playground.Copilot.Portal\data\registered-orchestrations.json
+04:19:05 info: Program[0] Loaded 2 persisted orchestrations on startup
+04:19:05 info: Orchestra.Playground.Copilot.Portal.TriggerManager[0] Trigger 'webhook-triggered-notification-89fb' registered for 'P:\Github\Orchestra\examples\webhook-triggered-notification.json' (type=Webhook, source=Json)
+04:19:05 info: Orchestra.Playground.Copilot.Portal.TriggerManager[0] Trigger 'm365-todo-digest-666d' registered for 'P:\Github\Orchestra\examples\m365-todo-digest.json' (type=Scheduler, source=Json)
+04:19:05 info: Program[0] Registered 2 triggers from loaded orchestrations
+04:19:05 info: Orchestra.Playground.Copilot.Portal.TriggerManager[0] TriggerManager started.
+04:19:05 info: Microsoft.Hosting.Lifetime[14] Now listening on: http://localhost:5100
+04:19:05 info: Microsoft.Hosting.Lifetime[0] Application started. Press Ctrl+C to shut down.
+04:19:05 info: Microsoft.Hosting.Lifetime[0] Hosting environment: Development
+04:19:05 info: Microsoft.Hosting.Lifetime[0] Content root path: P:\Github\Orchestra\playground\Hosting\Orchestra.Playground.Copilot.Portal
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0] Starting orchestration 'm365-todo-digest'...
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-recent-meetings' (no dependencies)
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-recent-emails' (no dependencies)
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-teams-mentions' (no dependencies)
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-upcoming-meetings' (no dependencies)
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-recent-meetings'...
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-recent-emails'...
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-teams-mentions'...
+04:19:17 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-upcoming-meetings'...
+[DEBUG] Step 'check-recent-meetings' has 1 MCPs: [graph]
+[DEBUG] Step 'check-teams-mentions' has 1 MCPs: [graph]
+[DEBUG] Step 'check-teams-mentions' McpNames: [graph]
+[DEBUG] Step 'check-upcoming-meetings' has 1 MCPs: [graph]
+[DEBUG] Step 'check-upcoming-meetings' McpNames: [graph]
+[DEBUG] Step 'check-recent-emails' has 1 MCPs: [graph]
+[DEBUG] Step 'check-recent-emails' McpNames: [graph]
+[DEBUG] Step 'check-recent-meetings' McpNames: [graph]
+[MCP-DEBUG] Agent has 1 MCPs configured
+[MCP-DEBUG] Agent has 1 MCPs configured
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[MCP-DEBUG] Agent has 1 MCPs configured
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[MCP-DEBUG] Agent has 1 MCPs configured
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:19:36 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-recent-meetings' completed successfully.
+04:19:37 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-recent-emails' completed successfully.
+04:19:37 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-upcoming-meetings' completed successfully.
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:20:08 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-teams-mentions' completed successfully.
+04:20:08 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'consolidate-todos'...
+[DEBUG] Step 'consolidate-todos' has 0 MCPs: []
+[DEBUG] Step 'consolidate-todos' McpNames: []
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:20:22 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'consolidate-todos' completed successfully.
+04:20:22 info: Orchestra.Engine.OrchestrationExecutor[0] Orchestration 'm365-todo-digest' completed successfully.
+04:24:05 info: Orchestra.Playground.Copilot.Portal.TriggerManager[0] Trigger 'm365-todo-digest-666d' firing orchestration 'P:\Github\Orchestra\examples\m365-todo-digest.json' (execution=46a8e3fc2adc, run #1)
+[DEBUG] ResolveStepMcps: Orchestration has 1 inline MCPs: [graph]
+[DEBUG] ResolveStepMcps: External MCPs count: 2, names: [filesystem, graph]
+[DEBUG] ResolveStepMcps: Final lookup has 2 MCPs: [graph, filesystem]
+[DEBUG] ResolveStepMcps: Step 'check-recent-meetings' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-recent-meetings' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-recent-emails' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-recent-emails' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-teams-mentions' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-teams-mentions' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-upcoming-meetings' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-upcoming-meetings' resolved 1 MCPs
+04:24:05 info: Orchestra.Engine.OrchestrationExecutor[0] Starting orchestration 'm365-todo-digest'...
+04:24:05 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-recent-meetings' (no dependencies)
+04:24:05 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-recent-emails' (no dependencies)
+04:24:05 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-teams-mentions' (no dependencies)
+04:24:05 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-upcoming-meetings' (no dependencies)
+04:24:05 [DEBUG] Step 'check-upcoming-meetings' has 1 MCPs: [graph]
+info[DEBUG] Step 'check-recent-meetings' has 1 MCPs: [graph]
+: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-upcoming-meetings'...
+[DEBUG] Step 'check-recent-meetings' McpNames: [graph]
+04:24:05 [DEBUG] Step 'check-upcoming-meetings' McpNames: [graph]
+info[MCP-DEBUG] Agent has 1 MCPs configured
+: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-recent-meetings'...
+[MCP-DEBUG] Agent has 1 MCPs configured
+04:24:05 [DEBUG] Step 'check-recent-emails' has 1 MCPs: [graph]
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[DEBUG] Step 'check-recent-emails' McpNames: [graph]
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+info[MCP-DEBUG] Agent has 1 MCPs configured
+: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-recent-emails'...
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+04:24:05 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-teams-mentions'...
+[DEBUG] Step 'check-teams-mentions' has 1 MCPs: [graph]
+[DEBUG] Step 'check-teams-mentions' McpNames: [graph]
+[MCP-DEBUG] Agent has 1 MCPs configured
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:24:21 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-teams-mentions' completed successfully.
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:24:23 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-upcoming-meetings' completed successfully.
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:24:25 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-recent-meetings' completed successfully.
+04:24:29 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-recent-emails' completed successfully.
+04:24:29 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'consolidate-todos'...
+[DEBUG] Step 'consolidate-todos' has 0 MCPs: []
+[DEBUG] Step 'consolidate-todos' McpNames: []
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:24:40 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'consolidate-todos' completed successfully.
+04:24:40 info: Orchestra.Engine.OrchestrationExecutor[0] Orchestration 'm365-todo-digest' completed successfully.
+04:29:40 info: Orchestra.Playground.Copilot.Portal.TriggerManager[0] Trigger 'm365-todo-digest-666d' firing orchestration 'P:\Github\Orchestra\examples\m365-todo-digest.json' (execution=0c564915b3e6, run #2)
+[DEBUG] ResolveStepMcps: Orchestration has 1 inline MCPs: [graph]
+[DEBUG] ResolveStepMcps: External MCPs count: 2, names: [filesystem, graph]
+[DEBUG] ResolveStepMcps: Final lookup has 2 MCPs: [graph, filesystem]
+[DEBUG] ResolveStepMcps: Step 'check-recent-meetings' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-recent-meetings' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-recent-emails' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-recent-emails' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-teams-mentions' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-teams-mentions' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-upcoming-meetings' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-upcoming-meetings' resolved 1 MCPs
+04:29:40 info: Orchestra.Engine.OrchestrationExecutor[0] Starting orchestration 'm365-todo-digest'...
+04:29:40 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-recent-meetings' (no dependencies)
+04:29:40 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-recent-emails' (no dependencies)
+04:29:40 info[DEBUG] Step 'check-recent-meetings' has 1 MCPs: [graph]
+[DEBUG] Step 'check-recent-meetings' McpNames: [graph]
+: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-recent-meetings'...
+[MCP-DEBUG] Agent has 1 MCPs configured
+04:29:40 [DEBUG] Step 'check-recent-emails' has 1 MCPs: [graph]
+info[DEBUG] Step 'check-recent-emails' McpNames: [graph]
+: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-teams-mentions' (no dependencies)
+[MCP-DEBUG] Agent has 1 MCPs configured
+04:29:40 [DEBUG] Step 'check-upcoming-meetings' has 1 MCPs: [graph]
+info[DEBUG] Step 'check-upcoming-meetings' McpNames: [graph]
+: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-upcoming-meetings' (no dependencies)
+[MCP-DEBUG] Agent has 1 MCPs configured
+04:29:40 [MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-upcoming-meetings'...
+04:29:40 info[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-recent-emails'...
+04:29:40 [DEBUG] Step 'check-teams-mentions' has 1 MCPs: [graph]
+info[DEBUG] Step 'check-teams-mentions' McpNames: [graph]
+: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-teams-mentions'...
+[MCP-DEBUG] Agent has 1 MCPs configured
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:29:57 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-upcoming-meetings' completed successfully.
+04:29:58 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-recent-emails' completed successfully.
+04:30:00 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-teams-mentions' completed successfully.
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:30:13 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'check-recent-meetings' completed successfully.
+04:30:13 info[DEBUG] Step 'consolidate-todos' has 0 MCPs: []
+: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'consolidate-todos'...
+[DEBUG] Step 'consolidate-todos' McpNames: []
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+[MCP-DEBUG] Agent has 0 MCPs configured
+[MCP-DEBUG] No MCPs to configure for this agent
+04:30:24 info: Orchestra.Engine.OrchestrationExecutor[0]   Step 'consolidate-todos' completed successfully.
+04:30:24 info: Orchestra.Engine.OrchestrationExecutor[0] Orchestration 'm365-todo-digest' completed successfully.
+05:33:13 info: Orchestra.Playground.Copilot.Portal.TriggerManager[0] Trigger 'm365-todo-digest-666d' firing orchestration 'P:\Github\Orchestra\examples\m365-todo-digest.json' (execution=f6dbef0a7781, run #3)
+[DEBUG] ResolveStepMcps: Orchestration has 1 inline MCPs: [graph]
+[DEBUG] ResolveStepMcps: External MCPs count: 2, names: [filesystem, graph]
+[DEBUG] ResolveStepMcps: Final lookup has 2 MCPs: [graph, filesystem]
+[DEBUG] ResolveStepMcps: Step 'check-recent-meetings' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-recent-meetings' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-recent-emails' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-recent-emails' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-teams-mentions' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-teams-mentions' resolved 1 MCPs
+[DEBUG] ResolveStepMcps: Step 'check-upcoming-meetings' references MCPs: [graph]
+[DEBUG] ResolveStepMcps: Step 'check-upcoming-meetings' resolved 1 MCPs
+05:33:13 info: Orchestra.Engine.OrchestrationExecutor[0] Starting orchestration 'm365-todo-digest'...
+05:33:13 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-recent-meetings' (no dependencies)
+05:33:13 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-recent-emails' (no dependencies)
+05:33:13 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-teams-mentions' (no dependencies)
+05:33:13 info: Orchestra.Engine.OrchestrationExecutor[0] Launching step 'check-upcoming-meetings' (no dependencies)
+05:33:13 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-upcoming-meetings'...
+[DEBUG] Step 'check-upcoming-meetings' has 1 MCPs: [graph]
+[DEBUG] Step 'check-upcoming-meetings' McpNames: [graph]
+[MCP-DEBUG] Agent has 1 MCPs configured
+[DEBUG] Step 'check-recent-meetings' has 1 MCPs: [graph]
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+05:33:13 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-recent-meetings'...
+[DEBUG] Step 'check-recent-meetings' McpNames: [graph]
+[MCP-DEBUG] Agent has 1 MCPs configured
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+05:33:13 [DEBUG] Step 'check-teams-mentions' has 1 MCPs: [graph]
+[DEBUG] Step 'check-teams-mentions' McpNames: [graph]
+info[MCP-DEBUG] Agent has 1 MCPs configured
+: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-teams-mentions'...
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra
+[DEBUG] Step 'check-recent-emails' has 1 MCPs: [graph]
+05:33:13 info: Orchestra.Engine.OrchestrationExecutor[0]   Running step 'check-recent-emails'...
+[DEBUG] Step 'check-recent-emails' McpNames: [graph]
+[MCP-DEBUG] Agent has 1 MCPs configured
+[MCP] Configuring local server 'graph': Command=dotnet, Args=[run, --project, src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj], Cwd=P:/Github/Orchestra

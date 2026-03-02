@@ -30,4 +30,10 @@ public interface IRunStore
 	/// Gets a specific run record by orchestration name and run ID.
 	/// </summary>
 	Task<OrchestrationRunRecord?> GetRunAsync(string orchestrationName, string runId, CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Deletes a specific run record by orchestration name and run ID.
+	/// </summary>
+	/// <returns>True if the record was deleted, false if it was not found.</returns>
+	Task<bool> DeleteRunAsync(string orchestrationName, string runId, CancellationToken cancellationToken = default);
 }

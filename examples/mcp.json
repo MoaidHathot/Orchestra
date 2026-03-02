@@ -5,6 +5,13 @@
       "type": "local",
       "command": "npx",
       "arguments": ["-y", "@anthropic/mcp-server-filesystem", "{{workingDirectory}}"]
+    },
+    {
+      "name": "graph",
+      "type": "local",
+      "command": "dotnet",
+      "arguments": ["run", "--project", "src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj"],
+      "workingDirectory": "P:/Github/Orchestra"
     }
   ]
 }

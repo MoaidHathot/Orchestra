@@ -1,0 +1,10 @@
+{
+  "rawContent": "I apologize, but I\u0027m unable to retrieve current road conditions from the WSDOT website. The pages are heavily JavaScript-dependent and don\u0027t load properly through the fetch tool - they require interactive map applications that I cannot access.\n\n**Alternative recommendation:** For real-time Washington State road conditions, you should:\n\n1. **Call 511** - Washington State\u0027s official travel information number\n2. **Visit WSDOT.wa.gov/travel** directly in a browser for their interactive map\n3. **Check the WSDOT mobile app** for live updates\n4. **Twitter: @wsdot** and **@wsdot_traffic** for real-time alerts\n\nThese sources will provide current information on:\n- **I-5 Seattle corridor** - Traffic flow, incidents, construction\n- **I-90 Snoqualmie Pass** - Weather conditions, chain requirements, closures\n- **Highway 20 (North Cascades)** - Typically closed in winter (seasonal highway)\n- **SR-20 to Anacortes** - Road conditions and ferry terminal access\n\nThe WSDOT website requires JavaScript to load live traffic data, cameras, and conditions which I cannot execute through web fetch tools.",
+  "content": "**WASHINGTON STATE ROAD CONDITIONS**\n\n**I-5 Seattle Corridor:** \u26A0\uFE0F STATUS UNAVAILABLE\nMonitor for traffic flow, incidents, and construction updates.\n\n**I-90 Snoqualmie Pass:** \u26A0\uFE0F STATUS UNAVAILABLE  \nCheck for weather conditions, chain requirements, and potential closures.\n\n**Highway 20 (North Cascades):** \uD83D\uDEAB LIKELY CLOSED\nSeasonal highway typically closed during winter months.\n\n**SR-20 to Anacortes:** \u26A0\uFE0F STATUS UNAVAILABLE\nCheck road conditions and ferry terminal access.\n\n**Access Current Information:**\n- Call 511 (official travel info)\n- Visit WSDOT.wa.gov/travel\n- WSDOT mobile app\n- Twitter: @wsdot, @wsdot_traffic\n\n*Note: Real-time data unavailable due to JavaScript-dependent mapping systems. Use official sources for live updates.*",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 23787,
+    "outputTokens": 270,
+    "totalTokens": 24057
+  }
+}

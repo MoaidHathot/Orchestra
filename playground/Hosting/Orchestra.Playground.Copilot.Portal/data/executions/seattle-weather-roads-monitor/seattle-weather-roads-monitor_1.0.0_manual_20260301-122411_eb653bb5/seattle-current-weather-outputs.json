@@ -1,0 +1,10 @@
+{
+  "rawContent": "## Current Weather Conditions for Seattle, Washington\n\n**As of:** March 1, 2026 at 4:16 AM PST\n\n- **Temperature:** 39\u00B0F (4\u00B0C) - Feels like 37\u00B0F (3\u00B0C)\n- **Conditions:** Clear skies\n- **Humidity:** 93%\n- **Wind Speed:** 4 mph (6 km/h) from the NNE\n- **Cloud Cover:** 0% (completely clear)\n- **Visibility:** 9 miles\n- **Pressure:** 30 inches (1019 mb)\n\nThe weather is currently clear with no precipitation, though humidity is high at 93%.",
+  "content": "**Seattle, Washington**  \n*March 1, 2026 \u2022 4:16 AM PST*\n\n\uD83C\uDF19 **Clear Skies** \u2022 39\u00B0F (feels like 37\u00B0F)\n\n**Current Conditions:**\n- Clear with 0% cloud cover\n- Humidity: 93%\n- Wind: 4 mph from NNE\n- Visibility: 9 miles\n- Pressure: 30.0 in\n\nHigh humidity with completely clear skies and calm winds. No precipitation expected.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 15268,
+    "outputTokens": 158,
+    "totalTokens": 15426
+  }
+}
