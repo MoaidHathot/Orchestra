@@ -136,6 +136,40 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		Console.WriteLine($"  [{checkerStepName}] Loop iteration {iteration}/{maxIterations} — re-running '{targetStepName}' with feedback");
 	}
 
+	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
+	{
+		var name = displayName ?? agentName;
+		var toolList = tools is { Length: > 0 } ? string.Join(", ", tools) : "all";
+		Console.WriteLine($"  [{stepName}] Subagent selected: {name} (tools: {toolList})");
+	}
+
+	public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description)
+	{
+		var name = displayName ?? agentName;
+		Console.WriteLine($"  [{stepName}] Subagent started: {name}");
+		if (description is not null)
+		{
+			Console.WriteLine($"    Description: {description}");
+		}
+	}
+
+	public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName)
+	{
+		var name = displayName ?? agentName;
+		Console.WriteLine($"  [{stepName}] Subagent completed: {name}");
+	}
+
+	public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error)
+	{
+		var name = displayName ?? agentName;
+		Console.Error.WriteLine($"  [{stepName}] Subagent failed: {name} - {error ?? "unknown error"}");
+	}
+
+	public void ReportSubagentDeselected(string stepName)
+	{
+		Console.WriteLine($"  [{stepName}] Returned to parent agent");
+	}
+
 	public void ReportStepTrace(string stepName, StepExecutionTrace trace)
 	{
 		// Console reporter doesn't output trace details — the step output is already shown.

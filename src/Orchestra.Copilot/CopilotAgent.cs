@@ -11,6 +11,7 @@ public partial class CopilotAgent : IAgent
 	private readonly string _model;
 	private readonly string? _systemPrompt;
 	private readonly Mcp[] _mcps;
+	private readonly Subagent[] _subagents;
 	private readonly ReasoningLevel? _reasoningLevel;
 	private readonly SystemPromptMode? _systemPromptMode;
 	private readonly IOrchestrationReporter _reporter;
@@ -21,6 +22,7 @@ public partial class CopilotAgent : IAgent
 			string model,
 			string? systemPrompt,
 			Mcp[] mcps,
+			Subagent[] subagents,
 			ReasoningLevel? reasoningLevel,
 			SystemPromptMode? systemPromptMode,
 			IOrchestrationReporter reporter,
@@ -30,6 +32,7 @@ public partial class CopilotAgent : IAgent
 		_model = model;
 		_systemPrompt = systemPrompt;
 		_mcps = mcps;
+		_subagents = subagents;
 		_reasoningLevel = reasoningLevel;
 		_systemPromptMode = systemPromptMode;
 		_reporter = reporter;
@@ -115,6 +118,11 @@ public partial class CopilotAgent : IAgent
 		if (_mcps.Length > 0)
 		{
 			config.McpServers = BuildMcpServers();
+		}
+
+		if (_subagents.Length > 0)
+		{
+			config.CustomAgents = BuildCustomAgents();
 		}
 
 		return config;
@@ -223,6 +231,88 @@ public partial class CopilotAgent : IAgent
 		return servers;
 	}
 
+	private List<CustomAgentConfig> BuildCustomAgents()
+	{
+		var customAgents = new List<CustomAgentConfig>();
+
+		foreach (var subagent in _subagents)
+		{
+			var config = new CustomAgentConfig
+			{
+				Name = subagent.Name,
+				Prompt = subagent.Prompt,
+			};
+
+			if (subagent.DisplayName is not null)
+				config.DisplayName = subagent.DisplayName;
+
+			if (subagent.Description is not null)
+				config.Description = subagent.Description;
+
+			if (subagent.Tools is { Length: > 0 })
+				config.Tools = [.. subagent.Tools];
+
+			if (!subagent.Infer)
+				config.Infer = false;
+
+			// Add MCP servers specific to this subagent
+			if (subagent.Mcps.Length > 0)
+			{
+				config.McpServers = BuildMcpServersFor(subagent.Mcps);
+			}
+
+			customAgents.Add(config);
+		}
+
+		LogSubagentConfiguration();
+		return customAgents;
+	}
+
+	private Dictionary<string, object> BuildMcpServersFor(Mcp[] mcps)
+	{
+		var servers = new Dictionary<string, object>();
+
+		foreach (var mcp in mcps)
+		{
+			switch (mcp)
+			{
+				case LocalMcp local:
+					servers[mcp.Name] = new McpLocalServerConfig
+					{
+						Command = local.Command,
+						Args = [.. local.Arguments],
+						Cwd = local.WorkingDirectory,
+					};
+					break;
+
+				case RemoteMcp remote:
+					servers[mcp.Name] = new McpRemoteServerConfig
+					{
+						Url = remote.Endpoint,
+						Headers = remote.Headers,
+					};
+					break;
+			}
+		}
+
+		return servers;
+	}
+
+	private void LogSubagentConfiguration()
+	{
+		LogSubagentCount(_subagents.Length);
+
+		foreach (var subagent in _subagents)
+		{
+			LogSubagentDetails(
+				subagent.Name,
+				subagent.DisplayName ?? "(none)",
+				subagent.Tools is { Length: > 0 } ? string.Join(", ", subagent.Tools) : "all",
+				subagent.Mcps.Length,
+				subagent.Infer);
+		}
+	}
+
 	#region Source-Generated Logging
 
 	[LoggerMessage(
@@ -248,6 +338,18 @@ public partial class CopilotAgent : IAgent
 			Level = LogLevel.Debug,
 			Message = "No MCPs configured for this agent")]
 	private partial void LogNoMcpsConfigured();
+
+	[LoggerMessage(
+			EventId = 5,
+			Level = LogLevel.Debug,
+			Message = "Agent has {SubagentCount} subagents configured")]
+	private partial void LogSubagentCount(int subagentCount);
+
+	[LoggerMessage(
+			EventId = 6,
+			Level = LogLevel.Debug,
+			Message = "Configuring subagent '{Name}': DisplayName={DisplayName}, Tools=[{Tools}], McpCount={McpCount}, Infer={Infer}")]
+	private partial void LogSubagentDetails(string name, string displayName, string tools, int mcpCount, bool infer);
 
 	#endregion
 }

@@ -23,4 +23,11 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// Raw MCP names from JSON, used internally during parsing to resolve to <see cref="Mcps"/>.
 	/// </summary>
 	internal string[] McpNames { get; init; } = [];
+
+	/// <summary>
+	/// Optional list of subagents that the main step orchestrator can delegate to.
+	/// When provided, the implementation will use multi-agent orchestration,
+	/// allowing the runtime to automatically delegate to subagents based on user intent.
+	/// </summary>
+	public Subagent[] Subagents { get; init; } = [];
 }

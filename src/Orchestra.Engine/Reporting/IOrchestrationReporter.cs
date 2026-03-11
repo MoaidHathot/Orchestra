@@ -18,4 +18,11 @@ public interface IOrchestrationReporter
 	void ReportStepStarted(string stepName);
 	void ReportStepSkipped(string stepName, string reason);
 	void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations);
+
+	// Subagent events
+	void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools);
+	void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description);
+	void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName);
+	void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error);
+	void ReportSubagentDeselected(string stepName);
 }

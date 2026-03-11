@@ -23,6 +23,7 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		var model = Model;
 		var systemPrompt = SystemPrompt;
 		var mcps = Mcps;
+		var subagents = Subagents;
 		var reasoningLevel = ReasoningLevel;
 		var systemPromptMode = SystemPromptMode;
 		var reporter = Reporter;
@@ -34,6 +35,7 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			model: model,
 			systemPrompt: systemPrompt,
 			mcps: mcps,
+			subagents: subagents,
 			reasoningLevel: reasoningLevel,
 			systemPromptMode: systemPromptMode,
 			reporter: reporter,

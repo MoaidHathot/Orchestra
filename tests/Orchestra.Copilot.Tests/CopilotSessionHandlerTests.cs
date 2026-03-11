@@ -143,6 +143,67 @@ public class CopilotSessionHandlerTests
 		Data = new SessionIdleData()
 	};
 
+	private static SubagentSelectedEvent CreateSubagentSelectedEvent(
+		string agentName,
+		string? displayName = null,
+		string[]? tools = null) => new()
+	{
+		Data = new SubagentSelectedData
+		{
+			AgentName = agentName,
+			AgentDisplayName = displayName!,
+			Tools = tools!
+		}
+	};
+
+	private static SubagentStartedEvent CreateSubagentStartedEvent(
+		string agentName,
+		string? toolCallId = null,
+		string? displayName = null,
+		string? description = null) => new()
+	{
+		Data = new SubagentStartedData
+		{
+			ToolCallId = toolCallId!,
+			AgentName = agentName,
+			AgentDisplayName = displayName!,
+			AgentDescription = description!
+		}
+	};
+
+	private static SubagentCompletedEvent CreateSubagentCompletedEvent(
+		string agentName,
+		string? toolCallId = null,
+		string? displayName = null) => new()
+	{
+		Data = new SubagentCompletedData
+		{
+			ToolCallId = toolCallId!,
+			AgentName = agentName,
+			AgentDisplayName = displayName!
+		}
+	};
+
+	private static SubagentFailedEvent CreateSubagentFailedEvent(
+		string agentName,
+		string? toolCallId = null,
+		string? displayName = null,
+		string? error = null) => new()
+	{
+		Data = new SubagentFailedData
+		{
+			ToolCallId = toolCallId!,
+			AgentName = agentName,
+			AgentDisplayName = displayName!,
+			Error = error!
+		}
+	};
+
+	private static SubagentDeselectedEvent CreateSubagentDeselectedEvent() => new()
+	{
+		Data = new SubagentDeselectedData()
+	};
+
 	#endregion
 
 	#region Session Start
@@ -548,6 +609,176 @@ public class CopilotSessionHandlerTests
 
 	#endregion
 
+	#region Subagent Selected
+
+	[Fact]
+	public void HandleEvent_SubagentSelected_WritesSubagentSelectedEvent()
+	{
+		// Arrange
+		var subagentSelectedEvent = CreateSubagentSelectedEvent(
+			agentName: "researcher",
+			displayName: "Research Agent",
+			tools: ["web_search", "read_file"]);
+
+		// Act
+		_handler.HandleEvent(subagentSelectedEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.SubagentSelected);
+		agentEvent.SubagentName.Should().Be("researcher");
+		agentEvent.SubagentDisplayName.Should().Be("Research Agent");
+		agentEvent.SubagentTools.Should().BeEquivalentTo(["web_search", "read_file"]);
+	}
+
+	[Fact]
+	public void HandleEvent_SubagentSelected_WithNullOptionalFields_HandlesGracefully()
+	{
+		// Arrange
+		var subagentSelectedEvent = CreateSubagentSelectedEvent(
+			agentName: "minimal-agent",
+			displayName: null,
+			tools: null);
+
+		// Act
+		_handler.HandleEvent(subagentSelectedEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.SubagentName.Should().Be("minimal-agent");
+		agentEvent.SubagentDisplayName.Should().BeNull();
+		agentEvent.SubagentTools.Should().BeNull();
+	}
+
+	#endregion
+
+	#region Subagent Started
+
+	[Fact]
+	public void HandleEvent_SubagentStarted_WritesSubagentStartedEvent()
+	{
+		// Arrange
+		var subagentStartedEvent = CreateSubagentStartedEvent(
+			agentName: "writer",
+			toolCallId: "call-123",
+			displayName: "Writer Agent",
+			description: "Specializes in writing content");
+
+		// Act
+		_handler.HandleEvent(subagentStartedEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.SubagentStarted);
+		agentEvent.ToolCallId.Should().Be("call-123");
+		agentEvent.SubagentName.Should().Be("writer");
+		agentEvent.SubagentDisplayName.Should().Be("Writer Agent");
+		agentEvent.SubagentDescription.Should().Be("Specializes in writing content");
+	}
+
+	[Fact]
+	public void HandleEvent_SubagentStarted_WithNullToolCallId_HandlesGracefully()
+	{
+		// Arrange
+		var subagentStartedEvent = CreateSubagentStartedEvent(
+			agentName: "simple-agent",
+			toolCallId: null);
+
+		// Act
+		_handler.HandleEvent(subagentStartedEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.ToolCallId.Should().BeNull();
+		agentEvent.SubagentName.Should().Be("simple-agent");
+	}
+
+	#endregion
+
+	#region Subagent Completed
+
+	[Fact]
+	public void HandleEvent_SubagentCompleted_WritesSubagentCompletedEvent()
+	{
+		// Arrange
+		var subagentCompletedEvent = CreateSubagentCompletedEvent(
+			agentName: "researcher",
+			toolCallId: "call-456",
+			displayName: "Research Agent");
+
+		// Act
+		_handler.HandleEvent(subagentCompletedEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.SubagentCompleted);
+		agentEvent.ToolCallId.Should().Be("call-456");
+		agentEvent.SubagentName.Should().Be("researcher");
+		agentEvent.SubagentDisplayName.Should().Be("Research Agent");
+	}
+
+	#endregion
+
+	#region Subagent Failed
+
+	[Fact]
+	public void HandleEvent_SubagentFailed_WritesSubagentFailedEvent()
+	{
+		// Arrange
+		var subagentFailedEvent = CreateSubagentFailedEvent(
+			agentName: "failing-agent",
+			toolCallId: "call-789",
+			displayName: "Failing Agent",
+			error: "Agent crashed unexpectedly");
+
+		// Act
+		_handler.HandleEvent(subagentFailedEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.SubagentFailed);
+		agentEvent.ToolCallId.Should().Be("call-789");
+		agentEvent.SubagentName.Should().Be("failing-agent");
+		agentEvent.SubagentDisplayName.Should().Be("Failing Agent");
+		agentEvent.ErrorMessage.Should().Be("Agent crashed unexpectedly");
+	}
+
+	[Fact]
+	public void HandleEvent_SubagentFailed_WithNullError_HandlesGracefully()
+	{
+		// Arrange
+		var subagentFailedEvent = CreateSubagentFailedEvent(
+			agentName: "agent",
+			error: null);
+
+		// Act
+		_handler.HandleEvent(subagentFailedEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.ErrorMessage.Should().BeNull();
+	}
+
+	#endregion
+
+	#region Subagent Deselected
+
+	[Fact]
+	public void HandleEvent_SubagentDeselected_WritesSubagentDeselectedEvent()
+	{
+		// Arrange
+		var subagentDeselectedEvent = CreateSubagentDeselectedEvent();
+
+		// Act
+		_handler.HandleEvent(subagentDeselectedEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.SubagentDeselected);
+	}
+
+	#endregion
+
 	#region Full Session Flow
 
 	[Fact]
@@ -586,6 +817,83 @@ public class CopilotSessionHandlerTests
 		events[5].Type.Should().Be(AgentEventType.Message);
 		events[6].Type.Should().Be(AgentEventType.Usage);
 		events[7].Type.Should().Be(AgentEventType.SessionIdle);
+	}
+
+	[Fact]
+	public void HandleEvent_FullSessionFlowWithSubagents_ProcessesAllEventsCorrectly()
+	{
+		// Arrange & Act - Simulate a session with subagent delegation
+		_handler.HandleEvent(CreateSessionStartEvent("claude-opus-4.5"));
+		_handler.HandleEvent(CreateMessageDeltaEvent("Let me delegate to a subagent..."));
+
+		// Subagent lifecycle
+		_handler.HandleEvent(CreateSubagentSelectedEvent("researcher", "Research Agent", ["web_search"]));
+		_handler.HandleEvent(CreateSubagentStartedEvent("researcher", "call-sub-1", "Research Agent", "Finds info"));
+		_handler.HandleEvent(CreateToolStartEvent("tool-1", "web_search"));
+		_handler.HandleEvent(CreateToolCompleteEvent("tool-1", true));
+		_handler.HandleEvent(CreateSubagentCompletedEvent("researcher", "call-sub-1", "Research Agent"));
+		_handler.HandleEvent(CreateSubagentDeselectedEvent());
+
+		// Back to main agent
+		_handler.HandleEvent(CreateMessageDeltaEvent("Based on the research..."));
+		_handler.HandleEvent(CreateMessageEvent("Here is the final answer."));
+		_handler.HandleEvent(CreateUsageEvent("claude-opus-4.5", 200, 100));
+		_handler.HandleEvent(CreateIdleEvent());
+
+		// Assert
+		_handler.FinalContent.Should().Be("Here is the final answer.");
+		_done.Task.IsCompleted.Should().BeTrue();
+
+		// Verify all events were written
+		var events = new List<AgentEvent>();
+		while (_channel.Reader.TryRead(out var evt))
+		{
+			events.Add(evt);
+		}
+
+		events.Should().HaveCount(12);
+		events[0].Type.Should().Be(AgentEventType.SessionStart);
+		events[1].Type.Should().Be(AgentEventType.MessageDelta);
+		events[2].Type.Should().Be(AgentEventType.SubagentSelected);
+		events[3].Type.Should().Be(AgentEventType.SubagentStarted);
+		events[4].Type.Should().Be(AgentEventType.ToolExecutionStart);
+		events[5].Type.Should().Be(AgentEventType.ToolExecutionComplete);
+		events[6].Type.Should().Be(AgentEventType.SubagentCompleted);
+		events[7].Type.Should().Be(AgentEventType.SubagentDeselected);
+		events[8].Type.Should().Be(AgentEventType.MessageDelta);
+		events[9].Type.Should().Be(AgentEventType.Message);
+		events[10].Type.Should().Be(AgentEventType.Usage);
+		events[11].Type.Should().Be(AgentEventType.SessionIdle);
+	}
+
+	[Fact]
+	public void HandleEvent_SubagentFailureRecovery_ProcessesCorrectly()
+	{
+		// Arrange & Act - Simulate a session where subagent fails and main agent recovers
+		_handler.HandleEvent(CreateSessionStartEvent("claude-opus-4.5"));
+
+		// First subagent fails
+		_handler.HandleEvent(CreateSubagentSelectedEvent("researcher", "Research Agent"));
+		_handler.HandleEvent(CreateSubagentStartedEvent("researcher", "call-1", "Research Agent"));
+		_handler.HandleEvent(CreateSubagentFailedEvent("researcher", "call-1", "Research Agent", "Network error"));
+
+		// Main agent handles the failure
+		_handler.HandleEvent(CreateMessageDeltaEvent("The researcher encountered an issue. "));
+		_handler.HandleEvent(CreateMessageDeltaEvent("Let me try a different approach."));
+		_handler.HandleEvent(CreateMessageEvent("I'll provide the answer directly."));
+		_handler.HandleEvent(CreateIdleEvent());
+
+		// Assert
+		var events = new List<AgentEvent>();
+		while (_channel.Reader.TryRead(out var evt))
+		{
+			events.Add(evt);
+		}
+
+		events.Should().HaveCount(8);
+		events[3].Type.Should().Be(AgentEventType.SubagentFailed);
+		events[3].ErrorMessage.Should().Be("Network error");
+		_handler.FinalContent.Should().Be("I'll provide the answer directly.");
 	}
 
 	#endregion

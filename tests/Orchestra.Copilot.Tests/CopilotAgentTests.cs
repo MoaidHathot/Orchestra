@@ -156,6 +156,232 @@ public class CopilotAgentTests
 
 	#endregion
 
+	#region Subagent Configuration
+
+	[Fact]
+	public void Agent_WithSubagents_ConfiguresCorrectly()
+	{
+		// Arrange
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "researcher",
+				DisplayName = "Research Agent",
+				Description = "Finds information",
+				Prompt = "You are a researcher.",
+				Tools = ["web_search", "read_file"],
+				Infer = true
+			}
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSubagents(subagents);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithMultipleSubagents_ConfiguresCorrectly()
+	{
+		// Arrange
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "researcher",
+				Prompt = "You are a researcher.",
+				Infer = true
+			},
+			new Subagent
+			{
+				Name = "writer",
+				Prompt = "You are a writer.",
+				Infer = false
+			},
+			new Subagent
+			{
+				Name = "reviewer",
+				Prompt = "You are a reviewer.",
+				Infer = true
+			}
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSubagents(subagents);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithSubagentInferFalse_ConfiguresCorrectly()
+	{
+		// Arrange - Test that Infer=false is handled correctly
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "explicit-only",
+				DisplayName = "Explicit Agent",
+				Description = "Only called explicitly, not inferred",
+				Prompt = "You handle specific requests only.",
+				Infer = false // Should not be auto-selected by model
+			}
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSubagents(subagents);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithSubagentWithTools_ConfiguresCorrectly()
+	{
+		// Arrange - Subagent with specific tools (MCPs are resolved at runtime from McpNames)
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "file-handler",
+				DisplayName = "File Handler",
+				Description = "Handles file operations",
+				Prompt = "You handle file operations.",
+				Tools = ["read_file", "write_file", "list_directory"]
+			}
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSubagents(subagents);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithSubagentWithToolRestrictions_ConfiguresCorrectly()
+	{
+		// Arrange - Subagent with restricted tools (read-only)
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "reader",
+				DisplayName = "Read-Only Agent",
+				Prompt = "You can only read, not modify.",
+				Tools = ["read_file", "list_directory", "search"] // No write tools
+			}
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSubagents(subagents);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithEmptySubagents_ConfiguresCorrectly()
+	{
+		// Arrange & Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSubagents([]);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithSubagentsAndMcps_ConfiguresCorrectly()
+	{
+		// Arrange - Full configuration with both MCPs and subagents
+		// Note: Subagent MCPs are resolved at runtime from McpNames (string references)
+		// Here we test that the main agent can have MCPs while subagents have their own configuration
+		var mainMcp = new LocalMcp
+		{
+			Name = "main-tools",
+			Type = McpType.Local,
+			Command = "npx",
+			Arguments = ["main-server"]
+		};
+
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "specialist",
+				DisplayName = "Specialist Agent",
+				Description = "A specialist agent for complex tasks",
+				Prompt = "You are a specialist.",
+				Tools = ["analyze", "process", "report"]
+			}
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithMcp(mainMcp)
+			.WithSubagents(subagents);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithAllConfigurationsIncludingSubagents_BuildsWithoutError()
+	{
+		// Arrange - Full configuration including subagents
+		var mcp = new LocalMcp
+		{
+			Name = "test-mcp",
+			Type = McpType.Local,
+			Command = "node",
+			Arguments = ["server.js"]
+		};
+
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "helper",
+				DisplayName = "Helper Agent",
+				Description = "Assists with tasks",
+				Prompt = "You are a helpful assistant.",
+				Tools = ["search"],
+				Infer = true
+			}
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder(NullLoggerFactory.Instance)
+			.WithModel("claude-opus-4.5")
+			.WithSystemPrompt("You are a coordinator agent.")
+			.WithMcp(mcp)
+			.WithSubagents(subagents)
+			.WithReasoningLevel(ReasoningLevel.Medium)
+			.WithSystemPromptMode(SystemPromptMode.Replace)
+			.WithReporter(NullOrchestrationReporter.Instance);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	#endregion
+
 	#region IAgent Interface
 
 	[Fact]

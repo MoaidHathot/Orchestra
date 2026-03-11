@@ -82,20 +82,41 @@ public static class OrchestrationParser
 
 		foreach (var step in orchestration.Steps)
 		{
-			if (step is PromptOrchestrationStep promptStep && promptStep.McpNames.Length > 0)
+			if (step is PromptOrchestrationStep promptStep)
 			{
-				var resolved = new Mcp[promptStep.McpNames.Length];
-				for (var i = 0; i < promptStep.McpNames.Length; i++)
+				// Resolve MCPs for the step itself
+				if (promptStep.McpNames.Length > 0)
 				{
-					var name = promptStep.McpNames[i];
-					if (!lookup.TryGetValue(name, out var mcp))
-						throw new InvalidOperationException(
-							$"MCP '{name}' referenced by step '{step.Name}' is not defined in MCP configuration.");
-					resolved[i] = mcp;
+					promptStep.Mcps = ResolveMcpNames(promptStep.McpNames, step.Name, lookup);
 				}
-				promptStep.Mcps = resolved;
+
+				// Resolve MCPs for each subagent
+				foreach (var subagent in promptStep.Subagents)
+				{
+					if (subagent.McpNames.Length > 0)
+					{
+						subagent.Mcps = ResolveMcpNames(
+							subagent.McpNames,
+							$"{step.Name}/subagent:{subagent.Name}",
+							lookup);
+					}
+				}
 			}
 		}
+	}
+
+	private static Mcp[] ResolveMcpNames(string[] mcpNames, string context, Dictionary<string, Mcp> lookup)
+	{
+		var resolved = new Mcp[mcpNames.Length];
+		for (var i = 0; i < mcpNames.Length; i++)
+		{
+			var name = mcpNames[i];
+			if (!lookup.TryGetValue(name, out var mcp))
+				throw new InvalidOperationException(
+					$"MCP '{name}' referenced by '{context}' is not defined in MCP configuration.");
+			resolved[i] = mcp;
+		}
+		return resolved;
 	}
 
 	private sealed class McpConverter : JsonConverter<Mcp>
@@ -194,6 +215,27 @@ public static class OrchestrationParser
 				Loop = root.TryGetProperty("loop", out var loop)
 					? DeserializeLoopConfig(loop)
 					: null,
+				Subagents = root.TryGetProperty("subagents", out var subagents)
+					? subagents.EnumerateArray().Select(DeserializeSubagent).ToArray()
+					: [],
+			};
+		}
+
+		private static Subagent DeserializeSubagent(JsonElement element)
+		{
+			return new Subagent
+			{
+				Name = element.GetProperty("name").GetString()!,
+				DisplayName = element.TryGetProperty("displayName", out var dn) ? dn.GetString() : null,
+				Description = element.TryGetProperty("description", out var desc) ? desc.GetString() : null,
+				Prompt = element.GetProperty("prompt").GetString()!,
+				Tools = element.TryGetProperty("tools", out var tools)
+					? tools.EnumerateArray().Select(e => e.GetString()!).ToArray()
+					: null,
+				McpNames = element.TryGetProperty("mcps", out var mcps)
+					? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
+					: [],
+				Infer = element.TryGetProperty("infer", out var infer) ? infer.GetBoolean() : true,
 			};
 		}
 

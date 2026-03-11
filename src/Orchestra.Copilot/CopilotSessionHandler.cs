@@ -82,6 +82,26 @@ internal sealed class CopilotSessionHandler
 				HandleToolExecutionComplete(toolComplete);
 				break;
 
+			case SubagentSelectedEvent subagentSelected:
+				HandleSubagentSelected(subagentSelected);
+				break;
+
+			case SubagentStartedEvent subagentStarted:
+				HandleSubagentStarted(subagentStarted);
+				break;
+
+			case SubagentCompletedEvent subagentCompleted:
+				HandleSubagentCompleted(subagentCompleted);
+				break;
+
+			case SubagentFailedEvent subagentFailed:
+				HandleSubagentFailed(subagentFailed);
+				break;
+
+			case SubagentDeselectedEvent:
+				HandleSubagentDeselected();
+				break;
+
 			case SessionErrorEvent err:
 				HandleError(err);
 				break;
@@ -209,6 +229,60 @@ internal sealed class CopilotSessionHandler
 			ToolSuccess = toolComplete.Data.Success,
 			ToolResult = toolComplete.Data.Result?.Content ?? toolComplete.Data.Result?.DetailedContent,
 			ToolError = toolComplete.Data.Error?.Message,
+		});
+	}
+
+	private void HandleSubagentSelected(SubagentSelectedEvent subagentSelected)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.SubagentSelected,
+			SubagentName = subagentSelected.Data.AgentName,
+			SubagentDisplayName = subagentSelected.Data.AgentDisplayName,
+			SubagentTools = subagentSelected.Data.Tools,
+		});
+	}
+
+	private void HandleSubagentStarted(SubagentStartedEvent subagentStarted)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.SubagentStarted,
+			ToolCallId = subagentStarted.Data.ToolCallId,
+			SubagentName = subagentStarted.Data.AgentName,
+			SubagentDisplayName = subagentStarted.Data.AgentDisplayName,
+			SubagentDescription = subagentStarted.Data.AgentDescription,
+		});
+	}
+
+	private void HandleSubagentCompleted(SubagentCompletedEvent subagentCompleted)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.SubagentCompleted,
+			ToolCallId = subagentCompleted.Data.ToolCallId,
+			SubagentName = subagentCompleted.Data.AgentName,
+			SubagentDisplayName = subagentCompleted.Data.AgentDisplayName,
+		});
+	}
+
+	private void HandleSubagentFailed(SubagentFailedEvent subagentFailed)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.SubagentFailed,
+			ToolCallId = subagentFailed.Data.ToolCallId,
+			SubagentName = subagentFailed.Data.AgentName,
+			SubagentDisplayName = subagentFailed.Data.AgentDisplayName,
+			ErrorMessage = subagentFailed.Data.Error,
+		});
+	}
+
+	private void HandleSubagentDeselected()
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.SubagentDeselected,
 		});
 	}
 
