@@ -1,0 +1,10 @@
+{
+  "rawContent": "## Current Weather Conditions for Seattle, Washington\n\n**Most Recent Observation** (Seattle-Tacoma International Airport - March 2, 4:53 PM PST):\n\n- **Temperature:** 57\u00B0F\n- **Humidity:** 58%\n- **Wind:** South at 5 mph\n- **Conditions:** A Few Clouds (mostly clear)\n- **Visibility:** 10 miles\n- **Pressure:** 30.07 inches (1019.0 mb)\n\n**Forecast:** Increasing clouds tonight with rain expected Tuesday. Seattle is entering a rainy period with precipitation likely through the week.",
+  "content": "**Seattle, Washington Weather**\n*March 2, 4:53 PM PST*\n\nCurrently 57\u00B0F with a few clouds and mostly clear skies. Humidity at 58%. Light southerly winds at 5 mph. Excellent visibility of 10 miles. Barometric pressure holding steady at 30.07 inches.\n\nClouds increasing tonight with rain moving in Tuesday. Expect wet conditions through the week ahead.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 16437,
+    "outputTokens": 142,
+    "totalTokens": 16579
+  }
+}

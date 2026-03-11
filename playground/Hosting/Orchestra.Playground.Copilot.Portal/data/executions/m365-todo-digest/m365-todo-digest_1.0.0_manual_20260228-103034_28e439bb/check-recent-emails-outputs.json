@@ -1,4 +1,0 @@
-{
-  "rawContent": "I don\u0027t have access to a \u0060get_mail\u0060 tool or Microsoft Graph API integration. My available tools are:\n\n- **File operations**: view, create, edit, grep, glob\n- **Shell**: powershell commands\n- **Web**: web_fetch (public URLs only)\n- **Agents**: task (explore, code-review, general-purpose)\n\nTo retrieve emails programmatically, you would need:\n1. **Microsoft Graph API credentials** (OAuth token or app registration)\n2. **A script or tool** that calls the Graph API endpoints\n\nWould you like me to help you:\n- Write a PowerShell script using Microsoft Graph API to fetch emails?\n- Set up authentication for Graph API access?",
-  "content": "No action items from recent emails.\n\n(No email content was provided to extract action items from.)"
-}

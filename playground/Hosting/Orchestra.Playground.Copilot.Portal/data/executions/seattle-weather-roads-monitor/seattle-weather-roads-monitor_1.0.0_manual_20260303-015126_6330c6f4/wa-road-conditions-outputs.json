@@ -1,0 +1,10 @@
+{
+  "rawContent": "I apologize, but I\u0027m unable to retrieve real-time road conditions from the Washington State Department of Transportation (WSDOT) website at this moment. The web pages are either not loading properly or returning minimal content without the actual traffic and road condition data.\n\n**To check current conditions for your requested routes, I recommend:**\n\n1. **WSDOT Travel Center Map**: Visit https://wsdot.com/travel/real-time/map directly in your browser for interactive real-time data\n2. **Call 511**: Dial 511 from any phone in Washington State for automated road conditions\n3. **WSDOT Twitter**: Follow @wsdot_traffic for live updates\n4. **Mountain Pass Reports**: Visit WSDOT\u0027s mountain pass pages for Snoqualmie Pass and North Cascades (SR-20)\n5. **Ferry Information**: Check Washington State Ferries website for Anacortes terminal conditions\n\nThe web fetch tool is experiencing connectivity issues with WSDOT\u0027s dynamic content pages, which likely require JavaScript to load current conditions data.",
+  "content": "**ROAD CONDITIONS UNAVAILABLE**\n\nReal-time data currently inaccessible. Status unknown for:\n\n**Snoqualmie Pass**: Status unavailable  \n**SR-20 (North Cascades)**: Status unavailable  \n**Anacortes Ferry Terminal**: Status unavailable  \n\n**Alternative Resources:**\n- WSDOT Travel Map: wsdot.com/travel/real-time/map\n- Phone: Dial 511\n- Twitter: @wsdot_traffic\n- Mountain pass reports and ferry schedules available on respective WSDOT pages\n\nTechnical issue prevents web-based condition retrieval. Use direct WSDOT resources for current information.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 17193,
+    "outputTokens": 236,
+    "totalTokens": 17429
+  }
+}
