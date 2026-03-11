@@ -5,6 +5,7 @@ public abstract class AgentBuilder
 	protected string? Model { get; private set; }
 	protected string? SystemPrompt { get; private set; }
 	protected Mcp[] Mcps { get; private set; } = [];
+	protected Subagent[] Subagents { get; private set; } = [];
 	protected ReasoningLevel? ReasoningLevel { get; private set; }
 	protected SystemPromptMode? SystemPromptMode { get; private set; }
 	protected IOrchestrationReporter Reporter { get; private set; } = NullOrchestrationReporter.Instance;
@@ -24,6 +25,12 @@ public abstract class AgentBuilder
 	public AgentBuilder WithMcp(params Mcp[] mcps)
 	{
 		Mcps = mcps;
+		return this;
+	}
+
+	public AgentBuilder WithSubagents(params Subagent[] subagents)
+	{
+		Subagents = subagents;
 		return this;
 	}
 

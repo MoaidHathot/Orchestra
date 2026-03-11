@@ -323,5 +323,10 @@ public class TriggerTypesTests
 		public void ReportStepStarted(string stepName) { }
 		public void ReportStepSkipped(string stepName, string reason) { }
 		public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations) { }
+		public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools) { }
+		public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description) { }
+		public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName) { }
+		public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error) { }
+		public void ReportSubagentDeselected(string stepName) { }
 	}
 }

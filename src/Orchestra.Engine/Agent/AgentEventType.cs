@@ -13,4 +13,11 @@ public enum AgentEventType
 	SessionStart,
 	ModelChange,
 	Usage,
+
+	// Subagent events
+	SubagentSelected,
+	SubagentStarted,
+	SubagentCompleted,
+	SubagentFailed,
+	SubagentDeselected,
 }

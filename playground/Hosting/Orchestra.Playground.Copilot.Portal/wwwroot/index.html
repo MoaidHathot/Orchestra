@@ -583,6 +583,11 @@
     .log-type.tool-started { color: var(--purple); }
     .log-type.tool-completed { color: var(--info); }
     .log-type.usage { color: var(--warning); }
+    .log-type.subagent-selected { color: var(--purple); }
+    .log-type.subagent-started { color: var(--cyan); }
+    .log-type.subagent-completed { color: var(--success); }
+    .log-type.subagent-failed { color: var(--error); }
+    .log-type.subagent-deselected { color: var(--text-muted); }
     .log-content { color: var(--text-muted); flex: 1; word-break: break-word; }
 
     /* Empty State */
@@ -679,6 +684,11 @@
     .step-event-item.tool-completed .event-type { color: var(--info); }
     .step-event-item.content-delta .event-type { color: var(--cyan); }
     .step-event-item.step-error .event-type { color: var(--error); }
+    .step-event-item.subagent-selected .event-type { color: var(--purple); }
+    .step-event-item.subagent-started .event-type { color: var(--cyan); }
+    .step-event-item.subagent-completed .event-type { color: var(--success); }
+    .step-event-item.subagent-failed .event-type { color: var(--error); }
+    .step-event-item.subagent-deselected .event-type { color: var(--text-muted); }
     .selected-step-header {
       font-weight: 600;
       margin-bottom: 8px;
@@ -1197,6 +1207,16 @@
             });
           });
 
+          // Handle subagent events
+          ['subagent-selected', 'subagent-started', 'subagent-completed', 'subagent-failed', 'subagent-deselected'].forEach(eventType => {
+            eventSource.addEventListener(eventType, (e) => {
+              try {
+                const data = JSON.parse(e.data);
+                addStepEvent(data.stepName, eventType, data);
+              } catch {}
+            });
+          });
+
           // Handle step-output: capture step result content
           eventSource.addEventListener('step-output', (e) => {
             try {
@@ -1541,6 +1561,16 @@
 
           // Handle tool events
           ['tool-started', 'tool-completed'].forEach(eventType => {
+            eventSource.addEventListener(eventType, (e) => {
+              try {
+                const data = JSON.parse(e.data);
+                addStepEvent(data.stepName, eventType, data);
+              } catch {}
+            });
+          });
+
+          // Handle subagent events
+          ['subagent-selected', 'subagent-started', 'subagent-completed', 'subagent-failed', 'subagent-deselected'].forEach(eventType => {
             eventSource.addEventListener(eventType, (e) => {
               try {
                 const data = JSON.parse(e.data);
@@ -4743,6 +4773,24 @@
       if (log.type === 'tool-completed') return `Tool ${log.toolName}: ${log.success ? 'success' : 'failed'}`;
       if (log.type === 'usage') return `Tokens: ${log.inputTokens || 0} in / ${log.outputTokens || 0} out`;
       if (log.type === 'content-delta') return log.chunk?.substring(0, 100) + (log.chunk?.length > 100 ? '...' : '');
+      if (log.type === 'subagent-selected') {
+        const name = log.displayName || log.agentName || 'unknown';
+        const tools = log.tools ? `(tools: ${log.tools.join(', ')})` : '(all tools)';
+        return `Selected: ${name} ${tools}`;
+      }
+      if (log.type === 'subagent-started') {
+        const name = log.displayName || log.agentName || 'unknown';
+        return `Subagent started: ${name}`;
+      }
+      if (log.type === 'subagent-completed') {
+        const name = log.displayName || log.agentName || 'unknown';
+        return `Subagent completed: ${name}`;
+      }
+      if (log.type === 'subagent-failed') {
+        const name = log.displayName || log.agentName || 'unknown';
+        return `Subagent failed: ${name} - ${log.error || 'unknown error'}`;
+      }
+      if (log.type === 'subagent-deselected') return 'Returned to parent agent';
       return JSON.stringify(log).substring(0, 200);
     }
 

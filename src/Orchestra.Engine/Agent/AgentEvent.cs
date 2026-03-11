@@ -57,4 +57,26 @@ public class AgentEvent
 	/// The error message if the tool failed (used by ToolExecutionComplete).
 	/// </summary>
 	public string? ToolError { get; init; }
+
+	// ── Subagent data (used by SubagentSelected, SubagentStarted, SubagentCompleted, SubagentFailed) ──
+
+	/// <summary>
+	/// The unique name/identifier of the subagent.
+	/// </summary>
+	public string? SubagentName { get; init; }
+
+	/// <summary>
+	/// The human-readable display name of the subagent.
+	/// </summary>
+	public string? SubagentDisplayName { get; init; }
+
+	/// <summary>
+	/// The description of the subagent (used by SubagentStarted).
+	/// </summary>
+	public string? SubagentDescription { get; init; }
+
+	/// <summary>
+	/// The list of tools available to the subagent (used by SubagentSelected).
+	/// </summary>
+	public string[]? SubagentTools { get; init; }
 }

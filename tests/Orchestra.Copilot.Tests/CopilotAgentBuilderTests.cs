@@ -201,5 +201,67 @@ public class CopilotAgentBuilderTests
 		builder.Should().NotBeNull();
 	}
 
+	[Fact]
+	public void WithSubagents_ReturnsSameBuilder()
+	{
+		// Arrange
+		var builder = new CopilotAgentBuilder();
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "researcher",
+				Prompt = "You are a researcher"
+			}
+		};
+
+		// Act
+		var result = builder.WithSubagents(subagents);
+
+		// Assert
+		result.Should().BeSameAs(builder);
+	}
+
+	[Fact]
+	public void WithSubagents_WithEmptyArray_ReturnsSameBuilder()
+	{
+		// Arrange
+		var builder = new CopilotAgentBuilder();
+
+		// Act
+		var result = builder.WithSubagents([]);
+
+		// Assert
+		result.Should().BeSameAs(builder);
+	}
+
+	[Fact]
+	public void WithSubagents_CanChainWithOtherMethods()
+	{
+		// Arrange
+		var subagents = new[]
+		{
+			new Subagent
+			{
+				Name = "writer",
+				DisplayName = "Writer Agent",
+				Description = "Writes content",
+				Prompt = "You are a writer",
+				Tools = ["write_file"],
+				Infer = true
+			}
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSystemPrompt("You are a coordinator")
+			.WithSubagents(subagents)
+			.WithReporter(NullOrchestrationReporter.Instance);
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
 	#endregion
 }

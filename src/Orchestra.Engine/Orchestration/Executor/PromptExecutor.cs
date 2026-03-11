@@ -49,6 +49,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				.WithModel(step.Model)
 				.WithSystemPrompt(step.SystemPrompt)
 				.WithMcp(step.Mcps)
+				.WithSubagents(step.Subagents)
 				.WithReasoningLevel(step.ReasoningLevel)
 				.WithSystemPromptMode(step.SystemPromptMode ?? context.DefaultSystemPromptMode)
 				.WithReporter(_reporter)

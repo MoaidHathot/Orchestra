@@ -644,6 +644,280 @@ public class OrchestrationParserTests
 
 	#endregion
 
+	#region Subagent Parsing
+
+	[Fact]
+	public void ParseOrchestration_WithSubagents_ParsesAllFields()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "subagent-test",
+				"description": "Test orchestration with subagents",
+				"steps": [
+					{
+						"name": "coordinator",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "You are a coordinator that delegates to subagents.",
+						"userPrompt": "Process this request",
+						"model": "claude-opus-4.5",
+						"subagents": [
+							{
+								"name": "researcher",
+								"displayName": "Research Agent",
+								"description": "Specializes in finding information",
+								"prompt": "You are a researcher. Find relevant information.",
+								"tools": ["web_search", "read_file"],
+								"infer": true
+							},
+							{
+								"name": "writer",
+								"displayName": "Writer Agent",
+								"description": "Specializes in writing content",
+								"prompt": "You are a writer. Create polished content.",
+								"infer": false
+							}
+						]
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.Subagents.Should().HaveCount(2);
+
+		// First subagent
+		var researcher = step.Subagents[0];
+		researcher.Name.Should().Be("researcher");
+		researcher.DisplayName.Should().Be("Research Agent");
+		researcher.Description.Should().Be("Specializes in finding information");
+		researcher.Prompt.Should().Be("You are a researcher. Find relevant information.");
+		researcher.Tools.Should().BeEquivalentTo(["web_search", "read_file"]);
+		researcher.Infer.Should().BeTrue();
+
+		// Second subagent
+		var writer = step.Subagents[1];
+		writer.Name.Should().Be("writer");
+		writer.DisplayName.Should().Be("Writer Agent");
+		writer.Description.Should().Be("Specializes in writing content");
+		writer.Prompt.Should().Be("You are a writer. Create polished content.");
+		writer.Tools.Should().BeNull(); // Not specified
+		writer.Infer.Should().BeFalse();
+	}
+
+	[Fact]
+	public void ParseOrchestration_SubagentWithMinimalFields_UsesDefaults()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "minimal-subagent",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"subagents": [
+							{
+								"name": "minimal",
+								"prompt": "Minimal prompt"
+							}
+						]
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.Subagents.Should().HaveCount(1);
+
+		var subagent = step.Subagents[0];
+		subagent.Name.Should().Be("minimal");
+		subagent.Prompt.Should().Be("Minimal prompt");
+		subagent.DisplayName.Should().BeNull();
+		subagent.Description.Should().BeNull();
+		subagent.Tools.Should().BeNull();
+		subagent.Mcps.Should().BeEmpty();
+		subagent.Infer.Should().BeTrue(); // Default value
+	}
+
+	[Fact]
+	public void ParseOrchestration_SubagentWithMcps_ResolvesMcpReferences()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "subagent-mcp-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"subagents": [
+							{
+								"name": "file-handler",
+								"prompt": "Handle files",
+								"mcps": ["filesystem"]
+							}
+						]
+					}
+				]
+			}
+			""";
+
+		var externalMcps = new Mcp[]
+		{
+			new LocalMcp
+			{
+				Name = "filesystem",
+				Type = McpType.Local,
+				Command = "npx",
+				Arguments = ["-y", "@anthropic/mcp-filesystem"]
+			}
+		};
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, externalMcps);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		var subagent = step!.Subagents[0];
+		subagent.Mcps.Should().HaveCount(1);
+		subagent.Mcps[0].Name.Should().Be("filesystem");
+		subagent.Mcps[0].Should().BeOfType<LocalMcp>();
+	}
+
+	[Fact]
+	public void ParseOrchestration_SubagentWithMissingMcp_ThrowsInvalidOperationException()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "subagent-missing-mcp",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"subagents": [
+							{
+								"name": "broken",
+								"prompt": "Test",
+								"mcps": ["nonexistent-mcp"]
+							}
+						]
+					}
+				]
+			}
+			""";
+
+		// Act
+		var act = () => OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		act.Should().Throw<InvalidOperationException>()
+			.WithMessage("*'nonexistent-mcp'*not defined*");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithoutSubagents_HasEmptySubagentsArray()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "no-subagents",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.Subagents.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestration_SubagentWithInlineMcps_ResolvesMcpReferences()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "subagent-inline-mcp",
+				"description": "Test",
+				"mcps": [
+					{
+						"name": "inline-tool",
+						"type": "local",
+						"command": "node",
+						"arguments": ["tool.js"]
+					}
+				],
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"subagents": [
+							{
+								"name": "tool-user",
+								"prompt": "Use the tool",
+								"mcps": ["inline-tool"]
+							}
+						]
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		var subagent = step!.Subagents[0];
+		subagent.Mcps.Should().HaveCount(1);
+		subagent.Mcps[0].Name.Should().Be("inline-tool");
+	}
+
+	#endregion
+
 	#region Error Handling
 
 	[Fact]

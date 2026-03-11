@@ -78,6 +78,26 @@ public class AgentEventProcessor
 				HandleToolExecutionComplete(evt);
 				break;
 
+			case AgentEventType.SubagentSelected:
+				HandleSubagentSelected(evt);
+				break;
+
+			case AgentEventType.SubagentStarted:
+				HandleSubagentStarted(evt);
+				break;
+
+			case AgentEventType.SubagentCompleted:
+				HandleSubagentCompleted(evt);
+				break;
+
+			case AgentEventType.SubagentFailed:
+				HandleSubagentFailed(evt);
+				break;
+
+			case AgentEventType.SubagentDeselected:
+				HandleSubagentDeselected();
+				break;
+
 			case AgentEventType.Error:
 				HandleError(evt);
 				break;
@@ -169,6 +189,49 @@ public class AgentEventProcessor
 	private void HandleError(AgentEvent evt)
 	{
 		_reporter.ReportStepError(_stepName, evt.ErrorMessage ?? "Unknown error");
+	}
+
+	private void HandleSubagentSelected(AgentEvent evt)
+	{
+		_reporter.ReportSubagentSelected(
+			_stepName,
+			evt.SubagentName ?? "unknown",
+			evt.SubagentDisplayName,
+			evt.SubagentTools);
+	}
+
+	private void HandleSubagentStarted(AgentEvent evt)
+	{
+		_reporter.ReportSubagentStarted(
+			_stepName,
+			evt.ToolCallId,
+			evt.SubagentName ?? "unknown",
+			evt.SubagentDisplayName,
+			evt.SubagentDescription);
+	}
+
+	private void HandleSubagentCompleted(AgentEvent evt)
+	{
+		_reporter.ReportSubagentCompleted(
+			_stepName,
+			evt.ToolCallId,
+			evt.SubagentName ?? "unknown",
+			evt.SubagentDisplayName);
+	}
+
+	private void HandleSubagentFailed(AgentEvent evt)
+	{
+		_reporter.ReportSubagentFailed(
+			_stepName,
+			evt.ToolCallId,
+			evt.SubagentName ?? "unknown",
+			evt.SubagentDisplayName,
+			evt.ErrorMessage);
+	}
+
+	private void HandleSubagentDeselected()
+	{
+		_reporter.ReportSubagentDeselected(_stepName);
 	}
 
 	private void FinalizeCurrentResponse()

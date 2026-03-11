@@ -1,0 +1,52 @@
+{
+  "name": "research-team-orchestration",
+  "description": "Demonstrates multi-agent orchestration using subagents. A coordinator delegates research tasks to specialized subagents (researcher, analyst, writer) based on user intent.",
+  "mcps": [
+    {
+      "name": "web-fetch",
+      "type": "local",
+      "command": "npx",
+      "arguments": ["-y", "@anthropic/mcp-fetch"]
+    }
+  ],
+  "steps": [
+    {
+      "name": "research-coordinator",
+      "type": "prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a research team coordinator. You manage a team of specialized agents:\n\n1. **Researcher** - Finds and gathers information from the web\n2. **Analyst** - Analyzes data and identifies patterns, trends, and insights\n3. **Writer** - Creates polished, well-structured content and reports\n\nDelegate tasks to the appropriate specialist based on what the user needs. You can use multiple specialists for complex requests. Coordinate their work and synthesize final results.",
+      "userPrompt": "{{topic}}",
+      "parameters": ["topic"],
+      "model": "claude-opus-4.5",
+      "subagents": [
+        {
+          "name": "researcher",
+          "displayName": "Research Specialist",
+          "description": "Gathers information by searching the web and collecting data from various sources. Use this agent when you need to find facts, statistics, or current information.",
+          "prompt": "You are a thorough research specialist. Your role is to:\n\n1. Search for relevant information on the requested topic\n2. Gather data from multiple credible sources\n3. Collect facts, statistics, quotes, and references\n4. Verify information accuracy when possible\n5. Return well-organized research findings with source citations\n\nBe comprehensive but focused. Prioritize authoritative sources.",
+          "tools": ["fetch"],
+          "mcps": ["web-fetch"],
+          "infer": true
+        },
+        {
+          "name": "analyst",
+          "displayName": "Data Analyst",
+          "description": "Analyzes information to find patterns, trends, and insights. Use this agent when you need to make sense of data or draw conclusions.",
+          "prompt": "You are an analytical expert. Your role is to:\n\n1. Analyze provided data and information\n2. Identify patterns, trends, and correlations\n3. Draw meaningful insights and conclusions\n4. Highlight key findings and their implications\n5. Provide data-driven recommendations\n\nBe objective and support conclusions with evidence. Note any limitations or uncertainties in your analysis.",
+          "infer": true
+        },
+        {
+          "name": "writer",
+          "displayName": "Content Writer",
+          "description": "Creates polished, well-structured written content. Use this agent when you need to produce reports, summaries, or documentation.",
+          "prompt": "You are a skilled content writer. Your role is to:\n\n1. Transform research and analysis into clear, engaging content\n2. Structure information logically with appropriate headings\n3. Use appropriate tone for the target audience\n4. Create concise summaries or detailed reports as needed\n5. Ensure clarity, coherence, and readability\n\nAdapt your writing style to the content type requested (executive summary, technical report, blog post, etc.).",
+          "infer": true
+        }
+      ]
+    }
+  ],
+  "trigger": {
+    "type": "webhook",
+    "enabled": true
+  }
+}

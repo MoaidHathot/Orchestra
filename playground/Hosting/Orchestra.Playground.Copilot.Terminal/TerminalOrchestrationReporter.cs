@@ -142,6 +142,36 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 		AddEvent(new ReporterEvent("loop-iteration", $"[{checkerStepName}] Loop {iteration}/{maxIterations} -> {targetStepName}"));
 	}
 
+	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
+	{
+		var name = displayName ?? agentName;
+		var toolList = tools != null ? string.Join(", ", tools) : "all";
+		AddEvent(new ReporterEvent("subagent-selected", $"[{stepName}] Selected: {name} (tools: {toolList})"));
+	}
+
+	public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description)
+	{
+		var name = displayName ?? agentName;
+		AddEvent(new ReporterEvent("subagent-started", $"[{stepName}] Subagent started: {name}"));
+	}
+
+	public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName)
+	{
+		var name = displayName ?? agentName;
+		AddEvent(new ReporterEvent("subagent-completed", $"[{stepName}] Subagent completed: {name}"));
+	}
+
+	public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error)
+	{
+		var name = displayName ?? agentName;
+		AddEvent(new ReporterEvent("subagent-failed", $"[{stepName}] Subagent failed: {name} - {error}"));
+	}
+
+	public void ReportSubagentDeselected(string stepName)
+	{
+		AddEvent(new ReporterEvent("subagent-deselected", $"[{stepName}] Returned to parent agent"));
+	}
+
 	public void ReportStepTrace(string stepName, StepExecutionTrace trace)
 	{
 		// Don't log full traces

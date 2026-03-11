@@ -122,6 +122,31 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 		Write("loop-iteration", new { checkerStepName, targetStepName, iteration, maxIterations });
 	}
 
+	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
+	{
+		Write("subagent-selected", new { stepName, agentName, displayName, tools });
+	}
+
+	public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description)
+	{
+		Write("subagent-started", new { stepName, toolCallId, agentName, displayName, description });
+	}
+
+	public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName)
+	{
+		Write("subagent-completed", new { stepName, toolCallId, agentName, displayName });
+	}
+
+	public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error)
+	{
+		Write("subagent-failed", new { stepName, toolCallId, agentName, displayName, error });
+	}
+
+	public void ReportSubagentDeselected(string stepName)
+	{
+		Write("subagent-deselected", new { stepName });
+	}
+
 	public void ReportStepTrace(string stepName, StepExecutionTrace trace)
 	{
 		Write("step-trace", new
