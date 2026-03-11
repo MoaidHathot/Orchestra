@@ -1,0 +1,269 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Orchestra.Engine;
+
+namespace Orchestra.Host.Registry;
+
+/// <summary>
+/// In-memory registry of loaded orchestrations with persistence support.
+/// </summary>
+public partial class OrchestrationRegistry
+{
+	private readonly ConcurrentDictionary<string, OrchestrationEntry> _entries = new();
+	private readonly string _persistPath;
+	private readonly ILogger<OrchestrationRegistry>? _logger;
+	private readonly JsonSerializerOptions _jsonOptions;
+
+	public OrchestrationRegistry(string? persistPath = null, ILogger<OrchestrationRegistry>? logger = null)
+	{
+		_persistPath = persistPath ?? Path.Combine(
+			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+			"OrchestraHost",
+			"registered-orchestrations.json");
+		_logger = logger;
+		_jsonOptions = new JsonSerializerOptions
+		{
+			WriteIndented = true,
+			PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+		};
+	}
+
+	/// <summary>
+	/// Gets the number of registered orchestrations.
+	/// </summary>
+	public int Count => _entries.Count;
+
+	/// <summary>
+	/// Registers an orchestration from a file path.
+	/// </summary>
+	public OrchestrationEntry Register(string path, string? mcpPath, Orchestration? preloaded = null, bool persist = true)
+	{
+		Mcp[] mcps = [];
+		if (!string.IsNullOrWhiteSpace(mcpPath) && File.Exists(mcpPath))
+			mcps = OrchestrationParser.ParseMcpFile(mcpPath);
+
+		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, mcps);
+		var id = GenerateId(orchestration.Name, path);
+
+		var entry = new OrchestrationEntry
+		{
+			Id = id,
+			Path = path,
+			McpPath = mcpPath,
+			Orchestration = orchestration,
+			RegisteredAt = DateTimeOffset.UtcNow
+		};
+
+		_entries[id] = entry;
+
+		if (persist)
+			SaveToDisk();
+
+		return entry;
+	}
+
+	/// <summary>
+	/// Gets an orchestration entry by ID.
+	/// </summary>
+	public OrchestrationEntry? Get(string id) =>
+		_entries.TryGetValue(id, out var entry) ? entry : null;
+
+	/// <summary>
+	/// Gets all registered orchestration entries.
+	/// </summary>
+	public IEnumerable<OrchestrationEntry> GetAll() => _entries.Values;
+
+	/// <summary>
+	/// Removes an orchestration by ID.
+	/// </summary>
+	public bool Remove(string id)
+	{
+		var removed = _entries.TryRemove(id, out _);
+		if (removed)
+			SaveToDisk();
+		return removed;
+	}
+
+	/// <summary>
+	/// Clears all registered orchestrations.
+	/// </summary>
+	public void Clear()
+	{
+		_entries.Clear();
+		SaveToDisk();
+	}
+
+	/// <summary>
+	/// Save registered orchestration paths to disk for persistence.
+	/// </summary>
+	public void SaveToDisk()
+	{
+		try
+		{
+			var dir = Path.GetDirectoryName(_persistPath);
+			if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+				Directory.CreateDirectory(dir);
+
+			var data = _entries.Values.Select(e => new PersistedOrchestration
+			{
+				Path = e.Path,
+				McpPath = e.McpPath
+			}).ToList();
+
+			var json = JsonSerializer.Serialize(data, _jsonOptions);
+			File.WriteAllText(_persistPath, json);
+			if (_logger is not null)
+				LogOrchestrationsPersistedToDisk(data.Count, _persistPath);
+		}
+		catch (Exception ex)
+		{
+			if (_logger is not null)
+				LogOrchestrationsSaveFailed(ex);
+		}
+	}
+
+	/// <summary>
+	/// Load registered orchestrations from disk.
+	/// </summary>
+	public int LoadFromDisk()
+	{
+		if (!File.Exists(_persistPath))
+		{
+			if (_logger is not null)
+				LogNoPersistedOrchestrationsFound(_persistPath);
+			return 0;
+		}
+
+		try
+		{
+			var json = File.ReadAllText(_persistPath);
+			var data = JsonSerializer.Deserialize<List<PersistedOrchestration>>(json, new JsonSerializerOptions
+			{
+				PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+			}) ?? [];
+
+			var loaded = 0;
+			foreach (var item in data)
+			{
+				if (string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path))
+				{
+					if (_logger is not null)
+						LogSkippingMissingOrchestrationFile(item.Path ?? "(null)");
+					continue;
+				}
+
+				try
+				{
+					Register(item.Path, item.McpPath, persist: false);
+					loaded++;
+				}
+				catch (Exception ex)
+				{
+					if (_logger is not null)
+						LogOrchestrationLoadFailed(ex, item.Path);
+				}
+			}
+
+			if (_logger is not null)
+				LogOrchestrationsLoadedFromDisk(loaded, _persistPath);
+			return loaded;
+		}
+		catch (Exception ex)
+		{
+			if (_logger is not null)
+				LogOrchestrationsLoadFailed(ex);
+			return 0;
+		}
+	}
+
+	/// <summary>
+	/// Scans a directory for orchestration files and registers them.
+	/// </summary>
+	public int ScanDirectory(string directory, string? mcpPath = null)
+	{
+		if (!Directory.Exists(directory))
+			return 0;
+
+		var loaded = 0;
+		foreach (var file in Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly))
+		{
+			try
+			{
+				Register(file, mcpPath, persist: false);
+				loaded++;
+			}
+			catch
+			{
+				// Not a valid orchestration file, skip
+			}
+		}
+
+		if (loaded > 0)
+			SaveToDisk();
+
+		return loaded;
+	}
+
+	/// <summary>
+	/// Generates a unique ID for an orchestration.
+	/// </summary>
+	public static string GenerateId(string name, string path)
+	{
+		var hash = path.GetHashCode().ToString("x8");
+		return $"{SanitizeId(name)}-{hash[..4]}";
+	}
+
+	private static string SanitizeId(string name)
+	{
+		return new string(name
+			.ToLowerInvariant()
+			.Select(c => char.IsLetterOrDigit(c) ? c : '-')
+			.ToArray())
+			.Trim('-');
+	}
+
+	// ── Structured Logging ──
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Saved {Count} orchestrations to {Path}")]
+	private partial void LogOrchestrationsPersistedToDisk(int count, string path);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to save orchestrations to disk")]
+	private partial void LogOrchestrationsSaveFailed(Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "No persisted orchestrations file found at {Path}")]
+	private partial void LogNoPersistedOrchestrationsFound(string path);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Skipping missing orchestration file: {Path}")]
+	private partial void LogSkippingMissingOrchestrationFile(string path);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load orchestration from {Path}")]
+	private partial void LogOrchestrationLoadFailed(Exception ex, string path);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Loaded {Count} orchestrations from {Path}")]
+	private partial void LogOrchestrationsLoadedFromDisk(int count, string path);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load orchestrations from disk")]
+	private partial void LogOrchestrationsLoadFailed(Exception ex);
+}
+
+/// <summary>
+/// Minimal data needed to reload an orchestration.
+/// </summary>
+public class PersistedOrchestration
+{
+	public string Path { get; set; } = "";
+	public string? McpPath { get; set; }
+}
+
+/// <summary>
+/// Entry in the orchestration registry.
+/// </summary>
+public class OrchestrationEntry
+{
+	public required string Id { get; init; }
+	public required string Path { get; init; }
+	public string? McpPath { get; init; }
+	public required Orchestration Orchestration { get; init; }
+	public DateTimeOffset RegisteredAt { get; init; }
+}

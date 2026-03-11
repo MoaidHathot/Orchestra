@@ -1,0 +1,10 @@
+{
+  "rawContent": "Perfect! Now I have detailed forecast data. Let me also check for marine-specific information.\n\n## **Tomorrow\u0027s Weather Forecast for Orcas Island, WA (Tuesday, March 4, 2026)**\n\n**Temperature:**\n- High: 51\u00B0F\n- Low: 43\u00B0F\n\n**Precipitation:**\n- 98-100% chance of rain throughout the day and night\n- Expected rainfall: 0.1 to 0.25 inches during the day, 0.1 to 0.25 inches overnight\n- Rain will be present all day\n\n**Wind Conditions:**\n- Daytime: South-southeast winds around 5 mph (light)\n- Nighttime: South-southeast winds 2-6 mph\n- Winds remain very calm, suitable for island travel\n\n**Marine Conditions:**\n- Wave height: 1 foot or less\n- Seas: Very calm\n- No small craft advisories or marine warnings in effect\n- Excellent conditions for ferry travel and marine transit\n\n**Overall:** Tomorrow will be a rainy but calm day on Orcas Island. Despite persistent rain, wind and marine conditions will be very favorable for travel. The light winds and minimal wave action make ferry crossings safe and comfortable. Pack rain gear, but don\u0027t worry about rough seas or challenging travel conditions.",
+  "content": "**Orcas Island Weather Forecast - Tuesday, March 4, 2026**\n\nRainy day ahead with temperatures 43-51\u00B0F and near-certain precipitation (0.2-0.5\u0022 total). However, excellent news for travelers: calm south-southeast winds (2-6 mph), wave heights under 1 foot, and no marine advisories make ferry crossings smooth and safe. \n\n**Ferry Travel:** Optimal conditions despite rain.\n\n**Outdoor Activities:** Persistent rain will dampen hiking and outdoor plans\u2014waterproof gear essential. Light winds make kayaking feasible for experienced paddlers, though visibility may be reduced.\n\nBottom line: Perfect travel day, challenging outdoor recreation day. Pack your rain jacket!",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 21413,
+    "outputTokens": 297,
+    "totalTokens": 21710
+  }
+}

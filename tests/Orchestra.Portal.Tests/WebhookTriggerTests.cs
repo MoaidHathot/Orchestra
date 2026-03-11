@@ -8,6 +8,64 @@ using Xunit;
 namespace Orchestra.Portal.Tests;
 
 /// <summary>
+/// Tests for SPA routing - ensures the Portal serves index.html for all routes.
+/// </summary>
+public class SpaRoutingTests : IClassFixture<PortalWebApplicationFactory>, IDisposable
+{
+	private readonly PortalWebApplicationFactory _factory;
+	private readonly HttpClient _client;
+
+	public SpaRoutingTests(PortalWebApplicationFactory factory)
+	{
+		_factory = factory;
+		_client = factory.CreateClient();
+	}
+
+	public void Dispose()
+	{
+		_client.Dispose();
+	}
+
+	[Fact]
+	public async Task RootUrl_ReturnsIndexHtml()
+	{
+		// Act
+		var response = await _client.GetAsync("/");
+
+		// Assert
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var content = await response.Content.ReadAsStringAsync();
+		content.Should().Contain("<!DOCTYPE html>");
+		content.Should().Contain("Orchestra Portal");
+	}
+
+	[Fact]
+	public async Task NonExistentRoute_ReturnsIndexHtml_ForSpaRouting()
+	{
+		// Act - Request a path that doesn't exist as a static file or API endpoint
+		var response = await _client.GetAsync("/some/spa/route");
+
+		// Assert - Should return index.html for SPA client-side routing
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var content = await response.Content.ReadAsStringAsync();
+		content.Should().Contain("<!DOCTYPE html>");
+		content.Should().Contain("Orchestra Portal");
+	}
+
+	[Fact]
+	public async Task ApiEndpoint_StillWorks()
+	{
+		// Act - API endpoints should still work normally
+		var response = await _client.GetAsync("/api/orchestrations");
+
+		// Assert
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var content = await response.Content.ReadAsStringAsync();
+		content.Should().Contain("orchestrations");
+	}
+}
+
+/// <summary>
 /// Integration tests for the webhook trigger functionality.
 /// Tests the complete flow: register orchestration -> enable trigger -> fire webhook -> verify status
 /// </summary>
@@ -40,7 +98,7 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 		// The endpoint expects { "Json": "...", "McpJson": null }
 		var requestBody = JsonSerializer.Serialize(new { Json = orchestrationJson, McpJson = (string?)null });
 		var content = new StringContent(requestBody, Encoding.UTF8, "application/json");
-		var response = await _client.PostAsync("/api/orchestrations/add-json", content);
+		var response = await _client.PostAsync("/api/orchestrations/json", content);
 		
 		var responseContent = await response.Content.ReadAsStringAsync();
 		if (!response.IsSuccessStatusCode)
@@ -109,7 +167,7 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 
 		// Act - Fire the webhook
 		var webhookPayload = new { message = "Test message", priority = "high" };
-		var fireResponse = await _client.PostAsJsonAsync($"/api/webhook/{triggerId}", webhookPayload, _jsonOptions);
+		var fireResponse = await _client.PostAsJsonAsync($"/api/webhooks/{triggerId}", webhookPayload, _jsonOptions);
 
 		// Assert - Webhook should be accepted
 		fireResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -148,7 +206,7 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 
 		// Act - Fire with custom parameters
 		var payload = new { customParam = "custom-value", anotherParam = "another-value" };
-		var response = await _client.PostAsJsonAsync($"/api/webhook/{triggerId}", payload, _jsonOptions);
+		var response = await _client.PostAsJsonAsync($"/api/webhooks/{triggerId}", payload, _jsonOptions);
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -186,7 +244,7 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 		var triggerId = webhookTrigger.GetProperty("id").GetString()!;
 
 		// Act
-		var response = await _client.PostAsJsonAsync($"/api/webhook/{triggerId}", new { }, _jsonOptions);
+		var response = await _client.PostAsJsonAsync($"/api/webhooks/{triggerId}", new { }, _jsonOptions);
 
 		// Assert - Should be accepted:false (trigger exists but is disabled)
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -198,7 +256,7 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 	public async Task WebhookEndpoint_WithInvalidTriggerId_ReturnsNotFound()
 	{
 		// Act
-		var response = await _client.PostAsJsonAsync("/api/webhook/nonexistent-trigger-id", new { }, _jsonOptions);
+		var response = await _client.PostAsJsonAsync("/api/webhooks/nonexistent-trigger-id", new { }, _jsonOptions);
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.NotFound);

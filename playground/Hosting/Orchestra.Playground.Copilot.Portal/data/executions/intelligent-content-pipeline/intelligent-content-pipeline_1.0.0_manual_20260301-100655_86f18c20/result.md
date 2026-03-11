@@ -1,3 +1,0 @@
-I cannot complete this transformation. The input content provided is a quality review verdict and summary about an article, not the article itself. The transformation instructions request "the complete formatted article with front matter," but no article text was provided in the input - only metadata describing an article that was reportedly saved to a file.
-
-To transform content, I need the actual article content as input.
