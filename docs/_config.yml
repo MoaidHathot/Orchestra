@@ -1,0 +1,31 @@
+title: Orchestra
+description: A declarative orchestration framework for LLM workflows
+baseurl: "/Orchestra"
+url: "https://moaidhathot.github.io"
+theme: jekyll-theme-cayman
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+
+# Exclude from processing
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor
+
+# Navigation
+navigation:
+  - title: Home
+    url: /
+  - title: Getting Started
+    url: /getting-started
+  - title: Engine
+    url: /engine
+  - title: Host
+    url: /host
+  - title: Copilot
+    url: /copilot
+  - title: API Reference
+    url: /api-reference

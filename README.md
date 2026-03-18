@@ -456,7 +456,7 @@ var orchestration = OrchestrationParser.ParseOrchestrationFile("orchestration.js
 // Configure services
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
-builder.Services.AddSingleton<IOrchestrationReporter, ConsoleOrchestrationReporter>();
+builder.Services.AddSingleton<IOrchestrationReporter, NullOrchestrationReporter>();
 builder.Services.AddSingleton<IScheduler, OrchestrationScheduler>();
 builder.Services.AddSingleton<OrchestrationExecutor>();
 
