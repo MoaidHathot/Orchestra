@@ -1,5 +1,0 @@
-{
-  "parameters": {},
-  "rawDependencyOutputs": {},
-  "promptSent": "Using the fetch tools, get the current weather conditions for Seattle, Washington. Include: temperature, humidity, wind speed, and general conditions (sunny, cloudy, rainy, etc.)."
-}
