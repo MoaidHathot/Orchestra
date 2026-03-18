@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the National Weather Service forecast for Seattle, Washington, **tomorrow (Monday, March 17, 2026)**:\n\n**\uD83C\uDF21\uFE0F Temperatures:**\n- High: 55\u00B0F\n- Low: 49\u00B0F (Monday night)\n\n**\uD83C\uDF27\uFE0F Precipitation:**\n- 90% chance of rain during the day (mainly before 1pm)\n- 80% chance of rain Monday night (mainly after midnight)\n- Expected rainfall: 0.1 to 0.25 inches during the day\n\n**\u2601\uFE0F General Conditions:**\nRainy conditions throughout the day with south-southwest winds 8-10 mph during the day, increasing to 9-11 mph at night with gusts up to 20 mph.",
+  "content": "**Tomorrow\u0027s Forecast for Seattle (Monday, March 17)**\n\n**Morning:** Heavy rain likely with 90% chance of precipitation. Temperatures around 49-52\u00B0F with south-southwest winds 8-10 mph.\n\n**Afternoon:** Rain tapering off after 1pm. Warming to high of 55\u00B0F with continued light winds.\n\n**Evening/Night:** Drying out early evening, then rain returns after midnight (80% chance). Low of 49\u00B0F with winds increasing to 9-11 mph, gusts up to 20 mph. Total rainfall: 0.1-0.25 inches expected.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 12809,
+    "outputTokens": 175,
+    "totalTokens": 12984
+  }
+}

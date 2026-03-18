@@ -1,0 +1,10 @@
+{
+  "rawContent": "I apologize, but I\u0027m unable to retrieve current road conditions from the Washington State Department of Transportation website. The pages I attempted to fetch are returning only skeleton HTML without the actual road condition data, likely because the content is loaded dynamically with JavaScript.\n\nTo check current conditions for the routes you requested (I-5 Seattle corridor, I-90 Snoqualmie Pass, Highway 20 North Cascades, and SR-20 to Anacortes), I recommend:\n\n1. **WSDOT Travel Center Map**: Visit wsdot.com/travel/real-time/map directly for interactive real-time conditions\n2. **Mountain Pass Reports**: Call 511 or visit wsdot.wa.gov/travel/real-time/mountainpasses for pass-specific updates\n3. **WSDOT Twitter**: @wsdot and @SnoqualmiePass provide real-time alerts\n\nThe web fetch tools available to me cannot access the dynamically-loaded JavaScript content where this data resides.",
+  "content": "**ROAD CONDITIONS SUMMARY**\n\n**I-5 Seattle Corridor:** \u26A0\uFE0F Status unavailable\n\n**I-90 Snoqualmie Pass:** \u26A0\uFE0F Status unavailable\n\n**Highway 20 North Cascades:** \u26A0\uFE0F Status unavailable\n\n**SR-20 to Anacortes:** \u26A0\uFE0F Status unavailable\n\n---\n\n**Current conditions unavailable** - data cannot be retrieved via automated tools.\n\n**Alternative Resources:**\n- **Real-time map:** wsdot.com/travel/real-time/map\n- **Mountain passes:** wsdot.wa.gov/travel/real-time/mountainpasses\n- **Phone:** Dial 511\n- **Twitter alerts:** @wsdot, @SnoqualmiePass",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 19357,
+    "outputTokens": 225,
+    "totalTokens": 19582
+  }
+}

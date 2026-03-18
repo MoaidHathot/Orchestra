@@ -1,0 +1,10 @@
+{
+  "rawContent": "## Tomorrow\u0027s Weather Forecast for Orcas Island, WA (March 17, 2026)\n\n**Temperature:**\n- High: 53\u00B0F\n- Low: 45\u00B0F (overnight)\n\n**Precipitation:**\n- 90% chance of rain, mainly before 5pm\n- Expected accumulation: 0.1 to 0.25 inches\n\n**Wind Conditions:**\n- Southeast winds 6-9 mph\n- Relatively calm conditions for island travel\n\n**Marine Conditions:**\n- Light southeast winds (6-9 mph) - favorable for ferry crossings\n- Rain throughout most of the day\n\n**Travel Advisory:** Winds are light and favorable for island ferry travel. The main concern is rain, so bring appropriate gear. Conditions are much calmer than typical stormy weather in the San Juan Islands.",
+  "content": "**ORCAS ISLAND WEATHER FORECAST - MARCH 17, 2026**\n\nExpect a damp day with temperatures between 45-53\u00B0F. Rain likely through 5pm (90% chance, up to 0.25\u0022 accumulation).\n\n**FERRY TRAVEL:** Excellent conditions. Light southeast winds 6-9 mph provide calm crossings\u2014much gentler than typical island storms.\n\n**OUTDOOR ACTIVITIES:** Rain gear essential for morning and afternoon plans. Conditions improve after 5pm. Winds minimal, making it suitable for most outdoor pursuits if you don\u0027t mind getting wet.\n\nBottom line: Great day for ferry travel, manageable for outdoor activities with proper rain protection.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 13475,
+    "outputTokens": 188,
+    "totalTokens": 13663
+  }
+}
