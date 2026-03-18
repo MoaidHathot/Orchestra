@@ -1,1 +1,0 @@
-ERROR: The article content is not present in the INPUT_CONTENT provided. Only metadata and status information was included. Cannot output the complete formatted article without the actual article text.
