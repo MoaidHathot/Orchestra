@@ -1,0 +1,10 @@
+{
+  "rawContent": "**Current Weather in Seattle, Washington:**\n\n- **Temperature:** 44\u00B0F (7\u00B0C), feels like 40\u00B0F (4\u00B0C)\n- **Humidity:** 89%\n- **Wind Speed:** 7 mph (12 km/h) from the South\n- **Conditions:** Light rain with 100% cloud cover\n\n*Observation time: March 16, 2026 at 3:45 AM local time*",
+  "content": "**Seattle, Washington Weather**\n\n*March 16, 2026 | 3:45 AM*\n\nCurrently experiencing light rain with complete cloud cover. Temperature sits at 44\u00B0F (7\u00B0C) but feels cooler at 40\u00B0F (4\u00B0C) due to humid conditions. Humidity levels are high at 89%. Gentle southerly winds blowing at 7 mph (12 km/h).",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 13788,
+    "outputTokens": 103,
+    "totalTokens": 13891
+  }
+}
