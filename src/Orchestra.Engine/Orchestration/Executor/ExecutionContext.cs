@@ -13,6 +13,13 @@ public class OrchestrationExecutionContext
 	/// </summary>
 	public SystemPromptMode? DefaultSystemPromptMode { get; init; }
 
+	/// <summary>
+	/// Default retry policy from the orchestration.
+	/// Applied to steps that don't define their own retry policy.
+	/// When null, no retries are performed.
+	/// </summary>
+	public RetryPolicy? DefaultRetryPolicy { get; init; }
+
 	private readonly ConcurrentDictionary<string, ExecutionResult> _results = new();
 	private readonly ConcurrentDictionary<string, string> _loopFeedback = new();
 
@@ -26,6 +33,15 @@ public class OrchestrationExecutionContext
 		return _results.TryGetValue(stepName, out var result)
 			? result
 			: throw new InvalidOperationException($"No result found for step '{stepName}'.");
+	}
+
+	/// <summary>
+	/// Attempts to get the result for a step by name.
+	/// Returns null if no result has been recorded for the step.
+	/// </summary>
+	public ExecutionResult? TryGetResult(string stepName)
+	{
+		return _results.TryGetValue(stepName, out var result) ? result : null;
 	}
 
 	public IReadOnlyDictionary<string, ExecutionResult> Results => _results;

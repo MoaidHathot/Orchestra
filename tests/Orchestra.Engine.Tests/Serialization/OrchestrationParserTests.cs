@@ -982,8 +982,8 @@ public class OrchestrationParserTests
 		// Act
 		var act = () => OrchestrationParser.ParseOrchestration(json, []);
 
-		// Assert - ArgumentException is thrown when parsing unknown enum value
-		act.Should().Throw<ArgumentException>();
+		// Assert - JsonException is thrown when no parser is registered for the unknown step type
+		act.Should().Throw<System.Text.Json.JsonException>();
 	}
 
 	#endregion

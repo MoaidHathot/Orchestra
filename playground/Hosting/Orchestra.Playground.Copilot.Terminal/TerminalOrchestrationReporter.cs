@@ -142,6 +142,16 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 		AddEvent(new ReporterEvent("loop-iteration", $"[{checkerStepName}] Loop {iteration}/{maxIterations} -> {targetStepName}"));
 	}
 
+	public void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay)
+	{
+		AddEvent(new ReporterEvent("step-retry", $"[{stepName}] Retry {attempt}/{maxRetries}: {error}. Waiting {delay.TotalSeconds:F1}s..."));
+	}
+
+	public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps)
+	{
+		AddEvent(new ReporterEvent("checkpoint-saved", $"Checkpoint saved after '{stepName}' ({completedSteps}/{totalSteps}) — run {runId}"));
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		var name = displayName ?? agentName;

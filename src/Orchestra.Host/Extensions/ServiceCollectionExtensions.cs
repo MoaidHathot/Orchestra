@@ -46,6 +46,14 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton<FileSystemRunStore>(runStore);
 		services.AddSingleton<IRunStore>(runStore);
 
+		// File-based checkpoint store
+		services.AddSingleton<FileSystemCheckpointStore>(sp =>
+			new FileSystemCheckpointStore(options.DataPath, sp.GetRequiredService<ILogger<FileSystemCheckpointStore>>()));
+		services.AddSingleton<ICheckpointStore>(sp => sp.GetRequiredService<FileSystemCheckpointStore>());
+
+		// Step type parser registry with built-in parsers (stateless, safe as singleton)
+		services.AddSingleton<StepTypeParserRegistry>(_ => OrchestrationParser.CreateDefaultParserRegistry());
+
 		// Active executions tracking
 		var activeExecutions = new ConcurrentDictionary<string, CancellationTokenSource>();
 		var activeExecutionInfos = new ConcurrentDictionary<string, ActiveExecutionInfo>();

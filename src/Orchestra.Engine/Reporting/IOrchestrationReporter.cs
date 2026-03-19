@@ -17,7 +17,9 @@ public interface IOrchestrationReporter
 	void ReportStepOutput(string stepName, string content);
 	void ReportStepStarted(string stepName);
 	void ReportStepSkipped(string stepName, string reason);
+	void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay);
 	void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations);
+	void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps);
 
 	// Subagent events
 	void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools);

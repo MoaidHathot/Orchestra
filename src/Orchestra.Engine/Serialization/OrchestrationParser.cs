@@ -5,17 +5,42 @@ namespace Orchestra.Engine;
 
 public static class OrchestrationParser
 {
-	private static readonly JsonSerializerOptions s_options = new()
+	/// <summary>
+	/// Default step type parser registry with built-in step types.
+	/// </summary>
+	private static readonly StepTypeParserRegistry s_defaultParserRegistry = new StepTypeParserRegistry()
+		.Register(new PromptStepTypeParser())
+		.Register(new HttpStepTypeParser())
+		.Register(new TransformStepTypeParser());
+
+	private static readonly JsonSerializerOptions s_options = CreateOptions(s_defaultParserRegistry);
+
+	/// <summary>
+	/// Creates a <see cref="StepTypeParserRegistry"/> pre-populated with all built-in step type parsers.
+	/// Use this as a base when registering custom step type parsers.
+	/// </summary>
+	public static StepTypeParserRegistry CreateDefaultParserRegistry()
 	{
-		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-		Converters =
+		return new StepTypeParserRegistry()
+			.Register(new PromptStepTypeParser())
+			.Register(new HttpStepTypeParser())
+			.Register(new TransformStepTypeParser());
+	}
+
+	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry)
+	{
+		return new JsonSerializerOptions
 		{
-			new OrchestrationStepConverter(),
-			new McpConverter(),
-			new TriggerConfigConverter(),
-			new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
-		},
-	};
+			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+			Converters =
+			{
+				new OrchestrationStepConverter(parserRegistry),
+				new McpConverter(),
+				new TriggerConfigConverter(),
+				new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
+			},
+		};
+	}
 
 	public static Orchestration ParseOrchestration(string json, Mcp[] availableMcps)
 	{
@@ -26,10 +51,33 @@ public static class OrchestrationParser
 		return orchestration;
 	}
 
+	/// <summary>
+	/// Parses orchestration JSON using a custom step type parser registry.
+	/// Use this overload when you have registered custom step types.
+	/// </summary>
+	public static Orchestration ParseOrchestration(string json, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
+	{
+		var options = CreateOptions(parserRegistry);
+		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
+			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+
+		ResolveStepMcps(orchestration, availableMcps);
+		return orchestration;
+	}
+
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps)
 	{
 		var json = File.ReadAllText(path);
 		return ParseOrchestration(json, availableMcps);
+	}
+
+	/// <summary>
+	/// Parses orchestration file using a custom step type parser registry.
+	/// </summary>
+	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
+	{
+		var json = File.ReadAllText(path);
+		return ParseOrchestration(json, availableMcps, parserRegistry);
 	}
 
 	/// <summary>
@@ -165,91 +213,32 @@ public static class OrchestrationParser
 
 	private sealed class OrchestrationStepConverter : JsonConverter<OrchestrationStep>
 	{
+		private readonly StepTypeParserRegistry _parserRegistry;
+
+		public OrchestrationStepConverter(StepTypeParserRegistry parserRegistry)
+		{
+			_parserRegistry = parserRegistry;
+		}
+
 		public override OrchestrationStep Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
 		{
 			using var doc = JsonDocument.ParseValue(ref reader);
 			var root = doc.RootElement;
 
-			var type = root.TryGetProperty("type", out var typeProp)
-				? Enum.Parse<OrchestrationStepType>(typeProp.GetString()!, ignoreCase: true)
+			var typeName = root.TryGetProperty("type", out var typeProp)
+				? typeProp.GetString()!
 				: throw new JsonException("Missing 'type' property on orchestration step.");
 
-			return type switch
-			{
-				OrchestrationStepType.Prompt => DeserializePromptStep(root),
-				_ => throw new JsonException($"Unknown orchestration step type: '{type}'."),
-			};
+			var step = _parserRegistry.TryParse(typeName, root);
+			if (step is not null)
+				return step;
+
+			throw new JsonException($"Unknown orchestration step type: '{typeName}'. No parser registered for this type.");
 		}
 
 		public override void Write(Utf8JsonWriter writer, OrchestrationStep value, JsonSerializerOptions options)
 		{
 			JsonSerializer.Serialize(writer, value, value.GetType(), options);
-		}
-
-		private static PromptOrchestrationStep DeserializePromptStep(JsonElement root)
-		{
-			return new PromptOrchestrationStep
-			{
-				Name = root.GetProperty("name").GetString()!,
-				Type = OrchestrationStepType.Prompt,
-				DependsOn = root.TryGetProperty("dependsOn", out var deps)
-					? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-					: [],
-				SystemPrompt = root.GetProperty("systemPrompt").GetString()!,
-				UserPrompt = root.GetProperty("userPrompt").GetString()!,
-				InputHandlerPrompt = root.TryGetProperty("inputHandlerPrompt", out var ihp) ? ihp.GetString() : null,
-				OutputHandlerPrompt = root.TryGetProperty("outputHandlerPrompt", out var ohp) ? ohp.GetString() : null,
-				Model = root.GetProperty("model").GetString()!,
-				McpNames = root.TryGetProperty("mcps", out var mcps)
-					? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-					: [],
-				ReasoningLevel = root.TryGetProperty("reasoningLevel", out var rl)
-					? Enum.Parse<ReasoningLevel>(rl.GetString()!, ignoreCase: true)
-					: null,
-				SystemPromptMode = root.TryGetProperty("systemPromptMode", out var spm)
-					? Enum.Parse<SystemPromptMode>(spm.GetString()!, ignoreCase: true)
-					: null,
-				TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
-					? ts.GetInt32()
-					: null,
-				Parameters = root.TryGetProperty("parameters", out var parameters)
-				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-				Loop = root.TryGetProperty("loop", out var loop)
-					? DeserializeLoopConfig(loop)
-					: null,
-				Subagents = root.TryGetProperty("subagents", out var subagents)
-					? subagents.EnumerateArray().Select(DeserializeSubagent).ToArray()
-					: [],
-			};
-		}
-
-		private static Subagent DeserializeSubagent(JsonElement element)
-		{
-			return new Subagent
-			{
-				Name = element.GetProperty("name").GetString()!,
-				DisplayName = element.TryGetProperty("displayName", out var dn) ? dn.GetString() : null,
-				Description = element.TryGetProperty("description", out var desc) ? desc.GetString() : null,
-				Prompt = element.GetProperty("prompt").GetString()!,
-				Tools = element.TryGetProperty("tools", out var tools)
-					? tools.EnumerateArray().Select(e => e.GetString()!).ToArray()
-					: null,
-				McpNames = element.TryGetProperty("mcps", out var mcps)
-					? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-					: [],
-				Infer = element.TryGetProperty("infer", out var infer) ? infer.GetBoolean() : true,
-			};
-		}
-
-		private static LoopConfig DeserializeLoopConfig(JsonElement element)
-		{
-			return new LoopConfig
-			{
-				Target = element.GetProperty("target").GetString()!,
-				MaxIterations = element.GetProperty("maxIterations").GetInt32(),
-				ExitPattern = element.GetProperty("exitPattern").GetString()!,
-			};
 		}
 	}
 

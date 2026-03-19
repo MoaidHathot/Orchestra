@@ -37,6 +37,8 @@ public static class EndpointRouteBuilderExtensions
 	///   <item><description>/api/active - Active executions</description></item>
 	///   <item><description>/api/orchestrations/{id}/run - SSE execution streaming</description></item>
 	///   <item><description>/api/execution/{id}/attach - SSE attach to running execution</description></item>
+	///   <item><description>/api/checkpoints - Checkpoint management and resume</description></item>
+	///   <item><description>/api/orchestrations/{id}/resume/{runId} - SSE resume from checkpoint</description></item>
 	///   <item><description>/api/models - Available AI models</description></item>
 	///   <item><description>/api/mcps - MCP servers used by orchestrations</description></item>
 	///   <item><description>/api/status - Server status</description></item>
@@ -55,6 +57,7 @@ public static class EndpointRouteBuilderExtensions
 		endpoints.MapWebhooksApi(jsonOptions);
 		endpoints.MapRunsApi(jsonOptions);
 		endpoints.MapExecutionApi(jsonOptions);
+		endpoints.MapCheckpointApi(jsonOptions);
 		endpoints.MapUtilityApi(jsonOptions);
 
 		return endpoints;
@@ -118,5 +121,15 @@ public static class EndpointRouteBuilderExtensions
 		JsonSerializerOptions? jsonOptions = null)
 	{
 		return endpoints.MapUtilityApi(jsonOptions ?? DefaultJsonOptions);
+	}
+
+	/// <summary>
+	/// Maps only the checkpoint and resume endpoints.
+	/// </summary>
+	public static IEndpointRouteBuilder MapCheckpointEndpoints(
+		this IEndpointRouteBuilder endpoints,
+		JsonSerializerOptions? jsonOptions = null)
+	{
+		return endpoints.MapCheckpointApi(jsonOptions ?? DefaultJsonOptions);
 	}
 }

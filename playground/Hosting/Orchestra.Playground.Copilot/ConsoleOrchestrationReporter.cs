@@ -136,6 +136,16 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		Console.WriteLine($"  [{checkerStepName}] Loop iteration {iteration}/{maxIterations} — re-running '{targetStepName}' with feedback");
 	}
 
+	public void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay)
+	{
+		Console.WriteLine($"  [{stepName}] Retrying ({attempt}/{maxRetries}) after error: {error}. Waiting {delay.TotalSeconds:F1}s...");
+	}
+
+	public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps)
+	{
+		Console.WriteLine($"  [checkpoint] Saved after '{stepName}' ({completedSteps}/{totalSteps} steps complete) — run {runId}");
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		var name = displayName ?? agentName;

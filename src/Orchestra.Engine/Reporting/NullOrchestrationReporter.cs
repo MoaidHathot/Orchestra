@@ -19,7 +19,9 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	public void ReportStepOutput(string stepName, string content) { }
 	public void ReportStepStarted(string stepName) { }
 	public void ReportStepSkipped(string stepName, string reason) { }
+	public void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay) { }
 	public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations) { }
+	public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps) { }
 
 	// Subagent events
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools) { }

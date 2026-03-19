@@ -257,6 +257,16 @@ public class SseReporter : IOrchestrationReporter
 		Write("loop-iteration", new { checkerStepName, targetStepName, iteration, maxIterations });
 	}
 
+	public void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay)
+	{
+		Write("step-retry", new { stepName, attempt, maxRetries, error, delaySeconds = delay.TotalSeconds });
+	}
+
+	public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps)
+	{
+		Write("checkpoint-saved", new { runId, stepName, completedSteps, totalSteps });
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		Write("subagent-selected", new { stepName, agentName, displayName, tools });

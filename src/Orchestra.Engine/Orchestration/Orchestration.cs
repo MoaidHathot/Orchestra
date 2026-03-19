@@ -37,4 +37,17 @@ public class Orchestration
 	/// preserving built-in capabilities like coding assistance.
 	/// </remarks>
 	public SystemPromptMode? DefaultSystemPromptMode { get; init; }
+
+	/// <summary>
+	/// Default retry policy applied to all steps that don't define their own.
+	/// When null, no retries are performed on step failures.
+	/// </summary>
+	public RetryPolicy? DefaultRetryPolicy { get; init; }
+
+	/// <summary>
+	/// Maximum time in seconds for the entire orchestration to complete.
+	/// When elapsed, all running steps are cancelled via CancellationToken.
+	/// Default is 3600 seconds (1 hour). Set to null or 0 to disable.
+	/// </summary>
+	public int? TimeoutSeconds { get; init; } = 3600;
 }
