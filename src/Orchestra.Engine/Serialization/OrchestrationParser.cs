@@ -209,6 +209,9 @@ public static class OrchestrationParser
 				SystemPromptMode = root.TryGetProperty("systemPromptMode", out var spm)
 					? Enum.Parse<SystemPromptMode>(spm.GetString()!, ignoreCase: true)
 					: null,
+				TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
+					? ts.GetInt32()
+					: null,
 				Parameters = root.TryGetProperty("parameters", out var parameters)
 				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],

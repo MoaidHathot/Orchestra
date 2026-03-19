@@ -12,6 +12,13 @@ public class PromptOrchestrationStep : OrchestrationStep
 	public Mcp[] Mcps { get; internal set; } = [];
 
 	/// <summary>
+	/// Optional timeout in seconds for this step. When set, the step will be cancelled
+	/// if it takes longer than this duration. If not set, the step runs with no timeout
+	/// (only the global cancellation token applies).
+	/// </summary>
+	public int? TimeoutSeconds { get; init; }
+
+	/// <summary>
 	/// Optional loop configuration for retry/check patterns.
 	/// When set, after this step runs the executor checks if the output matches
 	/// <see cref="LoopConfig.ExitPattern"/>. If not, it re-runs the target step

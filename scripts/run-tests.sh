@@ -1,10 +1,10 @@
 #!/bin/bash
-# Run all Orchestra Portal tests
+# Run all Orchestra tests
 
 set -e
 
 echo "================================"
-echo "Orchestra Portal Test Suite"
+echo "Orchestra Full Test Suite"
 echo "================================"
 
 # Change to repository root
@@ -12,26 +12,35 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR/.."
 
 echo ""
-echo "1. Installing Playwright browsers..."
+echo "1. Building solution..."
 echo "--------------------------------"
-pwsh -Command "& { cd tests/Orchestra.Portal.E2E; dotnet build; playwright install chromium }" 2>/dev/null || \
-    dotnet tool run playwright install chromium --project tests/Orchestra.Portal.E2E 2>/dev/null || \
-    echo "Note: Playwright browsers may need to be installed manually: npx playwright install"
+dotnet build
 
 echo ""
-echo "2. Running Integration Tests..."
+echo "2. Running Engine Unit Tests..."
 echo "--------------------------------"
-dotnet test tests/Orchestra.Portal.Tests --logger "console;verbosity=detailed"
+dotnet test tests/Orchestra.Engine.Tests --no-build --logger "console;verbosity=detailed"
 
 echo ""
-echo "3. Running E2E Tests..."
+echo "3. Running Host Unit Tests..."
 echo "--------------------------------"
-echo "Note: E2E tests require the Portal server to be running on http://localhost:5099"
-echo "Start the server with: dotnet run --project playground/Hosting/Orchestra.Playground.Copilot.Portal --urls http://localhost:5099"
+dotnet test tests/Orchestra.Host.Tests --no-build --logger "console;verbosity=detailed"
+
 echo ""
-dotnet test tests/Orchestra.Portal.E2E --logger "console;verbosity=detailed"
+echo "4. Running Copilot Unit Tests..."
+echo "--------------------------------"
+dotnet test tests/Orchestra.Copilot.Tests --no-build --logger "console;verbosity=detailed"
+
+echo ""
+echo "5. Running Mcp.Graph Unit Tests..."
+echo "--------------------------------"
+dotnet test tests/Orchestra.Mcp.Graph.Tests --no-build --logger "console;verbosity=detailed"
 
 echo ""
 echo "================================"
-echo "All tests completed!"
+echo "All unit tests completed successfully!"
 echo "================================"
+echo ""
+echo "NOTE: Portal integration and E2E tests are Windows-only and require separate execution:"
+echo "  dotnet test tests/Orchestra.Portal.Tests"
+echo "  dotnet test tests/Orchestra.Portal.E2E  (requires running Portal server)"

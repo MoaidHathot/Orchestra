@@ -258,18 +258,45 @@ public partial class OrchestrationExecutor
 
 		LogRunningStep(step.Name);
 		_reporter.ReportStepStarted(step.Name);
-		var result = await executor.ExecuteAsync(step, context, cancellationToken);
 
-		if (result.Status == ExecutionStatus.Succeeded)
+		// Apply per-step timeout if configured
+		CancellationTokenSource? timeoutCts = null;
+		var effectiveToken = cancellationToken;
+
+		if (step.TimeoutSeconds is > 0)
 		{
-			LogStepSucceeded(step.Name);
-		}
-		else
-		{
-			LogStepFailed(step.Name, result.ErrorMessage);
+			timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+			timeoutCts.CancelAfter(TimeSpan.FromSeconds(step.TimeoutSeconds.Value));
+			effectiveToken = timeoutCts.Token;
+			LogStepTimeout(step.Name, step.TimeoutSeconds.Value);
 		}
 
-		return result;
+		try
+		{
+			var result = await executor.ExecuteAsync(step, context, effectiveToken);
+
+			if (result.Status == ExecutionStatus.Succeeded)
+			{
+				LogStepSucceeded(step.Name);
+			}
+			else
+			{
+				LogStepFailed(step.Name, result.ErrorMessage);
+			}
+
+			return result;
+		}
+		catch (OperationCanceledException) when (timeoutCts is not null && timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+		{
+			var message = $"Step timed out after {step.TimeoutSeconds} seconds.";
+			LogStepTimedOut(step.Name, step.TimeoutSeconds!.Value);
+			_reporter.ReportStepError(step.Name, message);
+			return ExecutionResult.Failed(message);
+		}
+		finally
+		{
+			timeoutCts?.Dispose();
+		}
 	}
 
 	private async Task HandleLoopAsync(
@@ -459,6 +486,12 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "[{Checker}] Loop exhausted {MaxIterations} iterations without meeting exit condition. Using last result.")]
 	private partial void LogLoopExhausted(string checker, int maxIterations);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' has a timeout of {TimeoutSeconds} seconds.")]
+	private partial void LogStepTimeout(string stepName, int timeoutSeconds);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' timed out after {TimeoutSeconds} seconds.")]
+	private partial void LogStepTimedOut(string stepName, int timeoutSeconds);
 
 	#endregion
 }

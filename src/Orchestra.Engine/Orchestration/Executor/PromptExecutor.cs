@@ -115,6 +115,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				tokenUsage,
 				trace);
 		}
+		catch (OperationCanceledException)
+		{
+			throw; // Let cancellation propagate to the caller for timeout handling
+		}
 		catch (Exception ex)
 		{
 			// Build partial trace even on failure

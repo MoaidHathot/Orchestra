@@ -737,24 +737,11 @@ public partial class TriggerManager : BackgroundService
 
 	private static DateTime CalculateNextCronTime(string cron)
 	{
-		var parts = cron.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+		var expression = Cronos.CronExpression.Parse(cron);
+		var next = expression.GetNextOccurrence(DateTime.UtcNow);
 
-		if (parts.Length >= 5)
-		{
-			if (parts[0].StartsWith("*/"))
-			{
-				if (int.TryParse(parts[0][2..], out var minutes))
-					return DateTime.UtcNow.AddMinutes(minutes);
-			}
-
-			if (parts[0] == "0" && parts[1].StartsWith("*/"))
-			{
-				if (int.TryParse(parts[1][2..], out var hours))
-					return DateTime.UtcNow.AddHours(hours);
-			}
-		}
-
-		return DateTime.UtcNow.AddHours(1);
+		// Fallback to 1 hour if the expression yields no next occurrence
+		return next ?? DateTime.UtcNow.AddHours(1);
 	}
 
 	/// <summary>

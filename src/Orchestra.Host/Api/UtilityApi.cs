@@ -63,6 +63,16 @@ public static class UtilityApi
 			}, jsonOptions);
 		});
 
+		// GET /api/health - Health check endpoint
+		endpoints.MapGet("/api/health", () =>
+		{
+			return Results.Ok(new
+			{
+				status = "healthy",
+				timestamp = DateTimeOffset.UtcNow
+			});
+		});
+
 		// GET /api/mcps - List all MCPs used across orchestrations
 		endpoints.MapGet("/api/mcps", (OrchestrationRegistry registry) =>
 		{
