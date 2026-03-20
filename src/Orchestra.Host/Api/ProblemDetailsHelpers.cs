@@ -36,4 +36,14 @@ public static class ProblemDetailsHelpers
 			title: "Internal Server Error",
 			detail: detail,
 			instance: instance);
+
+	/// <summary>
+	/// Creates a 503 Service Unavailable Problem Details result.
+	/// </summary>
+	public static IResult ServiceUnavailable(string detail, string? instance = null)
+		=> Results.Problem(
+			statusCode: StatusCodes.Status503ServiceUnavailable,
+			title: "Service Unavailable",
+			detail: detail,
+			instance: instance);
 }

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.Persistence;
 
 namespace Orchestra.Host.Registry;
 
@@ -13,15 +14,17 @@ public partial class OrchestrationRegistry
 	private readonly ConcurrentDictionary<string, OrchestrationEntry> _entries = new();
 	private readonly string _persistPath;
 	private readonly ILogger<OrchestrationRegistry>? _logger;
+	private readonly IOrchestrationVersionStore? _versionStore;
 	private readonly JsonSerializerOptions _jsonOptions;
 
-	public OrchestrationRegistry(string? persistPath = null, ILogger<OrchestrationRegistry>? logger = null)
+	public OrchestrationRegistry(string? persistPath = null, ILogger<OrchestrationRegistry>? logger = null, IOrchestrationVersionStore? versionStore = null)
 	{
 		_persistPath = persistPath ?? Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
 			"OrchestraHost",
 			"registered-orchestrations.json");
 		_logger = logger;
+		_versionStore = versionStore;
 		_jsonOptions = new JsonSerializerOptions
 		{
 			WriteIndented = true,
@@ -35,10 +38,21 @@ public partial class OrchestrationRegistry
 	public int Count => _entries.Count;
 
 	/// <summary>
+	/// Gets the version store used for tracking orchestration version history.
+	/// May be null if no version store was configured.
+	/// </summary>
+	public IOrchestrationVersionStore? VersionStore => _versionStore;
+
+	/// <summary>
 	/// Registers an orchestration from a file path.
 	/// </summary>
 	public OrchestrationEntry Register(string path, string? mcpPath, Orchestration? preloaded = null, bool persist = true)
 	{
+		// Read the raw JSON content for hashing and snapshots
+		string? rawJson = null;
+		if (File.Exists(path))
+			rawJson = File.ReadAllText(path);
+
 		Mcp[] mcps = [];
 		if (!string.IsNullOrWhiteSpace(mcpPath) && File.Exists(mcpPath))
 			mcps = OrchestrationParser.ParseMcpFile(mcpPath);
@@ -46,14 +60,24 @@ public partial class OrchestrationRegistry
 		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, mcps);
 		var id = GenerateId(orchestration.Name, path);
 
+		// Compute content hash if we have the raw JSON
+		var contentHash = rawJson is not null ? FileSystemOrchestrationVersionStore.ComputeContentHash(rawJson) : null;
+
 		var entry = new OrchestrationEntry
 		{
 			Id = id,
 			Path = path,
 			McpPath = mcpPath,
 			Orchestration = orchestration,
-			RegisteredAt = DateTimeOffset.UtcNow
+			RegisteredAt = DateTimeOffset.UtcNow,
+			ContentHash = contentHash
 		};
+
+		// Check if this is a new or changed version, and auto-snapshot
+		if (_versionStore is not null && rawJson is not null && contentHash is not null)
+		{
+			_ = SnapshotVersionAsync(id, entry, rawJson, contentHash);
+		}
 
 		_entries[id] = entry;
 
@@ -61,6 +85,38 @@ public partial class OrchestrationRegistry
 			SaveToDisk();
 
 		return entry;
+	}
+
+	private async Task SnapshotVersionAsync(string orchestrationId, OrchestrationEntry entry, string rawJson, string contentHash)
+	{
+		try
+		{
+			var previousVersion = await _versionStore!.GetLatestVersionAsync(orchestrationId);
+
+			var versionEntry = new OrchestrationVersionEntry
+			{
+				ContentHash = contentHash,
+				DeclaredVersion = entry.Orchestration.Version,
+				Timestamp = DateTimeOffset.UtcNow,
+				OrchestrationName = entry.Orchestration.Name,
+				StepCount = entry.Orchestration.Steps.Length,
+				ChangeDescription = FileSystemOrchestrationVersionStore.GenerateChangeDescription(previousVersion, new OrchestrationVersionEntry
+				{
+					ContentHash = contentHash,
+					DeclaredVersion = entry.Orchestration.Version,
+					Timestamp = DateTimeOffset.UtcNow,
+					OrchestrationName = entry.Orchestration.Name,
+					StepCount = entry.Orchestration.Steps.Length
+				})
+			};
+
+			await _versionStore.SaveVersionAsync(orchestrationId, versionEntry, rawJson);
+		}
+		catch (Exception ex)
+		{
+			if (_logger is not null)
+				LogVersionSnapshotFailed(ex, orchestrationId);
+		}
 	}
 
 	/// <summary>
@@ -245,6 +301,9 @@ public partial class OrchestrationRegistry
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load orchestrations from disk")]
 	private partial void LogOrchestrationsLoadFailed(Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to snapshot version for orchestration '{OrchestrationId}'")]
+	private partial void LogVersionSnapshotFailed(Exception ex, string orchestrationId);
 }
 
 /// <summary>
@@ -266,4 +325,10 @@ public class OrchestrationEntry
 	public string? McpPath { get; init; }
 	public required Orchestration Orchestration { get; init; }
 	public DateTimeOffset RegisteredAt { get; init; }
+
+	/// <summary>
+	/// SHA-256 content hash of the orchestration JSON source file.
+	/// Used to detect content changes and deduplicate version snapshots.
+	/// </summary>
+	public string? ContentHash { get; init; }
 }

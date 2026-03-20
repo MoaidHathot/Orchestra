@@ -23,14 +23,22 @@ public static class OrchestrationsApi
 		var group = endpoints.MapGroup("/api/orchestrations");
 
 		// GET /api/orchestrations - List all registered orchestrations
-		group.MapGet("", (OrchestrationRegistry registry, TriggerManager triggerManager) =>
+		group.MapGet("", async (OrchestrationRegistry registry, TriggerManager triggerManager) =>
 		{
-			var orchestrations = registry.GetAll().Select(o =>
+			var orchestrations = await Task.WhenAll(registry.GetAll().Select(async o =>
 			{
 				var trigger = triggerManager.GetTrigger(o.Id);
 				var lastRun = trigger?.LastFireTime;
 				var nextRun = trigger?.NextFireTime;
 				var parameterNames = o.Orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray();
+
+				// Get version count if version store is available
+				int? versionCount = null;
+				if (registry.VersionStore is not null)
+				{
+					var versions = await registry.VersionStore.ListVersionsAsync(o.Id);
+					versionCount = versions.Count;
+				}
 
 				return new
 				{
@@ -40,6 +48,8 @@ public static class OrchestrationsApi
 					name = o.Orchestration.Name,
 					description = o.Orchestration.Description,
 					version = o.Orchestration.Version,
+					contentHash = o.ContentHash,
+					versionCount,
 					stepCount = o.Orchestration.Steps.Length,
 					steps = o.Orchestration.Steps.Select(s => new
 					{
@@ -73,20 +83,20 @@ public static class OrchestrationsApi
 					lastExecutionId = trigger?.LastExecutionId,
 					hasInlineMcps = o.Orchestration.Mcps.Length > 0,
 					mcps = o.Orchestration.Mcps.Select(m => m.Name).ToArray(),
-					models = o.Orchestration.Steps
+				models = o.Orchestration.Steps
 						.OfType<PromptOrchestrationStep>()
 						.Select(s => s.Model)
 						.Where(m => !string.IsNullOrEmpty(m))
 						.Distinct()
 						.ToArray()
 				};
-			}).ToArray();
+			}));
 
 			return Results.Json(new { count = orchestrations.Length, orchestrations }, jsonOptions);
 		});
 
 		// GET /api/orchestrations/{id} - Get a specific orchestration
-		group.MapGet("/{id}", (string id, OrchestrationRegistry registry, IScheduler scheduler, TriggerManager triggerManager) =>
+		group.MapGet("/{id}", async (string id, OrchestrationRegistry registry, IScheduler scheduler, TriggerManager triggerManager) =>
 		{
 			var entry = registry.Get(id);
 			if (entry is null)
@@ -139,6 +149,14 @@ public static class OrchestrationsApi
 			var triggerRegistration = triggerManager.GetTrigger(entry.Id);
 			var allParameters = o.Steps.SelectMany(s => s.Parameters).Distinct().ToArray();
 
+			// Get version count if version store is available
+			int? versionCount = null;
+			if (registry.VersionStore is not null)
+			{
+				var versions = await registry.VersionStore.ListVersionsAsync(entry.Id);
+				versionCount = versions.Count;
+			}
+
 			return Results.Json(new
 			{
 				id = entry.Id,
@@ -147,6 +165,8 @@ public static class OrchestrationsApi
 				name = o.Name,
 				description = o.Description,
 				version = o.Version,
+				contentHash = entry.ContentHash,
+				versionCount,
 				steps,
 				layers,
 				parameters = allParameters,
