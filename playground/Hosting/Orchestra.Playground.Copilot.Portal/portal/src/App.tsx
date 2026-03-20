@@ -1,0 +1,1313 @@
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import './App.css';
+import { api } from './api';
+import { Icons } from './icons';
+import { formatTime } from './utils';
+import type {
+  Orchestration,
+  ActiveData,
+  ServerStatus,
+  ExecutionModalState,
+  StepEvent,
+  Step,
+  TraceData,
+} from './types';
+import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
+import StatusBar from './components/StatusBar';
+import OfflineBanner from './components/OfflineBanner';
+import ViewerModal from './components/modals/ViewerModal';
+import HistoryModal from './components/modals/HistoryModal';
+import ActiveModal from './components/modals/ActiveModal';
+import AddModal from './components/modals/AddModal';
+import RunModal from './components/modals/RunModal';
+import ExecutionModal from './components/modals/ExecutionModal';
+import McpsModal from './components/modals/McpsModal';
+import BuilderModal from './components/modals/BuilderModal';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useOnlineStatus } from './hooks/useOnlineStatus';
+
+// ── API response types ──────────────────────────────────────────────────────
+
+interface OrchestrationsResponse {
+  orchestrations: RuntimeOrchestration[];
+}
+
+interface HistoryResponse {
+  runs: HistoryListEntry[];
+}
+
+/** Shape of a step in the detailed execution response from /api/history/:name/:runId */
+interface ExecutionDetailStep {
+  name: string;
+  status: string;
+  content?: string;
+  startedAt?: string;
+  completedAt?: string;
+  actualModel?: string;
+  errorMessage?: string;
+  usage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+  };
+  trace?: Omit<TraceData, 'toolCalls'> & {
+    toolCalls?: Array<{
+      toolName: string;
+      mcpServer?: string;
+      success?: boolean;
+      startedAt?: string;
+    }>;
+  };
+}
+
+interface ExecutionDetailsResponse {
+  status: string;
+  finalContent?: string;
+  steps?: ExecutionDetailStep[];
+}
+
+// ── Viewer / History / Add / Run modal state types ──────────────────────────
+
+interface ViewerModalState {
+  open: boolean;
+  orchestration: Orchestration | null;
+}
+
+interface HistoryModalState {
+  open: boolean;
+}
+
+interface AddModalState {
+  open: boolean;
+}
+
+interface RunModalState {
+  open: boolean;
+  orchestration: Orchestration | null;
+}
+
+interface McpsModalState {
+  open: boolean;
+}
+
+interface ActiveModalState {
+  open: boolean;
+  data: ActiveData | null;
+  loading: boolean;
+}
+
+/** Execution entry as it appears in the left-pane history list (may be enriched with active info). */
+interface HistoryListEntry {
+  runId: string;
+  executionId?: string;
+  orchestrationId?: string;
+  orchestrationName: string;
+  status?: string;
+  isActive?: boolean;
+  startedAt?: string;
+  durationSeconds?: number;
+  parameters?: Record<string, unknown>;
+}
+
+// ── Helpers for SSE event handling ──────────────────────────────────────────
+
+/** Extended orchestration type for runtime fields returned by the API but not in the base Orchestration type. */
+interface RuntimeOrchestration extends Orchestration {
+  status?: string;
+  stepCount?: number;
+  triggerType?: string;
+  hasParameters?: boolean;
+  lastExecutionStatus?: string;
+}
+
+type StepStatusValue = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
+
+interface SSEEventData {
+  stepName?: string;
+  status?: string;
+  executionId?: string;
+  chunk?: string;
+  content?: string;
+  error?: string;
+  message?: string;
+  [key: string]: unknown;
+}
+
+// ── The App component ───────────────────────────────────────────────────────
+
+function App(): React.JSX.Element {
+  const [orchestrations, setOrchestrations] = useState<RuntimeOrchestration[]>([]);
+  const [history, setHistory] = useState<HistoryListEntry[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedOrchId, setSelectedOrchId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeData, setActiveData] = useState<ActiveData>({ running: [], pending: [] });
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Modal states
+  const [viewerModal, setViewerModal] = useState<ViewerModalState>({ open: false, orchestration: null });
+  const [historyModal, setHistoryModal] = useState<HistoryModalState>({ open: false });
+  const [addModal, setAddModal] = useState<AddModalState>({ open: false });
+  const [runModal, setRunModal] = useState<RunModalState>({ open: false, orchestration: null });
+  const [executionModal, setExecutionModal] = useState<ExecutionModalState>({
+    open: false,
+    orchestration: null,
+    executionId: null,
+    stepStatuses: {},
+    stepEvents: {},
+    stepResults: {},
+    stepTraces: {},
+    streamingContent: '',
+    finalResult: '',
+    status: 'idle',
+    errorMessage: null,
+  });
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const [mcpsModal, setMcpsModal] = useState<McpsModalState>({ open: false });
+  const [activeModal, setActiveModal] = useState<ActiveModalState>({ open: false, data: null, loading: false });
+  const [builderModal, setBuilderModal] = useState(false);
+
+  // Status bar state
+  const [serverStatus, setServerStatus] = useState<ServerStatus>({
+    outlook: null,
+    orchestrationCount: 0,
+    activeTriggers: 0,
+    runningExecutions: 0,
+  });
+
+  // Online/offline tracking
+  const onlineStatus = useOnlineStatus();
+
+  // ── Load data ─────────────────────────────────────────────────────────────
+
+  const loadData = useCallback(async () => {
+    try {
+      const [orchData, histData, activeDataResult] = await Promise.all([
+        api.get<OrchestrationsResponse>('/api/orchestrations'),
+        api.get<HistoryResponse>('/api/history?limit=15'),
+        api.get<ActiveData>('/api/active'),
+      ]);
+      setOrchestrations(orchData.orchestrations || []);
+      setHistory(histData.runs || []);
+      setActiveData(activeDataResult || { running: [], pending: [] });
+    } catch (err) {
+      console.error('Failed to load data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // Reload data when coming back online
+  useEffect(() => {
+    if (onlineStatus.isOnline && onlineStatus.isServerReachable) {
+      loadData();
+    }
+  }, [onlineStatus.isOnline, onlineStatus.isServerReachable, loadData]);
+
+  // Auto-refresh active orchestrations every 2 seconds when there are running or pending ones
+  useEffect(() => {
+    const hasActiveOrPending = activeData.running.length > 0 || activeData.pending.length > 0;
+    const hasEnabledTriggers = orchestrations.some(o => o.enabled);
+
+    if (hasActiveOrPending || hasEnabledTriggers) {
+      const interval = setInterval(async () => {
+        try {
+          const data = await api.get<ActiveData>('/api/active');
+          setActiveData(data || { running: [], pending: [] });
+        } catch (err) {
+          console.error('Failed to refresh active:', err);
+        }
+      }, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [activeData.running.length, activeData.pending.length, orchestrations]);
+
+  // Auto-refresh history every 5 seconds when there are enabled triggers
+  useEffect(() => {
+    const hasEnabledTriggers = orchestrations.some(o => o.enabled);
+    if (hasEnabledTriggers) {
+      const interval = setInterval(async () => {
+        try {
+          const histData = await api.get<HistoryResponse>('/api/history?limit=15');
+          setHistory(histData.runs || []);
+        } catch (err) {
+          console.error('Failed to refresh history:', err);
+        }
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [orchestrations]);
+
+  // Poll server status (including Outlook connection status) every 5 seconds
+  useEffect(() => {
+    const fetchStatus = async () => {
+      try {
+        const status = await api.get<ServerStatus>('/api/status');
+        setServerStatus({
+          outlook: status.outlook || null,
+          orchestrationCount: status.orchestrationCount || 0,
+          activeTriggers: status.activeTriggers || 0,
+          runningExecutions: status.runningExecutions || 0,
+        });
+      } catch (err) {
+        console.error('Failed to fetch server status:', err);
+      }
+    };
+
+    fetchStatus();
+    const interval = setInterval(fetchStatus, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ── Filtered / enabled orchestrations ─────────────────────────────────────
+
+  const filteredOrchestrations = useMemo(() => {
+    if (!searchQuery) return orchestrations;
+    const q = searchQuery.toLowerCase();
+    return orchestrations.filter(o =>
+      o.name?.toLowerCase().includes(q) ||
+      o.description?.toLowerCase().includes(q) ||
+      o.triggerType?.toLowerCase().includes(q) ||
+      o.steps?.some((step: Step | string) => {
+        const stepName = typeof step === 'string' ? step : step.name;
+        return stepName?.toLowerCase().includes(q);
+      })
+    );
+  }, [orchestrations, searchQuery]);
+
+  const enabledOrchestrations = useMemo(() =>
+    filteredOrchestrations.filter(o => o.enabled !== false),
+    [filteredOrchestrations]
+  );
+
+  // ── SSE helper factories ──────────────────────────────────────────────────
+  // Both runOrchestration and attachToExecution share identical SSE wiring.
+  // We extract the helpers into a factory to avoid duplication.
+
+  function wireEventSource(
+    eventSource: EventSource,
+    initialStatuses: Record<string, StepStatusValue>,
+  ): void {
+    // Track state locally for batching updates
+    const stepEvents: Record<string, StepEvent[]> = {};
+    const stepStatuses: Record<string, string> = { ...initialStatuses };
+    const stepResults: Record<string, string> = {};
+    const stepTraces: Record<string, TraceData> = {};
+    let streamingContent = '';
+    let finalResult = '';
+
+    // ---- local helpers ----
+
+    const addStepEvent = (stepName: string | undefined, type: string, data: Record<string, unknown>) => {
+      if (!stepName) return;
+      if (!stepEvents[stepName]) {
+        stepEvents[stepName] = [];
+      }
+      stepEvents[stepName].push({
+        time: new Date().toLocaleTimeString(),
+        type,
+        ...data,
+      } as StepEvent);
+      setExecutionModal(prev => ({
+        ...prev,
+        stepEvents: { ...stepEvents },
+      }));
+    };
+
+    const updateStepResult = (stepName: string | undefined, content: string) => {
+      if (!stepName) return;
+      stepResults[stepName] = content;
+      setExecutionModal(prev => ({
+        ...prev,
+        stepResults: { ...stepResults },
+      }));
+    };
+
+    const updateStepTrace = (stepName: string | undefined, trace: TraceData) => {
+      if (!stepName) return;
+      stepTraces[stepName] = trace;
+      setExecutionModal(prev => ({
+        ...prev,
+        stepTraces: { ...stepTraces },
+      }));
+    };
+
+    const updateStepStatus = (stepName: string | undefined, status: string) => {
+      if (!stepName) return;
+      stepStatuses[stepName] = status;
+      setExecutionModal(prev => ({
+        ...prev,
+        stepStatuses: { ...stepStatuses },
+      }));
+    };
+
+    // ---- SSE listeners ----
+
+    // execution-info (sent when attaching to a running execution)
+    eventSource.addEventListener('execution-info', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        if (data.status === 'Cancelling') {
+          setExecutionModal(prev => ({ ...prev, status: 'cancelling' }));
+        }
+      } catch { /* ignore */ }
+    });
+
+    // step-started
+    eventSource.addEventListener('step-started', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        updateStepStatus(data.stepName, 'running');
+        addStepEvent(data.stepName, 'step-started', data as Record<string, unknown>);
+      } catch { /* ignore */ }
+    });
+
+    // step-completed
+    eventSource.addEventListener('step-completed', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        updateStepStatus(data.stepName, 'completed');
+        addStepEvent(data.stepName, 'step-completed', data as Record<string, unknown>);
+      } catch { /* ignore */ }
+    });
+
+    // step-error
+    eventSource.addEventListener('step-error', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        updateStepStatus(data.stepName, 'failed');
+        addStepEvent(data.stepName, 'step-error', data as Record<string, unknown>);
+      } catch { /* ignore */ }
+    });
+
+    // step-cancelled
+    eventSource.addEventListener('step-cancelled', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        updateStepStatus(data.stepName, 'cancelled');
+        addStepEvent(data.stepName, 'step-cancelled', data as Record<string, unknown>);
+      } catch { /* ignore */ }
+    });
+
+    // step-skipped
+    eventSource.addEventListener('step-skipped', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        updateStepStatus(data.stepName, 'skipped');
+        addStepEvent(data.stepName, 'step-skipped', data as Record<string, unknown>);
+      } catch { /* ignore */ }
+    });
+
+    // step-trace
+    eventSource.addEventListener('step-trace', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        updateStepTrace(data.stepName, data as unknown as TraceData);
+        addStepEvent(data.stepName, 'step-trace', { hasTrace: true });
+      } catch { /* ignore */ }
+    });
+
+    // content-delta
+    eventSource.addEventListener('content-delta', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        if (data.chunk) {
+          streamingContent += data.chunk;
+          setExecutionModal(prev => ({
+            ...prev,
+            streamingContent,
+          }));
+        }
+        if (data.stepName) {
+          addStepEvent(data.stepName, 'content-delta', data as Record<string, unknown>);
+        }
+      } catch { /* ignore */ }
+    });
+
+    // tool events
+    (['tool-started', 'tool-completed'] as const).forEach(eventType => {
+      eventSource.addEventListener(eventType, (e: MessageEvent) => {
+        try {
+          const data: SSEEventData = JSON.parse(e.data);
+          addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
+        } catch { /* ignore */ }
+      });
+    });
+
+    // subagent events
+    (['subagent-selected', 'subagent-started', 'subagent-completed', 'subagent-failed', 'subagent-deselected'] as const).forEach(eventType => {
+      eventSource.addEventListener(eventType, (e: MessageEvent) => {
+        try {
+          const data: SSEEventData = JSON.parse(e.data);
+          addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
+        } catch { /* ignore */ }
+      });
+    });
+
+    // step-output
+    eventSource.addEventListener('step-output', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        addStepEvent(data.stepName, 'step-output', data as Record<string, unknown>);
+        if (data.content) {
+          updateStepResult(data.stepName, data.content);
+          finalResult = data.content;
+          setExecutionModal(prev => ({ ...prev, finalResult }));
+        }
+      } catch { /* ignore */ }
+    });
+
+    // usage, loop-iteration, model-mismatch
+    (['usage', 'loop-iteration', 'model-mismatch'] as const).forEach(eventType => {
+      eventSource.addEventListener(eventType, (e: MessageEvent) => {
+        try {
+          const data: SSEEventData = JSON.parse(e.data);
+          addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
+        } catch { /* ignore */ }
+      });
+    });
+
+    // execution-started
+    eventSource.addEventListener('execution-started', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        if (data.executionId) {
+          setExecutionModal(prev => ({ ...prev, executionId: data.executionId as string }));
+          loadData();
+        }
+      } catch { /* ignore */ }
+    });
+
+    // status-changed
+    eventSource.addEventListener('status-changed', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        if (data.status === 'Cancelling') {
+          setExecutionModal(prev => ({ ...prev, status: 'cancelling' }));
+        }
+        loadData();
+      } catch { /* ignore */ }
+    });
+
+    // orchestration-done
+    eventSource.addEventListener('orchestration-done', (e: MessageEvent) => {
+      const data: SSEEventData = JSON.parse(e.data);
+      setExecutionModal(prev => ({
+        ...prev,
+        status: data.status === 'Succeeded' ? 'success' : 'failed',
+      }));
+      eventSource.close();
+      eventSourceRef.current = null;
+      loadData();
+    });
+
+    // orchestration-cancelled
+    eventSource.addEventListener('orchestration-cancelled', () => {
+      setExecutionModal(prev => ({ ...prev, status: 'cancelled' }));
+      eventSource.close();
+      eventSourceRef.current = null;
+      loadData();
+    });
+
+    // orchestration-error
+    eventSource.addEventListener('orchestration-error', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        setExecutionModal(prev => ({
+          ...prev,
+          status: 'error',
+          errorMessage: data.error || data.message || 'An error occurred during execution',
+        }));
+        eventSource.close();
+        eventSourceRef.current = null;
+        loadData();
+      } catch { /* ignore */ }
+    });
+
+    // onerror
+    eventSource.onerror = () => {
+      if (eventSource.readyState === EventSource.CLOSED) {
+        eventSource.close();
+        eventSourceRef.current = null;
+      } else {
+        console.error('EventSource error');
+        eventSource.close();
+        eventSourceRef.current = null;
+        setExecutionModal(prev => ({
+          ...prev,
+          status: 'error',
+          errorMessage: 'Connection to server lost. The orchestration may still be running.',
+        }));
+      }
+    };
+  }
+
+  // ── Build initial step statuses from an orchestration ─────────────────────
+
+  function buildInitialStatuses(orchestration: Orchestration | undefined): Record<string, StepStatusValue> {
+    const statuses: Record<string, StepStatusValue> = {};
+    if (orchestration?.steps) {
+      orchestration.steps.forEach((step: Step | string) => {
+        const stepName = typeof step === 'string' ? step : step.name;
+        statuses[stepName] = 'pending';
+      });
+    }
+    return statuses;
+  }
+
+  // ── Run orchestration ─────────────────────────────────────────────────────
+
+  const runOrchestration = async (id: string | undefined, params: Record<string, string> = {}): Promise<void> => {
+    if (!id) return;
+
+    const orchestration = orchestrations.find(o => o.id === id);
+    const initialStatuses = buildInitialStatuses(orchestration);
+
+    setExecutionModal({
+      open: true,
+      orchestration: orchestration || null,
+      executionId: null,
+      stepStatuses: initialStatuses,
+      stepEvents: {},
+      stepResults: {},
+      stepTraces: {},
+      streamingContent: '',
+      finalResult: '',
+      status: 'running',
+      errorMessage: null,
+    });
+
+    try {
+      const queryParams = Object.keys(params).length > 0
+        ? `?params=${encodeURIComponent(JSON.stringify(params))}`
+        : '';
+      const eventSource = new EventSource(`/api/orchestrations/${id}/run${queryParams}`);
+      eventSourceRef.current = eventSource;
+      wireEventSource(eventSource, initialStatuses);
+    } catch (err) {
+      console.error('Run error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to start orchestration';
+      setExecutionModal(prev => ({
+        ...prev,
+        status: 'error',
+        errorMessage: message,
+      }));
+    }
+  };
+
+  // ── Cancel running orchestration ──────────────────────────────────────────
+
+  const cancelExecution = async (executionId: string | null): Promise<void> => {
+    if (!executionId) return;
+    try {
+      setExecutionModal(prev => ({ ...prev, status: 'cancelling' }));
+      await api.post(`/api/cancel/${executionId}`);
+
+      if (!eventSourceRef.current) {
+        setExecutionModal(prev => ({ ...prev, status: 'cancelled' }));
+        loadData();
+      }
+    } catch (err) {
+      console.error('Failed to cancel:', err);
+      setExecutionModal(prev => ({ ...prev, status: 'error', errorMessage: 'Failed to cancel execution' }));
+    }
+  };
+
+  // ── Delete orchestration ──────────────────────────────────────────────────
+
+  const deleteOrchestration = async (orchestrationId: string, e?: React.MouseEvent): Promise<void> => {
+    if (e) {
+      e.stopPropagation();
+    }
+    if (!confirm('Are you sure you want to remove this orchestration?')) return;
+    try {
+      await api.delete(`/api/orchestrations/${orchestrationId}`);
+      if (selectedOrchId === orchestrationId) {
+        setSelectedOrchId(null);
+      }
+      loadData();
+    } catch (err) {
+      console.error('Failed to delete orchestration:', err);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      alert('Failed to delete orchestration: ' + message);
+    }
+  };
+
+  // ── Toggle orchestration enabled/disabled ─────────────────────────────────
+
+  const toggleOrchestration = async (orchestrationId: string, currentlyEnabled: boolean | undefined, e?: React.MouseEvent): Promise<void> => {
+    if (e) {
+      e.stopPropagation();
+    }
+    try {
+      const endpoint = currentlyEnabled
+        ? `/api/orchestrations/${orchestrationId}/disable`
+        : `/api/orchestrations/${orchestrationId}/enable`;
+      await api.post(endpoint);
+      loadData();
+    } catch (err) {
+      console.error('Failed to toggle orchestration:', err);
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      alert('Failed to toggle orchestration: ' + message);
+    }
+  };
+
+  // ── Attach to a running execution ─────────────────────────────────────────
+
+  const attachToExecution = async (
+    execution: { executionId?: string; status?: string },
+    orchestration: Orchestration | undefined,
+  ): Promise<void> => {
+    if (!execution?.executionId) return;
+
+    const initialStatuses = buildInitialStatuses(orchestration);
+
+    setExecutionModal({
+      open: true,
+      orchestration: orchestration || null,
+      executionId: execution.executionId,
+      stepStatuses: initialStatuses,
+      stepEvents: {},
+      stepResults: {},
+      stepTraces: {},
+      streamingContent: '',
+      finalResult: '',
+      status: execution.status === 'Cancelling' ? 'cancelling' : 'running',
+      errorMessage: null,
+    });
+
+    try {
+      const eventSource = new EventSource(`/api/execution/${execution.executionId}/attach`);
+      eventSourceRef.current = eventSource;
+      wireEventSource(eventSource, initialStatuses);
+    } catch (err) {
+      console.error('Attach error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to attach to execution';
+      setExecutionModal(prev => ({
+        ...prev,
+        status: 'error',
+        errorMessage: message,
+      }));
+    }
+  };
+
+  // ── View a historical (completed) execution ───────────────────────────────
+
+  const viewHistoricalExecution = async (exec: { orchestrationName?: string; runId?: string }): Promise<void> => {
+    if (!exec?.orchestrationName || !exec?.runId) return;
+
+    const orchestration = orchestrations?.find(o =>
+      o.name === exec.orchestrationName || o.id === exec.orchestrationName
+    );
+
+    // Show loading state
+    setExecutionModal({
+      open: true,
+      orchestration: orchestration || null,
+      executionId: exec.runId,
+      stepStatuses: {},
+      stepEvents: {},
+      stepResults: {},
+      stepTraces: {},
+      streamingContent: '',
+      finalResult: '',
+      status: 'loading',
+      errorMessage: null,
+    });
+
+    try {
+      const details = await api.get<ExecutionDetailsResponse>(
+        `/api/history/${encodeURIComponent(exec.orchestrationName)}/${encodeURIComponent(exec.runId)}`
+      );
+
+      const stepStatuses: Record<string, string> = {};
+      const stepEvents: Record<string, StepEvent[]> = {};
+      const stepResults: Record<string, string> = {};
+      const stepTraces: Record<string, TraceData> = {};
+      const finalResult = details.finalContent || '';
+
+      if (details.steps) {
+        details.steps.forEach((step: ExecutionDetailStep) => {
+          const statusMap: Record<string, string> = {
+            'Succeeded': 'completed',
+            'Failed': 'failed',
+            'Cancelled': 'cancelled',
+            'Skipped': 'skipped',
+            'Running': 'running',
+            'Pending': 'pending',
+          };
+          stepStatuses[step.name] = statusMap[step.status] || 'pending';
+
+          if (step.content) {
+            stepResults[step.name] = step.content;
+          }
+
+          if (step.trace) {
+            stepTraces[step.name] = step.trace as unknown as TraceData;
+          }
+
+          // Create events from step data
+          stepEvents[step.name] = [];
+
+          // Add step started event
+          stepEvents[step.name].push({
+            time: step.startedAt ? new Date(step.startedAt).toLocaleTimeString() : '',
+            type: 'step-started',
+          } as StepEvent);
+
+          // Add model info if available
+          if (step.actualModel) {
+            stepEvents[step.name].push({
+              time: step.startedAt ? new Date(step.startedAt).toLocaleTimeString() : '',
+              type: 'session-started',
+              selectedModel: step.actualModel,
+            } as StepEvent);
+          }
+
+          // Add usage info if available
+          if (step.usage) {
+            stepEvents[step.name].push({
+              time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
+              type: 'usage',
+              inputTokens: step.usage.inputTokens,
+              outputTokens: step.usage.outputTokens,
+            } as StepEvent);
+          }
+
+          // Add tool call events from trace
+          if (step.trace?.toolCalls) {
+            step.trace.toolCalls.forEach(tc => {
+              stepEvents[step.name].push({
+                time: tc.startedAt ? new Date(tc.startedAt).toLocaleTimeString() : '',
+                type: 'tool-call',
+                toolName: tc.toolName,
+                mcpServer: tc.mcpServer,
+                success: tc.success,
+              } as StepEvent);
+            });
+          }
+
+          // Add completion or error event
+          if (step.status === 'Succeeded') {
+            stepEvents[step.name].push({
+              time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
+              type: 'step-completed',
+              contentPreview: step.content
+                ? step.content.substring(0, 200) + (step.content.length > 200 ? '...' : '')
+                : undefined,
+            } as StepEvent);
+          } else if (step.errorMessage) {
+            stepEvents[step.name].push({
+              time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
+              type: 'step-error',
+              error: step.errorMessage,
+            } as StepEvent);
+          }
+        });
+      }
+
+      // Determine overall status
+      const overallStatusMap: Record<string, string> = {
+        'Succeeded': 'success',
+        'Failed': 'failed',
+        'Cancelled': 'cancelled',
+      };
+      const modalStatus = overallStatusMap[details.status] || 'success';
+
+      setExecutionModal({
+        open: true,
+        orchestration: orchestration || null,
+        executionId: exec.runId,
+        stepStatuses,
+        stepEvents,
+        stepResults,
+        stepTraces,
+        streamingContent: finalResult,
+        finalResult,
+        status: modalStatus,
+        errorMessage: null,
+      });
+    } catch (err) {
+      console.error('Failed to load execution details:', err);
+      const message = err instanceof Error ? err.message : 'Failed to load execution details';
+      setExecutionModal(prev => ({
+        ...prev,
+        status: 'error',
+        errorMessage: message,
+      }));
+    }
+  };
+
+  // ── Toggle enabled ────────────────────────────────────────────────────────
+
+  const toggleEnabled = async (id: string, enabled: boolean): Promise<void> => {
+    try {
+      await api.post(`/api/orchestrations/${id}/toggle`, { enabled });
+      loadData();
+    } catch (err) {
+      console.error('Failed to toggle:', err);
+    }
+  };
+
+  // ── Delete a history entry ────────────────────────────────────────────────
+
+  const deleteHistoryEntry = async (exec: HistoryListEntry, e?: React.MouseEvent): Promise<void> => {
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+    if (!exec?.orchestrationName || !exec?.runId) return;
+
+    // Don't allow deleting running executions
+    if (exec.isActive) return;
+
+    try {
+      await api.delete(`/api/history/${encodeURIComponent(exec.orchestrationName)}/${encodeURIComponent(exec.runId)}`);
+      setHistory(prev => prev.filter(h => h.runId !== exec.runId));
+    } catch (err) {
+      console.error('Failed to delete history entry:', err);
+    }
+  };
+
+  // ── Keyboard shortcuts (Escape closes sidebar) ────────────────────────────
+  useKeyboardShortcuts({
+    onEscape: useCallback(() => {
+      if (sidebarOpen) setSidebarOpen(false);
+    }, [sidebarOpen]),
+  });
+
+  // ── Render ────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="app-container">
+      {/* Offline / server-unreachable banner */}
+      <OfflineBanner onlineStatus={onlineStatus} />
+
+      {/* Skip to main content link for keyboard users */}
+      <a href="#main-content" className="skip-link">Skip to main content</a>
+
+      {/* Mobile sidebar overlay */}
+      <div
+        className={`sidebar-overlay ${sidebarOpen ? 'visible' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+
+      {/* Left Pane */}
+      <nav
+        className={`left-pane ${sidebarOpen ? 'open' : ''}`}
+        aria-label="Orchestrations sidebar"
+      >
+        <div className="left-header">
+          <div className="app-title">
+            <Icons.Workflow />
+            Orchestra Portal
+          </div>
+          <div className="search-box" role="search">
+            <span className="search-icon" aria-hidden="true"><Icons.Search /></span>
+            <input
+              type="text"
+              placeholder="Search orchestrations..."
+              value={searchQuery}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+              aria-label="Search orchestrations"
+            />
+          </div>
+          <button className="btn btn-primary btn-block" onClick={() => { setAddModal({ open: true }); setSidebarOpen(false); }}>
+            <Icons.Plus /> Add Orchestrations
+          </button>
+          <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setBuilderModal(true); setSidebarOpen(false); }}>
+            <Icons.Steps aria-hidden="true" /> Visual Builder
+          </button>
+          <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setMcpsModal({ open: true }); setSidebarOpen(false); }}>
+            <Icons.Tool /> MCP Tools
+          </button>
+        </div>
+
+        <div className="orchestrations-list" role="listbox" aria-label="Orchestrations">
+          {loading ? (
+            <div className="empty-state">
+              <div className="spinner"></div>
+            </div>
+          ) : filteredOrchestrations.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-text">No orchestrations found</div>
+            </div>
+          ) : (
+            filteredOrchestrations.map(orch => (
+              <div
+                key={orch.id}
+                className={`orch-item ${selectedOrchId === orch.id ? 'active' : ''}`}
+                role="option"
+                aria-selected={selectedOrchId === orch.id}
+                tabIndex={0}
+                onClick={() => {
+                  setSelectedOrchId(orch.id);
+                  setViewerModal({ open: true, orchestration: orch });
+                  setSidebarOpen(false);
+                }}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedOrchId(orch.id);
+                    setViewerModal({ open: true, orchestration: orch });
+                    setSidebarOpen(false);
+                  }
+                }}
+              >
+                <div className="orch-item-header">
+                  <span className="orch-name">{orch.name}</span>
+                  <div className="orch-status" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <span className={`status-dot ${orch.status === 'Running' ? 'running' : orch.enabled ? 'enabled' : 'disabled'}`}></span>
+                    <button
+                      className={`btn-icon btn-toggle ${orch.enabled ? 'enabled' : ''}`}
+                      onClick={(e: React.MouseEvent) => toggleOrchestration(orch.id, orch.enabled, e)}
+                      title={orch.enabled ? 'Disable trigger' : 'Enable trigger'}
+                      aria-label={orch.enabled ? `Disable ${orch.name} trigger` : `Enable ${orch.name} trigger`}
+                    >
+                      {orch.enabled ? <Icons.Check /> : <Icons.Play />}
+                    </button>
+                    <button
+                      className="btn-icon btn-delete-small"
+                      onClick={(e: React.MouseEvent) => deleteOrchestration(orch.id, e)}
+                      title="Remove orchestration"
+                      aria-label={`Remove ${orch.name}`}
+                    >
+                      <Icons.X />
+                    </button>
+                  </div>
+                </div>
+                <div className="orch-meta">
+                  <span className="orch-meta-item">
+                    <Icons.Steps /> {orch.stepCount || 0} steps
+                  </span>
+                  <span className={`badge badge-${orch.triggerType?.toLowerCase() || 'trigger'}`}>
+                    {orch.triggerType || 'Manual'}
+                  </span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* History Section */}
+        <div className="history-section" aria-label="Recent executions">
+          <div className="history-header">
+            <span className="history-title" id="history-title">Recent Executions</span>
+            <button className="btn btn-sm" onClick={() => { setHistoryModal({ open: true }); setSidebarOpen(false); }}>
+              Show All
+            </button>
+          </div>
+          <div className="history-list" role="list" aria-labelledby="history-title">
+            {history.length === 0 ? (
+              <div className="empty-state" style={{ padding: '20px' }}>
+                <div className="empty-text">No executions yet</div>
+              </div>
+            ) : (
+              history.map(exec => (
+                <div
+                  key={exec.runId}
+                  className="history-item"
+                  role="listitem"
+                  tabIndex={0}
+                  onClick={() => {
+                    if (exec.isActive && exec.executionId) {
+                      const orch = orchestrations?.find(o => o.id === exec.orchestrationId);
+                      attachToExecution(exec, orch);
+                    } else {
+                      viewHistoricalExecution(exec);
+                    }
+                    setSidebarOpen(false);
+                  }}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      if (exec.isActive && exec.executionId) {
+                        const orch = orchestrations?.find(o => o.id === exec.orchestrationId);
+                        attachToExecution(exec, orch);
+                      } else {
+                        viewHistoricalExecution(exec);
+                      }
+                      setSidebarOpen(false);
+                    }
+                  }}
+                  aria-label={`${exec.orchestrationName} - ${exec.status || 'Running'} - ${formatTime(exec.startedAt)}`}
+                >
+                  <div className={`history-status-icon ${exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
+                    {exec.isActive ? (
+                      <span className="spinner" style={{ width: '12px', height: '12px' }}></span>
+                    ) : exec.status === 'Succeeded' ? (
+                      <Icons.Check />
+                    ) : exec.status === 'Failed' ? (
+                      <Icons.X />
+                    ) : exec.status === 'Cancelled' ? (
+                      <Icons.X />
+                    ) : (
+                      '...'
+                    )}
+                  </div>
+                  <div className="history-info">
+                    <div className="history-name">
+                      {exec.orchestrationName}
+                      {exec.isActive && (
+                        <span className="step-status-badge running" style={{
+                          marginLeft: '8px',
+                          fontSize: '10px',
+                          padding: '2px 6px',
+                        }}>
+                          {exec.status === 'Cancelling' ? 'Cancelling' : 'Running'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="history-time">{formatTime(exec.startedAt)}</div>
+                  </div>
+                  {!exec.isActive && (
+                    <button
+                      className="history-delete-btn"
+                      onClick={(e: React.MouseEvent) => deleteHistoryEntry(exec, e)}
+                      title="Delete execution"
+                      aria-label={`Delete ${exec.orchestrationName} execution`}
+                    >
+                      <Icons.X />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </nav>
+
+      {/* Main Pane */}
+      <main id="main-content" className="main-pane">
+        <div className="main-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              className="mobile-menu-btn"
+              onClick={() => setSidebarOpen(prev => !prev)}
+              aria-label="Toggle sidebar menu"
+            >
+              <Icons.Menu />
+            </button>
+            <span className="main-title">Active Orchestrations</span>
+          </div>
+          <div className="main-actions">
+            <span className="text-muted" style={{ fontSize: '12px', marginRight: '8px' }}>
+              {activeData.running.length} running, {activeData.pending.length} pending
+            </span>
+            <button className="btn" onClick={loadData}>Refresh</button>
+          </div>
+        </div>
+
+        <div className="cards-container" style={{ overflow: 'auto' }}>
+          {activeData.running.length === 0 && activeData.pending.length === 0 ? (
+            <div className="empty-state">
+              <div className="empty-icon"><Icons.Activity /></div>
+              <div className="empty-title">No Active Orchestrations</div>
+              <div className="empty-text">
+                Run an orchestration from the sidebar to see it here, or add scheduled triggers.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Running Section */}
+              {activeData.running.length > 0 && (
+                <div>
+                  <div style={{
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    marginBottom: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    color: 'var(--text)',
+                  }}>
+                    <span className="step-status-badge running" style={{ width: '8px', height: '8px', borderRadius: '50%' }}></span>
+                    Running ({activeData.running.length})
+                  </div>
+                  <div className="cards-grid">
+                    {activeData.running.map(exec => (
+                      <ActiveOrchestrationCard
+                        key={exec.id}
+                        execution={exec}
+                        type="running"
+                        orchestrations={orchestrations}
+                        onView={(execution, orch) => {
+                          attachToExecution(execution, orch);
+                        }}
+                        onCancel={async (executionId: string) => {
+                          await cancelExecution(executionId);
+                          loadData();
+                        }}
+                        onRun={(orch: Orchestration) => {
+                          if ((orch as RuntimeOrchestration)?.hasParameters) {
+                            setRunModal({ open: true, orchestration: orch });
+                          } else {
+                            runOrchestration(orch?.id);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Pending Section */}
+              {activeData.pending.length > 0 && (
+                <div>
+                  <div style={{
+                    fontSize: '13px',
+                    fontWeight: '600',
+                    marginBottom: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    color: 'var(--text)',
+                  }}>
+                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--warning)' }}></span>
+                    Pending Triggers ({activeData.pending.length})
+                  </div>
+                  <div className="cards-grid">
+                    {activeData.pending.map((exec, idx) => (
+                      <ActiveOrchestrationCard
+                        key={exec.orchestrationId || idx}
+                        execution={exec}
+                        type="pending"
+                        orchestrations={orchestrations}
+                        onView={(_execution, orch) => {
+                          if (orch) {
+                            setViewerModal({ open: true, orchestration: orch });
+                          }
+                        }}
+                        onRun={(orch: Orchestration) => {
+                          if ((orch as RuntimeOrchestration)?.hasParameters) {
+                            setRunModal({ open: true, orchestration: orch });
+                          } else {
+                            runOrchestration(orch?.id);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+
+      {/* Modals */}
+      <ViewerModal
+        {...viewerModal}
+        onClose={() => setViewerModal({ open: false, orchestration: null })}
+        onRun={() => {
+          const orch = viewerModal.orchestration;
+          if ((orch as RuntimeOrchestration)?.hasParameters) {
+            setViewerModal({ open: false, orchestration: null });
+            setRunModal({ open: true, orchestration: orch });
+          } else {
+            runOrchestration(orch?.id);
+          }
+        }}
+      />
+      <HistoryModal
+        {...historyModal}
+        onClose={() => setHistoryModal({ open: false })}
+        onAttachToExecution={attachToExecution}
+        onViewExecution={viewHistoricalExecution}
+        orchestrations={orchestrations}
+      />
+      <AddModal
+        {...addModal}
+        onClose={() => setAddModal({ open: false })}
+        onAdded={loadData}
+      />
+      <RunModal
+        {...runModal}
+        onClose={() => setRunModal({ open: false, orchestration: null })}
+        onRun={(params: Record<string, string>) => {
+          setRunModal({ open: false, orchestration: null });
+          runOrchestration(runModal.orchestration?.id, params);
+        }}
+      />
+      <ExecutionModal
+        {...executionModal}
+        onClose={() => {
+          if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+          }
+          setExecutionModal({
+            open: false,
+            orchestration: null,
+            executionId: null,
+            stepStatuses: {},
+            stepEvents: {},
+            stepResults: {},
+            stepTraces: {},
+            streamingContent: '',
+            finalResult: '',
+            status: 'idle',
+            errorMessage: null,
+          });
+        }}
+        onCancel={() => cancelExecution(executionModal.executionId)}
+      />
+      <McpsModal
+        {...mcpsModal}
+        onClose={() => setMcpsModal({ open: false })}
+      />
+      <ActiveModal
+        {...activeModal}
+        orchestrations={orchestrations}
+        onClose={() => setActiveModal({ open: false, data: null, loading: false })}
+        onRefresh={async () => {
+          setActiveModal(prev => ({ ...prev, loading: true }));
+          try {
+            const data = await api.get<ActiveData>('/api/active');
+            setActiveModal({ open: true, data, loading: false });
+          } catch (err) {
+            console.error('Failed to refresh active:', err);
+            setActiveModal(prev => ({ ...prev, loading: false }));
+          }
+        }}
+        onViewOrchestration={(orch: Orchestration) => {
+          setActiveModal({ open: false, data: null, loading: false });
+          setViewerModal({ open: true, orchestration: orch });
+        }}
+        onViewRunningExecution={(exec, orch) => {
+          setActiveModal({ open: false, data: null, loading: false });
+          attachToExecution(exec, orch);
+        }}
+        onCancelExecution={async (executionId: string) => {
+          await cancelExecution(executionId);
+          try {
+            const data = await api.get<ActiveData>('/api/active');
+            setActiveModal(prev => ({ ...prev, data }));
+          } catch (err) {
+            console.error('Failed to refresh after cancel:', err);
+          }
+        }}
+      />
+      <BuilderModal
+        open={builderModal}
+        onClose={() => setBuilderModal(false)}
+        onSave={async (json: string) => {
+          try {
+            await api.post('/api/orchestrations/json', { json, mcpJson: null });
+            setBuilderModal(false);
+            loadData();
+          } catch (err) {
+            console.error('Failed to save orchestration from builder:', err);
+          }
+        }}
+      />
+
+      {/* Status Bar */}
+      <StatusBar status={serverStatus} onlineStatus={onlineStatus} />
+    </div>
+  );
+}
+
+export default App;

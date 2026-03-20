@@ -4,12 +4,29 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <RootNamespace>Orchestra.Playground.Copilot.Portal</RootNamespace>
     <UseWindowsForms>true</UseWindowsForms>
+    <SpaRoot>portal\</SpaRoot>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Orchestra.Engine\Orchestra.Engine.csproj" />
     <ProjectReference Include="..\..\..\src\Orchestra.Copilot\Orchestra.Copilot.csproj" />
     <ProjectReference Include="..\..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
+  </ItemGroup>
+
+  <!-- Ensure node_modules are installed before build -->
+  <Target Name="NpmInstall" BeforeTargets="BuildPortal" Condition="!Exists('$(SpaRoot)node_modules')">
+    <Exec Command="npm install" WorkingDirectory="$(SpaRoot)" />
+  </Target>
+
+  <!-- Build the Vite frontend before .NET build (output goes to wwwroot/) -->
+  <Target Name="BuildPortal" BeforeTargets="Build" Condition="'$(SKIP_PORTAL_BUILD)' != 'true'">
+    <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
+  </Target>
+
+  <!-- Exclude portal source from .NET content items -->
+  <ItemGroup>
+    <Content Remove="portal\**" />
+    <None Include="portal\**" Exclude="portal\node_modules\**" />
   </ItemGroup>
 
 </Project>
