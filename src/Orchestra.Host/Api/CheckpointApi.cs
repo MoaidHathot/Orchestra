@@ -66,7 +66,8 @@ public static class CheckpointApi
 			var checkpoint = await checkpointStore.LoadCheckpointAsync(orchestrationName, runId);
 			if (checkpoint is null)
 			{
-				return Results.NotFound(new { error = $"No checkpoint found for orchestration '{orchestrationName}', run '{runId}'." });
+				return ProblemDetailsHelpers.NotFound(
+					$"No checkpoint found for orchestration '{orchestrationName}', run '{runId}'.");
 			}
 
 			return Results.Ok(checkpoint);
@@ -81,7 +82,8 @@ public static class CheckpointApi
 			var checkpoint = await checkpointStore.LoadCheckpointAsync(orchestrationName, runId);
 			if (checkpoint is null)
 			{
-				return Results.NotFound(new { error = $"No checkpoint found for orchestration '{orchestrationName}', run '{runId}'." });
+				return ProblemDetailsHelpers.NotFound(
+					$"No checkpoint found for orchestration '{orchestrationName}', run '{runId}'.");
 			}
 
 			await checkpointStore.DeleteCheckpointAsync(orchestrationName, runId);
@@ -107,7 +109,15 @@ public static class CheckpointApi
 			if (entry is null)
 			{
 				httpContext.Response.StatusCode = 404;
-				await httpContext.Response.WriteAsJsonAsync(new { error = $"Orchestration '{id}' not found." });
+				httpContext.Response.ContentType = "application/problem+json";
+				await httpContext.Response.WriteAsJsonAsync(new
+				{
+					type = "https://tools.ietf.org/html/rfc7807",
+					title = "Not Found",
+					status = 404,
+					detail = $"Orchestration '{id}' not found.",
+					instance = httpContext.Request.Path.Value,
+				});
 				return;
 			}
 
@@ -115,7 +125,15 @@ public static class CheckpointApi
 			if (checkpoint is null)
 			{
 				httpContext.Response.StatusCode = 404;
-				await httpContext.Response.WriteAsJsonAsync(new { error = $"No checkpoint found for orchestration '{entry.Orchestration.Name}', run '{runId}'." });
+				httpContext.Response.ContentType = "application/problem+json";
+				await httpContext.Response.WriteAsJsonAsync(new
+				{
+					type = "https://tools.ietf.org/html/rfc7807",
+					title = "Not Found",
+					status = 404,
+					detail = $"No checkpoint found for orchestration '{entry.Orchestration.Name}', run '{runId}'.",
+					instance = httpContext.Request.Path.Value,
+				});
 				return;
 			}
 

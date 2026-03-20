@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -10,7 +11,7 @@ namespace Orchestra.Host.Api;
 /// <summary>
 /// API endpoints for webhook triggers.
 /// </summary>
-public static class WebhooksApi
+public static partial class WebhooksApi
 {
 	/// <summary>
 	/// Maps webhook endpoints.
@@ -24,10 +25,10 @@ public static class WebhooksApi
 		{
 			var t = triggerManager.GetTrigger(id);
 			if (t == null)
-				return Results.NotFound(new { error = $"Webhook trigger '{id}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Webhook trigger '{id}' not found.");
 
 			if (t.Config is not WebhookTriggerConfig webhookConfig)
-				return Results.BadRequest(new { error = $"Trigger '{id}' is not a webhook trigger." });
+				return ProblemDetailsHelpers.BadRequest($"Trigger '{id}' is not a webhook trigger.");
 
 			// Validate webhook secret if configured
 			if (!string.IsNullOrWhiteSpace(webhookConfig.Secret))
@@ -58,11 +59,17 @@ public static class WebhooksApi
 				}
 			}
 
-			var (found, executionId) = await triggerManager.FireWebhookTriggerAsync(id, webhookParams);
+			var (found, executionId, orchResult) = await triggerManager.FireWebhookTriggerAsync(id, webhookParams);
 			if (!found)
-				return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Trigger '{id}' not found.");
 
-			// If executionId is null, the trigger exists but is disabled or paused
+			// Synchronous webhook response: return the orchestration result inline
+			if (orchResult is not null && webhookConfig.Response is { WaitForResult: true } responseConfig)
+			{
+				return FormatSyncResponse(orchResult, responseConfig, executionId, id, jsonOptions);
+			}
+
+			// Async (fire-and-forget) response
 			var accepted = executionId != null;
 			return Results.Json(new
 			{
@@ -78,10 +85,10 @@ public static class WebhooksApi
 		{
 			var t = triggerManager.GetTrigger(id);
 			if (t == null)
-				return Results.NotFound(new { error = $"Webhook trigger '{id}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Webhook trigger '{id}' not found.");
 
 			if (t.Config is not WebhookTriggerConfig webhookConfig)
-				return Results.BadRequest(new { error = $"Trigger '{id}' is not a webhook trigger." });
+				return ProblemDetailsHelpers.BadRequest($"Trigger '{id}' is not a webhook trigger.");
 
 			// Validate webhook secret if configured
 			if (!string.IsNullOrWhiteSpace(webhookConfig.Secret))
@@ -98,10 +105,102 @@ public static class WebhooksApi
 				valid = true,
 				triggerId = id,
 				enabled = webhookConfig.Enabled,
-				hasInputHandler = !string.IsNullOrWhiteSpace(webhookConfig.InputHandlerPrompt)
+				hasInputHandler = !string.IsNullOrWhiteSpace(webhookConfig.InputHandlerPrompt),
+				synchronous = webhookConfig.Response?.WaitForResult ?? false
 			}, jsonOptions);
 		});
 
 		return endpoints;
 	}
+
+	/// <summary>
+	/// Formats a synchronous webhook response, applying a response template if configured.
+	/// </summary>
+	private static IResult FormatSyncResponse(
+		OrchestrationResult result,
+		WebhookResponseConfig responseConfig,
+		string? executionId,
+		string triggerId,
+		JsonSerializerOptions jsonOptions)
+	{
+		// If orchestration failed, return a 502 with error details
+		if (result.Status == ExecutionStatus.Failed)
+		{
+			var errors = result.StepResults
+				.Where(kv => kv.Value.Status == ExecutionStatus.Failed)
+				.ToDictionary(kv => kv.Key, kv => kv.Value.ErrorMessage ?? "Unknown error");
+
+			return Results.Json(new
+			{
+				status = "failed",
+				executionId,
+				triggerId,
+				errors
+			}, jsonOptions, statusCode: 502);
+		}
+
+		// Apply response template if provided
+		if (!string.IsNullOrWhiteSpace(responseConfig.ResponseTemplate))
+		{
+			var body = ApplyResponseTemplate(responseConfig.ResponseTemplate, result);
+			return Results.Content(body, "text/plain");
+		}
+
+		// Default: serialize the full result as JSON
+		var response = new
+		{
+			status = result.Status.ToString().ToLowerInvariant(),
+			executionId,
+			triggerId,
+			results = result.Results.ToDictionary(
+				kv => kv.Key,
+				kv => new
+				{
+					status = kv.Value.Status.ToString().ToLowerInvariant(),
+					content = kv.Value.Content,
+					error = kv.Value.ErrorMessage,
+					model = kv.Value.ActualModel,
+				})
+		};
+
+		return Results.Json(response, jsonOptions);
+	}
+
+	/// <summary>
+	/// Applies a Handlebars-style response template to the orchestration result.
+	/// Supports <c>{{stepName.Content}}</c>, <c>{{stepName.Status}}</c>, and <c>{{stepName.Error}}</c> placeholders.
+	/// </summary>
+	public static string ApplyResponseTemplate(string template, OrchestrationResult result)
+	{
+		return ResponseTemplatePlaceholder().Replace(template, match =>
+		{
+			var stepName = match.Groups[1].Value;
+			var property = match.Groups[2].Value;
+
+			// Look up step results (all steps), then terminal results
+			ExecutionResult? stepResult = null;
+			if (result.StepResults.TryGetValue(stepName, out var sr))
+				stepResult = sr;
+			else if (result.Results.TryGetValue(stepName, out var tr))
+				stepResult = tr;
+
+			if (stepResult is null)
+				return match.Value; // Leave placeholder as-is if step not found
+
+			return property.ToLowerInvariant() switch
+			{
+				"content" => stepResult.Content ?? "",
+				"status" => stepResult.Status.ToString().ToLowerInvariant(),
+				"error" => stepResult.ErrorMessage ?? "",
+				"model" => stepResult.ActualModel ?? "",
+				_ => match.Value, // Unknown property — leave as-is
+			};
+		});
+	}
+
+	/// <summary>
+	/// Matches <c>{{stepName.Property}}</c> placeholders in response templates.
+	/// </summary>
+	[GeneratedRegex(@"\{\{(\w+)\.(\w+)\}\}")]
+	private static partial Regex ResponseTemplatePlaceholder();
 }

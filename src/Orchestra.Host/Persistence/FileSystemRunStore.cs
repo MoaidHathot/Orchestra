@@ -21,11 +21,16 @@ public class FileSystemRunStore : IRunStore
 	private readonly string _rootPath;
 	private readonly JsonSerializerOptions _jsonOptions;
 
-	// In-memory index for fast lookups - populated on first access
+	// In-memory index for fast lookups - populated on first access.
+	// A single lock protects all mutations to the inner List<RunIndex> values.
+	// ConcurrentDictionary is still used for lock-free reads of the dictionary itself,
+	// but ALL reads/writes to the inner lists must hold _indexWriteLock.
 	private readonly ConcurrentDictionary<string, List<RunIndex>> _indexByOrchestration = new();
 	private readonly ConcurrentDictionary<string, List<RunIndex>> _indexByTrigger = new();
+	private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileWriteLocks = new();
+	private readonly object _indexWriteLock = new();
 	private volatile bool _indexLoaded;
-	private readonly SemaphoreSlim _indexLock = new(1, 1);
+	private readonly SemaphoreSlim _indexLoadLock = new(1, 1);
 
 	public FileSystemRunStore(string rootPath)
 	{
@@ -63,73 +68,84 @@ public class FileSystemRunStore : IRunStore
 		var version = SanitizePath(record.OrchestrationVersion);
 		var trigger = SanitizePath(record.TriggeredBy);
 		var timestamp = record.StartedAt.ToString("yyyyMMdd-HHmmss");
-		var shortId = record.RunId.Length > 8 ? record.RunId[..8] : record.RunId;
 
-		var folderName = $"{sanitizedName}_{version}_{trigger}_{timestamp}_{shortId}";
+		var folderName = $"{sanitizedName}_{version}_{trigger}_{timestamp}_{SanitizePath(record.RunId)}";
 		var runDir = Path.Combine(_rootPath, sanitizedName, folderName);
-		Directory.CreateDirectory(runDir);
 
-		// Write the orchestration copy if provided
-		if (orchestration is not null)
+		// Serialize file writes per orchestration to avoid Windows file locking conflicts
+		// when multiple concurrent saves target the same orchestration directory.
+		var writeLock = _fileWriteLocks.GetOrAdd(record.OrchestrationName, _ => new SemaphoreSlim(1, 1));
+		await writeLock.WaitAsync(cancellationToken);
+		try
 		{
-			var orchestrationJson = JsonSerializer.Serialize(orchestration, _jsonOptions);
-			await File.WriteAllTextAsync(Path.Combine(runDir, "orchestration.json"), orchestrationJson, cancellationToken);
+			Directory.CreateDirectory(runDir);
+
+			// Write the orchestration copy if provided
+			if (orchestration is not null)
+			{
+				var orchestrationJson = JsonSerializer.Serialize(orchestration, _jsonOptions);
+				await File.WriteAllTextAsync(Path.Combine(runDir, "orchestration.json"), orchestrationJson, cancellationToken);
+			}
+
+			// Write the full run record
+			var runJson = JsonSerializer.Serialize(record, _jsonOptions);
+			await File.WriteAllTextAsync(Path.Combine(runDir, "run.json"), runJson, cancellationToken);
+
+			// Write individual step files with enhanced structure
+			foreach (var (key, stepRecord) in record.AllStepRecords)
+			{
+				var stepName = SanitizePath(stepRecord.StepName);
+				var suffix = stepRecord.LoopIteration is { } iteration and > 0
+					? $"-iteration-{iteration}"
+					: "";
+
+				// Write inputs file (raw dependency outputs + parameters + prompt sent)
+				var inputs = new StepInputsRecord
+				{
+					Parameters = stepRecord.Parameters,
+					RawDependencyOutputs = stepRecord.RawDependencyOutputs,
+					PromptSent = stepRecord.PromptSent
+				};
+				var inputsJson = JsonSerializer.Serialize(inputs, _jsonOptions);
+				await File.WriteAllTextAsync(Path.Combine(runDir, $"{stepName}{suffix}-inputs.json"), inputsJson, cancellationToken);
+
+				// Write outputs file (raw content before handler + final content)
+				var outputs = new StepOutputsRecord
+				{
+					RawContent = stepRecord.RawContent,
+					Content = stepRecord.Content,
+					ActualModel = stepRecord.ActualModel,
+					Usage = stepRecord.Usage
+				};
+				var outputsJson = JsonSerializer.Serialize(outputs, _jsonOptions);
+				await File.WriteAllTextAsync(Path.Combine(runDir, $"{stepName}{suffix}-outputs.json"), outputsJson, cancellationToken);
+
+				// Write result file (status + timing + error if any)
+				var result = new StepResultRecord
+				{
+					Status = stepRecord.Status,
+					StartedAt = stepRecord.StartedAt,
+					CompletedAt = stepRecord.CompletedAt,
+					Duration = stepRecord.Duration,
+					ErrorMessage = stepRecord.ErrorMessage
+				};
+				var resultJson = JsonSerializer.Serialize(result, _jsonOptions);
+				await File.WriteAllTextAsync(Path.Combine(runDir, $"{stepName}{suffix}-result.json"), resultJson, cancellationToken);
+			}
+
+			// Write a human-readable result summary
+			var resultContent = record.FinalContent;
+			if (!string.IsNullOrWhiteSpace(resultContent))
+			{
+				await File.WriteAllTextAsync(Path.Combine(runDir, "result.md"), resultContent, cancellationToken);
+			}
+		}
+		finally
+		{
+			writeLock.Release();
 		}
 
-		// Write the full run record
-		var runJson = JsonSerializer.Serialize(record, _jsonOptions);
-		await File.WriteAllTextAsync(Path.Combine(runDir, "run.json"), runJson, cancellationToken);
-
-		// Write individual step files with enhanced structure
-		foreach (var (key, stepRecord) in record.AllStepRecords)
-		{
-			var stepName = SanitizePath(stepRecord.StepName);
-			var suffix = stepRecord.LoopIteration is { } iteration and > 0
-				? $"-iteration-{iteration}"
-				: "";
-
-			// Write inputs file (raw dependency outputs + parameters + prompt sent)
-			var inputs = new StepInputsRecord
-			{
-				Parameters = stepRecord.Parameters,
-				RawDependencyOutputs = stepRecord.RawDependencyOutputs,
-				PromptSent = stepRecord.PromptSent
-			};
-			var inputsJson = JsonSerializer.Serialize(inputs, _jsonOptions);
-			await File.WriteAllTextAsync(Path.Combine(runDir, $"{stepName}{suffix}-inputs.json"), inputsJson, cancellationToken);
-
-			// Write outputs file (raw content before handler + final content)
-			var outputs = new StepOutputsRecord
-			{
-				RawContent = stepRecord.RawContent,
-				Content = stepRecord.Content,
-				ActualModel = stepRecord.ActualModel,
-				Usage = stepRecord.Usage
-			};
-			var outputsJson = JsonSerializer.Serialize(outputs, _jsonOptions);
-			await File.WriteAllTextAsync(Path.Combine(runDir, $"{stepName}{suffix}-outputs.json"), outputsJson, cancellationToken);
-
-			// Write result file (status + timing + error if any)
-			var result = new StepResultRecord
-			{
-				Status = stepRecord.Status,
-				StartedAt = stepRecord.StartedAt,
-				CompletedAt = stepRecord.CompletedAt,
-				Duration = stepRecord.Duration,
-				ErrorMessage = stepRecord.ErrorMessage
-			};
-			var resultJson = JsonSerializer.Serialize(result, _jsonOptions);
-			await File.WriteAllTextAsync(Path.Combine(runDir, $"{stepName}{suffix}-result.json"), resultJson, cancellationToken);
-		}
-
-		// Write a human-readable result summary
-		var resultContent = record.FinalContent;
-		if (!string.IsNullOrWhiteSpace(resultContent))
-		{
-			await File.WriteAllTextAsync(Path.Combine(runDir, "result.md"), resultContent, cancellationToken);
-		}
-
-		// Update in-memory index
+		// Update in-memory index — thread-safe
 		var index = new RunIndex
 		{
 			RunId = record.RunId,
@@ -143,15 +159,18 @@ public class FileSystemRunStore : IRunStore
 			FolderPath = runDir
 		};
 
-		_indexByOrchestration
-			.GetOrAdd(record.OrchestrationName, _ => [])
-			.Add(index);
-
-		if (record.TriggerId is { } tid)
+		lock (_indexWriteLock)
 		{
-			_indexByTrigger
-				.GetOrAdd(tid, _ => [])
+			_indexByOrchestration
+				.GetOrAdd(record.OrchestrationName, _ => [])
 				.Add(index);
+
+			if (record.TriggerId is { } tid)
+			{
+				_indexByTrigger
+					.GetOrAdd(tid, _ => [])
+					.Add(index);
+			}
 		}
 	}
 
@@ -164,10 +183,15 @@ public class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-			return [];
+		List<RunIndex> snapshot;
+		lock (_indexWriteLock)
+		{
+			if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
+				return [];
+			snapshot = [.. indices];
+		}
 
-		var sorted = indices
+		var sorted = snapshot
 			.OrderByDescending(i => i.StartedAt)
 			.Take(limit ?? int.MaxValue);
 
@@ -179,12 +203,19 @@ public class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		var all = _indexByOrchestration.Values
-			.SelectMany(v => v)
+		List<RunIndex> snapshot;
+		lock (_indexWriteLock)
+		{
+			snapshot = _indexByOrchestration.Values
+				.SelectMany(v => v)
+				.ToList();
+		}
+
+		var sorted = snapshot
 			.OrderByDescending(i => i.StartedAt)
 			.Take(limit ?? int.MaxValue);
 
-		return await LoadRecordsAsync(all, cancellationToken);
+		return await LoadRecordsAsync(sorted, cancellationToken);
 	}
 
 	public async Task<IReadOnlyList<OrchestrationRunRecord>> ListRunsByTriggerAsync(
@@ -192,10 +223,15 @@ public class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		if (!_indexByTrigger.TryGetValue(triggerId, out var indices))
-			return [];
+		List<RunIndex> snapshot;
+		lock (_indexWriteLock)
+		{
+			if (!_indexByTrigger.TryGetValue(triggerId, out var indices))
+				return [];
+			snapshot = [.. indices];
+		}
 
-		var sorted = indices
+		var sorted = snapshot
 			.OrderByDescending(i => i.StartedAt)
 			.Take(limit ?? int.MaxValue);
 
@@ -207,10 +243,14 @@ public class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-			return null;
+		RunIndex? match;
+		lock (_indexWriteLock)
+		{
+			if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
+				return null;
+			match = indices.FirstOrDefault(i => i.RunId == runId);
+		}
 
-		var match = indices.FirstOrDefault(i => i.RunId == runId);
 		if (match is null)
 			return null;
 
@@ -225,23 +265,27 @@ public class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-			return false;
-
-		var match = indices.FirstOrDefault(i => i.RunId == runId);
-		if (match is null)
-			return false;
-
-		// Remove from indices
-		indices.Remove(match);
-
-		// Also remove from trigger index if applicable
-		if (match.TriggerId is { } tid && _indexByTrigger.TryGetValue(tid, out var triggerIndices))
+		RunIndex? match;
+		lock (_indexWriteLock)
 		{
-			triggerIndices.RemoveAll(i => i.RunId == runId);
+			if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
+				return false;
+
+			match = indices.FirstOrDefault(i => i.RunId == runId);
+			if (match is null)
+				return false;
+
+			// Remove from indices while holding the lock
+			indices.Remove(match);
+
+			// Also remove from trigger index if applicable
+			if (match.TriggerId is { } tid && _indexByTrigger.TryGetValue(tid, out var triggerIndices))
+			{
+				triggerIndices.RemoveAll(i => i.RunId == runId);
+			}
 		}
 
-		// Delete the folder and all its contents
+		// Delete the folder and all its contents (outside lock to avoid holding it during I/O)
 		if (Directory.Exists(match.FolderPath))
 		{
 			try
@@ -266,11 +310,14 @@ public class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		return _indexByOrchestration.Values
-			.SelectMany(v => v)
-			.OrderByDescending(i => i.StartedAt)
-			.Take(limit ?? int.MaxValue)
-			.ToList();
+		lock (_indexWriteLock)
+		{
+			return _indexByOrchestration.Values
+				.SelectMany(v => v)
+				.OrderByDescending(i => i.StartedAt)
+				.Take(limit ?? int.MaxValue)
+				.ToList();
+		}
 	}
 
 	/// <summary>
@@ -281,20 +328,23 @@ public class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-			return [];
+		lock (_indexWriteLock)
+		{
+			if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
+				return [];
 
-		return indices
-			.OrderByDescending(i => i.StartedAt)
-			.Take(limit ?? int.MaxValue)
-			.ToList();
+			return indices
+				.OrderByDescending(i => i.StartedAt)
+				.Take(limit ?? int.MaxValue)
+				.ToList();
+		}
 	}
 
 	private async Task EnsureIndexLoadedAsync(CancellationToken cancellationToken)
 	{
 		if (_indexLoaded) return;
 
-		await _indexLock.WaitAsync(cancellationToken);
+		await _indexLoadLock.WaitAsync(cancellationToken);
 		try
 		{
 			if (_indexLoaded) return;
@@ -327,15 +377,20 @@ public class FileSystemRunStore : IRunStore
 							FolderPath = runDir
 						};
 
-						_indexByOrchestration
-							.GetOrAdd(record.OrchestrationName, _ => [])
-							.Add(index);
-
-						if (record.TriggerId is { } tid)
+						// During initial load we are the only writer (protected by _indexLoadLock),
+						// but we still take _indexWriteLock for consistency.
+						lock (_indexWriteLock)
 						{
-							_indexByTrigger
-								.GetOrAdd(tid, _ => [])
+							_indexByOrchestration
+								.GetOrAdd(record.OrchestrationName, _ => [])
 								.Add(index);
+
+							if (record.TriggerId is { } tid)
+							{
+								_indexByTrigger
+									.GetOrAdd(tid, _ => [])
+									.Add(index);
+							}
 						}
 					}
 					catch
@@ -349,7 +404,7 @@ public class FileSystemRunStore : IRunStore
 		}
 		finally
 		{
-			_indexLock.Release();
+			_indexLoadLock.Release();
 		}
 	}
 

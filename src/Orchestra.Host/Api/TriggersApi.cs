@@ -46,7 +46,7 @@ public static class TriggersApi
 		{
 			var trigger = triggerManager.GetTrigger(id);
 			if (trigger is null)
-				return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Trigger '{id}' not found.");
 
 			return Results.Json(new
 			{
@@ -72,7 +72,7 @@ public static class TriggersApi
 		{
 			if (triggerManager.SetTriggerEnabled(id, true))
 				return Results.Ok(new { id, enabled = true });
-			return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+			return ProblemDetailsHelpers.NotFound($"Trigger '{id}' not found.");
 		});
 
 		// POST /api/triggers/{id}/disable - Disable a trigger
@@ -80,7 +80,7 @@ public static class TriggersApi
 		{
 			if (triggerManager.SetTriggerEnabled(id, false))
 				return Results.Ok(new { id, enabled = false });
-			return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+			return ProblemDetailsHelpers.NotFound($"Trigger '{id}' not found.");
 		});
 
 		// POST /api/triggers/{id}/fire - Manually fire a trigger
@@ -105,7 +105,7 @@ public static class TriggersApi
 
 			var (found, executionId) = await triggerManager.FireTriggerAsync(id, parameters);
 			if (!found)
-				return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Trigger '{id}' not found.");
 
 			return Results.Json(new { fired = true, id, executionId }, jsonOptions);
 		});
@@ -115,7 +115,7 @@ public static class TriggersApi
 		{
 			if (triggerManager.RemoveTrigger(id))
 				return Results.Ok(new { removed = true, id });
-			return Results.NotFound(new { error = $"Trigger '{id}' not found." });
+			return ProblemDetailsHelpers.NotFound($"Trigger '{id}' not found.");
 		});
 
 		return endpoints;
@@ -143,14 +143,20 @@ public static class TriggersApi
 				continueOnFailure = l.ContinueOnFailure,
 				inputHandlerPrompt = l.InputHandlerPrompt
 			},
-			WebhookTriggerConfig w => new
+		WebhookTriggerConfig w => new
+		{
+			type = "webhook",
+			enabled = w.Enabled,
+			maxConcurrent = w.MaxConcurrent,
+			hasSecret = !string.IsNullOrWhiteSpace(w.Secret),
+			hasInputHandler = !string.IsNullOrWhiteSpace(w.InputHandlerPrompt),
+			response = w.Response is not null ? new
 			{
-				type = "webhook",
-				enabled = w.Enabled,
-				maxConcurrent = w.MaxConcurrent,
-				hasSecret = !string.IsNullOrWhiteSpace(w.Secret),
-				hasInputHandler = !string.IsNullOrWhiteSpace(w.InputHandlerPrompt)
-			},
+				waitForResult = w.Response.WaitForResult,
+				hasResponseTemplate = !string.IsNullOrWhiteSpace(w.Response.ResponseTemplate),
+				timeoutSeconds = w.Response.TimeoutSeconds,
+			} : null
+		},
 			EmailTriggerConfig e => new
 			{
 				type = "email",

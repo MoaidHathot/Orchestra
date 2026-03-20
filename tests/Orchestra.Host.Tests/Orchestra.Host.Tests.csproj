@@ -21,4 +21,8 @@
     <ProjectReference Include="..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>

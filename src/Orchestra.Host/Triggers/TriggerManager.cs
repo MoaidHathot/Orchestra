@@ -9,6 +9,7 @@ namespace Orchestra.Host.Triggers;
 
 /// <summary>
 /// Background service that manages all trigger registrations and fires orchestrations.
+/// Supports graceful shutdown: cancels all active executions and awaits in-flight tasks.
 /// </summary>
 public partial class TriggerManager : BackgroundService
 {
@@ -24,6 +25,17 @@ public partial class TriggerManager : BackgroundService
 	private readonly IRunStore _runStore;
 	private readonly ITriggerExecutionCallback? _executionCallback;
 	private readonly JsonSerializerOptions _jsonOptions;
+
+	/// <summary>
+	/// Tracks all fire-and-forget tasks so they can be awaited during shutdown.
+	/// </summary>
+	private readonly ConcurrentDictionary<int, Task> _backgroundTasks = new();
+	private int _backgroundTaskId;
+
+	/// <summary>
+	/// Maximum time to wait for in-flight tasks during graceful shutdown.
+	/// </summary>
+	public static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(30);
 
 	public TriggerManager(
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
@@ -193,18 +205,20 @@ public partial class TriggerManager : BackgroundService
 
 	/// <summary>
 	/// Fires a webhook trigger by its ID. Returns true if the trigger was found and fired.
+	/// When the webhook config has <see cref="WebhookResponseConfig.WaitForResult"/> = true,
+	/// the <see cref="OrchestrationResult"/> is also returned.
 	/// </summary>
-	public async Task<(bool Found, string? ExecutionId)> FireWebhookTriggerAsync(
+	public async Task<(bool Found, string? ExecutionId, OrchestrationResult? Result)> FireWebhookTriggerAsync(
 		string id, Dictionary<string, string>? webhookParameters)
 	{
 		if (!_triggers.TryGetValue(id, out var reg))
-			return (false, null);
+			return (false, null, null);
 
 		if (reg.Config is not WebhookTriggerConfig webhookConfig)
-			return (false, null);
+			return (false, null, null);
 
 		if (!reg.Config.Enabled || reg.Status == TriggerStatus.Paused)
-			return (true, null);
+			return (true, null, null);
 
 		// Check concurrent execution limit
 		if (reg.ActiveExecutionId != null)
@@ -212,7 +226,7 @@ public partial class TriggerManager : BackgroundService
 			if (webhookConfig.MaxConcurrent <= 1)
 			{
 				LogWebhookSkippedConcurrent(id);
-				return (true, null);
+				return (true, null, null);
 			}
 		}
 
@@ -224,8 +238,15 @@ public partial class TriggerManager : BackgroundService
 				mergedParams[kv.Key] = kv.Value;
 		}
 
-		var executionId = await ExecuteOrchestrationAsync(reg, mergedParams);
-		return (true, executionId);
+		// If synchronous response is requested, await and capture the result
+		if (webhookConfig.Response is { WaitForResult: true })
+		{
+			var (executionId, result) = await ExecuteOrchestrationWithResultAsync(reg, mergedParams);
+			return (true, executionId, result);
+		}
+
+		var execId = await ExecuteOrchestrationAsync(reg, mergedParams);
+		return (true, execId, null);
 	}
 
 	/// <summary>
@@ -406,6 +427,54 @@ public partial class TriggerManager : BackgroundService
 		LogTriggerManagerStopped();
 	}
 
+	/// <summary>
+	/// Graceful shutdown: cancel all active executions and await in-flight tasks.
+	/// </summary>
+	public override async Task StopAsync(CancellationToken cancellationToken)
+	{
+		LogGracefulShutdownStarting(_activeExecutions.Count, _backgroundTasks.Count);
+
+		// 1. Cancel all active orchestration executions
+		foreach (var kvp in _activeExecutions)
+		{
+			try
+			{
+				kvp.Value.Cancel();
+			}
+			catch (ObjectDisposedException)
+			{
+				// Already disposed, ignore
+			}
+		}
+
+		// 2. Await all tracked background tasks with timeout
+		var allTasks = _backgroundTasks.Values.ToArray();
+		if (allTasks.Length > 0)
+		{
+			try
+			{
+				await Task.WhenAll(allTasks).WaitAsync(ShutdownTimeout, cancellationToken);
+			}
+			catch (TimeoutException)
+			{
+				LogGracefulShutdownTimeout(allTasks.Count(t => !t.IsCompleted));
+			}
+			catch (OperationCanceledException)
+			{
+				// Shutdown was forcibly cancelled
+			}
+			catch (Exception ex)
+			{
+				LogGracefulShutdownError(ex);
+			}
+		}
+
+		LogGracefulShutdownComplete();
+
+		// 3. Let the base class stop the ExecuteAsync loop
+		await base.StopAsync(cancellationToken);
+	}
+
 	private async Task CheckSchedulerTriggersAsync(CancellationToken stoppingToken)
 	{
 		var now = DateTime.UtcNow;
@@ -429,7 +498,7 @@ public partial class TriggerManager : BackgroundService
 						continue;
 					}
 
-					_ = ExecuteAndHandleCompletionAsync(reg, schedulerConfig);
+					TrackBackgroundTask(ExecuteAndHandleCompletionAsync(reg, schedulerConfig));
 				}
 			}
 		}
@@ -607,12 +676,12 @@ public partial class TriggerManager : BackgroundService
 						}
 						else
 						{
-							// Immediately re-run
-							_ = Task.Run(async () =>
+							// Immediately re-run — tracked for graceful shutdown
+							TrackBackgroundTask(Task.Run(async () =>
 							{
 								await Task.Delay(100); // Small delay to avoid tight loops
 								await ExecuteOrchestrationAsync(reg, parameters);
-							});
+							}));
 							return executionId;
 						}
 					}
@@ -646,12 +715,12 @@ public partial class TriggerManager : BackgroundService
 					info.Status = "Completed";
 					_executionCallback?.OnExecutionCompleted(info);
 
-					// Remove after a short delay
-					_ = Task.Run(async () =>
+					// Remove after a short delay — tracked for graceful shutdown
+					TrackBackgroundTask(Task.Run(async () =>
 					{
 						await Task.Delay(5000);
 						_activeExecutionInfos.TryRemove(executionId, out _);
-					});
+					}));
 				}
 				reg.LastExecutionId = executionId;
 				reg.ActiveExecutionId = null;
@@ -665,6 +734,179 @@ public partial class TriggerManager : BackgroundService
 			LogOrchestrationExecutionFailed(ex, reg.Id);
 			return null;
 		}
+	}
+
+	/// <summary>
+	/// Executes an orchestration and returns both the execution ID and the result.
+	/// Used for synchronous webhook responses where the caller needs the result.
+	/// </summary>
+	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationWithResultAsync(
+		TriggerRegistration reg,
+		Dictionary<string, string>? parameters)
+	{
+		reg.Status = TriggerStatus.Running;
+		reg.LastFireTime = DateTime.UtcNow;
+		reg.RunCount++;
+		reg.LastError = null;
+
+		var executionId = Guid.NewGuid().ToString("N")[..12];
+		reg.ActiveExecutionId = executionId;
+
+		LogTriggerFiring(reg.Id, reg.OrchestrationPath, executionId, reg.RunCount);
+
+		try
+		{
+			// Parse orchestration
+			Mcp[] mcps = [];
+			if (!string.IsNullOrWhiteSpace(reg.McpPath) && File.Exists(reg.McpPath))
+			{
+				mcps = OrchestrationParser.ParseMcpFile(reg.McpPath);
+			}
+
+			var orchestration = OrchestrationParser.ParseOrchestrationFile(reg.OrchestrationPath, mcps);
+			var schedule = _scheduler.Schedule(orchestration);
+
+			// ── Input Handler Prompt: transform raw parameters via LLM ──
+			if (!string.IsNullOrWhiteSpace(reg.Config.InputHandlerPrompt) && parameters is { Count: > 0 })
+			{
+				try
+				{
+					var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
+					var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
+
+					var agent = await _agentBuilder
+						.WithModel("gpt-4o-mini")
+						.WithSystemPrompt("You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.")
+						.WithMcp()
+						.WithReasoningLevel(null)
+						.WithSystemPromptMode(null)
+						.WithReporter(NullOrchestrationReporter.Instance)
+						.BuildAgentAsync();
+
+					var task = agent.SendAsync(fullPrompt);
+					var result = await task.GetResultAsync();
+
+					var content = result.Content.Trim();
+					if (content.StartsWith("```"))
+					{
+						var firstNewline = content.IndexOf('\n');
+						if (firstNewline >= 0) content = content[(firstNewline + 1)..];
+						if (content.EndsWith("```")) content = content[..^3].TrimEnd();
+					}
+
+					var transformed = JsonSerializer.Deserialize<Dictionary<string, string>>(content, _jsonOptions);
+					if (transformed is { Count: > 0 })
+					{
+						LogInputHandlerTransformed(reg.Id, parameters.Count, transformed.Count);
+						parameters = transformed;
+					}
+				}
+				catch (Exception ex)
+				{
+					LogInputHandlerFailed(ex, reg.Id);
+				}
+			}
+
+			// Create executor with reporter
+			var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore);
+
+			using var cts = new CancellationTokenSource();
+			_activeExecutions[executionId] = cts;
+
+			var executionInfo = new ActiveExecutionInfo
+			{
+				ExecutionId = executionId,
+				OrchestrationId = reg.Id,
+				OrchestrationName = orchestration.Name,
+				StartedAt = DateTimeOffset.UtcNow,
+				TriggeredBy = reg.Config.Type.ToString().ToLowerInvariant(),
+				CancellationTokenSource = cts,
+				Reporter = reporter,
+				Parameters = parameters,
+				TotalSteps = orchestration.Steps.Length
+			};
+			_activeExecutionInfos[executionId] = executionInfo;
+
+			_executionCallback?.OnExecutionStarted(executionInfo);
+
+			try
+			{
+				var orchResult = await executor.ExecuteAsync(orchestration, parameters, triggerId: reg.Id, cancellationToken: cts.Token);
+
+				// Persist history
+				try
+				{
+					var historyEntry = new
+					{
+						id = executionId,
+						orchestrationName = orchestration.Name,
+						orchestrationDescription = orchestration.Description,
+						orchestrationVersion = orchestration.Version,
+						orchestrationPath = reg.OrchestrationPath,
+						triggerId = reg.Id,
+						triggerType = reg.Config.Type.ToString(),
+						startedAt = reg.LastFireTime?.ToString("o"),
+						status = orchResult.Status.ToString(),
+						stepCount = orchestration.Steps.Length,
+						results = orchResult.StepResults.ToDictionary(
+							kv => kv.Key,
+							kv => new
+							{
+								status = kv.Value.Status.ToString(),
+								content = kv.Value.Content,
+								error = kv.Value.ErrorMessage,
+							}),
+					};
+					var historyJson = JsonSerializer.Serialize(historyEntry, _jsonOptions);
+					var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
+					await File.WriteAllTextAsync(historyPath, historyJson);
+				}
+				catch { /* best-effort */ }
+
+				// Webhook trigger - return to Waiting status
+				reg.Status = TriggerStatus.Waiting;
+
+				return (executionId, orchResult);
+			}
+			finally
+			{
+				_activeExecutions.TryRemove(executionId, out _);
+				if (_activeExecutionInfos.TryGetValue(executionId, out var info))
+				{
+					info.Status = "Completed";
+					_executionCallback?.OnExecutionCompleted(info);
+
+					TrackBackgroundTask(Task.Run(async () =>
+					{
+						await Task.Delay(5000);
+						_activeExecutionInfos.TryRemove(executionId, out _);
+					}));
+				}
+				reg.LastExecutionId = executionId;
+				reg.ActiveExecutionId = null;
+			}
+		}
+		catch (Exception ex)
+		{
+			reg.Status = TriggerStatus.Error;
+			reg.LastError = ex.Message;
+			reg.ActiveExecutionId = null;
+			LogOrchestrationExecutionFailed(ex, reg.Id);
+			return (null, null);
+		}
+	}
+
+	/// <summary>
+	/// Tracks a fire-and-forget task so it can be awaited during graceful shutdown.
+	/// </summary>
+	private void TrackBackgroundTask(Task task)
+	{
+		var id = Interlocked.Increment(ref _backgroundTaskId);
+		_backgroundTasks[id] = task;
+
+		// Self-cleanup when the task completes
+		task.ContinueWith(_ => _backgroundTasks.TryRemove(id, out _), TaskContinuationOptions.ExecuteSynchronously);
 	}
 
 	private void PersistTriggerOverride(TriggerRegistration reg)
@@ -767,13 +1009,14 @@ public partial class TriggerManager : BackgroundService
 				MaxIterations = l.MaxIterations,
 				ContinueOnFailure = l.ContinueOnFailure,
 			},
-			WebhookTriggerConfig w => new WebhookTriggerConfig
-			{
-				Type = w.Type,
-				Enabled = enabled,
-				Secret = w.Secret,
-				MaxConcurrent = w.MaxConcurrent,
-			},
+		WebhookTriggerConfig w => new WebhookTriggerConfig
+		{
+			Type = w.Type,
+			Enabled = enabled,
+			Secret = w.Secret,
+			MaxConcurrent = w.MaxConcurrent,
+			Response = w.Response,
+		},
 			EmailTriggerConfig e => new EmailTriggerConfig
 			{
 				Type = e.Type,
@@ -817,13 +1060,16 @@ public partial class TriggerManager : BackgroundService
 				MaxIterations = element.TryGetProperty("maxIterations", out var maxIter) ? maxIter.GetInt32() : null,
 				ContinueOnFailure = element.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
 			},
-			TriggerType.Webhook => new WebhookTriggerConfig
-			{
-				Type = TriggerType.Webhook,
-				Enabled = enabled,
-				Secret = element.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
-				MaxConcurrent = element.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
-			},
+		TriggerType.Webhook => new WebhookTriggerConfig
+		{
+			Type = TriggerType.Webhook,
+			Enabled = enabled,
+			Secret = element.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
+			MaxConcurrent = element.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
+			Response = element.TryGetProperty("response", out var responseProp)
+				? DeserializeWebhookResponseConfig(responseProp)
+				: null,
+		},
 			TriggerType.Email => new EmailTriggerConfig
 			{
 				Type = TriggerType.Email,
@@ -835,6 +1081,16 @@ public partial class TriggerManager : BackgroundService
 				SenderContains = element.TryGetProperty("senderContains", out var senderContains) ? senderContains.GetString() : null,
 			},
 			_ => null,
+		};
+	}
+
+	private static WebhookResponseConfig DeserializeWebhookResponseConfig(JsonElement element)
+	{
+		return new WebhookResponseConfig
+		{
+			WaitForResult = element.TryGetProperty("waitForResult", out var wfr) && wfr.GetBoolean(),
+			ResponseTemplate = element.TryGetProperty("responseTemplate", out var rt) ? rt.GetString() : null,
+			TimeoutSeconds = element.TryGetProperty("timeoutSeconds", out var ts) ? ts.GetInt32() : 120,
 		};
 	}
 
@@ -892,4 +1148,16 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to persist trigger override for '{TriggerId}'")]
 	private partial void LogTriggerPersistFailed(Exception ex, string triggerId);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Graceful shutdown starting: cancelling {ActiveCount} active executions, awaiting {BackgroundCount} background tasks")]
+	private partial void LogGracefulShutdownStarting(int activeCount, int backgroundCount);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Graceful shutdown timed out: {RemainingCount} tasks still running")]
+	private partial void LogGracefulShutdownTimeout(int remainingCount);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Error during graceful shutdown")]
+	private partial void LogGracefulShutdownError(Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Graceful shutdown complete")]
+	private partial void LogGracefulShutdownComplete();
 }

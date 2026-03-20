@@ -15,7 +15,7 @@ namespace Orchestra.Host.Api;
 /// <summary>
 /// API endpoints for execution streaming via SSE.
 /// </summary>
-public static class ExecutionApi
+public static partial class ExecutionApi
 {
 	/// <summary>
 	/// Maps execution streaming endpoints.
@@ -39,7 +39,15 @@ public static class ExecutionApi
 			if (entry is null)
 			{
 				httpContext.Response.StatusCode = 404;
-				await httpContext.Response.WriteAsJsonAsync(new { error = $"Orchestration '{id}' not found." });
+				httpContext.Response.ContentType = "application/problem+json";
+				await httpContext.Response.WriteAsJsonAsync(new
+				{
+					type = "https://tools.ietf.org/html/rfc7807",
+					title = "Not Found",
+					status = 404,
+					detail = $"Orchestration '{id}' not found.",
+					instance = httpContext.Request.Path.Value,
+				});
 				return;
 			}
 
@@ -107,6 +115,7 @@ public static class ExecutionApi
 			var cancellationToken = cts.Token;
 			var runId = executionId;
 			var runStartedAt = DateTimeOffset.UtcNow;
+			var logger = loggerFactory.CreateLogger(typeof(ExecutionApi));
 
 			// Execute in background
 			var executionTask = Task.Run(async () =>
@@ -122,7 +131,7 @@ public static class ExecutionApi
 					{
 						reporter.ReportOrchestrationCancelled();
 						executionInfo.Status = "Cancelled";
-						await SaveCancelledRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter);
+						await SaveCancelledRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, logger);
 						return;
 					}
 
@@ -139,14 +148,14 @@ public static class ExecutionApi
 				{
 					reporter.ReportOrchestrationCancelled();
 					executionInfo.Status = "Cancelled";
-					await SaveCancelledRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter);
+					await SaveCancelledRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, logger);
 				}
 				catch (Exception ex)
 				{
 					reporter.ReportStepError("orchestration", ex.Message);
 					reporter.ReportOrchestrationError(ex.Message);
 					executionInfo.Status = "Failed";
-					await SaveFailedRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, ex.Message);
+					await SaveFailedRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, ex.Message, logger);
 				}
 				finally
 				{
@@ -203,14 +212,30 @@ public static class ExecutionApi
 			if (!activeExecutionInfos.TryGetValue(executionId, out var info))
 			{
 				httpContext.Response.StatusCode = 404;
-				await httpContext.Response.WriteAsJsonAsync(new { error = $"No active execution with ID '{executionId}'" });
+				httpContext.Response.ContentType = "application/problem+json";
+				await httpContext.Response.WriteAsJsonAsync(new
+				{
+					type = "https://tools.ietf.org/html/rfc7807",
+					title = "Not Found",
+					status = 404,
+					detail = $"No active execution with ID '{executionId}'.",
+					instance = httpContext.Request.Path.Value,
+				});
 				return;
 			}
 
 			if (info.Reporter is not SseReporter sseReporter)
 			{
 				httpContext.Response.StatusCode = 500;
-				await httpContext.Response.WriteAsJsonAsync(new { error = "Execution reporter is not an SseReporter" });
+				httpContext.Response.ContentType = "application/problem+json";
+				await httpContext.Response.WriteAsJsonAsync(new
+				{
+					type = "https://tools.ietf.org/html/rfc7807",
+					title = "Internal Server Error",
+					status = 500,
+					detail = "Execution reporter is not an SseReporter.",
+					instance = httpContext.Request.Path.Value,
+				});
 				return;
 			}
 
@@ -278,7 +303,8 @@ public static class ExecutionApi
 		string runId,
 		DateTimeOffset startTime,
 		Dictionary<string, string>? parameters,
-		SseReporter reporter)
+		SseReporter reporter,
+		ILogger logger)
 	{
 		var completedAt = DateTimeOffset.UtcNow;
 		var stepRecords = new Dictionary<string, StepRunRecord>();
@@ -401,7 +427,7 @@ public static class ExecutionApi
 		}
 		catch (Exception ex)
 		{
-			Console.WriteLine($"Failed to save cancelled run record: {ex.Message}");
+			LogSaveCancelledRunFailed(logger, runId, ex);
 		}
 	}
 
@@ -412,7 +438,8 @@ public static class ExecutionApi
 		DateTimeOffset startTime,
 		Dictionary<string, string>? parameters,
 		SseReporter reporter,
-		string errorMessage)
+		string errorMessage,
+		ILogger logger)
 	{
 		var completedAt = DateTimeOffset.UtcNow;
 		var stepRecords = new Dictionary<string, StepRunRecord>();
@@ -441,8 +468,8 @@ public static class ExecutionApi
 						break;
 					case "step-error":
 						if (data.TryGetProperty("stepName", out var errorStepName) &&
-							data.TryGetProperty("error", out var errorMsg))
-							stepErrors[errorStepName.GetString() ?? ""] = errorMsg.GetString() ?? "";
+							data.TryGetProperty("error", out var errMsg))
+							stepErrors[errorStepName.GetString() ?? ""] = errMsg.GetString() ?? "";
 						break;
 				}
 			}
@@ -498,7 +525,13 @@ public static class ExecutionApi
 		}
 		catch (Exception ex)
 		{
-			Console.WriteLine($"Failed to save failed run record: {ex.Message}");
+			LogSaveFailedRunFailed(logger, runId, ex);
 		}
 	}
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to save cancelled run record for run '{RunId}'")]
+	private static partial void LogSaveCancelledRunFailed(ILogger logger, string runId, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to save failed run record for run '{RunId}'")]
+	private static partial void LogSaveFailedRunFailed(ILogger logger, string runId, Exception ex);
 }

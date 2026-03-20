@@ -49,6 +49,43 @@ public class TriggerTypesTests
 		config.Enabled.Should().BeTrue();
 		config.Secret.Should().BeNull();
 		config.MaxConcurrent.Should().Be(1);
+		config.Response.Should().BeNull();
+	}
+
+	[Fact]
+	public void WebhookResponseConfig_DefaultValues()
+	{
+		// Act
+		var config = new WebhookResponseConfig();
+
+		// Assert
+		config.WaitForResult.Should().BeFalse();
+		config.ResponseTemplate.Should().BeNull();
+		config.TimeoutSeconds.Should().Be(120);
+	}
+
+	[Fact]
+	public void WebhookTriggerConfig_WithResponseConfig()
+	{
+		// Arrange & Act
+		var config = new WebhookTriggerConfig
+		{
+			Type = TriggerType.Webhook,
+			Secret = "test-secret",
+			MaxConcurrent = 2,
+			Response = new WebhookResponseConfig
+			{
+				WaitForResult = true,
+				ResponseTemplate = "Result: {{analyze.Content}}",
+				TimeoutSeconds = 60,
+			}
+		};
+
+		// Assert
+		config.Response.Should().NotBeNull();
+		config.Response!.WaitForResult.Should().BeTrue();
+		config.Response.ResponseTemplate.Should().Be("Result: {{analyze.Content}}");
+		config.Response.TimeoutSeconds.Should().Be(60);
 	}
 
 	[Fact]
@@ -166,7 +203,13 @@ public class TriggerTypesTests
 			Type = TriggerType.Webhook,
 			Enabled = true,
 			Secret = "my-secret",
-			MaxConcurrent = 3
+			MaxConcurrent = 3,
+			Response = new WebhookResponseConfig
+			{
+				WaitForResult = true,
+				ResponseTemplate = "Hello {{step1.Content}}",
+				TimeoutSeconds = 30,
+			}
 		};
 
 		// Act
@@ -178,6 +221,34 @@ public class TriggerTypesTests
 		webhookClone.Enabled.Should().BeFalse();
 		webhookClone.Secret.Should().Be("my-secret");
 		webhookClone.MaxConcurrent.Should().Be(3);
+		webhookClone.Response.Should().NotBeNull();
+		webhookClone.Response!.WaitForResult.Should().BeTrue();
+		webhookClone.Response.ResponseTemplate.Should().Be("Hello {{step1.Content}}");
+		webhookClone.Response.TimeoutSeconds.Should().Be(30);
+	}
+
+	[Fact]
+	public void CloneTriggerConfigWithEnabled_WebhookConfig_NullResponse_ClonesCorrectly()
+	{
+		// Arrange
+		var original = new WebhookTriggerConfig
+		{
+			Type = TriggerType.Webhook,
+			Enabled = true,
+			Secret = "my-secret",
+			MaxConcurrent = 3,
+		};
+
+		// Act
+		var cloned = TriggerManager.CloneTriggerConfigWithEnabled(original, false);
+
+		// Assert
+		cloned.Should().BeOfType<WebhookTriggerConfig>();
+		var webhookClone = (WebhookTriggerConfig)cloned;
+		webhookClone.Enabled.Should().BeFalse();
+		webhookClone.Secret.Should().Be("my-secret");
+		webhookClone.MaxConcurrent.Should().Be(3);
+		webhookClone.Response.Should().BeNull();
 	}
 
 	[Fact]

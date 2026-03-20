@@ -90,7 +90,7 @@ public static class OrchestrationsApi
 		{
 			var entry = registry.Get(id);
 			if (entry is null)
-				return Results.NotFound(new { error = $"Orchestration '{id}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
 			var o = entry.Orchestration;
 			var schedule = scheduler.Schedule(o);
@@ -224,7 +224,7 @@ public static class OrchestrationsApi
 			try
 			{
 				if (string.IsNullOrWhiteSpace(request.Json))
-					return Results.BadRequest(new { error = "JSON content is required." });
+					return ProblemDetailsHelpers.BadRequest("JSON content is required.");
 
 				// Parse the MCPs if provided
 				Mcp[] mcps = [];
@@ -266,7 +266,7 @@ public static class OrchestrationsApi
 			}
 			catch (Exception ex)
 			{
-				return Results.BadRequest(new { error = ex.Message });
+				return ProblemDetailsHelpers.BadRequest(ex.Message);
 			}
 		});
 
@@ -278,7 +278,7 @@ public static class OrchestrationsApi
 				triggerManager.RemoveTrigger(id);
 				return Results.Ok(new { removed = true, id });
 			}
-			return Results.NotFound(new { error = $"Orchestration '{id}' not found." });
+			return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 		});
 
 		// POST /api/orchestrations/{id}/enable - Enable an orchestration's trigger
@@ -286,7 +286,7 @@ public static class OrchestrationsApi
 		{
 			var entry = registry.Get(id);
 			if (entry is null)
-				return Results.NotFound(new { error = $"Orchestration '{id}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
 			// If the orchestration has a trigger but it's not registered yet, register it now
 			if (entry.Orchestration.Trigger is { } trigger)
@@ -311,7 +311,7 @@ public static class OrchestrationsApi
 				return Results.Ok(new { id, enabled = true });
 			}
 
-			return Results.BadRequest(new { error = $"Orchestration '{id}' has no trigger defined." });
+			return ProblemDetailsHelpers.BadRequest($"Orchestration '{id}' has no trigger defined.");
 		});
 
 		// POST /api/orchestrations/{id}/disable - Disable an orchestration's trigger
@@ -319,7 +319,7 @@ public static class OrchestrationsApi
 		{
 			var entry = registry.Get(id);
 			if (entry is null)
-				return Results.NotFound(new { error = $"Orchestration '{id}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
 			triggerManager.SetTriggerEnabled(id, false);
 			return Results.Ok(new { id, enabled = false });
@@ -331,10 +331,10 @@ public static class OrchestrationsApi
 			try
 			{
 				if (string.IsNullOrWhiteSpace(request.Directory))
-					return Results.BadRequest(new { error = "Directory path is required" });
+					return ProblemDetailsHelpers.BadRequest("Directory path is required.");
 
 				if (!Directory.Exists(request.Directory))
-					return Results.BadRequest(new { error = $"Directory not found: {request.Directory}" });
+					return ProblemDetailsHelpers.BadRequest($"Directory not found: {request.Directory}");
 
 				var files = Directory.GetFiles(request.Directory, "*.json", SearchOption.TopDirectoryOnly);
 				var orchestrations = new List<object>();
@@ -401,7 +401,7 @@ public static class OrchestrationsApi
 			}
 			catch (Exception ex)
 			{
-				return Results.BadRequest(new { error = ex.Message });
+				return ProblemDetailsHelpers.BadRequest(ex.Message);
 			}
 		});
 

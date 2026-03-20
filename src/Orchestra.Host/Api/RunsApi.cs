@@ -178,7 +178,7 @@ public static class RunsApi
 		{
 			var record = await runStore.GetRunAsync(orchestrationName, runId);
 			if (record is null)
-				return Results.NotFound(new { error = $"Run '{runId}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Run '{runId}' not found.");
 
 			return Results.Json(new
 			{
@@ -241,7 +241,7 @@ public static class RunsApi
 		{
 			var deleted = await runStore.DeleteRunAsync(orchestrationName, runId);
 			if (!deleted)
-				return Results.NotFound(new { error = $"Run '{runId}' not found." });
+				return ProblemDetailsHelpers.NotFound($"Run '{runId}' not found.");
 
 			return Results.Ok(new { deleted = true, runId, orchestrationName });
 		});
@@ -372,7 +372,7 @@ public static class RunsApi
 				info.CancellationTokenSource.Cancel();
 				return Results.Ok(new { cancelled = true, executionId, status = "Cancelling" });
 			}
-			return Results.NotFound(new { error = $"No active execution with ID '{executionId}'" });
+			return ProblemDetailsHelpers.NotFound($"No active execution with ID '{executionId}'.");
 		});
 
 		return endpoints;

@@ -13,8 +13,12 @@ public record SseEvent(string Type, string Data);
 /// An IOrchestrationReporter that writes structured SSE events to multiple subscribers.
 /// Supports late-joining subscribers by replaying accumulated events.
 /// Each execution creates its own instance tied to a specific orchestration run.
+/// 
+/// Memory-bounded: uses a circular buffer for accumulated events (max 10,000)
+/// and bounded channels for subscribers (1,000 capacity with DropOldest).
+/// Limits subscribers to 50 max and implements IDisposable for cleanup.
 /// </summary>
-public class SseReporter : IOrchestrationReporter
+public sealed class SseReporter : IOrchestrationReporter, IDisposable
 {
 	private static readonly JsonSerializerOptions s_jsonOptions = new()
 	{
@@ -22,13 +26,32 @@ public class SseReporter : IOrchestrationReporter
 		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
 	};
 
+	/// <summary>
+	/// Maximum number of events to keep in the circular buffer for replay.
+	/// </summary>
+	public const int MaxAccumulatedEvents = 10_000;
+
+	/// <summary>
+	/// Maximum number of events that can be buffered per subscriber channel.
+	/// </summary>
+	public const int MaxChannelCapacity = 1_000;
+
+	/// <summary>
+	/// Maximum number of concurrent subscribers.
+	/// </summary>
+	public const int MaxSubscribers = 50;
+
 	private readonly object _lock = new();
-	private readonly List<SseEvent> _accumulatedEvents = [];
+	private readonly SseEvent[] _eventBuffer = new SseEvent[MaxAccumulatedEvents];
+	private int _eventCount;
+	private int _eventHead; // Index of the oldest event in the circular buffer
 	private readonly List<Channel<SseEvent>> _subscribers = [];
 	private bool _isCompleted;
+	private bool _disposed;
 
 	/// <summary>
 	/// Gets all accumulated events (for replay to late-joining subscribers).
+	/// Returns events in chronological order from the circular buffer.
 	/// </summary>
 	public IReadOnlyList<SseEvent> AccumulatedEvents
 	{
@@ -36,7 +59,35 @@ public class SseReporter : IOrchestrationReporter
 		{
 			lock (_lock)
 			{
-				return _accumulatedEvents.ToList();
+				return GetAccumulatedEventsLocked();
+			}
+		}
+	}
+
+	/// <summary>
+	/// Gets the total number of accumulated events (may be less than total written if buffer wrapped).
+	/// </summary>
+	public int AccumulatedEventCount
+	{
+		get
+		{
+			lock (_lock)
+			{
+				return _eventCount;
+			}
+		}
+	}
+
+	/// <summary>
+	/// Gets the current number of active subscribers.
+	/// </summary>
+	public int SubscriberCount
+	{
+		get
+		{
+			lock (_lock)
+			{
+				return _subscribers.Count;
 			}
 		}
 	}
@@ -68,35 +119,80 @@ public class SseReporter : IOrchestrationReporter
 	/// <summary>
 	/// Creates a new subscriber channel that will receive future events.
 	/// Call this to attach a new SSE client to the execution.
+	/// Returns null for Future if the maximum subscriber limit has been reached.
 	/// </summary>
 	/// <returns>A tuple of (accumulated events to replay, channel for future events)</returns>
-	public (IReadOnlyList<SseEvent> Replay, ChannelReader<SseEvent> Future) Subscribe()
+	public (IReadOnlyList<SseEvent> Replay, ChannelReader<SseEvent>? Future) Subscribe()
 	{
-		var channel = Channel.CreateUnbounded<SseEvent>(
-			new UnboundedChannelOptions { SingleReader = true });
+		var channel = Channel.CreateBounded<SseEvent>(
+			new BoundedChannelOptions(MaxChannelCapacity)
+			{
+				SingleReader = true,
+				SingleWriter = false,
+				FullMode = BoundedChannelFullMode.DropOldest,
+			});
 
 		lock (_lock)
 		{
+			var replay = GetAccumulatedEventsLocked();
+
 			if (_isCompleted)
 			{
 				// Already done - just return accumulated events and a completed channel
 				channel.Writer.TryComplete();
-				return (_accumulatedEvents.ToList(), channel.Reader);
+				return (replay, channel.Reader);
+			}
+
+			if (_subscribers.Count >= MaxSubscribers)
+			{
+				// Too many subscribers - return replay but no future channel
+				channel.Writer.TryComplete();
+				return (replay, null);
 			}
 
 			_subscribers.Add(channel);
-			return (_accumulatedEvents.ToList(), channel.Reader);
+			return (replay, channel.Reader);
 		}
 	}
 
 	/// <summary>
 	/// Unsubscribes a channel (e.g., when client disconnects).
 	/// </summary>
-	public void Unsubscribe(ChannelReader<SseEvent> reader)
+	public void Unsubscribe(ChannelReader<SseEvent>? reader)
 	{
+		if (reader is null) return;
+
 		lock (_lock)
 		{
-			_subscribers.RemoveAll(ch => ch.Reader == reader);
+			for (var i = _subscribers.Count - 1; i >= 0; i--)
+			{
+				if (_subscribers[i].Reader == reader)
+				{
+					_subscribers[i].Writer.TryComplete();
+					_subscribers.RemoveAt(i);
+					break;
+				}
+			}
+		}
+	}
+
+	/// <summary>
+	/// Sends a heartbeat/keepalive event to all subscribers.
+	/// Call this periodically from the SSE streaming loop.
+	/// </summary>
+	public void SendHeartbeat()
+	{
+		var evt = new SseEvent("heartbeat", "{}");
+
+		lock (_lock)
+		{
+			if (_isCompleted) return;
+
+			// Do NOT add heartbeats to the accumulator — they are ephemeral
+			foreach (var channel in _subscribers)
+			{
+				channel.Writer.TryWrite(evt);
+			}
 		}
 	}
 
@@ -109,7 +205,7 @@ public class SseReporter : IOrchestrationReporter
 		get
 		{
 			var (_, future) = Subscribe();
-			return future;
+			return future ?? Channel.CreateBounded<SseEvent>(1).Reader;
 		}
 	}
 
@@ -123,6 +219,27 @@ public class SseReporter : IOrchestrationReporter
 				channel.Writer.TryComplete();
 			}
 			_subscribers.Clear();
+		}
+	}
+
+	public void Dispose()
+	{
+		if (_disposed) return;
+		_disposed = true;
+
+		lock (_lock)
+		{
+			_isCompleted = true;
+			foreach (var channel in _subscribers)
+			{
+				channel.Writer.TryComplete();
+			}
+			_subscribers.Clear();
+
+			// Clear buffer references so events can be GC'd
+			Array.Clear(_eventBuffer);
+			_eventCount = 0;
+			_eventHead = 0;
 		}
 	}
 
@@ -347,14 +464,42 @@ public class SseReporter : IOrchestrationReporter
 
 		lock (_lock)
 		{
-			if (_isCompleted)
+			if (_isCompleted || _disposed)
 				return;
 
-			_accumulatedEvents.Add(evt);
+			// Add to circular buffer
+			var writeIndex = (_eventHead + _eventCount) % MaxAccumulatedEvents;
+			_eventBuffer[writeIndex] = evt;
+
+			if (_eventCount < MaxAccumulatedEvents)
+			{
+				_eventCount++;
+			}
+			else
+			{
+				// Buffer is full — advance head (oldest event is discarded)
+				_eventHead = (_eventHead + 1) % MaxAccumulatedEvents;
+			}
+
 			foreach (var channel in _subscribers)
 			{
+				// TryWrite on bounded channel with DropOldest will always succeed
 				channel.Writer.TryWrite(evt);
 			}
 		}
+	}
+
+	/// <summary>
+	/// Gets accumulated events in chronological order. Must be called under _lock.
+	/// </summary>
+	private List<SseEvent> GetAccumulatedEventsLocked()
+	{
+		var result = new List<SseEvent>(_eventCount);
+		for (var i = 0; i < _eventCount; i++)
+		{
+			var index = (_eventHead + i) % MaxAccumulatedEvents;
+			result.Add(_eventBuffer[index]);
+		}
+		return result;
 	}
 }

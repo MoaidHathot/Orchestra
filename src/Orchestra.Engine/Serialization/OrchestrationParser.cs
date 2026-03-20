@@ -281,14 +281,17 @@ public static class OrchestrationParser
 					MaxIterations = root.TryGetProperty("maxIterations", out var maxIter) ? maxIter.GetInt32() : null,
 					ContinueOnFailure = root.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
 				},
-			TriggerType.Webhook => new WebhookTriggerConfig
-			{
-				Type = TriggerType.Webhook,
-				Enabled = enabled,
-				InputHandlerPrompt = inputHandlerPrompt,
-				Secret = root.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
-				MaxConcurrent = root.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
-			},
+		TriggerType.Webhook => new WebhookTriggerConfig
+		{
+			Type = TriggerType.Webhook,
+			Enabled = enabled,
+			InputHandlerPrompt = inputHandlerPrompt,
+			Secret = root.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
+			MaxConcurrent = root.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
+			Response = root.TryGetProperty("response", out var responseProp)
+				? ParseWebhookResponseConfig(responseProp)
+				: null,
+		},
 			TriggerType.Email => new EmailTriggerConfig
 			{
 				Type = TriggerType.Email,
@@ -301,6 +304,16 @@ public static class OrchestrationParser
 				SenderContains = root.TryGetProperty("senderContains", out var senderContains) ? senderContains.GetString() : null,
 			},
 			_ => throw new JsonException($"Unknown trigger type: '{type}'."),
+			};
+		}
+
+		private static WebhookResponseConfig ParseWebhookResponseConfig(JsonElement element)
+		{
+			return new WebhookResponseConfig
+			{
+				WaitForResult = element.TryGetProperty("waitForResult", out var wfr) && wfr.GetBoolean(),
+				ResponseTemplate = element.TryGetProperty("responseTemplate", out var rt) ? rt.GetString() : null,
+				TimeoutSeconds = element.TryGetProperty("timeoutSeconds", out var ts) ? ts.GetInt32() : 120,
 			};
 		}
 
