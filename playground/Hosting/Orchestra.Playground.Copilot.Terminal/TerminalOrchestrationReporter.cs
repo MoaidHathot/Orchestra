@@ -1,3 +1,4 @@
+using System.Text;
 using Orchestra.Engine;
 
 namespace Orchestra.Playground.Copilot.Terminal;
@@ -5,16 +6,30 @@ namespace Orchestra.Playground.Copilot.Terminal;
 /// <summary>
 /// An IOrchestrationReporter that tracks events for the Terminal UI.
 /// Raises events that the TUI can subscribe to for live updates.
+/// Also accumulates streaming content/reasoning deltas per step for real-time display.
 /// </summary>
 public class TerminalOrchestrationReporter : IOrchestrationReporter
 {
 	private readonly object _lock = new();
 	private readonly List<ReporterEvent> _events = new();
 
+	// Streaming delta accumulators (per step name)
+	private readonly Dictionary<string, StringBuilder> _streamingContent = new();
+	private readonly Dictionary<string, StringBuilder> _streamingReasoning = new();
+	private string? _currentStreamingStep;
+	private DateTime _lastDeltaTime;
+
 	/// <summary>
 	/// Event raised when any report is received.
 	/// </summary>
 	public event Action? OnUpdate;
+
+	/// <summary>
+	/// Event raised specifically when streaming content arrives. Allows the TUI
+	/// to refresh at a higher frequency for the streaming view without flooding
+	/// the general event list.
+	/// </summary>
+	public event Action? OnStreamingUpdate;
 
 	/// <summary>
 	/// Callback invoked when a step starts.
@@ -38,13 +53,68 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 	}
 
 	/// <summary>
-	/// Clears all events.
+	/// Gets the accumulated streaming content for a specific step.
+	/// Returns null if no content has been streamed for that step.
+	/// </summary>
+	public string? GetStreamingContent(string stepName)
+	{
+		lock (_lock)
+		{
+			return _streamingContent.TryGetValue(stepName, out var sb) ? sb.ToString() : null;
+		}
+	}
+
+	/// <summary>
+	/// Gets the accumulated streaming reasoning for a specific step.
+	/// Returns null if no reasoning has been streamed for that step.
+	/// </summary>
+	public string? GetStreamingReasoning(string stepName)
+	{
+		lock (_lock)
+		{
+			return _streamingReasoning.TryGetValue(stepName, out var sb) ? sb.ToString() : null;
+		}
+	}
+
+	/// <summary>
+	/// Gets the name of the step that is currently receiving streaming content,
+	/// or null if no step is currently streaming.
+	/// </summary>
+	public string? CurrentStreamingStep
+	{
+		get { lock (_lock) return _currentStreamingStep; }
+	}
+
+	/// <summary>
+	/// Gets a snapshot of all step names that have accumulated streaming content.
+	/// </summary>
+	public IReadOnlyList<string> GetStreamingStepNames()
+	{
+		lock (_lock)
+		{
+			return _streamingContent.Keys.ToList();
+		}
+	}
+
+	/// <summary>
+	/// Returns the time of the most recent streaming delta, for UI throttling decisions.
+	/// </summary>
+	public DateTime LastDeltaTime
+	{
+		get { lock (_lock) return _lastDeltaTime; }
+	}
+
+	/// <summary>
+	/// Clears all events and streaming accumulators.
 	/// </summary>
 	public void Clear()
 	{
 		lock (_lock)
 		{
 			_events.Clear();
+			_streamingContent.Clear();
+			_streamingReasoning.Clear();
+			_currentStreamingStep = null;
 		}
 	}
 
@@ -79,12 +149,36 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 
 	public void ReportContentDelta(string stepName, string chunk)
 	{
-		// Don't log individual deltas to avoid flooding
+		lock (_lock)
+		{
+			if (!_streamingContent.TryGetValue(stepName, out var sb))
+			{
+				sb = new StringBuilder();
+				_streamingContent[stepName] = sb;
+			}
+			sb.Append(chunk);
+			_currentStreamingStep = stepName;
+			_lastDeltaTime = DateTime.Now;
+		}
+		// Don't add to the event list (would flood), but raise the streaming-specific event
+		OnStreamingUpdate?.Invoke();
 	}
 
 	public void ReportReasoningDelta(string stepName, string chunk)
 	{
-		// Don't log individual deltas
+		lock (_lock)
+		{
+			if (!_streamingReasoning.TryGetValue(stepName, out var sb))
+			{
+				sb = new StringBuilder();
+				_streamingReasoning[stepName] = sb;
+			}
+			sb.Append(chunk);
+			_currentStreamingStep = stepName;
+			_lastDeltaTime = DateTime.Now;
+		}
+		// Don't add to the event list (would flood), but raise the streaming-specific event
+		OnStreamingUpdate?.Invoke();
 	}
 
 	public void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer)
@@ -111,6 +205,14 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 
 	public void ReportStepCompleted(string stepName, AgentResult result)
 	{
+		lock (_lock)
+		{
+			// Clear the current streaming step marker when the step finishes
+			if (_currentStreamingStep == stepName)
+			{
+				_currentStreamingStep = null;
+			}
+		}
 		AddEvent(new ReporterEvent("step-completed", $"[{stepName}] Completed (model: {result.ActualModel})"));
 		OnStepCompleted?.Invoke(stepName);
 	}
@@ -184,7 +286,7 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 
 	public void ReportStepTrace(string stepName, StepExecutionTrace trace)
 	{
-		// Don't log full traces
+		// Don't log full traces to event list; they are available via the run record
 	}
 }
 

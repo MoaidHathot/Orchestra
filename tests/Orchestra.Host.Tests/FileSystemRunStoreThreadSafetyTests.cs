@@ -446,4 +446,194 @@ public class FileSystemRunStoreThreadSafetyTests : IDisposable
 		// All should return the same result
 		results.Should().AllSatisfy(r => r.Should().HaveCount(1));
 	}
+
+	// ─── Error information in RunIndex ─────────────────────────────
+
+	[Fact]
+	public async Task RunIndex_FailedRun_CarriesErrorMessage()
+	{
+		var now = DateTimeOffset.UtcNow;
+		var record = new OrchestrationRunRecord
+		{
+			RunId = "failed-run",
+			OrchestrationName = "error-orch",
+			StartedAt = now.AddSeconds(-5),
+			CompletedAt = now,
+			Status = ExecutionStatus.Failed,
+			FinalContent = "",
+			StepRecords = new Dictionary<string, StepRunRecord>
+			{
+				["step-1"] = new StepRunRecord
+				{
+					StepName = "step-1",
+					Status = ExecutionStatus.Failed,
+					StartedAt = now.AddSeconds(-3),
+					CompletedAt = now,
+					Content = "",
+					ErrorMessage = "Connection timeout after 30s"
+				}
+			},
+			AllStepRecords = new Dictionary<string, StepRunRecord>
+			{
+				["step-1"] = new StepRunRecord
+				{
+					StepName = "step-1",
+					Status = ExecutionStatus.Failed,
+					StartedAt = now.AddSeconds(-3),
+					CompletedAt = now,
+					Content = "",
+					ErrorMessage = "Connection timeout after 30s"
+				}
+			}
+		};
+
+		await Store.SaveRunAsync(record);
+
+		var summaries = await _store.GetRunSummariesAsync("error-orch");
+		summaries.Should().HaveCount(1);
+		summaries[0].Status.Should().Be(ExecutionStatus.Failed);
+		summaries[0].FailedStepName.Should().Be("step-1");
+		summaries[0].ErrorMessage.Should().Be("Connection timeout after 30s");
+	}
+
+	[Fact]
+	public async Task RunIndex_SucceededRun_HasNoErrorMessage()
+	{
+		var record = CreateTestRecord(runId: "success-run");
+		await Store.SaveRunAsync(record);
+
+		var summaries = await _store.GetRunSummariesAsync("test-orchestration");
+		summaries.Should().HaveCount(1);
+		summaries[0].FailedStepName.Should().BeNull();
+		summaries[0].ErrorMessage.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task RunIndex_FailedRun_UsesFirstFailedStep()
+	{
+		var now = DateTimeOffset.UtcNow;
+		var record = new OrchestrationRunRecord
+		{
+			RunId = "multi-fail",
+			OrchestrationName = "multi-fail-orch",
+			StartedAt = now.AddSeconds(-10),
+			CompletedAt = now,
+			Status = ExecutionStatus.Failed,
+			FinalContent = "",
+			StepRecords = new Dictionary<string, StepRunRecord>
+			{
+				["step-1"] = new StepRunRecord
+				{
+					StepName = "step-1",
+					Status = ExecutionStatus.Succeeded,
+					StartedAt = now.AddSeconds(-10),
+					CompletedAt = now.AddSeconds(-7),
+					Content = "ok"
+				},
+				["step-2"] = new StepRunRecord
+				{
+					StepName = "step-2",
+					Status = ExecutionStatus.Failed,
+					StartedAt = now.AddSeconds(-7),
+					CompletedAt = now.AddSeconds(-3),
+					Content = "",
+					ErrorMessage = "First error"
+				},
+				["step-3"] = new StepRunRecord
+				{
+					StepName = "step-3",
+					Status = ExecutionStatus.Failed,
+					StartedAt = now.AddSeconds(-3),
+					CompletedAt = now,
+					Content = "",
+					ErrorMessage = "Second error"
+				}
+			},
+			AllStepRecords = new Dictionary<string, StepRunRecord>
+			{
+				["step-1"] = new StepRunRecord
+				{
+					StepName = "step-1",
+					Status = ExecutionStatus.Succeeded,
+					StartedAt = now.AddSeconds(-10),
+					CompletedAt = now.AddSeconds(-7),
+					Content = "ok"
+				},
+				["step-2"] = new StepRunRecord
+				{
+					StepName = "step-2",
+					Status = ExecutionStatus.Failed,
+					StartedAt = now.AddSeconds(-7),
+					CompletedAt = now.AddSeconds(-3),
+					Content = "",
+					ErrorMessage = "First error"
+				},
+				["step-3"] = new StepRunRecord
+				{
+					StepName = "step-3",
+					Status = ExecutionStatus.Failed,
+					StartedAt = now.AddSeconds(-3),
+					CompletedAt = now,
+					Content = "",
+					ErrorMessage = "Second error"
+				}
+			}
+		};
+
+		await Store.SaveRunAsync(record);
+
+		var summaries = await _store.GetRunSummariesAsync("multi-fail-orch");
+		summaries.Should().HaveCount(1);
+		// Should use the first failed step chronologically
+		summaries[0].FailedStepName.Should().Be("step-2");
+		summaries[0].ErrorMessage.Should().Be("First error");
+	}
+
+	[Fact]
+	public async Task RunIndex_FailedRun_PersistsErrorAcrossReload()
+	{
+		var now = DateTimeOffset.UtcNow;
+		var record = new OrchestrationRunRecord
+		{
+			RunId = "persist-error",
+			OrchestrationName = "persist-err-orch",
+			StartedAt = now.AddSeconds(-5),
+			CompletedAt = now,
+			Status = ExecutionStatus.Failed,
+			FinalContent = "",
+			StepRecords = new Dictionary<string, StepRunRecord>
+			{
+				["analyze"] = new StepRunRecord
+				{
+					StepName = "analyze",
+					Status = ExecutionStatus.Failed,
+					StartedAt = now.AddSeconds(-3),
+					CompletedAt = now,
+					Content = "",
+					ErrorMessage = "Rate limit exceeded"
+				}
+			},
+			AllStepRecords = new Dictionary<string, StepRunRecord>
+			{
+				["analyze"] = new StepRunRecord
+				{
+					StepName = "analyze",
+					Status = ExecutionStatus.Failed,
+					StartedAt = now.AddSeconds(-3),
+					CompletedAt = now,
+					Content = "",
+					ErrorMessage = "Rate limit exceeded"
+				}
+			}
+		};
+
+		await Store.SaveRunAsync(record);
+
+		// Create a new store instance to force re-loading from disk
+		var freshStore = new FileSystemRunStore(_tempDir);
+		var summaries = await freshStore.GetRunSummariesAsync("persist-err-orch");
+		summaries.Should().HaveCount(1);
+		summaries[0].FailedStepName.Should().Be("analyze");
+		summaries[0].ErrorMessage.Should().Be("Rate limit exceeded");
+	}
 }

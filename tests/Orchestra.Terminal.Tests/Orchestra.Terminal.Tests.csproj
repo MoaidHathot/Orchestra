@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Terminal\Orchestra.Playground.Copilot.Terminal.csproj" />
+    <ProjectReference Include="..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
   </ItemGroup>
 
 </Project>

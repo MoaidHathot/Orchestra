@@ -27,7 +27,7 @@ if (args.Contains("--help") || args.Contains("-h"))
 	Console.WriteLine("  ORCHESTRA_HOST_URL               Same as --host-url");
 	Console.WriteLine();
 	Console.WriteLine("Keyboard Shortcuts:");
-	Console.WriteLine("  1-6        Switch views (Dashboard, Orchestrations, Triggers, History, Active, Event Log)");
+	Console.WriteLine("  1-7        Switch views (Dashboard, Orchestrations, Triggers, History, Active, Event Log, MCP Servers)");
 	Console.WriteLine("  j/k or ↑/↓ Navigate up/down");
 	Console.WriteLine("  Enter      Select item / Open detail");
 	Console.WriteLine("  r          Run selected orchestration/trigger");
@@ -39,7 +39,8 @@ if (args.Contains("--help") || args.Contains("-h"))
 	Console.WriteLine("  /          Search / filter items in list views");
 	Console.WriteLine("  ?          Show context-sensitive help overlay");
 	Console.WriteLine("  n/p        Next/previous page (in History view)");
-	Console.WriteLine("  Tab/1-3    Switch tabs (in Execution Detail view)");
+	Console.WriteLine("  Tab/1-4    Switch tabs (in Execution Detail: Summary, Steps, Output, Stream)");
+	Console.WriteLine("  f          Toggle auto-scroll in Stream tab");
 	Console.WriteLine("  u          Show run URL (in Execution Detail view)");
 	Console.WriteLine("  Esc        Go back (hierarchical navigation)");
 	Console.WriteLine("  Tab        Path autocomplete (when entering paths)");

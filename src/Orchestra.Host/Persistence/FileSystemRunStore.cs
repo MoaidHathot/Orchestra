@@ -146,6 +146,7 @@ public class FileSystemRunStore : IRunStore
 		}
 
 		// Update in-memory index — thread-safe
+		var (failedStep, errorMsg) = ExtractFailureInfo(record);
 		var index = new RunIndex
 		{
 			RunId = record.RunId,
@@ -156,7 +157,9 @@ public class FileSystemRunStore : IRunStore
 			CompletedAt = record.CompletedAt,
 			Status = record.Status,
 			TriggerId = record.TriggerId,
-			FolderPath = runDir
+			FolderPath = runDir,
+			FailedStepName = failedStep,
+			ErrorMessage = errorMsg
 		};
 
 		lock (_indexWriteLock)
@@ -364,6 +367,7 @@ public class FileSystemRunStore : IRunStore
 						var record = JsonSerializer.Deserialize<OrchestrationRunRecord>(json, _jsonOptions);
 						if (record is null) continue;
 
+						var (failedStep2, errorMsg2) = ExtractFailureInfo(record);
 						var index = new RunIndex
 						{
 							RunId = record.RunId,
@@ -374,7 +378,9 @@ public class FileSystemRunStore : IRunStore
 							CompletedAt = record.CompletedAt,
 							Status = record.Status,
 							TriggerId = record.TriggerId,
-							FolderPath = runDir
+							FolderPath = runDir,
+							FailedStepName = failedStep2,
+							ErrorMessage = errorMsg2
 						};
 
 						// During initial load we are the only writer (protected by _indexLoadLock),
@@ -406,6 +412,24 @@ public class FileSystemRunStore : IRunStore
 		{
 			_indexLoadLock.Release();
 		}
+	}
+
+	/// <summary>
+	/// Extracts the error message from the first failed step in a run record.
+	/// </summary>
+	private static (string? StepName, string? ErrorMessage) ExtractFailureInfo(OrchestrationRunRecord record)
+	{
+		if (record.Status != ExecutionStatus.Failed)
+			return (null, null);
+
+		var failedStep = record.AllStepRecords.Values
+			.Where(s => s.Status == ExecutionStatus.Failed && !string.IsNullOrEmpty(s.ErrorMessage))
+			.OrderBy(s => s.StartedAt)
+			.FirstOrDefault();
+
+		return failedStep != null
+			? (failedStep.StepName, failedStep.ErrorMessage)
+			: (null, null);
 	}
 
 	private async Task<IReadOnlyList<OrchestrationRunRecord>> LoadRecordsAsync(
@@ -462,6 +486,16 @@ public class RunIndex
 	public string? TriggerId { get; init; }
 	public required string FolderPath { get; init; }
 	public TimeSpan Duration => CompletedAt - StartedAt;
+
+	/// <summary>
+	/// Name of the first step that failed, if the run failed.
+	/// </summary>
+	public string? FailedStepName { get; init; }
+
+	/// <summary>
+	/// Error message from the first failed step, if the run failed.
+	/// </summary>
+	public string? ErrorMessage { get; init; }
 }
 
 /// <summary>

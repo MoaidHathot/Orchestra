@@ -83,6 +83,7 @@ public static class ServiceCollectionExtensions
 				sp.GetRequiredService<ILogger<TriggerManager>>(),
 				runsPath,
 				sp.GetRequiredService<IRunStore>(),
+				sp.GetRequiredService<ICheckpointStore>(),
 				sp.GetRequiredService<ITriggerExecutionCallback>());
 		});
 		services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());

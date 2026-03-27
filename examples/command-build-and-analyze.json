@@ -8,7 +8,7 @@
       "dependsOn": [],
       "command": "dotnet",
       "arguments": ["build", "--no-restore", "--verbosity", "minimal"],
-      "workingDirectory": "{{projectPath}}",
+      "workingDirectory": "{{param.projectPath}}",
       "parameters": ["projectPath"],
       "timeoutSeconds": 120,
       "includeStdErr": true
@@ -19,7 +19,7 @@
       "dependsOn": [],
       "command": "git",
       "arguments": ["log", "--oneline", "--no-decorate", "-10"],
-      "workingDirectory": "{{projectPath}}",
+      "workingDirectory": "{{param.projectPath}}",
       "parameters": ["projectPath"],
       "timeoutSeconds": 10
     },

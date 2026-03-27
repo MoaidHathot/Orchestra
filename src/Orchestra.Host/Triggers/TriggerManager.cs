@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.Registry;
 
 namespace Orchestra.Host.Triggers;
 
@@ -23,6 +24,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly string _runsDir;
 	private readonly string _triggersDir;
 	private readonly IRunStore _runStore;
+	private readonly ICheckpointStore _checkpointStore;
 	private readonly ITriggerExecutionCallback? _executionCallback;
 	private readonly JsonSerializerOptions _jsonOptions;
 
@@ -46,6 +48,7 @@ public partial class TriggerManager : BackgroundService
 		ILogger<TriggerManager> logger,
 		string runsDir,
 		IRunStore runStore,
+		ICheckpointStore checkpointStore,
 		ITriggerExecutionCallback? executionCallback = null)
 	{
 		_activeExecutions = activeExecutions;
@@ -57,6 +60,7 @@ public partial class TriggerManager : BackgroundService
 		_runsDir = runsDir;
 		_triggersDir = Path.Combine(Path.GetDirectoryName(runsDir)!, "triggers");
 		_runStore = runStore;
+		_checkpointStore = checkpointStore;
 		_executionCallback = executionCallback;
 		Directory.CreateDirectory(_triggersDir);
 
@@ -305,6 +309,97 @@ public partial class TriggerManager : BackgroundService
 		};
 
 		return await ExecuteOrchestrationAsync(tempReg, parameters);
+	}
+
+	/// <summary>
+	/// Resumes an orchestration from a checkpoint.
+	/// </summary>
+	public async Task<string?> ResumeFromCheckpointAsync(
+		OrchestrationEntry entry,
+		CheckpointData checkpoint)
+	{
+		var executionId = checkpoint.RunId;
+
+		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
+		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore);
+
+		using var cts = new CancellationTokenSource();
+		_activeExecutions[executionId] = cts;
+
+		var executionInfo = new ActiveExecutionInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationId = entry.Id,
+			OrchestrationName = entry.Orchestration.Name,
+			StartedAt = checkpoint.StartedAt,
+			TriggeredBy = "resume",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			Parameters = checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null,
+			TotalSteps = entry.Orchestration.Steps.Length,
+			CompletedSteps = checkpoint.CompletedSteps.Count,
+		};
+		_activeExecutionInfos[executionId] = executionInfo;
+
+		_executionCallback?.OnExecutionStarted(executionInfo);
+
+		var taskId = Interlocked.Increment(ref _backgroundTaskId);
+
+		var task = Task.Run(async () =>
+		{
+			try
+			{
+				var result = await executor.ResumeAsync(entry.Orchestration, checkpoint, cts.Token);
+
+				executionInfo.Status = result.Status == ExecutionStatus.Succeeded ? "Completed" : "Failed";
+
+				// Persist history
+				try
+				{
+					var historyEntry = new
+					{
+						id = executionId,
+						orchestrationName = entry.Orchestration.Name,
+						orchestrationDescription = entry.Orchestration.Description,
+						orchestrationVersion = entry.Orchestration.Version,
+						orchestrationPath = entry.Path,
+						triggerId = checkpoint.TriggerId,
+						triggerType = "resume",
+						startedAt = checkpoint.StartedAt.ToString("o"),
+						status = result.Status.ToString(),
+						stepCount = entry.Orchestration.Steps.Length,
+						results = result.StepResults.ToDictionary(
+							kv => kv.Key,
+							kv => new
+							{
+								status = kv.Value.Status.ToString(),
+								content = kv.Value.Content,
+								error = kv.Value.ErrorMessage,
+							}),
+					};
+					var historyJson = JsonSerializer.Serialize(historyEntry, _jsonOptions);
+					var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
+					await File.WriteAllTextAsync(historyPath, historyJson);
+				}
+				catch { /* best-effort history persist */ }
+			}
+			catch (OperationCanceledException)
+			{
+				executionInfo.Status = "Cancelled";
+			}
+			catch (Exception)
+			{
+				executionInfo.Status = "Failed";
+			}
+			finally
+			{
+				_activeExecutions.TryRemove(executionId, out _);
+				_backgroundTasks.TryRemove(taskId, out _);
+			}
+		});
+
+		_backgroundTasks[taskId] = task;
+		return executionId;
 	}
 
 	/// <summary>
