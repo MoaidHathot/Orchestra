@@ -27,7 +27,7 @@ if (args.Contains("--help") || args.Contains("-h"))
 	Console.WriteLine("  ORCHESTRA_HOST_URL               Same as --host-url");
 	Console.WriteLine();
 	Console.WriteLine("Keyboard Shortcuts:");
-	Console.WriteLine("  1-5        Switch views (Dashboard, Orchestrations, Triggers, History, Active)");
+	Console.WriteLine("  1-6        Switch views (Dashboard, Orchestrations, Triggers, History, Active, Event Log)");
 	Console.WriteLine("  j/k or ↑/↓ Navigate up/down");
 	Console.WriteLine("  Enter      Select item / Open detail");
 	Console.WriteLine("  r          Run selected orchestration/trigger");
@@ -36,11 +36,14 @@ if (args.Contains("--help") || args.Contains("-h"))
 	Console.WriteLine("  d          Delete selected item");
 	Console.WriteLine("  e          Enable/disable trigger (in Triggers view)");
 	Console.WriteLine("  c          Cancel execution (in Active view)");
+	Console.WriteLine("  /          Search / filter items in list views");
+	Console.WriteLine("  ?          Show context-sensitive help overlay");
+	Console.WriteLine("  n/p        Next/previous page (in History view)");
 	Console.WriteLine("  Tab/1-3    Switch tabs (in Execution Detail view)");
 	Console.WriteLine("  u          Show run URL (in Execution Detail view)");
-	Console.WriteLine("  Esc        Go back");
+	Console.WriteLine("  Esc        Go back (hierarchical navigation)");
 	Console.WriteLine("  Tab        Path autocomplete (when entering paths)");
-	Console.WriteLine("  q          Quit");
+	Console.WriteLine("  q          Quit (from Dashboard) or return to Dashboard");
 	return;
 }
 

@@ -31,11 +31,34 @@ public class TerminalUI
 	private readonly object _renderLock = new();
 	private DateTime _lastRender = DateTime.MinValue;
 
+	// Help overlay
+	private bool _showingHelp;
+
+	// Search/filter
+	private bool _isSearching;
+	private string _searchQuery = "";
+
+	// History pagination
+	private int _historyPageSize = 20;
+	private int _historyOffset;
+
+	// Navigation stack for hierarchical back navigation
+	private readonly Stack<(TuiView View, int SelectedIndex)> _navigationStack = new();
+
 	// Execution detail view state
 	private ExecutionDetailTab _executionDetailTab = ExecutionDetailTab.Summary;
 	private int _executionDetailScrollOffset;
 	private int _selectedStepIndex;
 	private OrchestrationRunRecord? _cachedRunRecord;
+
+	// Inline confirmation state
+	private bool _pendingConfirmation;
+	private string _confirmationMessage = "";
+	private Action? _confirmationAction;
+
+	// Transient message (replaces ShowMessage blocking)
+	private string? _transientMessage;
+	private DateTime _transientMessageExpiry;
 
 	public TerminalUI(
 		OrchestrationRegistry registry,
@@ -93,6 +116,12 @@ public class TerminalUI
 					{
 						Render();
 					}
+					// Clear transient messages after expiry
+					if (_transientMessage != null && DateTime.Now > _transientMessageExpiry)
+					{
+						_transientMessage = null;
+						Render();
+					}
 					await Task.Delay(50, cancellationToken);
 				}
 			}
@@ -115,41 +144,189 @@ public class TerminalUI
 		}
 	}
 
+	#region Navigation Helpers
+
+	/// <summary>
+	/// Push the current view onto the navigation stack and navigate to a new view.
+	/// </summary>
+	private void NavigateTo(TuiView view, int selectedIndex = 0)
+	{
+		_navigationStack.Push((_currentView, _selectedIndex));
+		_currentView = view;
+		_selectedIndex = selectedIndex;
+	}
+
+	/// <summary>
+	/// Navigate back to the previous view using the navigation stack.
+	/// Falls back to Dashboard if the stack is empty.
+	/// </summary>
+	private void NavigateBack()
+	{
+		if (_navigationStack.Count > 0)
+		{
+			var (view, index) = _navigationStack.Pop();
+			_currentView = view;
+			_selectedIndex = index;
+		}
+		else
+		{
+			_currentView = TuiView.Dashboard;
+			_selectedIndex = 0;
+		}
+	}
+
+	/// <summary>
+	/// Navigate directly to a top-level view, clearing the navigation stack.
+	/// </summary>
+	private void NavigateToTopLevel(TuiView view)
+	{
+		_navigationStack.Clear();
+		_currentView = view;
+		_selectedIndex = 0;
+		_searchQuery = "";
+		_isSearching = false;
+	}
+
+	/// <summary>
+	/// Gets the breadcrumb path for the current navigation state.
+	/// </summary>
+	private string GetBreadcrumb()
+	{
+		var parts = new List<string>();
+		foreach (var (view, _) in _navigationStack.Reverse())
+		{
+			parts.Add(GetViewName(view));
+		}
+		parts.Add(GetViewName(_currentView));
+		return string.Join(" > ", parts.Select((p, i) =>
+			i == parts.Count - 1 ? $"[bold cyan]{p}[/]" : $"[dim]{p}[/]"));
+	}
+
+	private static string GetViewName(TuiView view) => view switch
+	{
+		TuiView.Dashboard => "Dashboard",
+		TuiView.Orchestrations => "Orchestrations",
+		TuiView.Triggers => "Triggers",
+		TuiView.History => "History",
+		TuiView.Active => "Active",
+		TuiView.OrchestrationDetail => "Detail",
+		TuiView.ExecutionDetail => "Execution",
+		TuiView.EventLog => "Event Log",
+		_ => view.ToString()
+	};
+
+	#endregion
+
+	#region Inline Confirmation
+
+	/// <summary>
+	/// Shows an inline confirmation prompt. The action executes on 'y', cancelled on any other key.
+	/// </summary>
+	private void RequestConfirmation(string message, Action onConfirm)
+	{
+		_pendingConfirmation = true;
+		_confirmationMessage = message;
+		_confirmationAction = onConfirm;
+	}
+
+	private void HandleConfirmationInput(ConsoleKeyInfo key)
+	{
+		_pendingConfirmation = false;
+		if (key.Key == ConsoleKey.Y)
+		{
+			_confirmationAction?.Invoke();
+		}
+		_confirmationAction = null;
+		_confirmationMessage = "";
+	}
+
+	#endregion
+
+	#region Transient Messages
+
+	/// <summary>
+	/// Shows a non-blocking message that auto-dismisses.
+	/// </summary>
+	private void ShowTransientMessage(string markup, int durationMs = 2000)
+	{
+		_transientMessage = markup;
+		_transientMessageExpiry = DateTime.Now.AddMilliseconds(durationMs);
+	}
+
+	#endregion
+
 	private void HandleKeyPress(ConsoleKeyInfo key)
 	{
+		// Handle confirmation prompts first
+		if (_pendingConfirmation)
+		{
+			HandleConfirmationInput(key);
+			return;
+		}
+
+		// Handle help overlay
+		if (_showingHelp)
+		{
+			_showingHelp = false;
+			return;
+		}
+
+		// Handle search mode input
+		if (_isSearching)
+		{
+			HandleSearchInput(key);
+			return;
+		}
+
 		// Global shortcuts
 		switch (key.Key)
 		{
 			case ConsoleKey.Q:
-				_running = false;
+				if (key.Modifiers == 0 && _currentView == TuiView.Dashboard)
+				{
+					_running = false;
+					return;
+				}
+				else if (key.Modifiers == 0)
+				{
+					// Q in non-dashboard views goes back to dashboard
+					NavigateToTopLevel(TuiView.Dashboard);
+					return;
+				}
+				break;
+			case ConsoleKey.D1 when !IsDetailView():
+				NavigateToTopLevel(TuiView.Dashboard);
 				return;
-			case ConsoleKey.D1:
-				_currentView = TuiView.Dashboard;
-				_selectedIndex = 0;
+			case ConsoleKey.D2 when !IsDetailView():
+				NavigateToTopLevel(TuiView.Orchestrations);
 				return;
-			case ConsoleKey.D2:
-				_currentView = TuiView.Orchestrations;
-				_selectedIndex = 0;
+			case ConsoleKey.D3 when !IsDetailView():
+				NavigateToTopLevel(TuiView.Triggers);
 				return;
-			case ConsoleKey.D3:
-				_currentView = TuiView.Triggers;
-				_selectedIndex = 0;
+			case ConsoleKey.D4 when !IsDetailView():
+				NavigateToTopLevel(TuiView.History);
 				return;
-			case ConsoleKey.D4:
-				_currentView = TuiView.History;
-				_selectedIndex = 0;
+			case ConsoleKey.D5 when !IsDetailView():
+				NavigateToTopLevel(TuiView.Active);
 				return;
-			case ConsoleKey.D5:
-				_currentView = TuiView.Active;
-				_selectedIndex = 0;
+			case ConsoleKey.D6 when !IsDetailView():
+				NavigateToTopLevel(TuiView.EventLog);
 				return;
 			case ConsoleKey.Escape:
-				if (_currentView != TuiView.Dashboard)
-				{
-					_currentView = TuiView.Dashboard;
-					_selectedIndex = 0;
-				}
+				NavigateBack();
 				return;
+			case ConsoleKey.Oem2 when key.Modifiers.HasFlag(ConsoleModifiers.Shift): // '?' key
+				_showingHelp = true;
+				return;
+			case ConsoleKey.Divide: // '/' key for search (on numpad)
+			case ConsoleKey.Oem2 when !key.Modifiers.HasFlag(ConsoleModifiers.Shift): // '/' key
+				if (SupportsSearch(_currentView))
+				{
+					_isSearching = true;
+					_searchQuery = "";
+					return;
+				}
+				break;
 		}
 
 		// View-specific shortcuts
@@ -176,12 +353,56 @@ public class TerminalUI
 			case TuiView.ExecutionDetail:
 				HandleExecutionDetailInput(key);
 				break;
+			case TuiView.EventLog:
+				HandleEventLogInput(key);
+				break;
+		}
+	}
+
+	/// <summary>
+	/// Returns true if the current view is a detail/sub-view where number keys
+	/// should NOT switch top-level views.
+	/// </summary>
+	private bool IsDetailView() =>
+		_currentView is TuiView.OrchestrationDetail
+			or TuiView.ExecutionDetail;
+
+	private static bool SupportsSearch(TuiView view) =>
+		view is TuiView.Orchestrations or TuiView.History or TuiView.Triggers;
+
+	private void HandleSearchInput(ConsoleKeyInfo key)
+	{
+		switch (key.Key)
+		{
+			case ConsoleKey.Escape:
+				_isSearching = false;
+				_searchQuery = "";
+				_selectedIndex = 0;
+				break;
+			case ConsoleKey.Enter:
+				_isSearching = false;
+				// Keep the filter active
+				break;
+			case ConsoleKey.Backspace:
+				if (_searchQuery.Length > 0)
+				{
+					_searchQuery = _searchQuery[..^1];
+					_selectedIndex = 0;
+				}
+				break;
+			default:
+				if (!char.IsControl(key.KeyChar))
+				{
+					_searchQuery += key.KeyChar;
+					_selectedIndex = 0;
+				}
+				break;
 		}
 	}
 
 	private void HandleDashboardInput(ConsoleKeyInfo key)
 	{
-		var options = new[] { "Orchestrations", "Triggers", "History", "Active Executions", "Quit" };
+		var options = new[] { "Orchestrations", "Triggers", "History", "Active Executions", "Event Log", "Quit" };
 		switch (key.Key)
 		{
 			case ConsoleKey.UpArrow or ConsoleKey.K:
@@ -193,11 +414,12 @@ public class TerminalUI
 			case ConsoleKey.Enter:
 				switch (_selectedIndex)
 				{
-					case 0: _currentView = TuiView.Orchestrations; _selectedIndex = 0; break;
-					case 1: _currentView = TuiView.Triggers; _selectedIndex = 0; break;
-					case 2: _currentView = TuiView.History; _selectedIndex = 0; break;
-					case 3: _currentView = TuiView.Active; _selectedIndex = 0; break;
-					case 4: _running = false; break;
+					case 0: NavigateTo(TuiView.Orchestrations); break;
+					case 1: NavigateTo(TuiView.Triggers); break;
+					case 2: NavigateTo(TuiView.History); break;
+					case 3: NavigateTo(TuiView.Active); break;
+					case 4: NavigateTo(TuiView.EventLog); break;
+					case 5: _running = false; break;
 				}
 				break;
 		}
@@ -205,7 +427,7 @@ public class TerminalUI
 
 	private void HandleOrchestrationsInput(ConsoleKeyInfo key)
 	{
-		var items = _registry.GetAll().ToArray();
+		var items = GetFilteredOrchestrations();
 		switch (key.Key)
 		{
 			case ConsoleKey.UpArrow or ConsoleKey.K:
@@ -218,7 +440,7 @@ public class TerminalUI
 				if (items.Length > 0 && _selectedIndex < items.Length)
 				{
 					_selectedOrchestrationId = items[_selectedIndex].Id;
-					_currentView = TuiView.OrchestrationDetail;
+					NavigateTo(TuiView.OrchestrationDetail);
 				}
 				break;
 			case ConsoleKey.R:
@@ -226,7 +448,6 @@ public class TerminalUI
 				if (items.Length > 0 && _selectedIndex < items.Length)
 				{
 					var entry = items[_selectedIndex];
-					// Try firing registered trigger first, otherwise run directly
 					_ = RunOrchestrationAsync(entry);
 				}
 				break;
@@ -239,11 +460,21 @@ public class TerminalUI
 				PromptScanDirectory();
 				break;
 			case ConsoleKey.D or ConsoleKey.Delete:
-				// Delete/remove selected orchestration
+				// Delete/remove selected orchestration with confirmation
 				if (items.Length > 0 && _selectedIndex < items.Length)
 				{
 					var entry = items[_selectedIndex];
-					RemoveOrchestration(entry.Id);
+					RequestConfirmation(
+						$"Remove [cyan]{Markup.Escape(entry.Orchestration.Name)}[/]? [dim](y/n)[/]",
+						() =>
+						{
+							var trigger = _triggerManager.GetAllTriggers().FirstOrDefault(t => t.Id == entry.Id);
+							if (trigger != null)
+								_triggerManager.RemoveTrigger(trigger.Id);
+							_registry.Remove(entry.Id);
+							_selectedIndex = Math.Max(0, _selectedIndex - 1);
+							ShowTransientMessage($"[green]Removed:[/] {Markup.Escape(entry.Orchestration.Name)}");
+						});
 				}
 				break;
 		}
@@ -251,7 +482,7 @@ public class TerminalUI
 
 	private void HandleTriggersInput(ConsoleKeyInfo key)
 	{
-		var triggers = _triggerManager.GetAllTriggers().ToArray();
+		var triggers = GetFilteredTriggers();
 		switch (key.Key)
 		{
 			case ConsoleKey.UpArrow or ConsoleKey.K:
@@ -265,7 +496,11 @@ public class TerminalUI
 				if (triggers.Length > 0 && _selectedIndex < triggers.Length)
 				{
 					var trigger = triggers[_selectedIndex];
-					_triggerManager.SetTriggerEnabled(trigger.Id, !trigger.Config.Enabled);
+					var newState = !trigger.Config.Enabled;
+					_triggerManager.SetTriggerEnabled(trigger.Id, newState);
+					ShowTransientMessage(newState
+						? $"[green]Enabled[/] trigger for {Markup.Escape(trigger.OrchestrationName ?? trigger.Id)}"
+						: $"[yellow]Disabled[/] trigger for {Markup.Escape(trigger.OrchestrationName ?? trigger.Id)}");
 				}
 				break;
 			case ConsoleKey.R:
@@ -274,6 +509,22 @@ public class TerminalUI
 				{
 					var trigger = triggers[_selectedIndex];
 					_ = _triggerManager.FireTriggerAsync(trigger.Id);
+					ShowTransientMessage($"[green]Fired[/] trigger for {Markup.Escape(trigger.OrchestrationName ?? trigger.Id)}");
+				}
+				break;
+			case ConsoleKey.D or ConsoleKey.Delete:
+				// Delete trigger with confirmation
+				if (triggers.Length > 0 && _selectedIndex < triggers.Length)
+				{
+					var trigger = triggers[_selectedIndex];
+					RequestConfirmation(
+						$"Remove trigger for [cyan]{Markup.Escape(trigger.OrchestrationName ?? trigger.Id)}[/]? [dim](y/n)[/]",
+						() =>
+						{
+							_triggerManager.RemoveTrigger(trigger.Id);
+							_selectedIndex = Math.Max(0, _selectedIndex - 1);
+							ShowTransientMessage($"[green]Removed[/] trigger");
+						});
 				}
 				break;
 		}
@@ -281,7 +532,7 @@ public class TerminalUI
 
 	private void HandleHistoryInput(ConsoleKeyInfo key)
 	{
-		var runs = _runStore.GetRunSummariesAsync(20).GetAwaiter().GetResult();
+		var runs = GetFilteredHistory();
 		switch (key.Key)
 		{
 			case ConsoleKey.UpArrow or ConsoleKey.K:
@@ -295,16 +546,33 @@ public class TerminalUI
 				{
 					_selectedExecutionId = runs[_selectedIndex].RunId;
 					ResetExecutionDetailState();
-					_currentView = TuiView.ExecutionDetail;
+					NavigateTo(TuiView.ExecutionDetail);
 				}
 				break;
 			case ConsoleKey.D:
-				// Delete run
+				// Delete run with confirmation
 				if (runs.Count > 0 && _selectedIndex < runs.Count)
 				{
 					var run = runs[_selectedIndex];
-					_ = _runStore.DeleteRunAsync(run.OrchestrationName, run.RunId);
+					RequestConfirmation(
+						$"Delete run [cyan]{Markup.Escape(run.OrchestrationName)}[/] ({run.RunId[..8]}...)? [dim](y/n)[/]",
+						() =>
+						{
+							_ = _runStore.DeleteRunAsync(run.OrchestrationName, run.RunId);
+							_selectedIndex = Math.Max(0, _selectedIndex - 1);
+							ShowTransientMessage("[green]Run deleted[/]");
+						});
 				}
+				break;
+			case ConsoleKey.N or ConsoleKey.PageDown:
+				// Next page
+				_historyOffset += _historyPageSize;
+				_selectedIndex = 0;
+				break;
+			case ConsoleKey.P or ConsoleKey.PageUp:
+				// Previous page
+				_historyOffset = Math.Max(0, _historyOffset - _historyPageSize);
+				_selectedIndex = 0;
 				break;
 		}
 	}
@@ -325,15 +593,21 @@ public class TerminalUI
 				{
 					_selectedExecutionId = active[_selectedIndex].ExecutionId;
 					ResetExecutionDetailState();
-					_currentView = TuiView.ExecutionDetail;
+					NavigateTo(TuiView.ExecutionDetail);
 				}
 				break;
 			case ConsoleKey.C:
-				// Cancel execution
+				// Cancel execution with confirmation
 				if (active.Length > 0 && _selectedIndex < active.Length)
 				{
 					var exec = active[_selectedIndex];
-					_triggerManager.CancelExecution(exec.ExecutionId);
+					RequestConfirmation(
+						$"Cancel execution [cyan]{Markup.Escape(exec.OrchestrationName)}[/]? [dim](y/n)[/]",
+						() =>
+						{
+							_triggerManager.CancelExecution(exec.ExecutionId);
+							ShowTransientMessage($"[yellow]Cancelled[/] {Markup.Escape(exec.OrchestrationName)}");
+						});
 				}
 				break;
 		}
@@ -344,7 +618,7 @@ public class TerminalUI
 		switch (key.Key)
 		{
 			case ConsoleKey.Backspace or ConsoleKey.Escape:
-				_currentView = TuiView.Orchestrations;
+				NavigateBack();
 				break;
 			case ConsoleKey.R:
 				// Run orchestration
@@ -365,8 +639,8 @@ public class TerminalUI
 		switch (key.Key)
 		{
 			case ConsoleKey.Backspace or ConsoleKey.Escape:
-				_currentView = TuiView.History;
 				_cachedRunRecord = null;
+				NavigateBack();
 				break;
 			// Tab navigation with number keys
 			case ConsoleKey.D1:
@@ -416,8 +690,22 @@ public class TerminalUI
 				break;
 			// Copy URL to clipboard hint
 			case ConsoleKey.U:
-				// Show URL in a popup-like message
+				// Show URL in a transient message
 				ShowRunUrl();
+				break;
+		}
+	}
+
+	private void HandleEventLogInput(ConsoleKeyInfo key)
+	{
+		switch (key.Key)
+		{
+			case ConsoleKey.C:
+				_reporter.Clear();
+				ShowTransientMessage("[green]Event log cleared[/]");
+				break;
+			case ConsoleKey.Escape:
+				NavigateBack();
 				break;
 		}
 	}
@@ -434,13 +722,72 @@ public class TerminalUI
 	{
 		if (string.IsNullOrEmpty(_hostOptions.HostBaseUrl) || _cachedRunRecord == null)
 		{
-			ShowMessage("[yellow]No URL configured or run not loaded[/]", 1500);
+			ShowTransientMessage("[yellow]No URL configured or run not loaded[/]");
 			return;
 		}
 
 		var url = $"{_hostOptions.HostBaseUrl.TrimEnd('/')}/#/history/{Uri.EscapeDataString(_cachedRunRecord.OrchestrationName)}/{_cachedRunRecord.RunId}";
-		ShowMessage($"[cyan]URL:[/] {url}", 3000);
+		ShowTransientMessage($"[cyan]URL:[/] {url}", 5000);
 	}
+
+	#region Filtered Data Helpers
+
+	private OrchestrationEntry[] GetFilteredOrchestrations()
+	{
+		var all = _registry.GetAll().ToArray();
+		if (string.IsNullOrEmpty(_searchQuery))
+			return all;
+
+		return all.Where(e =>
+			e.Orchestration.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+			(e.Orchestration.Description?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false)
+		).ToArray();
+	}
+
+	private TriggerRegistration[] GetFilteredTriggers()
+	{
+		var all = _triggerManager.GetAllTriggers().ToArray();
+		if (string.IsNullOrEmpty(_searchQuery))
+			return all;
+
+		return all.Where(t =>
+			(t.OrchestrationName?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false) ||
+			t.Config.Type.ToString().Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
+		).ToArray();
+	}
+
+	private IReadOnlyList<RunIndex> GetFilteredHistory()
+	{
+		// Fetch a larger set for filtering, then apply offset/limit
+		var allRuns = _runStore.GetRunSummariesAsync(200).GetAwaiter().GetResult();
+
+		IEnumerable<RunIndex> filtered = allRuns;
+		if (!string.IsNullOrEmpty(_searchQuery))
+		{
+			filtered = filtered.Where(r =>
+				r.OrchestrationName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+				r.Status.ToString().Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+				r.TriggeredBy.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase)
+			);
+		}
+
+		return filtered.Skip(_historyOffset).Take(_historyPageSize).ToList();
+	}
+
+	private int GetTotalHistoryCount()
+	{
+		var allRuns = _runStore.GetRunSummariesAsync(1000).GetAwaiter().GetResult();
+		if (!string.IsNullOrEmpty(_searchQuery))
+		{
+			return allRuns.Count(r =>
+				r.OrchestrationName.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+				r.Status.ToString().Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+				r.TriggeredBy.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase));
+		}
+		return allRuns.Count;
+	}
+
+	#endregion
 
 	#region Orchestration Management
 
@@ -484,8 +831,8 @@ public class TerminalUI
 		// If execution started, switch to Active view
 		if (executionId != null)
 		{
-			_currentView = TuiView.Active;
-			_selectedIndex = 0;
+			NavigateTo(TuiView.Active);
+			ShowTransientMessage($"[green]Started:[/] {Markup.Escape(entry.Orchestration.Name)}");
 			Render();
 		}
 	}
@@ -508,7 +855,8 @@ public class TerminalUI
 
 		if (!File.Exists(path))
 		{
-			ShowMessage($"[red]File not found:[/] {path}", 2000);
+			ShowTransientMessage($"[red]File not found:[/] {Markup.Escape(path)}", 3000);
+			Render();
 			return;
 		}
 
@@ -537,12 +885,14 @@ public class TerminalUI
 					entry.Id);
 			}
 
-			ShowMessage($"[green]Added:[/] {entry.Orchestration.Name} (v{entry.Orchestration.Version})", 2000);
+			ShowTransientMessage($"[green]Added:[/] {Markup.Escape(entry.Orchestration.Name)} (v{entry.Orchestration.Version})");
 		}
 		catch (Exception ex)
 		{
-			ShowMessage($"[red]Error:[/] {ex.Message}", 3000);
+			ShowTransientMessage($"[red]Error:[/] {Markup.Escape(ex.Message)}", 3000);
 		}
+
+		Render();
 	}
 
 	private void PromptScanDirectory()
@@ -563,7 +913,8 @@ public class TerminalUI
 
 		if (!Directory.Exists(dirPath))
 		{
-			ShowMessage($"[red]Directory not found:[/] {dirPath}", 2000);
+			ShowTransientMessage($"[red]Directory not found:[/] {Markup.Escape(dirPath)}", 3000);
+			Render();
 			return;
 		}
 
@@ -600,45 +951,14 @@ public class TerminalUI
 				}
 			}
 
-			ShowMessage($"[green]Scanned:[/] Found {added} new orchestration(s)", 2000);
+			ShowTransientMessage($"[green]Scanned:[/] Found {added} new orchestration(s)");
 		}
 		catch (Exception ex)
 		{
-			ShowMessage($"[red]Error:[/] {ex.Message}", 3000);
-		}
-	}
-
-	private void RemoveOrchestration(string orchestrationId)
-	{
-		var entry = _registry.Get(orchestrationId);
-		if (entry == null)
-			return;
-
-		// Confirm deletion
-		Console.Clear();
-		AnsiConsole.MarkupLine($"[bold yellow]Remove Orchestration[/]");
-		AnsiConsole.MarkupLine($"\nAre you sure you want to remove [cyan]{entry.Orchestration.Name}[/]?");
-		AnsiConsole.MarkupLine("[dim]Press Y to confirm, any other key to cancel[/]");
-
-		var key = Console.ReadKey(intercept: true);
-		if (key.Key != ConsoleKey.Y)
-		{
-			Render();
-			return;
+			ShowTransientMessage($"[red]Error:[/] {Markup.Escape(ex.Message)}", 3000);
 		}
 
-		// Unregister trigger if exists (trigger ID matches orchestration ID when registered)
-		var trigger = _triggerManager.GetAllTriggers().FirstOrDefault(t => t.Id == orchestrationId);
-		if (trigger != null)
-		{
-			_triggerManager.RemoveTrigger(trigger.Id);
-		}
-
-		// Remove from registry
-		_registry.Remove(orchestrationId);
-		_selectedIndex = Math.Max(0, _selectedIndex - 1);
-
-		ShowMessage($"[green]Removed:[/] {entry.Orchestration.Name}", 1500);
+		Render();
 	}
 
 	private string? PromptForPath(string prompt)
@@ -753,7 +1073,7 @@ public class TerminalUI
 		}
 
 		Console.Clear();
-		AnsiConsole.MarkupLine($"[bold cyan]Run Orchestration: {entry.Orchestration.Name}[/]");
+		AnsiConsole.MarkupLine($"[bold cyan]Run Orchestration: {Markup.Escape(entry.Orchestration.Name)}[/]");
 		AnsiConsole.MarkupLine($"[dim]This orchestration requires {parameterNames.Length} parameter(s). Press Esc to cancel.[/]\n");
 
 		var parameters = new Dictionary<string, string>();
@@ -843,11 +1163,22 @@ public class TerminalUI
 				.SplitRows(
 					new Layout("Header").Size(3),
 					new Layout("Main"),
+					new Layout("StatusBar").Size(3),
 					new Layout("Footer").Size(3)
 				);
 
 			layout["Header"].Update(RenderHeader());
-			layout["Main"].Update(RenderMainContent());
+
+			if (_showingHelp)
+			{
+				layout["Main"].Update(RenderHelpOverlay());
+			}
+			else
+			{
+				layout["Main"].Update(RenderMainContent());
+			}
+
+			layout["StatusBar"].Update(RenderStatusBar());
 			layout["Footer"].Update(RenderFooter());
 
 			AnsiConsole.Write(layout);
@@ -859,16 +1190,78 @@ public class TerminalUI
 		var activeCount = _activeExecutionInfos.Count;
 		var orchestrationCount = _registry.Count;
 		var triggerCount = _triggerManager.GetAllTriggers().Count;
+		var breadcrumb = GetBreadcrumb();
 
 		var headerText = new Markup(
 			$"[bold blue]Orchestra Terminal[/] | " +
 			$"Orchestrations: [green]{orchestrationCount}[/] | " +
 			$"Triggers: [yellow]{triggerCount}[/] | " +
-			$"Active: [cyan]{activeCount}[/]");
+			$"Active: [cyan]{activeCount}[/]   " +
+			breadcrumb);
 
 		return new Panel(headerText)
 			.Border(BoxBorder.Rounded)
 			.BorderColor(Color.Blue);
+	}
+
+	private Panel RenderStatusBar()
+	{
+		// Show confirmation prompt if pending
+		if (_pendingConfirmation)
+		{
+			return new Panel(new Markup(_confirmationMessage))
+				.Border(BoxBorder.Rounded)
+				.BorderColor(Color.Yellow);
+		}
+
+		// Show transient message if active
+		if (_transientMessage != null && DateTime.Now < _transientMessageExpiry)
+		{
+			return new Panel(new Markup(_transientMessage))
+				.Border(BoxBorder.Rounded)
+				.BorderColor(Color.Green);
+		}
+
+		// Show search bar if searching
+		if (_isSearching)
+		{
+			return new Panel(new Markup($"[yellow]Search:[/] {Markup.Escape(_searchQuery)}[blink]|[/]"))
+				.Border(BoxBorder.Rounded)
+				.BorderColor(Color.Yellow);
+		}
+
+		// Show active filter if set
+		if (!string.IsNullOrEmpty(_searchQuery))
+		{
+			return new Panel(new Markup($"[dim]Filter:[/] [yellow]{Markup.Escape(_searchQuery)}[/] [dim](/ to search, Esc clears in search mode)[/]"))
+				.Border(BoxBorder.Rounded)
+				.BorderColor(Color.Grey);
+		}
+
+		// Show the last reporter event
+		var events = _reporter.GetEvents();
+		if (events.Count > 0)
+		{
+			var last = events[^1];
+			var timeAgo = (DateTimeOffset.Now - last.Timestamp).TotalSeconds;
+			var age = timeAgo < 60 ? $"{timeAgo:F0}s ago" : $"{timeAgo / 60:F0}m ago";
+			var typeColor = last.Type switch
+			{
+				"step-started" => "green",
+				"step-completed" => "cyan",
+				"step-error" => "red",
+				"tool-started" => "yellow",
+				"tool-completed" => "blue",
+				_ => "dim"
+			};
+			return new Panel(new Markup($"[{typeColor}]{Markup.Escape(last.Type)}[/] {Markup.Escape(last.Message)} [dim]({age})[/]"))
+				.Border(BoxBorder.Rounded)
+				.BorderColor(Color.Grey);
+		}
+
+		return new Panel(new Markup("[dim]Ready[/]"))
+			.Border(BoxBorder.Rounded)
+			.BorderColor(Color.Grey);
 	}
 
 	private IRenderable RenderMainContent()
@@ -882,36 +1275,112 @@ public class TerminalUI
 			TuiView.Active => RenderActive(),
 			TuiView.OrchestrationDetail => RenderOrchestrationDetail(),
 			TuiView.ExecutionDetail => RenderExecutionDetail(),
+			TuiView.EventLog => RenderEventLog(),
 			_ => new Panel("Unknown view")
 		};
 	}
 
 	private Panel RenderDashboard()
 	{
-		var options = new[] { "Orchestrations", "Triggers", "History", "Active Executions", "Quit" };
-		var table = new Table().HideHeaders().NoBorder().AddColumn("");
+		// Richer dashboard with summary information
+		var dashboardLayout = new Layout("DashboardRoot")
+			.SplitColumns(
+				new Layout("Menu").Size(35),
+				new Layout("Summary")
+			);
+
+		// Menu
+		var options = new[] { "Orchestrations", "Triggers", "History", "Active Executions", "Event Log", "Quit" };
+		var icons = new[] { "[green]2[/]", "[yellow]3[/]", "[blue]4[/]", "[cyan]5[/]", "[magenta]6[/]", "[red]Q[/]" };
+		var menuTable = new Table().HideHeaders().NoBorder().AddColumn("").AddColumn("");
 
 		for (int i = 0; i < options.Length; i++)
 		{
 			var prefix = i == _selectedIndex ? "[bold cyan]> [/]" : "  ";
 			var style = i == _selectedIndex ? "[bold]" : "[dim]";
-			table.AddRow(new Markup($"{prefix}{style}{options[i]}[/]"));
+			menuTable.AddRow(
+				new Markup($"{prefix}{style}{options[i]}[/]"),
+				new Markup($"  {icons[i]}")
+			);
 		}
 
-		return new Panel(table)
+		dashboardLayout["Menu"].Update(new Panel(menuTable).Header("[bold]Menu[/]").Border(BoxBorder.Rounded));
+
+		// Summary panel with recent activity
+		var summaryRows = new List<IRenderable>();
+
+		var orchestrationCount = _registry.Count;
+		var activeCount = _activeExecutionInfos.Count;
+		var triggerCount = _triggerManager.GetAllTriggers().Count;
+
+		summaryRows.Add(new Markup($"[bold]Orchestrations:[/] [green]{orchestrationCount}[/]"));
+		summaryRows.Add(new Markup($"[bold]Active Triggers:[/] [yellow]{triggerCount}[/]"));
+		summaryRows.Add(new Markup($"[bold]Running Now:[/] [cyan]{activeCount}[/]"));
+
+		// Show recent runs summary
+		summaryRows.Add(new Rule("[dim]Recent Activity[/]") { Style = Style.Parse("dim") });
+		var recentRuns = _runStore.GetRunSummariesAsync(5).GetAwaiter().GetResult();
+		if (recentRuns.Count > 0)
+		{
+			foreach (var run in recentRuns)
+			{
+				var statusColor = run.Status switch
+				{
+					ExecutionStatus.Succeeded => "green",
+					ExecutionStatus.Failed => "red",
+					ExecutionStatus.Cancelled => "yellow",
+					_ => "dim"
+				};
+				var statusIcon = run.Status switch
+				{
+					ExecutionStatus.Succeeded => "+",
+					ExecutionStatus.Failed => "x",
+					ExecutionStatus.Cancelled => "-",
+					_ => "?"
+				};
+				summaryRows.Add(new Markup(
+					$"  [{statusColor}]{statusIcon}[/] {Markup.Escape(run.OrchestrationName)} " +
+					$"[dim]{run.StartedAt:HH:mm}[/] [{statusColor}]{run.Status}[/] [dim]{run.Duration.TotalSeconds:F1}s[/]"));
+			}
+		}
+		else
+		{
+			summaryRows.Add(new Markup("  [dim]No recent runs[/]"));
+		}
+
+		// Show active executions if any
+		if (activeCount > 0)
+		{
+			summaryRows.Add(new Rule("[dim]Running[/]") { Style = Style.Parse("dim") });
+			foreach (var exec in _activeExecutionInfos.Values.Take(3))
+			{
+				var progress = exec.TotalSteps > 0
+					? $"{exec.CompletedSteps}/{exec.TotalSteps}"
+					: "...";
+				summaryRows.Add(new Markup(
+					$"  [green bold]>[/] {Markup.Escape(exec.OrchestrationName)} " +
+					$"[cyan]{exec.CurrentStep ?? "starting"}[/] [{(exec.TotalSteps > 0 ? "green" : "dim")}]{progress}[/]"));
+			}
+		}
+
+		dashboardLayout["Summary"].Update(new Panel(new Rows(summaryRows)).Header("[bold]Overview[/]").Border(BoxBorder.Rounded));
+
+		return new Panel(dashboardLayout)
 			.Header("[bold]Dashboard[/]")
-			.Border(BoxBorder.Rounded);
+			.Border(BoxBorder.None);
 	}
 
 	private Panel RenderOrchestrations()
 	{
-		var items = _registry.GetAll().ToArray();
+		var items = GetFilteredOrchestrations();
 		var table = new Table()
 			.AddColumn("Name")
 			.AddColumn("Version")
 			.AddColumn("Steps")
 			.AddColumn("Trigger")
-			.Border(TableBorder.Rounded);
+			.AddColumn("Description")
+			.Border(TableBorder.Rounded)
+			.Expand();
 
 		for (int i = 0; i < items.Length; i++)
 		{
@@ -920,35 +1389,43 @@ public class TerminalUI
 			var triggerType = o.Trigger?.Type.ToString() ?? "Manual";
 			var selected = i == _selectedIndex;
 			var style = selected ? "bold cyan" : "";
+			var desc = o.Description ?? "";
+			if (desc.Length > 40) desc = desc[..40] + "...";
 
 			table.AddRow(
-				new Markup($"[{style}]{o.Name}[/]"),
-				new Markup($"[{style}]{o.Version}[/]"),
+				new Markup($"[{style}]{Markup.Escape(o.Name)}[/]"),
+				new Markup($"[{style}]{Markup.Escape(o.Version)}[/]"),
 				new Markup($"[{style}]{o.Steps.Length}[/]"),
-				new Markup($"[{style}]{triggerType}[/]")
+				new Markup($"[{style}]{triggerType}[/]"),
+				new Markup($"[dim]{Markup.Escape(desc)}[/]")
 			);
 		}
 
 		if (items.Length == 0)
 		{
-			table.AddRow(new Markup("[dim]No orchestrations loaded[/]"));
+			var msg = string.IsNullOrEmpty(_searchQuery)
+				? "[dim]No orchestrations loaded. Press [bold]a[/] to add or [bold]s[/] to scan.[/]"
+				: $"[dim]No orchestrations matching [yellow]{Markup.Escape(_searchQuery)}[/][/]";
+			table.AddRow(new Markup(msg));
 		}
 
 		return new Panel(table)
-			.Header("[bold]Orchestrations[/] - [dim]R[/]=Run [dim]A[/]=Add [dim]S[/]=Scan [dim]D[/]=Delete [dim]Enter[/]=Details")
+			.Header("[bold]Orchestrations[/] [dim]|[/] [dim]r[/]=Run [dim]a[/]=Add [dim]s[/]=Scan [dim]d[/]=Delete [dim]Enter[/]=Details [dim]/[/]=Search")
 			.Border(BoxBorder.Rounded);
 	}
 
 	private Panel RenderTriggers()
 	{
-		var triggers = _triggerManager.GetAllTriggers().ToArray();
+		var triggers = GetFilteredTriggers();
 		var table = new Table()
 			.AddColumn("Orchestration")
 			.AddColumn("Type")
 			.AddColumn("Status")
+			.AddColumn("Enabled")
 			.AddColumn("Runs")
 			.AddColumn("Next Fire")
-			.Border(TableBorder.Rounded);
+			.Border(TableBorder.Rounded)
+			.Expand();
 
 		for (int i = 0; i < triggers.Length; i++)
 		{
@@ -964,12 +1441,16 @@ public class TerminalUI
 				_ => ""
 			};
 
+			var enabledText = trigger.Config.Enabled
+				? "[green]Yes[/]"
+				: "[red]No[/]";
 			var nextFire = trigger.NextFireTime?.ToString("HH:mm:ss") ?? "-";
 
 			table.AddRow(
-				new Markup($"[{style}]{trigger.OrchestrationName ?? trigger.Id}[/]"),
+				new Markup($"[{style}]{Markup.Escape(trigger.OrchestrationName ?? trigger.Id)}[/]"),
 				new Markup($"[{style}]{trigger.Config.Type}[/]"),
 				new Markup($"[{statusColor}]{trigger.Status}[/]"),
+				new Markup(enabledText),
 				new Markup($"[{style}]{trigger.RunCount}[/]"),
 				new Markup($"[{style}]{nextFire}[/]")
 			);
@@ -977,17 +1458,24 @@ public class TerminalUI
 
 		if (triggers.Length == 0)
 		{
-			table.AddRow(new Markup("[dim]No triggers registered[/]"));
+			var msg = string.IsNullOrEmpty(_searchQuery)
+				? "[dim]No triggers registered[/]"
+				: $"[dim]No triggers matching [yellow]{Markup.Escape(_searchQuery)}[/][/]";
+			table.AddRow(new Markup(msg));
 		}
 
 		return new Panel(table)
-			.Header("[bold]Triggers[/] - [dim]E[/]=Enable/Disable [dim]R[/]=Run")
+			.Header("[bold]Triggers[/] [dim]|[/] [dim]e[/]=Enable/Disable [dim]r[/]=Run [dim]d[/]=Delete [dim]/[/]=Search")
 			.Border(BoxBorder.Rounded);
 	}
 
 	private Panel RenderHistory()
 	{
-		var runs = _runStore.GetRunSummariesAsync(20).GetAwaiter().GetResult();
+		var runs = GetFilteredHistory();
+		var totalCount = GetTotalHistoryCount();
+		var currentPage = (_historyOffset / _historyPageSize) + 1;
+		var totalPages = Math.Max(1, (int)Math.Ceiling((double)totalCount / _historyPageSize));
+
 		var table = new Table()
 			.AddColumn("Orchestration")
 			.AddColumn("Ver")
@@ -1017,12 +1505,13 @@ public class TerminalUI
 				"manual" => "[dim]manual[/]",
 				"scheduler" => "[yellow]sched[/]",
 				"webhook" => "[cyan]webhook[/]",
-				_ => $"[dim]{run.TriggeredBy}[/]"
+				"loop" => "[magenta]loop[/]",
+				_ => $"[dim]{Markup.Escape(run.TriggeredBy)}[/]"
 			};
 
 			table.AddRow(
-				new Markup($"[{style}]{run.OrchestrationName}[/]"),
-				new Markup($"[dim]{run.OrchestrationVersion}[/]"),
+				new Markup($"[{style}]{Markup.Escape(run.OrchestrationName)}[/]"),
+				new Markup($"[dim]{Markup.Escape(run.OrchestrationVersion)}[/]"),
 				new Markup($"[{statusColor}]{run.Status}[/]"),
 				new Markup($"[{style}]{run.StartedAt:HH:mm:ss}[/]"),
 				new Markup($"[{style}]{run.Duration.TotalSeconds:F1}s[/]"),
@@ -1032,11 +1521,18 @@ public class TerminalUI
 
 		if (runs.Count == 0)
 		{
-			table.AddRow(new Markup("[dim]No execution history[/]"));
+			var msg = string.IsNullOrEmpty(_searchQuery)
+				? "[dim]No execution history[/]"
+				: $"[dim]No runs matching [yellow]{Markup.Escape(_searchQuery)}[/][/]";
+			table.AddRow(new Markup(msg));
 		}
 
+		var pageInfo = totalCount > _historyPageSize
+			? $" [dim]Page {currentPage}/{totalPages} ({totalCount} total)[/]"
+			: "";
+
 		return new Panel(table)
-			.Header("[bold]History[/] - [dim]Enter[/]=Details [dim]D[/]=Delete")
+			.Header($"[bold]History[/]{pageInfo} [dim]|[/] [dim]Enter[/]=Details [dim]d[/]=Delete [dim]n/p[/]=Page [dim]/[/]=Search")
 			.Border(BoxBorder.Rounded);
 	}
 
@@ -1048,7 +1544,9 @@ public class TerminalUI
 			.AddColumn("Step")
 			.AddColumn("Progress")
 			.AddColumn("Duration")
-			.Border(TableBorder.Rounded);
+			.AddColumn("Triggered By")
+			.Border(TableBorder.Rounded)
+			.Expand();
 
 		for (int i = 0; i < active.Length; i++)
 		{
@@ -1061,10 +1559,11 @@ public class TerminalUI
 				: "-";
 
 			table.AddRow(
-				new Markup($"[{style}]{exec.OrchestrationName}[/]"),
-				new Markup($"[green]{exec.CurrentStep ?? "-"}[/]"),
+				new Markup($"[{style}]{Markup.Escape(exec.OrchestrationName)}[/]"),
+				new Markup($"[green]{Markup.Escape(exec.CurrentStep ?? "-")}[/]"),
 				new Markup($"[{style}]{progress}[/]"),
-				new Markup($"[{style}]{duration:F1}s[/]")
+				new Markup($"[{style}]{duration:F1}s[/]"),
+				new Markup($"[dim]{Markup.Escape(exec.TriggeredBy)}[/]")
 			);
 		}
 
@@ -1074,7 +1573,7 @@ public class TerminalUI
 		}
 
 		return new Panel(table)
-			.Header("[bold]Active Executions[/] - [dim]C[/]=Cancel [dim]Enter[/]=Details")
+			.Header("[bold]Active Executions[/] [dim]|[/] [dim]c[/]=Cancel [dim]Enter[/]=Details")
 			.Border(BoxBorder.Rounded);
 	}
 
@@ -1087,33 +1586,58 @@ public class TerminalUI
 		}
 
 		var o = entry.Orchestration;
-		var content = new Rows(
-			new Markup($"[bold]Name:[/] {o.Name}"),
-			new Markup($"[bold]Description:[/] {o.Description ?? "(none)"}"),
-			new Markup($"[bold]Version:[/] {o.Version}"),
-			new Markup($"[bold]Path:[/] {entry.Path}"),
-			new Markup(""),
-			new Markup("[bold]Steps:[/]")
-		);
 
+		// Info section
+		var infoRows = new List<IRenderable>
+		{
+			new Markup($"[bold]Name:[/]        {Markup.Escape(o.Name)}"),
+			new Markup($"[bold]Description:[/] {Markup.Escape(o.Description ?? "(none)")}"),
+			new Markup($"[bold]Version:[/]     {Markup.Escape(o.Version)}"),
+			new Markup($"[bold]Path:[/]        [dim]{Markup.Escape(entry.Path)}[/]"),
+		};
+
+		if (entry.McpPath != null)
+		{
+			infoRows.Add(new Markup($"[bold]MCP Config:[/]  [dim]{Markup.Escape(entry.McpPath)}[/]"));
+		}
+
+		if (o.Trigger != null)
+		{
+			infoRows.Add(new Markup($"[bold]Trigger:[/]     {o.Trigger.Type} [dim](enabled: {o.Trigger.Enabled})[/]"));
+		}
+
+		var parameters = GetOrchestrationParameters(entry);
+		if (parameters.Length > 0)
+		{
+			infoRows.Add(new Markup($"[bold]Parameters:[/]  {string.Join(", ", parameters.Select(p => $"[cyan]{Markup.Escape(p)}[/]"))}"));
+		}
+
+		infoRows.Add(new Rule("[dim]Steps[/]") { Style = Style.Parse("dim") });
+
+		// Steps table
 		var stepsTable = new Table()
 			.AddColumn("Name")
 			.AddColumn("Type")
 			.AddColumn("Model")
 			.AddColumn("Depends On")
-			.Border(TableBorder.Simple);
+			.Border(TableBorder.Simple)
+			.Expand();
 
 		foreach (var step in o.Steps)
 		{
 			var model = step is PromptOrchestrationStep ps ? ps.Model : "-";
 			var deps = step.DependsOn.Length > 0 ? string.Join(", ", step.DependsOn) : "-";
-			stepsTable.AddRow(step.Name, step.Type.ToString(), model, deps);
+			stepsTable.AddRow(
+				Markup.Escape(step.Name),
+				step.Type.ToString(),
+				Markup.Escape(model),
+				Markup.Escape(deps));
 		}
 
-		var combined = new Rows(content, stepsTable);
+		infoRows.Add(stepsTable);
 
-		return new Panel(combined)
-			.Header($"[bold]{o.Name}[/] - [dim]R[/]=Run [dim]Esc[/]=Back")
+		return new Panel(new Rows(infoRows))
+			.Header($"[bold]{Markup.Escape(o.Name)}[/] [dim]|[/] [dim]r[/]=Run [dim]Esc[/]=Back")
 			.Border(BoxBorder.Rounded);
 	}
 
@@ -1162,20 +1686,40 @@ public class TerminalUI
 
 		var rows = new List<IRenderable>
 		{
-			new Markup($"[bold cyan]Orchestration:[/] {active.OrchestrationName}"),
-			new Markup($"[bold cyan]Status:[/] [green bold]{active.Status}[/]"),
-			new Markup($"[bold cyan]Current Step:[/] [yellow]{active.CurrentStep ?? "-"}[/]"),
+			new Markup($"[bold cyan]Orchestration:[/] {Markup.Escape(active.OrchestrationName)}"),
+			new Markup($"[bold cyan]Status:[/] [green bold]{Markup.Escape(active.Status)}[/]"),
+			new Markup($"[bold cyan]Current Step:[/] [yellow]{Markup.Escape(active.CurrentStep ?? "-")}[/]"),
 			new Rule("[dim]Progress[/]") { Style = Style.Parse("dim") },
 			new Markup(progressBarText),
 			new Markup($"[dim]{active.CompletedSteps} of {active.TotalSteps} steps completed[/]"),
 			new Rule("[dim]Details[/]") { Style = Style.Parse("dim") },
 			new Markup($"[bold cyan]Duration:[/] {duration:F1}s"),
-			new Markup($"[bold cyan]Triggered By:[/] {active.TriggeredBy}"),
+			new Markup($"[bold cyan]Triggered By:[/] {Markup.Escape(active.TriggeredBy)}"),
 			new Markup($"[bold cyan]Execution ID:[/] [dim]{active.ExecutionId}[/]"),
 		};
 
+		// Show recent events for this execution
+		var recentEvents = _reporter.GetEvents().TakeLast(5).ToList();
+		if (recentEvents.Count > 0)
+		{
+			rows.Add(new Rule("[dim]Recent Events[/]") { Style = Style.Parse("dim") });
+			foreach (var evt in recentEvents)
+			{
+				var typeColor = evt.Type switch
+				{
+					"step-started" => "green",
+					"step-completed" => "cyan",
+					"step-error" => "red",
+					"tool-started" => "yellow",
+					"tool-completed" => "blue",
+					_ => "dim"
+				};
+				rows.Add(new Markup($"  [{typeColor}]{Markup.Escape(evt.Type)}[/] {Markup.Escape(evt.Message)}"));
+			}
+		}
+
 		return new Panel(new Rows(rows))
-			.Header("[bold green]Active Execution[/] - [dim]Esc[/]=Back")
+			.Header("[bold green]Active Execution[/] [dim]|[/] [dim]Esc[/]=Back")
 			.Border(BoxBorder.Rounded)
 			.BorderColor(Color.Green);
 	}
@@ -1240,9 +1784,9 @@ public class TerminalUI
 			rows.Add(new Markup($"[dim]URL:[/] [link={url}]{url}[/]"));
 		}
 
-		var headerText = $"[bold]{record.OrchestrationName}[/] [{statusColor}]{record.Status}[/]";
+		var headerText = $"[bold]{Markup.Escape(record.OrchestrationName)}[/] [{statusColor}]{record.Status}[/]";
 		return new Panel(new Rows(rows))
-			.Header($"{headerText} - [dim]Tab[/]=Switch [dim]U[/]=URL [dim]Esc[/]=Back")
+			.Header($"{headerText} [dim]|[/] [dim]Tab[/]=Switch [dim]u[/]=URL [dim]Esc[/]=Back")
 			.Border(BoxBorder.Rounded)
 			.BorderColor(record.Status == ExecutionStatus.Failed ? Color.Red : Color.Blue);
 	}
@@ -1254,13 +1798,13 @@ public class TerminalUI
 		int totalOutputTokens,
 		int totalToolCalls)
 	{
-		yield return new Markup($"[bold]Orchestration:[/] {record.OrchestrationName}");
-		yield return new Markup($"[bold]Version:[/] {record.OrchestrationVersion}");
+		yield return new Markup($"[bold]Orchestration:[/] {Markup.Escape(record.OrchestrationName)}");
+		yield return new Markup($"[bold]Version:[/] {Markup.Escape(record.OrchestrationVersion)}");
 		yield return new Markup($"[bold]Status:[/] [{statusColor}]{record.Status}[/]");
 		yield return new Markup($"[bold]Started:[/] {record.StartedAt:yyyy-MM-dd HH:mm:ss}");
 		yield return new Markup($"[bold]Completed:[/] {record.CompletedAt:yyyy-MM-dd HH:mm:ss}");
 		yield return new Markup($"[bold]Duration:[/] {record.Duration.TotalSeconds:F2}s");
-		yield return new Markup($"[bold]Triggered By:[/] {record.TriggeredBy}");
+		yield return new Markup($"[bold]Triggered By:[/] {Markup.Escape(record.TriggeredBy)}");
 		yield return new Markup($"[bold]Run ID:[/] [dim]{record.RunId}[/]");
 		yield return new Rule("[dim]Usage[/]") { Style = Style.Parse("dim") };
 		yield return new Markup($"[bold]Steps:[/] {record.StepRecords.Count}");
@@ -1274,7 +1818,7 @@ public class TerminalUI
 			foreach (var param in record.Parameters)
 			{
 				var value = param.Value.Length > 50 ? param.Value[..50] + "..." : param.Value;
-				yield return new Markup($"  [cyan]{param.Key}[/]: {Markup.Escape(value)}");
+				yield return new Markup($"  [cyan]{Markup.Escape(param.Key)}[/]: {Markup.Escape(value)}");
 			}
 		}
 	}
@@ -1311,10 +1855,10 @@ public class TerminalUI
 			var toolCount = step.Trace?.ToolCalls.Count.ToString() ?? "0";
 
 			table.AddRow(
-				new Markup($"[{style}]{step.StepName}[/]"),
+				new Markup($"[{style}]{Markup.Escape(step.StepName)}[/]"),
 				new Markup($"[{statusColor}]{step.Status}[/]"),
 				new Markup($"[{style}]{step.Duration.TotalSeconds:F2}s[/]"),
-				new Markup($"[{style}]{step.ActualModel ?? "-"}[/]"),
+				new Markup($"[{style}]{Markup.Escape(step.ActualModel ?? "-")}[/]"),
 				new Markup($"[{style}]{tokens}[/]"),
 				new Markup($"[{style}]{toolCount}[/]")
 			);
@@ -1326,7 +1870,7 @@ public class TerminalUI
 		if (_selectedStepIndex >= 0 && _selectedStepIndex < steps.Count)
 		{
 			var step = steps[_selectedStepIndex];
-			yield return new Rule($"[cyan]{step.StepName}[/] Details") { Style = Style.Parse("cyan") };
+			yield return new Rule($"[cyan]{Markup.Escape(step.StepName)}[/] Details") { Style = Style.Parse("cyan") };
 
 			if (!string.IsNullOrEmpty(step.ErrorMessage))
 			{
@@ -1335,26 +1879,34 @@ public class TerminalUI
 
 			if (step.Trace?.ToolCalls.Count > 0)
 			{
-				yield return new Markup($"[bold]Tool Calls:[/]");
-				foreach (var tc in step.Trace.ToolCalls.Take(5))
+				yield return new Markup($"[bold]Tool Calls ({step.Trace.ToolCalls.Count}):[/]");
+				foreach (var tc in step.Trace.ToolCalls.Take(10))
 				{
 					var statusIcon = tc.Success ? "[green]+[/]" : "[red]x[/]";
-					var server = tc.McpServer != null ? $"[dim]{tc.McpServer}/[/]" : "";
-					yield return new Markup($"  {statusIcon} {server}[yellow]{tc.ToolName}[/]");
+					var server = tc.McpServer != null ? $"[dim]{Markup.Escape(tc.McpServer)}/[/]" : "";
+					yield return new Markup($"  {statusIcon} {server}[yellow]{Markup.Escape(tc.ToolName)}[/]");
 				}
-				if (step.Trace.ToolCalls.Count > 5)
+				if (step.Trace.ToolCalls.Count > 10)
 				{
-					yield return new Markup($"  [dim]... and {step.Trace.ToolCalls.Count - 5} more[/]");
+					yield return new Markup($"  [dim]... and {step.Trace.ToolCalls.Count - 10} more[/]");
 				}
 			}
 
-			// Show truncated content preview
+			// Show content preview with word wrapping
 			if (!string.IsNullOrEmpty(step.Content))
 			{
 				yield return new Markup($"[bold]Output Preview:[/]");
-				var preview = step.Content.Length > 200 ? step.Content[..200] + "..." : step.Content;
-				preview = preview.Replace("\r\n", " ").Replace("\n", " ");
-				yield return new Markup($"  [dim]{Markup.Escape(preview)}[/]");
+				var preview = step.Content.Length > 500 ? step.Content[..500] + "..." : step.Content;
+				// Word-wrap at terminal width boundaries rather than truncating
+				var wrappedLines = WordWrap(preview, Math.Max(40, GetSafeConsoleWidth() - 10));
+				foreach (var line in wrappedLines.Take(8))
+				{
+					yield return new Markup($"  [dim]{Markup.Escape(line)}[/]");
+				}
+				if (wrappedLines.Count > 8)
+				{
+					yield return new Markup($"  [dim]... ({wrappedLines.Count - 8} more lines)[/]");
+				}
 			}
 		}
 	}
@@ -1370,42 +1922,173 @@ public class TerminalUI
 			yield break;
 		}
 
-		// Split content into lines for scrolling
-		var lines = record.FinalContent.Split('\n');
-		var visibleLines = 20; // Number of lines visible in the panel
-		var maxOffset = Math.Max(0, lines.Length - visibleLines);
+		// Word-wrap content for better readability
+		var contentWidth = Math.Max(40, GetSafeConsoleWidth() - 8);
+		var allLines = new List<string>();
+		foreach (var rawLine in record.FinalContent.Split('\n'))
+		{
+			var cleanLine = rawLine.TrimEnd('\r');
+			if (cleanLine.Length <= contentWidth)
+			{
+				allLines.Add(cleanLine);
+			}
+			else
+			{
+				allLines.AddRange(WordWrap(cleanLine, contentWidth));
+			}
+		}
+
+		var visibleLines = 20;
+		var maxOffset = Math.Max(0, allLines.Count - visibleLines);
 		_executionDetailScrollOffset = Math.Min(_executionDetailScrollOffset, maxOffset);
 
-		var displayLines = lines
+		var displayLines = allLines
 			.Skip(_executionDetailScrollOffset)
 			.Take(visibleLines)
 			.ToArray();
 
 		foreach (var line in displayLines)
 		{
-			// Escape markup characters and truncate long lines
-			var safeLine = line.Length > 100 ? line[..100] + "..." : line;
-			yield return new Markup(Markup.Escape(safeLine));
+			yield return new Markup(Markup.Escape(line));
 		}
 
-		if (lines.Length > visibleLines)
+		if (allLines.Count > visibleLines)
 		{
 			yield return new Rule { Style = Style.Parse("dim") };
-			yield return new Markup($"[dim]Lines {_executionDetailScrollOffset + 1}-{Math.Min(_executionDetailScrollOffset + visibleLines, lines.Length)} of {lines.Length} (use j/k to scroll)[/]");
+			yield return new Markup($"[dim]Lines {_executionDetailScrollOffset + 1}-{Math.Min(_executionDetailScrollOffset + visibleLines, allLines.Count)} of {allLines.Count} (use j/k to scroll)[/]");
 		}
+	}
+
+	private Panel RenderEventLog()
+	{
+		var events = _reporter.GetEvents();
+		var rows = new List<IRenderable>();
+
+		if (events.Count == 0)
+		{
+			rows.Add(new Markup("[dim]No events recorded. Events will appear here as orchestrations execute.[/]"));
+		}
+		else
+		{
+			// Show events in reverse chronological order (newest first)
+			var displayEvents = events.Reverse().Take(30).ToList();
+			foreach (var evt in displayEvents)
+			{
+				var typeColor = evt.Type switch
+				{
+					"step-started" => "green",
+					"step-completed" => "cyan",
+					"step-error" or "step-cancelled" or "subagent-failed" => "red",
+					"tool-started" => "yellow",
+					"tool-completed" => "blue",
+					"loop-iteration" or "step-retry" => "magenta",
+					"checkpoint-saved" => "green",
+					"subagent-started" or "subagent-completed" or "subagent-selected" => "cyan",
+					_ => "dim"
+				};
+				rows.Add(new Markup(
+					$"[dim]{evt.Timestamp:HH:mm:ss.fff}[/] [{typeColor}]{Markup.Escape(evt.Type),-20}[/] {Markup.Escape(evt.Message)}"));
+			}
+		}
+
+		return new Panel(new Rows(rows))
+			.Header($"[bold]Event Log[/] ({events.Count} events) [dim]|[/] [dim]c[/]=Clear [dim]Esc[/]=Back")
+			.Border(BoxBorder.Rounded);
+	}
+
+	private Panel RenderHelpOverlay()
+	{
+		var rows = new List<IRenderable>
+		{
+			new Markup("[bold cyan]Keyboard Shortcuts[/]"),
+			new Rule { Style = Style.Parse("dim") },
+			new Markup(""),
+			new Markup("[bold]Global:[/]"),
+			new Markup("  [cyan]1-6[/]       Switch views (Dashboard, Orchestrations, Triggers, History, Active, Event Log)"),
+			new Markup("  [cyan]?[/]         Show this help"),
+			new Markup("  [cyan]/[/]         Search / filter (in list views)"),
+			new Markup("  [cyan]Esc[/]       Go back (hierarchical navigation)"),
+			new Markup("  [cyan]q[/]         Quit (from Dashboard) or go to Dashboard"),
+			new Markup(""),
+		};
+
+		// Context-sensitive help based on the view we were on before help was shown
+		var contextView = _currentView;
+		if (_navigationStack.Count > 0)
+		{
+			// We just pushed help, so the top of stack is where we came from
+		}
+
+		switch (contextView)
+		{
+			case TuiView.Dashboard:
+				rows.Add(new Markup("[bold]Dashboard:[/]"));
+				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate menu"));
+				rows.Add(new Markup("  [cyan]Enter[/]              Select item"));
+				break;
+			case TuiView.Orchestrations:
+				rows.Add(new Markup("[bold]Orchestrations:[/]"));
+				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate list"));
+				rows.Add(new Markup("  [cyan]Enter[/]              View orchestration details"));
+				rows.Add(new Markup("  [cyan]r[/]                  Run selected orchestration"));
+				rows.Add(new Markup("  [cyan]a[/]                  Add orchestration from file path"));
+				rows.Add(new Markup("  [cyan]s[/]                  Scan directory for orchestrations"));
+				rows.Add(new Markup("  [cyan]d[/] / [cyan]Delete[/]       Remove orchestration"));
+				break;
+			case TuiView.Triggers:
+				rows.Add(new Markup("[bold]Triggers:[/]"));
+				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate list"));
+				rows.Add(new Markup("  [cyan]e[/]                  Enable/disable trigger"));
+				rows.Add(new Markup("  [cyan]r[/]                  Fire trigger manually"));
+				rows.Add(new Markup("  [cyan]d[/] / [cyan]Delete[/]       Remove trigger"));
+				break;
+			case TuiView.History:
+				rows.Add(new Markup("[bold]History:[/]"));
+				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate list"));
+				rows.Add(new Markup("  [cyan]Enter[/]              View execution details"));
+				rows.Add(new Markup("  [cyan]d[/]                  Delete run"));
+				rows.Add(new Markup("  [cyan]n[/] / [cyan]PageDown[/]     Next page"));
+				rows.Add(new Markup("  [cyan]p[/] / [cyan]PageUp[/]       Previous page"));
+				break;
+			case TuiView.Active:
+				rows.Add(new Markup("[bold]Active Executions:[/]"));
+				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate list"));
+				rows.Add(new Markup("  [cyan]Enter[/]              View execution details"));
+				rows.Add(new Markup("  [cyan]c[/]                  Cancel execution"));
+				break;
+			case TuiView.ExecutionDetail:
+				rows.Add(new Markup("[bold]Execution Detail:[/]"));
+				rows.Add(new Markup("  [cyan]1/2/3[/] or [cyan]Tab[/]    Switch tabs (Summary, Steps, Output)"));
+				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate steps / scroll content"));
+				rows.Add(new Markup("  [cyan]u[/]                  Show run URL"));
+				break;
+			case TuiView.EventLog:
+				rows.Add(new Markup("[bold]Event Log:[/]"));
+				rows.Add(new Markup("  [cyan]c[/]                  Clear event log"));
+				break;
+		}
+
+		rows.Add(new Markup(""));
+		rows.Add(new Markup("[dim]Press any key to dismiss[/]"));
+
+		return new Panel(new Rows(rows))
+			.Header("[bold yellow]Help[/]")
+			.Border(BoxBorder.Double)
+			.BorderColor(Color.Yellow);
 	}
 
 	private Panel RenderFooter()
 	{
 		var shortcuts = _currentView switch
 		{
-			TuiView.Dashboard => "[dim]↑↓[/] Navigate [dim]Enter[/] Select [dim]1-5[/] Views [dim]Q[/] Quit",
-			TuiView.Orchestrations => "[dim]↑↓/JK[/] Navigate [dim]Enter[/] Details [dim]R[/] Run [dim]A[/] Add [dim]S[/] Scan [dim]D[/] Delete [dim]Esc[/] Back",
-			TuiView.Triggers => "[dim]↑↓/JK[/] Navigate [dim]E[/] Enable/Disable [dim]R[/] Run [dim]Esc[/] Back",
-			TuiView.History => "[dim]↑↓/JK[/] Navigate [dim]Enter[/] Details [dim]D[/] Delete [dim]Esc[/] Back",
-			TuiView.Active => "[dim]↑↓/JK[/] Navigate [dim]Enter[/] Details [dim]C[/] Cancel [dim]Esc[/] Back",
-			TuiView.OrchestrationDetail => "[dim]R[/] Run [dim]Esc[/] Back",
-			TuiView.ExecutionDetail => "[dim]1-3[/] Tabs [dim]Tab[/] Switch [dim]↑↓/JK[/] Navigate [dim]U[/] URL [dim]Esc[/] Back",
+			TuiView.Dashboard => "[dim]j/k[/] Navigate  [dim]Enter[/] Select  [dim]1-6[/] Views  [dim]?[/] Help  [dim]q[/] Quit",
+			TuiView.Orchestrations => "[dim]j/k[/] Navigate  [dim]Enter[/] Details  [dim]r[/] Run  [dim]a[/] Add  [dim]s[/] Scan  [dim]d[/] Delete  [dim]/[/] Search  [dim]?[/] Help",
+			TuiView.Triggers => "[dim]j/k[/] Navigate  [dim]e[/] Enable/Disable  [dim]r[/] Run  [dim]d[/] Delete  [dim]/[/] Search  [dim]?[/] Help",
+			TuiView.History => "[dim]j/k[/] Navigate  [dim]Enter[/] Details  [dim]d[/] Delete  [dim]n/p[/] Page  [dim]/[/] Search  [dim]?[/] Help",
+			TuiView.Active => "[dim]j/k[/] Navigate  [dim]Enter[/] Details  [dim]c[/] Cancel  [dim]?[/] Help",
+			TuiView.OrchestrationDetail => "[dim]r[/] Run  [dim]Esc[/] Back  [dim]?[/] Help",
+			TuiView.ExecutionDetail => "[dim]1-3[/] Tabs  [dim]Tab[/] Switch  [dim]j/k[/] Navigate  [dim]u[/] URL  [dim]Esc[/] Back  [dim]?[/] Help",
+			TuiView.EventLog => "[dim]c[/] Clear  [dim]Esc[/] Back  [dim]?[/] Help",
 			_ => ""
 		};
 
@@ -1413,6 +2096,8 @@ public class TerminalUI
 			.Border(BoxBorder.Rounded)
 			.BorderColor(Color.Grey);
 	}
+
+	#region Utility
 
 	private static bool IsInteractiveConsole()
 	{
@@ -1432,6 +2117,54 @@ public class TerminalUI
 			return false;
 		}
 	}
+
+	private static int GetSafeConsoleWidth()
+	{
+		try
+		{
+			return Console.WindowWidth;
+		}
+		catch
+		{
+			return 120;
+		}
+	}
+
+	/// <summary>
+	/// Word-wraps text at the specified width, breaking at word boundaries when possible.
+	/// </summary>
+	internal static List<string> WordWrap(string text, int maxWidth)
+	{
+		if (maxWidth <= 0) maxWidth = 80;
+		var lines = new List<string>();
+		if (string.IsNullOrEmpty(text))
+		{
+			lines.Add("");
+			return lines;
+		}
+
+		var remaining = text;
+		while (remaining.Length > maxWidth)
+		{
+			// Try to break at a space near the max width
+			var breakAt = remaining.LastIndexOf(' ', maxWidth);
+			if (breakAt <= 0)
+			{
+				// No space found; hard break
+				breakAt = maxWidth;
+			}
+			lines.Add(remaining[..breakAt]);
+			remaining = remaining[breakAt..].TrimStart();
+		}
+		if (remaining.Length > 0)
+		{
+			lines.Add(remaining);
+		}
+
+		return lines;
+	}
+
+	#endregion
 }
 
 public enum TuiView
@@ -1442,7 +2175,8 @@ public enum TuiView
 	History,
 	Active,
 	OrchestrationDetail,
-	ExecutionDetail
+	ExecutionDetail,
+	EventLog
 }
 
 /// <summary>
