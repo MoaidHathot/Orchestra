@@ -1,7 +1,0 @@
-{
-  "status": "Skipped",
-  "startedAt": "2026-03-21T07:49:35.2481118+00:00",
-  "completedAt": "2026-03-21T07:49:35.2483263+00:00",
-  "duration": "00:00:00.0002145",
-  "errorMessage": "Skipped because dependencies failed or were skipped: [review-code, quality-check]"
-}

@@ -1,6 +1,0 @@
-{
-  "parameters": {},
-  "rawDependencyOutputs": {
-    "fetch-open-prs": "The repository is hosted on GitHub, not Azure DevOps, and there\u0027s no Azure DevOps organization configured. I cannot query Azure DevOps pull requests without:\n\n1. An Azure DevOps organization URL\n2. A project name\n3. Valid authentication (PAT token)\n\nPlease provide:\n- Your Azure DevOps organization URL (e.g., \u0060https://dev.azure.com/YourOrg/\u0060)\n- The project name\n- Ensure you\u0027re logged in via \u0060az devops login\u0060"
-  }
-}

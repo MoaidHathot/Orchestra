@@ -1,6 +1,0 @@
-{
-  "parameters": {},
-  "rawDependencyOutputs": {
-    "fetch-open-prs": "This repository is hosted on GitHub, not Azure DevOps. There are no Azure DevOps MCP tools available in this environment, and the repository remote points to GitHub.\n\nTo query Azure DevOps pull requests, you would need:\n1. An Azure DevOps organization and project configured\n2. The repository to be hosted on Azure DevOps, or\n3. Azure DevOps credentials and organization/project parameters specified\n\nWould you like me to:\n1. Query GitHub pull requests instead (since this repo is on GitHub)?\n2. Help you configure Azure DevOps CLI with your organization details?"
-  }
-}

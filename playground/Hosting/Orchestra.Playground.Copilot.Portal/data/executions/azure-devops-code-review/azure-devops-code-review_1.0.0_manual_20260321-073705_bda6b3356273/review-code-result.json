@@ -1,7 +1,0 @@
-{
-  "status": "Failed",
-  "startedAt": "2026-03-21T07:38:05.7998504+00:00",
-  "completedAt": "2026-03-21T07:38:20.8092279+00:00",
-  "duration": "00:00:15.0093775",
-  "errorMessage": "Communication error with Copilot CLI: Request session.create failed with message: Model \u0027claude-opus-4.5\u0027 does not support reasoning effort configuration. Use models.list to check which models support reasoning effort."
-}

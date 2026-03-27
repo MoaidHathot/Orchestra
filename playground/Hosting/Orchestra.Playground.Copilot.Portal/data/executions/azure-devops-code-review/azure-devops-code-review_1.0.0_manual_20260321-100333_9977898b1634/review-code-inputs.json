@@ -1,8 +1,0 @@
-{
-  "parameters": {},
-  "rawDependencyOutputs": {
-    "fetch-pr-changes": "Based on the provided context, the filtered PR list is **empty** (\u0060[]\u0060). There are no open pull requests currently assigned to Moaid Hathot as a reviewer.\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_to_review\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review. The review process should be skipped.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** There are no PRs waiting for Moaid\u0027s review at this time. The review process should be skipped as per the instructions.",
-    "fetch-work-item": "Based on the PR data provided, there are **no pull requests to review**. The context shows:\n\n- **Status**: \u0060no_prs_to_review\u0060\n- **Linked Work Item IDs**: \u0060[]\u0060 (empty array)\n- **PR ID**: \u0060null\u0060\n\nSince there are no linked work items and no active PR assigned for review, there is nothing to fetch or summarize. The review process should be skipped as indicated in the message.",
-    "read-source-context": "Based on the context provided, there are **no PR changes to analyze**. The status indicates:\n\n- **Status**: \u0060no_prs_to_review\u0060\n- **Message**: No open pull requests are currently assigned to Moaid Hathot for review\n- **Files**: Empty array \u0060[]\u0060\n\nSince there are no modified files in the PR diff, there is no context report to generate. The review process should be skipped as indicated in the context."
-  }
-}
