@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no open pull requests** available for review. The PR fetch returned:\n\n- **Status**: \u0060no_prs_available\u0060\n- **Message**: No open pull requests found that are assigned to Moaid Hathot for review\n- **Files**: Empty array \u0060[]\u0060\n\nSince there are no modified files in any PR diff, there is no code context to gather or report on. No further action is needed at this time.",
+  "content": "No files to review. No open pull requests were found.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12337,
+    "outputTokens": 169,
+    "totalTokens": 12506
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no linked Work Items to fetch** because:\n\n1. **Status**: \u0060no_prs_available\u0060 - No open pull requests are currently assigned for review\n2. **linkedWorkItemIds**: \u0060[]\u0060 - Empty array, no work items are linked\n3. **prId**: \u0060null\u0060 - No PR exists to analyze\n\n## Context Summary\n\n**Result**: No action required.\n\nThere are no open pull requests assigned to Moaid Hathot for review, and consequently no linked Work Items to retrieve. The review process should be skipped at this time.\n\nWhen a PR becomes available with linked Work Items, I can:\n1. Extract the Work Item IDs from \u0060linkedWorkItemIds\u0060\n2. Use the work-item-fetcher subagent to retrieve each item\u0027s details\n3. Synthesize the requirements, acceptance criteria, and design decisions into a review context",
+  "content": "## Code Review Context\n\n**Status**: No review needed at this time.\n\nThere are currently no open pull requests assigned for review. No linked Work Items exist to provide background context on requirements or design decisions.\n\n**Next Steps**: Check back when a PR becomes available for review.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12460,
+    "outputTokens": 203,
+    "totalTokens": 12663
+  }
+}

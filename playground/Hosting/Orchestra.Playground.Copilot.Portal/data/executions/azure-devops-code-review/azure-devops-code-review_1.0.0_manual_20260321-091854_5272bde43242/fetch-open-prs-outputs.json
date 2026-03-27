@@ -1,0 +1,10 @@
+{
+  "rawContent": "The repository is on GitHub, not Azure DevOps. There is no Azure DevOps organization configured and no Azure DevOps remote. I cannot query Azure DevOps pull requests without:\n\n1. An Azure DevOps organization URL\n2. A project name\n3. Authentication credentials (PAT)\n\nPlease provide:\n- Your Azure DevOps organization URL (e.g., \u0060https://dev.azure.com/YourOrganization/\u0060)\n- The project name\n- Ensure you\u0027re logged in via \u0060az devops login\u0060",
+  "content": "[]",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 14023,
+    "outputTokens": 122,
+    "totalTokens": 14145
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "rawContent": "There are no PR changes to analyze. The context shows:\n\n- **Status**: \u0060no_prs_to_review\u0060\n- **Message**: No open pull requests found that are assigned to Moaid Hathot for review\n\nSince there are no modified files in any PR diff, there\u0027s nothing to read or produce a context report for. The review process should be skipped.",
+  "content": "No files to review. No open pull requests found that are assigned to Moaid Hathot for review.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12331,
+    "outputTokens": 154,
+    "totalTokens": 12485
+  }
+}

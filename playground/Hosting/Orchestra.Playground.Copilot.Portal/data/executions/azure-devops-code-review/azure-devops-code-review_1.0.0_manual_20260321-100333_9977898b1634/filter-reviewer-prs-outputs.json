@@ -1,0 +1,3 @@
+{
+  "content": "The following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR."
+}

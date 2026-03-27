@@ -1,0 +1,6 @@
+{
+  "parameters": {},
+  "rawDependencyOutputs": {
+    "fetch-open-prs": "I don\u0027t have Azure DevOps MCP tools available in my current toolset. My available tools are: powershell, file operations (view/edit/create), grep, glob, web_fetch, and task agents.\n\nTo query Azure DevOps pull requests, you would need to either:\n1. Provide Azure DevOps MCP tools/server connection\n2. Use the Azure DevOps REST API via PowerShell with a PAT token\n3. Use the \u0060az devops\u0060 CLI if installed and configured\n\nWould you like me to try querying via the Azure DevOps REST API or CLI instead? I would need your organization URL, project name, repository name, and a Personal Access Token (PAT)."
+  }
+}

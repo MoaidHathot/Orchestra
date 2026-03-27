@@ -1,0 +1,10 @@
+{
+  "rawContent": "I apologize, but I\u0027m encountering technical limitations accessing current road conditions. The WSDOT (Washington State Department of Transportation) website uses JavaScript-based dynamic content that doesn\u0027t render through the web fetch tool - the pages only show navigation menus without the actual traffic data.\n\n**Here\u0027s how you can check current conditions directly:**\n\n1. **WSDOT Travel Center Map**: https://wsdot.com/travel/real-time/map - Interactive map with all current conditions\n2. **Mountain Pass Reports**: https://wsdot.wa.gov/travel/real-time/mountainpasses - For I-90 Snoqualmie Pass and Highway 20 North Cascades\n3. **Call 511**: Dial 511 from any phone in Washington for automated road conditions\n4. **WSDOT mobile app**: Download \u0022WSDOT\u0022 app for real-time alerts\n\nThe web content I can access requires JavaScript rendering which these fetch tools cannot process. For the most current information on I-5, I-90, Highway 20, and SR-20 to Anacortes, please visit the WSDOT website directly or use their mobile app.",
+  "content": "**ROAD CONDITIONS - UNAVAILABLE**\n\n**I-5**: Status unknown - data unavailable  \n**I-90 (Snoqualmie Pass)**: Status unknown - data unavailable  \n**Highway 20 (North Cascades)**: Status unknown - data unavailable  \n**SR-20 (to Anacortes)**: Status unknown - data unavailable  \n\n**ALTERNATIVE INFORMATION SOURCES:**\n- WSDOT Travel Center Map: wsdot.com/travel/real-time/map\n- Mountain Pass Reports: wsdot.wa.gov/travel/real-time/mountainpasses\n- Dial 511 for automated conditions\n- WSDOT mobile app for real-time alerts\n\n*Current road data unavailable due to technical limitations with JavaScript-based content rendering. Use direct WSDOT resources for real-time conditions.*",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 20506,
+    "outputTokens": 262,
+    "totalTokens": 20768
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "parameters": {},
+  "rawDependencyOutputs": {
+    "fetch-open-prs": "I don\u0027t have Azure DevOps MCP tools available in my current toolset. My available tools are: powershell, file operations (view/edit/create), grep/glob search, web_fetch, and task agents.\n\nTo query Azure DevOps pull requests, I would need either:\n1. **Azure DevOps MCP tools** to be configured and available\n2. **Azure CLI** (\u0060az devops\u0060) installed with authentication configured\n3. **Azure DevOps REST API** access with a PAT token\n\nWould you like me to try using the Azure CLI (\u0060az repos pr list\u0060) if it\u0027s installed, or do you need to configure the Azure DevOps MCP server first?"
+  }
+}

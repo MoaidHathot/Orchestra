@@ -1,0 +1,39 @@
+{
+  "id": "d483fed42fbf",
+  "orchestrationName": "seattle-weather-roads-monitor",
+  "orchestrationDescription": "Multi-step orchestration that checks current weather in Seattle, tomorrow\u0027s forecast for Seattle and Orcas Island, and road conditions in Washington State. Triggered every 60 seconds.",
+  "orchestrationVersion": "1.0.0",
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\weather-roads-seattle.json",
+  "triggerId": "seattle-weather-roads-monitor-dcd0",
+  "triggerType": "Scheduler",
+  "startedAt": "2026-03-20T12:38:53.7728851Z",
+  "status": "Failed",
+  "stepCount": 5,
+  "results": {
+    "wa-road-conditions": {
+      "status": "Failed",
+      "content": "",
+      "error": "Cancelled"
+    },
+    "seattle-tomorrow-forecast": {
+      "status": "Failed",
+      "content": "",
+      "error": "Cancelled"
+    },
+    "travel-summary": {
+      "status": "Failed",
+      "content": "",
+      "error": "Cancelled"
+    },
+    "seattle-current-weather": {
+      "status": "Failed",
+      "content": "",
+      "error": "Cancelled"
+    },
+    "orcas-island-tomorrow-forecast": {
+      "status": "Failed",
+      "content": "",
+      "error": "Cancelled"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "rawContent": "The current repository is hosted on GitHub, not Azure DevOps. There are no Azure DevOps defaults configured, and no Azure DevOps MCP tools are available in this environment.\n\nTo query Azure DevOps pull requests, I need either:\n1. An Azure DevOps organization URL and project configured\n2. Azure DevOps MCP tools installed and connected\n\nPlease provide:\n- Your Azure DevOps organization URL (e.g., \u0060https://dev.azure.com/YourOrg\u0060)\n- Project name\n- Repository name (if different from project)\n\nOr configure defaults with:\n\u0060\u0060\u0060powershell\naz devops configure --defaults organization=https://dev.azure.com/YourOrg project=YourProject\n\u0060\u0060\u0060",
+  "content": "[]",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12924,
+    "outputTokens": 167,
+    "totalTokens": 13091
+  }
+}

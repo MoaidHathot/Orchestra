@@ -45,7 +45,8 @@ public partial class OrchestrationExecutor
 			_stepExecutorRegistry = new StepExecutorRegistry()
 				.Register(new PromptStepExecutor(promptExecutor))
 				.Register(new HttpStepExecutor(new System.Net.Http.HttpClient(), reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))
-				.Register(new TransformStepExecutor(loggerFactory.CreateLogger<TransformStepExecutor>()));
+				.Register(new TransformStepExecutor(loggerFactory.CreateLogger<TransformStepExecutor>()))
+				.Register(new CommandStepExecutor(reporter, loggerFactory.CreateLogger<CommandStepExecutor>()));
 		}
 	}
 

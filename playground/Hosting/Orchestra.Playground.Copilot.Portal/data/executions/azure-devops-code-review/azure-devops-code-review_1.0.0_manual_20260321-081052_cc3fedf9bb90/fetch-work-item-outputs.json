@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no pull requests available** to analyze:\n\n**Status Summary:**\n- **Status**: \u0060no_prs_available\u0060\n- **Message**: No open pull requests are currently assigned to Moaid Hathot for review\n- **Linked Work Items**: None (empty array \u0060[]\u0060)\n\n**Context Summary:**\n\nSince there are no PRs assigned for review and no linked Work Item IDs to fetch, I cannot produce a unified context summary about features, acceptance criteria, or design decisions.\n\n**Next Steps:**\n1. Check if there are PRs in a different state (e.g., draft, closed) that need review\n2. Verify the correct reviewer assignment in Azure DevOps\n3. Create or assign a PR for review if one is pending\n\nWould you like me to help with any of these alternatives?",
+  "content": "**Code Review Context Summary**\n\n**Status:** No Active Pull Requests\n\nThere are currently no open pull requests assigned for review. No linked work items or feature context is available to summarize.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12450,
+    "outputTokens": 189,
+    "totalTokens": 12639
+  }
+}

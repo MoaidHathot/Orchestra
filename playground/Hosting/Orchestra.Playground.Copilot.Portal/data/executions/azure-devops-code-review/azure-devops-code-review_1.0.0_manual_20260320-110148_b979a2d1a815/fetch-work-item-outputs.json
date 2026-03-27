@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly",
+  "content": "## Code Review Context Summary\n\n**Status:** No pull requests available for review.\n\nNo open pull requests are currently assigned to Moaid Hathot. There are no associated work items, feature requirements, or design decisions to provide context for.\n\nTo proceed, either have a PR assigned for review or specify a particular PR ID to analyze directly.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12262,
+    "outputTokens": 341,
+    "totalTokens": 12603
+  }
+}

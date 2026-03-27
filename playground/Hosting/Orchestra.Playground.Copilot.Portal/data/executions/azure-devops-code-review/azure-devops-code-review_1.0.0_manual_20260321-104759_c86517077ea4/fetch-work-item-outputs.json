@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no pull requests to review** and consequently **no linked Work Items to fetch**.\n\n**Summary:**\n- **Status**: No open PRs found\n- **Reason**: No pull requests are currently assigned to Moaid Hathot as a reviewer (that were created by others)\n- **Linked Work Items**: Empty (\u0060[]\u0060)\n\nSince there are no PRs waiting for review and no linked Work Item IDs to extract, there\u0027s nothing to delegate to the work-item-fetcher subagent. The review process should be skipped for this cycle.",
+  "content": "## Context Summary\n\n**No Active Pull Requests**\n\nThere are currently no pull requests awaiting review. The PR check found no open PRs assigned to Moaid Hathot as a reviewer (excluding self-authored PRs). Since no PRs exist, there are no linked Work Items to process.\n\n**Action**: Skip this review cycle.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12291,
+    "outputTokens": 221,
+    "totalTokens": 12512
+  }
+}

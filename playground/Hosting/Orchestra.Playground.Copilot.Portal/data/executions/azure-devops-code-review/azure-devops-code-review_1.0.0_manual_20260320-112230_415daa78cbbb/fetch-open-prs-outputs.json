@@ -1,0 +1,10 @@
+{
+  "rawContent": "This repository is hosted on GitHub, not Azure DevOps. There is no Azure DevOps organization configured, and the git remote points to \u0060https://github.com/MoaidHathot/Orchestra.git\u0060.\n\nTo query Azure DevOps pull requests, I need either:\n1. An Azure DevOps organization URL configured (e.g., \u0060https://dev.azure.com/YourOrganization/\u0060)\n2. A repository hosted on Azure DevOps\n\nCould you provide the Azure DevOps organization URL and project/repository name where you want to query pull requests?",
+  "content": "[]",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 14051,
+    "outputTokens": 131,
+    "totalTokens": 14182
+  }
+}

@@ -1,0 +1,177 @@
+{
+  "name": "azure-devops-code-review",
+  "description": "Automated code review orchestration for Azure DevOps PRs. Demonstrates mixed step types (Prompt, Http, Transform), subagents, scheduler trigger, retry policies, and loop/checker patterns. Scans for pull requests assigned to a specific reviewer every 10 minutes, fetches the PR diff and linked Work Items, performs a multi-faceted code review (security, quality, architecture), and produces a structured JSON verdict. The DAG: 1) fetch-open-prs finds PRs via Azure DevOps MCP, 2) filter-reviewer-prs uses Transform to keep only PRs awaiting review, 3) fetch-pr-changes gets the diff, 4) fetch-work-item retrieves linked WI context via subagent, 5) read-source-context reads local repo files for deeper understanding, 6) review-code runs a multi-subagent review, 7) quality-check loops to ensure thoroughness, 8) format-result uses Transform to build the final JSON, 9) post-review-status uses Http to post the verdict.",
+  "version": "1.0.0",
+  "defaultRetryPolicy": {
+    "maxRetries": 2,
+    "backoffSeconds": 5,
+    "backoffMultiplier": 2.0,
+    "retryOnTimeout": true
+  },
+  "timeoutSeconds": 1800,
+  "mcps": [
+    {
+      "name": "azure-devops",
+      "type": "local",
+      "command": "npx",
+      "arguments": [
+        "-y",
+        "azure-devops-mcp",
+        "--organization", "msazure",
+        "--project", "One",
+        "--repository", "ZTS"
+      ]
+    },
+    {
+      "name": "filesystem",
+      "type": "local",
+      "command": "npx",
+      "arguments": [
+        "-y",
+        "@anthropic/mcp-server-filesystem",
+        "P:\\Work\\Networking\\Repo\\Zero-Trust-Segmentation\\ZTS"
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "name": "fetch-open-prs",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are an Azure DevOps assistant. Your job is to query for active pull requests using the Azure DevOps MCP tools. Return structured data only — no commentary or explanation. Output valid JSON.",
+      "userPrompt": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have 'Moaid Hathot' as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author's display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation.",
+      "outputHandlerPrompt": "Ensure the output is a valid JSON array. If no PRs are found, return an empty array: []. Strip any markdown code fences or surrounding text — return raw JSON only.",
+      "mcps": ["azure-devops"],
+      "model": "claude-opus-4.5",
+      "timeoutSeconds": 120,
+      "retry": {
+        "maxRetries": 3,
+        "backoffSeconds": 10,
+        "backoffMultiplier": 2.0,
+        "retryOnTimeout": true
+      }
+    },
+    {
+      "name": "filter-reviewer-prs",
+      "type": "Transform",
+      "dependsOn": ["fetch-open-prs"],
+      "template": "The following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n{{fetch-open-prs.output}}\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the 'createdBy' field is NOT 'Moaid Hathot'. These are PRs created by others that are waiting for Moaid's review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR.",
+      "contentType": "text/plain"
+    },
+    {
+      "name": "fetch-pr-changes",
+      "type": "Prompt",
+      "dependsOn": ["filter-reviewer-prs"],
+      "systemPrompt": "You are an Azure DevOps assistant specialized in retrieving pull request details. You have access to Azure DevOps MCP tools to fetch PR diffs, comments, and metadata. Be thorough — retrieve the full diff so the reviewer has complete context.",
+      "userPrompt": "From the filtered PR list below, select the most recently created PR (by creationDate):\n\n{{filter-reviewer-prs.output}}\n\nFor that PR:\n1. Fetch the complete diff / file changes (all modified, added, and deleted files with their content changes).\n2. Fetch any existing review comments or discussion threads on the PR.\n3. Fetch the PR description and any linked work item IDs.\n\nReturn the results as structured JSON with fields: prId, prTitle, author, description, linkedWorkItemIds (array of integers), files (array of {path, changeType, diff}), existingComments (array of {author, content, file, line}).",
+      "outputHandlerPrompt": "Ensure the output is well-structured JSON. If the diff is very large, summarize unchanged boilerplate but keep all meaningful code changes intact. The 'diff' field for each file should contain the actual unified diff content.",
+      "mcps": ["azure-devops"],
+      "model": "claude-opus-4.5",
+      "timeoutSeconds": 180
+    },
+    {
+      "name": "fetch-work-item",
+      "type": "Prompt",
+      "dependsOn": ["fetch-pr-changes"],
+      "systemPrompt": "You are a coordinator that delegates Work Item retrieval to a specialized subagent. Extract the linked Work Item IDs from the PR details and delegate the fetch to the work-item-fetcher subagent. Synthesize the results into a clear context summary that will help a code reviewer understand the requirements behind the PR.",
+      "userPrompt": "The PR details are:\n\n{{fetch-pr-changes.output}}\n\nExtract the linkedWorkItemIds from the PR data above. For each linked Work Item, use the work-item-fetcher subagent to retrieve its details (title, description, acceptance criteria, state). Then produce a unified context summary that explains: 1) What feature or bug this PR addresses. 2) The acceptance criteria or requirements. 3) Any relevant design decisions mentioned in the Work Item.",
+      "outputHandlerPrompt": "Return a concise context summary (under 500 words) that a code reviewer can quickly read to understand the 'why' behind the code changes.",
+      "mcps": ["azure-devops"],
+      "model": "claude-opus-4.5",
+      "subagents": [
+        {
+          "name": "work-item-fetcher",
+          "displayName": "Work Item Fetcher",
+          "description": "Fetches Azure DevOps Work Item details given a Work Item ID. Use this agent to retrieve the title, description, acceptance criteria, and state of a Work Item.",
+          "prompt": "You are a Work Item retrieval specialist. When given a Work Item ID, use the Azure DevOps MCP tools to fetch its full details including: title, description (HTML content — extract the plain text), acceptance criteria, state, assigned to, iteration path, and any parent/child links. Return the data as structured JSON.",
+          "mcps": ["azure-devops"],
+          "infer": true
+        }
+      ]
+    },
+    {
+      "name": "read-source-context",
+      "type": "Prompt",
+      "dependsOn": ["fetch-pr-changes"],
+      "systemPrompt": "You are a source code exploration assistant. You have filesystem access to the local repository clone. Your job is to read files that are referenced or modified in a PR diff to provide surrounding context — such as the full class definition, interface contracts, related tests, or configuration that helps a reviewer understand the impact of changes.",
+      "userPrompt": "The PR changes are:\n\n{{fetch-pr-changes.output}}\n\nFor each modified file in the PR diff:\n1. Read the full current version of the file from the local repo (main branch) to understand the baseline.\n2. If the file imports or references other project files (e.g., interfaces, base classes, shared utilities), read those too.\n3. Check if there are corresponding test files and read them.\n\nProduce a context report with: for each modified file, the relevant surrounding code (interfaces implemented, base classes extended, callers of modified methods, and existing test coverage). Keep each file's context under 200 lines — focus on the most relevant parts.",
+      "outputHandlerPrompt": "Structure the output as sections per file. Include file paths as headers. Omit files that are trivial changes (e.g., auto-generated, package-lock, .csproj version bumps). Focus on files with logic changes.",
+      "mcps": ["filesystem"],
+      "model": "claude-opus-4.5",
+      "timeoutSeconds": 180
+    },
+    {
+      "name": "review-code",
+      "type": "Prompt",
+      "dependsOn": ["fetch-pr-changes", "fetch-work-item", "read-source-context"],
+      "systemPrompt": "You are a senior code reviewer coordinating a thorough pull request review. You have access to the PR diff, the Work Item context (requirements), and the surrounding source code context. You coordinate with specialized subagents for security and code quality analysis, then synthesize all findings into a comprehensive review.\n\nYour review must cover:\n1. Correctness — Does the code do what the Work Item requires?\n2. Security — Are there vulnerabilities, injection risks, or auth issues?\n3. Code quality — Naming, structure, SOLID principles, readability\n4. Performance — Unnecessary allocations, N+1 queries, blocking calls\n5. Testing — Are changes adequately tested?\n6. Architecture — Does the change fit the existing patterns?\n\nBe specific: reference file paths and line numbers. Distinguish between blocking issues (must fix) and suggestions (nice to have).",
+      "userPrompt": "Review this pull request:\n\n## PR Changes\n{{fetch-pr-changes.output}}\n\n## Work Item Context\n{{fetch-work-item.output}}\n\n## Source Code Context\n{{read-source-context.output}}\n\nPerform a thorough code review. Delegate security analysis to the security-reviewer subagent and code quality analysis to the quality-reviewer subagent. Combine their findings with your own analysis of correctness, performance, testing, and architecture.\n\nProduce a review with:\n1. An executive summary (2-3 sentences)\n2. A list of review comments, each with: file, line (if applicable), severity (blocking | suggestion | nitpick), category (security | quality | correctness | performance | testing | architecture), and the comment text\n3. A recommended status: 'approved' if no blocking issues, 'approved-with-suggestions' if only suggestions/nitpicks, 'waiting-for-author' if there are blocking issues\n\nReturn the review as JSON with fields: summary, comments (array), status.",
+      "outputHandlerPrompt": "Ensure the output is valid JSON with the specified schema. The 'status' field must be exactly one of: 'approved', 'approved-with-suggestions', 'waiting-for-author'. Each comment must have: file, line (number or null), severity, category, and text fields.",
+      "model": "claude-opus-4.5",
+      "reasoningLevel": "High",
+      "timeoutSeconds": 300,
+      "subagents": [
+        {
+          "name": "security-reviewer",
+          "displayName": "Security Reviewer",
+          "description": "Analyzes code changes for security vulnerabilities, injection attacks, authentication/authorization issues, secrets exposure, and unsafe patterns. Delegate to this agent for security-focused analysis of PR diffs.",
+          "prompt": "You are a security-focused code reviewer. Analyze the provided code changes for:\n\n1. Injection vulnerabilities (SQL, command, LDAP, XSS, etc.)\n2. Authentication and authorization flaws\n3. Secrets or credentials in code\n4. Insecure deserialization\n5. Path traversal or file access issues\n6. Cryptographic weaknesses\n7. Input validation gaps\n8. Dependency vulnerabilities (known CVEs in referenced packages)\n\nFor each finding, specify: file path, line number (if identifiable), severity (critical, high, medium, low), and a clear explanation with remediation guidance. If no security issues are found, explicitly state that the changes pass security review. Be thorough but avoid false positives.",
+          "infer": true
+        },
+        {
+          "name": "quality-reviewer",
+          "displayName": "Code Quality Reviewer",
+          "description": "Reviews code for quality issues: naming conventions, SOLID principles, code duplication, readability, error handling, and adherence to project patterns. Delegate to this agent for style and quality analysis.",
+          "prompt": "You are a code quality specialist. Review the provided code changes for:\n\n1. Naming conventions — Are variables, methods, and classes named clearly and consistently?\n2. SOLID principles — Single responsibility, open/closed, Liskov substitution, interface segregation, dependency inversion\n3. Code duplication — Is there copy-paste code that should be extracted?\n4. Error handling — Are exceptions handled properly? Are error messages helpful?\n5. Readability — Is the code easy to understand? Are complex sections commented?\n6. Project patterns — Does the new code follow the existing conventions in the codebase?\n7. Dead code — Are there unused variables, methods, or imports?\n\nFor each finding, specify: file path, line number (if identifiable), severity (blocking, suggestion, nitpick), and a clear description. Focus on actionable feedback.",
+          "infer": true
+        }
+      ]
+    },
+    {
+      "name": "quality-check",
+      "type": "Prompt",
+      "dependsOn": ["review-code"],
+      "systemPrompt": "You are a review quality auditor. You evaluate whether a code review is thorough and actionable. Check that the review covers all critical areas and that comments are specific (not vague). If the review meets all quality criteria, respond with APPROVED as the first word. If it needs improvement, respond with REVISE and explain what's missing.",
+      "userPrompt": "Evaluate this code review for quality and completeness:\n\n{{review-code.output}}\n\nQuality checklist:\n1. Does the review have an executive summary?\n2. Are there specific file/line references in comments (not just generic advice)?\n3. Are severity levels assigned to each comment?\n4. Is there at least one comment about testing (either praising coverage or noting gaps)?\n5. Is the status field present and one of the valid values?\n6. Are blocking issues (if any) clearly explained with remediation guidance?\n7. Is the review respectful and constructive in tone?\n\nIf ALL criteria pass, respond with: APPROVED\nIf ANY criterion fails, respond with: REVISE and list exactly what needs to be added or improved.",
+      "outputHandlerPrompt": "Ensure APPROVED or REVISE is the first word. Keep the evaluation under 300 words.",
+      "model": "claude-opus-4.5",
+      "loop": {
+        "target": "review-code",
+        "maxIterations": 2,
+        "exitPattern": "APPROVED"
+      }
+    },
+    {
+      "name": "format-result",
+      "type": "Transform",
+      "dependsOn": ["review-code", "quality-check"],
+      "template": "{{review-code.output}}",
+      "contentType": "application/json"
+    },
+    {
+      "name": "post-review-status",
+      "type": "Http",
+      "dependsOn": ["format-result"],
+      "method": "POST",
+      "url": "https://hooks.example.com/orchestra/code-review-completed",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Orchestra-Source": "azure-devops-code-review"
+      },
+      "body": "{{format-result.output}}",
+      "contentType": "application/json",
+      "timeoutSeconds": 30,
+      "retry": {
+        "maxRetries": 3,
+        "backoffSeconds": 2,
+        "backoffMultiplier": 2.0,
+        "retryOnTimeout": true
+      }
+    }
+  ],
+  "trigger": {
+    "type": "scheduler",
+    "enabled": true,
+    "intervalSeconds": 600
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no open pull requests** currently assigned for review. The status shows:\n\n- **Status**: \u0060no_prs_found\u0060\n- **Message**: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022\n- **Files**: Empty array \u0060[]\u0060\n\nSince there are no modified files in any PR diff, I cannot produce a context report. There\u0027s nothing to analyze.\n\n**Next steps you could take:**\n1. Check if there\u0027s a specific PR number you\u0027d like me to analyze\n2. Verify that the PR is still open and assigned correctly\n3. Provide a direct link or PR ID to examine",
+  "content": "No files to report. No open pull requests were found with modified files to analyze.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12300,
+    "outputTokens": 214,
+    "totalTokens": 12514
+  }
+}

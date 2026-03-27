@@ -1,0 +1,10 @@
+{
+  "rawContent": "The current repository is on GitHub, not Azure DevOps, and there\u0027s no Azure DevOps organization configured. To query Azure DevOps pull requests, I need:\n\n1. The Azure DevOps organization URL (e.g., \u0060https://dev.azure.com/YourOrganization/\u0060)\n2. The project name\n3. Optionally the repository name\n\nPlease provide:\n- **Organization**: Your Azure DevOps organization URL\n- **Project**: The project name containing the repository\n\nExample: \u0060az devops configure --defaults organization=https://dev.azure.com/MyOrg project=MyProject\u0060",
+  "content": "[]",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 13384,
+    "outputTokens": 140,
+    "totalTokens": 13524
+  }
+}

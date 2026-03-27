@@ -1,0 +1,34 @@
+{
+  "id": "114f04803417",
+  "orchestrationName": "seattle-weather-roads-monitor",
+  "orchestrationDescription": "Multi-step orchestration that checks current weather in Seattle, tomorrow\u0027s forecast for Seattle and Orcas Island, and road conditions in Washington State. Triggered every 60 seconds.",
+  "orchestrationVersion": "1.0.0",
+  "orchestrationPath": "P:\\Github\\Orchestra\\examples\\weather-roads-seattle.json",
+  "triggerId": "seattle-weather-roads-monitor-dcd0",
+  "triggerType": "Scheduler",
+  "startedAt": "2026-03-21T11:03:24.4389966Z",
+  "status": "Succeeded",
+  "stepCount": 5,
+  "results": {
+    "wa-road-conditions": {
+      "status": "Succeeded",
+      "content": "**ROAD CONDITIONS SUMMARY**\n\n**I-5**: Status unavailable - check resources below  \n**I-90/Snoqualmie Pass**: Status unavailable - check mountain pass reports  \n**Highway 20/North Cascades**: Status unavailable - check resources below  \n**SR-20 to Anacortes**: Status unavailable - check resources below\n\n**Real-time data currently inaccessible. Check current conditions:**\n- WSDOT Travel Center: wsdot.wa.gov/travel/real-time/map\n- Mountain Pass Reports: wsdot.wa.gov/travel/real-time/mountainpasses\n- Call 511 for automated updates\n- Twitter: @wsdot, @SnoqualmiePass"
+    },
+    "seattle-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "**Tomorrow\u0027s Forecast - Saturday, March 22, 2026 (Seattle, WA)**\n\n**Morning:** Cloudy skies with temperatures in the low 40s. North winds 3-8 mph.\n\n**Afternoon:** Gradual clearing to mostly sunny conditions. High of 49\u00B0F. Brief 20% chance of rain between 1-2pm. Light north winds.\n\n**Evening:** Partly cloudy skies. Temperatures dropping to 38\u00B0F overnight. Winds shifting south at 5-7 mph.\n\nOverall, a cool spring day transitioning from cloudy to mostly sunny with minimal rain risk."
+    },
+    "travel-summary": {
+      "status": "Succeeded",
+      "content": "**TRAVEL ADVISORY BRIEF: Seattle to Orcas Island**  \n**Saturday, March 22, 2026**\n\n**OVERALL RECOMMENDATION: GOOD TRAVEL DAY**\n\nConditions are favorable for your journey with only minor morning weather to navigate. Expect smooth sailing once brief showers clear.\n\n**WEATHER SUMMARY**\n\nSeattle will transition from cloudy morning (low 40s) to mostly sunny afternoon (49\u00B0F). Brief 20% rain chance between 1-2pm. Orcas Island sees morning showers ending by 11am, followed by partly sunny skies and temperatures in the upper 40s to low 50s.\n\n**FERRY CONDITIONS: EXCELLENT**\n\nLight winds at or below 5 knots, waves under 1 foot, and good visibility make for ideal crossing conditions. This is as smooth as it gets for the San Juan Islands route.\n\n**OPTIMAL DEPARTURE**\n\nLeave Seattle between 10-11am. This timing avoids morning showers on both ends, ensures arrival after Orcas Island\u0027s 11am rain clearance, and misses Seattle\u0027s afternoon sprinkle window.\n\n**ESSENTIALS**\n\nPack a light rain jacket for morning showers and dress in layers for temps in the 40s-50s. Confirm ferry reservations in advance.\n\n**CRITICAL ACTION ITEM**\n\nRoad conditions for I-5 and SR-20 were unavailable at advisory time. **MUST check wsdot.wa.gov/travel or call 511 on morning of departure** before leaving.\n\n**BOTTOM LINE:** Low-risk travel day with excellent marine conditions. Main task is verifying road status before you go."
+    },
+    "seattle-current-weather": {
+      "status": "Succeeded",
+      "content": "**Seattle, Washington Weather**\n\n*Last updated: March 21, 2026 at 3:48 AM local time*\n\n**Current Conditions:** Overcast skies with 100% cloud cover blanket the city. Temperature sits at 46\u00B0F (8\u00B0C) with 73% humidity. Light winds from the northeast at 4 mph (6 km/h) provide a gentle breeze. Typical spring weather for the Pacific Northwest."
+    },
+    "orcas-island-tomorrow-forecast": {
+      "status": "Succeeded",
+      "content": "**Orcas Island Weather - Sunday, March 22, 2026**\n\nPartly sunny with morning showers ending by 11am. Highs in the upper 40s to low 50s, overnight lows in the mid 30s to low 40s.\n\n**Ferry \u0026 Marine Travel:** Excellent conditions. Light variable winds 5 knots or less, waves under 1 foot, and good visibility. Ideal for inter-island crossings.\n\n**Outdoor Activities:** Great day once morning rain clears. Light south winds to 10 mph make it perfect for hiking, kayaking, or exploring. Bring a light jacket for cooler morning temperatures and rain gear for early hours.\n\nCalm seas and clearing skies\u2014an ideal island day ahead!"
+    }
+  }
+}

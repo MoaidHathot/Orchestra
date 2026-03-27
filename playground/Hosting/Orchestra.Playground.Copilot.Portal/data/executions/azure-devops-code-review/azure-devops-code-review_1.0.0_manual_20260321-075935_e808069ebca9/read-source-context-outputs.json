@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no open pull requests** waiting for review. The status indicates:\n\n- **Status**: \u0060no_prs_to_review\u0060\n- **Message**: No open pull requests found that are waiting for Moaid Hathot\u0027s review\n- **Files**: Empty list\n- **Linked Work Items**: None\n\nSince there are no PR changes to analyze, there\u0027s nothing to:\n1. Read from modified files\n2. Check for imported interfaces or base classes\n3. Review for test coverage\n\n**No context report can be generated** \u2014 the review process should be skipped as indicated in the summary.",
+  "content": "No files with logic changes to review.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12352,
+    "outputTokens": 211,
+    "totalTokens": 12563
+  }
+}

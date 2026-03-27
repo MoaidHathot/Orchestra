@@ -1,0 +1,7 @@
+{
+  "status": "Skipped",
+  "startedAt": "2026-03-21T07:15:43.2139915+00:00",
+  "completedAt": "2026-03-21T07:15:43.2142165+00:00",
+  "duration": "00:00:00.0002250",
+  "errorMessage": "Skipped because dependencies failed or were skipped: [format-result]"
+}

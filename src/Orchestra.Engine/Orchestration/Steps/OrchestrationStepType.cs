@@ -5,4 +5,5 @@ public enum OrchestrationStepType
 	Prompt,
 	Http,
 	Transform,
+	Command,
 }

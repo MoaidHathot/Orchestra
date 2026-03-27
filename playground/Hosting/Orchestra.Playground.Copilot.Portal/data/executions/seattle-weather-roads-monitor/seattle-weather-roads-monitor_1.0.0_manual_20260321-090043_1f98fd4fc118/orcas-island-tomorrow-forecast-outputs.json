@@ -1,0 +1,10 @@
+{
+  "rawContent": "## Weather Forecast for Orcas Island, WA (Tomorrow - Saturday, March 22, 2026)\n\n**Temperature:**\n- High: 49\u00B0F\n- Low: 39\u00B0F (Saturday night)\n\n**Conditions:** Sunny during the day\n\n**Precipitation:** \n- Day: 0% (clear/sunny)\n- Night: 50% chance of rain between midnight and 4am\n\n**Wind Conditions:**\n- Morning: West wind around 6 mph becoming calm\n- Important for island travel: Light winds throughout the day, favorable for ferry/boat travel\n\n**Marine Conditions:**\n- Winds shift to south-southeast around 5 mph by evening\n- Calm wind conditions make for good island travel conditions on Saturday\n\n**Summary:** Excellent day for island travel with sunny skies, mild temperatures near 49\u00B0F, and very light winds (6 mph or less). Rain possible late Saturday night but shouldn\u0027t affect daytime activities or travel.",
+  "content": "**Orcas Island Weather Forecast - Saturday, March 22, 2026**\n\nExcellent conditions for island travel and outdoor activities! Sunny skies with highs near 49\u00B0F and lows around 39\u00B0F. Light westerly winds at 6 mph, becoming calm\u2014ideal for ferry crossings and marine activities throughout the day. Winds shift south-southeast at 5 mph by evening, maintaining smooth passage conditions.\n\nPerfect day for hiking, kayaking, or exploring the island. Rain possible after midnight (50% chance), but won\u0027t impact Saturday activities. Pack layers for the 10-degree temperature swing. Ferry travel conditions: optimal.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 15968,
+    "outputTokens": 220,
+    "totalTokens": 16188
+  }
+}

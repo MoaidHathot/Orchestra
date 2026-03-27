@@ -987,4 +987,46 @@ public class OrchestrationParserTests
 	}
 
 	#endregion
+
+	#region Example File Parsing
+
+	[Theory]
+	[MemberData(nameof(GetExampleFiles))]
+	public void ParseOrchestration_ExampleFile_ParsesSuccessfully(string filePath)
+	{
+		// Arrange
+		var json = File.ReadAllText(filePath);
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Should().NotBeNull();
+		orchestration.Name.Should().NotBeNullOrWhiteSpace();
+		orchestration.Description.Should().NotBeNullOrWhiteSpace();
+		orchestration.Steps.Should().NotBeEmpty();
+	}
+
+	public static TheoryData<string> GetExampleFiles()
+	{
+		var data = new TheoryData<string>();
+		var examplesDir = Path.GetFullPath(
+			Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"));
+
+		if (Directory.Exists(examplesDir))
+		{
+			foreach (var file in Directory.GetFiles(examplesDir, "*.json"))
+			{
+				// Skip mcp.json — it's not an orchestration file
+				if (Path.GetFileName(file).Equals("mcp.json", StringComparison.OrdinalIgnoreCase))
+					continue;
+
+				data.Add(file);
+			}
+		}
+
+		return data;
+	}
+
+	#endregion
 }

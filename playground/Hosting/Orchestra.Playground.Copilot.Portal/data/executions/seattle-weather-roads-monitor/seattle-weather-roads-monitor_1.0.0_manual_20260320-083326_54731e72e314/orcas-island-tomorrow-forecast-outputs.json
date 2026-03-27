@@ -1,0 +1,10 @@
+{
+  "rawContent": "## Weather Forecast for Orcas Island, WA - Tomorrow (Friday, March 21)\n\n**Temperature:**\n- High: 54\u00B0F\n- Low: 39\u00B0F (Friday night)\n\n**Precipitation:**\n- 90% chance of rain, mainly before noon\n- Less than 0.1 inch accumulation expected\n\n**Wind Conditions:**\n- Morning: South-southeast 5-10 mph\n- Afternoon: Shifting to west-southwest 5-10 mph\n- Evening: West-northwest 7-9 mph\n\n**Marine/Travel Conditions:**\nWinds will be light to moderate (5-10 mph) throughout the day, which should be manageable for ferry travel. The wind direction shifts from southeast in the morning to west-southwest by afternoon, with rain clearing by noon. Conditions should improve significantly by evening.\n\nSaturday looks better with only a 20% chance of showers in the morning and sunny skies with lighter winds (~6 mph).",
+  "content": "**Orcas Island Weather - Friday, March 21**\n\nExpect morning rain (90% chance, clearing by noon) with temps climbing to 54\u00B0F. Light winds 5-10 mph shifting from south-southeast to west-southwest.\n\n**Ferry Travel:** Favorable conditions with light to moderate winds throughout the day. Smoothest crossings expected after noon when rain clears.\n\n**Outdoor Activities:** Morning ventures will be wet\u2014pack rain gear. Afternoon and evening look promising as skies clear and winds remain gentle (7-9 mph). \n\nSaturday improves significantly: mostly sunny, 20% morning showers, lighter winds at 6 mph. Ideal for hiking and outdoor exploration.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 13396,
+    "outputTokens": 223,
+    "totalTokens": 13619
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "runId": "9c9ed57aa84f",
+  "orchestrationName": "seattle-weather-roads-monitor",
+  "startedAt": "2026-03-20T12:38:53.7739378+00:00",
+  "completedAt": "2026-03-21T08:00:42.8321489+00:00",
+  "duration": "19:21:49.0582111",
+  "status": "Failed",
+  "orchestrationVersion": "1.0.0",
+  "triggeredBy": "manual",
+  "parameters": {},
+  "triggerId": "seattle-weather-roads-monitor-dcd0",
+  "stepRecords": {
+    "wa-road-conditions": {
+      "stepName": "wa-road-conditions",
+      "status": "Failed",
+      "startedAt": "2026-03-20T12:38:53.7739963+00:00",
+      "completedAt": "2026-03-21T08:00:42.8310276+00:00",
+      "duration": "19:21:49.0570313",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "seattle-tomorrow-forecast": {
+      "stepName": "seattle-tomorrow-forecast",
+      "status": "Failed",
+      "startedAt": "2026-03-20T12:38:53.7741901+00:00",
+      "completedAt": "2026-03-21T08:00:42.8307333+00:00",
+      "duration": "19:21:49.0565432",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "travel-summary": {
+      "stepName": "travel-summary",
+      "status": "Failed",
+      "startedAt": "2026-03-21T08:00:42.8311003+00:00",
+      "completedAt": "2026-03-21T08:00:42.8318904+00:00",
+      "duration": "00:00:00.0007901",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "seattle-current-weather": {
+      "stepName": "seattle-current-weather",
+      "status": "Failed",
+      "startedAt": "2026-03-20T12:38:53.77407+00:00",
+      "completedAt": "2026-03-21T08:00:42.8307733+00:00",
+      "duration": "19:21:49.0567033",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "orcas-island-tomorrow-forecast": {
+      "stepName": "orcas-island-tomorrow-forecast",
+      "status": "Failed",
+      "startedAt": "2026-03-20T12:38:53.7741164+00:00",
+      "completedAt": "2026-03-21T08:00:42.8306613+00:00",
+      "duration": "19:21:49.0565449",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "allStepRecords": {
+    "wa-road-conditions": {
+      "stepName": "wa-road-conditions",
+      "status": "Failed",
+      "startedAt": "2026-03-20T12:38:53.7739963+00:00",
+      "completedAt": "2026-03-21T08:00:42.8310276+00:00",
+      "duration": "19:21:49.0570313",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "seattle-tomorrow-forecast": {
+      "stepName": "seattle-tomorrow-forecast",
+      "status": "Failed",
+      "startedAt": "2026-03-20T12:38:53.7741901+00:00",
+      "completedAt": "2026-03-21T08:00:42.8307333+00:00",
+      "duration": "19:21:49.0565432",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "travel-summary": {
+      "stepName": "travel-summary",
+      "status": "Failed",
+      "startedAt": "2026-03-21T08:00:42.8311003+00:00",
+      "completedAt": "2026-03-21T08:00:42.8318904+00:00",
+      "duration": "00:00:00.0007901",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "seattle-current-weather": {
+      "stepName": "seattle-current-weather",
+      "status": "Failed",
+      "startedAt": "2026-03-20T12:38:53.77407+00:00",
+      "completedAt": "2026-03-21T08:00:42.8307733+00:00",
+      "duration": "19:21:49.0567033",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "orcas-island-tomorrow-forecast": {
+      "stepName": "orcas-island-tomorrow-forecast",
+      "status": "Failed",
+      "startedAt": "2026-03-20T12:38:53.7741164+00:00",
+      "completedAt": "2026-03-21T08:00:42.8306613+00:00",
+      "duration": "19:21:49.0565449",
+      "content": "",
+      "errorMessage": "Cancelled",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    }
+  },
+  "finalContent": ""
+}

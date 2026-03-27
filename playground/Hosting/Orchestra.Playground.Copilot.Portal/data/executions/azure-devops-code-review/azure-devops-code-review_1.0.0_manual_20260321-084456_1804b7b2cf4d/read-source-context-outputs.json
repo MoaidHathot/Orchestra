@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no PR changes to analyze**. The previous step reported:\n\n- **Status**: \u0060no_prs_to_review\u0060\n- **Reason**: No open pull requests found that are assigned to Moaid Hathot as a reviewer and created by other team members\n- **Files**: Empty array \u0060[]\u0060\n\nSince there are no modified files in any PR, I cannot produce a context report. Would you like me to:\n\n1. Check for PRs with different criteria (e.g., all open PRs, or PRs you authored)?\n2. Analyze specific files or recent commits instead?\n3. Something else?",
+  "content": "# No Files to Review\n\nNo open pull requests found that are assigned for review and created by other team members. There are no modified files to analyze.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12344,
+    "outputTokens": 212,
+    "totalTokens": 12556
+  }
+}

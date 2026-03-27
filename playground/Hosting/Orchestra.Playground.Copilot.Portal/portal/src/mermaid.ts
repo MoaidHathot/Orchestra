@@ -14,6 +14,30 @@ function getStepName(step: LooseStep | string): string | undefined {
   return step?.name as string | undefined;
 }
 
+/**
+ * Detect whether an error is caused by a stale dynamic-import chunk
+ * (happens when the app was rebuilt while the page was still open).
+ * Returns user-friendly HTML with a reload button when detected.
+ */
+function renderDagError(err: unknown, container: HTMLElement): void {
+  const msg = (err as Error)?.message ?? String(err);
+  const isStaleImport =
+    /Failed to fetch dynamically imported module/i.test(msg) ||
+    /Loading chunk [\w-]+ failed/i.test(msg) ||
+    /import.*failed/i.test(msg);
+
+  if (isStaleImport) {
+    container.innerHTML =
+      `<div class="empty-state" style="text-align:center">` +
+      `<div class="empty-text" style="margin-bottom:8px">` +
+      `The application has been updated since this page was loaded.</div>` +
+      `<button class="btn btn-sm" onclick="location.reload()">Reload Page</button></div>`;
+  } else {
+    container.innerHTML =
+      `<div class="empty-state"><div class="empty-text">Failed to render DAG: ${msg}</div></div>`;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // renderMermaidDag – renders the DAG for an orchestration *definition*
 // ---------------------------------------------------------------------------
@@ -155,7 +179,10 @@ export async function renderMermaidDag(
     mermaid.initialize({
       startOnLoad: false,
       theme: 'dark',
-      securityLevel: 'loose', // Required for click handlers
+      // 'antiscript' sanitises via DOMPurify but keeps safe HTML (<small>, <br/>) intact.
+      // 'loose' is NOT needed — we attach our own DOM click listeners, not Mermaid's
+      // built-in click directives, so the setClickFun path is irrelevant.
+      securityLevel: 'antiscript',
       themeVariables: {
         primaryColor: '#21262d',
         primaryTextColor: '#e6edf3',
@@ -168,6 +195,31 @@ export async function renderMermaidDag(
 
     const { svg } = await mermaid.render('dag-' + Date.now(), mermaidCode);
     container.innerHTML = svg;
+
+    // Intercept ALL click events inside the container using the capture phase.
+    // If any element (including Mermaid-generated <a> wrappers or foreignObject
+    // content) would trigger a navigation, we block it here.  This is a safety
+    // net that covers every edge-case regardless of Mermaid's internal DOM.
+    container.addEventListener(
+      'click',
+      (e: Event) => {
+        const target = e.target as HTMLElement;
+        // Block navigation from <a> elements inside the SVG
+        const anchor = target.closest?.('a');
+        if (anchor && container.contains(anchor)) {
+          e.preventDefault();
+        }
+      },
+      true, // capture phase — fires BEFORE the node click handlers
+    );
+
+    // Also strip href/xlink:href from any <a> elements as a belt-and-suspenders
+    // approach — even though 'antiscript' mode should not generate navigable links.
+    const svgAnchors = container.querySelectorAll('svg a');
+    svgAnchors.forEach((a) => {
+      a.removeAttribute('href');
+      a.removeAttribute('xlink:href');
+    });
 
     // Add click handlers to nodes
     if (onNodeClick) {
@@ -183,6 +235,7 @@ export async function renderMermaidDag(
           if (stepName) {
             (node as HTMLElement).style.cursor = 'pointer';
             node.addEventListener('click', (e) => {
+              e.preventDefault();
               e.stopPropagation();
               onNodeClick(stepName);
             });
@@ -207,7 +260,7 @@ export async function renderMermaidDag(
     }
   } catch (err) {
     console.error('Mermaid render error:', err);
-    container.innerHTML = `<div class="empty-state"><div class="empty-text">Failed to render DAG: ${(err as Error).message}</div></div>`;
+    renderDagError(err, container);
   }
 }
 
@@ -392,7 +445,7 @@ export async function renderExecutionDag(
     mermaid.initialize({
       startOnLoad: false,
       theme: 'dark',
-      securityLevel: 'loose',
+      securityLevel: 'antiscript',
       themeVariables: {
         primaryColor: '#21262d',
         primaryTextColor: '#e6edf3',
@@ -405,6 +458,27 @@ export async function renderExecutionDag(
 
     const { svg } = await mermaid.render('exec-dag-' + Date.now(), mermaidCode);
     container.innerHTML = svg;
+
+    // Capture-phase interceptor — block any accidental navigation from within
+    // the SVG (e.g. <a> wrappers, foreignObject links, etc.)
+    container.addEventListener(
+      'click',
+      (e: Event) => {
+        const target = e.target as HTMLElement;
+        const anchor = target.closest?.('a');
+        if (anchor && container.contains(anchor)) {
+          e.preventDefault();
+        }
+      },
+      true,
+    );
+
+    // Belt-and-suspenders: strip href/xlink:href from any <a> elements
+    const svgAnchors = container.querySelectorAll('svg a');
+    svgAnchors.forEach((a) => {
+      a.removeAttribute('href');
+      a.removeAttribute('xlink:href');
+    });
 
     // Add click handlers to nodes
     if (onNodeClick) {
@@ -429,6 +503,7 @@ export async function renderExecutionDag(
             }
 
             node.addEventListener('click', (e) => {
+              e.preventDefault();
               e.stopPropagation();
               onNodeClick(stepName);
             });
@@ -455,6 +530,6 @@ export async function renderExecutionDag(
     }
   } catch (err) {
     console.error('Mermaid render error:', err);
-    container.innerHTML = `<div class="empty-state"><div class="empty-text">Failed to render DAG: ${(err as Error).message}</div></div>`;
+    renderDagError(err, container);
   }
 }

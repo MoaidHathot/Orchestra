@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no PR changes to analyze**. The status indicates:\n\n- **Status**: \u0060no_prs_available\u0060\n- **Message**: No open pull requests are currently assigned to Moaid Hathot for review\n- **Files**: Empty array \u0060[]\u0060\n\nSince there are no modified files in the PR diff, I cannot produce a context report. \n\n**Options:**\n1. If you have a specific PR number, provide it and I can fetch the changes\n2. If you want to review a local branch diff instead, let me know the branch names (e.g., \u0060feature-branch\u0060 vs \u0060main\u0060)\n3. If you have uncommitted changes to review, I can analyze those with \u0060git diff\u0060",
+  "content": "No files with logic changes to report.\n\nThe PR context indicates no open pull requests are currently available for review, and no modified files are present in the diff.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12313,
+    "outputTokens": 231,
+    "totalTokens": 12544
+  }
+}

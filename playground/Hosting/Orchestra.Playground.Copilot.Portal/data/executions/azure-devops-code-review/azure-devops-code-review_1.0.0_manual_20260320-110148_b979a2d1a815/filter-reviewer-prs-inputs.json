@@ -1,0 +1,6 @@
+{
+  "parameters": {},
+  "rawDependencyOutputs": {
+    "fetch-open-prs": "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060."
+  }
+}

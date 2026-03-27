@@ -1,0 +1,10 @@
+{
+  "rawContent": "## Work Item Context Summary\n\n**Status:** No work items to retrieve\n\nThe PR context indicates:\n- **No open pull requests** are currently waiting for review\n- **No linked Work Items** (\u0060linkedWorkItemIds: []\u0060 is empty)\n- **Review not required** at this time\n\nSince there are no PRs pending review and no linked work items, there is nothing to fetch or summarize. When a PR with linked work items becomes available, I can retrieve the work item details (title, description, acceptance criteria, state) and provide a comprehensive context summary for code review.",
+  "content": "## Code Review Context\n\n**Summary:** No active work items or pull requests linked to this change.\n\nThere are currently no pending PRs requiring review and no linked work items providing business context. The review context will be available once a PR with associated work items is submitted.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12451,
+    "outputTokens": 126,
+    "totalTokens": 12577
+  }
+}

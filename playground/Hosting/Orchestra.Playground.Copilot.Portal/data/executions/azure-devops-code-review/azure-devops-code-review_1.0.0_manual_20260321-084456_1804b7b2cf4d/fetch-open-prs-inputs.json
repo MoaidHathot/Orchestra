@@ -1,0 +1,5 @@
+{
+  "parameters": {},
+  "rawDependencyOutputs": {},
+  "promptSent": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have \u0027Moaid Hathot\u0027 as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author\u0027s display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation."
+}

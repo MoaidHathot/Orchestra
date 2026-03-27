@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no PR changes to analyze**. The previous step indicates:\n\n- **Status**: \u0060no_prs_to_review\u0060\n- **Files**: Empty array \u0060[]\u0060\n- **Message**: No pull requests found that require review - either there are no open PRs assigned to Moaid Hathot as a reviewer, or all assigned PRs were created by Moaid Hathot himself.\n\n**Context Report**: N/A - No modified files to examine since there are no PRs pending review.",
+  "content": "No files with logic changes to review.\n\n**Status**: No pull requests found that require review. Either there are no open PRs assigned to Moaid Hathot as a reviewer, or all assigned PRs were created by Moaid Hathot himself.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12364,
+    "outputTokens": 187,
+    "totalTokens": 12551
+  }
+}

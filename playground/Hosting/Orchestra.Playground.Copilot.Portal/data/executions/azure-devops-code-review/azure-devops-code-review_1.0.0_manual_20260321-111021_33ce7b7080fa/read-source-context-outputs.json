@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no pull requests currently waiting for review**. The PR fetch returned:\n\n- **Status**: \u0060no_prs_found\u0060\n- **Files**: Empty array \u0060[]\u0060\n- **Message**: No pull requests are currently waiting for Moaid Hathot\u0027s review\n\nSince there are no modified files in any PR diff, there\u0027s nothing to analyze for surrounding context. The review process should be skipped.\n\n**Would you like me to:**\n1. Check for any open PRs in the repository (regardless of reviewer assignment)?\n2. Analyze a specific branch or commit instead?\n3. Review recent changes in the working directory?",
+  "content": "No files to review - no pull requests are currently waiting for review.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12343,
+    "outputTokens": 221,
+    "totalTokens": 12564
+  }
+}

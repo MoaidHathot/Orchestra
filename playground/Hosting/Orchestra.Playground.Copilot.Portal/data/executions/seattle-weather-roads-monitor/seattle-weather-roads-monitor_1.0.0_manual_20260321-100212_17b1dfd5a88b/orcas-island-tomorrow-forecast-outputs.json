@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the National Weather Service forecast for Orcas Island, Washington, here\u0027s **tomorrow\u0027s (Sunday, March 22nd) weather forecast**:\n\n## **Tomorrow - Sunday**\n\n**Temperature:** High and low temperatures not specified in marine format, but conditions indicate mild spring weather\n\n**Precipitation:** Chance of rain before 11am\n\n**Wind Conditions:** Variable winds 5 knots or less (very light, excellent for island travel)\n\n**Marine Conditions:** Waves 1 foot or less (calm seas, ideal for ferry travel and boating)\n\n**Summary:** Tomorrow will start with a chance of rain in the morning (ending by 11am), followed by mostly cloudy skies. Wind conditions are exceptionally calm with variable winds under 5 knots, making it an excellent day for island travel via ferry or boat. The marine conditions are very favorable with minimal wave action (1 ft or less).\n\n**Note:** The forecast appears to be using the marine format which focuses on wind speeds in knots and wave heights rather than standard temperature readings. For more detailed temperature information, you may want to check weather.com or contact the National Weather Service Seattle office directly at (206) 526-6087.",
+  "content": "**Orcas Island Weather - Sunday, March 22nd**\n\nMorning rain clearing by 11am, followed by mostly cloudy skies. Mild spring temperatures expected.\n\n**Ferry \u0026 Marine Travel:** Excellent conditions. Variable winds under 5 knots with waves 1 foot or less\u2014calm seas ideal for all water transport.\n\n**Outdoor Activities:** Morning activities may require rain gear. Afternoon favorable for hiking, kayaking, and exploring with minimal wind. Light layers recommended.\n\n**Bottom Line:** Perfect day for island visitors and ferry travelers. Light morning showers won\u0027t impact plans significantly.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 19891,
+    "outputTokens": 265,
+    "totalTokens": 20156
+  }
+}

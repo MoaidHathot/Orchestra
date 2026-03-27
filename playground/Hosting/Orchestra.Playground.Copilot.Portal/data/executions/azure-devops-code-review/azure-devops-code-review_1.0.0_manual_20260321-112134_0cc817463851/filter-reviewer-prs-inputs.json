@@ -1,0 +1,6 @@
+{
+  "parameters": {},
+  "rawDependencyOutputs": {
+    "fetch-open-prs": "I don\u0027t have access to Azure DevOps MCP tools, and this repository is hosted on GitHub (not Azure DevOps). The git remote points to \u0060https://github.com/MoaidHathot/Orchestra.git\u0060.\n\nTo query Azure DevOps pull requests, I would need either:\n1. Azure DevOps MCP tools (not available in this environment)\n2. The Azure DevOps organization URL and project name configured\n\nPlease provide:\n- The Azure DevOps organization URL (e.g., \u0060https://dev.azure.com/YourOrg\u0060)\n- The project name\n- Or confirm if you meant to query GitHub pull requests instead"
+  }
+}

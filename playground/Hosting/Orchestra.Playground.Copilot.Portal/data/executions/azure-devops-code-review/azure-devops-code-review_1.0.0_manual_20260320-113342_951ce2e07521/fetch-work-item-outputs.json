@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no pull requests to review** and consequently **no linked Work Items to fetch**.\n\n## Context Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_to_review\u0060 |\n| **PR ID** | None |\n| **Linked Work Items** | None (empty array) |\n\n### Analysis\n\nThe workflow has determined that:\n1. There are no open PRs assigned to Moaid Hathot as a reviewer, OR\n2. All assigned PRs were created by Moaid Hathot himself (self-authored PRs are excluded from review)\n\n### Recommendation\n\n**No action required.** The review process should be skipped as there are no PRs from other team members waiting for review.\n\n---\n\nIf you expected PRs to be available, you may want to:\n- Check if there are pending PRs in Azure DevOps that haven\u0027t been assigned to the reviewer\n- Verify the repository and project filters in the PR fetching step\n- Confirm that team members have created PRs requiring review",
+  "content": "## Context Summary for Code Review\n\n**Status: No PRs Available for Review**\n\nThe automated PR review workflow found no pull requests requiring attention. This occurs when either:\n\n1. No open PRs are currently assigned to the reviewer (Moaid Hathot)\n2. All assigned PRs are self-authored and automatically excluded from the review queue\n\n**Action Required:** None. The review cycle can be skipped.\n\nIf PRs were expected, verify Azure DevOps assignments and repository/project filters are configured correctly.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12335,
+    "outputTokens": 346,
+    "totalTokens": 12681
+  }
+}

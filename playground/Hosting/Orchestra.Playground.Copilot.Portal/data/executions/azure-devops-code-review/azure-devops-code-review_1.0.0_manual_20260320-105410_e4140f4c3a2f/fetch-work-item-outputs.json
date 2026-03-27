@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no pull requests** currently waiting for review, and consequently **no linked Work Items** to fetch.\n\n## Context Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **PR ID** | None |\n| **Linked Work Items** | None (empty array) |\n\n### What This Means\n\n1. **No Feature/Bug to Address**: There is no active PR from other team members awaiting Moaid Hathot\u0027s review at this time.\n\n2. **No Acceptance Criteria**: With no linked Work Items, there are no requirements or acceptance criteria to retrieve.\n\n3. **No Design Decisions**: No Work Item context is available to summarize.\n\n### Recommendation\n\nThe review workflow should be **skipped** for this iteration. When a PR becomes available with linked Work Items (e.g., \u0060linkedWorkItemIds: [12345, 67890]\u0060), I can:\n- Delegate to the \u0060work-item-fetcher\u0060 subagent to retrieve each Work Item\u0027s details\n- Synthesize the requirements, acceptance criteria, and design context\n- Provide a comprehensive summary for code review\n\nWould you like me to check for PRs again, or is there another task I can help with?",
+  "content": "## Review Context Summary\n\n**Status**: No active pull requests awaiting review.\n\nThere are currently no PRs pending review, which means:\n- No code changes to evaluate\n- No linked Work Items with requirements or acceptance criteria\n- No design decisions or feature context to consider\n\n**Action**: Skip this review cycle. Re-check when a PR with linked Work Items becomes available.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12299,
+    "outputTokens": 407,
+    "totalTokens": 12706
+  }
+}

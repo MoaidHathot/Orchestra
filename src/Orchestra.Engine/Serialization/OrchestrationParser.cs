@@ -11,7 +11,8 @@ public static class OrchestrationParser
 	private static readonly StepTypeParserRegistry s_defaultParserRegistry = new StepTypeParserRegistry()
 		.Register(new PromptStepTypeParser())
 		.Register(new HttpStepTypeParser())
-		.Register(new TransformStepTypeParser());
+		.Register(new TransformStepTypeParser())
+		.Register(new CommandStepTypeParser());
 
 	private static readonly JsonSerializerOptions s_options = CreateOptions(s_defaultParserRegistry);
 
@@ -24,7 +25,8 @@ public static class OrchestrationParser
 		return new StepTypeParserRegistry()
 			.Register(new PromptStepTypeParser())
 			.Register(new HttpStepTypeParser())
-			.Register(new TransformStepTypeParser());
+			.Register(new TransformStepTypeParser())
+			.Register(new CommandStepTypeParser());
 	}
 
 	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry)

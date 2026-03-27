@@ -1,0 +1,10 @@
+{
+  "rawContent": "I cannot complete this request. The repository\u0027s git remote points to GitHub (https://github.com/MoaidHathot/Orchestra.git), not Azure DevOps. To query Azure DevOps pull requests, I need either:\n\n1. An Azure DevOps organization URL configured (e.g., \u0060https://dev.azure.com/YourOrganization/\u0060)\n2. A project name\n3. Optionally a repository name\n\nPlease provide the Azure DevOps organization URL and project name so I can query the pull requests.",
+  "content": "[]",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 14328,
+    "outputTokens": 122,
+    "totalTokens": 14450
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no pull requests to review** and therefore **no linked Work Items to fetch**.\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_to_review\u0060 |\n| **PR ID** | None |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\n**No action required.** The pipeline indicates:\n- No open pull requests are currently assigned to Moaid Hathot for review\n- No PRs were created by other team members that need attention\n- The \u0060linkedWorkItemIds\u0060 array is empty, so there are no Work Items to retrieve\n\nThe review process should be skipped for this iteration.",
+  "content": "## Context Summary for Code Review\n\n**Status: No Active Pull Requests**\n\nThere are currently no pull requests requiring review. The pipeline found:\n- No open PRs assigned for review\n- No PRs created by team members needing attention\n- No linked Work Items\n\n**Action:** Skip this review iteration. No code changes to evaluate.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12292,
+    "outputTokens": 288,
+    "totalTokens": 12580
+  }
+}

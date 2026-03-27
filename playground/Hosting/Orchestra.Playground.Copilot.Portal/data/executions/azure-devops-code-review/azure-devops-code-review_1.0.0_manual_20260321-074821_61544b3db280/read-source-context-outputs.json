@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no PR changes to analyze**. The previous step indicates:\n\n- **Status**: \u0060no_prs_to_review\u0060\n- **Message**: No open pull requests found that are assigned to Moaid Hathot for review and created by other team members.\n- **Files**: Empty array \u0060[]\u0060\n\nSince there are no modified files in any PR, there\u0027s nothing to read or produce a context report for. The review process should be skipped.",
+  "content": "No files with logic changes to report.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12334,
+    "outputTokens": 183,
+    "totalTokens": 12517
+  }
+}

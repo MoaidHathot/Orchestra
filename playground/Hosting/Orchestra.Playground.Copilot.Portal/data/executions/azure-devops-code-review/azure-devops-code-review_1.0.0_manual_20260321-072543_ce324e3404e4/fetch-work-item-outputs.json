@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no pull requests available** to process:\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_available\u0060 |\n| **PR ID** | \u0060null\u0060 |\n| **Linked Work Items** | \u0060[]\u0060 (empty) |\n\n## Summary\n\nNo work items can be fetched because:\n1. No open pull requests are currently assigned to Moaid Hathot for review\n2. The \u0060linkedWorkItemIds\u0060 array is empty\n\n**Next steps:** Wait for a PR to be assigned, or check if there are PRs in a different state (draft, approved, etc.) that should be reviewed.",
+  "content": "## Context Summary for Code Review\n\n**Status:** No pull requests available for review.\n\nThere are currently no open pull requests assigned to the reviewer. The system found no PR data to process and no linked work items to provide context.\n\n**Action Required:** No code review needed at this time. Check back when a PR is assigned or verify if there are PRs in other states (draft, approved) that require attention.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12436,
+    "outputTokens": 157,
+    "totalTokens": 12593
+  }
+}

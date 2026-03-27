@@ -1,0 +1,564 @@
+{
+  "runId": "b979a2d1a815",
+  "orchestrationName": "azure-devops-code-review",
+  "startedAt": "2026-03-20T11:01:48.2888145+00:00",
+  "completedAt": "2026-03-20T11:03:25.563443+00:00",
+  "duration": "00:01:37.2746285",
+  "status": "Failed",
+  "orchestrationVersion": "1.0.0",
+  "triggeredBy": "manual",
+  "parameters": {},
+  "stepRecords": {
+    "fetch-work-item": {
+      "stepName": "fetch-work-item",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:02:55.0350334+00:00",
+      "completedAt": "2026-03-20T11:03:10.5114033+00:00",
+      "duration": "00:00:15.4763699",
+      "content": "## Code Review Context Summary\n\n**Status:** No pull requests available for review.\n\nNo open pull requests are currently assigned to Moaid Hathot. There are no associated work items, feature requirements, or design decisions to provide context for.\n\nTo proceed, either have a PR assigned for review or specify a particular PR ID to analyze directly.",
+      "rawContent": "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "fetch-pr-changes": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review."
+      },
+      "promptSent": "The PR details are:\n\n{{fetch-pr-changes.output}}\n\nExtract the linkedWorkItemIds from the PR data above. For each linked Work Item, use the work-item-fetcher subagent to retrieve its details (title, description, acceptance criteria, state). Then produce a unified context summary that explains: 1) What feature or bug this PR addresses. 2) The acceptance criteria or requirements. 3) Any relevant design decisions mentioned in the Work Item.\r\n\r\n---\r\nContext from previous steps:\r\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+      "actualModel": "claude-opus-4.5",
+      "usage": {
+        "inputTokens": 12262,
+        "outputTokens": 341,
+        "totalTokens": 12603
+      },
+      "trace": {
+        "systemPrompt": "You are a coordinator that delegates Work Item retrieval to a specialized subagent. Extract the linked Work Item IDs from the PR details and delegate the fetch to the work-item-fetcher subagent. Synthesize the results into a clear context summary that will help a code reviewer understand the requirements behind the PR.",
+        "userPromptRaw": "The PR details are:\n\n{{fetch-pr-changes.output}}\n\nExtract the linkedWorkItemIds from the PR data above. For each linked Work Item, use the work-item-fetcher subagent to retrieve its details (title, description, acceptance criteria, state). Then produce a unified context summary that explains: 1) What feature or bug this PR addresses. 2) The acceptance criteria or requirements. 3) Any relevant design decisions mentioned in the Work Item.",
+        "userPromptProcessed": "The PR details are:\n\n{{fetch-pr-changes.output}}\n\nExtract the linkedWorkItemIds from the PR data above. For each linked Work Item, use the work-item-fetcher subagent to retrieve its details (title, description, acceptance criteria, state). Then produce a unified context summary that explains: 1) What feature or bug this PR addresses. 2) The acceptance criteria or requirements. 3) Any relevant design decisions mentioned in the Work Item.\r\n\r\n---\r\nContext from previous steps:\r\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+        "reasoning": "The user is asking me to extract linked Work Item IDs from the PR details and fetch their information. However, looking at the context provided, the PR fetch returned a status of \u0022no_prs_found\u0022 with no linked work items.\n\nLet me analyze what was provided:\n- status: \u0022no_prs_found\u0022\n- message: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022\n- linkedWorkItemIds: [] (empty array)\n\nSince there are no PRs found and no linked work items, I cannot fetch any work item details. I should inform the user of this situation.",
+        "toolCalls": [],
+        "responseSegments": [
+          "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly"
+        ],
+        "finalResponse": "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly",
+        "outputHandlerResult": "## Code Review Context Summary\n\n**Status:** No pull requests available for review.\n\nNo open pull requests are currently assigned to Moaid Hathot. There are no associated work items, feature requirements, or design decisions to provide context for.\n\nTo proceed, either have a PR assigned for review or specify a particular PR ID to analyze directly."
+      }
+    },
+    "read-source-context": {
+      "stepName": "read-source-context",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:02:55.0350366+00:00",
+      "completedAt": "2026-03-20T11:03:07.8384553+00:00",
+      "duration": "00:00:12.8034187",
+      "content": "No files with logic changes to report.\n\nNo open pull requests were found assigned for review, and therefore no modified files are available for analysis.",
+      "rawContent": "Based on the context provided, there are **no open pull requests** currently assigned for review. The PR fetch returned:\n\n\u0060\u0060\u0060\nStatus: no_prs_found\nMessage: No open pull requests are currently assigned to Moaid Hathot for review.\nFiles: []\n\u0060\u0060\u0060\n\n**No context report can be generated** because there are no modified files in the PR diff to analyze.\n\nIf you\u0027d like me to:\n1. Check for PRs using a different filter (e.g., all open PRs, PRs by a specific author)\n2. Analyze a specific PR by number\n3. Review local uncommitted changes instead\n\nPlease let me know how you\u0027d like to proceed.",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "fetch-pr-changes": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review."
+      },
+      "promptSent": "The PR changes are:\n\n{{fetch-pr-changes.output}}\n\nFor each modified file in the PR diff:\n1. Read the full current version of the file from the local repo (main branch) to understand the baseline.\n2. If the file imports or references other project files (e.g., interfaces, base classes, shared utilities), read those too.\n3. Check if there are corresponding test files and read them.\n\nProduce a context report with: for each modified file, the relevant surrounding code (interfaces implemented, base classes extended, callers of modified methods, and existing test coverage). Keep each file\u0027s context under 200 lines \u2014 focus on the most relevant parts.\r\n\r\n---\r\nContext from previous steps:\r\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+      "actualModel": "claude-opus-4.5",
+      "usage": {
+        "inputTokens": 12312,
+        "outputTokens": 218,
+        "totalTokens": 12530
+      },
+      "trace": {
+        "systemPrompt": "You are a source code exploration assistant. You have filesystem access to the local repository clone. Your job is to read files that are referenced or modified in a PR diff to provide surrounding context \u2014 such as the full class definition, interface contracts, related tests, or configuration that helps a reviewer understand the impact of changes.",
+        "userPromptRaw": "The PR changes are:\n\n{{fetch-pr-changes.output}}\n\nFor each modified file in the PR diff:\n1. Read the full current version of the file from the local repo (main branch) to understand the baseline.\n2. If the file imports or references other project files (e.g., interfaces, base classes, shared utilities), read those too.\n3. Check if there are corresponding test files and read them.\n\nProduce a context report with: for each modified file, the relevant surrounding code (interfaces implemented, base classes extended, callers of modified methods, and existing test coverage). Keep each file\u0027s context under 200 lines \u2014 focus on the most relevant parts.",
+        "userPromptProcessed": "The PR changes are:\n\n{{fetch-pr-changes.output}}\n\nFor each modified file in the PR diff:\n1. Read the full current version of the file from the local repo (main branch) to understand the baseline.\n2. If the file imports or references other project files (e.g., interfaces, base classes, shared utilities), read those too.\n3. Check if there are corresponding test files and read them.\n\nProduce a context report with: for each modified file, the relevant surrounding code (interfaces implemented, base classes extended, callers of modified methods, and existing test coverage). Keep each file\u0027s context under 200 lines \u2014 focus on the most relevant parts.\r\n\r\n---\r\nContext from previous steps:\r\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+        "reasoning": "The user is asking me to analyze PR changes, but the context shows there are no open pull requests found. The PR changes data shows \u0022no_prs_found\u0022 status with empty files array.\n\nI should inform the user that there are no PR changes to analyze.",
+        "toolCalls": [],
+        "responseSegments": [
+          "Based on the context provided, there are **no open pull requests** currently assigned for review. The PR fetch returned:\n\n\u0060\u0060\u0060\nStatus: no_prs_found\nMessage: No open pull requests are currently assigned to Moaid Hathot for review.\nFiles: []\n\u0060\u0060\u0060\n\n**No context report can be generated** because there are no modified files in the PR diff to analyze.\n\nIf you\u0027d like me to:\n1. Check for PRs using a different filter (e.g., all open PRs, PRs by a specific author)\n2. Analyze a specific PR by number\n3. Review local uncommitted changes instead\n\nPlease let me know how you\u0027d like to proceed."
+        ],
+        "finalResponse": "Based on the context provided, there are **no open pull requests** currently assigned for review. The PR fetch returned:\n\n\u0060\u0060\u0060\nStatus: no_prs_found\nMessage: No open pull requests are currently assigned to Moaid Hathot for review.\nFiles: []\n\u0060\u0060\u0060\n\n**No context report can be generated** because there are no modified files in the PR diff to analyze.\n\nIf you\u0027d like me to:\n1. Check for PRs using a different filter (e.g., all open PRs, PRs by a specific author)\n2. Analyze a specific PR by number\n3. Review local uncommitted changes instead\n\nPlease let me know how you\u0027d like to proceed.",
+        "outputHandlerResult": "No files with logic changes to report.\n\nNo open pull requests were found assigned for review, and therefore no modified files are available for analysis."
+      }
+    },
+    "fetch-open-prs": {
+      "stepName": "fetch-open-prs",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:01:48.2907281+00:00",
+      "completedAt": "2026-03-20T11:02:43.2732149+00:00",
+      "duration": "00:00:54.9824868",
+      "content": "[]",
+      "rawContent": "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060.",
+      "parameters": {},
+      "rawDependencyOutputs": {},
+      "promptSent": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have \u0027Moaid Hathot\u0027 as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author\u0027s display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation.",
+      "actualModel": "claude-opus-4.5",
+      "usage": {
+        "inputTokens": 14196,
+        "outputTokens": 183,
+        "totalTokens": 14379
+      },
+      "trace": {
+        "systemPrompt": "You are an Azure DevOps assistant. Your job is to query for active pull requests using the Azure DevOps MCP tools. Return structured data only \u2014 no commentary or explanation. Output valid JSON.",
+        "userPromptRaw": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have \u0027Moaid Hathot\u0027 as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author\u0027s display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation.",
+        "userPromptProcessed": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have \u0027Moaid Hathot\u0027 as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author\u0027s display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation.",
+        "reasoning": "The user wants me to query Azure DevOps for active pull requests where \u0027Moaid Hathot\u0027 is a reviewer. I need to use MCP tools for Azure DevOps. Let me first check what tools are available by exploring the environment.",
+        "toolCalls": [
+          {
+            "callId": "toolu_vrtx_015YLL7e6N4mGRkCw4znGzGh",
+            "toolName": "report_intent",
+            "arguments": "{\u0022intent\u0022:\u0022Querying Azure DevOps PRs\u0022}",
+            "success": true,
+            "result": "Intent logged",
+            "startedAt": "2026-03-20T11:01:57.8129342+00:00",
+            "completedAt": "2026-03-20T11:01:57.8175687+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01FKTd7ACyYHoQWDpYkj9tv1",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022Get-ChildItem Env: | Where-Object { $_.Name -like \\u0022*AZURE*\\u0022 -or $_.Name -like \\u0022*ADO*\\u0022 -or $_.Name -like \\u0022*DEVOPS*\\u0022 } | Format-Table -AutoSize\u0022,\u0022description\u0022:\u0022Check for Azure DevOps environment variables\u0022}",
+            "success": true,
+            "result": "Name                                         Value\n----                                         -----\nMEMORYBANK_MEMORYBANK__AZUREOPENAI__APIKEY   REDACTED_AZURE_OPENAI_KEY\u2026\nMEMORYBANK_MEMORYBANK__AZUREOPENAI__ENDPOINT https://memoryexchangeembeddings.openai.azure.com/\nMEMORYBANK_MEMORYBANK__AZURESEARCH__APIKEY   REDACTED_AZURE_SEARCH_KEY\nMEMORYBANK_MEMORYBANK__AZURESEARCH__ENDPOINT https://memory-exchange-search.search.windows.net\nMSBuildLoadMicrosoftTargetsReadOnly          true\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:01:57.813022+00:00",
+            "completedAt": "2026-03-20T11:01:59.3330075+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01K58zJNvC4Ketum9nn8kVyo",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Check if there\\u0027s an Azure DevOps CLI or MCP server available\\naz devops --help 2\\u003E$null; if ($LASTEXITCODE -ne 0) { \\u0022Azure CLI DevOps extension not found or not working\\u0022 }\u0022,\u0022description\u0022:\u0022Check Azure DevOps CLI availability\u0022}",
+            "success": true,
+            "result": "Group\n    az devops : Manage Azure DevOps organization level operations.\n        Related Groups\n        az pipelines: Manage Azure Pipelines\n        az boards: Manage Azure Boards\n        az repos: Manage Azure Repos\n        az artifacts: Manage Azure Artifacts.\n\nSubgroups:\n    admin            : Manage administration operations.\n    extension        : Manage extensions.\n    project          : Manage team projects.\n    security         : Manage security related operations.\n    service-endpoint : Manage service endpoints/connections.\n    team             : Manage teams.\n    user             : Manage users.\n    wiki             : Manage wikis.\n\nCommands:\n    configure        : Configure the Azure DevOps CLI or view your configuration.\n    invoke           : This command will invoke request for any DevOps area and resource. Please use\n                       only json output as the response of this command is not fixed. Helpful docs -\n                       https://docs.microsoft.com/en-us/rest/api/azure/devops/.\n    login            : Set the credential (PAT) to use for a particular organization.\n    logout           : Clear the credential for all or a particular organization.\n\nTo search AI knowledge base for examples, use: az find \u0022az devops\u0022\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:03.2622423+00:00",
+            "completedAt": "2026-03-20T11:02:07.0771417+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_013cSh7Mi1K6Zf8ELQ6n2dix",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Get default organization and project\\naz devops configure --list 2\\u003E$null\u0022,\u0022description\u0022:\u0022Check Azure DevOps default config\u0022}",
+            "success": true,
+            "result": "Use git alias = No\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:09.3349197+00:00",
+            "completedAt": "2026-03-20T11:02:11.4512273+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_019vpmXE9iKe6HxdCYVhNb2U",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Try to get organization from git remote\\ngit remote -v 2\\u003E$null | Select-String \\u0022azure\\u0022 -SimpleMatch\u0022,\u0022description\u0022:\u0022Check git remote for Azure DevOps\u0022}",
+            "success": true,
+            "result": "\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:13.6027325+00:00",
+            "completedAt": "2026-03-20T11:02:14.6201047+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01CL118LXCYv1rAnYKDDNRPr",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Check git remote\\ngit remote -v\u0022,\u0022description\u0022:\u0022List git remotes\u0022}",
+            "success": true,
+            "result": "origin  https://github.com/MoaidHathot/Orchestra.git (fetch)\norigin  https://github.com/MoaidHathot/Orchestra.git (push)\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:16.1090995+00:00",
+            "completedAt": "2026-03-20T11:02:17.0275568+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01B5FYKHFoTBNLY1YYBC4cmv",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# List PRs using Azure DevOps CLI - need to find organization/project first\\n# Let\\u0027s check if there\\u0027s environment variables or config for this\\nGet-ChildItem Env: | Where-Object { $_.Name -like \\u0022*ORG*\\u0022 -or $_.Name -like \\u0022*PROJECT*\\u0022 } | Format-Table -AutoSize\u0022,\u0022description\u0022:\u0022Check for org/project env vars\u0022}",
+            "success": true,
+            "result": "\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:20.1736488+00:00",
+            "completedAt": "2026-03-20T11:02:21.2837437+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01H6rK8DZkdUcnzvityVnGQ5",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Let\\u0027s check what MCP servers might be available - looking for Azure DevOps related config\\nGet-ChildItem -Path \\u0022$env:USERPROFILE\\\\.copilot\\u0022 -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like \\u0022*mcp*\\u0022 -or $_.Name -like \\u0022*azure*\\u0022 -or $_.Name -like \\u0022*devops*\\u0022 } | Select-Object FullName\u0022,\u0022description\u0022:\u0022Look for MCP config files\u0022}",
+            "success": true,
+            "result": "FullName\n--------\nC:\\Users\\moaid\\.copilot\\mcp-config.json\nC:\\Users\\moaid\\.copilot\\installed-plugins\\copilot-plugins\\workiq\\.mcp.json\nC:\\Users\\moaid\\.copilot\\marketplace-cache\\github-copilot-plugins\\plugins\\workiq\\.mcp.json\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:24.5170266+00:00",
+            "completedAt": "2026-03-20T11:02:31.2151706+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_012QVYNg8kp45zWhvWz9JZs2",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022Get-Content \\u0022$env:USERPROFILE\\\\.copilot\\\\mcp-config.json\\u0022 | ConvertFrom-Json | ConvertTo-Json -Depth 10\u0022,\u0022description\u0022:\u0022Read MCP config\u0022}",
+            "success": true,
+            "result": "{\n  \u0022mcpServers\u0022: {\n    \u0022graph\u0022: {\n      \u0022command\u0022: \u0022dotnet\u0022,\n      \u0022args\u0022: [\n        \u0022run\u0022,\n        \u0022--project\u0022,\n        \u0022src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj\u0022\n      ],\n      \u0022cwd\u0022: \u0022P:/Github/Orchestra\u0022\n    }\n  }\n}\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:33.0452138+00:00",
+            "completedAt": "2026-03-20T11:02:34.1724945+00:00"
+          }
+        ],
+        "responseSegments": [
+          "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060."
+        ],
+        "finalResponse": "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060.",
+        "outputHandlerResult": "[]"
+      }
+    },
+    "post-review-status": {
+      "stepName": "post-review-status",
+      "status": "Skipped",
+      "startedAt": "2026-03-20T11:03:25.5607205+00:00",
+      "completedAt": "2026-03-20T11:03:25.5609175+00:00",
+      "duration": "00:00:00.0001970",
+      "content": "",
+      "errorMessage": "Skipped because dependencies failed or were skipped: [format-result]",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "quality-check": {
+      "stepName": "quality-check",
+      "status": "Skipped",
+      "startedAt": "2026-03-20T11:03:25.5594553+00:00",
+      "completedAt": "2026-03-20T11:03:25.5605388+00:00",
+      "duration": "00:00:00.0010835",
+      "content": "",
+      "errorMessage": "Skipped because dependencies failed or were skipped: [review-code]",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "review-code": {
+      "stepName": "review-code",
+      "status": "Failed",
+      "startedAt": "2026-03-20T11:03:10.51156+00:00",
+      "completedAt": "2026-03-20T11:03:25.5594242+00:00",
+      "duration": "00:00:15.0478642",
+      "content": "",
+      "errorMessage": "Communication error with Copilot CLI: Request session.create failed with message: Model \u0027claude-opus-4.5\u0027 does not support reasoning effort configuration. Use models.list to check which models support reasoning effort.",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "fetch-pr-changes": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review.",
+        "fetch-work-item": "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly",
+        "read-source-context": "Based on the context provided, there are **no open pull requests** currently assigned for review. The PR fetch returned:\n\n\u0060\u0060\u0060\nStatus: no_prs_found\nMessage: No open pull requests are currently assigned to Moaid Hathot for review.\nFiles: []\n\u0060\u0060\u0060\n\n**No context report can be generated** because there are no modified files in the PR diff to analyze.\n\nIf you\u0027d like me to:\n1. Check for PRs using a different filter (e.g., all open PRs, PRs by a specific author)\n2. Analyze a specific PR by number\n3. Review local uncommitted changes instead\n\nPlease let me know how you\u0027d like to proceed."
+      },
+      "trace": {
+        "systemPrompt": "You are a senior code reviewer coordinating a thorough pull request review. You have access to the PR diff, the Work Item context (requirements), and the surrounding source code context. You coordinate with specialized subagents for security and code quality analysis, then synthesize all findings into a comprehensive review.\n\nYour review must cover:\n1. Correctness \u2014 Does the code do what the Work Item requires?\n2. Security \u2014 Are there vulnerabilities, injection risks, or auth issues?\n3. Code quality \u2014 Naming, structure, SOLID principles, readability\n4. Performance \u2014 Unnecessary allocations, N\u002B1 queries, blocking calls\n5. Testing \u2014 Are changes adequately tested?\n6. Architecture \u2014 Does the change fit the existing patterns?\n\nBe specific: reference file paths and line numbers. Distinguish between blocking issues (must fix) and suggestions (nice to have).",
+        "userPromptRaw": "Review this pull request:\n\n## PR Changes\n{{fetch-pr-changes.output}}\n\n## Work Item Context\n{{fetch-work-item.output}}\n\n## Source Code Context\n{{read-source-context.output}}\n\nPerform a thorough code review. Delegate security analysis to the security-reviewer subagent and code quality analysis to the quality-reviewer subagent. Combine their findings with your own analysis of correctness, performance, testing, and architecture.\n\nProduce a review with:\n1. An executive summary (2-3 sentences)\n2. A list of review comments, each with: file, line (if applicable), severity (blocking | suggestion | nitpick), category (security | quality | correctness | performance | testing | architecture), and the comment text\n3. A recommended status: \u0027approved\u0027 if no blocking issues, \u0027approved-with-suggestions\u0027 if only suggestions/nitpicks, \u0027waiting-for-author\u0027 if there are blocking issues\n\nReturn the review as JSON with fields: summary, comments (array), status.",
+        "toolCalls": [],
+        "responseSegments": []
+      }
+    },
+    "filter-reviewer-prs": {
+      "stepName": "filter-reviewer-prs",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:02:43.2783176+00:00",
+      "completedAt": "2026-03-20T11:02:43.2825133+00:00",
+      "duration": "00:00:00.0041957",
+      "content": "The following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR.",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "fetch-open-prs": "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060."
+      }
+    },
+    "format-result": {
+      "stepName": "format-result",
+      "status": "Skipped",
+      "startedAt": "2026-03-20T11:03:25.5605574+00:00",
+      "completedAt": "2026-03-20T11:03:25.5607079+00:00",
+      "duration": "00:00:00.0001505",
+      "content": "",
+      "errorMessage": "Skipped because dependencies failed or were skipped: [review-code, quality-check]",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "fetch-pr-changes": {
+      "stepName": "fetch-pr-changes",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:02:43.2826171+00:00",
+      "completedAt": "2026-03-20T11:02:55.0349647+00:00",
+      "duration": "00:00:11.7523476",
+      "content": "\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+      "rawContent": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review.",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "filter-reviewer-prs": "The following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR."
+      },
+      "promptSent": "From the filtered PR list below, select the most recently created PR (by creationDate):\n\n{{filter-reviewer-prs.output}}\n\nFor that PR:\n1. Fetch the complete diff / file changes (all modified, added, and deleted files with their content changes).\n2. Fetch any existing review comments or discussion threads on the PR.\n3. Fetch the PR description and any linked work item IDs.\n\nReturn the results as structured JSON with fields: prId, prTitle, author, description, linkedWorkItemIds (array of integers), files (array of {path, changeType, diff}), existingComments (array of {author, content, file, line}).\r\n\r\n---\r\nContext from previous steps:\r\nThe following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR.",
+      "actualModel": "claude-opus-4.5",
+      "usage": {
+        "inputTokens": 12307,
+        "outputTokens": 277,
+        "totalTokens": 12584
+      },
+      "trace": {
+        "systemPrompt": "You are an Azure DevOps assistant specialized in retrieving pull request details. You have access to Azure DevOps MCP tools to fetch PR diffs, comments, and metadata. Be thorough \u2014 retrieve the full diff so the reviewer has complete context.",
+        "userPromptRaw": "From the filtered PR list below, select the most recently created PR (by creationDate):\n\n{{filter-reviewer-prs.output}}\n\nFor that PR:\n1. Fetch the complete diff / file changes (all modified, added, and deleted files with their content changes).\n2. Fetch any existing review comments or discussion threads on the PR.\n3. Fetch the PR description and any linked work item IDs.\n\nReturn the results as structured JSON with fields: prId, prTitle, author, description, linkedWorkItemIds (array of integers), files (array of {path, changeType, diff}), existingComments (array of {author, content, file, line}).",
+        "userPromptProcessed": "From the filtered PR list below, select the most recently created PR (by creationDate):\n\n{{filter-reviewer-prs.output}}\n\nFor that PR:\n1. Fetch the complete diff / file changes (all modified, added, and deleted files with their content changes).\n2. Fetch any existing review comments or discussion threads on the PR.\n3. Fetch the PR description and any linked work item IDs.\n\nReturn the results as structured JSON with fields: prId, prTitle, author, description, linkedWorkItemIds (array of integers), files (array of {path, changeType, diff}), existingComments (array of {author, content, file, line}).\r\n\r\n---\r\nContext from previous steps:\r\nThe following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR.",
+        "reasoning": "The user is asking me to select the most recently created PR from a filtered list of PRs assigned to Moaid Hathot as a reviewer. However, looking at the context provided, the list of open PRs is empty: \u0060[]\u0060\n\nSince there are no PRs in the list, there\u0027s nothing to process. I should return an appropriate response indicating that no PRs are available for review.",
+        "toolCalls": [],
+        "responseSegments": [
+          "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review."
+        ],
+        "finalResponse": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review.",
+        "outputHandlerResult": "\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060"
+      }
+    }
+  },
+  "allStepRecords": {
+    "fetch-work-item": {
+      "stepName": "fetch-work-item",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:02:55.0350334+00:00",
+      "completedAt": "2026-03-20T11:03:10.5114033+00:00",
+      "duration": "00:00:15.4763699",
+      "content": "## Code Review Context Summary\n\n**Status:** No pull requests available for review.\n\nNo open pull requests are currently assigned to Moaid Hathot. There are no associated work items, feature requirements, or design decisions to provide context for.\n\nTo proceed, either have a PR assigned for review or specify a particular PR ID to analyze directly.",
+      "rawContent": "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "fetch-pr-changes": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review."
+      },
+      "promptSent": "The PR details are:\n\n{{fetch-pr-changes.output}}\n\nExtract the linkedWorkItemIds from the PR data above. For each linked Work Item, use the work-item-fetcher subagent to retrieve its details (title, description, acceptance criteria, state). Then produce a unified context summary that explains: 1) What feature or bug this PR addresses. 2) The acceptance criteria or requirements. 3) Any relevant design decisions mentioned in the Work Item.\r\n\r\n---\r\nContext from previous steps:\r\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+      "actualModel": "claude-opus-4.5",
+      "usage": {
+        "inputTokens": 12262,
+        "outputTokens": 341,
+        "totalTokens": 12603
+      },
+      "trace": {
+        "systemPrompt": "You are a coordinator that delegates Work Item retrieval to a specialized subagent. Extract the linked Work Item IDs from the PR details and delegate the fetch to the work-item-fetcher subagent. Synthesize the results into a clear context summary that will help a code reviewer understand the requirements behind the PR.",
+        "userPromptRaw": "The PR details are:\n\n{{fetch-pr-changes.output}}\n\nExtract the linkedWorkItemIds from the PR data above. For each linked Work Item, use the work-item-fetcher subagent to retrieve its details (title, description, acceptance criteria, state). Then produce a unified context summary that explains: 1) What feature or bug this PR addresses. 2) The acceptance criteria or requirements. 3) Any relevant design decisions mentioned in the Work Item.",
+        "userPromptProcessed": "The PR details are:\n\n{{fetch-pr-changes.output}}\n\nExtract the linkedWorkItemIds from the PR data above. For each linked Work Item, use the work-item-fetcher subagent to retrieve its details (title, description, acceptance criteria, state). Then produce a unified context summary that explains: 1) What feature or bug this PR addresses. 2) The acceptance criteria or requirements. 3) Any relevant design decisions mentioned in the Work Item.\r\n\r\n---\r\nContext from previous steps:\r\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+        "reasoning": "The user is asking me to extract linked Work Item IDs from the PR details and fetch their information. However, looking at the context provided, the PR fetch returned a status of \u0022no_prs_found\u0022 with no linked work items.\n\nLet me analyze what was provided:\n- status: \u0022no_prs_found\u0022\n- message: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022\n- linkedWorkItemIds: [] (empty array)\n\nSince there are no PRs found and no linked work items, I cannot fetch any work item details. I should inform the user of this situation.",
+        "toolCalls": [],
+        "responseSegments": [
+          "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly"
+        ],
+        "finalResponse": "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly",
+        "outputHandlerResult": "## Code Review Context Summary\n\n**Status:** No pull requests available for review.\n\nNo open pull requests are currently assigned to Moaid Hathot. There are no associated work items, feature requirements, or design decisions to provide context for.\n\nTo proceed, either have a PR assigned for review or specify a particular PR ID to analyze directly."
+      }
+    },
+    "read-source-context": {
+      "stepName": "read-source-context",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:02:55.0350366+00:00",
+      "completedAt": "2026-03-20T11:03:07.8384553+00:00",
+      "duration": "00:00:12.8034187",
+      "content": "No files with logic changes to report.\n\nNo open pull requests were found assigned for review, and therefore no modified files are available for analysis.",
+      "rawContent": "Based on the context provided, there are **no open pull requests** currently assigned for review. The PR fetch returned:\n\n\u0060\u0060\u0060\nStatus: no_prs_found\nMessage: No open pull requests are currently assigned to Moaid Hathot for review.\nFiles: []\n\u0060\u0060\u0060\n\n**No context report can be generated** because there are no modified files in the PR diff to analyze.\n\nIf you\u0027d like me to:\n1. Check for PRs using a different filter (e.g., all open PRs, PRs by a specific author)\n2. Analyze a specific PR by number\n3. Review local uncommitted changes instead\n\nPlease let me know how you\u0027d like to proceed.",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "fetch-pr-changes": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review."
+      },
+      "promptSent": "The PR changes are:\n\n{{fetch-pr-changes.output}}\n\nFor each modified file in the PR diff:\n1. Read the full current version of the file from the local repo (main branch) to understand the baseline.\n2. If the file imports or references other project files (e.g., interfaces, base classes, shared utilities), read those too.\n3. Check if there are corresponding test files and read them.\n\nProduce a context report with: for each modified file, the relevant surrounding code (interfaces implemented, base classes extended, callers of modified methods, and existing test coverage). Keep each file\u0027s context under 200 lines \u2014 focus on the most relevant parts.\r\n\r\n---\r\nContext from previous steps:\r\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+      "actualModel": "claude-opus-4.5",
+      "usage": {
+        "inputTokens": 12312,
+        "outputTokens": 218,
+        "totalTokens": 12530
+      },
+      "trace": {
+        "systemPrompt": "You are a source code exploration assistant. You have filesystem access to the local repository clone. Your job is to read files that are referenced or modified in a PR diff to provide surrounding context \u2014 such as the full class definition, interface contracts, related tests, or configuration that helps a reviewer understand the impact of changes.",
+        "userPromptRaw": "The PR changes are:\n\n{{fetch-pr-changes.output}}\n\nFor each modified file in the PR diff:\n1. Read the full current version of the file from the local repo (main branch) to understand the baseline.\n2. If the file imports or references other project files (e.g., interfaces, base classes, shared utilities), read those too.\n3. Check if there are corresponding test files and read them.\n\nProduce a context report with: for each modified file, the relevant surrounding code (interfaces implemented, base classes extended, callers of modified methods, and existing test coverage). Keep each file\u0027s context under 200 lines \u2014 focus on the most relevant parts.",
+        "userPromptProcessed": "The PR changes are:\n\n{{fetch-pr-changes.output}}\n\nFor each modified file in the PR diff:\n1. Read the full current version of the file from the local repo (main branch) to understand the baseline.\n2. If the file imports or references other project files (e.g., interfaces, base classes, shared utilities), read those too.\n3. Check if there are corresponding test files and read them.\n\nProduce a context report with: for each modified file, the relevant surrounding code (interfaces implemented, base classes extended, callers of modified methods, and existing test coverage). Keep each file\u0027s context under 200 lines \u2014 focus on the most relevant parts.\r\n\r\n---\r\nContext from previous steps:\r\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+        "reasoning": "The user is asking me to analyze PR changes, but the context shows there are no open pull requests found. The PR changes data shows \u0022no_prs_found\u0022 status with empty files array.\n\nI should inform the user that there are no PR changes to analyze.",
+        "toolCalls": [],
+        "responseSegments": [
+          "Based on the context provided, there are **no open pull requests** currently assigned for review. The PR fetch returned:\n\n\u0060\u0060\u0060\nStatus: no_prs_found\nMessage: No open pull requests are currently assigned to Moaid Hathot for review.\nFiles: []\n\u0060\u0060\u0060\n\n**No context report can be generated** because there are no modified files in the PR diff to analyze.\n\nIf you\u0027d like me to:\n1. Check for PRs using a different filter (e.g., all open PRs, PRs by a specific author)\n2. Analyze a specific PR by number\n3. Review local uncommitted changes instead\n\nPlease let me know how you\u0027d like to proceed."
+        ],
+        "finalResponse": "Based on the context provided, there are **no open pull requests** currently assigned for review. The PR fetch returned:\n\n\u0060\u0060\u0060\nStatus: no_prs_found\nMessage: No open pull requests are currently assigned to Moaid Hathot for review.\nFiles: []\n\u0060\u0060\u0060\n\n**No context report can be generated** because there are no modified files in the PR diff to analyze.\n\nIf you\u0027d like me to:\n1. Check for PRs using a different filter (e.g., all open PRs, PRs by a specific author)\n2. Analyze a specific PR by number\n3. Review local uncommitted changes instead\n\nPlease let me know how you\u0027d like to proceed.",
+        "outputHandlerResult": "No files with logic changes to report.\n\nNo open pull requests were found assigned for review, and therefore no modified files are available for analysis."
+      }
+    },
+    "fetch-open-prs": {
+      "stepName": "fetch-open-prs",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:01:48.2907281+00:00",
+      "completedAt": "2026-03-20T11:02:43.2732149+00:00",
+      "duration": "00:00:54.9824868",
+      "content": "[]",
+      "rawContent": "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060.",
+      "parameters": {},
+      "rawDependencyOutputs": {},
+      "promptSent": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have \u0027Moaid Hathot\u0027 as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author\u0027s display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation.",
+      "actualModel": "claude-opus-4.5",
+      "usage": {
+        "inputTokens": 14196,
+        "outputTokens": 183,
+        "totalTokens": 14379
+      },
+      "trace": {
+        "systemPrompt": "You are an Azure DevOps assistant. Your job is to query for active pull requests using the Azure DevOps MCP tools. Return structured data only \u2014 no commentary or explanation. Output valid JSON.",
+        "userPromptRaw": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have \u0027Moaid Hathot\u0027 as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author\u0027s display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation.",
+        "userPromptProcessed": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have \u0027Moaid Hathot\u0027 as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author\u0027s display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation.",
+        "reasoning": "The user wants me to query Azure DevOps for active pull requests where \u0027Moaid Hathot\u0027 is a reviewer. I need to use MCP tools for Azure DevOps. Let me first check what tools are available by exploring the environment.",
+        "toolCalls": [
+          {
+            "callId": "toolu_vrtx_015YLL7e6N4mGRkCw4znGzGh",
+            "toolName": "report_intent",
+            "arguments": "{\u0022intent\u0022:\u0022Querying Azure DevOps PRs\u0022}",
+            "success": true,
+            "result": "Intent logged",
+            "startedAt": "2026-03-20T11:01:57.8129342+00:00",
+            "completedAt": "2026-03-20T11:01:57.8175687+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01FKTd7ACyYHoQWDpYkj9tv1",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022Get-ChildItem Env: | Where-Object { $_.Name -like \\u0022*AZURE*\\u0022 -or $_.Name -like \\u0022*ADO*\\u0022 -or $_.Name -like \\u0022*DEVOPS*\\u0022 } | Format-Table -AutoSize\u0022,\u0022description\u0022:\u0022Check for Azure DevOps environment variables\u0022}",
+            "success": true,
+            "result": "Name                                         Value\n----                                         -----\nMEMORYBANK_MEMORYBANK__AZUREOPENAI__APIKEY   REDACTED_AZURE_OPENAI_KEY\u2026\nMEMORYBANK_MEMORYBANK__AZUREOPENAI__ENDPOINT https://memoryexchangeembeddings.openai.azure.com/\nMEMORYBANK_MEMORYBANK__AZURESEARCH__APIKEY   REDACTED_AZURE_SEARCH_KEY\nMEMORYBANK_MEMORYBANK__AZURESEARCH__ENDPOINT https://memory-exchange-search.search.windows.net\nMSBuildLoadMicrosoftTargetsReadOnly          true\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:01:57.813022+00:00",
+            "completedAt": "2026-03-20T11:01:59.3330075+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01K58zJNvC4Ketum9nn8kVyo",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Check if there\\u0027s an Azure DevOps CLI or MCP server available\\naz devops --help 2\\u003E$null; if ($LASTEXITCODE -ne 0) { \\u0022Azure CLI DevOps extension not found or not working\\u0022 }\u0022,\u0022description\u0022:\u0022Check Azure DevOps CLI availability\u0022}",
+            "success": true,
+            "result": "Group\n    az devops : Manage Azure DevOps organization level operations.\n        Related Groups\n        az pipelines: Manage Azure Pipelines\n        az boards: Manage Azure Boards\n        az repos: Manage Azure Repos\n        az artifacts: Manage Azure Artifacts.\n\nSubgroups:\n    admin            : Manage administration operations.\n    extension        : Manage extensions.\n    project          : Manage team projects.\n    security         : Manage security related operations.\n    service-endpoint : Manage service endpoints/connections.\n    team             : Manage teams.\n    user             : Manage users.\n    wiki             : Manage wikis.\n\nCommands:\n    configure        : Configure the Azure DevOps CLI or view your configuration.\n    invoke           : This command will invoke request for any DevOps area and resource. Please use\n                       only json output as the response of this command is not fixed. Helpful docs -\n                       https://docs.microsoft.com/en-us/rest/api/azure/devops/.\n    login            : Set the credential (PAT) to use for a particular organization.\n    logout           : Clear the credential for all or a particular organization.\n\nTo search AI knowledge base for examples, use: az find \u0022az devops\u0022\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:03.2622423+00:00",
+            "completedAt": "2026-03-20T11:02:07.0771417+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_013cSh7Mi1K6Zf8ELQ6n2dix",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Get default organization and project\\naz devops configure --list 2\\u003E$null\u0022,\u0022description\u0022:\u0022Check Azure DevOps default config\u0022}",
+            "success": true,
+            "result": "Use git alias = No\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:09.3349197+00:00",
+            "completedAt": "2026-03-20T11:02:11.4512273+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_019vpmXE9iKe6HxdCYVhNb2U",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Try to get organization from git remote\\ngit remote -v 2\\u003E$null | Select-String \\u0022azure\\u0022 -SimpleMatch\u0022,\u0022description\u0022:\u0022Check git remote for Azure DevOps\u0022}",
+            "success": true,
+            "result": "\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:13.6027325+00:00",
+            "completedAt": "2026-03-20T11:02:14.6201047+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01CL118LXCYv1rAnYKDDNRPr",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Check git remote\\ngit remote -v\u0022,\u0022description\u0022:\u0022List git remotes\u0022}",
+            "success": true,
+            "result": "origin  https://github.com/MoaidHathot/Orchestra.git (fetch)\norigin  https://github.com/MoaidHathot/Orchestra.git (push)\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:16.1090995+00:00",
+            "completedAt": "2026-03-20T11:02:17.0275568+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01B5FYKHFoTBNLY1YYBC4cmv",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# List PRs using Azure DevOps CLI - need to find organization/project first\\n# Let\\u0027s check if there\\u0027s environment variables or config for this\\nGet-ChildItem Env: | Where-Object { $_.Name -like \\u0022*ORG*\\u0022 -or $_.Name -like \\u0022*PROJECT*\\u0022 } | Format-Table -AutoSize\u0022,\u0022description\u0022:\u0022Check for org/project env vars\u0022}",
+            "success": true,
+            "result": "\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:20.1736488+00:00",
+            "completedAt": "2026-03-20T11:02:21.2837437+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_01H6rK8DZkdUcnzvityVnGQ5",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022# Let\\u0027s check what MCP servers might be available - looking for Azure DevOps related config\\nGet-ChildItem -Path \\u0022$env:USERPROFILE\\\\.copilot\\u0022 -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like \\u0022*mcp*\\u0022 -or $_.Name -like \\u0022*azure*\\u0022 -or $_.Name -like \\u0022*devops*\\u0022 } | Select-Object FullName\u0022,\u0022description\u0022:\u0022Look for MCP config files\u0022}",
+            "success": true,
+            "result": "FullName\n--------\nC:\\Users\\moaid\\.copilot\\mcp-config.json\nC:\\Users\\moaid\\.copilot\\installed-plugins\\copilot-plugins\\workiq\\.mcp.json\nC:\\Users\\moaid\\.copilot\\marketplace-cache\\github-copilot-plugins\\plugins\\workiq\\.mcp.json\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:24.5170266+00:00",
+            "completedAt": "2026-03-20T11:02:31.2151706+00:00"
+          },
+          {
+            "callId": "toolu_vrtx_012QVYNg8kp45zWhvWz9JZs2",
+            "toolName": "powershell",
+            "arguments": "{\u0022command\u0022:\u0022Get-Content \\u0022$env:USERPROFILE\\\\.copilot\\\\mcp-config.json\\u0022 | ConvertFrom-Json | ConvertTo-Json -Depth 10\u0022,\u0022description\u0022:\u0022Read MCP config\u0022}",
+            "success": true,
+            "result": "{\n  \u0022mcpServers\u0022: {\n    \u0022graph\u0022: {\n      \u0022command\u0022: \u0022dotnet\u0022,\n      \u0022args\u0022: [\n        \u0022run\u0022,\n        \u0022--project\u0022,\n        \u0022src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj\u0022\n      ],\n      \u0022cwd\u0022: \u0022P:/Github/Orchestra\u0022\n    }\n  }\n}\n\u003Cexited with exit code 0\u003E",
+            "startedAt": "2026-03-20T11:02:33.0452138+00:00",
+            "completedAt": "2026-03-20T11:02:34.1724945+00:00"
+          }
+        ],
+        "responseSegments": [
+          "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060."
+        ],
+        "finalResponse": "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060.",
+        "outputHandlerResult": "[]"
+      }
+    },
+    "post-review-status": {
+      "stepName": "post-review-status",
+      "status": "Skipped",
+      "startedAt": "2026-03-20T11:03:25.5607205+00:00",
+      "completedAt": "2026-03-20T11:03:25.5609175+00:00",
+      "duration": "00:00:00.0001970",
+      "content": "",
+      "errorMessage": "Skipped because dependencies failed or were skipped: [format-result]",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "quality-check": {
+      "stepName": "quality-check",
+      "status": "Skipped",
+      "startedAt": "2026-03-20T11:03:25.5594553+00:00",
+      "completedAt": "2026-03-20T11:03:25.5605388+00:00",
+      "duration": "00:00:00.0010835",
+      "content": "",
+      "errorMessage": "Skipped because dependencies failed or were skipped: [review-code]",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "review-code": {
+      "stepName": "review-code",
+      "status": "Failed",
+      "startedAt": "2026-03-20T11:03:10.51156+00:00",
+      "completedAt": "2026-03-20T11:03:25.5594242+00:00",
+      "duration": "00:00:15.0478642",
+      "content": "",
+      "errorMessage": "Communication error with Copilot CLI: Request session.create failed with message: Model \u0027claude-opus-4.5\u0027 does not support reasoning effort configuration. Use models.list to check which models support reasoning effort.",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "fetch-pr-changes": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review.",
+        "fetch-work-item": "Based on the PR data provided, there are **no pull requests to review**:\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **Message** | No open pull requests are currently assigned to Moaid Hathot for review |\n| **Linked Work Items** | None (empty array) |\n\n## Context Summary\n\nSince no open pull requests are assigned for review, there are:\n\n1. **No feature or bug to address** - No PR is available for analysis\n2. **No acceptance criteria** - No linked work items to retrieve requirements from\n3. **No design decisions** - No work item context to examine\n\n### Next Steps\n\nTo proceed with a code review, you would need to:\n- Have a PR assigned to you for review, or\n- Specify a particular PR ID to analyze directly",
+        "read-source-context": "Based on the context provided, there are **no open pull requests** currently assigned for review. The PR fetch returned:\n\n\u0060\u0060\u0060\nStatus: no_prs_found\nMessage: No open pull requests are currently assigned to Moaid Hathot for review.\nFiles: []\n\u0060\u0060\u0060\n\n**No context report can be generated** because there are no modified files in the PR diff to analyze.\n\nIf you\u0027d like me to:\n1. Check for PRs using a different filter (e.g., all open PRs, PRs by a specific author)\n2. Analyze a specific PR by number\n3. Review local uncommitted changes instead\n\nPlease let me know how you\u0027d like to proceed."
+      },
+      "trace": {
+        "systemPrompt": "You are a senior code reviewer coordinating a thorough pull request review. You have access to the PR diff, the Work Item context (requirements), and the surrounding source code context. You coordinate with specialized subagents for security and code quality analysis, then synthesize all findings into a comprehensive review.\n\nYour review must cover:\n1. Correctness \u2014 Does the code do what the Work Item requires?\n2. Security \u2014 Are there vulnerabilities, injection risks, or auth issues?\n3. Code quality \u2014 Naming, structure, SOLID principles, readability\n4. Performance \u2014 Unnecessary allocations, N\u002B1 queries, blocking calls\n5. Testing \u2014 Are changes adequately tested?\n6. Architecture \u2014 Does the change fit the existing patterns?\n\nBe specific: reference file paths and line numbers. Distinguish between blocking issues (must fix) and suggestions (nice to have).",
+        "userPromptRaw": "Review this pull request:\n\n## PR Changes\n{{fetch-pr-changes.output}}\n\n## Work Item Context\n{{fetch-work-item.output}}\n\n## Source Code Context\n{{read-source-context.output}}\n\nPerform a thorough code review. Delegate security analysis to the security-reviewer subagent and code quality analysis to the quality-reviewer subagent. Combine their findings with your own analysis of correctness, performance, testing, and architecture.\n\nProduce a review with:\n1. An executive summary (2-3 sentences)\n2. A list of review comments, each with: file, line (if applicable), severity (blocking | suggestion | nitpick), category (security | quality | correctness | performance | testing | architecture), and the comment text\n3. A recommended status: \u0027approved\u0027 if no blocking issues, \u0027approved-with-suggestions\u0027 if only suggestions/nitpicks, \u0027waiting-for-author\u0027 if there are blocking issues\n\nReturn the review as JSON with fields: summary, comments (array), status.",
+        "toolCalls": [],
+        "responseSegments": []
+      }
+    },
+    "filter-reviewer-prs": {
+      "stepName": "filter-reviewer-prs",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:02:43.2783176+00:00",
+      "completedAt": "2026-03-20T11:02:43.2825133+00:00",
+      "duration": "00:00:00.0041957",
+      "content": "The following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR.",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "fetch-open-prs": "I don\u0027t have access to Azure DevOps MCP tools in this environment. The only MCP server configured is for Microsoft Graph, not Azure DevOps. \n\nTo query Azure DevOps PRs, I would need either:\n1. An Azure DevOps MCP server configured\n2. Azure DevOps CLI configured with organization/project credentials\n3. Direct API access with a PAT token\n\nThe current repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps MCP server available. Could you provide:\n1. The Azure DevOps organization and project name\n2. A PAT token or ensure \u0060az devops login\u0060 is configured\n\nOr if you have an Azure DevOps MCP server, please configure it in \u0060~/.copilot/mcp-config.json\u0060."
+      }
+    },
+    "format-result": {
+      "stepName": "format-result",
+      "status": "Skipped",
+      "startedAt": "2026-03-20T11:03:25.5605574+00:00",
+      "completedAt": "2026-03-20T11:03:25.5607079+00:00",
+      "duration": "00:00:00.0001505",
+      "content": "",
+      "errorMessage": "Skipped because dependencies failed or were skipped: [review-code, quality-check]",
+      "parameters": {},
+      "rawDependencyOutputs": {}
+    },
+    "fetch-pr-changes": {
+      "stepName": "fetch-pr-changes",
+      "status": "Succeeded",
+      "startedAt": "2026-03-20T11:02:43.2826171+00:00",
+      "completedAt": "2026-03-20T11:02:55.0349647+00:00",
+      "duration": "00:00:11.7523476",
+      "content": "\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+      "rawContent": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review.",
+      "parameters": {},
+      "rawDependencyOutputs": {
+        "filter-reviewer-prs": "The following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR."
+      },
+      "promptSent": "From the filtered PR list below, select the most recently created PR (by creationDate):\n\n{{filter-reviewer-prs.output}}\n\nFor that PR:\n1. Fetch the complete diff / file changes (all modified, added, and deleted files with their content changes).\n2. Fetch any existing review comments or discussion threads on the PR.\n3. Fetch the PR description and any linked work item IDs.\n\nReturn the results as structured JSON with fields: prId, prTitle, author, description, linkedWorkItemIds (array of integers), files (array of {path, changeType, diff}), existingComments (array of {author, content, file, line}).\r\n\r\n---\r\nContext from previous steps:\r\nThe following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR.",
+      "actualModel": "claude-opus-4.5",
+      "usage": {
+        "inputTokens": 12307,
+        "outputTokens": 277,
+        "totalTokens": 12584
+      },
+      "trace": {
+        "systemPrompt": "You are an Azure DevOps assistant specialized in retrieving pull request details. You have access to Azure DevOps MCP tools to fetch PR diffs, comments, and metadata. Be thorough \u2014 retrieve the full diff so the reviewer has complete context.",
+        "userPromptRaw": "From the filtered PR list below, select the most recently created PR (by creationDate):\n\n{{filter-reviewer-prs.output}}\n\nFor that PR:\n1. Fetch the complete diff / file changes (all modified, added, and deleted files with their content changes).\n2. Fetch any existing review comments or discussion threads on the PR.\n3. Fetch the PR description and any linked work item IDs.\n\nReturn the results as structured JSON with fields: prId, prTitle, author, description, linkedWorkItemIds (array of integers), files (array of {path, changeType, diff}), existingComments (array of {author, content, file, line}).",
+        "userPromptProcessed": "From the filtered PR list below, select the most recently created PR (by creationDate):\n\n{{filter-reviewer-prs.output}}\n\nFor that PR:\n1. Fetch the complete diff / file changes (all modified, added, and deleted files with their content changes).\n2. Fetch any existing review comments or discussion threads on the PR.\n3. Fetch the PR description and any linked work item IDs.\n\nReturn the results as structured JSON with fields: prId, prTitle, author, description, linkedWorkItemIds (array of integers), files (array of {path, changeType, diff}), existingComments (array of {author, content, file, line}).\r\n\r\n---\r\nContext from previous steps:\r\nThe following is the list of open PRs assigned to Moaid Hathot as a reviewer:\n\n[]\n\nINSTRUCTION: From the list above, the downstream step should ONLY process PRs where the \u0027createdBy\u0027 field is NOT \u0027Moaid Hathot\u0027. These are PRs created by others that are waiting for Moaid\u0027s review. If no such PRs exist after filtering, the review process should be skipped. Pass the filtered list as-is for the next step to pick the most recent PR.",
+        "reasoning": "The user is asking me to select the most recently created PR from a filtered list of PRs assigned to Moaid Hathot as a reviewer. However, looking at the context provided, the list of open PRs is empty: \u0060[]\u0060\n\nSince there are no PRs in the list, there\u0027s nothing to process. I should return an appropriate response indicating that no PRs are available for review.",
+        "toolCalls": [],
+        "responseSegments": [
+          "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review."
+        ],
+        "finalResponse": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** The review process should be skipped as there are no PRs waiting for Moaid\u0027s review.",
+        "outputHandlerResult": "\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060"
+      }
+    }
+  },
+  "finalContent": ""
+}

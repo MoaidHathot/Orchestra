@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no PR changes to analyze**. The status indicates:\n\n- **Status**: \u0060no_prs_found\u0060\n- **Message**: No PRs available for review where Moaid Hathot is assigned as a reviewer (excluding self-created PRs)\n- **Files**: Empty array \u0060[]\u0060\n\nSince there are no modified files in the PR diff, I cannot produce a context report. The review process should be skipped as there are no PRs waiting for review.",
+  "content": "No files to review. No PRs available for review where Moaid Hathot is assigned as a reviewer (excluding self-created PRs).",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12352,
+    "outputTokens": 179,
+    "totalTokens": 12531
+  }
+}

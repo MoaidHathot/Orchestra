@@ -1,0 +1,10 @@
+{
+  "rawContent": "I need the Azure DevOps organization and project details to query pull requests. This repository is hosted on GitHub, not Azure DevOps. \n\nCould you provide:\n1. Your Azure DevOps organization URL (e.g., \u0060https://dev.azure.com/YourOrganization/\u0060)\n2. The project name\n3. The repository name (if different from the project)\n\nAlternatively, if you have Azure DevOps MCP tools configured separately (not the Azure CLI), please let me know how to access them.",
+  "content": "[]",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 14103,
+    "outputTokens": 119,
+    "totalTokens": 14222
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the National Weather Service forecast for Seattle, Washington, **tomorrow (Saturday, March 22, 2026)**:\n\n**Temperature:**\n- **High:** 49\u00B0F\n- **Low:** 38\u00B0F (Saturday night)\n\n**Precipitation:**\n- **Chance:** 20% (brief rain possible between 1pm-2pm)\n\n**General Conditions:**\n- Morning: Cloudy\n- Afternoon: Gradually becoming mostly sunny\n- Wind: North wind 3-8 mph\n- Night: Partly cloudy with light winds becoming south 5-7 mph\n\nOverall, it will be a cool spring day starting cloudy but improving to mostly sunny conditions by afternoon, with only a slight chance of rain.",
+  "content": "**Tomorrow\u0027s Forecast - Saturday, March 22, 2026 (Seattle, WA)**\n\n**Morning:** Cloudy skies with temperatures in the low 40s. North winds 3-8 mph.\n\n**Afternoon:** Gradual clearing to mostly sunny conditions. High of 49\u00B0F. Brief 20% chance of rain between 1-2pm. Light north winds.\n\n**Evening:** Partly cloudy skies. Temperatures dropping to 38\u00B0F overnight. Winds shifting south at 5-7 mph.\n\nOverall, a cool spring day transitioning from cloudy to mostly sunny with minimal rain risk.",
+  "actualModel": "claude-sonnet-4.5",
+  "usage": {
+    "inputTokens": 12874,
+    "outputTokens": 165,
+    "totalTokens": 13039
+  }
+}

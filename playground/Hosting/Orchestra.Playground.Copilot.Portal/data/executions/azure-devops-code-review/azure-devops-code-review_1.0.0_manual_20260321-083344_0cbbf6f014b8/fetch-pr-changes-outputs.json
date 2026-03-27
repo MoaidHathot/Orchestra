@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\nSince there are no PRs in the list, there is nothing to process. Here is the structured JSON response:\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review. The review process should be skipped.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** There are no PRs waiting for Moaid\u0027s review at this time.",
+  "content": "\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_found\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review. The review process should be skipped.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12307,
+    "outputTokens": 271,
+    "totalTokens": 12578
+  }
+}

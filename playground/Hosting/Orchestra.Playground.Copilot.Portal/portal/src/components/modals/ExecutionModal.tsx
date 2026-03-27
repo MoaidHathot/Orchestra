@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Orchestration, StepEvent, TraceData, Step } from '../../types';
+import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef } from '../../types';
 import { Icons } from '../../icons';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+
+/** Extract a display name from a step MCP reference (string or object). */
+function mcpDisplayName(ref: StepMcpRef): string {
+  return typeof ref === 'string' ? ref : ref.name;
+}
 
 /**
  * The trace tool-call objects coming from the server carry more fields than
@@ -139,7 +144,11 @@ export default function ExecutionModal({
     }
   }, [displayContent.content, selectedStep, orchestration?.name]);
 
-  // Render DAG when orchestration or step statuses change
+  // Render DAG when orchestration or step statuses change.
+  // NOTE: `selectedStep` is intentionally excluded from deps — including it
+  // caused a full SVG re-render on every click, which destroyed event
+  // listeners mid-propagation and could trigger unwanted navigation.
+  // Selected-step highlighting is handled via direct DOM manipulation below.
   useEffect(() => {
     if (open && dagRef.current && orchestration) {
       renderExecutionDag(
@@ -147,10 +156,39 @@ export default function ExecutionModal({
         stepStatuses || {},
         dagRef.current,
         setSelectedStep,
-        selectedStep ?? undefined,
       );
     }
-  }, [open, orchestration, stepStatuses, selectedStep]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, orchestration, stepStatuses]);
+
+  // Highlight the selected step via direct DOM manipulation instead of
+  // re-rendering the entire DAG (which would destroy click handlers).
+  useEffect(() => {
+    if (!dagRef.current) return;
+    const svg = dagRef.current.querySelector('svg');
+    if (!svg) return;
+
+    // Reset all node highlights first
+    svg.querySelectorAll('.node rect, .node polygon, .node circle, .node ellipse').forEach((el) => {
+      (el as HTMLElement).style.strokeWidth = '';
+    });
+
+    // Apply highlight to selected step
+    if (selectedStep) {
+      const safeId = selectedStep.replace(/[^a-zA-Z0-9]/g, '_');
+      // Mermaid node IDs follow the pattern "flowchart-<safeId>-<number>"
+      const nodes = svg.querySelectorAll('.node');
+      nodes.forEach((node) => {
+        const nodeId = node.id?.replace('flowchart-', '').replace(/-\d+$/, '');
+        if (nodeId === safeId) {
+          const rect = node.querySelector('rect, polygon, circle, ellipse') as HTMLElement | null;
+          if (rect) {
+            rect.style.strokeWidth = '3px';
+          }
+        }
+      });
+    }
+  }, [selectedStep]);
 
   // Auto-scroll streaming content
   useEffect(() => {
@@ -378,7 +416,7 @@ export default function ExecutionModal({
                                         '1px solid var(--border-subtle)',
                                     }}
                                   >
-                                    {mcp}
+                                    {mcpDisplayName(mcp)}
                                   </span>
                                 ))}
                               </div>

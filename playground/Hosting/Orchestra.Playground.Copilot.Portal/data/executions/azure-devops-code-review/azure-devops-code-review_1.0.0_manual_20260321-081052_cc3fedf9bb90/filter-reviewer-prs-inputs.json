@@ -1,0 +1,6 @@
+{
+  "parameters": {},
+  "rawDependencyOutputs": {
+    "fetch-open-prs": "I don\u0027t have access to Azure DevOps MCP tools in this environment. This repository is hosted on GitHub (not Azure DevOps), and there\u0027s no Azure DevOps organization configured.\n\nTo query Azure DevOps pull requests, I need:\n1. The Azure DevOps organization URL (e.g., \u0060https://dev.azure.com/YourOrganization\u0060)\n2. The project name\n3. Either Azure DevOps MCP tools installed, or Azure CLI DevOps extension configured with credentials\n\nPlease provide the Azure DevOps organization and project details, or confirm if Azure DevOps MCP tools are available."
+  }
+}

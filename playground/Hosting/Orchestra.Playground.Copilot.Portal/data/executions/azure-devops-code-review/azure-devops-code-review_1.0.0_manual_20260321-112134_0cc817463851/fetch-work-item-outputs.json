@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no open PRs** currently assigned for review, and consequently **no linked Work Items** to fetch.\n\n## Context Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_found\u0060 |\n| **PR ID** | None |\n| **Linked Work Items** | None (empty array) |\n\n### What This Means\n\n1. **No feature or bug to address** - There is no PR currently requiring review for the specified user (Moaid Hathot).\n\n2. **No acceptance criteria to evaluate** - Without a PR or linked work items, there are no requirements to synthesize.\n\n3. **No design decisions to consider** - The review process was skipped as expected.\n\n**Next Steps:** When a PR is assigned for review with linked work items, I can fetch the work item details and provide a comprehensive context summary for the code reviewer.",
+  "content": "## Code Review Context Summary\n\n**Status:** No PRs Available for Review\n\nThere are currently no open pull requests assigned for review. No linked work items, feature requirements, or acceptance criteria exist to evaluate.\n\n**Action Required:** None at this time. Context will be provided when a PR with linked work items is assigned for review.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12269,
+    "outputTokens": 302,
+    "totalTokens": 12571
+  }
+}

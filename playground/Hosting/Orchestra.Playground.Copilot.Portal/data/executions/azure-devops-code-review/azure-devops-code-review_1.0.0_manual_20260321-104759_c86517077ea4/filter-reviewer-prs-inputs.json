@@ -1,0 +1,6 @@
+{
+  "parameters": {},
+  "rawDependencyOutputs": {
+    "fetch-open-prs": "The repository is on GitHub, not Azure DevOps. There is no Azure DevOps organization configured for this repository. I cannot query Azure DevOps pull requests without knowing which Azure DevOps organization and project to query.\n\n\u0060\u0060\u0060json\n{\u0022error\u0022: \u0022No Azure DevOps organization configured. This repository uses GitHub (https://github.com/MoaidHathot/Orchestra.git), not Azure DevOps. Please provide the Azure DevOps organization URL and project name to query pull requests.\u0022}\n\u0060\u0060\u0060"
+  }
+}

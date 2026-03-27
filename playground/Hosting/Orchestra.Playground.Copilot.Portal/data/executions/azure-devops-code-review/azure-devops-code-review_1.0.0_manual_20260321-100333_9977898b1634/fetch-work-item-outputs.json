@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR data provided, there are **no pull requests to review**. The context shows:\n\n- **Status**: \u0060no_prs_to_review\u0060\n- **Linked Work Item IDs**: \u0060[]\u0060 (empty array)\n- **PR ID**: \u0060null\u0060\n\nSince there are no linked work items and no active PR assigned for review, there is nothing to fetch or summarize. The review process should be skipped as indicated in the message.",
+  "content": "**Context Summary: No Active Review Required**\n\nThere are no pull requests available for review. The system returned a \u0060no_prs_to_review\u0060 status with no linked work items and a null PR ID. No action is needed at this time.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12265,
+    "outputTokens": 173,
+    "totalTokens": 12438
+  }
+}

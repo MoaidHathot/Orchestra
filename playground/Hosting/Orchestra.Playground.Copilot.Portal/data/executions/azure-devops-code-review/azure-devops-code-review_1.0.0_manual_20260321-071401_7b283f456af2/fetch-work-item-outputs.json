@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the PR context provided, there are **no pull requests to review** and consequently **no linked Work Items to fetch**.\n\n## Summary\n\n| Field | Value |\n|-------|-------|\n| **Status** | \u0060no_prs_to_review\u0060 |\n| **Linked Work Items** | None (empty array) |\n| **PR ID** | N/A |\n| **Author** | N/A |\n\n### Context Summary\n\nThere are no open pull requests assigned to Moaid Hathot as a reviewer that were created by others. Since no PR exists:\n\n1. **Feature/Bug Addressed**: N/A - No PR to review\n2. **Acceptance Criteria**: N/A - No linked Work Items\n3. **Design Decisions**: N/A - No Work Item context available\n\nNo action is required from the work-item-fetcher subagent since the \u0060linkedWorkItemIds\u0060 array is empty.",
+  "content": "## Code Review Context Summary\n\n**Status**: No pull requests available for review.\n\nThere are currently no open pull requests assigned to the reviewer that were created by other contributors. As a result:\n\n- No code changes to examine\n- No linked Work Items or requirements to reference\n- No acceptance criteria or design decisions to verify\n\n**Action Required**: None at this time. Check back later for new review assignments.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12267,
+    "outputTokens": 302,
+    "totalTokens": 12569
+  }
+}

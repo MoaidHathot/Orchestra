@@ -15,6 +15,14 @@ export interface Orchestration {
   contentHash?: string;
 }
 
+/**
+ * A step MCP reference as returned by the API.
+ * The list endpoint returns `{ name, type }` while the detail endpoint
+ * may include additional fields like `command`, `endpoint`, etc.
+ * We accept both strings (for forward-compat) and objects.
+ */
+export type StepMcpRef = string | { name: string; type?: string; [key: string]: unknown };
+
 export interface Step {
   name: string;
   type?: string;
@@ -26,7 +34,7 @@ export interface Step {
   condition?: string;
   output?: string;
   tools?: string[];
-  mcps?: string[];
+  mcps?: StepMcpRef[];
   temperature?: number;
   maxTokens?: number;
   reasoningLevel?: string;

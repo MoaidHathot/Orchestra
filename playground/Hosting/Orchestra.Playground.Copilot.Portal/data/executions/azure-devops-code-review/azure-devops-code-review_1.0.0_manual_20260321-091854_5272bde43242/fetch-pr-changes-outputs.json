@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the provided context, the list of open PRs assigned to Moaid Hathot as a reviewer is **empty** (\u0060[]\u0060).\n\n\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_available\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review. The review process should be skipped.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: []\n}\n\u0060\u0060\u0060\n\n**Summary:** There are no PRs waiting for Moaid Hathot\u0027s review at this time. No further action is needed.",
+  "content": "\u0060\u0060\u0060json\n{\n  \u0022status\u0022: \u0022no_prs_available\u0022,\n  \u0022message\u0022: \u0022No open pull requests are currently assigned to Moaid Hathot for review. The review process should be skipped.\u0022,\n  \u0022prId\u0022: null,\n  \u0022prTitle\u0022: null,\n  \u0022author\u0022: null,\n  \u0022description\u0022: null,\n  \u0022linkedWorkItemIds\u0022: [],\n  \u0022files\u0022: [],\n  \u0022existingComments\u0022: [],\n  \u0022summary\u0022: \u0022There are no PRs waiting for Moaid Hathot\u0027s review at this time. No further action is needed.\u0022\n}\n\u0060\u0060\u0060",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12313,
+    "outputTokens": 265,
+    "totalTokens": 12578
+  }
+}

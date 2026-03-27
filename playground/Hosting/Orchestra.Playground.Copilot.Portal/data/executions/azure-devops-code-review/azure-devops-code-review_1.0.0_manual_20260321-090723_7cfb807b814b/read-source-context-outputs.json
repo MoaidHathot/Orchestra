@@ -1,0 +1,10 @@
+{
+  "rawContent": "Based on the context provided, there are **no PR changes to analyze**. The status indicates:\n\n- **Status**: \u0060no_prs_found\u0060\n- **Message**: No open pull requests are currently assigned to Moaid Hathot as a reviewer\n- **Files**: Empty array \u0060[]\u0060\n\nSince there are no modified files in any PR, there\u0027s no code context to gather. The review process should be skipped as indicated in the message.\n\nIf you\u0027d like me to explore a specific PR or branch instead, please provide:\n1. A PR number or URL, or\n2. A branch name to compare against main",
+  "content": "No files with logic changes to review.\n\n**Status**: No open pull requests found for review.",
+  "actualModel": "claude-opus-4.5",
+  "usage": {
+    "inputTokens": 12306,
+    "outputTokens": 209,
+    "totalTokens": 12515
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "build-and-analyze",
+  "description": "An orchestration that demonstrates the Command step type. It runs 'dotnet build' to compile a project, uses a Command step to run 'git log' for recent changes, then uses an LLM to analyze the build output and git history together to produce a developer summary.",
+  "steps": [
+    {
+      "name": "build-project",
+      "type": "Command",
+      "dependsOn": [],
+      "command": "dotnet",
+      "arguments": ["build", "--no-restore", "--verbosity", "minimal"],
+      "workingDirectory": "{{projectPath}}",
+      "parameters": ["projectPath"],
+      "timeoutSeconds": 120,
+      "includeStdErr": true
+    },
+    {
+      "name": "git-recent-changes",
+      "type": "Command",
+      "dependsOn": [],
+      "command": "git",
+      "arguments": ["log", "--oneline", "--no-decorate", "-10"],
+      "workingDirectory": "{{projectPath}}",
+      "parameters": ["projectPath"],
+      "timeoutSeconds": 10
+    },
+    {
+      "name": "analyze-results",
+      "type": "Prompt",
+      "dependsOn": ["build-project", "git-recent-changes"],
+      "systemPrompt": "You are a developer productivity assistant. You analyze build outputs and recent git history to produce concise summaries for the development team.",
+      "userPrompt": "Analyze the following build output and recent git history. Produce a brief developer summary that includes: 1) Build status (success/failure and any warnings). 2) Recent changes summary from the git log. 3) Any recommendations or issues to address.\n\nBuild Output:\n{{build-project.output}}\n\nRecent Git History:\n{{git-recent-changes.output}}",
+      "mcps": [],
+      "model": "claude-opus-4.6"
+    }
+  ]
+}
