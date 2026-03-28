@@ -58,6 +58,6 @@ echo ================================
 echo All unit tests completed successfully!
 echo ================================
 echo.
-echo NOTE: Portal integration and E2E tests are Windows-only and require separate execution:
+echo NOTE: Portal integration and E2E tests require separate execution:
 echo   dotnet test tests/Orchestra.Portal.Tests
 echo   dotnet test tests/Orchestra.Portal.E2E  (requires running Portal server)

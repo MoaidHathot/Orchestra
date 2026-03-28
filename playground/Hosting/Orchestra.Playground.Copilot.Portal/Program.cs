@@ -136,8 +136,8 @@ app.MapGet("/api/browse", ([AsParameters] BrowseRequest request) =>
 	}
 });
 
-// GET /api/folder/browse - Open native folder picker dialog (Windows only)
-app.MapGet("/api/folder/browse", (IWebHostEnvironment env) =>
+// GET /api/folder/browse - Open native folder picker dialog (Windows only, via PowerShell)
+app.MapGet("/api/folder/browse", async (IWebHostEnvironment env) =>
 {
 	// In the Testing environment, return a cancelled response instead of opening
 	// a native dialog (which would block test execution with a modal window).
@@ -147,25 +147,32 @@ app.MapGet("/api/folder/browse", (IWebHostEnvironment env) =>
 	if (!OperatingSystem.IsWindows())
 		return Results.BadRequest(new { error = "Native folder dialog is only supported on Windows." });
 
-	string? selectedPath = null;
-	var thread = new Thread(() =>
+	try
 	{
-		using var dialog = new System.Windows.Forms.FolderBrowserDialog
+		var psi = new System.Diagnostics.ProcessStartInfo
 		{
-			Description = "Select orchestration folder",
-			ShowNewFolderButton = false,
-			UseDescriptionForTitle = true,
+			FileName = "powershell",
+			Arguments = "-NoProfile -Command \"Add-Type -AssemblyName System.Windows.Forms; $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Select orchestration folder'; $d.ShowNewFolderButton = $false; if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath } else { '' }\"",
+			RedirectStandardOutput = true,
+			UseShellExecute = false,
+			CreateNoWindow = true,
 		};
-		if (dialog.ShowDialog() == System.Windows.Forms.DialogResult.OK)
-			selectedPath = dialog.SelectedPath;
-	});
-	thread.SetApartmentState(ApartmentState.STA);
-	thread.Start();
-	thread.Join();
 
-	return selectedPath is not null
-		? Results.Json(new { cancelled = false, path = selectedPath })
-		: Results.Json(new { cancelled = true, path = (string?)null });
+		using var proc = System.Diagnostics.Process.Start(psi);
+		if (proc is null)
+			return Results.BadRequest(new { error = "Failed to launch folder dialog." });
+
+		var output = (await proc.StandardOutput.ReadToEndAsync()).Trim();
+		await proc.WaitForExitAsync();
+
+		return string.IsNullOrEmpty(output)
+			? Results.Json(new { cancelled = true, path = (string?)null })
+			: Results.Json(new { cancelled = false, path = output });
+	}
+	catch (Exception ex)
+	{
+		return Results.BadRequest(new { error = ex.Message });
+	}
 });
 
 // POST /api/folder/scan - Scan a folder for orchestration JSON files

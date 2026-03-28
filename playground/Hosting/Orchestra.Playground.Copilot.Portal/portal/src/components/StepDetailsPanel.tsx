@@ -170,7 +170,7 @@ export default function StepDetailsPanel({ step }: Props): React.JSX.Element | n
       )}
 
       {/* Parameters */}
-      {step.parameters != null && Object.keys(step.parameters).length > 0 && (
+      {step.parameters != null && step.parameters.length > 0 && (
         <div style={{ marginBottom: '12px' }}>
           <div
             className="text-muted"
@@ -179,7 +179,7 @@ export default function StepDetailsPanel({ step }: Props): React.JSX.Element | n
             Required Parameters
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-            {Object.entries(step.parameters).map(([paramName], i) => (
+            {step.parameters.map((paramName, i) => (
               <span
                 key={i}
                 style={{

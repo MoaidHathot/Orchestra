@@ -97,11 +97,44 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 	#region Helper: Register a test orchestration
 
 	private async Task<(string Id, string Name)> RegisterTestOrchestrationAsync(
-		string? name = null, bool withWebhookTrigger = false, bool triggerEnabled = false)
+		string? name = null, bool withWebhookTrigger = false, bool triggerEnabled = false,
+		bool withParameters = false)
 	{
 		name ??= $"Contract Test {Guid.NewGuid():N}";
-		var json = withWebhookTrigger
-			? $$"""
+
+		string json;
+		if (withParameters)
+		{
+			json = """
+			{
+				"name": "PARAM_NAME_PLACEHOLDER",
+				"description": "Orchestration with parameters",
+				"steps": [
+					{
+						"name": "step-a",
+						"type": "Prompt",
+						"dependsOn": [],
+						"parameters": ["destination", "duration"],
+						"systemPrompt": "Plan a trip",
+						"userPrompt": "Plan a trip",
+						"model": "claude-opus-4.5"
+					},
+					{
+						"name": "step-b",
+						"type": "Prompt",
+						"dependsOn": ["step-a"],
+						"parameters": ["destination"],
+						"systemPrompt": "Summarize",
+						"userPrompt": "Summarize the trip",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""".Replace("PARAM_NAME_PLACEHOLDER", name);
+		}
+		else if (withWebhookTrigger)
+		{
+			json = $$"""
 			{
 				"name": "{{name}}",
 				"description": "Contract test orchestration",
@@ -119,8 +152,11 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 					"model": "claude-opus-4.5"
 				}]
 			}
-			"""
-			: $$"""
+			""";
+		}
+		else
+		{
+			json = $$"""
 			{
 				"name": "{{name}}",
 				"description": "Contract test orchestration",
@@ -134,6 +170,7 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 				}]
 			}
 			""";
+		}
 
 		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
 			new { json }, _jsonOptions);
@@ -182,6 +219,135 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 
 		await AssertIsApiResponse(response, "GET /api/orchestrations/nonexistent-id");
 		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+	}
+
+	#endregion
+
+	#region 2b. Parameters shape — parameters must be string[] for frontend compatibility
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_ParametersIsStringArray()
+	{
+		var (id, _) = await RegisterTestOrchestrationAsync(withParameters: true);
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orchestrations = result.GetProperty("orchestrations");
+		var orch = orchestrations.EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		// parameters must be an array of strings, not an object —
+		// the frontend iterates it with array methods, and Object.keys()
+		// on an array returns indices ("0", "1") instead of parameter names
+		var parameters = orch.GetProperty("parameters");
+		parameters.ValueKind.Should().Be(JsonValueKind.Array,
+			"parameters must be a JSON array, not an object — the frontend depends on this");
+
+		var paramValues = parameters.EnumerateArray().Select(e => e.GetString()).ToArray();
+		paramValues.Should().Contain("destination");
+		paramValues.Should().Contain("duration");
+
+		// hasParameters must also be true
+		orch.GetProperty("hasParameters").GetBoolean().Should().BeTrue();
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_StepParametersIsStringArray()
+	{
+		var (id, _) = await RegisterTestOrchestrationAsync(withParameters: true);
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orchestrations = result.GetProperty("orchestrations");
+		var orch = orchestrations.EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		var steps = orch.GetProperty("steps");
+		var stepA = steps.EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "step-a");
+
+		// Step-level parameters must also be a string array
+		var stepParams = stepA.GetProperty("parameters");
+		stepParams.ValueKind.Should().Be(JsonValueKind.Array,
+			"step parameters must be a JSON array of strings");
+
+		var stepParamValues = stepParams.EnumerateArray().Select(e => e.GetString()).ToArray();
+		stepParamValues.Should().BeEquivalentTo(["destination", "duration"]);
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrationById_ParametersIsStringArray()
+	{
+		var (id, _) = await RegisterTestOrchestrationAsync(withParameters: true);
+
+		var response = await _client.GetAsync($"/api/orchestrations/{id}");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+		// Orchestration-level parameters must be a string array
+		var parameters = result.GetProperty("parameters");
+		parameters.ValueKind.Should().Be(JsonValueKind.Array,
+			"parameters must be a JSON array, not an object — the frontend depends on this");
+
+		var paramValues = parameters.EnumerateArray().Select(e => e.GetString()).ToArray();
+		paramValues.Should().Contain("destination");
+		paramValues.Should().Contain("duration");
+
+		// Step-level parameters must also be string arrays
+		var steps = result.GetProperty("steps");
+		var stepB = steps.EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "step-b");
+
+		var stepBParams = stepB.GetProperty("parameters");
+		stepBParams.ValueKind.Should().Be(JsonValueKind.Array);
+		stepBParams.EnumerateArray().Select(e => e.GetString()).ToArray()
+			.Should().BeEquivalentTo(["destination"]);
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_NoParameters_HasEmptyArray()
+	{
+		var (id, _) = await RegisterTestOrchestrationAsync(withParameters: false);
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orchestrations = result.GetProperty("orchestrations");
+		var orch = orchestrations.EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		var parameters = orch.GetProperty("parameters");
+		parameters.ValueKind.Should().Be(JsonValueKind.Array);
+		parameters.GetArrayLength().Should().Be(0);
+		orch.GetProperty("hasParameters").GetBoolean().Should().BeFalse();
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_ParametersAreDeduplicatedAcrossSteps()
+	{
+		var (id, _) = await RegisterTestOrchestrationAsync(withParameters: true);
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		// step-a has ["destination", "duration"], step-b has ["destination"]
+		// Orchestration-level parameters should be deduplicated: ["destination", "duration"]
+		var paramValues = orch.GetProperty("parameters").EnumerateArray()
+			.Select(e => e.GetString()).ToArray();
+		paramValues.Should().HaveCount(2,
+			"parameters should be deduplicated across steps — 'destination' appears in both steps but should only be listed once");
+		paramValues.Should().Contain("destination");
+		paramValues.Should().Contain("duration");
 	}
 
 	#endregion

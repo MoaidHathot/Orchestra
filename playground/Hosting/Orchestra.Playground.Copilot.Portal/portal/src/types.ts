@@ -8,7 +8,7 @@ export interface Orchestration {
   mcpPath?: string;
   enabled?: boolean;
   steps?: Step[];
-  parameters?: Record<string, ParameterDef>;
+  parameters?: string[];
   trigger?: TriggerConfig;
   mcps?: McpConfig[];
   registeredAt?: string;
@@ -39,7 +39,7 @@ export interface Step {
   maxTokens?: number;
   reasoningLevel?: string;
   loopConfig?: LoopConfig;
-  parameters?: Record<string, unknown>;
+  parameters?: string[];
   url?: string;
   method?: string;
   headers?: Record<string, string>;
@@ -57,13 +57,6 @@ export interface LoopConfig {
 export interface HandlerConfig {
   type: string;
   [key: string]: unknown;
-}
-
-export interface ParameterDef {
-  type?: string;
-  description?: string;
-  required?: boolean;
-  default?: unknown;
 }
 
 export interface TriggerConfig {

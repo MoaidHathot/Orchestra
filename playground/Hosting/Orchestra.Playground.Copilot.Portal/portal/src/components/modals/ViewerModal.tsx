@@ -85,7 +85,7 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
 
   /** Build the cURL body payload from expected parameters. */
   const buildCurlBody = (): string => {
-    const expectedParams = trigger?.expectedParameters ?? Object.keys(parameters ?? {});
+    const expectedParams = trigger?.expectedParameters ?? parameters ?? [];
     const payload = expectedParams.reduce<Record<string, string>>((acc, p) => {
       acc[p] = `<${p} value>`;
       return acc;
@@ -198,11 +198,11 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
                   </div>
 
                   {/* Parameters */}
-                  {parameters && Object.keys(parameters).length > 0 && (
+                  {parameters && parameters.length > 0 && (
                     <div className="form-group">
                       <label className="form-label">Required Parameters</label>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                        {Object.entries(parameters).map(([paramName], i) => (
+                        {parameters.map((paramName, i) => (
                           <span key={i} style={{
                             background: '#3fb9504d',
                             border: '1px solid #3fb950',
@@ -403,10 +403,10 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
                               depends on: {step.dependsOn.join(', ')}
                             </span>
                           )}
-                          {step.parameters && Object.keys(step.parameters).length > 0 && (
+                          {step.parameters && step.parameters.length > 0 && (
                             <div style={{ marginTop: '4px' }}>
                               <span className="text-muted" style={{ fontSize: '11px' }}>params: </span>
-                              {Object.entries(step.parameters).map(([paramName], j) => (
+                              {step.parameters.map((paramName, j) => (
                                 <span key={j} style={{
                                   background: '#3fb9503d',
                                   padding: '1px 6px',

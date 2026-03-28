@@ -17,8 +17,8 @@ export default function RunModal({ open, orchestration, onClose, onRun }: Props)
   useEffect(() => {
     if (orchestration?.parameters) {
       const initial: Record<string, string> = {};
-      for (const key of Object.keys(orchestration.parameters)) {
-        initial[key] = '';
+      for (const name of orchestration.parameters) {
+        initial[name] = '';
       }
       setParams(initial);
     }
@@ -26,10 +26,7 @@ export default function RunModal({ open, orchestration, onClose, onRun }: Props)
 
   if (!orchestration) return null;
 
-  // Build a list of { name, description } from the parameters record
-  const parameterList = Object.entries(orchestration.parameters ?? {}).map(
-    ([name, def]) => ({ name, description: def?.description ?? '' }),
-  );
+  const parameterNames = orchestration.parameters ?? [];
 
   return (
     <div
@@ -50,16 +47,16 @@ export default function RunModal({ open, orchestration, onClose, onRun }: Props)
           <p className="text-muted" style={{ marginBottom: '16px' }}>
             Enter parameters for this orchestration:
           </p>
-          {parameterList.map((param, i) => (
+          {parameterNames.map((name, i) => (
             <div className="form-group" key={i}>
-              <label className="form-label">{param.name}</label>
+              <label className="form-label">{name}</label>
               <input
                 type="text"
                 className="form-input"
-                placeholder={param.description || `Enter ${param.name}`}
-                value={params[param.name] || ''}
+                placeholder={`Enter ${name}`}
+                value={params[name] || ''}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setParams((prev) => ({ ...prev, [param.name]: e.target.value }))
+                  setParams((prev) => ({ ...prev, [name]: e.target.value }))
                 }
               />
             </div>
