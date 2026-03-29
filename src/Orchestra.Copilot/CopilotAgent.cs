@@ -347,19 +347,19 @@ public partial class CopilotAgent : IAgent
 
 	[LoggerMessage(
 			EventId = 1,
-			Level = LogLevel.Debug,
+			Level = LogLevel.Information,
 			Message = "Agent has {McpCount} MCPs configured")]
 	private partial void LogMcpCount(int mcpCount);
 
 	[LoggerMessage(
 			EventId = 2,
-			Level = LogLevel.Debug,
+			Level = LogLevel.Information,
 			Message = "Configuring local MCP server '{Name}': Command={Command}, Args=[{Args}], Cwd={WorkingDirectory}")]
 	private partial void LogLocalMcpServer(string name, string command, string args, string? workingDirectory);
 
 	[LoggerMessage(
 			EventId = 3,
-			Level = LogLevel.Debug,
+			Level = LogLevel.Information,
 			Message = "Configuring remote MCP server '{Name}': Url={Url}")]
 	private partial void LogRemoteMcpServer(string name, string url);
 

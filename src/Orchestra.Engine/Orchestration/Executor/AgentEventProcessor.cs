@@ -17,6 +17,7 @@ public class AgentEventProcessor
 	private readonly List<string> _responseSegments = [];
 	private readonly StringBuilder _currentResponseBuilder = new();
 	private readonly Dictionary<string, PendingToolCall> _pendingToolCalls = [];
+	private readonly List<string> _warnings = [];
 
 	public AgentEventProcessor(IOrchestrationReporter reporter, string stepName)
 	{
@@ -100,6 +101,14 @@ public class AgentEventProcessor
 
 			case AgentEventType.Error:
 				HandleError(evt);
+				break;
+
+			case AgentEventType.Warning:
+				HandleWarning(evt);
+				break;
+
+			case AgentEventType.Info:
+				HandleInfo(evt);
 				break;
 		}
 	}
@@ -191,6 +200,18 @@ public class AgentEventProcessor
 		_reporter.ReportStepError(_stepName, evt.ErrorMessage ?? "Unknown error");
 	}
 
+	private void HandleWarning(AgentEvent evt)
+	{
+		var warningMessage = $"[{evt.DiagnosticType ?? "unknown"}] {evt.ErrorMessage ?? "Unknown warning"}";
+		_warnings.Add(warningMessage);
+		_reporter.ReportSessionWarning(evt.DiagnosticType ?? "unknown", evt.ErrorMessage ?? "Unknown warning");
+	}
+
+	private void HandleInfo(AgentEvent evt)
+	{
+		_reporter.ReportSessionInfo(evt.DiagnosticType ?? "unknown", evt.Content ?? "");
+	}
+
 	private void HandleSubagentSelected(AgentEvent evt)
 	{
 		_reporter.ReportSubagentSelected(
@@ -251,7 +272,8 @@ public class AgentEventProcessor
 		string? userPromptRaw,
 		string? userPromptProcessed = null,
 		string? finalResponse = null,
-		string? outputHandlerResult = null)
+		string? outputHandlerResult = null,
+		List<string>? mcpServers = null)
 	{
 		return new StepExecutionTrace
 		{
@@ -263,13 +285,15 @@ public class AgentEventProcessor
 			ResponseSegments = _responseSegments.ToList(),
 			FinalResponse = finalResponse,
 			OutputHandlerResult = outputHandlerResult,
+			McpServers = mcpServers ?? [],
+			Warnings = _warnings.ToList(),
 		};
 	}
 
 	/// <summary>
 	/// Builds a partial trace (typically used when an error occurs).
 	/// </summary>
-	public StepExecutionTrace BuildPartialTrace(string? systemPrompt, string? userPromptRaw)
+	public StepExecutionTrace BuildPartialTrace(string? systemPrompt, string? userPromptRaw, List<string>? mcpServers = null)
 	{
 		return new StepExecutionTrace
 		{
@@ -278,6 +302,8 @@ public class AgentEventProcessor
 			Reasoning = Reasoning,
 			ToolCalls = _toolCalls,
 			ResponseSegments = _responseSegments.ToList(),
+			McpServers = mcpServers ?? [],
+			Warnings = _warnings.ToList(),
 		};
 	}
 

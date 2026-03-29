@@ -38,6 +38,9 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Create event processor to handle agent events and collect trace data
 		var eventProcessor = new AgentEventProcessor(_reporter, step.Name);
 
+		// Build MCP server descriptions for trace diagnostics
+		var mcpServerDescriptions = BuildMcpServerDescriptions(step.Mcps);
+
 		try
 		{
 			// Build the user prompt, incorporating dependency outputs and parameters
@@ -114,7 +117,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				userPromptRaw,
 				userPrompt,
 				rawContent ?? result.Content,
-				outputHandlerResult);
+				outputHandlerResult,
+				mcpServerDescriptions);
 
 			// Report the step trace for live trace viewing
 			_reporter.ReportStepTrace(step.Name, trace);
@@ -130,7 +134,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				rawDependencyOutputs,
 				userPrompt,
 				result.ActualModel,
-				trace), engineToolCtx);
+				trace), engineToolCtx, step.Name);
 		}
 
 		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
@@ -143,7 +147,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				userPrompt,
 				result.ActualModel,
 				tokenUsage,
-				trace), engineToolCtx);
+				trace), engineToolCtx, step.Name);
 		}
 
 		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
@@ -159,7 +163,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				userPrompt,
 				result.ActualModel,
 				tokenUsage,
-				trace), engineToolCtx);
+				trace), engineToolCtx, step.Name);
 		}
 		catch (OperationCanceledException)
 		{
@@ -168,7 +172,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		catch (Exception ex)
 		{
 			// Build partial trace even on failure
-			var trace = eventProcessor.BuildPartialTrace(step.SystemPrompt, userPromptRaw);
+			var trace = eventProcessor.BuildPartialTrace(step.SystemPrompt, userPromptRaw, mcpServerDescriptions);
 
 			// Report the partial trace for live trace viewing
 			_reporter.ReportStepTrace(step.Name, trace);
@@ -205,6 +209,22 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		return result;
 	}
 
+	private static List<string> BuildMcpServerDescriptions(Mcp[] mcps)
+	{
+		var descriptions = new List<string>(mcps.Length);
+		foreach (var mcp in mcps)
+		{
+			var desc = mcp switch
+			{
+				LocalMcp local => $"{mcp.Name} (local: {local.Command} {string.Join(" ", local.Arguments)})",
+				RemoteMcp remote => $"{mcp.Name} (remote: {remote.Endpoint})",
+				_ => mcp.Name,
+			};
+			descriptions.Add(desc);
+		}
+		return descriptions;
+	}
+
 	private async Task<string> RunHandlerAsync(
 		string handlerPrompt,
 		string content,
@@ -238,7 +258,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	/// If the LLM called orchestra_complete, the returned result will carry the signal
 	/// so the orchestration executor can halt all remaining steps.
 	/// </summary>
-	private static ExecutionResult WithOrchestrationComplete(ExecutionResult result, EngineToolContext ctx)
+	private static ExecutionResult WithOrchestrationComplete(ExecutionResult result, EngineToolContext ctx, string stepName)
 	{
 		if (!ctx.OrchestrationCompleteRequested)
 			return result;
@@ -257,6 +277,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			OrchestrationCompleteRequested = true,
 			OrchestrationCompleteStatus = ctx.OrchestrationCompleteStatus,
 			OrchestrationCompleteReason = ctx.OrchestrationCompleteReason,
+			OrchestrationCompleteStepName = stepName,
 		};
 	}
 

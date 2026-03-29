@@ -254,6 +254,16 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 		AddEvent(new ReporterEvent("checkpoint-saved", $"Checkpoint saved after '{stepName}' ({completedSteps}/{totalSteps}) — run {runId}"));
 	}
 
+	public void ReportSessionWarning(string warningType, string message)
+	{
+		AddEvent(new ReporterEvent("session-warning", $"[{warningType}] {message}"));
+	}
+
+	public void ReportSessionInfo(string infoType, string message)
+	{
+		AddEvent(new ReporterEvent("session-info", $"[{infoType}] {message}"));
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		var name = displayName ?? agentName;

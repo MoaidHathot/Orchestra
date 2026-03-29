@@ -121,6 +121,7 @@ public partial class OrchestrationExecutor
 		// Track orchestration-complete signal details (set by the step that triggers it)
 		ExecutionStatus? orchestrationCompleteStatus = null;
 		string? orchestrationCompleteReason = null;
+		string? orchestrationCompleteStepName = null;
 
 		// Build step lookup and dependency graph
 		var allSteps = orchestration.Steps
@@ -233,6 +234,7 @@ public partial class OrchestrationExecutor
 					{
 						orchestrationCompleteStatus = result.OrchestrationCompleteStatus;
 						orchestrationCompleteReason = result.OrchestrationCompleteReason;
+						orchestrationCompleteStepName = step.Name;
 						LogOrchestrationCompleteRequested(step.Name, orchestrationCompleteReason ?? "No reason provided");
 
 						// Cancel all remaining steps by triggering the linked CTS.
@@ -321,7 +323,7 @@ public partial class OrchestrationExecutor
 		await Task.WhenAll(completionSources.Values.Select(tcs => tcs.Task));
 
 		var orchestrationResult = OrchestrationResult.From(
-			orchestration, stepResults, orchestrationCompleteStatus, orchestrationCompleteReason);
+			orchestration, stepResults, orchestrationCompleteStatus, orchestrationCompleteReason, orchestrationCompleteStepName);
 
 		if (orchestrationResult.Status == ExecutionStatus.Succeeded)
 		{
@@ -355,6 +357,7 @@ public partial class OrchestrationExecutor
 			AllStepRecords = allStepRecords,
 			FinalContent = finalContent,
 			CompletionReason = orchestrationResult.CompletionReason,
+			CompletedByStep = orchestrationResult.CompletedByStep,
 		};
 
 		try

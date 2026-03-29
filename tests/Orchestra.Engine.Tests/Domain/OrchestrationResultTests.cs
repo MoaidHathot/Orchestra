@@ -470,4 +470,69 @@ public class OrchestrationResultTests
 	}
 
 	#endregion
+
+	#region CompletedByStep
+
+	[Fact]
+	public void From_WithOrchestrationCompleteStepName_SetsCompletedByStep()
+	{
+		// Arrange
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "step2", Type = OrchestrationStepType.Prompt, DependsOn = ["step1"], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.Succeeded("Output"),
+			["step2"] = ExecutionResult.Cancelled()
+		};
+
+		// Act
+		var result = OrchestrationResult.From(
+			orchestration, stepResults,
+			orchestrationCompleteStatus: ExecutionStatus.Succeeded,
+			orchestrationCompleteReason: "Nothing to do",
+			orchestrationCompleteStepName: "step1");
+
+		// Assert
+		result.CompletedByStep.Should().Be("step1");
+		result.CompletionReason.Should().Be("Nothing to do");
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+	}
+
+	[Fact]
+	public void From_WithoutOrchestrationCompleteStepName_CompletedByStepIsNull()
+	{
+		// Arrange
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.Succeeded("Output")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert
+		result.CompletedByStep.Should().BeNull();
+		result.CompletionReason.Should().BeNull();
+	}
+
+	#endregion
 }

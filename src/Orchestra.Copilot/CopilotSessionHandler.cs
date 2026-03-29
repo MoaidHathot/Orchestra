@@ -102,6 +102,14 @@ internal sealed class CopilotSessionHandler
 				HandleSubagentDeselected();
 				break;
 
+			case SessionWarningEvent warning:
+				HandleWarning(warning);
+				break;
+
+			case SessionInfoEvent info:
+				HandleInfo(info);
+				break;
+
 			case SessionErrorEvent err:
 				HandleError(err);
 				break;
@@ -283,6 +291,28 @@ internal sealed class CopilotSessionHandler
 		_writer.TryWrite(new AgentEvent
 		{
 			Type = AgentEventType.SubagentDeselected,
+		});
+	}
+
+	private void HandleWarning(SessionWarningEvent warning)
+	{
+		_reporter.ReportSessionWarning(warning.Data.WarningType, warning.Data.Message);
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.Warning,
+			ErrorMessage = warning.Data.Message,
+			DiagnosticType = warning.Data.WarningType,
+		});
+	}
+
+	private void HandleInfo(SessionInfoEvent info)
+	{
+		_reporter.ReportSessionInfo(info.Data.InfoType, info.Data.Message);
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.Info,
+			Content = info.Data.Message,
+			DiagnosticType = info.Data.InfoType,
 		});
 	}
 

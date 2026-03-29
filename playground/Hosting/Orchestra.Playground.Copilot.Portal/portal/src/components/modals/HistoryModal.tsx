@@ -13,6 +13,7 @@ interface HistoryExecution {
   orchestrationName: string;
   status?: string;
   completionReason?: string;
+  completedByStep?: string;
   isActive?: boolean;
   startedAt?: string;
   durationSeconds?: number;

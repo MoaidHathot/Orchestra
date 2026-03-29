@@ -537,6 +537,7 @@ export function generateExecutionDagCode(
     pending: [],
     running: [],
     completed: [],
+    completedEarly: [],
     failed: [],
     cancelled: [],
     skipped: [],
@@ -580,6 +581,9 @@ export function generateExecutionDagCode(
       case 'noaction':
         statusIcon = ' \u2014'; // —
         break;
+      case 'completed_early':
+        statusIcon = ' \u23F9'; // ⏹
+        break;
     }
 
     // Loop indicator
@@ -612,7 +616,8 @@ export function generateExecutionDagCode(
     mermaidCode += buildNodeDeclaration(safeId, label, stepType);
 
     // Categorize by status
-    const group = statusGroups[status] || statusGroups.pending;
+    const mappedStatus = status === 'completed_early' ? 'completedEarly' : status;
+    const group = statusGroups[mappedStatus] || statusGroups.pending;
     group.push(safeId);
 
     // Dependencies
@@ -667,6 +672,7 @@ export function generateExecutionDagCode(
   mermaidCode += '  classDef cancelled fill:#3d2e0d,stroke:#d29922,color:#d29922\n';
   mermaidCode += '  classDef skipped fill:#21262d,stroke:#484f58,color:#6e7681\n';
   mermaidCode += '  classDef noaction fill:#21262d,stroke:#8b949e,color:#8b949e\n';
+  mermaidCode += '  classDef completedEarly fill:#0c2a3d,stroke:#38bdf8,color:#38bdf8\n';
   mermaidCode += '  classDef subagentNode fill:#161b22,stroke:#8b949e,color:#8b949e\n';
 
   // Apply status classes

@@ -605,6 +605,273 @@ public class AgentEventProcessorTests
 
 	#endregion
 
+	#region Warning and Info Events
+
+	[Fact]
+	public async Task ProcessEventsAsync_Warning_ReportsWarningAndCollectsIt()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.Warning,
+				ErrorMessage = "Failed to start MCP server 'icm'",
+				DiagnosticType = "mcp_server_error"
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		_reporter.Received(1).ReportSessionWarning("mcp_server_error", "Failed to start MCP server 'icm'");
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Single(trace.Warnings);
+		Assert.Equal("[mcp_server_error] Failed to start MCP server 'icm'", trace.Warnings[0]);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_Warning_WithNullValues_HandlesGracefully()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.Warning,
+				ErrorMessage = null,
+				DiagnosticType = null
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		_reporter.Received(1).ReportSessionWarning("unknown", "Unknown warning");
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Single(trace.Warnings);
+		Assert.Equal("[unknown] Unknown warning", trace.Warnings[0]);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_MultipleWarnings_CollectsAll()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.Warning,
+				ErrorMessage = "First warning",
+				DiagnosticType = "type_a"
+			},
+			new AgentEvent
+			{
+				Type = AgentEventType.Warning,
+				ErrorMessage = "Second warning",
+				DiagnosticType = "type_b"
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Equal(2, trace.Warnings.Count);
+		Assert.Equal("[type_a] First warning", trace.Warnings[0]);
+		Assert.Equal("[type_b] Second warning", trace.Warnings[1]);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_Info_ReportsInfo()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.Info,
+				Content = "MCP server 'icm' connected",
+				DiagnosticType = "mcp_connected"
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		_reporter.Received(1).ReportSessionInfo("mcp_connected", "MCP server 'icm' connected");
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_Info_WithNullValues_HandlesGracefully()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.Info,
+				Content = null,
+				DiagnosticType = null
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		_reporter.Received(1).ReportSessionInfo("unknown", "");
+	}
+
+	#endregion
+
+	#region BuildTrace with MCP Servers and Warnings
+
+	[Fact]
+	public void BuildTrace_WithMcpServers_IncludesMcpServersInTrace()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var mcpServers = new List<string>
+		{
+			"icm (local: dnx Icm.Mcp ...)",
+			"graph (remote: https://graph.example.com)"
+		};
+
+		// Act
+		var trace = processor.BuildTrace(
+			systemPrompt: "System",
+			userPromptRaw: "User",
+			mcpServers: mcpServers
+		);
+
+		// Assert
+		Assert.Equal(2, trace.McpServers.Count);
+		Assert.Equal("icm (local: dnx Icm.Mcp ...)", trace.McpServers[0]);
+		Assert.Equal("graph (remote: https://graph.example.com)", trace.McpServers[1]);
+	}
+
+	[Fact]
+	public void BuildTrace_WithoutMcpServers_HasEmptyList()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+
+		// Act
+		var trace = processor.BuildTrace("sys", "user");
+
+		// Assert
+		Assert.Empty(trace.McpServers);
+	}
+
+	[Fact]
+	public void BuildPartialTrace_WithMcpServers_IncludesMcpServersInTrace()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var mcpServers = new List<string> { "icm (local: dnx Icm.Mcp ...)" };
+
+		// Act
+		var trace = processor.BuildPartialTrace("sys", "user", mcpServers);
+
+		// Assert
+		Assert.Single(trace.McpServers);
+		Assert.Equal("icm (local: dnx Icm.Mcp ...)", trace.McpServers[0]);
+	}
+
+	[Fact]
+	public void BuildPartialTrace_WithoutMcpServers_HasEmptyList()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+
+		// Act
+		var trace = processor.BuildPartialTrace("sys", "user");
+
+		// Assert
+		Assert.Empty(trace.McpServers);
+	}
+
+	[Fact]
+	public async Task BuildTrace_AfterWarnings_IncludesWarningsInTrace()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.Warning,
+				ErrorMessage = "MCP failure",
+				DiagnosticType = "mcp_error"
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Response" }
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+		var trace = processor.BuildTrace("sys", "user", mcpServers: new List<string> { "icm (local: dnx Icm.Mcp)" });
+
+		// Assert
+		Assert.Single(trace.Warnings);
+		Assert.Equal("[mcp_error] MCP failure", trace.Warnings[0]);
+		Assert.Single(trace.McpServers);
+		Assert.Equal("icm (local: dnx Icm.Mcp)", trace.McpServers[0]);
+	}
+
+	[Fact]
+	public async Task BuildPartialTrace_AfterWarnings_IncludesWarningsInTrace()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.Warning,
+				ErrorMessage = "MCP failure",
+				DiagnosticType = "mcp_error"
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+		var trace = processor.BuildPartialTrace("sys", "user", mcpServers: new List<string> { "icm (local: dnx Icm.Mcp)" });
+
+		// Assert
+		Assert.Single(trace.Warnings);
+		Assert.Equal("[mcp_error] MCP failure", trace.Warnings[0]);
+		Assert.Single(trace.McpServers);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_WarningsDoNotAffectResponseSegments()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Before warning" },
+			new AgentEvent
+			{
+				Type = AgentEventType.Warning,
+				ErrorMessage = "Some warning",
+				DiagnosticType = "test_warning"
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = " after warning" }
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert - Warning should NOT split response segments
+		Assert.Single(processor.ResponseSegments);
+		Assert.Equal("Before warning after warning", processor.ResponseSegments[0]);
+	}
+
+	#endregion
+
 	private static async IAsyncEnumerable<T> CreateAsyncEnumerable<T>(params T[] items)
 	{
 		foreach (var item in items)

@@ -66,6 +66,7 @@ public static class RunsApi
 				durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
 				status = s.Status.ToString(),
 				completionReason = s.CompletionReason,
+				completedByStep = s.CompletedByStep,
 				isActive = false
 			});
 
@@ -141,6 +142,7 @@ public static class RunsApi
 					durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
 					status = s.Status.ToString(),
 					completionReason = s.CompletionReason,
+					completedByStep = s.CompletedByStep,
 					isActive = false
 				});
 				allItems.AddRange(completedItems.Cast<object>());
@@ -194,6 +196,7 @@ public static class RunsApi
 				durationSeconds = Math.Round(record.Duration.TotalSeconds, 2),
 				status = record.Status.ToString(),
 				completionReason = record.CompletionReason,
+				completedByStep = record.CompletedByStep,
 				parameters = record.Parameters,
 				finalContent = record.FinalContent,
 				steps = record.StepRecords.Select(kv => new
@@ -234,7 +237,9 @@ public static class RunsApi
 						}).ToArray(),
 						responseSegments = t.ResponseSegments,
 						finalResponse = t.FinalResponse,
-						outputHandlerResult = t.OutputHandlerResult
+						outputHandlerResult = t.OutputHandlerResult,
+						mcpServers = t.McpServers.Count > 0 ? t.McpServers : null,
+						warnings = t.Warnings.Count > 0 ? t.Warnings : null,
 					} : null
 				}).ToArray()
 			}, jsonOptions);

@@ -489,4 +489,38 @@ describe('edge cases', () => {
     const { mermaidCode } = generateExecutionDagCode(steps, {});
     await assertMermaidParses(mermaidCode);
   });
+
+  it('renders completed_early status with correct class and icon', async () => {
+    const steps: Step[] = [
+      {
+        name: 'check-incidents',
+        type: 'Prompt',
+        model: 'claude-opus-4.5',
+        dependsOn: [],
+      },
+      {
+        name: 'acknowledge',
+        type: 'Prompt',
+        model: 'claude-opus-4.5',
+        dependsOn: ['check-incidents'],
+      },
+    ];
+    const statuses: Record<string, string> = {
+      'check-incidents': 'completed_early',
+      'acknowledge': 'cancelled',
+    };
+    const { mermaidCode } = generateExecutionDagCode(steps, statuses);
+
+    // Should contain the completedEarly classDef
+    expect(mermaidCode).toContain('classDef completedEarly');
+
+    // Should assign the completedEarly class to the step
+    expect(mermaidCode).toContain('completedEarly');
+
+    // Should contain the stop icon (⏹) in the node label
+    expect(mermaidCode).toContain('\u23F9');
+
+    // Should parse as valid Mermaid syntax
+    await assertMermaidParses(mermaidCode);
+  });
 });

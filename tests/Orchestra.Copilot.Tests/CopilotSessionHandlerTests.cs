@@ -204,6 +204,24 @@ public class CopilotSessionHandlerTests
 		Data = new SubagentDeselectedData()
 	};
 
+	private static SessionWarningEvent CreateWarningEvent(string warningType, string message) => new()
+	{
+		Data = new SessionWarningData
+		{
+			WarningType = warningType,
+			Message = message
+		}
+	};
+
+	private static SessionInfoEvent CreateInfoEvent(string infoType, string message) => new()
+	{
+		Data = new SessionInfoData
+		{
+			InfoType = infoType,
+			Message = message
+		}
+	};
+
 	#endregion
 
 	#region Session Start
@@ -894,6 +912,111 @@ public class CopilotSessionHandlerTests
 		events[3].Type.Should().Be(AgentEventType.SubagentFailed);
 		events[3].ErrorMessage.Should().Be("Network error");
 		_handler.FinalContent.Should().Be("I'll provide the answer directly.");
+	}
+
+	#endregion
+
+	#region Warning
+
+	[Fact]
+	public void HandleEvent_Warning_WritesWarningEvent()
+	{
+		// Arrange
+		var warningEvent = CreateWarningEvent("mcp_server_error", "Failed to start MCP server 'icm'");
+
+		// Act
+		_handler.HandleEvent(warningEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.Warning);
+		agentEvent.ErrorMessage.Should().Be("Failed to start MCP server 'icm'");
+		agentEvent.DiagnosticType.Should().Be("mcp_server_error");
+	}
+
+	[Fact]
+	public void HandleEvent_Warning_ReportsSessionWarning()
+	{
+		// Arrange
+		var warningEvent = CreateWarningEvent("tool_discovery_failed", "No tools found for server 'icm'");
+
+		// Act
+		_handler.HandleEvent(warningEvent);
+
+		// Assert
+		_reporter.Received(1).ReportSessionWarning("tool_discovery_failed", "No tools found for server 'icm'");
+	}
+
+	#endregion
+
+	#region Info
+
+	[Fact]
+	public void HandleEvent_Info_WritesInfoEvent()
+	{
+		// Arrange
+		var infoEvent = CreateInfoEvent("mcp_connected", "MCP server 'icm' connected successfully");
+
+		// Act
+		_handler.HandleEvent(infoEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.Info);
+		agentEvent.Content.Should().Be("MCP server 'icm' connected successfully");
+		agentEvent.DiagnosticType.Should().Be("mcp_connected");
+	}
+
+	[Fact]
+	public void HandleEvent_Info_ReportsSessionInfo()
+	{
+		// Arrange
+		var infoEvent = CreateInfoEvent("server_status", "All MCP servers started");
+
+		// Act
+		_handler.HandleEvent(infoEvent);
+
+		// Assert
+		_reporter.Received(1).ReportSessionInfo("server_status", "All MCP servers started");
+	}
+
+	#endregion
+
+	#region Full Session Flow with Warnings
+
+	[Fact]
+	public void HandleEvent_SessionWithWarnings_ProcessesWarningsAlongsideOtherEvents()
+	{
+		// Arrange & Act - Simulate a session where MCP server fails
+		_handler.HandleEvent(CreateSessionStartEvent("claude-opus-4.5"));
+		_handler.HandleEvent(CreateWarningEvent("mcp_server_error", "Failed to start MCP server 'icm'"));
+		_handler.HandleEvent(CreateInfoEvent("session_info", "Continuing without MCP tools"));
+		_handler.HandleEvent(CreateMessageDeltaEvent("I don't have access to IcM tools..."));
+		_handler.HandleEvent(CreateMessageEvent("No IcM MCP tools are available."));
+		_handler.HandleEvent(CreateUsageEvent("claude-opus-4.5", 50, 30));
+		_handler.HandleEvent(CreateIdleEvent());
+
+		// Assert
+		_handler.FinalContent.Should().Be("No IcM MCP tools are available.");
+		_done.Task.IsCompleted.Should().BeTrue();
+
+		var events = new List<AgentEvent>();
+		while (_channel.Reader.TryRead(out var evt))
+		{
+			events.Add(evt);
+		}
+
+		events.Should().HaveCount(7);
+		events[0].Type.Should().Be(AgentEventType.SessionStart);
+		events[1].Type.Should().Be(AgentEventType.Warning);
+		events[1].ErrorMessage.Should().Be("Failed to start MCP server 'icm'");
+		events[1].DiagnosticType.Should().Be("mcp_server_error");
+		events[2].Type.Should().Be(AgentEventType.Info);
+		events[2].Content.Should().Be("Continuing without MCP tools");
+		events[3].Type.Should().Be(AgentEventType.MessageDelta);
+		events[4].Type.Should().Be(AgentEventType.Message);
+		events[5].Type.Should().Be(AgentEventType.Usage);
+		events[6].Type.Should().Be(AgentEventType.SessionIdle);
 	}
 
 	#endregion

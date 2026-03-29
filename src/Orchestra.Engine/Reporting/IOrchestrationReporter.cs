@@ -21,6 +21,10 @@ public interface IOrchestrationReporter
 	void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations);
 	void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps);
 
+	// Session diagnostics
+	void ReportSessionWarning(string warningType, string message);
+	void ReportSessionInfo(string infoType, string message);
+
 	// Subagent events
 	void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools);
 	void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description);

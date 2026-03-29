@@ -161,6 +161,7 @@ public class FileSystemRunStore : IRunStore
 			FailedStepName = failedStep,
 			ErrorMessage = errorMsg,
 			CompletionReason = record.CompletionReason,
+			CompletedByStep = record.CompletedByStep,
 		};
 
 		lock (_indexWriteLock)
@@ -383,6 +384,7 @@ public class FileSystemRunStore : IRunStore
 							FailedStepName = failedStep2,
 							ErrorMessage = errorMsg2,
 							CompletionReason = record.CompletionReason,
+							CompletedByStep = record.CompletedByStep,
 						};
 
 						// During initial load we are the only writer (protected by _indexLoadLock),
@@ -515,6 +517,11 @@ public class RunIndex
 	/// When set, indicates the orchestration was completed early by the orchestra_complete tool.
 	/// </summary>
 	public string? CompletionReason { get; init; }
+
+	/// <summary>
+	/// The name of the step that triggered early completion via orchestra_complete.
+	/// </summary>
+	public string? CompletedByStep { get; init; }
 }
 
 /// <summary>

@@ -338,7 +338,9 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			}).ToArray(),
 			responseSegments = trace.ResponseSegments,
 			finalResponse = trace.FinalResponse,
-			outputHandlerResult = trace.OutputHandlerResult
+			outputHandlerResult = trace.OutputHandlerResult,
+			mcpServers = trace.McpServers.Count > 0 ? trace.McpServers : null,
+			warnings = trace.Warnings.Count > 0 ? trace.Warnings : null,
 		});
 	}
 
@@ -382,6 +384,16 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps)
 	{
 		Write("checkpoint-saved", new { runId, stepName, completedSteps, totalSteps });
+	}
+
+	public void ReportSessionWarning(string warningType, string message)
+	{
+		Write("session-warning", new { warningType, message });
+	}
+
+	public void ReportSessionInfo(string infoType, string message)
+	{
+		Write("session-info", new { infoType, message });
 	}
 
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
@@ -430,6 +442,7 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		{
 			status = orchestrationResult.Status.ToString(),
 			completionReason = orchestrationResult.CompletionReason,
+			completedByStep = orchestrationResult.CompletedByStep,
 			results,
 		});
 	}

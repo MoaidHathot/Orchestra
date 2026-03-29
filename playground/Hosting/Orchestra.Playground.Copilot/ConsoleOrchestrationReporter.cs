@@ -146,6 +146,16 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		Console.WriteLine($"  [checkpoint] Saved after '{stepName}' ({completedSteps}/{totalSteps} steps complete) — run {runId}");
 	}
 
+	public void ReportSessionWarning(string warningType, string message)
+	{
+		Console.WriteLine($"  [WARNING] ({warningType}) {message}");
+	}
+
+	public void ReportSessionInfo(string infoType, string message)
+	{
+		Console.WriteLine($"  [INFO] ({infoType}) {message}");
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		var name = displayName ?? agentName;

@@ -23,6 +23,10 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations) { }
 	public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps) { }
 
+	// Session diagnostics
+	public void ReportSessionWarning(string warningType, string message) { }
+	public void ReportSessionInfo(string infoType, string message) { }
+
 	// Subagent events
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools) { }
 	public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description) { }

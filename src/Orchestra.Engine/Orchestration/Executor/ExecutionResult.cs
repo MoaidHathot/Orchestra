@@ -50,6 +50,11 @@ public class ExecutionResult
 	public ExecutionStatus? OrchestrationCompleteStatus { get; init; }
 
 	/// <summary>
+	/// The name of the step that triggered orchestration completion when <see cref="OrchestrationCompleteRequested"/> is true.
+	/// </summary>
+	public string? OrchestrationCompleteStepName { get; init; }
+
+	/// <summary>
 	/// The reason for orchestration completion when <see cref="OrchestrationCompleteRequested"/> is true.
 	/// </summary>
 	public string? OrchestrationCompleteReason { get; init; }

@@ -20,4 +20,8 @@ public enum AgentEventType
 	SubagentCompleted,
 	SubagentFailed,
 	SubagentDeselected,
+
+	// Session diagnostics
+	Warning,
+	Info,
 }

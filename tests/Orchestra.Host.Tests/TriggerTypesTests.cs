@@ -396,6 +396,8 @@ public class TriggerTypesTests
 		public void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay) { }
 		public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations) { }
 		public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps) { }
+		public void ReportSessionWarning(string warningType, string message) { }
+		public void ReportSessionInfo(string infoType, string message) { }
 		public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools) { }
 		public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description) { }
 		public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName) { }

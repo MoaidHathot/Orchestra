@@ -132,6 +132,16 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 		Write("checkpoint-saved", new { runId, stepName, completedSteps, totalSteps });
 	}
 
+	public void ReportSessionWarning(string warningType, string message)
+	{
+		Write("session-warning", new { warningType, message });
+	}
+
+	public void ReportSessionInfo(string infoType, string message)
+	{
+		Write("session-info", new { infoType, message });
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		Write("subagent-selected", new { stepName, agentName, displayName, tools });
@@ -179,6 +189,8 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 			responseSegments = trace.ResponseSegments,
 			finalResponse = trace.FinalResponse,
 			outputHandlerResult = trace.OutputHandlerResult,
+			mcpServers = trace.McpServers.Count > 0 ? trace.McpServers : null,
+			warnings = trace.Warnings.Count > 0 ? trace.Warnings : null,
 		});
 	}
 

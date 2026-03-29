@@ -140,6 +140,8 @@ export interface TraceData {
   responseSegments?: ResponseSegment[];
   finalResponse?: string;
   outputHandlerResult?: string;
+  mcpServers?: string[];
+  warnings?: string[];
 }
 
 export interface ToolCallData {
@@ -206,6 +208,7 @@ export interface ExecutionModalState {
   finalResult: string;
   status: string;
   errorMessage: string | null;
+  completedByStep: string | null;
 }
 
 export interface StepEvent {

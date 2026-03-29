@@ -1440,6 +1440,8 @@ public class TerminalUI
 				"step-error" => "red",
 				"tool-started" => "yellow",
 				"tool-completed" => "blue",
+				"session-warning" => "yellow",
+				"session-info" => "blue",
 				_ => "dim"
 			};
 			return new Panel(new Markup($"[{typeColor}]{Markup.Escape(last.Type)}[/] {Markup.Escape(last.Message)} [dim]({age})[/]"))
@@ -2523,6 +2525,8 @@ public class TerminalUI
 					"loop-iteration" or "step-retry" => "magenta",
 					"checkpoint-saved" => "green",
 					"subagent-started" or "subagent-completed" or "subagent-selected" => "cyan",
+					"session-warning" => "yellow",
+					"session-info" => "blue",
 					_ => "dim"
 				};
 				rows.Add(new Markup(

@@ -120,6 +120,17 @@ public class StepExecutionTrace
 	/// The response after output handler was applied (same as Content).
 	/// </summary>
 	public string? OutputHandlerResult { get; init; }
+
+	/// <summary>
+	/// MCP server configurations used by this step, for diagnostics.
+	/// Each entry contains the server name and type (e.g., "icm (local: dnx Icm.Mcp ...)").
+	/// </summary>
+	public List<string> McpServers { get; init; } = [];
+
+	/// <summary>
+	/// Session warnings received from the SDK during execution (e.g., MCP server startup failures).
+	/// </summary>
+	public List<string> Warnings { get; init; } = [];
 }
 
 /// <summary>

@@ -42,7 +42,9 @@ type TraceSectionKey =
   | 'toolCalls'
   | 'responseSegments'
   | 'finalResponse'
-  | 'outputHandlerResult';
+  | 'outputHandlerResult'
+  | 'mcpServers'
+  | 'warnings';
 
 interface DisplayContent {
   content: string;
@@ -61,6 +63,7 @@ interface Props {
   finalResult: string;
   status: string;
   errorMessage: string | null;
+  completedByStep: string | null;
   onClose: () => void;
   onCancel: (executionId: string) => void;
 }
@@ -77,6 +80,7 @@ export default function ExecutionModal({
   finalResult,
   status,
   errorMessage,
+  completedByStep,
   onClose,
   onCancel,
 }: Props): React.JSX.Element {
@@ -247,7 +251,9 @@ export default function ExecutionModal({
               <span className="text-success">Completed</span>
             )}
             {status === 'completed_early' && (
-              <span className="text-completed-early">Completed Early</span>
+              <span className="text-completed-early">
+                Completed Early{completedByStep ? ` (by ${completedByStep})` : ''}
+              </span>
             )}
             {status === 'failed' && <span className="text-error">Failed</span>}
             {status === 'cancelled' && (
@@ -1078,6 +1084,138 @@ export default function ExecutionModal({
                                   }}
                                 >
                                   {selectedStepTrace.outputHandlerResult}
+                                </pre>
+                               )}
+                            </div>
+                          )}
+
+                        {/* MCP Servers */}
+                        {selectedStepTrace.mcpServers &&
+                          selectedStepTrace.mcpServers.length > 0 && (
+                            <div
+                              className="trace-section"
+                              style={{ marginBottom: '12px' }}
+                            >
+                              <div
+                                className="trace-section-header"
+                                onClick={() =>
+                                  toggleTraceSection('mcpServers')
+                                }
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  cursor: 'pointer',
+                                  padding: '6px 8px',
+                                  background: 'var(--surface)',
+                                  borderRadius: '4px',
+                                  marginBottom:
+                                    expandedTraceSections.mcpServers
+                                      ? '4px'
+                                      : '0',
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    transform:
+                                      expandedTraceSections.mcpServers
+                                        ? 'rotate(90deg)'
+                                        : 'rotate(0deg)',
+                                    transition: 'transform 0.15s',
+                                  }}
+                                >
+                                  &#9654;
+                                </span>
+                                <span
+                                  style={{
+                                    fontWeight: 500,
+                                    color: 'var(--cyan)',
+                                  }}
+                                >
+                                  MCP Servers (
+                                  {selectedStepTrace.mcpServers.length})
+                                </span>
+                              </div>
+                              {expandedTraceSections.mcpServers && (
+                                <pre
+                                  style={{
+                                    background: 'var(--bg)',
+                                    padding: '8px',
+                                    borderRadius: '4px',
+                                    whiteSpace: 'pre-wrap',
+                                    fontSize: '11px',
+                                    color: 'var(--text-muted)',
+                                    maxHeight: '150px',
+                                    overflow: 'auto',
+                                  }}
+                                >
+                                  {selectedStepTrace.mcpServers.join('\n')}
+                                </pre>
+                              )}
+                            </div>
+                          )}
+
+                        {/* Warnings */}
+                        {selectedStepTrace.warnings &&
+                          selectedStepTrace.warnings.length > 0 && (
+                            <div
+                              className="trace-section"
+                              style={{ marginBottom: '12px' }}
+                            >
+                              <div
+                                className="trace-section-header"
+                                onClick={() =>
+                                  toggleTraceSection('warnings')
+                                }
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  cursor: 'pointer',
+                                  padding: '6px 8px',
+                                  background: 'var(--surface)',
+                                  borderRadius: '4px',
+                                  marginBottom:
+                                    expandedTraceSections.warnings
+                                      ? '4px'
+                                      : '0',
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    transform:
+                                      expandedTraceSections.warnings
+                                        ? 'rotate(90deg)'
+                                        : 'rotate(0deg)',
+                                    transition: 'transform 0.15s',
+                                  }}
+                                >
+                                  &#9654;
+                                </span>
+                                <span
+                                  style={{
+                                    fontWeight: 500,
+                                    color: 'var(--error)',
+                                  }}
+                                >
+                                  Warnings (
+                                  {selectedStepTrace.warnings.length})
+                                </span>
+                              </div>
+                              {expandedTraceSections.warnings && (
+                                <pre
+                                  style={{
+                                    background: 'var(--bg)',
+                                    padding: '8px',
+                                    borderRadius: '4px',
+                                    whiteSpace: 'pre-wrap',
+                                    fontSize: '11px',
+                                    color: 'var(--warning)',
+                                    maxHeight: '150px',
+                                    overflow: 'auto',
+                                  }}
+                                >
+                                  {selectedStepTrace.warnings.join('\n')}
                                 </pre>
                               )}
                             </div>

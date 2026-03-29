@@ -20,11 +20,17 @@ public class OrchestrationResult
 	/// </summary>
 	public string? CompletionReason { get; init; }
 
+	/// <summary>
+	/// The name of the step that triggered early completion via orchestra_complete.
+	/// </summary>
+	public string? CompletedByStep { get; init; }
+
 	public static OrchestrationResult From(
 		Orchestration orchestration,
 		IReadOnlyDictionary<string, ExecutionResult> stepResults,
 		ExecutionStatus? orchestrationCompleteStatus = null,
-		string? orchestrationCompleteReason = null)
+		string? orchestrationCompleteReason = null,
+		string? orchestrationCompleteStepName = null)
 	{
 		// Terminal steps are those that no other step depends on
 		var dependedOn = new HashSet<string>(
@@ -73,6 +79,7 @@ public class OrchestrationResult
 			Results = terminalResults,
 			StepResults = stepResults,
 			CompletionReason = orchestrationCompleteReason,
+			CompletedByStep = orchestrationCompleteStepName,
 		};
 	}
 }

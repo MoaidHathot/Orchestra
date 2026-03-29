@@ -6,7 +6,7 @@
       "name": "icm",
       "type": "local",
       "command": "dnx",
-      "arguments": ["Icm.Mcp", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes"]
+      "arguments": ["IcM.Mcp", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes"]
     }
   ],
   "steps": [

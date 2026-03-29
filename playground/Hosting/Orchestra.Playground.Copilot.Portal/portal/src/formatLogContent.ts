@@ -10,6 +10,9 @@ export interface LogEvent {
   displayName?: string;
   agentName?: string;
   tools?: string[];
+  warningType?: string;
+  infoType?: string;
+  message?: string;
   [key: string]: unknown;
 }
 
@@ -39,5 +42,7 @@ export function formatLogContent(log: LogEvent): string {
     return `Subagent failed: ${name} - ${log.error || 'unknown error'}`;
   }
   if (log.type === 'subagent-deselected') return 'Returned to parent agent';
+  if (log.type === 'session-warning') return `Warning [${log.warningType || 'unknown'}]: ${log.message || ''}`;
+  if (log.type === 'session-info') return `Info [${log.infoType || 'unknown'}]: ${log.message || ''}`;
   return JSON.stringify(log).substring(0, 200);
 }

@@ -62,6 +62,7 @@ interface ExecutionDetailStep {
 interface ExecutionDetailsResponse {
   status: string;
   completionReason?: string;
+  completedByStep?: string;
   finalContent?: string;
   steps?: ExecutionDetailStep[];
 }
@@ -104,6 +105,7 @@ interface HistoryListEntry {
   orchestrationName: string;
   status?: string;
   completionReason?: string;
+  completedByStep?: string;
   isActive?: boolean;
   startedAt?: string;
   durationSeconds?: number;
@@ -127,6 +129,7 @@ interface SSEEventData {
   stepName?: string;
   status?: string;
   completionReason?: string;
+  completedByStep?: string;
   executionId?: string;
   chunk?: string;
   content?: string;
@@ -163,6 +166,7 @@ function App(): React.JSX.Element {
     finalResult: '',
     status: 'idle',
     errorMessage: null,
+    completedByStep: null,
   });
   const eventSourceRef = useRef<EventSource | null>(null);
   const [mcpsModal, setMcpsModal] = useState<McpsModalState>({ open: false });
@@ -448,6 +452,16 @@ function App(): React.JSX.Element {
       });
     });
 
+    // session warning and info events
+    (['session-warning', 'session-info'] as const).forEach(eventType => {
+      eventSource.addEventListener(eventType, (e: MessageEvent) => {
+        try {
+          const data: SSEEventData = JSON.parse(e.data);
+          addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
+        } catch { /* ignore */ }
+      });
+    });
+
     // step-output
     eventSource.addEventListener('step-output', (e: MessageEvent) => {
       try {
@@ -518,15 +532,21 @@ function App(): React.JSX.Element {
             updatedStatuses[stepName] = statusMap[stepData.status] || 'completed';
           }
         }
+        // Mark the step that triggered early completion with a distinct status for DAG visualization
+        if (data.completedByStep && updatedStatuses[data.completedByStep]) {
+          updatedStatuses[data.completedByStep] = 'completed_early';
+        }
         setExecutionModal(prev => ({
           ...prev,
           stepStatuses: { ...prev.stepStatuses, ...updatedStatuses },
           status: modalStatus,
+          completedByStep: data.completedByStep || null,
         }));
       } else {
         setExecutionModal(prev => ({
           ...prev,
           status: modalStatus,
+          completedByStep: data.completedByStep || null,
         }));
       }
 
@@ -609,6 +629,7 @@ function App(): React.JSX.Element {
       finalResult: '',
       status: 'running',
       errorMessage: null,
+      completedByStep: null,
     });
 
     try {
@@ -708,6 +729,7 @@ function App(): React.JSX.Element {
       finalResult: '',
       status: execution.status === 'Cancelling' ? 'cancelling' : 'running',
       errorMessage: null,
+      completedByStep: null,
     });
 
     try {
@@ -747,6 +769,7 @@ function App(): React.JSX.Element {
       finalResult: '',
       status: 'loading',
       errorMessage: null,
+      completedByStep: null,
     });
 
     try {
@@ -841,6 +864,11 @@ function App(): React.JSX.Element {
         });
       }
 
+      // Mark the step that triggered early completion with a distinct status for DAG visualization
+      if (details.completedByStep && stepStatuses[details.completedByStep]) {
+        stepStatuses[details.completedByStep] = 'completed_early';
+      }
+
       // Determine overall status
       const overallStatusMap: Record<string, string> = {
         'Succeeded': 'success',
@@ -864,6 +892,7 @@ function App(): React.JSX.Element {
         finalResult,
         status: modalStatus,
         errorMessage: null,
+        completedByStep: details.completedByStep || null,
       });
     } catch (err) {
       console.error('Failed to load execution details:', err);
@@ -1289,6 +1318,7 @@ function App(): React.JSX.Element {
             finalResult: '',
             status: 'idle',
             errorMessage: null,
+            completedByStep: null,
           });
         }}
         onCancel={() => cancelExecution(executionModal.executionId)}

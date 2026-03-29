@@ -53,4 +53,9 @@ public class OrchestrationRunRecord
 	/// Contains the reason provided by the LLM.
 	/// </summary>
 	public string? CompletionReason { get; init; }
+
+	/// <summary>
+	/// The name of the step that triggered early completion via orchestra_complete.
+	/// </summary>
+	public string? CompletedByStep { get; init; }
 }

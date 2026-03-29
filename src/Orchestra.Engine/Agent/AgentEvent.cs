@@ -58,6 +58,13 @@ public class AgentEvent
 	/// </summary>
 	public string? ToolError { get; init; }
 
+	// ── Session diagnostics (used by Warning, Info events) ──
+
+	/// <summary>
+	/// The warning/info category type from the SDK (e.g., "mcp_server_error", "tool_discovery_failed").
+	/// </summary>
+	public string? DiagnosticType { get; init; }
+
 	// ── Subagent data (used by SubagentSelected, SubagentStarted, SubagentCompleted, SubagentFailed) ──
 
 	/// <summary>
