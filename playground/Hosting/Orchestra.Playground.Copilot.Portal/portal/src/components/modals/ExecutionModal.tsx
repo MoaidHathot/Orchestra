@@ -98,7 +98,7 @@ export default function ExecutionModal({
   }, []);
 
   // Determine if execution is completed
-  const isCompleted = ['success', 'failed', 'cancelled'].includes(status);
+  const isCompleted = ['success', 'failed', 'cancelled', 'completed_early'].includes(status);
 
   // Get trace for selected step (cast to the richer shape the template expects)
   const selectedStepTrace: RichTraceData | null =
@@ -245,6 +245,9 @@ export default function ExecutionModal({
             )}
             {status === 'success' && (
               <span className="text-success">Completed</span>
+            )}
+            {status === 'completed_early' && (
+              <span className="text-completed-early">Completed Early</span>
             )}
             {status === 'failed' && <span className="text-error">Failed</span>}
             {status === 'cancelled' && (

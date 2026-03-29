@@ -65,6 +65,7 @@ public static class RunsApi
 				completedAt = s.CompletedAt.ToString("o"),
 				durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
 				status = s.Status.ToString(),
+				completionReason = s.CompletionReason,
 				isActive = false
 			});
 
@@ -128,26 +129,7 @@ public static class RunsApi
 				var remaining = requestedLimit - allItems.Count;
 				if (remaining > 0)
 				{
-					var completedItems = completedSummaries.Take(remaining).Select(s => new
-					{
-						runId = s.RunId,
-						executionId = (string?)null,
-						orchestrationName = s.OrchestrationName,
-						version = s.OrchestrationVersion,
-						triggeredBy = s.TriggeredBy,
-						startedAt = s.StartedAt.ToString("o"),
-						completedAt = s.CompletedAt.ToString("o"),
-						durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
-						status = s.Status.ToString(),
-						isActive = false
-					});
-					allItems.AddRange(completedItems.Cast<object>());
-				}
-			}
-			else
-			{
-				var completedOffset = requestedOffset - runningCount;
-				var completedItems = completedSummaries.Skip(completedOffset).Take(requestedLimit).Select(s => new
+				var completedItems = completedSummaries.Take(remaining).Select(s => new
 				{
 					runId = s.RunId,
 					executionId = (string?)null,
@@ -158,9 +140,30 @@ public static class RunsApi
 					completedAt = s.CompletedAt.ToString("o"),
 					durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
 					status = s.Status.ToString(),
+					completionReason = s.CompletionReason,
 					isActive = false
 				});
 				allItems.AddRange(completedItems.Cast<object>());
+			}
+		}
+		else
+		{
+			var completedOffset = requestedOffset - runningCount;
+			var completedItems = completedSummaries.Skip(completedOffset).Take(requestedLimit).Select(s => new
+			{
+				runId = s.RunId,
+				executionId = (string?)null,
+				orchestrationName = s.OrchestrationName,
+				version = s.OrchestrationVersion,
+				triggeredBy = s.TriggeredBy,
+				startedAt = s.StartedAt.ToString("o"),
+				completedAt = s.CompletedAt.ToString("o"),
+				durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
+				status = s.Status.ToString(),
+				completionReason = s.CompletionReason,
+				isActive = false
+			});
+			allItems.AddRange(completedItems.Cast<object>());
 			}
 
 			return Results.Json(new
@@ -190,6 +193,7 @@ public static class RunsApi
 				completedAt = record.CompletedAt.ToString("o"),
 				durationSeconds = Math.Round(record.Duration.TotalSeconds, 2),
 				status = record.Status.ToString(),
+				completionReason = record.CompletionReason,
 				parameters = record.Parameters,
 				finalContent = record.FinalContent,
 				steps = record.StepRecords.Select(kv => new

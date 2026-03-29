@@ -38,4 +38,12 @@ public class CommandOrchestrationStep : OrchestrationStep
 	/// When true, stderr is appended after stdout.
 	/// </summary>
 	public bool IncludeStdErr { get; init; }
+
+	/// <summary>
+	/// Optional content to pipe to the process's standard input.
+	/// Supports template expressions (e.g., {{stepName.output}}).
+	/// Use this instead of passing large outputs as command-line arguments,
+	/// which can exceed OS command-line length limits.
+	/// </summary>
+	public string? Stdin { get; init; }
 }

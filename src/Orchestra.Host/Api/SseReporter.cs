@@ -429,6 +429,7 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("orchestration-done", new
 		{
 			status = orchestrationResult.Status.ToString(),
+			completionReason = orchestrationResult.CompletionReason,
 			results,
 		});
 	}

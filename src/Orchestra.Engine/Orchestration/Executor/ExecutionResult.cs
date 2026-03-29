@@ -38,6 +38,22 @@ public class ExecutionResult
 	/// </summary>
 	public StepExecutionTrace? Trace { get; init; }
 
+	/// <summary>
+	/// When true, signals that the entire orchestration should complete immediately.
+	/// Set by the orchestra_complete engine tool.
+	/// </summary>
+	public bool OrchestrationCompleteRequested { get; init; }
+
+	/// <summary>
+	/// The status to use for orchestration completion when <see cref="OrchestrationCompleteRequested"/> is true.
+	/// </summary>
+	public ExecutionStatus? OrchestrationCompleteStatus { get; init; }
+
+	/// <summary>
+	/// The reason for orchestration completion when <see cref="OrchestrationCompleteRequested"/> is true.
+	/// </summary>
+	public string? OrchestrationCompleteReason { get; init; }
+
 	public static ExecutionResult Succeeded(
 		string content,
 		string? rawContent = null,
@@ -85,5 +101,26 @@ public class ExecutionResult
 		Content = string.Empty,
 		Status = ExecutionStatus.Cancelled,
 		ErrorMessage = errorMessage ?? "Cancelled",
+	};
+
+	/// <summary>
+	/// Creates a NoAction result indicating the step completed but there is nothing to do.
+	/// Downstream steps that depend on this step will be skipped.
+	/// </summary>
+	public static ExecutionResult NoAction(
+		string reason,
+		Dictionary<string, string>? rawDependencyOutputs = null,
+		string? promptSent = null,
+		string? actualModel = null,
+		TokenUsage? usage = null,
+		StepExecutionTrace? trace = null) => new()
+	{
+		Content = reason,
+		Status = ExecutionStatus.NoAction,
+		RawDependencyOutputs = rawDependencyOutputs ?? [],
+		PromptSent = promptSent,
+		ActualModel = actualModel,
+		Usage = usage,
+		Trace = trace,
 	};
 }

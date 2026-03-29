@@ -149,4 +149,68 @@ public class SetStatusToolTests
 
 		context.StatusOverride.Should().Be(ExecutionStatus.Failed);
 	}
+
+	[Fact]
+	public void Execute_StatusNoAction_SetsContextToNoAction()
+	{
+		var tool = new SetStatusTool();
+		var context = new EngineToolContext();
+
+		tool.Execute("""{"status": "no_action", "reason": "No incidents to process"}""", context);
+
+		context.HasStatusOverride.Should().BeTrue();
+		context.StatusOverride.Should().Be(ExecutionStatus.NoAction);
+		context.StatusReason.Should().Be("No incidents to process");
+	}
+
+	[Fact]
+	public void Execute_StatusNoAction_ReturnsConfirmationMessage()
+	{
+		var tool = new SetStatusTool();
+		var context = new EngineToolContext();
+
+		var result = tool.Execute("""{"status": "no_action", "reason": "Nothing to do"}""", context);
+
+		result.Should().Contain("no_action");
+	}
+
+	[Fact]
+	public void Execute_StatusNoActionWithoutReason_UsesDefaultReason()
+	{
+		var tool = new SetStatusTool();
+		var context = new EngineToolContext();
+
+		tool.Execute("""{"status": "no_action"}""", context);
+
+		context.HasStatusOverride.Should().BeTrue();
+		context.StatusOverride.Should().Be(ExecutionStatus.NoAction);
+		context.StatusReason.Should().Be("No action needed");
+	}
+
+	[Fact]
+	public void Execute_CaseInsensitiveNoAction_SetsNoAction()
+	{
+		var tool = new SetStatusTool();
+		var context = new EngineToolContext();
+
+		tool.Execute("""{"status": "NO_ACTION", "reason": "test"}""", context);
+
+		context.StatusOverride.Should().Be(ExecutionStatus.NoAction);
+	}
+
+	[Fact]
+	public void ParametersSchema_ContainsNoActionInEnum()
+	{
+		var tool = new SetStatusTool();
+
+		tool.ParametersSchema.Should().Contain("no_action");
+	}
+
+	[Fact]
+	public void Description_MentionsNoAction()
+	{
+		var tool = new SetStatusTool();
+
+		tool.Description.Should().Contain("no_action");
+	}
 }

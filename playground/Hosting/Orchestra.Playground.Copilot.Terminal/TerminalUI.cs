@@ -1523,23 +1523,27 @@ public class TerminalUI
 		{
 			foreach (var run in recentRuns)
 			{
-				var statusColor = run.Status switch
+			var isEarlyCompletion = run.Status == ExecutionStatus.Succeeded && run.CompletionReason is not null;
+				var statusColor = isEarlyCompletion ? "cyan" : run.Status switch
 				{
 					ExecutionStatus.Succeeded => "green",
 					ExecutionStatus.Failed => "red",
 					ExecutionStatus.Cancelled => "yellow",
+					ExecutionStatus.NoAction => "dim",
 					_ => "dim"
 				};
-				var statusIcon = run.Status switch
+				var statusIcon = isEarlyCompletion ? ">" : run.Status switch
 				{
 					ExecutionStatus.Succeeded => "+",
 					ExecutionStatus.Failed => "x",
 					ExecutionStatus.Cancelled => "-",
+					ExecutionStatus.NoAction => "—",
 					_ => "?"
 				};
+				var statusLabel = isEarlyCompletion ? "Completed Early" : run.Status.ToString();
 				summaryRows.Add(new Markup(
 					$"  [{statusColor}]{statusIcon}[/] {Markup.Escape(run.OrchestrationName)} " +
-					$"[dim]{run.StartedAt:HH:mm}[/] [{statusColor}]{run.Status}[/] [dim]{run.Duration.TotalSeconds:F1}s[/]"));
+					$"[dim]{run.StartedAt:HH:mm}[/] [{statusColor}]{statusLabel}[/] [dim]{run.Duration.TotalSeconds:F1}s[/]"));
 			}
 		}
 		else
@@ -1691,13 +1695,16 @@ public class TerminalUI
 			var run = runs[i];
 			var selected = i == _selectedIndex;
 			var style = selected ? "bold cyan" : "";
-			var statusColor = run.Status switch
+			var isRunEarlyCompletion = run.Status == ExecutionStatus.Succeeded && run.CompletionReason is not null;
+			var statusColor = isRunEarlyCompletion ? "cyan" : run.Status switch
 			{
 				ExecutionStatus.Succeeded => "green",
 				ExecutionStatus.Failed => "red",
 				ExecutionStatus.Cancelled => "yellow",
+				ExecutionStatus.NoAction => "dim",
 				_ => ""
 			};
+			var statusLabel = isRunEarlyCompletion ? "Completed Early" : run.Status.ToString();
 
 			// Format trigger source
 			var triggerText = run.TriggeredBy switch
@@ -1725,7 +1732,7 @@ public class TerminalUI
 			table.AddRow(
 				new Markup($"[{style}]{Markup.Escape(run.OrchestrationName)}[/]"),
 				new Markup($"[dim]{Markup.Escape(run.OrchestrationVersion)}[/]"),
-				new Markup($"[{statusColor}]{run.Status}[/]"),
+				new Markup($"[{statusColor}]{statusLabel}[/]"),
 				new Markup($"[{style}]{run.StartedAt:HH:mm:ss}[/]"),
 				new Markup($"[{style}]{run.Duration.TotalSeconds:F1}s[/]"),
 				new Markup(triggerText),
@@ -2060,11 +2067,13 @@ public class TerminalUI
 
 	private Panel RenderCompletedExecutionDetail(OrchestrationRunRecord record)
 	{
-		var statusColor = record.Status switch
+		var isRecordEarlyCompletion = record.Status == ExecutionStatus.Succeeded && record.CompletionReason is not null;
+		var statusColor = isRecordEarlyCompletion ? "cyan" : record.Status switch
 		{
 			ExecutionStatus.Succeeded => "green",
 			ExecutionStatus.Failed => "red",
 			ExecutionStatus.Cancelled => "yellow",
+			ExecutionStatus.NoAction => "dim",
 			_ => "white"
 		};
 
@@ -2112,11 +2121,12 @@ public class TerminalUI
 			rows.Add(new Markup($"[dim]URL:[/] [link={url}]{url}[/]"));
 		}
 
-		var headerText = $"[bold]{Markup.Escape(record.OrchestrationName)}[/] [{statusColor}]{record.Status}[/]";
+		var headerStatusLabel = isRecordEarlyCompletion ? "Completed Early" : record.Status.ToString();
+		var headerText = $"[bold]{Markup.Escape(record.OrchestrationName)}[/] [{statusColor}]{headerStatusLabel}[/]";
 		return new Panel(new Rows(rows))
 			.Header($"{headerText} [dim]|[/] [dim]Tab[/]=Switch [dim]f[/]=Follow [dim]u[/]=URL [dim]Esc[/]=Back")
 			.Border(BoxBorder.Rounded)
-			.BorderColor(record.Status == ExecutionStatus.Failed ? Color.Red : record.Status == ExecutionStatus.Cancelled ? Color.Yellow : Color.Blue);
+			.BorderColor(isRecordEarlyCompletion ? Color.Cyan1 : record.Status == ExecutionStatus.Failed ? Color.Red : record.Status == ExecutionStatus.Cancelled ? Color.Yellow : Color.Blue);
 	}
 
 	private IEnumerable<IRenderable> RenderSummaryTab(
@@ -2128,7 +2138,13 @@ public class TerminalUI
 	{
 		yield return new Markup($"[bold]Orchestration:[/] {Markup.Escape(record.OrchestrationName)}");
 		yield return new Markup($"[bold]Version:[/] {Markup.Escape(record.OrchestrationVersion)}");
-		yield return new Markup($"[bold]Status:[/] [{statusColor}]{record.Status}[/]");
+		var summaryStatusLabel = record.Status == ExecutionStatus.Succeeded && record.CompletionReason is not null
+			? "Completed Early" : record.Status.ToString();
+		yield return new Markup($"[bold]Status:[/] [{statusColor}]{summaryStatusLabel}[/]");
+		if (record.CompletionReason is not null)
+		{
+			yield return new Markup($"[bold]Reason:[/] [{statusColor}]{Markup.Escape(record.CompletionReason)}[/]");
+		}
 
 		// Show error banner for failed/cancelled runs
 		if (record.Status is ExecutionStatus.Failed or ExecutionStatus.Cancelled)
@@ -2213,6 +2229,7 @@ public class TerminalUI
 			{
 				ExecutionStatus.Succeeded => "green",
 				ExecutionStatus.Failed => "red",
+				ExecutionStatus.NoAction => "dim",
 				_ => "yellow"
 			};
 

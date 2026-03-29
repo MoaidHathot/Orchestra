@@ -54,6 +54,13 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				workingDirectory = TemplateResolver.Resolve(commandStep.WorkingDirectory, context.Parameters, context, step.DependsOn);
 			}
 
+			// Resolve template expressions in stdin content
+			string? resolvedStdin = null;
+			if (commandStep.Stdin is not null)
+			{
+				resolvedStdin = TemplateResolver.Resolve(commandStep.Stdin, context.Parameters, context, step.DependsOn);
+			}
+
 			// Build process start info.
 			// Route through the platform shell so that .cmd shims (Windows) and
 			// PATH-resolved scripts (Linux/macOS) are found correctly.
@@ -90,6 +97,7 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				Arguments = isWindows ? $"/c {fullCommandLine}" : $"-c {fullCommandLine}",
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
+				RedirectStandardInput = resolvedStdin is not null,
 				UseShellExecute = false,
 				CreateNoWindow = true,
 			};
@@ -142,6 +150,13 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			process.BeginOutputReadLine();
 			process.BeginErrorReadLine();
 
+			// Write stdin content if provided, then close the stream
+			if (resolvedStdin is not null)
+			{
+				await process.StandardInput.WriteAsync(resolvedStdin);
+				process.StandardInput.Close();
+			}
+
 			// Wait for process to exit with cancellation support
 			await process.WaitForExitAsync(cancellationToken);
 
@@ -155,9 +170,15 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 					: stdout;
 
 				LogCommandSuccess(step.Name, process.ExitCode);
+
+				// Build trace data for viewer visibility
+				var trace = BuildTrace(command, arguments, workingDirectory, commandStep.Environment, output, stderr);
+				_reporter.ReportStepTrace(step.Name, trace);
+
 				return ExecutionResult.Succeeded(
 					output,
-					rawDependencyOutputs: rawDependencyOutputs);
+					rawDependencyOutputs: rawDependencyOutputs,
+					trace: trace);
 			}
 			else
 			{
@@ -167,7 +188,12 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 
 				LogCommandFailed(step.Name, process.ExitCode, errorMessage);
 				_reporter.ReportStepError(step.Name, errorMessage);
-				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs);
+
+				// Build trace data even on failure
+				var trace = BuildTrace(command, arguments, workingDirectory, commandStep.Environment, stdout, stderr);
+				_reporter.ReportStepTrace(step.Name, trace);
+
+				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: trace);
 			}
 		}
 		catch (OperationCanceledException)
@@ -181,6 +207,43 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			_reporter.ReportStepError(step.Name, errorMessage);
 			return ExecutionResult.Failed(errorMessage, rawDependencyOutputs);
 		}
+	}
+
+	/// <summary>
+	/// Builds a trace record for the command step so the viewer can display
+	/// the resolved command, arguments, working directory, and output.
+	/// </summary>
+	private static StepExecutionTrace BuildTrace(
+		string command,
+		string[] arguments,
+		string? workingDirectory,
+		IReadOnlyDictionary<string, string> environment,
+		string stdout,
+		string stderr)
+	{
+		// Build a human-readable command line for display
+		var commandLineParts = new List<string> { command };
+		commandLineParts.AddRange(arguments);
+		var commandLine = string.Join(' ', commandLineParts.Select(p => p.Contains(' ') ? $"\"{p}\"" : p));
+
+		// Include working directory and env vars in the "system prompt" area if present
+		var contextInfo = new StringBuilder();
+		if (workingDirectory is not null)
+			contextInfo.AppendLine($"Working Directory: {workingDirectory}");
+		if (environment.Count > 0)
+		{
+			contextInfo.AppendLine("Environment Variables:");
+			foreach (var (key, value) in environment)
+				contextInfo.AppendLine($"  {key}={value}");
+		}
+
+		return new StepExecutionTrace
+		{
+			SystemPrompt = contextInfo.Length > 0 ? contextInfo.ToString().TrimEnd() : null,
+			UserPromptRaw = commandLine,
+			FinalResponse = stdout,
+			ResponseSegments = stderr.Length > 0 ? [stderr] : [],
+		};
 	}
 
 	#region Source-Generated Logging

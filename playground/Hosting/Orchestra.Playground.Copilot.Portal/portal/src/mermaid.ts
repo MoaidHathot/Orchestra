@@ -577,6 +577,9 @@ export function generateExecutionDagCode(
       case 'skipped':
         statusIcon = ' \u25CB'; // ○
         break;
+      case 'noaction':
+        statusIcon = ' \u2014'; // —
+        break;
     }
 
     // Loop indicator
@@ -663,6 +666,7 @@ export function generateExecutionDagCode(
   mermaidCode += '  classDef failed fill:#3d1418,stroke:#f85149,color:#f85149\n';
   mermaidCode += '  classDef cancelled fill:#3d2e0d,stroke:#d29922,color:#d29922\n';
   mermaidCode += '  classDef skipped fill:#21262d,stroke:#484f58,color:#6e7681\n';
+  mermaidCode += '  classDef noaction fill:#21262d,stroke:#8b949e,color:#8b949e\n';
   mermaidCode += '  classDef subagentNode fill:#161b22,stroke:#8b949e,color:#8b949e\n';
 
   // Apply status classes

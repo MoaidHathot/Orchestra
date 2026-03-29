@@ -159,7 +159,8 @@ public class FileSystemRunStore : IRunStore
 			TriggerId = record.TriggerId,
 			FolderPath = runDir,
 			FailedStepName = failedStep,
-			ErrorMessage = errorMsg
+			ErrorMessage = errorMsg,
+			CompletionReason = record.CompletionReason,
 		};
 
 		lock (_indexWriteLock)
@@ -380,7 +381,8 @@ public class FileSystemRunStore : IRunStore
 							TriggerId = record.TriggerId,
 							FolderPath = runDir,
 							FailedStepName = failedStep2,
-							ErrorMessage = errorMsg2
+							ErrorMessage = errorMsg2,
+							CompletionReason = record.CompletionReason,
 						};
 
 						// During initial load we are the only writer (protected by _indexLoadLock),
@@ -508,6 +510,11 @@ public class RunIndex
 	/// Error message from the first failed step, if the run failed.
 	/// </summary>
 	public string? ErrorMessage { get; init; }
+
+	/// <summary>
+	/// When set, indicates the orchestration was completed early by the orchestra_complete tool.
+	/// </summary>
+	public string? CompletionReason { get; init; }
 }
 
 /// <summary>

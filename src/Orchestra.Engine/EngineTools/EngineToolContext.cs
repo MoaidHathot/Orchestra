@@ -23,8 +23,25 @@ public sealed class EngineToolContext
 	public bool HasStatusOverride => StatusOverride is not null;
 
 	/// <summary>
+	/// When set, signals that the entire orchestration should complete immediately.
+	/// All pending and running steps will be cancelled.
+	/// </summary>
+	public bool OrchestrationCompleteRequested { get; private set; }
+
+	/// <summary>
+	/// The status to use for the orchestration completion (success or failed).
+	/// </summary>
+	public ExecutionStatus? OrchestrationCompleteStatus { get; private set; }
+
+	/// <summary>
+	/// The reason for orchestration completion.
+	/// </summary>
+	public string? OrchestrationCompleteReason { get; private set; }
+
+	/// <summary>
 	/// Sets the execution status override. Can only transition to a "worse" state
 	/// (e.g., from null to Failed). Once failed, cannot be reset to succeeded.
+	/// NoAction can transition to Failed but not back to Succeeded.
 	/// </summary>
 	public void SetStatus(ExecutionStatus status, string? reason = null)
 	{
@@ -34,5 +51,16 @@ public sealed class EngineToolContext
 
 		StatusOverride = status;
 		StatusReason = reason;
+	}
+
+	/// <summary>
+	/// Signals that the entire orchestration should complete immediately.
+	/// The orchestration will cancel all pending/running steps and finish.
+	/// </summary>
+	public void CompleteOrchestration(ExecutionStatus status, string? reason = null)
+	{
+		OrchestrationCompleteRequested = true;
+		OrchestrationCompleteStatus = status;
+		OrchestrationCompleteReason = reason;
 	}
 }

@@ -1,6 +1,6 @@
 {
   "name": "icm-acknowledge",
-  "description": "Periodically checks for active IcM incidents that have not been acknowledged, acknowledges each one via the IcM MCP server, creates an ActionView entry summarizing what was done, and produces a final markdown summary. Runs every 15 seconds.",
+  "description": "Periodically checks for active IcM incidents that have not been acknowledged, acknowledges each one via the IcM MCP server, creates an ActionView entry summarizing what was done, and produces a final markdown summary. Runs every 15 seconds. Uses a gate step to complete early if no unacknowledged incidents are found.",
   "mcps": [
     {
       "name": "icm",
@@ -15,15 +15,25 @@
       "type": "Command",
       "dependsOn": [],
       "command": "dnx",
-      "arguments": ["Icm.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "incidents", "--states", "ACTIVE"],
+      "arguments": ["Icm.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "incidents", "--acknowledged", "no", "--states", "ACTIVE"],
       "timeoutSeconds": 120
+    },
+    {
+      "name": "check-incidents",
+      "type": "Prompt",
+      "dependsOn": ["fetch-active-incidents"],
+      "systemPrompt": "You are a gate-check assistant. Your ONLY job is to determine whether there are any unacknowledged incidents in the provided data. You have access to the orchestra_complete tool. If there are NO unacknowledged incidents, call orchestra_complete with status 'success' and a reason explaining that no action is needed. If there ARE unacknowledged incidents, output the text 'Proceeding with acknowledgment' and do nothing else.",
+      "userPrompt": "Review the following incident data and determine if any incidents are NOT yet acknowledged:\n\n{{fetch-active-incidents.output}}\n\nIf ALL incidents are already acknowledged (or there are no incidents at all), use the orchestra_complete tool to stop the orchestration early with status 'success'. Otherwise, output 'Proceeding with acknowledgment'.",
+      "mcps": [],
+      "model": "claude-opus-4.6",
+      "timeoutSeconds": 30
     },
     {
       "name": "acknowledge-incidents",
       "type": "Prompt",
-      "dependsOn": ["fetch-active-incidents"],
+      "dependsOn": ["check-incidents"],
       "systemPrompt": "You are an IcM incident management assistant. You have access to the IcM MCP tools to acknowledge incidents. Your task is to acknowledge each active incident provided to you. For each incident, use the appropriate IcM MCP tool to acknowledge it. Be thorough and process every incident in the list.",
-      "userPrompt": "The following is the list of currently active IcM incidents:\n\n{{fetch-active-incidents.output}}\n\nFor each incident that is NOT acknoledged yet in this list, use the IcM MCP tools to acknowledge it. After acknowledging all incidents, output ONLY a JSON array of the incident IDs that you successfully acknowledged. The output must be a valid JSON array of numbers or strings, e.g. [12345, 67890]. Do not include any other text outside the JSON array.",
+      "userPrompt": "The following is the list of currently active IcM incidents:\n\n{{fetch-active-incidents.output}}\n\nFor each incident that is NOT acknowledged yet in this list, use the IcM MCP tools to acknowledge it. After acknowledging all incidents, output ONLY a JSON array of the incident IDs that you successfully acknowledged. The output must be a valid JSON array of numbers or strings, e.g. [12345, 67890]. Do not include any other text outside the JSON array.",
       "mcps": ["icm"],
       "model": "claude-opus-4.6",
       "timeoutSeconds": 120
@@ -51,7 +61,8 @@
       "type": "Command",
       "dependsOn": ["create-action-view-entry"],
       "command": "dnx",
-      "arguments": ["ActionView.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "add", "--json", "{{create-action-view-entry.output}}"],
+      "arguments": ["ActionView.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "add", "--json", "-"],
+      "stdin": "{{create-action-view-entry.output}}",
       "timeoutSeconds": 120
     },
     {

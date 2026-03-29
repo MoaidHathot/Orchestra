@@ -113,6 +113,15 @@ public partial class OrchestrationExecutor
 		var stepRecords = new ConcurrentDictionary<string, StepRunRecord>();
 		var allStepRecords = new ConcurrentDictionary<string, StepRunRecord>();
 
+		// CancellationTokenSource for orchestration-complete signals.
+		// When a step calls orchestra_complete, this CTS is triggered to cancel all remaining steps.
+		using var orchestrationCompleteCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var effectiveStepToken = orchestrationCompleteCts.Token;
+
+		// Track orchestration-complete signal details (set by the step that triggers it)
+		ExecutionStatus? orchestrationCompleteStatus = null;
+		string? orchestrationCompleteReason = null;
+
 		// Build step lookup and dependency graph
 		var allSteps = orchestration.Steps
 			.ToDictionary(s => s.Name, s => s);
@@ -197,7 +206,7 @@ public partial class OrchestrationExecutor
 
 				try
 				{
-					var result = await ExecuteWithRetryAsync(step, stepExecutor, context, stepResults, cancellationToken);
+					var result = await ExecuteWithRetryAsync(step, stepExecutor, context, stepResults, effectiveStepToken);
 
 					context.AddResult(step.Name, result);
 					stepResults[step.Name] = result;
@@ -209,7 +218,7 @@ public partial class OrchestrationExecutor
 					// Handle loop if configured (loop is a Prompt-only feature)
 					if (step is PromptOrchestrationStep promptStep && promptStep.Loop is not null && result.Status == ExecutionStatus.Succeeded)
 					{
-						await HandleLoopAsync(promptStep, allSteps, context, stepResults, stepRecords, allStepRecords, effectiveParams, cancellationToken);
+						await HandleLoopAsync(promptStep, allSteps, context, stepResults, stepRecords, allStepRecords, effectiveParams, effectiveStepToken);
 					}
 
 					// Save checkpoint before signaling completion so the checkpoint
@@ -217,6 +226,37 @@ public partial class OrchestrationExecutor
 					if (result.Status == ExecutionStatus.Succeeded)
 					{
 						await SaveCheckpointAfterStepAsync(runId, orchestration, runStartedAt, effectiveParams, triggerId, stepResults, step.Name, totalSteps, externalCancellationToken);
+					}
+
+					// Check if this step requested orchestration completion
+					if (result.OrchestrationCompleteRequested)
+					{
+						orchestrationCompleteStatus = result.OrchestrationCompleteStatus;
+						orchestrationCompleteReason = result.OrchestrationCompleteReason;
+						LogOrchestrationCompleteRequested(step.Name, orchestrationCompleteReason ?? "No reason provided");
+
+						// Cancel all remaining steps by triggering the linked CTS.
+						// Steps already running will observe the cancellation token;
+						// steps not yet started will be cancelled when TryLaunchStep checks the token.
+						try { orchestrationCompleteCts.Cancel(); } catch (ObjectDisposedException) { }
+
+						// Complete all pending step TCSs with Cancelled results
+						foreach (var (name, tcs) in completionSources)
+						{
+							if (!stepResults.ContainsKey(name))
+							{
+								var cancelledResult = ExecutionResult.Cancelled($"Orchestration completed early: {orchestrationCompleteReason ?? "no reason"}");
+								context.AddResult(name, cancelledResult);
+								stepResults[name] = cancelledResult;
+
+								var cancelRecord = BuildStepRecord(allSteps[name], cancelledResult, effectiveParams, DateTimeOffset.UtcNow);
+								stepRecords[name] = cancelRecord;
+								allStepRecords[name] = cancelRecord;
+
+								_reporter.ReportStepCancelled(name);
+								tcs.TrySetResult(cancelledResult);
+							}
+						}
 					}
 
 					completionSources[step.Name].TrySetResult(stepResults[step.Name]);
@@ -244,14 +284,18 @@ public partial class OrchestrationExecutor
 				}
 
 				// After this step completes, check all dependents — launch any that are now ready
-				foreach (var dependent in dependents[stepName])
+				// (but only if orchestration hasn't been completed early)
+				if (!orchestrationCompleteCts.IsCancellationRequested)
 				{
-					var allDepsComplete = allSteps[dependent].DependsOn
-						.All(dep => stepResults.ContainsKey(dep));
-
-					if (allDepsComplete)
+					foreach (var dependent in dependents[stepName])
 					{
-						TryLaunchStep(dependent);
+						var allDepsComplete = allSteps[dependent].DependsOn
+							.All(dep => stepResults.ContainsKey(dep));
+
+						if (allDepsComplete)
+						{
+							TryLaunchStep(dependent);
+						}
 					}
 				}
 			}); // Don't pass cancellationToken to Task.Run - let step handle cancellation internally
@@ -276,7 +320,8 @@ public partial class OrchestrationExecutor
 		// Wait for all steps to complete
 		await Task.WhenAll(completionSources.Values.Select(tcs => tcs.Task));
 
-		var orchestrationResult = OrchestrationResult.From(orchestration, stepResults);
+		var orchestrationResult = OrchestrationResult.From(
+			orchestration, stepResults, orchestrationCompleteStatus, orchestrationCompleteReason);
 
 		if (orchestrationResult.Status == ExecutionStatus.Succeeded)
 		{
@@ -309,6 +354,7 @@ public partial class OrchestrationExecutor
 			StepRecords = stepRecords,
 			AllStepRecords = allStepRecords,
 			FinalContent = finalContent,
+			CompletionReason = orchestrationResult.CompletionReason,
 		};
 
 		try
@@ -537,13 +583,27 @@ public partial class OrchestrationExecutor
 		var failedDeps = shouldSkip
 			? step.DependsOn
 				.Where(dep => stepResults.TryGetValue(dep, out var r) &&
-					r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped or ExecutionStatus.Cancelled)
+					r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped or ExecutionStatus.Cancelled or ExecutionStatus.NoAction)
 				.ToArray()
 			: [];
 
 		if (shouldSkip)
 		{
-			var reason = $"Skipped because dependencies failed, were cancelled, or were skipped: [{string.Join(", ", failedDeps)}]";
+			// Distinguish between NoAction-based skips and failure-based skips
+			var noActionDeps = failedDeps.Where(dep =>
+				stepResults.TryGetValue(dep, out var r) && r.Status == ExecutionStatus.NoAction).ToArray();
+			var failureDeps = failedDeps.Except(noActionDeps).ToArray();
+
+			string reason;
+			if (noActionDeps.Length > 0 && failureDeps.Length == 0)
+			{
+				reason = $"Skipped because dependencies required no action: [{string.Join(", ", noActionDeps)}]";
+			}
+			else
+			{
+				reason = $"Skipped because dependencies failed, were cancelled, or were skipped: [{string.Join(", ", failedDeps)}]";
+			}
+
 			LogSkippingStep(step.Name, reason);
 			_reporter.ReportStepSkipped(step.Name, reason);
 			return ExecutionResult.Skipped(reason);
@@ -571,6 +631,10 @@ public partial class OrchestrationExecutor
 			if (result.Status == ExecutionStatus.Succeeded)
 			{
 				LogStepSucceeded(step.Name);
+			}
+			else if (result.Status == ExecutionStatus.NoAction)
+			{
+				LogStepNoAction(step.Name, result.Content);
 			}
 			else
 			{
@@ -730,9 +794,17 @@ public partial class OrchestrationExecutor
 		if (orchestrationResult.Status is ExecutionStatus.Cancelled or ExecutionStatus.Failed)
 		{
 			var summary = new System.Text.StringBuilder();
-			summary.AppendLine(orchestrationResult.Status == ExecutionStatus.Cancelled
-				? "Orchestration was cancelled."
-				: "Orchestration failed.");
+
+			if (orchestrationResult.CompletionReason is not null)
+			{
+				summary.AppendLine($"Orchestration completed early: {orchestrationResult.CompletionReason}");
+			}
+			else
+			{
+				summary.AppendLine(orchestrationResult.Status == ExecutionStatus.Cancelled
+					? "Orchestration was cancelled."
+					: "Orchestration failed.");
+			}
 
 			var succeeded = orchestrationResult.StepResults
 				.Where(kv => kv.Value.Status == ExecutionStatus.Succeeded)
@@ -746,9 +818,14 @@ public partial class OrchestrationExecutor
 			var skipped = orchestrationResult.StepResults
 				.Where(kv => kv.Value.Status == ExecutionStatus.Skipped)
 				.Select(kv => kv.Key).ToList();
+			var noAction = orchestrationResult.StepResults
+				.Where(kv => kv.Value.Status == ExecutionStatus.NoAction)
+				.Select(kv => kv.Key).ToList();
 
 			if (succeeded.Count > 0)
 				summary.AppendLine($"Completed steps: {string.Join(", ", succeeded)}");
+			if (noAction.Count > 0)
+				summary.AppendLine($"No action steps: {string.Join(", ", noAction)}");
 			if (failed.Count > 0)
 			{
 				summary.AppendLine($"Failed steps: {string.Join(", ", failed)}");
@@ -765,6 +842,12 @@ public partial class OrchestrationExecutor
 				summary.AppendLine($"Skipped steps: {string.Join(", ", skipped)}");
 
 			return summary.ToString();
+		}
+
+		// For successful completions, include completion reason if available
+		if (orchestrationResult.CompletionReason is not null)
+		{
+			return $"Orchestration completed: {orchestrationResult.CompletionReason}";
 		}
 
 		if (orchestrationResult.Results.Count == 1)
@@ -809,6 +892,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' completed successfully.")]
 	private partial void LogStepSucceeded(string stepName);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' completed with no action: {Reason}")]
+	private partial void LogStepNoAction(string stepName, string reason);
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Step '{StepName}' failed: {Error}")]
 	private partial void LogStepFailed(string stepName, string? error);
@@ -866,6 +952,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Resuming orchestration '{Name}', run '{RunId}', restoring {CompletedSteps} completed step(s) from checkpoint.")]
 	private partial void LogResumingFromCheckpoint(string name, string runId, int completedSteps);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' requested orchestration completion: {Reason}")]
+	private partial void LogOrchestrationCompleteRequested(string stepName, string reason);
 
 	#endregion
 }

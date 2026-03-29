@@ -298,6 +298,7 @@
       flex-shrink: 0;
     }
     .history-status-icon.success, .history-status-icon.succeeded { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .history-status-icon.completed-early { background: rgba(56, 189, 248, 0.2); color: #38bdf8; }
     .history-status-icon.failed { background: rgba(248, 81, 73, 0.2); color: var(--error); }
     .history-status-icon.cancelled { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
     .history-status-icon.cancelling { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
@@ -750,6 +751,7 @@
     .step-status-badge.failed { background: rgba(248, 81, 73, 0.2); color: var(--error); }
     .step-status-badge.cancelled { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
     .step-status-badge.skipped { background: var(--bg-secondary); color: var(--text-muted); }
+    .step-status-badge.noaction { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
     
     /* Pulse animation for running steps */
     @keyframes pulse {
@@ -892,6 +894,7 @@
 
     /* Utility */
     .text-success { color: var(--success); }
+    .text-completed-early { color: #38bdf8; }
     .text-error { color: var(--error); }
     .text-warning { color: var(--warning); }
     .text-muted { color: var(--text-muted); }

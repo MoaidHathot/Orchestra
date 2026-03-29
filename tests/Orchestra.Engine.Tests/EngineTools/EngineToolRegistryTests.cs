@@ -9,9 +9,25 @@ public class EngineToolRegistryTests
 	{
 		var registry = EngineToolRegistry.CreateDefault();
 
-		registry.Count.Should().Be(1);
 		registry.TryGet("orchestra_set_status", out var tool).Should().BeTrue();
 		tool.Should().BeOfType<SetStatusTool>();
+	}
+
+	[Fact]
+	public void CreateDefault_ContainsCompleteTool()
+	{
+		var registry = EngineToolRegistry.CreateDefault();
+
+		registry.TryGet("orchestra_complete", out var tool).Should().BeTrue();
+		tool.Should().BeOfType<CompleteTool>();
+	}
+
+	[Fact]
+	public void CreateDefault_ContainsTwoTools()
+	{
+		var registry = EngineToolRegistry.CreateDefault();
+
+		registry.Count.Should().Be(2);
 	}
 
 	[Fact]
@@ -44,7 +60,7 @@ public class EngineToolRegistryTests
 
 		var tools = registry.GetAll();
 
-		tools.Should().HaveCount(1);
+		tools.Should().HaveCount(2);
 	}
 
 	[Fact]

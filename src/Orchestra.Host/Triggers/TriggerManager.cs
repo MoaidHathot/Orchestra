@@ -351,7 +351,7 @@ public partial class TriggerManager : BackgroundService
 			{
 				var result = await executor.ResumeAsync(entry.Orchestration, checkpoint, cts.Token);
 
-				executionInfo.Status = result.Status == ExecutionStatus.Succeeded ? "Completed" : "Failed";
+				executionInfo.Status = result.Status is ExecutionStatus.Succeeded or ExecutionStatus.NoAction ? "Completed" : "Failed";
 
 				// Persist history
 				try

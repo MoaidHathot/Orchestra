@@ -61,6 +61,7 @@ interface ExecutionDetailStep {
 
 interface ExecutionDetailsResponse {
   status: string;
+  completionReason?: string;
   finalContent?: string;
   steps?: ExecutionDetailStep[];
 }
@@ -102,6 +103,7 @@ interface HistoryListEntry {
   orchestrationId?: string;
   orchestrationName: string;
   status?: string;
+  completionReason?: string;
   isActive?: boolean;
   startedAt?: string;
   durationSeconds?: number;
@@ -124,6 +126,7 @@ type StepStatusValue = 'pending' | 'running' | 'completed' | 'failed' | 'cancell
 interface SSEEventData {
   stepName?: string;
   status?: string;
+  completionReason?: string;
   executionId?: string;
   chunk?: string;
   content?: string;
@@ -493,10 +496,40 @@ function App(): React.JSX.Element {
     // orchestration-done
     eventSource.addEventListener('orchestration-done', (e: MessageEvent) => {
       const data: SSEEventData = JSON.parse(e.data);
-      setExecutionModal(prev => ({
-        ...prev,
-        status: data.status === 'Succeeded' ? 'success' : 'failed',
-      }));
+
+      // Determine orchestration-level modal status
+      const isEarlyCompletion = data.status === 'Succeeded' && !!data.completionReason;
+      const modalStatus = isEarlyCompletion
+        ? 'completed_early'
+        : data.status === 'Succeeded' ? 'success' : 'failed';
+
+      // Update per-step statuses from the final results (handles NoAction, etc.)
+      const statusMap: Record<string, string> = {
+        'Succeeded': 'completed',
+        'Failed': 'failed',
+        'Cancelled': 'cancelled',
+        'Skipped': 'skipped',
+        'NoAction': 'noaction',
+      };
+      if (data.results) {
+        const updatedStatuses: Record<string, string> = {};
+        for (const [stepName, stepData] of Object.entries(data.results as Record<string, { status?: string }>)) {
+          if (stepData.status) {
+            updatedStatuses[stepName] = statusMap[stepData.status] || 'completed';
+          }
+        }
+        setExecutionModal(prev => ({
+          ...prev,
+          stepStatuses: { ...prev.stepStatuses, ...updatedStatuses },
+          status: modalStatus,
+        }));
+      } else {
+        setExecutionModal(prev => ({
+          ...prev,
+          status: modalStatus,
+        }));
+      }
+
       eventSource.close();
       eventSourceRef.current = null;
       loadData();
@@ -736,6 +769,7 @@ function App(): React.JSX.Element {
             'Skipped': 'skipped',
             'Running': 'running',
             'Pending': 'pending',
+            'NoAction': 'noaction',
           };
           stepStatuses[step.name] = statusMap[step.status] || 'pending';
 
@@ -813,7 +847,10 @@ function App(): React.JSX.Element {
         'Failed': 'failed',
         'Cancelled': 'cancelled',
       };
-      const modalStatus = overallStatusMap[details.status] || 'success';
+      const isEarlyCompletion = details.status === 'Succeeded' && !!details.completionReason;
+      const modalStatus = isEarlyCompletion
+        ? 'completed_early'
+        : overallStatusMap[details.status] || 'success';
 
       setExecutionModal({
         open: true,
@@ -1034,9 +1071,11 @@ function App(): React.JSX.Element {
                   }}
                   aria-label={`${exec.orchestrationName} - ${exec.status || 'Running'} - ${formatTime(exec.startedAt)}`}
                 >
-                  <div className={`history-status-icon ${exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
+                  <div className={`history-status-icon ${exec.completionReason && exec.status === 'Succeeded' ? 'completed-early' : exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
                     {exec.isActive ? (
                       <span className="spinner" style={{ width: '12px', height: '12px' }}></span>
+                    ) : exec.status === 'Succeeded' && exec.completionReason ? (
+                      <Icons.SkipForward />
                     ) : exec.status === 'Succeeded' ? (
                       <Icons.Check />
                     ) : exec.status === 'Failed' ? (

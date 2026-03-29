@@ -121,6 +121,12 @@ export const Icons = {
       <path d="M3.05 3.05a7 7 0 0 0 9.9 9.9L3.05 3.05Zm1.41-1.41 9.9 9.9a7 7 0 0 0-9.9-9.9ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Z" />
     </svg>
   ),
+  SkipForward: (): React.JSX.Element => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M2 2l8 6-8 6V2z" />
+      <path d="M12 2v12" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
   WifiOff: (props?: React.SVGProps<SVGSVGElement>): React.JSX.Element => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <line x1="1" y1="1" x2="23" y2="23" />

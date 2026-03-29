@@ -12,6 +12,7 @@ interface HistoryExecution {
   orchestrationId: string;
   orchestrationName: string;
   status?: string;
+  completionReason?: string;
   isActive?: boolean;
   startedAt?: string;
   durationSeconds?: number;
@@ -184,9 +185,11 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
                   }}
                   aria-label={`${exec.orchestrationName} - ${exec.status || 'Running'} - ${formatTime(exec.startedAt)}`}
                 >
-                  <div className={`history-status-icon ${exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
+                  <div className={`history-status-icon ${exec.completionReason && exec.status === 'Succeeded' ? 'completed-early' : exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
                     {exec.isActive ? (
                       <span className="spinner" style={{ width: '12px', height: '12px' }}></span>
+                    ) : exec.status === 'Succeeded' && exec.completionReason ? (
+                      <Icons.SkipForward />
                     ) : exec.status === 'Succeeded' ? (
                       <Icons.Check />
                     ) : exec.status === 'Failed' ? (

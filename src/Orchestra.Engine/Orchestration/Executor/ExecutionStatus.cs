@@ -8,4 +8,10 @@ public enum ExecutionStatus
 	Failed,
 	Skipped,
 	Cancelled,
+
+	/// <summary>
+	/// The step completed successfully but determined that no further action is needed.
+	/// Downstream dependent steps will be skipped.
+	/// </summary>
+	NoAction,
 }

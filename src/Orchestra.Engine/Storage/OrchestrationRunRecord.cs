@@ -47,4 +47,10 @@ public class OrchestrationRunRecord
 	/// The final output content from the terminal step(s).
 	/// </summary>
 	public required string FinalContent { get; init; }
+
+	/// <summary>
+	/// When set, indicates the orchestration was completed early by the orchestra_complete tool.
+	/// Contains the reason provided by the LLM.
+	/// </summary>
+	public string? CompletionReason { get; init; }
 }

@@ -31,6 +31,9 @@ public sealed class CommandStepTypeParser : IStepTypeParser
 				: [],
 			IncludeStdErr = root.TryGetProperty("includeStdErr", out var ise)
 				&& ise.GetBoolean(),
+			Stdin = root.TryGetProperty("stdin", out var stdin)
+				? stdin.GetString()
+				: null,
 			TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
 				? ts.GetInt32()
 				: null,

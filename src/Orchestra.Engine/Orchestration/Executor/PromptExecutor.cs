@@ -125,12 +125,25 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			var reason = engineToolCtx.StatusReason ?? "Step marked as failed by LLM";
 			LogEngineToolStatusOverride(step.Name, reason);
 			_reporter.ReportStepError(step.Name, reason);
-			return ExecutionResult.Failed(
+			return WithOrchestrationComplete(ExecutionResult.Failed(
 				reason,
 				rawDependencyOutputs,
 				userPrompt,
 				result.ActualModel,
-				trace);
+				trace), engineToolCtx);
+		}
+
+		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
+		{
+			var reason = engineToolCtx.StatusReason ?? "No action needed";
+			LogEngineToolNoActionOverride(step.Name, reason);
+			return WithOrchestrationComplete(ExecutionResult.NoAction(
+				reason,
+				rawDependencyOutputs,
+				userPrompt,
+				result.ActualModel,
+				tokenUsage,
+				trace), engineToolCtx);
 		}
 
 		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
@@ -139,14 +152,14 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			LogEngineToolSuccessOverride(step.Name, reason);
 		}
 
-			return ExecutionResult.Succeeded(
+			return WithOrchestrationComplete(ExecutionResult.Succeeded(
 				content,
 				rawContent,
 				rawDependencyOutputs,
 				userPrompt,
 				result.ActualModel,
 				tokenUsage,
-				trace);
+				trace), engineToolCtx);
 		}
 		catch (OperationCanceledException)
 		{
@@ -220,6 +233,33 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		return result.Content;
 	}
 
+	/// <summary>
+	/// Copies orchestration-complete flags from the engine tool context onto the execution result.
+	/// If the LLM called orchestra_complete, the returned result will carry the signal
+	/// so the orchestration executor can halt all remaining steps.
+	/// </summary>
+	private static ExecutionResult WithOrchestrationComplete(ExecutionResult result, EngineToolContext ctx)
+	{
+		if (!ctx.OrchestrationCompleteRequested)
+			return result;
+
+		return new ExecutionResult
+		{
+			Content = result.Content,
+			Status = result.Status,
+			ErrorMessage = result.ErrorMessage,
+			RawContent = result.RawContent,
+			RawDependencyOutputs = result.RawDependencyOutputs,
+			PromptSent = result.PromptSent,
+			ActualModel = result.ActualModel,
+			Usage = result.Usage,
+			Trace = result.Trace,
+			OrchestrationCompleteRequested = true,
+			OrchestrationCompleteStatus = ctx.OrchestrationCompleteStatus,
+			OrchestrationCompleteReason = ctx.OrchestrationCompleteReason,
+		};
+	}
+
 	#region Source-Generated Logging
 
 	[LoggerMessage(
@@ -245,6 +285,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Information,
 		Message = "Step '{StepName}' explicitly marked as succeeded by engine tool: {Reason}")]
 	private partial void LogEngineToolSuccessOverride(string stepName, string reason);
+
+	[LoggerMessage(
+		EventId = 5,
+		Level = LogLevel.Information,
+		Message = "Step '{StepName}' marked as no_action by engine tool: {Reason}")]
+	private partial void LogEngineToolNoActionOverride(string stepName, string reason);
 
 	#endregion
 }

@@ -31,7 +31,7 @@ public class OrchestraWorker
 		var result = await _executor.ExecuteAsync(_orchestration, parameters, cancellationToken: cancellationToken);
 		stopwatch.Stop();
 
-		if (result.Status == ExecutionStatus.Succeeded)
+		if (result.Status is ExecutionStatus.Succeeded or ExecutionStatus.NoAction)
 		{
 			var filename = parameters?.GetValueOrDefault("filename");
 
@@ -52,7 +52,7 @@ public class OrchestraWorker
 		else
 		{
 			var failedSteps = result.Results
-				.Where(kv => kv.Value.Status is not ExecutionStatus.Succeeded)
+				.Where(kv => kv.Value.Status is not ExecutionStatus.Succeeded and not ExecutionStatus.NoAction)
 				.Select(kv => $"'{kv.Key}' ({kv.Value.Status})")
 				.ToArray();
 

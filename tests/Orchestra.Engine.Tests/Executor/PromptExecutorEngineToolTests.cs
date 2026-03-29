@@ -253,4 +253,125 @@ public class PromptExecutorEngineToolTests
 		result1.Status.Should().Be(ExecutionStatus.Failed);
 		result2.Status.Should().Be(ExecutionStatus.Succeeded);
 	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmCallsSetStatusNoAction_ReturnsNoActionResult()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder()
+			.WithEngineToolCall(
+				"orchestra_set_status",
+				"""{"status": "no_action", "reason": "No incidents to process"}""",
+				"There are no unacknowledged incidents.");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.NoAction);
+		result.Content.Should().Be("No incidents to process");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmCallsSetStatusNoAction_DoesNotReportError()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder()
+			.WithEngineToolCall(
+				"orchestra_set_status",
+				"""{"status": "no_action", "reason": "Nothing to do"}""",
+				"No action needed.");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - NoAction should not report errors
+		reporter.DidNotReceive().ReportStepError(Arg.Any<string>(), Arg.Any<string>());
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmCallsOrchestraComplete_ReturnsResultWithOrchestrationCompleteFlag()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder()
+			.WithEngineToolCall(
+				"orchestra_complete",
+				"""{"status": "success", "reason": "No incidents to process"}""",
+				"Orchestration halted — nothing to do.");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.OrchestrationCompleteRequested.Should().BeTrue();
+		result.OrchestrationCompleteStatus.Should().Be(ExecutionStatus.Succeeded);
+		result.OrchestrationCompleteReason.Should().Be("No incidents to process");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmCallsOrchestraCompleteFailed_ReturnsFailedResultWithOrchestrationCompleteFlag()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder()
+			.WithEngineToolCall(
+				"orchestra_complete",
+				"""{"status": "failed", "reason": "Critical issue detected"}""",
+				"Halting orchestration due to critical issue.");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.OrchestrationCompleteRequested.Should().BeTrue();
+		result.OrchestrationCompleteStatus.Should().Be(ExecutionStatus.Failed);
+		result.OrchestrationCompleteReason.Should().Be("Critical issue detected");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmCallsOrchestraCompleteSuccess_SetsStepStatusToSucceeded()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder()
+			.WithEngineToolCall(
+				"orchestra_complete",
+				"""{"status": "success", "reason": "All done early"}""",
+				"Done.");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert - The step itself should succeed
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+	}
 }

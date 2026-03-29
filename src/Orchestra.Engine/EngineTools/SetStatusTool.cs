@@ -4,8 +4,8 @@ namespace Orchestra.Engine;
 
 /// <summary>
 /// Built-in engine tool that allows the LLM to explicitly signal the execution status
-/// of a prompt step. The LLM calls this tool to mark the step as either 'success' or
-/// 'failed' with a reason describing the outcome.
+/// of a prompt step. The LLM calls this tool to mark the step as 'success', 'failed',
+/// or 'no_action' with a reason describing the outcome.
 /// </summary>
 public sealed class SetStatusTool : IEngineTool
 {
@@ -13,9 +13,11 @@ public sealed class SetStatusTool : IEngineTool
 
 	public string Description =>
 		"Signal the final execution status of this step. Call this tool with 'success' to " +
-		"confirm the task was completed successfully, or 'failed' if you cannot accomplish " +
+		"confirm the task was completed successfully, 'failed' if you cannot accomplish " +
 		"the task (e.g., required tools are unavailable, input is invalid, or the task is " +
-		"impossible). Provide a reason describing the outcome.";
+		"impossible), or 'no_action' if there is nothing to do (e.g., no items to process, " +
+		"all items already handled). When 'no_action' is used, all downstream steps that " +
+		"depend on this step will be skipped. Provide a reason describing the outcome.";
 
 	public string ParametersSchema => """
 		{
@@ -23,12 +25,12 @@ public sealed class SetStatusTool : IEngineTool
 			"properties": {
 				"status": {
 					"type": "string",
-					"enum": ["success", "failed"],
-					"description": "The execution status to set: 'success' or 'failed'."
+					"enum": ["success", "failed", "no_action"],
+					"description": "The execution status to set: 'success', 'failed', or 'no_action' (nothing to do, skip downstream steps)."
 				},
 				"reason": {
 					"type": "string",
-					"description": "A clear explanation of the outcome — why the task succeeded or failed."
+					"description": "A clear explanation of the outcome — why the task succeeded, failed, or requires no action."
 				}
 			},
 			"required": ["status", "reason"]
@@ -62,7 +64,13 @@ public sealed class SetStatusTool : IEngineTool
 				return "Status set to failed. The step will be marked as failed upon completion.";
 			}
 
-			return $"Unknown status '{status}'. Supported values are 'success' and 'failed'.";
+			if (string.Equals(status, "no_action", StringComparison.OrdinalIgnoreCase))
+			{
+				context.SetStatus(ExecutionStatus.NoAction, reason ?? "No action needed");
+				return "Status set to no_action. The step will complete and all downstream dependent steps will be skipped.";
+			}
+
+			return $"Unknown status '{status}'. Supported values are 'success', 'failed', and 'no_action'.";
 		}
 		catch (JsonException)
 		{

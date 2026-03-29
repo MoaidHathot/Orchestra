@@ -41,6 +41,7 @@ public sealed class EngineToolRegistry
 	public static EngineToolRegistry CreateDefault()
 	{
 		return new EngineToolRegistry()
-			.Register(new SetStatusTool());
+			.Register(new SetStatusTool())
+			.Register(new CompleteTool());
 	}
 }
