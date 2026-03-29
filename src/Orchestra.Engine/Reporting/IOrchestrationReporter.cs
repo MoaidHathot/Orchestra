@@ -25,6 +25,10 @@ public interface IOrchestrationReporter
 	void ReportSessionWarning(string warningType, string message);
 	void ReportSessionInfo(string infoType, string message);
 
+	// MCP server lifecycle
+	void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers);
+	void ReportMcpServerStatusChanged(string serverName, string status);
+
 	// Subagent events
 	void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools);
 	void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description);

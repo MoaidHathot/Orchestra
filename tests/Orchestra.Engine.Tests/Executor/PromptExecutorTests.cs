@@ -688,4 +688,418 @@ public class PromptExecutorTests
 	}
 
 	#endregion
+
+	#region Template Resolution in UserPrompt
+
+	[Fact]
+	public async Task ExecuteAsync_ResolvesInlineStepOutputTemplates()
+	{
+		// Arrange
+		string? capturedPrompt = null;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			capturedPrompt = prompt;
+			return MockAgentBuilderExtensions.CreateWithResponse("response")
+				.BuildAgentAsync(ct).Result.SendAsync(prompt, ct);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		// Step references {{step-a.output}} inline in its userPrompt but depends on step-b
+		var step = TestOrchestrations.CreatePromptStep(
+			"consumer",
+			dependsOn: ["step-b"],
+			userPrompt: "Data from A: {{step-a.output}}\n\nPlease process.");
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		context.AddResult("step-a", ExecutionResult.Succeeded("incident data from step A"));
+		context.AddResult("step-b", ExecutionResult.Succeeded("check passed"));
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - The {{step-a.output}} should be resolved inline, not left as literal text
+		capturedPrompt.Should().Contain("Data from A: incident data from step A");
+		capturedPrompt.Should().NotContain("{{step-a.output}}");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ResolvesInlineTemplateFromDirectDependency()
+	{
+		// Arrange
+		string? capturedPrompt = null;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			capturedPrompt = prompt;
+			return MockAgentBuilderExtensions.CreateWithResponse("response")
+				.BuildAgentAsync(ct).Result.SendAsync(prompt, ct);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		// Step references {{dep.output}} inline and dep IS in dependsOn
+		var step = TestOrchestrations.CreatePromptStep(
+			"consumer",
+			dependsOn: ["dep"],
+			userPrompt: "Result: {{dep.output}}");
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		context.AddResult("dep", ExecutionResult.Succeeded("dependency output value"));
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - Template resolved inline
+		capturedPrompt.Should().Contain("Result: dependency output value");
+		capturedPrompt.Should().NotContain("{{dep.output}}");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ResolvesMultipleInlineTemplates()
+	{
+		// Arrange
+		string? capturedPrompt = null;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			capturedPrompt = prompt;
+			return MockAgentBuilderExtensions.CreateWithResponse("response")
+				.BuildAgentAsync(ct).Result.SendAsync(prompt, ct);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		// Step references multiple outputs inline, some from direct deps, some transitive
+		var step = TestOrchestrations.CreatePromptStep(
+			"consumer",
+			dependsOn: ["dep-b"],
+			userPrompt: "A output: {{dep-a.output}}\n\nB output: {{dep-b.output}}");
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		context.AddResult("dep-a", ExecutionResult.Succeeded("output from A"));
+		context.AddResult("dep-b", ExecutionResult.Succeeded("output from B"));
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		capturedPrompt.Should().Contain("A output: output from A");
+		capturedPrompt.Should().Contain("B output: output from B");
+		capturedPrompt.Should().NotContain("{{dep-a.output}}");
+		capturedPrompt.Should().NotContain("{{dep-b.output}}");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_UnresolvedTemplate_RemainsLiteral()
+	{
+		// Arrange
+		string? capturedPrompt = null;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			capturedPrompt = prompt;
+			return MockAgentBuilderExtensions.CreateWithResponse("response")
+				.BuildAgentAsync(ct).Result.SendAsync(prompt, ct);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		// Step references a step that doesn't exist in the context
+		var step = TestOrchestrations.CreatePromptStep(
+			"consumer",
+			dependsOn: [],
+			userPrompt: "Data: {{nonexistent-step.output}}");
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - Unresolvable template remains as-is
+		capturedPrompt.Should().Contain("{{nonexistent-step.output}}");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ResolvesRawOutputTemplateInline()
+	{
+		// Arrange
+		string? capturedPrompt = null;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			capturedPrompt = prompt;
+			return MockAgentBuilderExtensions.CreateWithResponse("response")
+				.BuildAgentAsync(ct).Result.SendAsync(prompt, ct);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep(
+			"consumer",
+			dependsOn: ["dep"],
+			userPrompt: "Raw: {{dep.rawOutput}}");
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		context.AddResult("dep", ExecutionResult.Succeeded("processed", rawContent: "raw content here"));
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		capturedPrompt.Should().Contain("Raw: raw content here");
+		capturedPrompt.Should().NotContain("{{dep.rawOutput}}");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_IcmAcknowledgeScenario_ResolvesTransitiveDependencyOutput()
+	{
+		// Arrange - This test simulates the exact icm-acknowledge.json bug scenario:
+		// acknowledge-incidents depends on check-incidents, but references {{fetch-active-incidents.output}}
+		// which is a transitive dependency (check-incidents depends on fetch-active-incidents)
+		string? capturedPrompt = null;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			capturedPrompt = prompt;
+			return MockAgentBuilderExtensions.CreateWithResponse("[12345, 67890]")
+				.BuildAgentAsync(ct).Result.SendAsync(prompt, ct);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep(
+			"acknowledge-incidents",
+			dependsOn: ["check-incidents"],
+			userPrompt: "The following is the list of currently active IcM incidents:\n\n{{fetch-active-incidents.output}}\n\nFor each incident, acknowledge it.");
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		context.AddResult("fetch-active-incidents", ExecutionResult.Succeeded("[{\"id\": 12345, \"title\": \"Server Down\"}, {\"id\": 67890, \"title\": \"High CPU\"}]"));
+		context.AddResult("check-incidents", ExecutionResult.Succeeded("Proceeding with acknowledgment"));
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - The {{fetch-active-incidents.output}} must be resolved, not sent as literal
+		capturedPrompt.Should().Contain("Server Down");
+		capturedPrompt.Should().Contain("High CPU");
+		capturedPrompt.Should().NotContain("{{fetch-active-incidents.output}}");
+	}
+
+	#endregion
+
+	#region MCP Server Failure Detection
+
+	[Fact]
+	public async Task ExecuteAsync_RequiredMcpServerFailed_ReturnsFailedResult()
+	{
+		// Arrange - Mock agent that emits an MCP server failure event
+		var mcpFailedEvents = new[]
+		{
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = new List<McpServerStatusInfo>
+				{
+					new("icm", "Failed", Error: "Connection timeout")
+				}
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "No IcM MCP tools are available." }
+		};
+		var agentBuilder = new MockAgentBuilder().WithResponse("No IcM MCP tools are available.", mcpFailedEvents);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("acknowledge-incidents");
+		step.Mcps = [new LocalMcp { Name = "icm", Type = McpType.Local, Command = "dnx", Arguments = ["IcM.Mcp"] }];
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("icm");
+		result.ErrorMessage.Should().Contain("failed to start");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_RequiredMcpServerFailed_ReportsError()
+	{
+		// Arrange
+		var mcpFailedEvents = new[]
+		{
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = new List<McpServerStatusInfo>
+				{
+					new("icm", "Failed", Error: "Process exited")
+				}
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "No tools available." }
+		};
+		var agentBuilder = new MockAgentBuilder().WithResponse("No tools available.", mcpFailedEvents);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		step.Mcps = [new LocalMcp { Name = "icm", Type = McpType.Local, Command = "dnx", Arguments = ["IcM.Mcp"] }];
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		reporter.Received().ReportStepError("test-step", Arg.Is<string>(s => s.Contains("icm") && s.Contains("failed to start")));
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_NonRequiredMcpServerFailed_SucceedsNormally()
+	{
+		// Arrange - "graph" MCP failed but step only requires "icm" which connected
+		var mcpEvents = new[]
+		{
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = new List<McpServerStatusInfo>
+				{
+					new("icm", "Connected"),
+					new("graph", "Failed", Error: "Connection refused")
+				}
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Acknowledged incidents." }
+		};
+		var agentBuilder = new MockAgentBuilder().WithResponse("Acknowledged incidents.", mcpEvents);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		step.Mcps = [new LocalMcp { Name = "icm", Type = McpType.Local, Command = "dnx", Arguments = ["IcM.Mcp"] }];
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert - Step should succeed because its required MCP ("icm") connected
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be("Acknowledged incidents.");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_NoMcpServersConfigured_IgnoresFailedServers()
+	{
+		// Arrange - MCP servers failed but step doesn't require any
+		var mcpEvents = new[]
+		{
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = new List<McpServerStatusInfo>
+				{
+					new("graph", "Failed", Error: "Connection refused")
+				}
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Success." }
+		};
+		var agentBuilder = new MockAgentBuilder().WithResponse("Success.", mcpEvents);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		// No MCPs configured on this step
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert - Step should succeed because it doesn't require any MCPs
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_RequiredMcpServerFailed_IncludesTraceInResult()
+	{
+		// Arrange
+		var mcpFailedEvents = new[]
+		{
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = new List<McpServerStatusInfo>
+				{
+					new("icm", "Failed", Error: "Server crashed")
+				}
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "No tools." }
+		};
+		var agentBuilder = new MockAgentBuilder().WithResponse("No tools.", mcpFailedEvents);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		step.Mcps = [new LocalMcp { Name = "icm", Type = McpType.Local, Command = "dnx", Arguments = ["IcM.Mcp"] }];
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert - Trace should be included even on MCP failure
+		result.Trace.Should().NotBeNull();
+		result.Trace!.SystemPrompt.Should().NotBeNull();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_MultipleMcpServersAllFailed_ErrorListsAllServers()
+	{
+		// Arrange
+		var mcpFailedEvents = new[]
+		{
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = new List<McpServerStatusInfo>
+				{
+					new("icm", "Failed", Error: "Timeout"),
+					new("graph", "Failed", Error: "Connection refused")
+				}
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "No tools." }
+		};
+		var agentBuilder = new MockAgentBuilder().WithResponse("No tools.", mcpFailedEvents);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		step.Mcps =
+		[
+			new LocalMcp { Name = "icm", Type = McpType.Local, Command = "dnx", Arguments = ["IcM.Mcp"] },
+			new LocalMcp { Name = "graph", Type = McpType.Local, Command = "dnx", Arguments = ["Graph.Mcp"] }
+		];
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("icm");
+		result.ErrorMessage.Should().Contain("graph");
+	}
+
+	#endregion
 }

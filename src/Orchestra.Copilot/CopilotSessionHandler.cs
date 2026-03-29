@@ -106,11 +106,19 @@ internal sealed class CopilotSessionHandler
 				HandleWarning(warning);
 				break;
 
-			case SessionInfoEvent info:
-				HandleInfo(info);
-				break;
+		case SessionInfoEvent info:
+			HandleInfo(info);
+			break;
 
-			case SessionErrorEvent err:
+		case SessionMcpServersLoadedEvent mcpLoaded:
+			HandleMcpServersLoaded(mcpLoaded);
+			break;
+
+		case SessionMcpServerStatusChangedEvent mcpStatusChanged:
+			HandleMcpServerStatusChanged(mcpStatusChanged);
+			break;
+
+		case SessionErrorEvent err:
 				HandleError(err);
 				break;
 
@@ -313,6 +321,35 @@ internal sealed class CopilotSessionHandler
 			Type = AgentEventType.Info,
 			Content = info.Data.Message,
 			DiagnosticType = info.Data.InfoType,
+		});
+	}
+
+	private void HandleMcpServersLoaded(SessionMcpServersLoadedEvent mcpLoaded)
+	{
+		var statuses = mcpLoaded.Data.Servers.Select(s => new McpServerStatusInfo(
+			Name: s.Name,
+			Status: s.Status.ToString(),
+			Source: s.Source,
+			Error: s.Error
+		)).ToList();
+
+		_reporter.ReportMcpServersLoaded(statuses);
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.McpServersLoaded,
+			McpServerStatuses = statuses,
+		});
+	}
+
+	private void HandleMcpServerStatusChanged(SessionMcpServerStatusChangedEvent mcpStatusChanged)
+	{
+		var status = mcpStatusChanged.Data.Status.ToString();
+		_reporter.ReportMcpServerStatusChanged(mcpStatusChanged.Data.ServerName, status);
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.McpServerStatusChanged,
+			McpServerName = mcpStatusChanged.Data.ServerName,
+			McpServerStatus = status,
 		});
 	}
 

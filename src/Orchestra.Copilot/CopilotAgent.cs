@@ -93,7 +93,7 @@ public partial class CopilotAgent : IAgent
 		}
 	}
 
-	private SessionConfig BuildSessionConfig()
+	internal SessionConfig BuildSessionConfig()
 	{
 		var config = new SessionConfig
 		{
@@ -228,6 +228,7 @@ public partial class CopilotAgent : IAgent
 						Command = local.Command,
 						Args = [.. local.Arguments],
 						Cwd = local.WorkingDirectory,
+						Tools = ["*"],
 					};
 					break;
 
@@ -236,6 +237,7 @@ public partial class CopilotAgent : IAgent
 					{
 						Url = remote.Endpoint,
 						Headers = remote.Headers,
+						Tools = ["*"],
 					};
 					break;
 			}
@@ -295,6 +297,7 @@ public partial class CopilotAgent : IAgent
 						Command = local.Command,
 						Args = [.. local.Arguments],
 						Cwd = local.WorkingDirectory,
+						Tools = ["*"],
 					};
 					break;
 
@@ -303,6 +306,7 @@ public partial class CopilotAgent : IAgent
 					{
 						Url = remote.Endpoint,
 						Headers = remote.Headers,
+						Tools = ["*"],
 					};
 					break;
 			}

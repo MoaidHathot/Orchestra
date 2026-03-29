@@ -44,5 +44,12 @@ export function formatLogContent(log: LogEvent): string {
   if (log.type === 'subagent-deselected') return 'Returned to parent agent';
   if (log.type === 'session-warning') return `Warning [${log.warningType || 'unknown'}]: ${log.message || ''}`;
   if (log.type === 'session-info') return `Info [${log.infoType || 'unknown'}]: ${log.message || ''}`;
+  if (log.type === 'mcp-servers-loaded') {
+    const servers = (log.servers as Array<{ name: string; status: string; error?: string }>) || [];
+    return `MCP servers loaded: ${servers.map(s => `${s.name}=${s.status}${s.error ? ` (${s.error})` : ''}`).join(', ')}`;
+  }
+  if (log.type === 'mcp-server-status-changed') {
+    return `MCP '${log.serverName || 'unknown'}' -> ${log.status || 'unknown'}`;
+  }
   return JSON.stringify(log).substring(0, 200);
 }

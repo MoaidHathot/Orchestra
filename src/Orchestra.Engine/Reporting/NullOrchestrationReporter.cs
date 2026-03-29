@@ -27,6 +27,10 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	public void ReportSessionWarning(string warningType, string message) { }
 	public void ReportSessionInfo(string infoType, string message) { }
 
+	// MCP server lifecycle
+	public void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers) { }
+	public void ReportMcpServerStatusChanged(string serverName, string status) { }
+
 	// Subagent events
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools) { }
 	public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description) { }

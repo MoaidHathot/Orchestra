@@ -34,6 +34,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 		// Get the raw user prompt before input handler processing
 		var userPromptRaw = InjectParameters(step.UserPrompt, step.Parameters, context.Parameters);
+		userPromptRaw = TemplateResolver.Resolve(userPromptRaw, context.Parameters, context, step.DependsOn);
 
 		// Create event processor to handle agent events and collect trace data
 		var eventProcessor = new AgentEventProcessor(_reporter, step.Name);
@@ -77,6 +78,29 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			await eventProcessor.ProcessEventsAsync(task, cancellationToken);
 
 			var result = await task.GetResultAsync();
+
+			// Check if any required MCP servers failed to start.
+			// When MCP servers fail, the LLM runs without the expected tools and produces
+			// unreliable output. Fail the step early with a clear error rather than
+			// propagating the LLM's confused response as a "success."
+			var failedMcpServers = eventProcessor.GetFailedMcpServers();
+			if (failedMcpServers.Count > 0 && step.Mcps.Length > 0)
+			{
+				var requiredFailed = failedMcpServers
+					.Where(f => step.Mcps.Any(m => string.Equals(m.Name, f, StringComparison.OrdinalIgnoreCase)))
+					.ToList();
+
+				if (requiredFailed.Count > 0)
+				{
+					var serverList = string.Join(", ", requiredFailed);
+					var errorMessage = $"Required MCP server(s) failed to start: {serverList}. The step cannot execute without these tools.";
+					var mcpFailTrace = eventProcessor.BuildPartialTrace(step.SystemPrompt, userPromptRaw, mcpServerDescriptions);
+					_reporter.ReportStepTrace(step.Name, mcpFailTrace);
+					_reporter.ReportStepError(step.Name, errorMessage);
+					LogMcpServersFailed(step.Name, serverList);
+					return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: mcpFailTrace);
+				}
+			}
 
 			// Report model and usage metadata if available
 			if (result.ActualModel is not null)
@@ -185,6 +209,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private string BuildUserPrompt(PromptOrchestrationStep step, OrchestrationExecutionContext context)
 	{
 		var userPrompt = InjectParameters(step.UserPrompt, step.Parameters, context.Parameters);
+
+		// Resolve {{stepName.output}} and {{stepName.rawOutput}} template expressions inline.
+		// This uses the same TemplateResolver as Command/Http/Transform steps, with a fallback
+		// to TryGetResult for steps not listed in DependsOn (e.g. transitive dependencies).
+		userPrompt = TemplateResolver.Resolve(userPrompt, context.Parameters, context, step.DependsOn);
+
 		var dependencyOutputsDict = context.GetDependencyOutputs(step.DependsOn);
 		var dependencyOutputs = _formatter.FormatDependencyOutputs(dependencyOutputsDict);
 		var loopFeedback = context.ConsumeLoopFeedback(step.Name);
@@ -312,6 +342,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Information,
 		Message = "Step '{StepName}' marked as no_action by engine tool: {Reason}")]
 	private partial void LogEngineToolNoActionOverride(string stepName, string reason);
+
+	[LoggerMessage(
+		EventId = 6,
+		Level = LogLevel.Error,
+		Message = "Step '{StepName}' failed because required MCP server(s) did not start: {Servers}")]
+	private partial void LogMcpServersFailed(string stepName, string servers);
 
 	#endregion
 }

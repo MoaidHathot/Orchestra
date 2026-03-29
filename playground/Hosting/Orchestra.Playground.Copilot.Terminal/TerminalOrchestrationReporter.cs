@@ -264,6 +264,21 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 		AddEvent(new ReporterEvent("session-info", $"[{infoType}] {message}"));
 	}
 
+	public void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers)
+	{
+		var summary = string.Join(", ", servers.Select(s =>
+		{
+			var err = s.Error is not null ? $" ({s.Error})" : "";
+			return $"{s.Name}={s.Status}{err}";
+		}));
+		AddEvent(new ReporterEvent("mcp-servers-loaded", $"MCP servers: {summary}"));
+	}
+
+	public void ReportMcpServerStatusChanged(string serverName, string status)
+	{
+		AddEvent(new ReporterEvent("mcp-server-status-changed", $"MCP '{serverName}' -> {status}"));
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		var name = displayName ?? agentName;

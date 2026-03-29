@@ -982,6 +982,198 @@ public class CopilotSessionHandlerTests
 
 	#endregion
 
+	#region MCP Servers Loaded
+
+	private static SessionMcpServersLoadedEvent CreateMcpServersLoadedEvent(
+		params SessionMcpServersLoadedDataServersItem[] servers) => new()
+	{
+		Data = new SessionMcpServersLoadedData
+		{
+			Servers = servers
+		}
+	};
+
+	private static SessionMcpServersLoadedDataServersItem CreateMcpServerItem(
+		string name,
+		SessionMcpServersLoadedDataServersItemStatus status,
+		string? source = null,
+		string? error = null) => new()
+	{
+		Name = name,
+		Status = status,
+		Source = source!,
+		Error = error!
+	};
+
+	[Fact]
+	public void HandleEvent_McpServersLoaded_WritesMcpServersLoadedEvent()
+	{
+		// Arrange
+		var evt = CreateMcpServersLoadedEvent(
+			CreateMcpServerItem("icm", SessionMcpServersLoadedDataServersItemStatus.Connected, "local"),
+			CreateMcpServerItem("graph", SessionMcpServersLoadedDataServersItemStatus.Failed, "remote", "Connection refused"));
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.McpServersLoaded);
+		agentEvent.McpServerStatuses.Should().HaveCount(2);
+
+		agentEvent.McpServerStatuses![0].Name.Should().Be("icm");
+		agentEvent.McpServerStatuses[0].Status.Should().Be("Connected");
+		agentEvent.McpServerStatuses[0].Source.Should().Be("local");
+		agentEvent.McpServerStatuses[0].Error.Should().BeNull();
+
+		agentEvent.McpServerStatuses[1].Name.Should().Be("graph");
+		agentEvent.McpServerStatuses[1].Status.Should().Be("Failed");
+		agentEvent.McpServerStatuses[1].Source.Should().Be("remote");
+		agentEvent.McpServerStatuses[1].Error.Should().Be("Connection refused");
+	}
+
+	[Fact]
+	public void HandleEvent_McpServersLoaded_ReportsMcpServersLoaded()
+	{
+		// Arrange
+		var evt = CreateMcpServersLoadedEvent(
+			CreateMcpServerItem("icm", SessionMcpServersLoadedDataServersItemStatus.Connected));
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_reporter.Received(1).ReportMcpServersLoaded(
+			Arg.Is<IReadOnlyList<McpServerStatusInfo>>(list =>
+				list.Count == 1 && list[0].Name == "icm" && list[0].Status == "Connected"));
+	}
+
+	[Fact]
+	public void HandleEvent_McpServersLoaded_EmptyServersList_HandlesGracefully()
+	{
+		// Arrange
+		var evt = CreateMcpServersLoadedEvent();
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.McpServersLoaded);
+		agentEvent.McpServerStatuses.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void HandleEvent_McpServersLoaded_AllStatusTypes_MapsCorrectly()
+	{
+		// Arrange
+		var evt = CreateMcpServersLoadedEvent(
+			CreateMcpServerItem("s1", SessionMcpServersLoadedDataServersItemStatus.Connected),
+			CreateMcpServerItem("s2", SessionMcpServersLoadedDataServersItemStatus.Failed, error: "timeout"),
+			CreateMcpServerItem("s3", SessionMcpServersLoadedDataServersItemStatus.Pending),
+			CreateMcpServerItem("s4", SessionMcpServersLoadedDataServersItemStatus.Disabled),
+			CreateMcpServerItem("s5", SessionMcpServersLoadedDataServersItemStatus.NotConfigured));
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		var statuses = agentEvent!.McpServerStatuses!;
+		statuses.Should().HaveCount(5);
+		statuses[0].Status.Should().Be("Connected");
+		statuses[1].Status.Should().Be("Failed");
+		statuses[1].Error.Should().Be("timeout");
+		statuses[2].Status.Should().Be("Pending");
+		statuses[3].Status.Should().Be("Disabled");
+		statuses[4].Status.Should().Be("NotConfigured");
+	}
+
+	#endregion
+
+	#region MCP Server Status Changed
+
+	private static SessionMcpServerStatusChangedEvent CreateMcpServerStatusChangedEvent(
+		string serverName,
+		SessionMcpServersLoadedDataServersItemStatus status) => new()
+	{
+		Data = new SessionMcpServerStatusChangedData
+		{
+			ServerName = serverName,
+			Status = status
+		}
+	};
+
+	[Fact]
+	public void HandleEvent_McpServerStatusChanged_WritesMcpServerStatusChangedEvent()
+	{
+		// Arrange
+		var evt = CreateMcpServerStatusChangedEvent("icm", SessionMcpServersLoadedDataServersItemStatus.Connected);
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.McpServerStatusChanged);
+		agentEvent.McpServerName.Should().Be("icm");
+		agentEvent.McpServerStatus.Should().Be("Connected");
+	}
+
+	[Fact]
+	public void HandleEvent_McpServerStatusChanged_ReportsMcpServerStatusChanged()
+	{
+		// Arrange
+		var evt = CreateMcpServerStatusChangedEvent("graph", SessionMcpServersLoadedDataServersItemStatus.Failed);
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_reporter.Received(1).ReportMcpServerStatusChanged("graph", "Failed");
+	}
+
+	#endregion
+
+	#region Full Session Flow with MCP Events
+
+	[Fact]
+	public void HandleEvent_SessionWithMcpEvents_ProcessesAllEventsCorrectly()
+	{
+		// Arrange & Act - Simulate a session with MCP server lifecycle events
+		_handler.HandleEvent(CreateSessionStartEvent("claude-opus-4.5"));
+		_handler.HandleEvent(CreateMcpServerStatusChangedEvent("icm", SessionMcpServersLoadedDataServersItemStatus.Pending));
+		_handler.HandleEvent(CreateMcpServersLoadedEvent(
+			CreateMcpServerItem("icm", SessionMcpServersLoadedDataServersItemStatus.Connected, "local"),
+			CreateMcpServerItem("graph", SessionMcpServersLoadedDataServersItemStatus.Failed, error: "timeout")));
+		_handler.HandleEvent(CreateMessageDeltaEvent("Working with IcM tools..."));
+		_handler.HandleEvent(CreateMessageEvent("Done."));
+		_handler.HandleEvent(CreateUsageEvent("claude-opus-4.5", 100, 50));
+		_handler.HandleEvent(CreateIdleEvent());
+
+		// Assert
+		var events = new List<AgentEvent>();
+		while (_channel.Reader.TryRead(out var evt))
+		{
+			events.Add(evt);
+		}
+
+		events.Should().HaveCount(7);
+		events[0].Type.Should().Be(AgentEventType.SessionStart);
+		events[1].Type.Should().Be(AgentEventType.McpServerStatusChanged);
+		events[1].McpServerName.Should().Be("icm");
+		events[1].McpServerStatus.Should().Be("Pending");
+		events[2].Type.Should().Be(AgentEventType.McpServersLoaded);
+		events[2].McpServerStatuses.Should().HaveCount(2);
+		events[3].Type.Should().Be(AgentEventType.MessageDelta);
+		events[4].Type.Should().Be(AgentEventType.Message);
+		events[5].Type.Should().Be(AgentEventType.Usage);
+		events[6].Type.Should().Be(AgentEventType.SessionIdle);
+		_done.Task.IsCompleted.Should().BeTrue();
+	}
+
+	#endregion
+
 	#region Full Session Flow with Warnings
 
 	[Fact]

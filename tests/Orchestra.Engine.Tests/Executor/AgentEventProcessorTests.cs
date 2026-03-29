@@ -729,6 +729,375 @@ public class AgentEventProcessorTests
 
 	#endregion
 
+	#region MCP Servers Loaded
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServersLoaded_ReportsMcpServersLoaded()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected", Source: "local"),
+			new("graph", "Failed", Source: "remote", Error: "Connection refused")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		_reporter.Received(1).ReportMcpServersLoaded(
+			Arg.Is<IReadOnlyList<McpServerStatusInfo>>(list =>
+				list.Count == 2 && list[0].Name == "icm" && list[1].Name == "graph"));
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServersLoaded_CollectsMcpServerStatuses()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected", Source: "local"),
+			new("graph", "Failed", Source: "remote", Error: "Connection refused")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Equal(2, processor.McpServerStatuses.Count);
+		Assert.Equal("icm", processor.McpServerStatuses[0].Name);
+		Assert.Equal("Connected", processor.McpServerStatuses[0].Status);
+		Assert.Equal("local", processor.McpServerStatuses[0].Source);
+		Assert.Null(processor.McpServerStatuses[0].Error);
+		Assert.Equal("graph", processor.McpServerStatuses[1].Name);
+		Assert.Equal("Failed", processor.McpServerStatuses[1].Status);
+		Assert.Equal("Connection refused", processor.McpServerStatuses[1].Error);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServersLoaded_FailedServer_AutoGeneratesWarning()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected"),
+			new("graph", "Failed", Error: "Connection refused")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Single(trace.Warnings);
+		Assert.Contains("graph", trace.Warnings[0]);
+		Assert.Contains("failed to connect", trace.Warnings[0]);
+		Assert.Contains("Connection refused", trace.Warnings[0]);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServersLoaded_FailedServerWithoutError_AutoGeneratesWarningWithoutErrorDetail()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("graph", "Failed")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Single(trace.Warnings);
+		Assert.Contains("graph", trace.Warnings[0]);
+		Assert.Contains("failed to connect", trace.Warnings[0]);
+		Assert.DoesNotContain(":", trace.Warnings[0].Split("connect")[1]);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServersLoaded_AllConnected_NoAutoWarnings()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected"),
+			new("graph", "Connected")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Empty(trace.Warnings);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServersLoaded_NullStatuses_HandlesGracefully()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = null
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Empty(processor.McpServerStatuses);
+		_reporter.Received(1).ReportMcpServersLoaded(
+			Arg.Is<IReadOnlyList<McpServerStatusInfo>>(list => list.Count == 0));
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServersLoaded_MultipleFailedServers_GeneratesMultipleWarnings()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Failed", Error: "timeout"),
+			new("graph", "Failed", Error: "auth error"),
+			new("search", "Connected")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Equal(2, trace.Warnings.Count);
+		Assert.Contains("icm", trace.Warnings[0]);
+		Assert.Contains("timeout", trace.Warnings[0]);
+		Assert.Contains("graph", trace.Warnings[1]);
+		Assert.Contains("auth error", trace.Warnings[1]);
+	}
+
+	#endregion
+
+	#region MCP Server Status Changed
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServerStatusChanged_ReportsStatusChange()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServerStatusChanged,
+				McpServerName = "icm",
+				McpServerStatus = "Connected"
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		_reporter.Received(1).ReportMcpServerStatusChanged("icm", "Connected");
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServerStatusChanged_WithNullValues_UsesDefaults()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServerStatusChanged,
+				McpServerName = null,
+				McpServerStatus = null
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		_reporter.Received(1).ReportMcpServerStatusChanged("unknown", "unknown");
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_McpServerStatusChanged_DoesNotAffectResponseSegments()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Before" },
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServerStatusChanged,
+				McpServerName = "icm",
+				McpServerStatus = "Connected"
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = " after" }
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert - MCP status events should NOT split response segments
+		Assert.Single(processor.ResponseSegments);
+		Assert.Equal("Before after", processor.ResponseSegments[0]);
+	}
+
+	#endregion
+
+	#region BuildTrace with Runtime MCP Statuses
+
+	[Fact]
+	public async Task BuildTrace_WithRuntimeMcpStatuses_OverridesConfigDescriptions()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected", Source: "local"),
+			new("graph", "Failed", Source: "remote", Error: "timeout")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		await processor.ProcessEventsAsync(events);
+
+		// Act — config descriptions should be overridden by runtime statuses
+		var trace = processor.BuildTrace(
+			systemPrompt: "sys",
+			userPromptRaw: "user",
+			mcpServers: new List<string> { "icm (local: dnx Icm.Mcp ...)", "graph (remote: https://graph.example.com)" }
+		);
+
+		// Assert
+		Assert.Equal(2, trace.McpServers.Count);
+		Assert.Contains("icm", trace.McpServers[0]);
+		Assert.Contains("Connected", trace.McpServers[0]);
+		Assert.Contains("local", trace.McpServers[0]);
+		Assert.Contains("graph", trace.McpServers[1]);
+		Assert.Contains("Failed", trace.McpServers[1]);
+		Assert.Contains("timeout", trace.McpServers[1]);
+	}
+
+	[Fact]
+	public async Task BuildPartialTrace_WithRuntimeMcpStatuses_OverridesConfigDescriptions()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected", Source: "local")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		await processor.ProcessEventsAsync(events);
+
+		// Act
+		var trace = processor.BuildPartialTrace(
+			systemPrompt: "sys",
+			userPromptRaw: "user",
+			mcpServers: new List<string> { "icm (local: dnx Icm.Mcp ...)" }
+		);
+
+		// Assert
+		Assert.Single(trace.McpServers);
+		Assert.Contains("Connected", trace.McpServers[0]);
+	}
+
+	[Fact]
+	public async Task BuildTrace_WithRuntimeMcpStatuses_NoConfigDescriptions_UsesRuntimeOnly()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		await processor.ProcessEventsAsync(events);
+
+		// Act
+		var trace = processor.BuildTrace("sys", "user");
+
+		// Assert
+		Assert.Single(trace.McpServers);
+		Assert.Contains("icm", trace.McpServers[0]);
+		Assert.Contains("Connected", trace.McpServers[0]);
+	}
+
+	#endregion
+
 	#region BuildTrace with MCP Servers and Warnings
 
 	[Fact]
@@ -868,6 +1237,133 @@ public class AgentEventProcessorTests
 		// Assert - Warning should NOT split response segments
 		Assert.Single(processor.ResponseSegments);
 		Assert.Equal("Before warning after warning", processor.ResponseSegments[0]);
+	}
+
+	#endregion
+
+	#region GetFailedMcpServers
+
+	[Fact]
+	public async Task GetFailedMcpServers_NoMcpEvents_ReturnsEmpty()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Hello" }
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Empty(processor.GetFailedMcpServers());
+	}
+
+	[Fact]
+	public async Task GetFailedMcpServers_AllConnected_ReturnsEmpty()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected"),
+			new("graph", "Connected")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Empty(processor.GetFailedMcpServers());
+	}
+
+	[Fact]
+	public async Task GetFailedMcpServers_OneServerFailed_ReturnsFailedServerName()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Connected"),
+			new("graph", "Failed", Error: "Connection refused")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var failed = processor.GetFailedMcpServers();
+		Assert.Single(failed);
+		Assert.Equal("graph", failed[0]);
+	}
+
+	[Fact]
+	public async Task GetFailedMcpServers_MultipleServersFailed_ReturnsAllFailedNames()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "Failed", Error: "Timeout"),
+			new("graph", "Failed", Error: "Connection refused"),
+			new("other", "Connected")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var failed = processor.GetFailedMcpServers();
+		Assert.Equal(2, failed.Count);
+		Assert.Contains("icm", failed);
+		Assert.Contains("graph", failed);
+	}
+
+	[Fact]
+	public async Task GetFailedMcpServers_CaseInsensitiveStatusComparison()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var statuses = new List<McpServerStatusInfo>
+		{
+			new("icm", "FAILED"),
+			new("graph", "failed")
+		};
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = statuses
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var failed = processor.GetFailedMcpServers();
+		Assert.Equal(2, failed.Count);
 	}
 
 	#endregion

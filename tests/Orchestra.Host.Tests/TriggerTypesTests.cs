@@ -398,6 +398,8 @@ public class TriggerTypesTests
 		public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps) { }
 		public void ReportSessionWarning(string warningType, string message) { }
 		public void ReportSessionInfo(string infoType, string message) { }
+		public void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers) { }
+		public void ReportMcpServerStatusChanged(string serverName, string status) { }
 		public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools) { }
 		public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description) { }
 		public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName) { }

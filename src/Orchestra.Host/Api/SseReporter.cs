@@ -396,6 +396,25 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("session-info", new { infoType, message });
 	}
 
+	public void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers)
+	{
+		Write("mcp-servers-loaded", new
+		{
+			servers = servers.Select(s => new
+			{
+				name = s.Name,
+				status = s.Status,
+				source = s.Source,
+				error = s.Error,
+			}).ToArray(),
+		});
+	}
+
+	public void ReportMcpServerStatusChanged(string serverName, string status)
+	{
+		Write("mcp-server-status-changed", new { serverName, status });
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		Write("subagent-selected", new { stepName, agentName, displayName, tools });

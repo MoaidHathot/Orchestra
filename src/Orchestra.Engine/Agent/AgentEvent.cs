@@ -65,6 +65,18 @@ public class AgentEvent
 	/// </summary>
 	public string? DiagnosticType { get; init; }
 
+	// ── MCP server lifecycle data (used by McpServersLoaded, McpServerStatusChanged) ──
+
+	/// <summary>
+	/// List of MCP server statuses (used by McpServersLoaded event).
+	/// </summary>
+	public IReadOnlyList<McpServerStatusInfo>? McpServerStatuses { get; init; }
+
+	/// <summary>
+	/// The new status of an MCP server (used by McpServerStatusChanged event).
+	/// </summary>
+	public string? McpServerStatus { get; init; }
+
 	// ── Subagent data (used by SubagentSelected, SubagentStarted, SubagentCompleted, SubagentFailed) ──
 
 	/// <summary>
@@ -87,3 +99,12 @@ public class AgentEvent
 	/// </summary>
 	public string[]? SubagentTools { get; init; }
 }
+
+/// <summary>
+/// Represents the status of an individual MCP server, as reported by the SDK.
+/// </summary>
+public record McpServerStatusInfo(
+	string Name,
+	string Status,
+	string? Source = null,
+	string? Error = null);

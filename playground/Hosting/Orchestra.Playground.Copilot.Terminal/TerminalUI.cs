@@ -1440,11 +1440,13 @@ public class TerminalUI
 				"step-error" => "red",
 				"tool-started" => "yellow",
 				"tool-completed" => "blue",
-				"session-warning" => "yellow",
-				"session-info" => "blue",
-				_ => "dim"
-			};
-			return new Panel(new Markup($"[{typeColor}]{Markup.Escape(last.Type)}[/] {Markup.Escape(last.Message)} [dim]({age})[/]"))
+			"session-warning" => "yellow",
+			"session-info" => "blue",
+			"mcp-servers-loaded" => "cyan",
+			"mcp-server-status-changed" => "yellow",
+			_ => "dim"
+		};
+		return new Panel(new Markup($"[{typeColor}]{Markup.Escape(last.Type)}[/] {Markup.Escape(last.Message)} [dim]({age})[/]"))
 				.Border(BoxBorder.Rounded)
 				.BorderColor(Color.Grey);
 		}
@@ -2525,9 +2527,11 @@ public class TerminalUI
 					"loop-iteration" or "step-retry" => "magenta",
 					"checkpoint-saved" => "green",
 					"subagent-started" or "subagent-completed" or "subagent-selected" => "cyan",
-					"session-warning" => "yellow",
-					"session-info" => "blue",
-					_ => "dim"
+				"session-warning" => "yellow",
+				"session-info" => "blue",
+				"mcp-servers-loaded" => "cyan",
+				"mcp-server-status-changed" => "yellow",
+				_ => "dim"
 				};
 				rows.Add(new Markup(
 					$"[dim]{evt.Timestamp:HH:mm:ss.fff}[/] [{typeColor}]{Markup.Escape(evt.Type),-20}[/] {Markup.Escape(evt.Message)}"));

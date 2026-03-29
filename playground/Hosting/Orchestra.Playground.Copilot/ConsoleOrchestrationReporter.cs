@@ -156,6 +156,21 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		Console.WriteLine($"  [INFO] ({infoType}) {message}");
 	}
 
+	public void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers)
+	{
+		Console.WriteLine($"  [MCP] Servers loaded ({servers.Count}):");
+		foreach (var server in servers)
+		{
+			var err = server.Error is not null ? $" — {server.Error}" : "";
+			Console.WriteLine($"    - {server.Name}: {server.Status}{err}");
+		}
+	}
+
+	public void ReportMcpServerStatusChanged(string serverName, string status)
+	{
+		Console.WriteLine($"  [MCP] Server '{serverName}' status changed: {status}");
+	}
+
 	public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools)
 	{
 		var name = displayName ?? agentName;

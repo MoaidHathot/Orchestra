@@ -13,7 +13,7 @@
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.2" />
 
     <!-- LLM / MCP -->
-    <PackageVersion Include="GitHub.Copilot.SDK" Version="0.1.29" />
+    <PackageVersion Include="GitHub.Copilot.SDK" Version="0.2.0" />
     <PackageVersion Include="ModelContextProtocol" Version="0.2.0-preview.2" />
 
     <!-- Scheduling -->

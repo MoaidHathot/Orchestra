@@ -462,6 +462,16 @@ function App(): React.JSX.Element {
       });
     });
 
+    // MCP server lifecycle events
+    (['mcp-servers-loaded', 'mcp-server-status-changed'] as const).forEach(eventType => {
+      eventSource.addEventListener(eventType, (e: MessageEvent) => {
+        try {
+          const data: SSEEventData = JSON.parse(e.data);
+          addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
+        } catch { /* ignore */ }
+      });
+    });
+
     // step-output
     eventSource.addEventListener('step-output', (e: MessageEvent) => {
       try {

@@ -18,6 +18,7 @@ public class AgentEventProcessor
 	private readonly StringBuilder _currentResponseBuilder = new();
 	private readonly Dictionary<string, PendingToolCall> _pendingToolCalls = [];
 	private readonly List<string> _warnings = [];
+	private readonly List<McpServerStatusInfo> _mcpServerStatuses = [];
 
 	public AgentEventProcessor(IOrchestrationReporter reporter, string stepName)
 	{
@@ -107,10 +108,18 @@ public class AgentEventProcessor
 				HandleWarning(evt);
 				break;
 
-			case AgentEventType.Info:
-				HandleInfo(evt);
-				break;
-		}
+		case AgentEventType.Info:
+			HandleInfo(evt);
+			break;
+
+		case AgentEventType.McpServersLoaded:
+			HandleMcpServersLoaded(evt);
+			break;
+
+		case AgentEventType.McpServerStatusChanged:
+			HandleMcpServerStatusChanged(evt);
+			break;
+	}
 	}
 
 	private void HandleMessageDelta(AgentEvent evt)
@@ -212,6 +221,33 @@ public class AgentEventProcessor
 		_reporter.ReportSessionInfo(evt.DiagnosticType ?? "unknown", evt.Content ?? "");
 	}
 
+	private void HandleMcpServersLoaded(AgentEvent evt)
+	{
+		var statuses = evt.McpServerStatuses ?? [];
+		_mcpServerStatuses.Clear();
+		_mcpServerStatuses.AddRange(statuses);
+
+		_reporter.ReportMcpServersLoaded(statuses);
+
+		// Auto-generate warnings for any failed servers
+		foreach (var server in statuses)
+		{
+			if (string.Equals(server.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+			{
+				var errorDetail = server.Error is not null ? $": {server.Error}" : "";
+				var warningMessage = $"MCP server '{server.Name}' failed to connect{errorDetail}";
+				_warnings.Add($"[mcp_server_failed] {warningMessage}");
+			}
+		}
+	}
+
+	private void HandleMcpServerStatusChanged(AgentEvent evt)
+	{
+		_reporter.ReportMcpServerStatusChanged(
+			evt.McpServerName ?? "unknown",
+			evt.McpServerStatus ?? "unknown");
+	}
+
 	private void HandleSubagentSelected(AgentEvent evt)
 	{
 		_reporter.ReportSubagentSelected(
@@ -265,6 +301,23 @@ public class AgentEventProcessor
 	}
 
 	/// <summary>
+	/// Gets the MCP server statuses collected at runtime from the SDK.
+	/// </summary>
+	public IReadOnlyList<McpServerStatusInfo> McpServerStatuses => _mcpServerStatuses;
+
+	/// <summary>
+	/// Returns the names of MCP servers that failed to connect or load tools.
+	/// Used by PromptExecutor to fail steps early when required MCP servers are unavailable.
+	/// </summary>
+	public IReadOnlyList<string> GetFailedMcpServers()
+	{
+		return _mcpServerStatuses
+			.Where(s => string.Equals(s.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+			.Select(s => s.Name)
+			.ToList();
+	}
+
+	/// <summary>
 	/// Builds a StepExecutionTrace from the collected data.
 	/// </summary>
 	public StepExecutionTrace BuildTrace(
@@ -285,7 +338,7 @@ public class AgentEventProcessor
 			ResponseSegments = _responseSegments.ToList(),
 			FinalResponse = finalResponse,
 			OutputHandlerResult = outputHandlerResult,
-			McpServers = mcpServers ?? [],
+			McpServers = BuildMcpServerList(mcpServers),
 			Warnings = _warnings.ToList(),
 		};
 	}
@@ -302,9 +355,28 @@ public class AgentEventProcessor
 			Reasoning = Reasoning,
 			ToolCalls = _toolCalls,
 			ResponseSegments = _responseSegments.ToList(),
-			McpServers = mcpServers ?? [],
+			McpServers = BuildMcpServerList(mcpServers),
 			Warnings = _warnings.ToList(),
 		};
+	}
+
+	/// <summary>
+	/// Merges MCP server config descriptions with runtime statuses.
+	/// If we have runtime statuses, use them (more informative); otherwise, fall back to config descriptions.
+	/// </summary>
+	private List<string> BuildMcpServerList(List<string>? configDescriptions)
+	{
+		if (_mcpServerStatuses.Count > 0)
+		{
+			return _mcpServerStatuses.Select(s =>
+			{
+				var err = s.Error is not null ? $" — {s.Error}" : "";
+				var source = s.Source is not null ? $", source: {s.Source}" : "";
+				return $"{s.Name} (status: {s.Status}{source}{err})";
+			}).ToList();
+		}
+
+		return configDescriptions ?? [];
 	}
 
 	/// <summary>

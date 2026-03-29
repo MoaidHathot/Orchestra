@@ -1,4 +1,6 @@
 using FluentAssertions;
+using GitHub.Copilot.SDK;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 
@@ -389,6 +391,131 @@ public class CopilotAgentTests
 	{
 		// Assert - CopilotAgent should implement IAgent
 		typeof(CopilotAgent).Should().Implement<IAgent>();
+	}
+
+	#endregion
+
+	#region BuildSessionConfig MCP Tools Tests
+
+	private static CopilotAgent CreateAgentWithMcps(params Mcp[] mcps)
+	{
+		return new CopilotAgent(
+			client: new CopilotClient(),
+			model: "test-model",
+			systemPrompt: null,
+			mcps: mcps,
+			subagents: [],
+			reasoningLevel: null,
+			systemPromptMode: null,
+			reporter: NullOrchestrationReporter.Instance,
+			engineTools: [],
+			engineToolContext: null,
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
+		);
+	}
+
+	[Fact]
+	public void BuildSessionConfig_LocalMcp_SetsToolsToWildcard()
+	{
+		// Arrange
+		var agent = CreateAgentWithMcps(new LocalMcp
+		{
+			Name = "icm",
+			Type = McpType.Local,
+			Command = "dnx",
+			Arguments = ["IcM.Mcp"],
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.McpServers.Should().ContainKey("icm");
+		var serverConfig = config.McpServers!["icm"].Should().BeOfType<McpLocalServerConfig>().Subject;
+		serverConfig.Command.Should().Be("dnx");
+		serverConfig.Args.Should().BeEquivalentTo(["IcM.Mcp"]);
+		serverConfig.Tools.Should().ContainSingle().Which.Should().Be("*");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_RemoteMcp_SetsToolsToWildcard()
+	{
+		// Arrange
+		var agent = CreateAgentWithMcps(new RemoteMcp
+		{
+			Name = "api",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com/mcp",
+			Headers = new Dictionary<string, string> { ["Authorization"] = "Bearer token" },
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.McpServers.Should().ContainKey("api");
+		var serverConfig = config.McpServers!["api"].Should().BeOfType<McpRemoteServerConfig>().Subject;
+		serverConfig.Url.Should().Be("https://api.example.com/mcp");
+		serverConfig.Tools.Should().ContainSingle().Which.Should().Be("*");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_MultipleMcps_AllHaveToolsWildcard()
+	{
+		// Arrange
+		var agent = CreateAgentWithMcps(
+			new LocalMcp
+			{
+				Name = "local-1",
+				Type = McpType.Local,
+				Command = "node",
+				Arguments = ["server.js"],
+			},
+			new RemoteMcp
+			{
+				Name = "remote-1",
+				Type = McpType.Remote,
+				Endpoint = "https://remote.example.com",
+				Headers = [],
+			},
+			new LocalMcp
+			{
+				Name = "local-2",
+				Type = McpType.Local,
+				Command = "python",
+				Arguments = ["-m", "mcp_server"],
+				WorkingDirectory = "/app",
+			}
+		);
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.McpServers.Should().HaveCount(3);
+
+		var local1 = config.McpServers!["local-1"].Should().BeOfType<McpLocalServerConfig>().Subject;
+		local1.Tools.Should().ContainSingle().Which.Should().Be("*");
+
+		var remote1 = config.McpServers!["remote-1"].Should().BeOfType<McpRemoteServerConfig>().Subject;
+		remote1.Tools.Should().ContainSingle().Which.Should().Be("*");
+
+		var local2 = config.McpServers!["local-2"].Should().BeOfType<McpLocalServerConfig>().Subject;
+		local2.Tools.Should().ContainSingle().Which.Should().Be("*");
+		local2.Cwd.Should().Be("/app");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_NoMcps_McpServersIsNull()
+	{
+		// Arrange
+		var agent = CreateAgentWithMcps();
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.McpServers.Should().BeNull();
 	}
 
 	#endregion

@@ -24,4 +24,8 @@ public enum AgentEventType
 	// Session diagnostics
 	Warning,
 	Info,
+
+	// MCP server lifecycle
+	McpServersLoaded,
+	McpServerStatusChanged,
 }
