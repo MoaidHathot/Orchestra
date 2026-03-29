@@ -440,7 +440,7 @@ public class RetryExecutionTests
 	{
 		// Arrange — fail always, cancel during retry delay.
 		// The executor's TryLaunchStep catches OperationCanceledException and marks
-		// the step as Failed("Cancelled"), so no exception is thrown to the caller.
+		// the step as Cancelled, so no exception is thrown to the caller.
 		var callCount = 0;
 		using var cts = new CancellationTokenSource();
 		var agentBuilder = new MockAgentBuilder();
@@ -472,8 +472,8 @@ public class RetryExecutionTests
 		var result = await executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
 
 		// Assert — step should be cancelled, not all 10 retries attempted
-		result.Status.Should().Be(ExecutionStatus.Failed);
-		result.StepResults["test-step"].Status.Should().Be(ExecutionStatus.Failed);
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["test-step"].Status.Should().Be(ExecutionStatus.Cancelled);
 		callCount.Should().BeLessThan(10); // Should not have exhausted all retries
 	}
 

@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 using Orchestra.Host.Persistence;
 
@@ -13,7 +14,7 @@ public partial class OrchestrationRegistry
 {
 	private readonly ConcurrentDictionary<string, OrchestrationEntry> _entries = new();
 	private readonly string _persistPath;
-	private readonly ILogger<OrchestrationRegistry>? _logger;
+	private readonly ILogger<OrchestrationRegistry> _logger;
 	private readonly IOrchestrationVersionStore? _versionStore;
 	private readonly JsonSerializerOptions _jsonOptions;
 
@@ -23,7 +24,7 @@ public partial class OrchestrationRegistry
 			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
 			"OrchestraHost",
 			"registered-orchestrations.json");
-		_logger = logger;
+		_logger = logger ?? NullLoggerFactory.Instance.CreateLogger<OrchestrationRegistry>();
 		_versionStore = versionStore;
 		_jsonOptions = new JsonSerializerOptions
 		{
@@ -114,8 +115,7 @@ public partial class OrchestrationRegistry
 		}
 		catch (Exception ex)
 		{
-			if (_logger is not null)
-				LogVersionSnapshotFailed(ex, orchestrationId);
+			LogVersionSnapshotFailed(ex, orchestrationId);
 		}
 	}
 
@@ -169,13 +169,11 @@ public partial class OrchestrationRegistry
 
 			var json = JsonSerializer.Serialize(data, _jsonOptions);
 			File.WriteAllText(_persistPath, json);
-			if (_logger is not null)
-				LogOrchestrationsPersistedToDisk(data.Count, _persistPath);
+			LogOrchestrationsPersistedToDisk(data.Count, _persistPath);
 		}
 		catch (Exception ex)
 		{
-			if (_logger is not null)
-				LogOrchestrationsSaveFailed(ex);
+			LogOrchestrationsSaveFailed(ex);
 		}
 	}
 
@@ -186,8 +184,7 @@ public partial class OrchestrationRegistry
 	{
 		if (!File.Exists(_persistPath))
 		{
-			if (_logger is not null)
-				LogNoPersistedOrchestrationsFound(_persistPath);
+			LogNoPersistedOrchestrationsFound(_persistPath);
 			return 0;
 		}
 
@@ -204,8 +201,7 @@ public partial class OrchestrationRegistry
 			{
 				if (string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path))
 				{
-					if (_logger is not null)
-						LogSkippingMissingOrchestrationFile(item.Path ?? "(null)");
+					LogSkippingMissingOrchestrationFile(item.Path ?? "(null)");
 					continue;
 				}
 
@@ -216,19 +212,16 @@ public partial class OrchestrationRegistry
 				}
 				catch (Exception ex)
 				{
-					if (_logger is not null)
-						LogOrchestrationLoadFailed(ex, item.Path);
+					LogOrchestrationLoadFailed(ex, item.Path);
 				}
 			}
 
-			if (_logger is not null)
-				LogOrchestrationsLoadedFromDisk(loaded, _persistPath);
+			LogOrchestrationsLoadedFromDisk(loaded, _persistPath);
 			return loaded;
 		}
 		catch (Exception ex)
 		{
-			if (_logger is not null)
-				LogOrchestrationsLoadFailed(ex);
+			LogOrchestrationsLoadFailed(ex);
 			return 0;
 		}
 	}

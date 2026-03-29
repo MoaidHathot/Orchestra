@@ -23,6 +23,15 @@ export interface Orchestration {
  */
 export type StepMcpRef = string | { name: string; type?: string; [key: string]: unknown };
 
+export interface SubagentInfo {
+  name: string;
+  displayName?: string;
+  description?: string;
+  tools?: string[];
+  mcps?: string[];
+  infer?: boolean;
+}
+
 export interface Step {
   name: string;
   type?: string;
@@ -40,11 +49,21 @@ export interface Step {
   reasoningLevel?: string;
   loopConfig?: LoopConfig;
   parameters?: string[];
+  // Http step fields
   url?: string;
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  contentType?: string;
+  // Command step fields
+  command?: string;
+  arguments?: string[];
+  workingDirectory?: string;
+  // Transform step fields
   transform?: string;
+  template?: string;
+  // Subagents
+  subagents?: SubagentInfo[];
   handler?: HandlerConfig;
 }
 

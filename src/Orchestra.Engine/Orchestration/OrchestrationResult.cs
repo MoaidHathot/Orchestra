@@ -25,12 +25,23 @@ public class OrchestrationResult
 			.Where(kv => !dependedOn.Contains(kv.Key))
 			.ToDictionary(kv => kv.Key, kv => kv.Value);
 
-		var hasFailure = terminalResults.Values.Any(
-			r => r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped);
+		// Determine overall status from ALL step results (not just terminal).
+		// A failed step may be non-terminal (with dependents that got skipped),
+		// so checking only terminal results could miss it.
+		var hasAnyFailed = stepResults.Values.Any(r => r.Status == ExecutionStatus.Failed);
+		var hasAnyCancelledOrSkipped = terminalResults.Values.Any(
+			r => r.Status is ExecutionStatus.Cancelled or ExecutionStatus.Skipped);
+
+		// Failed takes priority over Cancelled; Cancelled over Succeeded.
+		var status = hasAnyFailed
+			? ExecutionStatus.Failed
+			: hasAnyCancelledOrSkipped
+				? ExecutionStatus.Cancelled
+				: ExecutionStatus.Succeeded;
 
 		return new OrchestrationResult
 		{
-			Status = hasFailure ? ExecutionStatus.Failed : ExecutionStatus.Succeeded,
+			Status = status,
 			Results = terminalResults,
 			StepResults = stepResults,
 		};

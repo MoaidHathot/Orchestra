@@ -110,7 +110,7 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
     { value: 'all', label: 'All', color: 'var(--text-muted)' },
     { value: 'Succeeded', label: 'Succeeded', color: 'var(--success)' },
     { value: 'Failed', label: 'Failed', color: 'var(--error)' },
-    { value: 'Cancelled', label: 'Cancelled', color: 'var(--text-muted)' },
+    { value: 'Cancelled', label: 'Cancelled', color: 'var(--warning)' },
     { value: 'Running', label: 'Running', color: 'var(--warning)' },
   ];
 
@@ -192,7 +192,7 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
                     ) : exec.status === 'Failed' ? (
                       <Icons.X />
                     ) : exec.status === 'Cancelled' ? (
-                      <Icons.X />
+                      <Icons.Ban />
                     ) : (
                       <span>...</span>
                     )}

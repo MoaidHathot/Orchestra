@@ -51,24 +51,45 @@ public static class OrchestrationsApi
 					contentHash = o.ContentHash,
 					versionCount,
 					stepCount = o.Orchestration.Steps.Length,
-					steps = o.Orchestration.Steps.Select(s => new
+					steps = o.Orchestration.Steps.Select(s =>
 					{
-						name = s.Name,
-						type = s.Type.ToString(),
-						dependsOn = s.DependsOn,
-						parameters = s.Parameters,
-						model = s is PromptOrchestrationStep ps ? ps.Model : null,
-						mcps = s is PromptOrchestrationStep psMcp ? psMcp.Mcps.Select(m => new
+						var ps = s as PromptOrchestrationStep;
+						var hs = s as HttpOrchestrationStep;
+						var cs = s as CommandOrchestrationStep;
+						var ts = s as TransformOrchestrationStep;
+						return new
 						{
-							name = m.Name,
-							type = m.Type
-						}).ToArray() : Array.Empty<object>(),
-						loopConfig = s is PromptOrchestrationStep psLoop && psLoop.Loop is not null ? new
-						{
-							target = psLoop.Loop.Target,
-							maxIterations = psLoop.Loop.MaxIterations,
-							exitPattern = psLoop.Loop.ExitPattern
-						} : null
+							name = s.Name,
+							type = s.Type.ToString(),
+							dependsOn = s.DependsOn,
+							parameters = s.Parameters,
+							model = ps?.Model,
+							mcps = ps?.Mcps.Select(m => new
+							{
+								name = m.Name,
+								type = m.Type
+							}).ToArray() ?? Array.Empty<object>(),
+							loopConfig = ps?.Loop is not null ? new
+							{
+								target = ps.Loop.Target,
+								maxIterations = ps.Loop.MaxIterations,
+								exitPattern = ps.Loop.ExitPattern
+							} : null,
+							subagents = ps?.Subagents.Length > 0 ? ps.Subagents.Select(sa => new
+							{
+								name = sa.Name,
+								displayName = sa.DisplayName,
+								description = sa.Description
+							}).ToArray() : null,
+							// Http step fields
+							method = hs?.Method,
+							url = hs?.Url,
+							// Command step fields
+							command = cs?.Command,
+							arguments = cs?.Arguments,
+							// Transform step fields
+							template = ts?.Template
+						};
 					}).ToArray(),
 					parameters = parameterNames,
 					hasParameters = parameterNames.Length > 0,
@@ -108,6 +129,9 @@ public static class OrchestrationsApi
 			var steps = o.Steps.Select(s =>
 			{
 				var ps = s as PromptOrchestrationStep;
+				var hs = s as HttpOrchestrationStep;
+				var cs = s as CommandOrchestrationStep;
+				var ts = s as TransformOrchestrationStep;
 				return new
 				{
 					name = s.Name,
@@ -135,7 +159,28 @@ public static class OrchestrationsApi
 						command = (m as LocalMcp)?.Command,
 						arguments = (m as LocalMcp)?.Arguments,
 						workingDirectory = (m as LocalMcp)?.WorkingDirectory
-					}).ToArray()
+					}).ToArray(),
+					subagents = ps?.Subagents.Length > 0 ? ps.Subagents.Select(sa => new
+					{
+						name = sa.Name,
+						displayName = sa.DisplayName,
+						description = sa.Description,
+						tools = sa.Tools,
+						mcps = sa.Mcps.Select(m => m.Name).ToArray(),
+						infer = sa.Infer
+					}).ToArray() : null,
+					// Http step fields
+					method = hs?.Method,
+					url = hs?.Url,
+					headers = hs?.Headers.Count > 0 ? hs.Headers : null,
+					body = hs?.Body,
+					contentType = hs?.ContentType,
+					// Command step fields
+					command = cs?.Command,
+					arguments = cs?.Arguments.Length > 0 ? cs.Arguments : null,
+					workingDirectory = cs?.WorkingDirectory,
+					// Transform step fields
+					template = ts?.Template
 				};
 			}).ToArray();
 

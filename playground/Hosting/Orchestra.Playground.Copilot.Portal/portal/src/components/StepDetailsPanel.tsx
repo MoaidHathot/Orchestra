@@ -1,5 +1,5 @@
 import React from 'react';
-import type { Step } from '../types';
+import type { Step, SubagentInfo } from '../types';
 import CollapsibleText from './CollapsibleText';
 
 interface Props {
@@ -95,6 +95,19 @@ const KNOWN_PROPS: ReadonlySet<string> = new Set([
   'outputHandlerPrompt',
   'type',
   'systemPromptMode',
+  'subagents',
+  'url',
+  'method',
+  'headers',
+  'body',
+  'contentType',
+  'command',
+  'arguments',
+  'workingDirectory',
+  'template',
+  'transform',
+  'handler',
+  'loop',
 ]);
 
 export default function StepDetailsPanel({ step }: Props): React.JSX.Element | null {
@@ -416,6 +429,144 @@ export default function StepDetailsPanel({ step }: Props): React.JSX.Element | n
             Loop Config
           </div>
           <div>{renderValue(step.loopConfig as unknown as JsonValue)}</div>
+        </div>
+      )}
+
+      {/* Http Step: URL & Method */}
+      {step.url != null && (
+        <div style={{ marginBottom: '12px' }}>
+          <div
+            className="text-muted"
+            style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}
+          >
+            HTTP Request
+          </div>
+          <div style={{ color: '#3fb950' }}>
+            <span style={{ fontWeight: 600 }}>{step.method || 'GET'}</span>{' '}
+            <span style={{ wordBreak: 'break-all' }}>{step.url}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Http Step: Headers */}
+      {step.headers != null && Object.keys(step.headers).length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <div
+            className="text-muted"
+            style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}
+          >
+            Headers
+          </div>
+          <div>{renderValue(step.headers as unknown as JsonValue)}</div>
+        </div>
+      )}
+
+      {/* Http Step: Body */}
+      {step.body != null && (
+        <CollapsibleText label="Request Body" text={step.body} maxCollapsedHeight={50} />
+      )}
+
+      {/* Command Step */}
+      {step.command != null && (
+        <div style={{ marginBottom: '12px' }}>
+          <div
+            className="text-muted"
+            style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}
+          >
+            Command
+          </div>
+          <div
+            style={{
+              background: 'var(--bg)',
+              padding: '8px 12px',
+              borderRadius: '4px',
+              fontFamily: "'SF Mono', Monaco, Consolas, monospace",
+              fontSize: '12px',
+              color: '#a371f7',
+            }}
+          >
+            {step.command}
+            {step.arguments && step.arguments.length > 0 && (
+              <span style={{ color: '#e6edf3' }}> {step.arguments.join(' ')}</span>
+            )}
+          </div>
+          {step.workingDirectory && (
+            <div style={{ marginTop: '4px', fontSize: '12px' }}>
+              <span className="text-muted">cwd: </span>
+              <span>{step.workingDirectory}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Transform Step: Template */}
+      {step.template != null && (
+        <CollapsibleText label="Template" text={step.template} maxCollapsedHeight={80} />
+      )}
+
+      {/* Subagents */}
+      {step.subagents != null && step.subagents.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <div
+            className="text-muted"
+            style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}
+          >
+            Subagents ({step.subagents.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {(step.subagents as SubagentInfo[]).map((sa, i) => (
+              <div
+                key={i}
+                style={{
+                  background: 'var(--bg)',
+                  padding: '8px 10px',
+                  borderRadius: '6px',
+                  borderLeft: '3px solid #a371f7',
+                }}
+              >
+                <div style={{ fontWeight: 600, fontSize: '12px', color: '#a371f7' }}>
+                  {sa.displayName || sa.name}
+                </div>
+                {sa.description && (
+                  <div
+                    className="text-muted"
+                    style={{ fontSize: '11px', marginTop: '2px' }}
+                  >
+                    {sa.description}
+                  </div>
+                )}
+                {sa.tools && sa.tools.length > 0 && (
+                  <div style={{ marginTop: '4px', display: 'flex', flexWrap: 'wrap', gap: '3px' }}>
+                    {sa.tools.map((tool, ti) => (
+                      <span
+                        key={ti}
+                        style={{
+                          background: 'rgba(127, 127, 127, 0.15)',
+                          padding: '1px 6px',
+                          borderRadius: '3px',
+                          fontSize: '10px',
+                          color: '#7ee787',
+                        }}
+                      >
+                        {tool}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {sa.mcps && sa.mcps.length > 0 && (
+                  <div style={{ marginTop: '4px', fontSize: '11px' }}>
+                    <span className="text-muted">MCPs: </span>
+                    <span style={{ color: '#a371f7' }}>{sa.mcps.join(', ')}</span>
+                  </div>
+                )}
+                {sa.infer === false && (
+                  <div style={{ marginTop: '2px', fontSize: '10px', color: '#d29922' }}>
+                    Manual selection only
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

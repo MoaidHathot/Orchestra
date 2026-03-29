@@ -7,17 +7,20 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private readonly AgentBuilder _agentBuilder;
 	private readonly IOrchestrationReporter _reporter;
 	private readonly IPromptFormatter _formatter;
+	private readonly EngineToolRegistry _engineToolRegistry;
 	private readonly ILogger<PromptExecutor> _logger;
 
 	public PromptExecutor(
 		AgentBuilder agentBuilder,
 		IOrchestrationReporter reporter,
 		IPromptFormatter formatter,
-		ILogger<PromptExecutor> logger)
+		ILogger<PromptExecutor> logger,
+		EngineToolRegistry? engineToolRegistry = null)
 	{
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
 		_formatter = formatter;
+		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 		_logger = logger;
 	}
 
@@ -44,16 +47,26 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			LogStepMcps(step.Name, step.Mcps.Length, string.Join(", ", step.Mcps.Select(m => m.Name)));
 			LogStepMcpNames(step.Name, string.Join(", ", step.McpNames));
 
-			// Build and run the agent
-			var agent = await _agentBuilder
-				.WithModel(step.Model)
-				.WithSystemPrompt(step.SystemPrompt)
-				.WithMcp(step.Mcps)
-				.WithSubagents(step.Subagents)
-				.WithReasoningLevel(step.ReasoningLevel)
-				.WithSystemPromptMode(step.SystemPromptMode ?? context.DefaultSystemPromptMode)
-				.WithReporter(_reporter)
-				.BuildAgentAsync(cancellationToken);
+			// Create a fresh engine tool context for this execution
+			var engineToolCtx = new EngineToolContext();
+			var engineTools = _engineToolRegistry.GetAll();
+
+		// Build and run the agent using an immutable config snapshot (thread-safe)
+		var config = new AgentBuildConfig
+		{
+			Model = step.Model,
+			SystemPrompt = step.SystemPrompt,
+			Mcps = step.Mcps,
+			Subagents = step.Subagents,
+			ReasoningLevel = step.ReasoningLevel,
+			SystemPromptMode = step.SystemPromptMode ?? context.DefaultSystemPromptMode,
+			Reporter = _reporter,
+			EngineTools = engineTools,
+			EngineToolCtx = engineToolCtx,
+		};
+
+		var agent = await _agentBuilder
+			.BuildAgentAsync(config, cancellationToken);
 
 			var task = agent.SendAsync(userPrompt, cancellationToken);
 
@@ -105,6 +118,26 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 			// Report the step trace for live trace viewing
 			_reporter.ReportStepTrace(step.Name, trace);
+
+		// Check if an engine tool overrode the status (e.g., LLM called orchestra_set_status)
+		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Failed)
+		{
+			var reason = engineToolCtx.StatusReason ?? "Step marked as failed by LLM";
+			LogEngineToolStatusOverride(step.Name, reason);
+			_reporter.ReportStepError(step.Name, reason);
+			return ExecutionResult.Failed(
+				reason,
+				rawDependencyOutputs,
+				userPrompt,
+				result.ActualModel,
+				trace);
+		}
+
+		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
+		{
+			var reason = engineToolCtx.StatusReason ?? "Step marked as succeeded by LLM";
+			LogEngineToolSuccessOverride(step.Name, reason);
+		}
 
 			return ExecutionResult.Succeeded(
 				content,
@@ -167,13 +200,17 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	{
 		var systemPrompt = _formatter.BuildTransformationSystemPrompt(handlerPrompt);
 
+		var config = new AgentBuildConfig
+		{
+			Model = model,
+			SystemPrompt = systemPrompt,
+			SystemPromptMode = SystemPromptMode.Replace,
+			Mcps = [],
+			Reporter = _reporter,
+		};
+
 		var agent = await _agentBuilder
-			.WithModel(model)
-			.WithSystemPrompt(systemPrompt)
-			.WithSystemPromptMode(SystemPromptMode.Replace)
-			.WithMcp()
-			.WithReporter(_reporter)
-			.BuildAgentAsync(cancellationToken);
+			.BuildAgentAsync(config, cancellationToken);
 
 		var wrappedContent = _formatter.WrapContentForTransformation(content);
 
@@ -196,6 +233,18 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Debug,
 		Message = "Step '{StepName}' McpNames configuration: [{McpNames}]")]
 	private partial void LogStepMcpNames(string stepName, string mcpNames);
+
+	[LoggerMessage(
+		EventId = 3,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' status overridden to failed by engine tool: {Reason}")]
+	private partial void LogEngineToolStatusOverride(string stepName, string reason);
+
+	[LoggerMessage(
+		EventId = 4,
+		Level = LogLevel.Information,
+		Message = "Step '{StepName}' explicitly marked as succeeded by engine tool: {Reason}")]
+	private partial void LogEngineToolSuccessOverride(string stepName, string reason);
 
 	#endregion
 }

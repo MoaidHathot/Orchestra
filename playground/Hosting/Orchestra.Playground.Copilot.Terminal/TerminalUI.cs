@@ -1709,16 +1709,17 @@ public class TerminalUI
 				_ => $"[dim]{Markup.Escape(run.TriggeredBy)}[/]"
 			};
 
-			// Format error preview for failed runs
+			// Format error preview for failed/cancelled runs
 			var errorText = "";
-			if (run.Status == ExecutionStatus.Failed && !string.IsNullOrEmpty(run.ErrorMessage))
+			if (run.Status is ExecutionStatus.Failed or ExecutionStatus.Cancelled && !string.IsNullOrEmpty(run.ErrorMessage))
 			{
 				var errorPreview = run.ErrorMessage.ReplaceLineEndings(" ");
 				if (errorPreview.Length > 40) errorPreview = errorPreview[..40] + "...";
 				var stepPrefix = !string.IsNullOrEmpty(run.FailedStepName)
 					? $"{Markup.Escape(run.FailedStepName)}: "
 					: "";
-				errorText = $"[red]{stepPrefix}{Markup.Escape(errorPreview)}[/]";
+				var errorColor = run.Status == ExecutionStatus.Failed ? "red" : "yellow";
+				errorText = $"[{errorColor}]{stepPrefix}{Markup.Escape(errorPreview)}[/]";
 			}
 
 			table.AddRow(
@@ -2115,7 +2116,7 @@ public class TerminalUI
 		return new Panel(new Rows(rows))
 			.Header($"{headerText} [dim]|[/] [dim]Tab[/]=Switch [dim]f[/]=Follow [dim]u[/]=URL [dim]Esc[/]=Back")
 			.Border(BoxBorder.Rounded)
-			.BorderColor(record.Status == ExecutionStatus.Failed ? Color.Red : Color.Blue);
+			.BorderColor(record.Status == ExecutionStatus.Failed ? Color.Red : record.Status == ExecutionStatus.Cancelled ? Color.Yellow : Color.Blue);
 	}
 
 	private IEnumerable<IRenderable> RenderSummaryTab(
@@ -2129,11 +2130,15 @@ public class TerminalUI
 		yield return new Markup($"[bold]Version:[/] {Markup.Escape(record.OrchestrationVersion)}");
 		yield return new Markup($"[bold]Status:[/] [{statusColor}]{record.Status}[/]");
 
-		// Show error banner for failed runs
-		if (record.Status == ExecutionStatus.Failed)
+		// Show error banner for failed/cancelled runs
+		if (record.Status is ExecutionStatus.Failed or ExecutionStatus.Cancelled)
 		{
 			var failedSteps = record.AllStepRecords.Values
 				.Where(s => s.Status == ExecutionStatus.Failed && !string.IsNullOrEmpty(s.ErrorMessage))
+				.OrderBy(s => s.StartedAt)
+				.ToList();
+			var cancelledSteps = record.AllStepRecords.Values
+				.Where(s => s.Status == ExecutionStatus.Cancelled)
 				.OrderBy(s => s.StartedAt)
 				.ToList();
 
@@ -2151,6 +2156,15 @@ public class TerminalUI
 					}
 				}
 				yield return new Rule { Style = Style.Parse("red dim") };
+			}
+			if (cancelledSteps.Count > 0)
+			{
+				yield return new Rule("[yellow bold]Cancelled[/]") { Style = Style.Parse("yellow") };
+				foreach (var cancelledStep in cancelledSteps)
+				{
+					yield return new Markup($"  [yellow]{Markup.Escape(cancelledStep.StepName)}[/]");
+				}
+				yield return new Rule { Style = Style.Parse("yellow dim") };
 			}
 		}
 

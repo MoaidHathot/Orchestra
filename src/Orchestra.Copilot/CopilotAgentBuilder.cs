@@ -27,6 +27,8 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		var reasoningLevel = ReasoningLevel;
 		var systemPromptMode = SystemPromptMode;
 		var reporter = Reporter;
+		var engineTools = EngineTools;
+		var engineToolCtx = EngineToolCtx;
 
 		await _client.StartAsync(cancellationToken);
 
@@ -39,6 +41,27 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			reasoningLevel: reasoningLevel,
 			systemPromptMode: systemPromptMode,
 			reporter: reporter,
+			engineTools: engineTools,
+			engineToolContext: engineToolCtx,
+			logger: _loggerFactory.CreateLogger<CopilotAgent>()
+		);
+	}
+
+	public override async Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
+	{
+		await _client.StartAsync(cancellationToken);
+
+		return new CopilotAgent(
+			client: _client,
+			model: config.Model,
+			systemPrompt: config.SystemPrompt,
+			mcps: config.Mcps,
+			subagents: config.Subagents,
+			reasoningLevel: config.ReasoningLevel,
+			systemPromptMode: config.SystemPromptMode,
+			reporter: config.Reporter,
+			engineTools: config.EngineTools,
+			engineToolContext: config.EngineToolCtx,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()
 		);
 	}

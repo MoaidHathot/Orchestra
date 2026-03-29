@@ -79,4 +79,11 @@ public class ExecutionResult
 		Status = ExecutionStatus.Skipped,
 		ErrorMessage = reason,
 	};
+
+	public static ExecutionResult Cancelled(string? errorMessage = null) => new()
+	{
+		Content = string.Empty,
+		Status = ExecutionStatus.Cancelled,
+		ErrorMessage = errorMessage ?? "Cancelled",
+	};
 }

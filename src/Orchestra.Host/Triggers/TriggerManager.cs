@@ -659,24 +659,23 @@ public partial class TriggerManager : BackgroundService
 			{
 				try
 				{
-					var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
-					var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
+				var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
+				var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
-					var agent = await _agentBuilder
-						.WithModel("gpt-4o-mini")
-						.WithSystemPrompt("You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.")
-						.WithMcp()
-						.WithReasoningLevel(null)
-						.WithSystemPromptMode(null)
-						.WithReporter(NullOrchestrationReporter.Instance)
-						.BuildAgentAsync();
+				var agent = await _agentBuilder
+					.BuildAgentAsync(new AgentBuildConfig
+					{
+						Model = "gpt-4o-mini",
+						SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
+						Mcps = [],
+					});
 
-					var task = agent.SendAsync(fullPrompt);
-					var result = await task.GetResultAsync();
+				var task = agent.SendAsync(fullPrompt);
+				var result = await task.GetResultAsync();
 
-					// Parse the LLM response as JSON parameters
-					var content = result.Content.Trim();
-					// Strip markdown code fences if present
+				// Parse the LLM response as JSON parameters
+				var content = result.Content.Trim();
+				// Strip markdown code fences if present
 					if (content.StartsWith("```"))
 					{
 						var firstNewline = content.IndexOf('\n');
@@ -866,22 +865,21 @@ public partial class TriggerManager : BackgroundService
 			{
 				try
 				{
-					var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
-					var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
+				var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
+				var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
-					var agent = await _agentBuilder
-						.WithModel("gpt-4o-mini")
-						.WithSystemPrompt("You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.")
-						.WithMcp()
-						.WithReasoningLevel(null)
-						.WithSystemPromptMode(null)
-						.WithReporter(NullOrchestrationReporter.Instance)
-						.BuildAgentAsync();
+				var agent = await _agentBuilder
+					.BuildAgentAsync(new AgentBuildConfig
+					{
+						Model = "gpt-4o-mini",
+						SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
+						Mcps = [],
+					});
 
-					var task = agent.SendAsync(fullPrompt);
-					var result = await task.GetResultAsync();
+				var task = agent.SendAsync(fullPrompt);
+				var result = await task.GetResultAsync();
 
-					var content = result.Content.Trim();
+				var content = result.Content.Trim();
 					if (content.StartsWith("```"))
 					{
 						var firstNewline = content.IndexOf('\n');
@@ -1001,7 +999,11 @@ public partial class TriggerManager : BackgroundService
 		_backgroundTasks[id] = task;
 
 		// Self-cleanup when the task completes
-		task.ContinueWith(_ => _backgroundTasks.TryRemove(id, out _), TaskContinuationOptions.ExecuteSynchronously);
+		task.ContinueWith(static (_, state) =>
+		{
+			var (dict, taskId) = ((ConcurrentDictionary<int, Task>, int))state!;
+			dict.TryRemove(taskId, out Task? _);
+		}, (_backgroundTasks, id), TaskContinuationOptions.ExecuteSynchronously);
 	}
 
 	private void PersistTriggerOverride(TriggerRegistration reg)

@@ -77,7 +77,7 @@ public class OrchestrationResultTests
 	}
 
 	[Fact]
-	public void From_TerminalStepSkipped_ReturnsFailedStatus()
+	public void From_TerminalStepSkipped_ReturnsCancelledStatus()
 	{
 		// Arrange
 		var orchestration = new Orchestration
@@ -106,8 +106,8 @@ public class OrchestrationResultTests
 		// Act
 		var result = OrchestrationResult.From(orchestration, stepResults);
 
-		// Assert
-		result.Status.Should().Be(ExecutionStatus.Failed);
+		// Assert — Skipped without any Failed step yields Cancelled at orchestration level
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
 	}
 
 	[Fact]
@@ -288,6 +288,152 @@ public class OrchestrationResultTests
 		result.Status.Should().Be(ExecutionStatus.Failed);
 		result.Results.Should().ContainKey("B");
 		result.Results["B"].Status.Should().Be(ExecutionStatus.Skipped);
+	}
+
+	#endregion
+
+	#region Cancelled Status
+
+	[Fact]
+	public void From_TerminalStepCancelled_ReturnsCancelledStatus()
+	{
+		// Arrange
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.Cancelled()
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+	}
+
+	[Fact]
+	public void From_CancelledAndSucceeded_ReturnsCancelledStatus()
+	{
+		// Arrange — two parallel terminal steps, one succeeds and one is cancelled
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "A", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["A"] = ExecutionResult.Succeeded("done"),
+			["B"] = ExecutionResult.Cancelled()
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+	}
+
+	[Fact]
+	public void From_CancelledAndFailed_ReturnsFailedStatus()
+	{
+		// Arrange — Failed takes priority over Cancelled
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "A", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["A"] = ExecutionResult.Failed("error"),
+			["B"] = ExecutionResult.Cancelled()
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert — Failed takes priority
+		result.Status.Should().Be(ExecutionStatus.Failed);
+	}
+
+	[Fact]
+	public void From_NonTerminalCancelled_TerminalSkipped_ReturnsCancelledStatus()
+	{
+		// Arrange — A is cancelled, B depends on A and is skipped.
+		// No step actually Failed, so orchestration should be Cancelled.
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "A", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = ["A"], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["A"] = ExecutionResult.Cancelled(),
+			["B"] = ExecutionResult.Skipped("Dependency cancelled")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.Results.Should().ContainKey("B");
+		result.Results["B"].Status.Should().Be(ExecutionStatus.Skipped);
+	}
+
+	[Fact]
+	public void From_NonTerminalFailed_TerminalSkipped_ReturnsFailedStatus()
+	{
+		// Arrange — A fails (non-terminal), B depends on A and is skipped (terminal).
+		// hasAnyFailed is true because A failed, so orchestration should be Failed.
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "A", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = ["A"], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["A"] = ExecutionResult.Failed("error"),
+			["B"] = ExecutionResult.Skipped("Dependency failed")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
 	}
 
 	#endregion

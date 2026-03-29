@@ -254,18 +254,21 @@ public static class CheckpointApi
 			await httpContext.Response.Body.FlushAsync(sseToken);
 
 			// Stream future events until client disconnects OR orchestration completes
-			try
+			if (futureEvents is not null)
 			{
-				await foreach (var evt in futureEvents.ReadAllAsync(sseToken))
+				try
 				{
-					await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-					await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
-					await httpContext.Response.Body.FlushAsync(sseToken);
+					await foreach (var evt in futureEvents.ReadAllAsync(sseToken))
+					{
+						await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
+						await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+						await httpContext.Response.Body.FlushAsync(sseToken);
+					}
 				}
-			}
-			catch (OperationCanceledException)
-			{
-				reporter.Unsubscribe(futureEvents);
+				catch (OperationCanceledException)
+				{
+					reporter.Unsubscribe(futureEvents);
+				}
 			}
 
 			if (!sseToken.IsCancellationRequested)

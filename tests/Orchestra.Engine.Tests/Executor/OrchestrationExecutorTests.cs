@@ -347,7 +347,7 @@ public class OrchestrationExecutorTests
 		var result = await executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
 
 		// Assert
-		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
 	}
 
 	[Fact]
@@ -392,7 +392,7 @@ public class OrchestrationExecutorTests
 		var result = await executeTask;
 
 		// Assert
-		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
 	}
 
 	#endregion
@@ -524,6 +524,246 @@ public class OrchestrationExecutorTests
 		result.Results.Should().HaveCount(1);
 		result.Results.Should().ContainKey("C");
 		result.StepResults.Should().HaveCount(3); // All steps
+	}
+
+	#endregion
+
+	#region BuildFinalContent
+
+	[Fact]
+	public async Task ExecuteAsync_CancelledRun_FinalContentContainsCancellationSummary()
+	{
+		// Arrange
+		OrchestrationRunRecord? capturedRecord = null;
+		var runStore = Substitute.For<IRunStore>();
+		runStore.SaveRunAsync(Arg.Do<OrchestrationRunRecord>(r => capturedRecord = r), Arg.Any<CancellationToken>())
+			.Returns(Task.CompletedTask);
+
+		var cts = new CancellationTokenSource();
+		cts.Cancel(); // Cancel immediately
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory, runStore: runStore);
+		var orchestration = TestOrchestrations.LinearChain(); // A -> B -> C
+
+		// Act
+		await executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
+
+		// Assert
+		capturedRecord.Should().NotBeNull();
+		capturedRecord!.Status.Should().Be(ExecutionStatus.Cancelled);
+		capturedRecord.FinalContent.Should().Contain("Orchestration was cancelled.");
+		capturedRecord.FinalContent.Should().Contain("Cancelled steps:");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_FailedRun_FinalContentContainsFailureSummary()
+	{
+		// Arrange
+		OrchestrationRunRecord? capturedRecord = null;
+		var runStore = Substitute.For<IRunStore>();
+		runStore.SaveRunAsync(Arg.Do<OrchestrationRunRecord>(r => capturedRecord = r), Arg.Any<CancellationToken>())
+			.Returns(Task.CompletedTask);
+
+		var agentBuilder = new MockAgentBuilder().WithException(new Exception("Something broke"));
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory, runStore: runStore);
+		var orchestration = TestOrchestrations.LinearChain(); // A -> B -> C
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		capturedRecord.Should().NotBeNull();
+		capturedRecord!.Status.Should().Be(ExecutionStatus.Failed);
+		capturedRecord.FinalContent.Should().Contain("Orchestration failed.");
+		capturedRecord.FinalContent.Should().Contain("Failed steps:");
+		capturedRecord.FinalContent.Should().Contain("Skipped steps:");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_CancelledRun_SavesRunRecordSuccessfully()
+	{
+		// Arrange — verifies the CancellationToken.None fix for SaveRunAsync
+		var runStore = Substitute.For<IRunStore>();
+		runStore.SaveRunAsync(Arg.Any<OrchestrationRunRecord>(), Arg.Any<CancellationToken>())
+			.Returns(Task.CompletedTask);
+
+		var cts = new CancellationTokenSource();
+		cts.Cancel();
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory, runStore: runStore);
+		var orchestration = TestOrchestrations.SingleStep();
+
+		// Act
+		await executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
+
+		// Assert — SaveRunAsync should be called despite the external token being cancelled
+		await runStore.Received(1).SaveRunAsync(
+			Arg.Is<OrchestrationRunRecord>(r => r.Status == ExecutionStatus.Cancelled),
+			Arg.Any<CancellationToken>());
+	}
+
+	#endregion
+
+	#region Skip Reason With Cancelled Dependencies
+
+	[Fact]
+	public async Task ExecuteAsync_CancelledDependency_DownstreamStepsCancelled()
+	{
+		// Arrange — Use a linear chain where A is cancelled during execution,
+		// causing B and C to also be cancelled (since the external token is cancelled)
+		var cts = new CancellationTokenSource();
+		var stepCount = 0;
+
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var current = Interlocked.Increment(ref stepCount);
+			if (current == 1)
+			{
+				// Cancel during first step — throw OperationCanceledException
+				cts.Cancel();
+				throw new OperationCanceledException(ct);
+			}
+
+			var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+			channel.Writer.Complete();
+			var resultTask = Task.FromResult(new AgentResult { Content = "Output" });
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.LinearChain(); // A -> B -> C
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Cancelled);
+		// B and C should also be cancelled (the external token is cancelled, so they
+		// hit the pre-cancellation check rather than the dependency-skip check)
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Cancelled);
+		_reporter.Received().ReportStepCancelled("B");
+		_reporter.Received().ReportStepCancelled("C");
+	}
+
+	#endregion
+
+	#region Concurrency Safety (AgentBuildConfig)
+
+	[Fact]
+	public async Task ExecuteAsync_ParallelStepsWithDifferentMcps_EachStepReceivesCorrectMcps()
+	{
+		// Arrange — Two parallel steps with different MCP configurations.
+		// Before the AgentBuildConfig fix, the shared mutable AgentBuilder would
+		// let one step's MCPs be overwritten by the other before BuildAgentAsync()
+		// captured them.
+		var mcpA = new Mcp { Name = "icm", Type = McpType.Local };
+		var mcpB = new Mcp { Name = "graph", Type = McpType.Remote };
+
+		var stepA = new PromptOrchestrationStep
+		{
+			Name = "A",
+			Type = OrchestrationStepType.Prompt,
+			DependsOn = [],
+			Parameters = [],
+			SystemPrompt = "System A",
+			UserPrompt = "Prompt A",
+			Model = "claude-opus-4.5",
+			Mcps = [mcpA]
+		};
+
+		var stepB = new PromptOrchestrationStep
+		{
+			Name = "B",
+			Type = OrchestrationStepType.Prompt,
+			DependsOn = [],
+			Parameters = [],
+			SystemPrompt = "System B",
+			UserPrompt = "Prompt B",
+			Model = "claude-opus-4.5",
+			Mcps = [mcpB]
+		};
+
+		var orchestration = new Orchestration
+		{
+			Name = "parallel-mcp-test",
+			Description = "Two parallel steps with different MCPs",
+			Steps = [stepA, stepB]
+		};
+
+		// Use a builder that captures every config in a thread-safe collection
+		var agentBuilder = new ConcurrentCapturingAgentBuilder();
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+
+		// Act — Run multiple times to increase the chance of detecting races
+		for (var i = 0; i < 20; i++)
+		{
+			agentBuilder.ClearCaptures();
+			var result = await executor.ExecuteAsync(orchestration);
+
+			// Assert
+			result.Status.Should().Be(ExecutionStatus.Succeeded);
+
+			var configs = agentBuilder.CapturedConfigs;
+			configs.Should().HaveCount(2, "two parallel steps should produce two configs");
+
+			var configA = configs.FirstOrDefault(c => c.Mcps.Any(m => m.Name == "icm"));
+			var configB = configs.FirstOrDefault(c => c.Mcps.Any(m => m.Name == "graph"));
+
+			configA.Should().NotBeNull("step A should receive the 'icm' MCP");
+			configB.Should().NotBeNull("step B should receive the 'graph' MCP");
+
+			configA!.Mcps.Should().HaveCount(1);
+			configA.Mcps[0].Name.Should().Be("icm");
+
+			configB!.Mcps.Should().HaveCount(1);
+			configB.Mcps[0].Name.Should().Be("graph");
+		}
+	}
+
+	/// <summary>
+	/// Thread-safe mock builder that captures all AgentBuildConfig instances
+	/// passed across concurrent BuildAgentAsync calls.
+	/// </summary>
+	private class ConcurrentCapturingAgentBuilder : AgentBuilder
+	{
+		private readonly System.Collections.Concurrent.ConcurrentBag<AgentBuildConfig> _capturedConfigs = new();
+
+		public IReadOnlyList<AgentBuildConfig> CapturedConfigs => [.. _capturedConfigs];
+
+		public void ClearCaptures() => _capturedConfigs.Clear();
+
+		public override Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)
+		{
+			var agent = NSubstitute.Substitute.For<IAgent>();
+			agent.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+				.Returns(callInfo =>
+				{
+					var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+					var resultTask = Task.Run(async () =>
+					{
+						await channel.Writer.WriteAsync(new AgentEvent
+						{
+							Type = AgentEventType.MessageDelta,
+							Content = "Response"
+						});
+						channel.Writer.Complete();
+						return new AgentResult { Content = "Response", ActualModel = "claude-opus-4.5" };
+					});
+					return new AgentTask(channel.Reader, resultTask);
+				});
+			return Task.FromResult(agent);
+		}
+
+		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
+		{
+			_capturedConfigs.Add(config);
+			return BuildAgentAsync(cancellationToken);
+		}
 	}
 
 	#endregion

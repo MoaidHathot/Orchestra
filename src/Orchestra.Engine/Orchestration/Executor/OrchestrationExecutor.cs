@@ -23,7 +23,8 @@ public partial class OrchestrationExecutor
 		IPromptFormatter? promptFormatter = null,
 		IRunStore? runStore = null,
 		ICheckpointStore? checkpointStore = null,
-		StepExecutorRegistry? stepExecutorRegistry = null)
+		StepExecutorRegistry? stepExecutorRegistry = null,
+		EngineToolRegistry? engineToolRegistry = null)
 	{
 		_scheduler = scheduler;
 		_agentBuilder = agentBuilder;
@@ -41,7 +42,7 @@ public partial class OrchestrationExecutor
 		}
 		else
 		{
-			var promptExecutor = new PromptExecutor(agentBuilder, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>());
+			var promptExecutor = new PromptExecutor(agentBuilder, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>(), engineToolRegistry);
 			_stepExecutorRegistry = new StepExecutorRegistry()
 				.Register(new PromptStepExecutor(promptExecutor))
 				.Register(new HttpStepExecutor(new System.Net.Http.HttpClient(), reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))
@@ -222,7 +223,7 @@ public partial class OrchestrationExecutor
 				}
 				catch (OperationCanceledException)
 				{
-					var cancelled = ExecutionResult.Failed("Cancelled");
+					var cancelled = ExecutionResult.Cancelled();
 					context.AddResult(step.Name, cancelled);
 					stepResults[step.Name] = cancelled;
 					var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
@@ -281,12 +282,18 @@ public partial class OrchestrationExecutor
 		{
 			LogOrchestrationSucceeded(orchestration.Name);
 		}
+		else if (orchestrationResult.Status == ExecutionStatus.Cancelled)
+		{
+			LogOrchestrationCancelled(orchestration.Name);
+		}
 		else
 		{
 			LogOrchestrationFailed(orchestration.Name);
 		}
 
-		// Build and persist the run record (use external token so save isn't blocked by orchestration timeout)
+		// Build and persist the run record.
+		// Use CancellationToken.None so the save always completes, even when the
+		// orchestration was cancelled — the run record must be persisted to history.
 		var runCompletedAt = DateTimeOffset.UtcNow;
 		var finalContent = BuildFinalContent(orchestrationResult);
 
@@ -306,7 +313,7 @@ public partial class OrchestrationExecutor
 
 		try
 		{
-			await _runStore.SaveRunAsync(runRecord, externalCancellationToken);
+			await _runStore.SaveRunAsync(runRecord, CancellationToken.None);
 		}
 		catch (Exception ex)
 		{
@@ -316,7 +323,7 @@ public partial class OrchestrationExecutor
 		// Clean up checkpoint now that execution is complete
 		try
 		{
-			await _checkpointStore.DeleteCheckpointAsync(orchestration.Name, runId, externalCancellationToken);
+			await _checkpointStore.DeleteCheckpointAsync(orchestration.Name, runId, CancellationToken.None);
 		}
 		catch (Exception ex)
 		{
@@ -521,8 +528,8 @@ public partial class OrchestrationExecutor
 		if (cancellationToken.IsCancellationRequested)
 		{
 			LogStepCancelledBeforeStart(step.Name);
-			_reporter.ReportStepSkipped(step.Name, "Cancelled");
-			return ExecutionResult.Failed("Cancelled");
+			_reporter.ReportStepCancelled(step.Name);
+			return ExecutionResult.Cancelled();
 		}
 
 		// Check if any dependency failed or was skipped
@@ -530,13 +537,13 @@ public partial class OrchestrationExecutor
 		var failedDeps = shouldSkip
 			? step.DependsOn
 				.Where(dep => stepResults.TryGetValue(dep, out var r) &&
-					r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped)
+					r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped or ExecutionStatus.Cancelled)
 				.ToArray()
 			: [];
 
 		if (shouldSkip)
 		{
-			var reason = $"Skipped because dependencies failed or were skipped: [{string.Join(", ", failedDeps)}]";
+			var reason = $"Skipped because dependencies failed, were cancelled, or were skipped: [{string.Join(", ", failedDeps)}]";
 			LogSkippingStep(step.Name, reason);
 			_reporter.ReportStepSkipped(step.Name, reason);
 			return ExecutionResult.Skipped(reason);
@@ -720,6 +727,46 @@ public partial class OrchestrationExecutor
 
 	private static string BuildFinalContent(OrchestrationResult orchestrationResult)
 	{
+		if (orchestrationResult.Status is ExecutionStatus.Cancelled or ExecutionStatus.Failed)
+		{
+			var summary = new System.Text.StringBuilder();
+			summary.AppendLine(orchestrationResult.Status == ExecutionStatus.Cancelled
+				? "Orchestration was cancelled."
+				: "Orchestration failed.");
+
+			var succeeded = orchestrationResult.StepResults
+				.Where(kv => kv.Value.Status == ExecutionStatus.Succeeded)
+				.Select(kv => kv.Key).ToList();
+			var failed = orchestrationResult.StepResults
+				.Where(kv => kv.Value.Status == ExecutionStatus.Failed)
+				.Select(kv => kv.Key).ToList();
+			var cancelled = orchestrationResult.StepResults
+				.Where(kv => kv.Value.Status == ExecutionStatus.Cancelled)
+				.Select(kv => kv.Key).ToList();
+			var skipped = orchestrationResult.StepResults
+				.Where(kv => kv.Value.Status == ExecutionStatus.Skipped)
+				.Select(kv => kv.Key).ToList();
+
+			if (succeeded.Count > 0)
+				summary.AppendLine($"Completed steps: {string.Join(", ", succeeded)}");
+			if (failed.Count > 0)
+			{
+				summary.AppendLine($"Failed steps: {string.Join(", ", failed)}");
+				foreach (var stepName in failed)
+				{
+					var errorMessage = orchestrationResult.StepResults[stepName].ErrorMessage;
+					if (!string.IsNullOrEmpty(errorMessage))
+						summary.AppendLine($"  {stepName}: {errorMessage}");
+				}
+			}
+			if (cancelled.Count > 0)
+				summary.AppendLine($"Cancelled steps: {string.Join(", ", cancelled)}");
+			if (skipped.Count > 0)
+				summary.AppendLine($"Skipped steps: {string.Join(", ", skipped)}");
+
+			return summary.ToString();
+		}
+
 		if (orchestrationResult.Results.Count == 1)
 		{
 			return orchestrationResult.Results.Values.First().Content;
@@ -744,6 +791,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Orchestration '{Name}' completed with failures.")]
 	private partial void LogOrchestrationFailed(string name);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Orchestration '{Name}' was cancelled.")]
+	private partial void LogOrchestrationCancelled(string name);
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to save run record for orchestration '{Name}', run '{RunId}'.")]
 	private partial void LogRunStoreSaveFailed(Exception ex, string name, string runId);

@@ -1,0 +1,73 @@
+{
+  "name": "icm-acknowledge",
+  "description": "Periodically checks for active IcM incidents that have not been acknowledged, acknowledges each one via the IcM MCP server, creates an ActionView entry summarizing what was done, and produces a final markdown summary. Runs every 15 seconds.",
+  "mcps": [
+    {
+      "name": "icm",
+      "type": "local",
+      "command": "dnx",
+      "arguments": ["Icm.Mcp", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes"]
+    }
+  ],
+  "steps": [
+    {
+      "name": "fetch-active-incidents",
+      "type": "Command",
+      "dependsOn": [],
+      "command": "dnx",
+      "arguments": ["Icm.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "incidents", "--states", "ACTIVE"],
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "acknowledge-incidents",
+      "type": "Prompt",
+      "dependsOn": ["fetch-active-incidents"],
+      "systemPrompt": "You are an IcM incident management assistant. You have access to the IcM MCP tools to acknowledge incidents. Your task is to acknowledge each active incident provided to you. For each incident, use the appropriate IcM MCP tool to acknowledge it. Be thorough and process every incident in the list.",
+      "userPrompt": "The following is the list of currently active IcM incidents:\n\n{{fetch-active-incidents.output}}\n\nFor each incident that is NOT acknoledged yet in this list, use the IcM MCP tools to acknowledge it. After acknowledging all incidents, output ONLY a JSON array of the incident IDs that you successfully acknowledged. The output must be a valid JSON array of numbers or strings, e.g. [12345, 67890]. Do not include any other text outside the JSON array.",
+      "mcps": ["icm"],
+      "model": "claude-opus-4.6",
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "fetch-action-view-schema",
+      "type": "Command",
+      "dependsOn": [],
+      "command": "dnx",
+      "arguments": ["ActionView.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "schema"],
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "create-action-view-entry",
+      "type": "Prompt",
+      "dependsOn": ["fetch-active-incidents", "acknowledge-incidents", "fetch-action-view-schema"],
+      "systemPrompt": "You are an ActionView entry generator. Your job is to create a structured JSON entry for ActionView that documents actions taken on IcM incidents. You are given the ActionView entry schema and must generate an entry that strictly conforms to it. Output ONLY the raw JSON content of the entry — no markdown fences, no explanation, no surrounding text.",
+      "userPrompt": "You have the ActionView entry schema, the list of active incidents, and the IDs of incidents that were acknowledged. Create a single ActionView entry that:\n\n1. Has a clear title like \"IcM Incidents Acknowledged\" with a timestamp.\n2. Starts with a summary table at the beginning containing columns: Incident ID, Title, Environment/Region, and Action (\"Acknowledged\").\n3. Contains sub-entries for each acknowledged incident showing the important details: title, environment, region, severity, and the action taken (\"Acknowledged\"). Do not include the entire raw incident data — only the key fields that matter.\n\nActionView entry schema:\n{{fetch-action-view-schema.output}}\n\nActive incidents data:\n{{fetch-active-incidents.output}}\n\nAcknowledged incident IDs:\n{{acknowledge-incidents.output}}\n\nOutput ONLY the valid JSON content of the generated ActionView entry, conforming to the schema above. No markdown, no explanation.",
+      "mcps": [],
+      "model": "claude-opus-4.6",
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "submit-action-view-entry",
+      "type": "Command",
+      "dependsOn": ["create-action-view-entry"],
+      "command": "dnx",
+      "arguments": ["ActionView.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "add", "--json", "{{create-action-view-entry.output}}"],
+      "timeoutSeconds": 120
+    },
+    {
+      "name": "generate-summary",
+      "type": "Prompt",
+      "dependsOn": ["fetch-active-incidents", "acknowledge-incidents", "create-action-view-entry", "submit-action-view-entry"],
+      "systemPrompt": "You are a reporting assistant. You produce clear, elegant markdown summaries of automated actions taken on IcM incidents. Use tables, headers, and formatting to make the output easy to scan and professional.",
+      "userPrompt": "Create a final markdown summary of the IcM Acknowledge orchestration run. You have the following data:\n\n**Active incidents fetched:**\n{{fetch-active-incidents.output}}\n\n**Acknowledged incident IDs:**\n{{acknowledge-incidents.output}}\n\n**ActionView entry created:**\n{{create-action-view-entry.output}}\n\n**ActionView submission result:**\n{{submit-action-view-entry.output}}\n\nProduce a polished markdown report that includes:\n1. A header with the orchestration name and timestamp.\n2. A summary line (e.g., \"X incidents acknowledged\").\n3. A table of all incidents with columns: Incident ID, Title, Environment/Region, Severity, Status (Acknowledged).\n4. A section confirming the ActionView entry was submitted successfully.\n5. Any errors or issues encountered (or confirm none).\n\nUse clean markdown with tables, horizontal rules, and headers for easy readability.",
+      "mcps": [],
+      "model": "claude-opus-4.6",
+      "timeoutSeconds": 120
+    }
+  ],
+  "trigger": {
+    "type": "scheduler",
+    "enabled": true,
+    "intervalSeconds": 15
+  }
+}

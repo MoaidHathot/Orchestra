@@ -1042,7 +1042,7 @@ function App(): React.JSX.Element {
                     ) : exec.status === 'Failed' ? (
                       <Icons.X />
                     ) : exec.status === 'Cancelled' ? (
-                      <Icons.X />
+                      <Icons.Ban />
                     ) : (
                       '...'
                     )}

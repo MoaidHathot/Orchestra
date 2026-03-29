@@ -127,11 +127,11 @@ public static partial class ExecutionApi
 						parameters,
 						cancellationToken: cancellationToken);
 
-					if (cancellationToken.IsCancellationRequested)
+					if (result.Status == ExecutionStatus.Cancelled)
 					{
+						// Engine already saved the run record with Cancelled status.
 						reporter.ReportOrchestrationCancelled();
 						executionInfo.Status = "Cancelled";
-						await SaveCancelledRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, logger);
 						return;
 					}
 
@@ -146,6 +146,8 @@ public static partial class ExecutionApi
 				}
 				catch (OperationCanceledException)
 				{
+					// Engine may not have saved the run record if cancellation occurred
+					// before steps could complete, so save a cancelled record from SSE events.
 					reporter.ReportOrchestrationCancelled();
 					executionInfo.Status = "Cancelled";
 					await SaveCancelledRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, logger);
@@ -183,18 +185,21 @@ public static partial class ExecutionApi
 			await httpContext.Response.Body.FlushAsync(sseToken);
 
 			// Stream future events until client disconnects OR orchestration completes
-			try
+			if (futureEvents is not null)
 			{
-				await foreach (var evt in futureEvents.ReadAllAsync(sseToken))
+				try
 				{
-					await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-					await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
-					await httpContext.Response.Body.FlushAsync(sseToken);
+					await foreach (var evt in futureEvents.ReadAllAsync(sseToken))
+					{
+						await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
+						await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+						await httpContext.Response.Body.FlushAsync(sseToken);
+					}
 				}
-			}
-			catch (OperationCanceledException)
-			{
-				reporter.Unsubscribe(futureEvents);
+				catch (OperationCanceledException)
+				{
+					reporter.Unsubscribe(futureEvents);
+				}
 			}
 
 			if (!sseToken.IsCancellationRequested)
@@ -279,18 +284,21 @@ public static partial class ExecutionApi
 			}
 
 			// Stream future events
-			try
+			if (futureEvents is not null)
 			{
-				await foreach (var evt in futureEvents.ReadAllAsync(cancellationToken))
+				try
 				{
-					await httpContext.Response.WriteAsync($"event: {evt.Type}\n", cancellationToken);
-					await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", cancellationToken);
-					await httpContext.Response.Body.FlushAsync(cancellationToken);
+					await foreach (var evt in futureEvents.ReadAllAsync(cancellationToken))
+					{
+						await httpContext.Response.WriteAsync($"event: {evt.Type}\n", cancellationToken);
+						await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", cancellationToken);
+						await httpContext.Response.Body.FlushAsync(cancellationToken);
+					}
 				}
-			}
-			catch (OperationCanceledException)
-			{
-				sseReporter.Unsubscribe(futureEvents);
+				catch (OperationCanceledException)
+				{
+					sseReporter.Unsubscribe(futureEvents);
+				}
 			}
 		});
 
@@ -482,7 +490,7 @@ public static partial class ExecutionApi
 				? ExecutionStatus.Succeeded
 				: stepErrors.ContainsKey(stepName)
 					? ExecutionStatus.Failed
-					: ExecutionStatus.Failed;
+					: ExecutionStatus.Cancelled;
 			var stepError = stepErrors.GetValueOrDefault(stepName);
 
 			var stepRecord = new StepRunRecord
@@ -491,7 +499,7 @@ public static partial class ExecutionApi
 				Status = status,
 				StartedAt = startTime,
 				CompletedAt = completedAt,
-				Content = status == ExecutionStatus.Failed ? "[Failed]" : "",
+				Content = status == ExecutionStatus.Failed ? "[Failed]" : status == ExecutionStatus.Cancelled ? "[Cancelled]" : "",
 				ErrorMessage = stepError
 			};
 

@@ -415,10 +415,22 @@ public class FileSystemRunStore : IRunStore
 	}
 
 	/// <summary>
-	/// Extracts the error message from the first failed step in a run record.
+	/// Extracts the error/cancellation info from the first relevant step in a run record.
 	/// </summary>
 	private static (string? StepName, string? ErrorMessage) ExtractFailureInfo(OrchestrationRunRecord record)
 	{
+		if (record.Status == ExecutionStatus.Cancelled)
+		{
+			var cancelledStep = record.AllStepRecords.Values
+				.Where(s => s.Status == ExecutionStatus.Cancelled && !string.IsNullOrEmpty(s.ErrorMessage))
+				.OrderBy(s => s.StartedAt)
+				.FirstOrDefault();
+
+			return cancelledStep != null
+				? (cancelledStep.StepName, cancelledStep.ErrorMessage)
+				: (null, "Cancelled");
+		}
+
 		if (record.Status != ExecutionStatus.Failed)
 			return (null, null);
 

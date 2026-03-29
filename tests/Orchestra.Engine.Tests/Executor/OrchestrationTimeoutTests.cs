@@ -17,7 +17,7 @@ public class OrchestrationTimeoutTests
 	{
 		// Arrange — step takes longer than orchestration timeout.
 		// The executor catches OperationCanceledException inside TryLaunchStep and marks
-		// the step as Failed("Cancelled"), so the overall result is Failed (not a thrown TimeoutException).
+		// the step as Cancelled, so the overall result is Cancelled (no actual Failed steps).
 		var agentBuilder = new MockAgentBuilder();
 		agentBuilder.WithHandler((prompt, ct) =>
 		{
@@ -56,9 +56,9 @@ public class OrchestrationTimeoutTests
 		// Act
 		var result = await executor.ExecuteAsync(orchestration);
 
-		// Assert — step should be marked as Failed/Cancelled
-		result.Status.Should().Be(ExecutionStatus.Failed);
-		result.StepResults["slow-step"].Status.Should().Be(ExecutionStatus.Failed);
+		// Assert — step should be marked as Cancelled
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["slow-step"].Status.Should().Be(ExecutionStatus.Cancelled);
 		result.StepResults["slow-step"].ErrorMessage.Should().Contain("Cancelled");
 	}
 
@@ -182,7 +182,7 @@ public class OrchestrationTimeoutTests
 	[Fact]
 	public async Task ExecuteAsync_ExternalCancellation_StepsMarkedAsCancelled()
 	{
-		// Arrange — external cancellation causes steps to fail with "Cancelled".
+		// Arrange — external cancellation causes steps to be marked as Cancelled.
 		// Because TryLaunchStep catches OperationCanceledException, the executor returns
 		// a result rather than throwing.
 		using var cts = new CancellationTokenSource();
@@ -226,9 +226,9 @@ public class OrchestrationTimeoutTests
 		// Act
 		var result = await executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
 
-		// Assert — should be marked as Failed with "Cancelled"
-		result.Status.Should().Be(ExecutionStatus.Failed);
-		result.StepResults["step1"].Status.Should().Be(ExecutionStatus.Failed);
+		// Assert — should be marked as Cancelled
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["step1"].Status.Should().Be(ExecutionStatus.Cancelled);
 		result.StepResults["step1"].ErrorMessage.Should().Contain("Cancelled");
 	}
 
@@ -287,11 +287,11 @@ public class OrchestrationTimeoutTests
 		// Act
 		var result = await executor.ExecuteAsync(orchestration);
 
-		// Assert — both steps should be cancelled/failed
-		result.Status.Should().Be(ExecutionStatus.Failed);
-		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Failed);
+		// Assert — both steps should be cancelled
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Cancelled);
 		result.StepResults["A"].ErrorMessage.Should().Contain("Cancelled");
-		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Cancelled);
 		result.StepResults["B"].ErrorMessage.Should().Contain("Cancelled");
 		completedSteps.Should().Be(0); // Neither step should have completed
 	}
@@ -349,10 +349,10 @@ public class OrchestrationTimeoutTests
 		var result = await executor.ExecuteAsync(orchestration);
 
 		// Assert
-		result.Status.Should().Be(ExecutionStatus.Failed);
-		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Failed);
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Cancelled);
 		result.StepResults["A"].ErrorMessage.Should().Contain("Cancelled");
-		// B should either be skipped (dependency failed) or also cancelled
-		result.StepResults["B"].Status.Should().BeOneOf(ExecutionStatus.Failed, ExecutionStatus.Skipped);
+		// B should either be skipped (dependency cancelled) or also cancelled
+		result.StepResults["B"].Status.Should().BeOneOf(ExecutionStatus.Cancelled, ExecutionStatus.Skipped);
 	}
 }

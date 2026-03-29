@@ -1,5 +1,5 @@
 import mermaid from 'mermaid';
-import type { Orchestration } from './types';
+import type { Orchestration, Step } from './types';
 
 /**
  * Extended step shape used at runtime by the DAG renderer.
@@ -12,6 +12,171 @@ type LooseStep = Record<string, unknown>;
 function getStepName(step: LooseStep | string): string | undefined {
   if (typeof step === 'string') return step;
   return step?.name as string | undefined;
+}
+
+/** Make a string safe for use as a Mermaid node ID. */
+function safeNodeId(name: string): string {
+  return name.replace(/[^a-zA-Z0-9]/g, '_');
+}
+
+/** Escape double quotes for use inside Mermaid labels. */
+function escLabel(text: string): string {
+  return text.replace(/"/g, '#quot;');
+}
+
+/**
+ * Get the step type from the step data. Returns lowercase.
+ */
+function getStepType(step: LooseStep | Step | string): string {
+  if (typeof step === 'string') return 'prompt';
+  const t = (step as LooseStep).type ?? (step as Step).type;
+  return typeof t === 'string' ? t.toLowerCase() : 'prompt';
+}
+
+/**
+ * Get a type icon prefix for the step label.
+ */
+function getTypeIcon(stepType: string): string {
+  switch (stepType) {
+    case 'http':
+      return '\u{1F310} '; // globe
+    case 'command':
+      return '\u{1F4BB} '; // terminal/laptop
+    case 'transform':
+      return '\u{1F504} '; // transform arrows
+    default:
+      return '';
+  }
+}
+
+/**
+ * Build the metadata line for a step based on its type.
+ */
+function buildMetadataLines(step: LooseStep | Step | string): string[] {
+  if (typeof step === 'string') return [];
+  const s = step as LooseStep;
+  const lines: string[] = [];
+  const stepType = getStepType(step);
+
+  switch (stepType) {
+    case 'prompt': {
+      // Model info
+      const model = s.model as string | undefined;
+      if (model) {
+        const shortModel = model.split('/').pop() || model;
+        lines.push(`<small>${escLabel(shortModel)}</small>`);
+      }
+
+      // MCPs info
+      const mcps = (s.mcps || s.mcp) as unknown;
+      if (mcps && Array.isArray(mcps) && mcps.length > 0) {
+        const mcpNames = mcps
+          .map((m: unknown) => (typeof m === 'string' ? m : (m as Record<string, unknown>).name))
+          .join(', ');
+        lines.push(`<small>MCPs: ${escLabel(mcpNames)}</small>`);
+      } else if (mcps && typeof mcps === 'string') {
+        lines.push(`<small>MCP: ${escLabel(mcps)}</small>`);
+      }
+      break;
+    }
+    case 'http': {
+      const method = (s.method as string) || 'GET';
+      const url = s.url as string | undefined;
+      if (url) {
+        // Show just the host/path, truncated
+        let shortUrl = url;
+        try {
+          // Handle template URLs gracefully
+          if (!url.includes('{{')) {
+            const parsed = new URL(url);
+            shortUrl = parsed.host + (parsed.pathname !== '/' ? parsed.pathname : '');
+          }
+        } catch {
+          /* keep original */
+        }
+        if (shortUrl.length > 35) shortUrl = shortUrl.substring(0, 32) + '...';
+        lines.push(`<small>${escLabel(method)} ${escLabel(shortUrl)}</small>`);
+      } else {
+        lines.push(`<small>${escLabel(method)}</small>`);
+      }
+      break;
+    }
+    case 'command': {
+      const cmd = s.command as string | undefined;
+      if (cmd) {
+        const args = (s.arguments as string[]) || [];
+        let cmdLine = cmd;
+        if (args.length > 0) {
+          cmdLine += ' ' + args.slice(0, 2).join(' ');
+          if (args.length > 2) cmdLine += ' ...';
+        }
+        if (cmdLine.length > 35) cmdLine = cmdLine.substring(0, 32) + '...';
+        lines.push(`<small>${escLabel(cmdLine)}</small>`);
+      }
+      break;
+    }
+    case 'transform': {
+      const template = s.template as string | undefined;
+      if (template) {
+        let preview = template.replace(/\n/g, ' ').trim();
+        if (preview.length > 35) preview = preview.substring(0, 32) + '...';
+        lines.push(`<small>${escLabel(preview)}</small>`);
+      }
+      break;
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Build the Mermaid node declaration with the appropriate shape for its type.
+ * - Prompt:    rounded rectangle  ("...")
+ * - Http:      hexagon            {{"..."}}
+ * - Command:   stadium/pill       (["..."])
+ * - Transform: rhombus/diamond    {"..."}
+ */
+function buildNodeDeclaration(safeId: string, label: string, stepType: string): string {
+  switch (stepType) {
+    case 'http':
+      return `  ${safeId}{{"${label}"}}\n`;
+    case 'command':
+      return `  ${safeId}(["${label}"])\n`;
+    case 'transform':
+      return `  ${safeId}{"${label}"}\n`;
+    default:
+      // Prompt / unknown = rounded rectangle
+      return `  ${safeId}["${label}"]\n`;
+  }
+}
+
+/**
+ * Build subagent section for a step. Returns mermaid code for a subgraph
+ * wrapping the step node and its subagent nodes.
+ */
+function buildSubagentSection(
+  safeId: string,
+  subagents: Array<{ name: string; displayName?: string; description?: string }>,
+): { subgraphCode: string; subagentIds: string[] } {
+  const subagentIds: string[] = [];
+  let code = '';
+
+  // Create a subgraph that groups the parent step with its subagents
+  code += `  subgraph ${safeId}_agents [" "]\n`;
+  code += `    direction LR\n`;
+
+  // Add subagent nodes inside the subgraph
+  for (const sa of subagents) {
+    const subId = `${safeId}_sa_${safeNodeId(sa.name)}`;
+    subagentIds.push(subId);
+    const displayName = sa.displayName || sa.name;
+    const desc = sa.description ? `<br/><small>${escLabel(sa.description.length > 40 ? sa.description.substring(0, 37) + '...' : sa.description)}</small>` : '';
+    code += `    ${subId}[/"${escLabel(displayName)}${desc}"/]\n`;
+  }
+
+  code += `  end\n`;
+
+  return { subgraphCode: code, subagentIds };
 }
 
 /**
@@ -38,8 +203,282 @@ function renderDagError(err: unknown, container: HTMLElement): void {
   }
 }
 
+/** Shared Mermaid initialization config. */
+export function getMermaidConfig() {
+  return {
+    startOnLoad: false,
+    theme: 'dark' as const,
+    securityLevel: 'antiscript' as const,
+    themeVariables: {
+      primaryColor: '#21262d',
+      primaryTextColor: '#e6edf3',
+      primaryBorderColor: '#30363d',
+      lineColor: '#58a6ff',
+      secondaryColor: '#161b22',
+      tertiaryColor: '#0d1117',
+    },
+  };
+}
+
+/**
+ * Attach click-safety and node click handlers to the rendered SVG.
+ */
+function attachSvgHandlers(
+  container: HTMLElement,
+  stepNameToId: Map<string, string>,
+  onNodeClick?: (stepName: string) => void,
+  selectedStep?: string,
+): void {
+  // Capture-phase interceptor to block accidental navigation
+  container.addEventListener(
+    'click',
+    (e: Event) => {
+      const target = e.target as HTMLElement;
+      const anchor = target.closest?.('a');
+      if (anchor && container.contains(anchor)) {
+        e.preventDefault();
+      }
+    },
+    true,
+  );
+
+  // Strip href/xlink:href from <a> elements
+  const svgAnchors = container.querySelectorAll('svg a');
+  svgAnchors.forEach((a) => {
+    a.removeAttribute('href');
+    a.removeAttribute('xlink:href');
+  });
+
+  if (!onNodeClick) return;
+
+  const svgElement = container.querySelector('svg');
+  if (!svgElement) return;
+
+  const nodes = svgElement.querySelectorAll('.node');
+  nodes.forEach((node) => {
+    const nodeId = node.id?.replace('flowchart-', '').replace(/-\d+$/, '');
+    const stepName = stepNameToId.get(nodeId);
+
+    if (stepName) {
+      (node as HTMLElement).style.cursor = 'pointer';
+
+      // Highlight selected step
+      if (selectedStep === stepName) {
+        const rect = node.querySelector('rect, polygon, circle, ellipse, path') as HTMLElement | null;
+        if (rect) {
+          rect.style.strokeWidth = '3px';
+        }
+      }
+
+      node.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onNodeClick(stepName);
+      });
+
+      node.addEventListener('mouseenter', () => {
+        const rect = node.querySelector('rect, polygon, circle, ellipse, path') as HTMLElement | null;
+        if (rect) {
+          rect.style.filter = 'brightness(1.2)';
+          rect.style.stroke = '#58a6ff';
+          rect.style.strokeWidth = '2px';
+        }
+      });
+      node.addEventListener('mouseleave', () => {
+        const rect = node.querySelector('rect, polygon, circle, ellipse, path') as HTMLElement | null;
+        if (rect) {
+          rect.style.filter = 'none';
+          rect.style.stroke = '';
+          rect.style.strokeWidth = selectedStep === stepName ? '3px' : '';
+        }
+      });
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
-// renderMermaidDag – renders the DAG for an orchestration *definition*
+// Type-based class definitions for the definition DAG
+// ---------------------------------------------------------------------------
+function getDefinitionClassDefs(): string {
+  let code = '\n';
+  // Step type styles (cursor is applied post-render via JS to avoid Mermaid parser issues)
+  code += '  classDef promptStep fill:#1a2332,stroke:#58a6ff,color:#e6edf3\n';
+  code += '  classDef httpStep fill:#1a2a1a,stroke:#3fb950,color:#e6edf3\n';
+  code += '  classDef commandStep fill:#2a1a2a,stroke:#a371f7,color:#e6edf3\n';
+  code += '  classDef transformStep fill:#2a2a1a,stroke:#d29922,color:#e6edf3\n';
+  // Handler indicator styles
+  code += '  classDef hasInputHandler fill:#1f3a1f,stroke:#3fb950,color:#e6edf3\n';
+  code += '  classDef hasOutputHandler fill:#1f2a3f,stroke:#58a6ff,color:#e6edf3\n';
+  code += '  classDef hasBothHandlers fill:#2d2a1f,stroke:#d29922,color:#e6edf3\n';
+  code += '  classDef hasLoop fill:#2d1f2d,stroke:#a371f7,color:#e6edf3\n';
+  // Subagent node style (font-size applied via <small> tags in labels)
+  code += '  classDef subagentNode fill:#161b22,stroke:#8b949e,color:#8b949e\n';
+  return code;
+}
+
+// ---------------------------------------------------------------------------
+// generateDefinitionDagCode -- generates Mermaid code for an orchestration
+// definition DAG. Extracted as a pure function for testability.
+// ---------------------------------------------------------------------------
+export function generateDefinitionDagCode(
+  steps: Step[],
+): { mermaidCode: string; stepNameToId: Map<string, string> } {
+  let mermaidCode = 'graph TD\n';
+  const stepNameToId = new Map<string, string>();
+
+  // Collect steps by type for class application
+  const typeGroups: Record<string, string[]> = {
+    prompt: [],
+    http: [],
+    command: [],
+    transform: [],
+  };
+
+  const stepsWithInputHandler: string[] = [];
+  const stepsWithOutputHandler: string[] = [];
+  const stepsWithBothHandlers: string[] = [];
+  const stepsWithLoop: string[] = [];
+  const subagentNodeIds: string[] = [];
+
+  const loopEdges: string[] = [];
+  const subgraphSections: string[] = [];
+  const subagentEdges: string[] = [];
+
+  steps.forEach((step) => {
+    const s = step as unknown as LooseStep;
+    const safeId = safeNodeId(step.name);
+    stepNameToId.set(safeId, step.name);
+
+    const stepType = getStepType(step);
+    const typeIcon = getTypeIcon(stepType);
+
+    // Build label
+    let labelLine1 = typeIcon + step.name;
+    const hasInput = s.inputHandlerPrompt;
+    const hasOutput = s.outputHandlerPrompt;
+    const hasLoop = s.loopConfig || s.loop;
+
+    if (hasInput && hasOutput) {
+      labelLine1 += ' \u21C4'; // ⇄
+      stepsWithBothHandlers.push(safeId);
+    } else if (hasInput) {
+      labelLine1 += ' \u21E2'; // ⇢
+      stepsWithInputHandler.push(safeId);
+    } else if (hasOutput) {
+      labelLine1 += ' \u21E0'; // ⇠
+      stepsWithOutputHandler.push(safeId);
+    }
+
+    if (hasLoop) {
+      labelLine1 += ' \u21BB'; // ↻
+      stepsWithLoop.push(safeId);
+    }
+
+    // Add type badge
+    if (stepType !== 'prompt') {
+      labelLine1 += ` <small>[${stepType.toUpperCase()}]</small>`;
+    }
+
+    const labelParts = [escLabel(labelLine1)];
+
+    // Add type-specific metadata
+    const metaLines = buildMetadataLines(step);
+    labelParts.push(...metaLines);
+
+    // Subagent count indicator in the label
+    const subagents = (s.subagents as Array<{ name: string; displayName?: string; description?: string }>) || [];
+    if (subagents.length > 0) {
+      labelParts.push(`<small>\u{1F916} ${subagents.length} subagent${subagents.length > 1 ? 's' : ''}</small>`);
+    }
+
+    const label = labelParts.join('<br/>');
+
+    // Build the node with shape based on type
+    mermaidCode += buildNodeDeclaration(safeId, label, stepType);
+
+    // Track type for class assignment
+    if (typeGroups[stepType]) {
+      typeGroups[stepType].push(safeId);
+    } else {
+      typeGroups.prompt.push(safeId);
+    }
+
+    // Dependencies
+    if (step.dependsOn && step.dependsOn.length > 0) {
+      step.dependsOn.forEach((dep) => {
+        const safeDep = safeNodeId(dep);
+        mermaidCode += `  ${safeDep} --> ${safeId}\n`;
+      });
+    }
+
+    // Loop edges
+    if (hasLoop) {
+      const loopConfig = (s.loopConfig || s.loop) as Record<string, unknown>;
+      const targetName = (loopConfig.target || loopConfig.Target) as string | undefined;
+      if (targetName) {
+        const safeTarget = safeNodeId(targetName);
+        const maxIter = loopConfig.maxIterations || loopConfig.MaxIterations || '?';
+        loopEdges.push(`  ${safeId} -.->|"loop (max ${maxIter})"| ${safeTarget}\n`);
+      }
+    }
+
+    // Subagent subgraph
+    if (subagents.length > 0) {
+      const { subgraphCode, subagentIds } = buildSubagentSection(safeId, subagents);
+      subgraphSections.push(subgraphCode);
+      subagentNodeIds.push(...subagentIds);
+      // Connect the parent step to the subagent subgraph with a dotted edge
+      subagentEdges.push(`  ${safeId} -.-o ${subagentIds[0]}\n`);
+    }
+  });
+
+  // Add loop edges
+  loopEdges.forEach((edge) => {
+    mermaidCode += edge;
+  });
+
+  // Add subagent subgraphs
+  subgraphSections.forEach((section) => {
+    mermaidCode += section;
+  });
+
+  // Add subagent edges
+  subagentEdges.forEach((edge) => {
+    mermaidCode += edge;
+  });
+
+  // Class definitions
+  mermaidCode += getDefinitionClassDefs();
+
+  // Apply type-based classes
+  for (const [type, ids] of Object.entries(typeGroups)) {
+    if (ids.length > 0) {
+      mermaidCode += `  class ${ids.join(',')} ${type}Step\n`;
+    }
+  }
+
+  // Apply handler/loop classes (override type styles for steps with handlers)
+  if (stepsWithInputHandler.length > 0) {
+    mermaidCode += `  class ${stepsWithInputHandler.join(',')} hasInputHandler\n`;
+  }
+  if (stepsWithOutputHandler.length > 0) {
+    mermaidCode += `  class ${stepsWithOutputHandler.join(',')} hasOutputHandler\n`;
+  }
+  if (stepsWithBothHandlers.length > 0) {
+    mermaidCode += `  class ${stepsWithBothHandlers.join(',')} hasBothHandlers\n`;
+  }
+  if (stepsWithLoop.length > 0) {
+    mermaidCode += `  class ${stepsWithLoop.join(',')} hasLoop\n`;
+  }
+  if (subagentNodeIds.length > 0) {
+    mermaidCode += `  class ${subagentNodeIds.join(',')} subagentNode\n`;
+  }
+
+  return { mermaidCode, stepNameToId };
+}
+
+// ---------------------------------------------------------------------------
+// renderMermaidDag -- renders the DAG for an orchestration *definition*
 // ---------------------------------------------------------------------------
 export async function renderMermaidDag(
   orchestration: Orchestration,
@@ -56,208 +495,28 @@ export async function renderMermaidDag(
   // Show loading spinner while rendering
   container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
 
-  // Build mermaid DAG from steps
-  let mermaidCode = 'graph TD\n';
-  const stepNameToId = new Map<string, string>();
-  const stepsWithInputHandler: string[] = [];
-  const stepsWithOutputHandler: string[] = [];
-  const stepsWithBothHandlers: string[] = [];
-
-  const loopEdges: string[] = [];
-
-  steps.forEach((step) => {
-    const s = step as unknown as LooseStep;
-    const safeId = step.name.replace(/[^a-zA-Z0-9]/g, '_');
-    stepNameToId.set(safeId, step.name);
-
-    // Build label with handler indicators and loop indicator
-    let labelLine1 = step.name;
-    const hasInput = s.inputHandlerPrompt;
-    const hasOutput = s.outputHandlerPrompt;
-    const hasLoop = s.loopConfig || s.loop;
-
-    if (hasInput && hasOutput) {
-      labelLine1 = `${step.name} ⇄`;
-      stepsWithBothHandlers.push(safeId);
-    } else if (hasInput) {
-      labelLine1 = `${step.name} ⇢`;
-      stepsWithInputHandler.push(safeId);
-    } else if (hasOutput) {
-      labelLine1 = `${step.name} ⇠`;
-      stepsWithOutputHandler.push(safeId);
-    }
-
-    // Add loop indicator to label if step has a loop config
-    if (hasLoop) {
-      labelLine1 = `${labelLine1} ↻`;
-    }
-
-    // Build additional info lines for model and MCPs
-    const labelParts = [labelLine1];
-
-    // Add model info if available
-    if (step.model) {
-      // Shorten model name for display
-      const shortModel = step.model.split('/').pop() || step.model;
-      labelParts.push(`<small>${shortModel}</small>`);
-    }
-
-    // Add MCPs info if available
-    const mcps = (s.mcps || s.mcp) as unknown;
-    if (mcps && Array.isArray(mcps) && mcps.length > 0) {
-      const mcpNames = mcps
-        .map((m: unknown) => (typeof m === 'string' ? m : (m as Record<string, unknown>).name))
-        .join(', ');
-      labelParts.push(`<small>MCPs: ${mcpNames}</small>`);
-    } else if (mcps && typeof mcps === 'string') {
-      labelParts.push(`<small>MCP: ${mcps}</small>`);
-    }
-
-    const label = labelParts.join('<br/>');
-    mermaidCode += `  ${safeId}["${label}"]\n`;
-
-    if (step.dependsOn && step.dependsOn.length > 0) {
-      step.dependsOn.forEach((dep) => {
-        const safeDep = dep.replace(/[^a-zA-Z0-9]/g, '_');
-        mermaidCode += `  ${safeDep} --> ${safeId}\n`;
-      });
-    }
-
-    // If this step has a loop config, add a loop edge back to the target
-    if (hasLoop) {
-      const loopConfig = (s.loopConfig || s.loop) as Record<string, unknown>;
-      const targetName = (loopConfig.target || loopConfig.Target) as string | undefined;
-      if (targetName) {
-        const safeTarget = targetName.replace(/[^a-zA-Z0-9]/g, '_');
-        // Use dotted arrow with label showing max iterations
-        const maxIter = loopConfig.maxIterations || loopConfig.MaxIterations || '?';
-        loopEdges.push(`  ${safeId} -.->|"loop (max ${maxIter})"| ${safeTarget}\n`);
-      }
-    }
-  });
-
-  // Add loop edges (dotted arrows going back)
-  loopEdges.forEach((edge) => {
-    mermaidCode += edge;
-  });
-
-  // Add styling with hover effect and handler indicators
-  mermaidCode += '\n  classDef default fill:#21262d,stroke:#30363d,color:#e6edf3,cursor:pointer\n';
-  mermaidCode += '  classDef hover fill:#30363d,stroke:#58a6ff,color:#e6edf3\n';
-  mermaidCode +=
-    '  classDef hasInputHandler fill:#1f3a1f,stroke:#3fb950,color:#e6edf3,cursor:pointer\n';
-  mermaidCode +=
-    '  classDef hasOutputHandler fill:#1f2a3f,stroke:#58a6ff,color:#e6edf3,cursor:pointer\n';
-  mermaidCode +=
-    '  classDef hasBothHandlers fill:#2d2a1f,stroke:#d29922,color:#e6edf3,cursor:pointer\n';
-  mermaidCode +=
-    '  classDef hasLoop fill:#2d1f2d,stroke:#a371f7,color:#e6edf3,cursor:pointer\n';
-
-  // Collect steps with loops for styling
-  const stepsWithLoop = steps
-    .filter((s) => {
-      const loose = s as unknown as LooseStep;
-      return loose.loopConfig || loose.loop;
-    })
-    .map((s) => s.name.replace(/[^a-zA-Z0-9]/g, '_'));
-
-  // Apply classes
-  if (stepsWithInputHandler.length > 0) {
-    mermaidCode += `  class ${stepsWithInputHandler.join(',')} hasInputHandler\n`;
-  }
-  if (stepsWithOutputHandler.length > 0) {
-    mermaidCode += `  class ${stepsWithOutputHandler.join(',')} hasOutputHandler\n`;
-  }
-  if (stepsWithBothHandlers.length > 0) {
-    mermaidCode += `  class ${stepsWithBothHandlers.join(',')} hasBothHandlers\n`;
-  }
-  if (stepsWithLoop.length > 0) {
-    mermaidCode += `  class ${stepsWithLoop.join(',')} hasLoop\n`;
-  }
+  const { mermaidCode, stepNameToId } = generateDefinitionDagCode(steps);
 
   try {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      // 'antiscript' sanitises via DOMPurify but keeps safe HTML (<small>, <br/>) intact.
-      // 'loose' is NOT needed — we attach our own DOM click listeners, not Mermaid's
-      // built-in click directives, so the setClickFun path is irrelevant.
-      securityLevel: 'antiscript',
-      themeVariables: {
-        primaryColor: '#21262d',
-        primaryTextColor: '#e6edf3',
-        primaryBorderColor: '#30363d',
-        lineColor: '#58a6ff',
-        secondaryColor: '#161b22',
-        tertiaryColor: '#0d1117',
-      },
-    });
+    mermaid.initialize(getMermaidConfig());
 
     const { svg } = await mermaid.render('dag-' + Date.now(), mermaidCode);
     container.innerHTML = svg;
 
-    // Intercept ALL click events inside the container using the capture phase.
-    // If any element (including Mermaid-generated <a> wrappers or foreignObject
-    // content) would trigger a navigation, we block it here.  This is a safety
-    // net that covers every edge-case regardless of Mermaid's internal DOM.
-    container.addEventListener(
-      'click',
-      (e: Event) => {
-        const target = e.target as HTMLElement;
-        // Block navigation from <a> elements inside the SVG
-        const anchor = target.closest?.('a');
-        if (anchor && container.contains(anchor)) {
-          e.preventDefault();
-        }
-      },
-      true, // capture phase — fires BEFORE the node click handlers
-    );
-
-    // Also strip href/xlink:href from any <a> elements as a belt-and-suspenders
-    // approach — even though 'antiscript' mode should not generate navigable links.
-    const svgAnchors = container.querySelectorAll('svg a');
-    svgAnchors.forEach((a) => {
-      a.removeAttribute('href');
-      a.removeAttribute('xlink:href');
-    });
-
-    // Add click handlers to nodes
-    if (onNodeClick) {
-      const svgElement = container.querySelector('svg');
-      if (svgElement) {
-        // Find all nodes (g elements with class 'node')
-        const nodes = svgElement.querySelectorAll('.node');
-        nodes.forEach((node) => {
-          // Get the node ID from the data-id attribute or the text content
-          const nodeId = node.id?.replace('flowchart-', '').replace(/-\d+$/, '');
-          const stepName = stepNameToId.get(nodeId);
-
-          if (stepName) {
-            (node as HTMLElement).style.cursor = 'pointer';
-            node.addEventListener('click', (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onNodeClick(stepName);
-            });
-            // Add hover effect
-            node.addEventListener('mouseenter', () => {
-              const rect = node.querySelector('rect, polygon, circle, ellipse') as HTMLElement | null;
-              if (rect) {
-                rect.style.stroke = '#58a6ff';
-                rect.style.strokeWidth = '2px';
-              }
-            });
-            node.addEventListener('mouseleave', () => {
-              const rect = node.querySelector('rect, polygon, circle, ellipse') as HTMLElement | null;
-              if (rect) {
-                rect.style.stroke = '#30363d';
-                rect.style.strokeWidth = '1px';
-              }
-            });
-          }
-        });
-      }
+    // Style subagent subgraphs with a subtle border
+    const svgEl = container.querySelector('svg');
+    if (svgEl) {
+      const subgraphs = svgEl.querySelectorAll('.cluster rect');
+      subgraphs.forEach((rect) => {
+        (rect as HTMLElement).style.fill = 'rgba(139, 148, 158, 0.05)';
+        (rect as HTMLElement).style.stroke = 'rgba(139, 148, 158, 0.3)';
+        (rect as HTMLElement).style.strokeWidth = '1px';
+        (rect as HTMLElement).style.strokeDasharray = '5,5';
+        (rect as HTMLElement).style.rx = '8';
+      });
     }
+
+    attachSvgHandlers(container, stepNameToId, onNodeClick);
   } catch (err) {
     console.error('Mermaid render error:', err);
     renderDagError(err, container);
@@ -265,7 +524,164 @@ export async function renderMermaidDag(
 }
 
 // ---------------------------------------------------------------------------
-// renderExecutionDag – renders a DAG with execution status coloring
+// generateExecutionDagCode -- generates Mermaid code for an execution DAG
+// with status coloring. Extracted as a pure function for testability.
+// ---------------------------------------------------------------------------
+export function generateExecutionDagCode(
+  steps: Step[],
+  stepStatuses: Record<string, string>,
+): { mermaidCode: string; stepNameToId: Map<string, string> } {
+  let mermaidCode = 'graph TD\n';
+  const stepNameToId = new Map<string, string>();
+  const statusGroups: Record<string, string[]> = {
+    pending: [],
+    running: [],
+    completed: [],
+    failed: [],
+    cancelled: [],
+    skipped: [],
+  };
+
+  const loopEdges: string[] = [];
+  const subgraphSections: string[] = [];
+  const subagentEdges: string[] = [];
+  const subagentNodeIds: string[] = [];
+
+  steps.forEach((step) => {
+    const stepName = getStepName(step as unknown as LooseStep | string);
+    if (!stepName) return;
+
+    const safeId = safeNodeId(stepName);
+    stepNameToId.set(safeId, stepName);
+
+    const s = step as unknown as LooseStep;
+    const stepType = getStepType(step as unknown as LooseStep | string);
+    const typeIcon = getTypeIcon(stepType);
+
+    // Status icon
+    const status = stepStatuses[stepName] || 'pending';
+    let statusIcon = '';
+    switch (status) {
+      case 'running':
+        statusIcon = ' ...';
+        break;
+      case 'completed':
+        statusIcon = ' \u2713'; // ✓
+        break;
+      case 'failed':
+        statusIcon = ' \u2717'; // ✗
+        break;
+      case 'cancelled':
+        statusIcon = ' \u2298'; // ⊘
+        break;
+      case 'skipped':
+        statusIcon = ' \u25CB'; // ○
+        break;
+    }
+
+    // Loop indicator
+    const hasLoop = typeof step === 'object' && (s.loopConfig || s.loop);
+    const loopIndicator = hasLoop ? ' \u21BB' : '';
+
+    // Type badge
+    const typeBadge = stepType !== 'prompt' ? ` <small>[${stepType.toUpperCase()}]</small>` : '';
+
+    // Build label
+    const labelParts = [escLabel(`${typeIcon}${stepName}${statusIcon}${loopIndicator}${typeBadge}`)];
+
+    // Add type-specific metadata
+    if (typeof step === 'object') {
+      const metaLines = buildMetadataLines(step as unknown as LooseStep);
+      labelParts.push(...metaLines);
+    }
+
+    // Subagent indicator
+    const subagents = typeof step === 'object'
+      ? (s.subagents as Array<{ name: string; displayName?: string; description?: string }>) || []
+      : [];
+    if (subagents.length > 0) {
+      labelParts.push(`<small>\u{1F916} ${subagents.length} subagent${subagents.length > 1 ? 's' : ''}</small>`);
+    }
+
+    const label = labelParts.join('<br/>');
+
+    // Build node with shape based on type
+    mermaidCode += buildNodeDeclaration(safeId, label, stepType);
+
+    // Categorize by status
+    const group = statusGroups[status] || statusGroups.pending;
+    group.push(safeId);
+
+    // Dependencies
+    const dependsOn = typeof step === 'object' ? step.dependsOn : null;
+    if (dependsOn && dependsOn.length > 0) {
+      dependsOn.forEach((dep) => {
+        const safeDep = safeNodeId(dep);
+        mermaidCode += `  ${safeDep} --> ${safeId}\n`;
+      });
+    }
+
+    // Loop edges
+    if (hasLoop) {
+      const loopConfig = (s.loopConfig || s.loop) as Record<string, unknown>;
+      const targetName = (loopConfig.target || loopConfig.Target) as string | undefined;
+      if (targetName) {
+        const safeTarget = safeNodeId(targetName);
+        const maxIter = loopConfig.maxIterations || loopConfig.MaxIterations || '?';
+        loopEdges.push(`  ${safeId} -.->|"loop (max ${maxIter})"| ${safeTarget}\n`);
+      }
+    }
+
+    // Subagent subgraph
+    if (subagents.length > 0) {
+      const { subgraphCode, subagentIds } = buildSubagentSection(safeId, subagents);
+      subgraphSections.push(subgraphCode);
+      subagentNodeIds.push(...subagentIds);
+      subagentEdges.push(`  ${safeId} -.-o ${subagentIds[0]}\n`);
+    }
+  });
+
+  // Add loop edges
+  loopEdges.forEach((edge) => {
+    mermaidCode += edge;
+  });
+
+  // Add subagent subgraphs
+  subgraphSections.forEach((section) => {
+    mermaidCode += section;
+  });
+
+  // Add subagent edges
+  subagentEdges.forEach((edge) => {
+    mermaidCode += edge;
+  });
+
+  // Status-based styling (cursor is applied post-render via JS to avoid Mermaid parser issues)
+  mermaidCode += '\n  classDef pending fill:#21262d,stroke:#484f58,color:#8b949e\n';
+  mermaidCode += '  classDef running fill:#0d2847,stroke:#58a6ff,color:#58a6ff\n';
+  mermaidCode += '  classDef completed fill:#0d331a,stroke:#3fb950,color:#3fb950\n';
+  mermaidCode += '  classDef failed fill:#3d1418,stroke:#f85149,color:#f85149\n';
+  mermaidCode += '  classDef cancelled fill:#3d2e0d,stroke:#d29922,color:#d29922\n';
+  mermaidCode += '  classDef skipped fill:#21262d,stroke:#484f58,color:#6e7681\n';
+  mermaidCode += '  classDef subagentNode fill:#161b22,stroke:#8b949e,color:#8b949e\n';
+
+  // Apply status classes
+  for (const [status, ids] of Object.entries(statusGroups)) {
+    if (ids.length > 0) {
+      mermaidCode += `  class ${ids.join(',')} ${status}\n`;
+    }
+  }
+
+  // Apply subagent node class
+  if (subagentNodeIds.length > 0) {
+    mermaidCode += `  class ${subagentNodeIds.join(',')} subagentNode\n`;
+  }
+
+  return { mermaidCode, stepNameToId };
+}
+
+// ---------------------------------------------------------------------------
+// renderExecutionDag -- renders a DAG with execution status coloring
 // ---------------------------------------------------------------------------
 export async function renderExecutionDag(
   orchestration: Orchestration,
@@ -281,253 +697,28 @@ export async function renderExecutionDag(
     return;
   }
 
-  // Build mermaid DAG from steps with status styling
-  let mermaidCode = 'graph TD\n';
-  const stepNameToId = new Map<string, string | LooseStep>();
-  const pendingSteps: string[] = [];
-  const runningSteps: string[] = [];
-  const completedSteps: string[] = [];
-  const failedSteps: string[] = [];
-  const cancelledSteps: string[] = [];
-  const skippedSteps: string[] = [];
-
-  const loopEdges: string[] = [];
-
-  steps.forEach((step) => {
-    // Handle both string and object step formats
-    const stepName = getStepName(step as unknown as LooseStep | string);
-    if (!stepName) return; // Skip invalid steps
-
-    const safeId = stepName.replace(/[^a-zA-Z0-9]/g, '_');
-    stepNameToId.set(safeId, stepName);
-
-    // Store step object for later reference (MCPs, etc.)
-    if (typeof step === 'object') {
-      stepNameToId.set(`${safeId}_data`, step as unknown as LooseStep);
-    }
-
-    const s = step as unknown as LooseStep;
-
-    // Build label with status emoji
-    const status = stepStatuses[stepName] || 'pending';
-    let statusIcon = '';
-    switch (status) {
-      case 'running':
-        statusIcon = ' ...';
-        break;
-      case 'completed':
-        statusIcon = ' ✓';
-        break;
-      case 'failed':
-        statusIcon = ' ✗';
-        break;
-      case 'cancelled':
-        statusIcon = ' ⊘';
-        break;
-      case 'skipped':
-        statusIcon = ' ○';
-        break;
-      default:
-        statusIcon = '';
-        break;
-    }
-
-    // Check for loop config
-    const hasLoop = typeof step === 'object' && (s.loopConfig || s.loop);
-    const loopIndicator = hasLoop ? ' ↻' : '';
-
-    // Build label with multiple lines for model and MCPs
-    const labelParts = [`${stepName}${statusIcon}${loopIndicator}`];
-
-    // Add model info if available (only for object steps)
-    if (typeof step === 'object' && step.model) {
-      const shortModel = step.model.split('/').pop() || step.model;
-      labelParts.push(`<small>${shortModel}</small>`);
-    }
-
-    // Add MCPs info if available (only for object steps)
-    if (typeof step === 'object') {
-      const mcps = (s.mcps || s.mcp) as unknown;
-      if (mcps && Array.isArray(mcps) && mcps.length > 0) {
-        const mcpNames = mcps
-          .map((m: unknown) => (typeof m === 'string' ? m : (m as Record<string, unknown>).name))
-          .join(', ');
-        labelParts.push(`<small>MCPs: ${mcpNames}</small>`);
-      } else if (mcps && typeof mcps === 'string') {
-        labelParts.push(`<small>MCP: ${mcps}</small>`);
-      }
-    }
-
-    const label = labelParts.join('<br/>');
-    mermaidCode += `  ${safeId}["${label}"]\n`;
-
-    // Categorize by status
-    switch (status) {
-      case 'running':
-        runningSteps.push(safeId);
-        break;
-      case 'completed':
-        completedSteps.push(safeId);
-        break;
-      case 'failed':
-        failedSteps.push(safeId);
-        break;
-      case 'cancelled':
-        cancelledSteps.push(safeId);
-        break;
-      case 'skipped':
-        skippedSteps.push(safeId);
-        break;
-      default:
-        pendingSteps.push(safeId);
-        break;
-    }
-
-    // Handle dependencies (only available if step is an object)
-    const dependsOn = typeof step === 'object' ? step.dependsOn : null;
-    if (dependsOn && dependsOn.length > 0) {
-      dependsOn.forEach((dep) => {
-        const safeDep = dep.replace(/[^a-zA-Z0-9]/g, '_');
-        mermaidCode += `  ${safeDep} --> ${safeId}\n`;
-      });
-    }
-
-    // If this step has a loop config, add a loop edge back to the target
-    if (hasLoop) {
-      const loopConfig = (s.loopConfig || s.loop) as Record<string, unknown>;
-      const targetName = (loopConfig.target || loopConfig.Target) as string | undefined;
-      if (targetName) {
-        const safeTarget = targetName.replace(/[^a-zA-Z0-9]/g, '_');
-        // Use dotted arrow with label showing max iterations
-        const maxIter = loopConfig.maxIterations || loopConfig.MaxIterations || '?';
-        loopEdges.push(`  ${safeId} -.->|"loop (max ${maxIter})"| ${safeTarget}\n`);
-      }
-    }
-  });
-
-  // Add loop edges (dotted arrows going back)
-  loopEdges.forEach((edge) => {
-    mermaidCode += edge;
-  });
-
-  // Add styling for different statuses
-  mermaidCode += '\n  classDef pending fill:#21262d,stroke:#484f58,color:#8b949e,cursor:pointer\n';
-  mermaidCode += '  classDef running fill:#0d2847,stroke:#58a6ff,color:#58a6ff,cursor:pointer\n';
-  mermaidCode +=
-    '  classDef completed fill:#0d331a,stroke:#3fb950,color:#3fb950,cursor:pointer\n';
-  mermaidCode += '  classDef failed fill:#3d1418,stroke:#f85149,color:#f85149,cursor:pointer\n';
-  mermaidCode +=
-    '  classDef cancelled fill:#3d2e0d,stroke:#d29922,color:#d29922,cursor:pointer\n';
-  mermaidCode += '  classDef skipped fill:#21262d,stroke:#484f58,color:#6e7681,cursor:pointer\n';
-  mermaidCode += '  classDef selected stroke-width:3px\n';
-
-  // Apply classes
-  if (pendingSteps.length > 0) {
-    mermaidCode += `  class ${pendingSteps.join(',')} pending\n`;
-  }
-  if (runningSteps.length > 0) {
-    mermaidCode += `  class ${runningSteps.join(',')} running\n`;
-  }
-  if (completedSteps.length > 0) {
-    mermaidCode += `  class ${completedSteps.join(',')} completed\n`;
-  }
-  if (failedSteps.length > 0) {
-    mermaidCode += `  class ${failedSteps.join(',')} failed\n`;
-  }
-  if (cancelledSteps.length > 0) {
-    mermaidCode += `  class ${cancelledSteps.join(',')} cancelled\n`;
-  }
-  if (skippedSteps.length > 0) {
-    mermaidCode += `  class ${skippedSteps.join(',')} skipped\n`;
-  }
+  const { mermaidCode, stepNameToId } = generateExecutionDagCode(steps, stepStatuses);
 
   try {
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'dark',
-      securityLevel: 'antiscript',
-      themeVariables: {
-        primaryColor: '#21262d',
-        primaryTextColor: '#e6edf3',
-        primaryBorderColor: '#30363d',
-        lineColor: '#58a6ff',
-        secondaryColor: '#161b22',
-        tertiaryColor: '#0d1117',
-      },
-    });
+    mermaid.initialize(getMermaidConfig());
 
     const { svg } = await mermaid.render('exec-dag-' + Date.now(), mermaidCode);
     container.innerHTML = svg;
 
-    // Capture-phase interceptor — block any accidental navigation from within
-    // the SVG (e.g. <a> wrappers, foreignObject links, etc.)
-    container.addEventListener(
-      'click',
-      (e: Event) => {
-        const target = e.target as HTMLElement;
-        const anchor = target.closest?.('a');
-        if (anchor && container.contains(anchor)) {
-          e.preventDefault();
-        }
-      },
-      true,
-    );
-
-    // Belt-and-suspenders: strip href/xlink:href from any <a> elements
-    const svgAnchors = container.querySelectorAll('svg a');
-    svgAnchors.forEach((a) => {
-      a.removeAttribute('href');
-      a.removeAttribute('xlink:href');
-    });
-
-    // Add click handlers to nodes
-    if (onNodeClick) {
-      const svgElement = container.querySelector('svg');
-      if (svgElement) {
-        const nodes = svgElement.querySelectorAll('.node');
-        nodes.forEach((node) => {
-          const nodeId = node.id?.replace('flowchart-', '').replace(/-\d+$/, '');
-          const stepName = stepNameToId.get(nodeId) as string | undefined;
-
-          if (stepName) {
-            (node as HTMLElement).style.cursor = 'pointer';
-
-            // Highlight selected step
-            if (selectedStep === stepName) {
-              const rect = node.querySelector(
-                'rect, polygon, circle, ellipse',
-              ) as HTMLElement | null;
-              if (rect) {
-                rect.style.strokeWidth = '3px';
-              }
-            }
-
-            node.addEventListener('click', (e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onNodeClick(stepName);
-            });
-
-            node.addEventListener('mouseenter', () => {
-              const rect = node.querySelector(
-                'rect, polygon, circle, ellipse',
-              ) as HTMLElement | null;
-              if (rect) {
-                rect.style.filter = 'brightness(1.2)';
-              }
-            });
-            node.addEventListener('mouseleave', () => {
-              const rect = node.querySelector(
-                'rect, polygon, circle, ellipse',
-              ) as HTMLElement | null;
-              if (rect) {
-                rect.style.filter = 'none';
-              }
-            });
-          }
-        });
-      }
+    // Style subagent subgraphs
+    const svgEl = container.querySelector('svg');
+    if (svgEl) {
+      const subgraphs = svgEl.querySelectorAll('.cluster rect');
+      subgraphs.forEach((rect) => {
+        (rect as HTMLElement).style.fill = 'rgba(139, 148, 158, 0.05)';
+        (rect as HTMLElement).style.stroke = 'rgba(139, 148, 158, 0.3)';
+        (rect as HTMLElement).style.strokeWidth = '1px';
+        (rect as HTMLElement).style.strokeDasharray = '5,5';
+        (rect as HTMLElement).style.rx = '8';
+      });
     }
+
+    attachSvgHandlers(container, stepNameToId, onNodeClick, selectedStep);
   } catch (err) {
     console.error('Mermaid render error:', err);
     renderDagError(err, container);

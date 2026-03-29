@@ -116,6 +116,11 @@ export const Icons = {
       <path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-3.5a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4.5ZM8 12a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z" />
     </svg>
   ),
+  Ban: (): React.JSX.Element => (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M3.05 3.05a7 7 0 0 0 9.9 9.9L3.05 3.05Zm1.41-1.41 9.9 9.9a7 7 0 0 0-9.9-9.9ZM0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Z" />
+    </svg>
+  ),
   WifiOff: (props?: React.SVGProps<SVGSVGElement>): React.JSX.Element => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <line x1="1" y1="1" x2="23" y2="23" />

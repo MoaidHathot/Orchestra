@@ -85,8 +85,11 @@ public class CommandStepExecutorTests
 		var result = await executor.ExecuteAsync(step, context);
 
 		// Assert
+		// The command is routed through the platform shell (cmd.exe /c on Windows,
+		// /bin/sh -c on Linux), so the shell itself starts but returns a non-zero
+		// exit code when the command is not found.
 		result.Status.Should().Be(ExecutionStatus.Failed);
-		result.ErrorMessage.Should().Contain("Command execution failed");
+		result.ErrorMessage.Should().Contain("nonexistent-binary-xyz-123");
 	}
 
 	[Fact]

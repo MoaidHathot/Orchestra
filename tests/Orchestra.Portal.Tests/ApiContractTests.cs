@@ -352,6 +352,200 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 
 	#endregion
 
+	#region 2c. Subagent & step type shape
+
+	private async Task<string> RegisterOrchestrationWithSubagentsAsync()
+	{
+		var name = $"Subagent Test {Guid.NewGuid():N}";
+		var json = """
+		{
+			"name": "NAME_PLACEHOLDER",
+			"description": "Orchestration with subagents and mixed step types",
+			"steps": [
+				{
+					"name": "fetch-data",
+					"type": "Http",
+					"method": "GET",
+					"url": "https://api.example.com/data",
+					"dependsOn": []
+				},
+				{
+					"name": "analyze",
+					"type": "Prompt",
+					"dependsOn": ["fetch-data"],
+					"systemPrompt": "You are an analyst.",
+					"userPrompt": "Analyze the data: {{fetch-data.output}}",
+					"model": "claude-opus-4.5",
+					"subagents": [
+						{
+							"name": "researcher",
+							"displayName": "Research Agent",
+							"description": "Searches for additional context",
+							"prompt": "You are a researcher.",
+							"infer": true
+						},
+						{
+							"name": "writer",
+							"displayName": "Writer Agent",
+							"description": "Writes polished content",
+							"prompt": "You are a writer.",
+							"tools": ["edit_file", "create_file"],
+							"infer": false
+						}
+					]
+				},
+				{
+					"name": "format-output",
+					"type": "Transform",
+					"dependsOn": ["analyze"],
+					"template": "Result: {{analyze.output}}"
+				}
+			]
+		}
+		""".Replace("NAME_PLACEHOLDER", name);
+
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+			new { json }, _jsonOptions);
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		return result.GetProperty("id").GetString()!;
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_StepsIncludeTypeField()
+	{
+		var id = await RegisterOrchestrationWithSubagentsAsync();
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		var steps = orch.GetProperty("steps").EnumerateArray().ToArray();
+		steps.Should().HaveCount(3);
+
+		// Verify type field is present and correct
+		steps[0].GetProperty("type").GetString().Should().Be("Http");
+		steps[1].GetProperty("type").GetString().Should().Be("Prompt");
+		steps[2].GetProperty("type").GetString().Should().Be("Transform");
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_SubagentsIncludedInListEndpoint()
+	{
+		var id = await RegisterOrchestrationWithSubagentsAsync();
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		var analyzeStep = orch.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "analyze");
+
+		// Subagents should be present
+		analyzeStep.TryGetProperty("subagents", out var subagents).Should().BeTrue(
+			"Prompt steps with subagents should include subagents in the list endpoint");
+
+		subagents.GetArrayLength().Should().Be(2);
+
+		var researcher = subagents.EnumerateArray()
+			.First(sa => sa.GetProperty("name").GetString() == "researcher");
+		researcher.GetProperty("displayName").GetString().Should().Be("Research Agent");
+		researcher.GetProperty("description").GetString().Should().Be("Searches for additional context");
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrationById_SubagentsIncludeAllFields()
+	{
+		var id = await RegisterOrchestrationWithSubagentsAsync();
+
+		var response = await _client.GetAsync($"/api/orchestrations/{id}");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var analyzeStep = result.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "analyze");
+
+		var subagents = analyzeStep.GetProperty("subagents");
+		subagents.GetArrayLength().Should().Be(2);
+
+		// Verify writer agent has full detail
+		var writer = subagents.EnumerateArray()
+			.First(sa => sa.GetProperty("name").GetString() == "writer");
+		writer.GetProperty("displayName").GetString().Should().Be("Writer Agent");
+		writer.GetProperty("description").GetString().Should().Be("Writes polished content");
+		writer.GetProperty("infer").GetBoolean().Should().BeFalse();
+
+		var tools = writer.GetProperty("tools");
+		tools.ValueKind.Should().Be(JsonValueKind.Array);
+		tools.GetArrayLength().Should().Be(2);
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_HttpStepIncludesMethodAndUrl()
+	{
+		var id = await RegisterOrchestrationWithSubagentsAsync();
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		var httpStep = orch.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "fetch-data");
+
+		httpStep.GetProperty("type").GetString().Should().Be("Http");
+		httpStep.GetProperty("method").GetString().Should().Be("GET");
+		httpStep.GetProperty("url").GetString().Should().Be("https://api.example.com/data");
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrationById_TransformStepIncludesTemplate()
+	{
+		var id = await RegisterOrchestrationWithSubagentsAsync();
+
+		var response = await _client.GetAsync($"/api/orchestrations/{id}");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var transformStep = result.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "format-output");
+
+		transformStep.GetProperty("type").GetString().Should().Be("Transform");
+		transformStep.GetProperty("template").GetString().Should().Be("Result: {{analyze.output}}");
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_PromptStepWithoutSubagents_OmitsSubagentsField()
+	{
+		var (id, _) = await RegisterTestOrchestrationAsync();
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		var step = orch.GetProperty("steps").EnumerateArray().First();
+
+		// When no subagents, the field should be null/omitted (WhenWritingNull)
+		if (step.TryGetProperty("subagents", out var val))
+		{
+			val.ValueKind.Should().Be(JsonValueKind.Null,
+				"subagents should be null (omitted) when the step has no subagents");
+		}
+	}
+
+	#endregion
+
 	#region 3. DELETE /api/orchestrations/{id} — Delete orchestration
 
 	[Fact]

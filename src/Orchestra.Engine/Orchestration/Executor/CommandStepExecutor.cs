@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
 
@@ -53,21 +54,45 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				workingDirectory = TemplateResolver.Resolve(commandStep.WorkingDirectory, context.Parameters, context, step.DependsOn);
 			}
 
-			// Build process start info
+			// Build process start info.
+			// Route through the platform shell so that .cmd shims (Windows) and
+			// PATH-resolved scripts (Linux/macOS) are found correctly.
+			// Without shell wrapping, commands like 'dnx' (a .NET global tool installed
+			// as a .cmd shim) fail with "The system cannot find the file specified"
+			// because Process.Start with UseShellExecute=false calls CreateProcess
+			// directly, which doesn't resolve .cmd files.
+			var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
+
+			// Build the shell-escaped argument string
+			var escapedArgs = arguments.Select(arg =>
+			{
+				if (isWindows)
+				{
+					// On Windows cmd.exe: wrap args containing spaces in double quotes
+					return arg.Contains(' ') ? $"\"{arg}\"" : arg;
+				}
+				else
+				{
+					// On Unix sh: use single quotes to prevent interpretation, escaping embedded single quotes
+					return $"'{arg.Replace("'", "'\\''")}'";
+				}
+			});
+
+			var fullCommandLine = arguments.Length > 0
+				? $"{command} {string.Join(' ', escapedArgs)}"
+				: command;
+
 			var startInfo = new ProcessStartInfo
 			{
-				FileName = command,
+				FileName = isWindows ? "cmd.exe" : "/bin/sh",
+				// Use the Arguments string property (not ArgumentList) so that
+				// cmd.exe /c receives the command line verbatim without extra quoting.
+				Arguments = isWindows ? $"/c {fullCommandLine}" : $"-c {fullCommandLine}",
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
 				UseShellExecute = false,
 				CreateNoWindow = true,
 			};
-
-			// Add arguments individually
-			foreach (var arg in arguments)
-			{
-				startInfo.ArgumentList.Add(arg);
-			}
 
 			// Set working directory
 			if (workingDirectory is not null)

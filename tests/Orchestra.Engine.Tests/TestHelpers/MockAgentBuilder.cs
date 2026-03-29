@@ -10,11 +10,37 @@ public class MockAgentBuilder : AgentBuilder
 {
 	private Func<string, CancellationToken, AgentTask>? _sendAsyncHandler;
 
+	// Captured from the last BuildAgentAsync(config) call for test assertions
+	private AgentBuildConfig? _capturedConfig;
+
 	/// <summary>
-	/// Gets the SystemPromptMode that was configured on this builder.
-	/// Useful for testing that the correct mode is passed through.
+	/// Gets the full config that was passed to the last BuildAgentAsync(config) call.
 	/// </summary>
-	public SystemPromptMode? CapturedSystemPromptMode => SystemPromptMode;
+	public AgentBuildConfig? CapturedConfig => _capturedConfig;
+
+	/// <summary>
+	/// Gets the SystemPromptMode that was configured.
+	/// Returns config-based value if available, otherwise falls back to fluent API state.
+	/// </summary>
+	public SystemPromptMode? CapturedSystemPromptMode => _capturedConfig?.SystemPromptMode ?? SystemPromptMode;
+
+	/// <summary>
+	/// Gets the engine tools that were configured.
+	/// Returns config-based tools if available, otherwise falls back to fluent API state.
+	/// </summary>
+	public IReadOnlyCollection<IEngineTool> CapturedEngineTools => _capturedConfig?.EngineTools ?? EngineTools;
+
+	/// <summary>
+	/// Gets the engine tool context that was configured.
+	/// Returns config-based context if available, otherwise falls back to fluent API state.
+	/// </summary>
+	public EngineToolContext? CapturedEngineToolContext => _capturedConfig?.EngineToolCtx ?? EngineToolCtx;
+
+	/// <summary>
+	/// Gets the MCPs that were configured.
+	/// Returns config-based MCPs if available, otherwise falls back to fluent API state.
+	/// </summary>
+	public Mcp[] CapturedMcps => _capturedConfig?.Mcps ?? Mcps;
 
 	/// <summary>
 	/// Configures the mock agent to return specific events and result.
@@ -51,6 +77,78 @@ public class MockAgentBuilder : AgentBuilder
 					Content = content,
 					ActualModel = actualModel ?? Model,
 					Usage = usage
+				};
+			}, ct);
+
+			return new AgentTask(channel.Reader, resultTask);
+		};
+
+		return this;
+	}
+
+	/// <summary>
+	/// Configures the mock agent to simulate the LLM calling an engine tool.
+	/// The engine tool will be actually executed against the EngineToolContext,
+	/// producing real side effects that the PromptExecutor can inspect.
+	/// </summary>
+	public MockAgentBuilder WithEngineToolCall(string toolName, string arguments, string content)
+	{
+		_sendAsyncHandler = (prompt, ct) =>
+		{
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				// Use config-based engine tools/context if available, otherwise fall back to fluent API
+				var engineTools = _capturedConfig?.EngineTools ?? EngineTools;
+				var engineToolCtx = _capturedConfig?.EngineToolCtx ?? EngineToolCtx;
+
+				// Execute the engine tool against the real context
+				string toolResult = "Tool not found";
+				if (engineToolCtx is not null)
+				{
+					foreach (var tool in engineTools)
+					{
+						if (string.Equals(tool.Name, toolName, StringComparison.OrdinalIgnoreCase))
+						{
+							toolResult = tool.Execute(arguments, engineToolCtx);
+							break;
+						}
+					}
+				}
+
+				var callId = Guid.NewGuid().ToString();
+
+				// Write tool execution events
+				await channel.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.ToolExecutionStart,
+					ToolCallId = callId,
+					ToolName = toolName,
+					ToolArguments = arguments
+				}, ct);
+
+				await channel.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.ToolExecutionComplete,
+					ToolCallId = callId,
+					ToolName = toolName,
+					ToolSuccess = true,
+					ToolResult = toolResult
+				}, ct);
+
+				// Write final content
+				await channel.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.MessageDelta,
+					Content = content
+				}, ct);
+
+				channel.Writer.Complete();
+
+				return new AgentResult
+				{
+					Content = content,
+					ActualModel = Model,
 				};
 			}, ct);
 
@@ -98,6 +196,14 @@ public class MockAgentBuilder : AgentBuilder
 			});
 
 		return Task.FromResult(agent);
+	}
+
+	public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
+	{
+		// Capture config for test assertions and engine tool execution
+		_capturedConfig = config;
+
+		return BuildAgentAsync(cancellationToken);
 	}
 
 	private static AgentTask CreateDefaultTask(string content)

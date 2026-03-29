@@ -157,6 +157,49 @@ public class ExecutionResultTests
 
 	#endregion
 
+	#region Cancelled Factory Method
+
+	[Fact]
+	public void Cancelled_WithDefaultMessage_CreatesCancelledResult()
+	{
+		// Act
+		var result = ExecutionResult.Cancelled();
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.Content.Should().BeEmpty();
+		result.ErrorMessage.Should().Be("Cancelled");
+	}
+
+	[Fact]
+	public void Cancelled_WithCustomMessage_UsesProvidedMessage()
+	{
+		// Act
+		var result = ExecutionResult.Cancelled("Custom cancellation reason");
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.Content.Should().BeEmpty();
+		result.ErrorMessage.Should().Be("Custom cancellation reason");
+	}
+
+	[Fact]
+	public void Cancelled_HasEmptyDependencyOutputs()
+	{
+		// Act
+		var result = ExecutionResult.Cancelled();
+
+		// Assert
+		result.RawDependencyOutputs.Should().BeEmpty();
+		result.RawContent.Should().BeNull();
+		result.PromptSent.Should().BeNull();
+		result.ActualModel.Should().BeNull();
+		result.Usage.Should().BeNull();
+		result.Trace.Should().BeNull();
+	}
+
+	#endregion
+
 	#region Required Properties
 
 	[Fact]
@@ -167,10 +210,12 @@ public class ExecutionResultTests
 		var succeeded = ExecutionResult.Succeeded("content");
 		var failed = ExecutionResult.Failed("error");
 		var skipped = ExecutionResult.Skipped("reason");
+		var cancelled = ExecutionResult.Cancelled();
 
 		succeeded.Content.Should().NotBeNull();
 		failed.Content.Should().NotBeNull();
 		skipped.Content.Should().NotBeNull();
+		cancelled.Content.Should().NotBeNull();
 	}
 
 	[Fact]
@@ -180,10 +225,12 @@ public class ExecutionResultTests
 		var succeeded = ExecutionResult.Succeeded("content");
 		var failed = ExecutionResult.Failed("error");
 		var skipped = ExecutionResult.Skipped("reason");
+		var cancelled = ExecutionResult.Cancelled();
 
 		succeeded.Status.Should().Be(ExecutionStatus.Succeeded);
 		failed.Status.Should().Be(ExecutionStatus.Failed);
 		skipped.Status.Should().Be(ExecutionStatus.Skipped);
+		cancelled.Status.Should().Be(ExecutionStatus.Cancelled);
 	}
 
 	#endregion

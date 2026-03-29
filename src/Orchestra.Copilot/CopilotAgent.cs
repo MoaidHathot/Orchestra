@@ -1,5 +1,6 @@
 using System.Threading.Channels;
 using GitHub.Copilot.SDK;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 
@@ -15,6 +16,8 @@ public partial class CopilotAgent : IAgent
 	private readonly ReasoningLevel? _reasoningLevel;
 	private readonly SystemPromptMode? _systemPromptMode;
 	private readonly IOrchestrationReporter _reporter;
+	private readonly IReadOnlyCollection<IEngineTool> _engineTools;
+	private readonly EngineToolContext? _engineToolContext;
 	private readonly ILogger<CopilotAgent> _logger;
 
 	internal CopilotAgent(
@@ -26,6 +29,8 @@ public partial class CopilotAgent : IAgent
 			ReasoningLevel? reasoningLevel,
 			SystemPromptMode? systemPromptMode,
 			IOrchestrationReporter reporter,
+			IReadOnlyCollection<IEngineTool> engineTools,
+			EngineToolContext? engineToolContext,
 			ILogger<CopilotAgent> logger)
 	{
 		_client = client;
@@ -36,6 +41,8 @@ public partial class CopilotAgent : IAgent
 		_reasoningLevel = reasoningLevel;
 		_systemPromptMode = systemPromptMode;
 		_reporter = reporter;
+		_engineTools = engineTools;
+		_engineToolContext = engineToolContext;
 		_logger = logger;
 	}
 
@@ -123,6 +130,12 @@ public partial class CopilotAgent : IAgent
 		if (_subagents.Length > 0)
 		{
 			config.CustomAgents = BuildCustomAgents();
+		}
+
+		// Register engine tools as custom AIFunction instances
+		if (_engineTools.Count > 0 && _engineToolContext is not null)
+		{
+			config.Tools = BuildEngineTools();
 		}
 
 		return config;
@@ -311,6 +324,23 @@ public partial class CopilotAgent : IAgent
 				subagent.Mcps.Length,
 				subagent.Infer);
 		}
+	}
+
+	/// <summary>
+	/// Converts engine tools to AIFunction instances that the Copilot SDK can register.
+	/// Each engine tool is wrapped in an <see cref="EngineToolAIFunction"/> that delegates
+	/// to <see cref="IEngineTool.Execute"/> with the shared <see cref="EngineToolContext"/>.
+	/// </summary>
+	private List<AIFunction> BuildEngineTools()
+	{
+		var functions = new List<AIFunction>();
+
+		foreach (var tool in _engineTools)
+		{
+			functions.Add(new EngineToolAIFunction(tool, _engineToolContext!));
+		}
+
+		return functions;
 	}
 
 	#region Source-Generated Logging

@@ -50,7 +50,7 @@ public class OrchestrationExecutionContext
 	{
 		return dependsOn.Any(dep =>
 			_results.TryGetValue(dep, out var result) &&
-			result.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped);
+			result.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped or ExecutionStatus.Cancelled);
 	}
 
 	/// <summary>

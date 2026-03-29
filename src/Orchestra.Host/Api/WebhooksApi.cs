@@ -123,16 +123,16 @@ public static partial class WebhooksApi
 		string triggerId,
 		JsonSerializerOptions jsonOptions)
 	{
-		// If orchestration failed, return a 502 with error details
-		if (result.Status == ExecutionStatus.Failed)
+		// If orchestration failed or was cancelled, return a 502 with error details
+		if (result.Status is ExecutionStatus.Failed or ExecutionStatus.Cancelled)
 		{
 			var errors = result.StepResults
-				.Where(kv => kv.Value.Status == ExecutionStatus.Failed)
+				.Where(kv => kv.Value.Status is ExecutionStatus.Failed or ExecutionStatus.Cancelled)
 				.ToDictionary(kv => kv.Key, kv => kv.Value.ErrorMessage ?? "Unknown error");
 
 			return Results.Json(new
 			{
-				status = "failed",
+				status = result.Status.ToString().ToLowerInvariant(),
 				executionId,
 				triggerId,
 				errors

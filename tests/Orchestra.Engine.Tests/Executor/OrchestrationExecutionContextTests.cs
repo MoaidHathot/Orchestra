@@ -171,6 +171,21 @@ public class OrchestrationExecutionContextTests
 		result.Should().BeFalse();
 	}
 
+	[Fact]
+	public void HasAnyDependencyFailed_WhenOneCancelled_ReturnsTrue()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		context.AddResult("dep1", ExecutionResult.Succeeded("result1"));
+		context.AddResult("dep2", ExecutionResult.Cancelled());
+
+		// Act
+		var result = context.HasAnyDependencyFailed(["dep1", "dep2"]);
+
+		// Assert
+		result.Should().BeTrue();
+	}
+
 	#endregion
 
 	#region GetDependencyOutputs
