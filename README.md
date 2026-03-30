@@ -6,6 +6,8 @@ A declarative orchestration engine for LLM (Large Language Model) workflows. Def
 
 - **Declarative JSON Pipelines** - Define complex LLM workflows as simple JSON files
 - **DAG-Based Execution** - Automatic parallel execution of independent steps
+- **Variables & Metadata** - Reusable variables with recursive expansion, plus built-in orchestration and step metadata
+- **Template Expressions** - Rich expression syntax for parameters, variables, metadata, and step outputs
 - **MCP Integration** - Extend LLM capabilities with Model Context Protocol servers
 - **Quality Control Loops** - Retry steps with feedback until criteria are met
 - **Handler Transformations** - Transform inputs and outputs between steps
@@ -57,6 +59,8 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
 
 - [Orchestration Schema](#orchestration-schema)
 - [Step Configuration](#step-configuration)
+- [Template Expressions](#template-expressions)
+- [Variables](#variables)
 - [MCP Integration](#mcp-integration)
 - [Triggers](#triggers)
 - [System Prompt Modes](#system-prompt-modes)
@@ -73,6 +77,7 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
 | `name` | string | Yes | Unique name for the orchestration |
 | `description` | string | Yes | Human-readable description |
 | `version` | string | No | Version string (default: `"1.0.0"`) |
+| `variables` | object | No | User-defined variables accessible via `{{vars.name}}` |
 | `defaultSystemPromptMode` | enum | No | Default mode for all steps: `append` or `replace` |
 | `mcps` | array | No | Inline MCP server definitions |
 | `steps` | array | Yes | Array of step configurations |
@@ -85,6 +90,10 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
   "name": "my-orchestration",
   "description": "A multi-step AI workflow",
   "version": "1.0.0",
+  "variables": {
+    "baseUrl": "https://api.example.com",
+    "outputDir": "/reports/{{param.project}}"
+  },
   "defaultSystemPromptMode": "replace",
   "mcps": [],
   "steps": [],
@@ -114,12 +123,12 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
 
 ### Parameters
 
-Use `{{paramName}}` syntax in prompts to inject parameters:
+Use `{{param.name}}` syntax in prompts to inject parameters:
 
 ```json
 {
   "name": "translator",
-  "userPrompt": "Translate '{{text}}' to {{targetLanguage}}.",
+  "userPrompt": "Translate '{{param.text}}' to {{param.targetLanguage}}.",
   "parameters": ["text", "targetLanguage"]
 }
 ```
@@ -143,7 +152,7 @@ Steps automatically receive outputs from their dependencies:
 {
   "name": "step-b",
   "dependsOn": ["step-a"],
-  "userPrompt": "Expand on the topics provided above."
+  "userPrompt": "Expand on: {{step-a.output}}"
 }
 ```
 
@@ -182,6 +191,106 @@ Implement quality control by retrying steps until criteria are met:
 ```
 
 The `quality-checker` step will re-run `writer` with feedback until `APPROVED` appears in the response or `maxIterations` is reached.
+
+## Template Expressions
+
+Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, headers, templates, and command arguments. All expressions are case-insensitive and whitespace-tolerant (e.g., `{{ orchestration.NAME }}` works).
+
+### Expression Namespaces
+
+| Namespace | Syntax | Description |
+|-----------|--------|-------------|
+| Parameters | `{{param.name}}` | User-supplied parameters passed at runtime |
+| Variables | `{{vars.name}}` | User-defined orchestration variables (with recursive expansion) |
+| Orchestration | `{{orchestration.property}}` | Built-in orchestration metadata |
+| Step | `{{step.property}}` | Current step metadata |
+| Step Output | `{{stepName.output}}` | Output content from a completed step |
+| Step Raw Output | `{{stepName.rawOutput}}` | Raw (unprocessed) output from a completed step |
+
+### Orchestration Metadata Properties
+
+| Property | Description | Example Value |
+|----------|-------------|---------------|
+| `{{orchestration.name}}` | Orchestration name | `"deployment-pipeline"` |
+| `{{orchestration.version}}` | Orchestration version | `"2.1.0"` |
+| `{{orchestration.runId}}` | Unique run identifier | `"abc123-def456"` |
+| `{{orchestration.startedAt}}` | Run start time (ISO 8601) | `"2025-06-15T10:30:00+00:00"` |
+
+### Step Metadata Properties
+
+| Property | Description | Example Value |
+|----------|-------------|---------------|
+| `{{step.name}}` | Current step's name | `"security-scan"` |
+| `{{step.type}}` | Current step's type | `"Prompt"`, `"Command"`, `"Transform"`, `"Http"` |
+
+### Example
+
+```json
+{
+  "userPrompt": "{{orchestration.name}} v{{orchestration.version}} [Run: {{orchestration.runId}}]\nStep: {{step.name}} ({{step.type}})\nTopic: {{param.topic}}\nPrevious result: {{research.output}}"
+}
+```
+
+## Variables
+
+Variables let you define reusable values at the orchestration level. They are declared in the top-level `variables` object and referenced via `{{vars.name}}` in any step.
+
+### Basic Usage
+
+```json
+{
+  "name": "my-pipeline",
+  "variables": {
+    "appName": "customer-portal",
+    "apiEndpoint": "https://api.example.com/v2"
+  },
+  "steps": [
+    {
+      "name": "fetch-data",
+      "type": "Http",
+      "url": "{{vars.apiEndpoint}}/projects/{{param.project}}/summary"
+    }
+  ]
+}
+```
+
+### Recursive Expansion
+
+Variable values can contain other template expressions, which are resolved when the variable is used:
+
+```json
+{
+  "variables": {
+    "baseDir": "/data/{{param.env}}",
+    "outputDir": "{{vars.baseDir}}/reports",
+    "logPrefix": "[{{orchestration.name}}:{{orchestration.runId}}]"
+  }
+}
+```
+
+In this example:
+- `{{vars.outputDir}}` resolves to `{{vars.baseDir}}/reports`, then `baseDir` resolves to `/data/prod/reports` (if `env=prod`)
+- `{{vars.logPrefix}}` resolves to `[my-pipeline:abc123]` using live orchestration metadata
+- Variables can reference `{{param.*}}`, `{{orchestration.*}}`, `{{step.*}}`, `{{stepName.output}}`, and other `{{vars.*}}`
+
+### Circular Reference Protection
+
+Circular variable references (e.g., `a` references `b` which references `a`) are detected and left unresolved to prevent infinite loops:
+
+```json
+{
+  "variables": {
+    "a": "{{vars.b}}",
+    "b": "{{vars.a}}"
+  }
+}
+```
+
+Using `{{vars.a}}` will resolve to `{{vars.a}}` (left as-is) rather than causing an error.
+
+### Unknown Variables
+
+References to undefined variables are left as-is in the output (e.g., `{{vars.nonexistent}}` remains `{{vars.nonexistent}}`).
 
 ## MCP Integration
 
@@ -570,11 +679,15 @@ See the `examples/` folder for complete orchestration examples:
 
 | Example | Description |
 |---------|-------------|
+| `deployment-pipeline.json` | Deployment pipeline with variables, metadata, and mixed step types |
+| `variables-and-metadata.json` | Variables, orchestration metadata, and step metadata expressions |
 | `weather-roads-seattle.json` | Parallel weather monitoring |
+| `command-build-and-analyze.json` | Command steps with build and git analysis |
 | `system-prompt-mode-example.json` | System prompt mode demonstration |
 | `advanced-combined-features.json` | Full pipeline with loops and MCPs |
 | `email-trigger-example.json` | Email-triggered processing |
 | `webhook-triggered-notification.json` | Webhook event handling |
+| `subagents-research-team.json` | Multi-agent orchestration with subagents |
 
 ## CLI Reference
 

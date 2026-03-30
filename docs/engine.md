@@ -31,6 +31,7 @@ public class Orchestration
     public required string Description { get; init; }
     public required OrchestrationStep[] Steps { get; init; }
     public string Version { get; init; } = "1.0.0";
+    public Dictionary<string, string> Variables { get; init; } = [];
     public TriggerConfig? Trigger { get; init; }
     public Mcp[] Mcps { get; init; } = [];
     public SystemPromptMode? DefaultSystemPromptMode { get; init; }
@@ -71,6 +72,83 @@ Steps can depend on other steps using the `DependsOn` property. The engine:
 - Validates the dependency graph (DAG) for cycles
 - Executes independent steps in parallel
 - Passes outputs from dependencies to dependent steps automatically
+
+### Template Expressions
+
+The engine uses `{{expression}}` syntax for dynamic values in prompts, URLs, headers, templates, and command arguments. All expressions are case-insensitive and whitespace-tolerant.
+
+#### Supported Namespaces
+
+| Namespace | Syntax | Resolution |
+|-----------|--------|------------|
+| `param` | `{{param.name}}` | Replaced with the runtime parameter value. Unknown parameters are left as-is. |
+| `orchestration` | `{{orchestration.property}}` | Replaced with orchestration metadata. Unknown properties throw `InvalidOperationException`. |
+| `step` | `{{step.property}}` | Replaced with current step metadata. Unknown properties throw `InvalidOperationException`. |
+| `vars` | `{{vars.name}}` | Replaced with the variable value (recursively expanded). Unknown variables are left as-is. |
+| Step output | `{{stepName.output}}` | Replaced with the processed output of the named step. |
+| Step raw output | `{{stepName.rawOutput}}` | Replaced with the raw (unprocessed) output of the named step. |
+
+#### Orchestration Metadata
+
+Available via `{{orchestration.property}}`:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | string | The orchestration name |
+| `version` | string | The orchestration version |
+| `runId` | string | Unique identifier for this execution run |
+| `startedAt` | string | Run start time in ISO 8601 format |
+
+These properties come from the `OrchestrationInfo` record, created once per execution:
+
+```csharp
+public record OrchestrationInfo(
+    string Name,
+    string Version,
+    string RunId,
+    DateTimeOffset StartedAt);
+```
+
+#### Step Metadata
+
+Available via `{{step.property}}`:
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | string | The current step's name |
+| `type` | string | The current step's type (`Prompt`, `Command`, `Transform`, `Http`) |
+
+#### Template Resolution
+
+Templates are resolved by `TemplateResolver.Resolve()`, which is called by each step executor. The resolver:
+
+1. Finds all `{{expression}}` patterns in the input string
+2. Identifies the namespace (`param`, `orchestration`, `step`, `vars`, or step output)
+3. Replaces each match with the resolved value
+4. For `vars.*`, recursively resolves any nested template expressions in the variable's value
+5. Detects circular variable references and leaves them as-is to prevent infinite loops
+
+### Variables
+
+Variables provide reusable, orchestration-scoped values that can be referenced by any step via `{{vars.name}}`. They are defined in the top-level `variables` dictionary:
+
+```json
+{
+  "variables": {
+    "appName": "customer-portal",
+    "registry": "ghcr.io/myorg/{{vars.appName}}",
+    "outputDir": "/reports/{{param.project}}",
+    "logTag": "[{{orchestration.name}}:{{orchestration.runId}}]"
+  }
+}
+```
+
+Key behaviors:
+- **Recursive expansion**: Variable values can contain template expressions (including references to other variables, parameters, orchestration metadata, etc.), which are resolved when the variable is used
+- **Chained references**: Variables can reference other variables (e.g., `registry` references `appName` above)
+- **Circular protection**: Circular references are detected via a resolution stack and left as-is
+- **Unknown variables**: References to undefined variables are left as-is in the output
+- **No caching**: Variables are resolved inline each time they are referenced
 
 ## Parsing Orchestrations
 

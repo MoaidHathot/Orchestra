@@ -191,6 +191,61 @@ Steps without mutual dependencies run in parallel:
 
 Here, `technical-review` and `market-review` run in parallel, and `final-report` runs after both complete.
 
+## Template Expressions
+
+Orchestra supports several template expression namespaces for dynamic values in your orchestrations:
+
+| Syntax | Description |
+|--------|-------------|
+| `{{param.name}}` | Runtime parameter value |
+| `{{vars.name}}` | User-defined variable (see below) |
+| `{{orchestration.name}}` | Orchestration name |
+| `{{orchestration.version}}` | Orchestration version |
+| `{{orchestration.runId}}` | Unique run identifier |
+| `{{orchestration.startedAt}}` | Run start time (ISO 8601) |
+| `{{step.name}}` | Current step's name |
+| `{{step.type}}` | Current step's type |
+| `{{stepName.output}}` | Output from a completed step |
+| `{{stepName.rawOutput}}` | Raw output from a completed step |
+
+All expressions are case-insensitive and whitespace-tolerant.
+
+## Using Variables
+
+Variables let you define reusable values at the orchestration level:
+
+```json
+{
+  "name": "deployment-pipeline",
+  "version": "2.1.0",
+  "variables": {
+    "appName": "customer-portal",
+    "registry": "ghcr.io/myorg/{{vars.appName}}",
+    "artifactPath": "/artifacts/{{vars.appName}}/{{orchestration.runId}}"
+  },
+  "steps": [
+    {
+      "name": "build",
+      "type": "Command",
+      "dependsOn": [],
+      "command": "dotnet",
+      "arguments": ["publish", "-o", "{{vars.artifactPath}}"]
+    },
+    {
+      "name": "deploy-summary",
+      "type": "Transform",
+      "dependsOn": ["build"],
+      "template": "Deployed {{vars.appName}} to {{vars.registry}}:{{orchestration.runId}}\nBuild output: {{build.output}}"
+    }
+  ]
+}
+```
+
+Key points:
+- Variable values can contain other template expressions, which are resolved when used
+- Variables can reference other variables (e.g., `registry` references `appName`)
+- Circular references are detected and left unresolved (no errors or infinite loops)
+
 ## Using MCP Servers
 
 Orchestra supports Model Context Protocol (MCP) servers for external tool access:
