@@ -62,7 +62,7 @@
       "type": "Prompt",
       "dependsOn": ["fetch-active-incidents", "acknowledge-incidents", "fetch-action-view-schema"],
       "systemPrompt": "You are an ActionView entry generator. Your job is to create a structured JSON entry for ActionView that documents actions taken on IcM incidents. You are given the ActionView entry schema and must generate an entry that strictly conforms to it. Output ONLY the raw JSON content of the entry — no markdown fences, no explanation, no surrounding text.",
-      "userPrompt": "You have the ActionView entry schema, the list of active incidents, and the IDs of incidents that were acknowledged. Create a single ActionView entry that:\n\n1. Has a clear title like \"IcM Incidents Acknowledged\" with a timestamp.\n2. Starts with a summary table at the beginning containing columns: Incident ID, Title, Environment/Region, and Action (\"Acknowledged\").\n3. Contains sub-entries for each acknowledged incident showing the important details: title, environment, region, severity, and the action taken (\"Acknowledged\"). Do not include the entire raw incident data — only the key fields that matter.\n\nActionView entry schema:\n{{fetch-action-view-schema.output}}\n\nActive incidents data:\n{{fetch-active-incidents.output}}\n\nAcknowledged incident IDs:\n{{acknowledge-incidents.output}}\n\nOutput ONLY the valid JSON content of the generated ActionView entry, conforming to the schema above. No markdown, no explanation.",
+      "userPrompt": "You have the ActionView entry schema, the list of active incidents, and the IDs of incidents that were acknowledged. Create a single ActionView entry that:\n\n1. Has a clear title like \"IcM Incidents Acknowledged\" with a timestamp.\n2. Starts with a summary table at the beginning containing columns: Incident ID, Title, Environment/Region, and Action (\"Acknowledged\").\n3. Contains sub-entries for each acknowledged incident showing the important details: title, environment, region, severity, and the action taken (\"Acknowledged\"). Do not include the entire raw incident data — only the key fields that matter.\n\nActionView entry schema:\n{{fetch-action-view-schema.output}}\n\nActive incidents data:\n{{fetch-active-incidents.output}}\n\nAcknowledged incident IDs:\n{{acknowledge-incidents.output}}\n\nOutput ONLY the valid JSON content of the generated ActionView entry, conforming to the schema above. No markdown, no explanation. It should be a single JSON object without new lines (single line) and escaped as needed to be passed to a CLI commandline",
       "mcps": [],
       "model": "claude-opus-4.6",
       "timeoutSeconds": 120
@@ -72,7 +72,7 @@
       "type": "Command",
       "dependsOn": ["create-action-view-entry"],
       "command": "dnx",
-      "arguments": ["ActionView.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "add", "--json", "-"],
+      "arguments": ["ActionView.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "add", "--json", "{{create-action-view-entry.output}}"],
       "stdin": "{{create-action-view-entry.output}}",
       "timeoutSeconds": 120
     },

@@ -24,10 +24,10 @@ builder.Logging.AddSimpleConsole(options =>
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 
 // Determine data path - supports test isolation via environment variable or configuration
+// Default: %LOCALAPPDATA%/OrchestraHost (from OrchestrationHostOptions)
 var dataPath = Environment.GetEnvironmentVariable("ORCHESTRA_PORTAL_DATA_PATH")
 	?? builder.Configuration["data-path"]
-	?? builder.Configuration["executions-path"]
-	?? Path.Combine(builder.Environment.ContentRootPath, "data");
+	?? builder.Configuration["executions-path"];
 
 // Determine orchestrations scan path
 var orchestrationsScanPath = Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH")
@@ -39,7 +39,8 @@ var orchestrationsScanPath = Environment.GetEnvironmentVariable("ORCHESTRA_ORCHE
 // - Default execution callback (SseReporter-based)
 builder.Services.AddOrchestraHost(options =>
 {
-	options.DataPath = dataPath;
+	if (dataPath is not null)
+		options.DataPath = dataPath;
 	options.OrchestrationsScanPath = orchestrationsScanPath;
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
@@ -54,7 +55,8 @@ var app = builder.Build();
 app.Services.InitializeOrchestraHost();
 
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
-startupLogger.LogInformation("Orchestra Portal started with data path: {DataPath}", dataPath);
+var resolvedDataPath = dataPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrchestraHost");
+startupLogger.LogInformation("Orchestra Portal started with data path: {DataPath}", resolvedDataPath);
 
 app.UseStaticFiles();
 
