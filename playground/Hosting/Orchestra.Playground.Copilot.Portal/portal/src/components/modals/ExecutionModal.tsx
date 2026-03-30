@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef } from '../../types';
+import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext } from '../../types';
 import { Icons } from '../../icons';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
@@ -64,6 +64,7 @@ interface Props {
   status: string;
   errorMessage: string | null;
   completedByStep: string | null;
+  runContext: RunContext | null;
   onClose: () => void;
   onCancel: (executionId: string) => void;
 }
@@ -81,6 +82,7 @@ export default function ExecutionModal({
   status,
   errorMessage,
   completedByStep,
+  runContext,
   onClose,
   onCancel,
 }: Props): React.JSX.Element {
@@ -89,6 +91,7 @@ export default function ExecutionModal({
   const streamingEndRef = useRef<HTMLDivElement | null>(null);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
   const [showTracePanel, setShowTracePanel] = useState(true);
+  const [showRunContext, setShowRunContext] = useState(false);
   const [expandedTraceSections, setExpandedTraceSections] = useState<
     Record<TraceSectionKey, boolean>
   >({} as Record<TraceSectionKey, boolean>);
@@ -293,6 +296,146 @@ export default function ExecutionModal({
                   {errorMessage}
                 </div>
               </div>
+            </div>
+          )}
+          {/* Run Context Panel */}
+          {runContext && (
+            <div className="run-context-panel">
+              <div
+                className="run-context-header"
+                onClick={() => setShowRunContext(!showRunContext)}
+              >
+                <span
+                  style={{
+                    transform: showRunContext ? 'rotate(90deg)' : 'rotate(0deg)',
+                    transition: 'transform 0.15s',
+                    display: 'inline-block',
+                  }}
+                >
+                  &#9654;
+                </span>
+                <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
+                  Run Context
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--text-dim)', marginLeft: '8px' }}>
+                  {runContext.orchestrationName} v{runContext.orchestrationVersion}
+                </span>
+              </div>
+              {showRunContext && (
+                <div className="run-context-body">
+                  {/* Summary row */}
+                  <div className="run-context-summary">
+                    <div className="run-context-field">
+                      <span className="run-context-label">Run ID</span>
+                      <span className="run-context-value run-context-mono">{runContext.runId}</span>
+                    </div>
+                    <div className="run-context-field">
+                      <span className="run-context-label">Orchestration</span>
+                      <span className="run-context-value">{runContext.orchestrationName} v{runContext.orchestrationVersion}</span>
+                    </div>
+                    <div className="run-context-field">
+                      <span className="run-context-label">Started At</span>
+                      <span className="run-context-value">{runContext.startedAt ? new Date(runContext.startedAt).toLocaleString() : 'N/A'}</span>
+                    </div>
+                    <div className="run-context-field">
+                      <span className="run-context-label">Triggered By</span>
+                      <span className="run-context-value">{runContext.triggeredBy || 'N/A'}</span>
+                    </div>
+                    {runContext.triggerId && (
+                      <div className="run-context-field">
+                        <span className="run-context-label">Trigger ID</span>
+                        <span className="run-context-value run-context-mono">{runContext.triggerId}</span>
+                      </div>
+                    )}
+                    {runContext.dataDirectory && (
+                      <div className="run-context-field" style={{ gridColumn: '1 / -1' }}>
+                        <span className="run-context-label">Data Directory</span>
+                        <span className="run-context-value run-context-mono" style={{ fontSize: '11px', wordBreak: 'break-all' }}>{runContext.dataDirectory}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Parameters */}
+                  {runContext.parameters && Object.keys(runContext.parameters).length > 0 && (
+                    <div className="run-context-table-section">
+                      <div className="run-context-table-title">Parameters</div>
+                      <table className="run-context-table">
+                        <thead>
+                          <tr><th>Name</th><th>Value</th></tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(runContext.parameters).map(([key, value]) => (
+                            <tr key={key}>
+                              <td className="run-context-mono">{key}</td>
+                              <td>{value}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Variables (raw) */}
+                  {runContext.variables && Object.keys(runContext.variables).length > 0 && (
+                    <div className="run-context-table-section">
+                      <div className="run-context-table-title">Variables (Raw)</div>
+                      <table className="run-context-table">
+                        <thead>
+                          <tr><th>Name</th><th>Value</th></tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(runContext.variables).map(([key, value]) => (
+                            <tr key={key}>
+                              <td className="run-context-mono">{key}</td>
+                              <td>{value}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Resolved Variables */}
+                  {runContext.resolvedVariables && Object.keys(runContext.resolvedVariables).length > 0 && (
+                    <div className="run-context-table-section">
+                      <div className="run-context-table-title">Resolved Variables</div>
+                      <table className="run-context-table">
+                        <thead>
+                          <tr><th>Name</th><th>Resolved Value</th></tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(runContext.resolvedVariables).map(([key, value]) => (
+                            <tr key={key}>
+                              <td className="run-context-mono">{key}</td>
+                              <td>{value}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Accessed Environment Variables */}
+                  {runContext.accessedEnvironmentVariables && Object.keys(runContext.accessedEnvironmentVariables).length > 0 && (
+                    <div className="run-context-table-section">
+                      <div className="run-context-table-title">Accessed Environment Variables</div>
+                      <table className="run-context-table">
+                        <thead>
+                          <tr><th>Name</th><th>Value</th></tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(runContext.accessedEnvironmentVariables).map(([key, value]) => (
+                            <tr key={key}>
+                              <td className="run-context-mono">{key}</td>
+                              <td>{value !== null ? value : <span style={{ color: 'var(--text-dim)', fontStyle: 'italic' }}>not set</span>}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
           <div className="execution-modal-content">

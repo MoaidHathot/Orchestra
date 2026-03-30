@@ -11,6 +11,7 @@ import type {
   StepEvent,
   Step,
   TraceData,
+  RunContext,
 } from './types';
 import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
 import StatusBar from './components/StatusBar';
@@ -65,6 +66,7 @@ interface ExecutionDetailsResponse {
   completedByStep?: string;
   finalContent?: string;
   steps?: ExecutionDetailStep[];
+  context?: RunContext | null;
 }
 
 // ── Viewer / History / Add / Run modal state types ──────────────────────────
@@ -167,6 +169,7 @@ function App(): React.JSX.Element {
     status: 'idle',
     errorMessage: null,
     completedByStep: null,
+    runContext: null,
   });
   const eventSourceRef = useRef<EventSource | null>(null);
   const [mcpsModal, setMcpsModal] = useState<McpsModalState>({ open: false });
@@ -358,6 +361,14 @@ function App(): React.JSX.Element {
         if (data.status === 'Cancelling') {
           setExecutionModal(prev => ({ ...prev, status: 'cancelling' }));
         }
+      } catch { /* ignore */ }
+    });
+
+    // run-context (sent when the run context is available)
+    eventSource.addEventListener('run-context', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as RunContext;
+        setExecutionModal(prev => ({ ...prev, runContext: data }));
       } catch { /* ignore */ }
     });
 
@@ -640,6 +651,7 @@ function App(): React.JSX.Element {
       status: 'running',
       errorMessage: null,
       completedByStep: null,
+      runContext: null,
     });
 
     try {
@@ -740,6 +752,7 @@ function App(): React.JSX.Element {
       status: execution.status === 'Cancelling' ? 'cancelling' : 'running',
       errorMessage: null,
       completedByStep: null,
+      runContext: null,
     });
 
     try {
@@ -780,6 +793,7 @@ function App(): React.JSX.Element {
       status: 'loading',
       errorMessage: null,
       completedByStep: null,
+      runContext: null,
     });
 
     try {
@@ -903,6 +917,7 @@ function App(): React.JSX.Element {
         status: modalStatus,
         errorMessage: null,
         completedByStep: details.completedByStep || null,
+        runContext: details.context || null,
       });
     } catch (err) {
       console.error('Failed to load execution details:', err);
@@ -1329,6 +1344,7 @@ function App(): React.JSX.Element {
             status: 'idle',
             errorMessage: null,
             completedByStep: null,
+            runContext: null,
           });
         }}
         onCancel={() => cancelExecution(executionModal.executionId)}

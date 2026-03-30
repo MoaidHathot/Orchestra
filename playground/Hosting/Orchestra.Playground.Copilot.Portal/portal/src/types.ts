@@ -209,6 +209,21 @@ export interface ExecutionModalState {
   status: string;
   errorMessage: string | null;
   completedByStep: string | null;
+  runContext: RunContext | null;
+}
+
+export interface RunContext {
+  runId: string;
+  orchestrationName: string;
+  orchestrationVersion: string;
+  startedAt: string;
+  triggeredBy: string;
+  triggerId?: string | null;
+  parameters?: Record<string, string> | null;
+  variables?: Record<string, string> | null;
+  resolvedVariables?: Record<string, string> | null;
+  accessedEnvironmentVariables?: Record<string, string | null> | null;
+  dataDirectory?: string | null;
 }
 
 export interface StepEvent {

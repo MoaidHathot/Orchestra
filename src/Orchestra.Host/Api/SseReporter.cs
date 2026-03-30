@@ -440,6 +440,24 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("subagent-deselected", new { stepName });
 	}
 
+	public void ReportRunContext(RunContext context)
+	{
+		Write("run-context", new
+		{
+			runId = context.RunId,
+			orchestrationName = context.OrchestrationName,
+			orchestrationVersion = context.OrchestrationVersion,
+			startedAt = context.StartedAt.ToString("o"),
+			triggeredBy = context.TriggeredBy,
+			triggerId = context.TriggerId,
+			parameters = context.Parameters.Count > 0 ? context.Parameters : null,
+			variables = context.Variables.Count > 0 ? context.Variables : null,
+			resolvedVariables = context.ResolvedVariables.Count > 0 ? context.ResolvedVariables : null,
+			accessedEnvironmentVariables = context.AccessedEnvironmentVariables.Count > 0 ? context.AccessedEnvironmentVariables : null,
+			dataDirectory = context.DataDirectory,
+		});
+	}
+
 	/// <summary>
 	/// Reports the final orchestration result.
 	/// Not part of IOrchestrationReporter - called directly by the execution endpoint.

@@ -186,6 +186,24 @@ public class WebOrchestrationReporter : IOrchestrationReporter
 		Write("subagent-deselected", new { stepName });
 	}
 
+	public void ReportRunContext(RunContext context)
+	{
+		Write("run-context", new
+		{
+			runId = context.RunId,
+			orchestrationName = context.OrchestrationName,
+			orchestrationVersion = context.OrchestrationVersion,
+			startedAt = context.StartedAt.ToString("o"),
+			triggeredBy = context.TriggeredBy,
+			triggerId = context.TriggerId,
+			parameters = context.Parameters.Count > 0 ? context.Parameters : null,
+			variables = context.Variables.Count > 0 ? context.Variables : null,
+			resolvedVariables = context.ResolvedVariables.Count > 0 ? context.ResolvedVariables : null,
+			accessedEnvironmentVariables = context.AccessedEnvironmentVariables.Count > 0 ? context.AccessedEnvironmentVariables : null,
+			dataDirectory = context.DataDirectory,
+		});
+	}
+
 	public void ReportStepTrace(string stepName, StepExecutionTrace trace)
 	{
 		Write("step-trace", new

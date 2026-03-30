@@ -35,4 +35,7 @@ public interface IOrchestrationReporter
 	void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName);
 	void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error);
 	void ReportSubagentDeselected(string stepName);
+
+	// Run context
+	void ReportRunContext(RunContext context);
 }

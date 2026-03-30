@@ -734,6 +734,92 @@
     .streaming-content {
       color: var(--text-muted);
     }
+
+    /* Run Context Panel */
+    .run-context-panel {
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+    }
+    .run-context-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: background 0.15s;
+      user-select: none;
+    }
+    .run-context-header:hover {
+      background: var(--surface);
+    }
+    .run-context-body {
+      padding: 0 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .run-context-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 8px 16px;
+    }
+    .run-context-field {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .run-context-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+    }
+    .run-context-value {
+      font-size: 12px;
+      color: var(--text);
+    }
+    .run-context-mono {
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+    }
+    .run-context-table-section {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .run-context-table-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .run-context-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    .run-context-table th {
+      text-align: left;
+      padding: 4px 8px;
+      background: var(--surface);
+      color: var(--text-muted);
+      font-weight: 500;
+      font-size: 11px;
+      border-bottom: 1px solid var(--border);
+    }
+    .run-context-table td {
+      padding: 4px 8px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+      word-break: break-word;
+    }
+    .run-context-table tr:last-child td {
+      border-bottom: none;
+    }
+    .run-context-table tbody tr:hover {
+      background: var(--surface);
+    }
     
     /* Step status indicator pills */
     .step-status-badge {

@@ -185,6 +185,10 @@ public static class RunsApi
 			if (record is null)
 				return ProblemDetailsHelpers.NotFound($"Run '{runId}' not found.");
 
+			// Look up the folder path from the run index
+			var summaries = await runStore.GetRunSummariesAsync(orchestrationName);
+			var matchingIndex = summaries.FirstOrDefault(s => s.RunId == runId);
+
 			return Results.Json(new
 			{
 				runId = record.RunId,
@@ -199,6 +203,20 @@ public static class RunsApi
 				completedByStep = record.CompletedByStep,
 				parameters = record.Parameters,
 				finalContent = record.FinalContent,
+				context = record.Context is { } ctx ? new
+				{
+					runId = ctx.RunId,
+					orchestrationName = ctx.OrchestrationName,
+					orchestrationVersion = ctx.OrchestrationVersion,
+					startedAt = ctx.StartedAt.ToString("o"),
+					triggeredBy = ctx.TriggeredBy,
+					triggerId = ctx.TriggerId,
+					parameters = ctx.Parameters.Count > 0 ? ctx.Parameters : null,
+					variables = ctx.Variables.Count > 0 ? ctx.Variables : null,
+					resolvedVariables = ctx.ResolvedVariables.Count > 0 ? ctx.ResolvedVariables : null,
+					accessedEnvironmentVariables = ctx.AccessedEnvironmentVariables.Count > 0 ? ctx.AccessedEnvironmentVariables : null,
+					dataDirectory = matchingIndex?.FolderPath ?? ctx.DataDirectory,
+				} : null,
 				steps = record.StepRecords.Select(kv => new
 				{
 					name = kv.Key,

@@ -405,5 +405,6 @@ public class TriggerTypesTests
 		public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName) { }
 		public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error) { }
 		public void ReportSubagentDeselected(string stepName) { }
+		public void ReportRunContext(RunContext context) { }
 	}
 }

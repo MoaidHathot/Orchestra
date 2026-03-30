@@ -209,4 +209,13 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 	{
 		// Console reporter doesn't output trace details — the step output is already shown.
 	}
+
+	public void ReportRunContext(RunContext context)
+	{
+		Console.WriteLine($"  [context] Run {context.RunId} — {context.OrchestrationName} v{context.OrchestrationVersion}");
+		if (context.Parameters.Count > 0)
+			Console.WriteLine($"    Parameters: {string.Join(", ", context.Parameters.Select(p => $"{p.Key}={p.Value}"))}");
+		if (context.AccessedEnvironmentVariables.Count > 0)
+			Console.WriteLine($"    Env vars accessed: {string.Join(", ", context.AccessedEnvironmentVariables.Keys)}");
+	}
 }

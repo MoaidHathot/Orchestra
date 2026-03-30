@@ -58,4 +58,10 @@ public class OrchestrationRunRecord
 	/// The name of the step that triggered early completion via orchestra_complete.
 	/// </summary>
 	public string? CompletedByStep { get; init; }
+
+	/// <summary>
+	/// Runtime context of this run, including resolved variables, accessed env vars,
+	/// orchestration metadata, and data directory path.
+	/// </summary>
+	public RunContext? Context { get; init; }
 }

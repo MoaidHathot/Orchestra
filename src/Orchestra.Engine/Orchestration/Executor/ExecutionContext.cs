@@ -33,6 +33,12 @@ public class OrchestrationExecutionContext
 	/// </summary>
 	public RetryPolicy? DefaultRetryPolicy { get; init; }
 
+	/// <summary>
+	/// Tracks which template expressions (env vars, variables) were resolved during execution.
+	/// Thread-safe for concurrent step execution.
+	/// </summary>
+	public TemplateResolutionTracker ResolutionTracker { get; } = new();
+
 	private readonly ConcurrentDictionary<string, ExecutionResult> _results = new();
 	private readonly ConcurrentDictionary<string, string> _loopFeedback = new();
 

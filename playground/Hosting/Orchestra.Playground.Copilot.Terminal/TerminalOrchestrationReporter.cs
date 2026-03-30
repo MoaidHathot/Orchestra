@@ -313,6 +313,11 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 	{
 		// Don't log full traces to event list; they are available via the run record
 	}
+
+	public void ReportRunContext(RunContext context)
+	{
+		AddEvent(new ReporterEvent("run-context", $"Run {context.RunId} — {context.OrchestrationName} v{context.OrchestrationVersion}"));
+	}
 }
 
 /// <summary>

@@ -364,7 +364,26 @@ public partial class OrchestrationExecutor
 			FinalContent = finalContent,
 			CompletionReason = orchestrationResult.CompletionReason,
 			CompletedByStep = orchestrationResult.CompletedByStep,
+			Context = new RunContext
+			{
+				RunId = runId,
+				OrchestrationName = orchestration.Name,
+				OrchestrationVersion = orchestration.Version,
+				StartedAt = runStartedAt,
+				TriggeredBy = triggerId is not null ? "trigger" : "manual",
+				TriggerId = triggerId,
+				Parameters = effectiveParams,
+				Variables = orchestration.Variables,
+				ResolvedVariables = new Dictionary<string, string>(context.ResolutionTracker.ResolvedVariables),
+				AccessedEnvironmentVariables = new Dictionary<string, string?>(context.ResolutionTracker.AccessedEnvironmentVariables),
+			},
 		};
+
+		// Report context for live viewers (SSE) before persisting
+		if (runRecord.Context is not null)
+		{
+			_reporter.ReportRunContext(runRecord.Context);
+		}
 
 		try
 		{

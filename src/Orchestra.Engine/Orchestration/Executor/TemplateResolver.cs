@@ -31,7 +31,7 @@ public static partial class TemplateResolver
 		string[] dependsOn,
 		OrchestrationStep currentStep)
 	{
-		return Resolve(template, parameters, context, dependsOn, currentStep, resolvingVars: null);
+		return Resolve(template, parameters, context, dependsOn, currentStep, resolvingVars: null, tracker: context.ResolutionTracker);
 	}
 
 	/// <summary>
@@ -44,7 +44,8 @@ public static partial class TemplateResolver
 		OrchestrationExecutionContext context,
 		string[] dependsOn,
 		OrchestrationStep currentStep,
-		HashSet<string>? resolvingVars)
+		HashSet<string>? resolvingVars,
+		TemplateResolutionTracker? tracker = null)
 	{
 		return TemplatePattern().Replace(template, match =>
 		{
@@ -75,7 +76,7 @@ public static partial class TemplateResolver
 			if (expr.StartsWith("vars.", StringComparison.OrdinalIgnoreCase))
 			{
 				var varName = expr["vars.".Length..];
-				return ResolveVariable(varName, parameters, context, dependsOn, currentStep, resolvingVars, match.Value);
+				return ResolveVariable(varName, parameters, context, dependsOn, currentStep, resolvingVars, match.Value, tracker);
 			}
 
 			// {{env.VAR_NAME}} — environment variable
@@ -83,6 +84,7 @@ public static partial class TemplateResolver
 			{
 				var envVarName = expr["env.".Length..];
 				var envValue = Environment.GetEnvironmentVariable(envVarName);
+				tracker?.TrackEnvironmentVariable(envVarName, envValue);
 				return envValue ?? match.Value;
 			}
 
@@ -168,7 +170,8 @@ public static partial class TemplateResolver
 		string[] dependsOn,
 		OrchestrationStep currentStep,
 		HashSet<string>? resolvingVars,
-		string originalMatch)
+		string originalMatch,
+		TemplateResolutionTracker? tracker = null)
 	{
 		if (!context.Variables.TryGetValue(varName, out var rawValue))
 			return originalMatch;
@@ -183,10 +186,16 @@ public static partial class TemplateResolver
 		stack.Add(varName);
 
 		// Recursively resolve any template expressions within the variable value
-		var resolved = Resolve(rawValue, parameters, context, dependsOn, currentStep, stack);
+		var resolved = Resolve(rawValue, parameters, context, dependsOn, currentStep, stack, tracker);
 
 		// Pop from resolution stack
 		stack.Remove(varName);
+
+		// Track the resolved variable if it differs from the raw value
+		if (tracker is not null && resolved != rawValue)
+		{
+			tracker.TrackResolvedVariable(varName, resolved);
+		}
 
 		return resolved;
 	}
