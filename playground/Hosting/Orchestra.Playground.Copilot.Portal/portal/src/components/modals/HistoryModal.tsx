@@ -20,9 +20,15 @@ interface HistoryExecution {
   parameters?: Record<string, unknown>;
 }
 
-interface HistoryResponse {
+interface PaginatedHistoryResponse {
+  total: number;
+  offset: number;
+  limit: number;
+  count: number;
   runs: HistoryExecution[];
 }
+
+const PAGE_SIZE = 100;
 
 type StatusFilter = 'all' | 'Succeeded' | 'Failed' | 'Cancelled' | 'Running';
 
@@ -38,6 +44,8 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
   const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
   const [history, setHistory] = useState<HistoryExecution[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [totalExecutions, setTotalExecutions] = useState(0);
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
@@ -46,11 +54,27 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
   useEffect(() => {
     if (open) {
       setLoading(true);
-      api.get<HistoryResponse>('/api/history?limit=100')
-        .then(data => setHistory(data.runs || []))
+      api.get<PaginatedHistoryResponse>(`/api/history/all?offset=0&limit=${PAGE_SIZE}`)
+        .then(data => {
+          setHistory(data.runs || []);
+          setTotalExecutions(data.total ?? 0);
+        })
         .finally(() => setLoading(false));
     }
   }, [open]);
+
+  const loadMore = () => {
+    setLoadingMore(true);
+    const nextOffset = history.length;
+    api.get<PaginatedHistoryResponse>(`/api/history/all?offset=${nextOffset}&limit=${PAGE_SIZE}`)
+      .then(data => {
+        setHistory(prev => [...prev, ...(data.runs || [])]);
+        setTotalExecutions(data.total ?? totalExecutions);
+      })
+      .finally(() => setLoadingMore(false));
+  };
+
+  const hasMore = history.length < totalExecutions;
 
   // Reset filters when modal opens
   useEffect(() => {
@@ -221,12 +245,23 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
                   </div>
                 </div>
               ))}
+              {hasMore && !searchQuery && statusFilter === 'all' && (
+                <button
+                  className="btn btn-sm"
+                  onClick={loadMore}
+                  disabled={loadingMore}
+                  style={{ alignSelf: 'center', marginTop: '8px' }}
+                >
+                  {loadingMore ? 'Loading...' : `Load More (${history.length} of ${totalExecutions})`}
+                </button>
+              )}
             </div>
           )}
         </div>
         <div className="modal-footer">
           <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginRight: 'auto' }}>
-            Showing {filteredHistory.length} of {history.length} executions
+            Showing {filteredHistory.length} of {totalExecutions} executions
+            {history.length < totalExecutions && ` (${history.length} loaded)`}
           </span>
           <button className="btn" onClick={onClose}>Close</button>
         </div>

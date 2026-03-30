@@ -783,13 +783,25 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 	}
 
 	[Fact]
-	public async Task Contract_GetHistory_WithHigherLimit_ReturnsJson()
+	public async Task Contract_GetHistoryAll_ReturnsPaginatedJson()
 	{
-		// HistoryModal.tsx uses limit=100
-		var response = await _client.GetAsync("/api/history?limit=100");
+		// HistoryModal.tsx uses /api/history/all with pagination
+		var response = await _client.GetAsync("/api/history/all?offset=0&limit=100");
 
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
-		await AssertIsJsonResponse(response, "GET /api/history?limit=100");
+		await AssertIsJsonResponse(response, "GET /api/history/all?offset=0&limit=100");
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		result.TryGetProperty("runs", out _).Should().BeTrue(
+			"Response should have 'runs' array for paginated execution list");
+		result.TryGetProperty("total", out _).Should().BeTrue(
+			"Response should have 'total' count for pagination");
+		result.TryGetProperty("offset", out _).Should().BeTrue(
+			"Response should have 'offset' for pagination");
+		result.TryGetProperty("limit", out _).Should().BeTrue(
+			"Response should have 'limit' for pagination");
+		result.TryGetProperty("count", out _).Should().BeTrue(
+			"Response should have 'count' for number of items returned");
 	}
 
 	#endregion
@@ -995,6 +1007,7 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 	[InlineData("POST", "/api/cancel/{executionId}")]
 	[InlineData("GET", "/api/execution/{executionId}/attach")]
 	[InlineData("GET", "/api/history?limit=15")]
+	[InlineData("GET", "/api/history/all?offset=0&limit=100")]
 	[InlineData("GET", "/api/history/{name}/{runId}")]
 	[InlineData("DELETE", "/api/history/{name}/{runId}")]
 	[InlineData("GET", "/api/active")]
