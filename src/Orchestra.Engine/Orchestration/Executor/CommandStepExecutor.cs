@@ -40,25 +40,25 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 		try
 		{
 			// Resolve template expressions in command
-			var command = TemplateResolver.Resolve(commandStep.Command, context.Parameters, context, step.DependsOn);
+			var command = TemplateResolver.Resolve(commandStep.Command, context.Parameters, context, step.DependsOn, step);
 
 			// Resolve template expressions in arguments
 			var arguments = commandStep.Arguments
-				.Select(arg => TemplateResolver.Resolve(arg, context.Parameters, context, step.DependsOn))
+				.Select(arg => TemplateResolver.Resolve(arg, context.Parameters, context, step.DependsOn, step))
 				.ToArray();
 
 			// Resolve template expressions in working directory
 			string? workingDirectory = null;
 			if (commandStep.WorkingDirectory is not null)
 			{
-				workingDirectory = TemplateResolver.Resolve(commandStep.WorkingDirectory, context.Parameters, context, step.DependsOn);
+				workingDirectory = TemplateResolver.Resolve(commandStep.WorkingDirectory, context.Parameters, context, step.DependsOn, step);
 			}
 
 			// Resolve template expressions in stdin content
 			string? resolvedStdin = null;
 			if (commandStep.Stdin is not null)
 			{
-				resolvedStdin = TemplateResolver.Resolve(commandStep.Stdin, context.Parameters, context, step.DependsOn);
+				resolvedStdin = TemplateResolver.Resolve(commandStep.Stdin, context.Parameters, context, step.DependsOn, step);
 			}
 
 			// Build process start info.
@@ -111,7 +111,7 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			// Set environment variables (resolve templates in values)
 			foreach (var (key, value) in commandStep.Environment)
 			{
-				var resolvedValue = TemplateResolver.Resolve(value, context.Parameters, context, step.DependsOn);
+				var resolvedValue = TemplateResolver.Resolve(value, context.Parameters, context, step.DependsOn, step);
 				startInfo.Environment[key] = resolvedValue;
 			}
 

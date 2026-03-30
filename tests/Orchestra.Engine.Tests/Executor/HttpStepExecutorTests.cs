@@ -8,6 +8,7 @@ namespace Orchestra.Engine.Tests.Executor;
 
 public class HttpStepExecutorTests
 {
+	private static readonly OrchestrationInfo s_defaultInfo = new("test-orchestration", "1.0.0", "run123", DateTimeOffset.UtcNow);
 	private readonly IOrchestrationReporter _reporter = Substitute.For<IOrchestrationReporter>();
 	private readonly ILogger<HttpStepExecutor> _logger = NullLoggerFactory.Instance.CreateLogger<HttpStepExecutor>();
 
@@ -54,7 +55,7 @@ public class HttpStepExecutorTests
 		});
 
 		var step = CreateHttpStep();
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -86,7 +87,7 @@ public class HttpStepExecutorTests
 		var step = CreateHttpStep(
 			method: "POST",
 			body: "{\"name\":\"test\"}");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -117,7 +118,7 @@ public class HttpStepExecutorTests
 		});
 
 		var step = CreateHttpStep();
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -137,7 +138,7 @@ public class HttpStepExecutorTests
 		});
 
 		var step = CreateHttpStep();
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -181,6 +182,7 @@ public class HttpStepExecutorTests
 
 		var context = new OrchestrationExecutionContext
 		{
+			OrchestrationInfo = s_defaultInfo,
 			Parameters = new Dictionary<string, string>
 			{
 				["host"] = "api.example.com",
@@ -217,7 +219,7 @@ public class HttpStepExecutorTests
 			Model = "claude-opus-4.5"
 		};
 
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var act = () => executor.ExecuteAsync(wrongStep, context);
@@ -242,7 +244,7 @@ public class HttpStepExecutorTests
 		});
 
 		var step = CreateHttpStep();
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		using var cts = new CancellationTokenSource();
 		cts.Cancel();
 

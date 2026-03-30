@@ -7,6 +7,19 @@ public class OrchestrationExecutionContext
 	public Dictionary<string, string> Parameters { get; init; } = [];
 
 	/// <summary>
+	/// Runtime metadata for the orchestration execution, providing built-in variables
+	/// accessible via <c>{{orchestration.name}}</c>, <c>{{orchestration.runId}}</c>, etc.
+	/// </summary>
+	public required OrchestrationInfo OrchestrationInfo { get; init; }
+
+	/// <summary>
+	/// User-defined variables declared in the orchestration JSON.
+	/// Accessible via <c>{{vars.name}}</c> template expressions.
+	/// Values may contain template expressions that are resolved lazily.
+	/// </summary>
+	public Dictionary<string, string> Variables { get; init; } = [];
+
+	/// <summary>
 	/// Default system prompt mode from the orchestration.
 	/// Steps can override this with their own SystemPromptMode.
 	/// When null, the SDK's default behavior is used.

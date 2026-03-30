@@ -50,4 +50,11 @@ public class Orchestration
 	/// Default is 3600 seconds (1 hour). Set to null or 0 to disable.
 	/// </summary>
 	public int? TimeoutSeconds { get; init; } = 3600;
+
+	/// <summary>
+	/// User-defined variables available to all steps via <c>{{vars.name}}</c> template expressions.
+	/// Variable values may themselves contain template expressions (e.g., <c>{{param.project}}</c>)
+	/// which are resolved lazily when the variable is first referenced.
+	/// </summary>
+	public Dictionary<string, string> Variables { get; init; } = [];
 }

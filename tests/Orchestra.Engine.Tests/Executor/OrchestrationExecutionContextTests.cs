@@ -4,13 +4,15 @@ namespace Orchestra.Engine.Tests.Executor;
 
 public class OrchestrationExecutionContextTests
 {
+	private static readonly OrchestrationInfo s_defaultInfo = new("test-orchestration", "1.0.0", "run123", DateTimeOffset.UtcNow);
+
 	#region Result Storage and Retrieval
 
 	[Fact]
 	public void AddResult_StoresResult()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		var result = ExecutionResult.Succeeded("test content");
 
 		// Act
@@ -25,7 +27,7 @@ public class OrchestrationExecutionContextTests
 	public void GetResult_WhenExists_ReturnsResult()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		var result = ExecutionResult.Succeeded("test content");
 		context.AddResult("step1", result);
 
@@ -40,7 +42,7 @@ public class OrchestrationExecutionContextTests
 	public void GetResult_WhenNotExists_ThrowsInvalidOperationException()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var act = () => context.GetResult("nonexistent");
@@ -54,7 +56,7 @@ public class OrchestrationExecutionContextTests
 	public void AddResult_OverwritesExistingResult()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		var result1 = ExecutionResult.Succeeded("first");
 		var result2 = ExecutionResult.Succeeded("second");
 
@@ -70,7 +72,7 @@ public class OrchestrationExecutionContextTests
 	public void ClearResult_RemovesResult()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("step1", ExecutionResult.Succeeded("test"));
 
 		// Act
@@ -85,7 +87,7 @@ public class OrchestrationExecutionContextTests
 	public void ClearResult_WhenNotExists_DoesNotThrow()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var act = () => context.ClearResult("nonexistent");
@@ -102,7 +104,7 @@ public class OrchestrationExecutionContextTests
 	public void HasAnyDependencyFailed_WhenAllSucceeded_ReturnsFalse()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("result1"));
 		context.AddResult("dep2", ExecutionResult.Succeeded("result2"));
 
@@ -117,7 +119,7 @@ public class OrchestrationExecutionContextTests
 	public void HasAnyDependencyFailed_WhenOneFailed_ReturnsTrue()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("result1"));
 		context.AddResult("dep2", ExecutionResult.Failed("error"));
 
@@ -132,7 +134,7 @@ public class OrchestrationExecutionContextTests
 	public void HasAnyDependencyFailed_WhenOneSkipped_ReturnsTrue()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("result1"));
 		context.AddResult("dep2", ExecutionResult.Skipped("reason"));
 
@@ -147,7 +149,7 @@ public class OrchestrationExecutionContextTests
 	public void HasAnyDependencyFailed_WhenNoDependencies_ReturnsFalse()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = context.HasAnyDependencyFailed([]);
@@ -160,7 +162,7 @@ public class OrchestrationExecutionContextTests
 	public void HasAnyDependencyFailed_WhenDependencyNotYetComplete_ReturnsFalse()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("result1"));
 		// dep2 not added yet
 
@@ -175,7 +177,7 @@ public class OrchestrationExecutionContextTests
 	public void HasAnyDependencyFailed_WhenOneCancelled_ReturnsTrue()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("result1"));
 		context.AddResult("dep2", ExecutionResult.Cancelled());
 
@@ -194,7 +196,7 @@ public class OrchestrationExecutionContextTests
 	public void GetDependencyOutputs_WhenNoDependencies_ReturnsEmptyDictionary()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = context.GetDependencyOutputs([]);
@@ -207,7 +209,7 @@ public class OrchestrationExecutionContextTests
 	public void GetDependencyOutputs_SingleDependency_ReturnsDictionaryWithContent()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("output content"));
 
 		// Act
@@ -222,7 +224,7 @@ public class OrchestrationExecutionContextTests
 	public void GetDependencyOutputs_MultipleDependencies_ReturnsDictionaryWithAllOutputs()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("output1"));
 		context.AddResult("dep2", ExecutionResult.Succeeded("output2"));
 
@@ -241,7 +243,7 @@ public class OrchestrationExecutionContextTests
 	public void GetDependencyOutputs_SkipsFailedDependencies()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("output1"));
 		context.AddResult("dep2", ExecutionResult.Failed("error"));
 
@@ -258,7 +260,7 @@ public class OrchestrationExecutionContextTests
 	public void GetDependencyOutputs_WhenAllFailed_ReturnsEmptyDictionary()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Failed("error1"));
 		context.AddResult("dep2", ExecutionResult.Skipped("reason"));
 
@@ -277,7 +279,7 @@ public class OrchestrationExecutionContextTests
 	public void GetRawDependencyOutputs_ReturnsRawContentWhenAvailable()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		var result = ExecutionResult.Succeeded("processed", rawContent: "raw content");
 		context.AddResult("dep1", result);
 
@@ -293,7 +295,7 @@ public class OrchestrationExecutionContextTests
 	public void GetRawDependencyOutputs_FallsBackToContentWhenNoRaw()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		var result = ExecutionResult.Succeeded("processed content");
 		context.AddResult("dep1", result);
 
@@ -309,7 +311,7 @@ public class OrchestrationExecutionContextTests
 	public void GetRawDependencyOutputs_SkipsFailedDependencies()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("dep1", ExecutionResult.Succeeded("output1"));
 		context.AddResult("dep2", ExecutionResult.Failed("error"));
 
@@ -329,7 +331,7 @@ public class OrchestrationExecutionContextTests
 	public void SetLoopFeedback_StoresFeedback()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		context.SetLoopFeedback("step1", "feedback content");
@@ -343,7 +345,7 @@ public class OrchestrationExecutionContextTests
 	public void ConsumeLoopFeedback_WhenNotSet_ReturnsNull()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var feedback = context.ConsumeLoopFeedback("step1");
@@ -356,7 +358,7 @@ public class OrchestrationExecutionContextTests
 	public void ConsumeLoopFeedback_RemovesFeedbackAfterConsumption()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.SetLoopFeedback("step1", "feedback content");
 
 		// Act
@@ -372,7 +374,7 @@ public class OrchestrationExecutionContextTests
 	public void SetLoopFeedback_OverwritesPreviousFeedback()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		context.SetLoopFeedback("step1", "first feedback");
@@ -397,7 +399,7 @@ public class OrchestrationExecutionContextTests
 			["param2"] = "value2"
 		};
 
-		var context = new OrchestrationExecutionContext { Parameters = parameters };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = parameters };
 
 		// Assert
 		context.Parameters.Should().ContainKey("param1");
@@ -412,7 +414,7 @@ public class OrchestrationExecutionContextTests
 	public void DefaultSystemPromptMode_WhenNotSet_IsNull()
 	{
 		// Arrange
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Assert
 		context.DefaultSystemPromptMode.Should().BeNull();
@@ -424,6 +426,7 @@ public class OrchestrationExecutionContextTests
 		// Arrange
 		var context = new OrchestrationExecutionContext
 		{
+			OrchestrationInfo = s_defaultInfo,
 			Parameters = new Dictionary<string, string>(),
 			DefaultSystemPromptMode = SystemPromptMode.Replace
 		};
@@ -438,6 +441,7 @@ public class OrchestrationExecutionContextTests
 		// Arrange
 		var context = new OrchestrationExecutionContext
 		{
+			OrchestrationInfo = s_defaultInfo,
 			Parameters = new Dictionary<string, string>(),
 			DefaultSystemPromptMode = SystemPromptMode.Append
 		};

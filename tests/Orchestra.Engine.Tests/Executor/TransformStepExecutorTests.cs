@@ -6,6 +6,7 @@ namespace Orchestra.Engine.Tests.Executor;
 
 public class TransformStepExecutorTests
 {
+	private static readonly OrchestrationInfo s_defaultInfo = new("test-orchestration", "1.0.0", "run123", DateTimeOffset.UtcNow);
 	private readonly ILogger<TransformStepExecutor> _logger = NullLoggerFactory.Instance.CreateLogger<TransformStepExecutor>();
 
 	private TransformStepExecutor CreateExecutor() => new(_logger);
@@ -33,7 +34,7 @@ public class TransformStepExecutorTests
 		// Arrange
 		var executor = CreateExecutor();
 		var step = CreateTransformStep(template: "Plain text content");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -58,6 +59,7 @@ public class TransformStepExecutorTests
 
 		var context = new OrchestrationExecutionContext
 		{
+			OrchestrationInfo = s_defaultInfo,
 			Parameters = new Dictionary<string, string>
 			{
 				["name"] = "Alice",
@@ -86,7 +88,7 @@ public class TransformStepExecutorTests
 			template: "Summary: {{step1.output}}",
 			dependsOn: ["step1"]);
 
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("step1", ExecutionResult.Succeeded("Generated analysis report"));
 
 		// Act
@@ -113,6 +115,7 @@ public class TransformStepExecutorTests
 
 		var context = new OrchestrationExecutionContext
 		{
+			OrchestrationInfo = s_defaultInfo,
 			Parameters = new Dictionary<string, string>
 			{
 				["recipient"] = "Bob",
@@ -150,7 +153,7 @@ public class TransformStepExecutorTests
 			Model = "claude-opus-4.5"
 		};
 
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var act = () => executor.ExecuteAsync(wrongStep, context);
@@ -158,6 +161,162 @@ public class TransformStepExecutorTests
 		// Assert
 		await act.Should().ThrowAsync<InvalidOperationException>()
 			.WithMessage("*TransformStepExecutor*PromptOrchestrationStep*TransformOrchestrationStep*");
+	}
+
+	#endregion
+
+	#region Orchestration Namespace Resolution
+
+	[Fact]
+	public async Task ExecuteAsync_OrchestrationTemplate_ResolvesOrchestrationMetadata()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var startedAt = new DateTimeOffset(2025, 6, 15, 10, 30, 0, TimeSpan.Zero);
+		var info = new OrchestrationInfo("my-pipeline", "2.0.0", "run-abc-123", startedAt);
+
+		var step = CreateTransformStep(
+			template: "Pipeline: {{orchestration.name}} v{{orchestration.version}}, Run: {{orchestration.runId}}, Started: {{orchestration.startedAt}}");
+
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = info,
+			Parameters = new Dictionary<string, string>()
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be($"Pipeline: my-pipeline v2.0.0, Run: run-abc-123, Started: {startedAt:o}");
+	}
+
+	#endregion
+
+	#region Step Namespace Resolution
+
+	[Fact]
+	public async Task ExecuteAsync_StepTemplate_ResolvesStepMetadata()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var step = CreateTransformStep(
+			name: "my-transform-step",
+			template: "Step: {{step.name}}, Type: {{step.type}}");
+
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be("Step: my-transform-step, Type: Transform");
+	}
+
+	#endregion
+
+	#region Variables Namespace Resolution
+
+	[Fact]
+	public async Task ExecuteAsync_VarsTemplate_ResolvesVariables()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var step = CreateTransformStep(
+			template: "Base URL: {{vars.baseUrl}}, Env: {{vars.environment}}");
+
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+			Variables = new Dictionary<string, string>
+			{
+				["baseUrl"] = "https://api.example.com",
+				["environment"] = "production"
+			}
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be("Base URL: https://api.example.com, Env: production");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_VarsWithRecursiveExpansion_ResolvesParamInVariable()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var step = CreateTransformStep(
+			template: "Output: {{vars.outputDir}}",
+			parameters: ["project"]);
+
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>
+			{
+				["project"] = "myapp"
+			},
+			Variables = new Dictionary<string, string>
+			{
+				["outputDir"] = "/reports/{{param.project}}/latest"
+			}
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be("Output: /reports/myapp/latest");
+	}
+
+	#endregion
+
+	#region All Namespaces Combined
+
+	[Fact]
+	public async Task ExecuteAsync_AllTemplateNamespaces_ResolvesEverything()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var info = new OrchestrationInfo("full-test", "3.0.0", "run-xyz", DateTimeOffset.UtcNow);
+
+		var step = CreateTransformStep(
+			name: "combined-step",
+			template: "Orch={{orchestration.name}}, Step={{step.name}}, Var={{vars.region}}, Param={{param.userId}}, Dep={{dep1.output}}",
+			dependsOn: ["dep1"],
+			parameters: ["userId"]);
+
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = info,
+			Parameters = new Dictionary<string, string>
+			{
+				["userId"] = "user-42"
+			},
+			Variables = new Dictionary<string, string>
+			{
+				["region"] = "us-west-2"
+			}
+		};
+		context.AddResult("dep1", ExecutionResult.Succeeded("dependency-output-data"));
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be("Orch=full-test, Step=combined-step, Var=us-west-2, Param=user-42, Dep=dependency-output-data");
 	}
 
 	#endregion
@@ -170,7 +329,7 @@ public class TransformStepExecutorTests
 		// Arrange
 		var executor = CreateExecutor();
 		var step = CreateTransformStep(template: "some content");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		using var cts = new CancellationTokenSource();
 		cts.Cancel();
 

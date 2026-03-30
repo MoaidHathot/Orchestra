@@ -41,13 +41,13 @@ public sealed partial class HttpStepExecutor : IStepExecutor
 		try
 		{
 			// Resolve template expressions in URL
-			var url = TemplateResolver.Resolve(httpStep.Url, context.Parameters, context, step.DependsOn);
+			var url = TemplateResolver.Resolve(httpStep.Url, context.Parameters, context, step.DependsOn, step);
 
 			// Resolve template expressions in body
 			string? body = null;
 			if (httpStep.Body is not null)
 			{
-				body = TemplateResolver.Resolve(httpStep.Body, context.Parameters, context, step.DependsOn);
+				body = TemplateResolver.Resolve(httpStep.Body, context.Parameters, context, step.DependsOn, step);
 			}
 
 			// Build the HTTP request
@@ -57,7 +57,7 @@ public sealed partial class HttpStepExecutor : IStepExecutor
 			// Resolve template expressions in headers
 			foreach (var (key, value) in httpStep.Headers)
 			{
-				var resolvedValue = TemplateResolver.Resolve(value, context.Parameters, context, step.DependsOn);
+				var resolvedValue = TemplateResolver.Resolve(value, context.Parameters, context, step.DependsOn, step);
 				request.Headers.TryAddWithoutValidation(key, resolvedValue);
 			}
 

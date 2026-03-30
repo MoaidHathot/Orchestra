@@ -7,6 +7,7 @@ namespace Orchestra.Engine.Tests.Executor;
 
 public class PromptExecutorEngineToolTests
 {
+	private static readonly OrchestrationInfo s_defaultInfo = new("test-orchestration", "1.0.0", "run123", DateTimeOffset.UtcNow);
 	private readonly ILogger<PromptExecutor> _logger = Substitute.For<ILogger<PromptExecutor>>();
 	private readonly IPromptFormatter _formatter = DefaultPromptFormatter.Instance;
 
@@ -24,7 +25,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -48,7 +49,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		await executor.ExecuteAsync(step, context);
@@ -66,7 +67,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -90,7 +91,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -113,7 +114,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("consumer", dependsOn: ["producer"]);
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 		context.AddResult("producer", ExecutionResult.Succeeded("Producer output"));
 
 		// Act
@@ -134,7 +135,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, emptyRegistry);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -152,7 +153,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		await executor.ExecuteAsync(step, context);
@@ -176,7 +177,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -200,7 +201,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		await executor.ExecuteAsync(step, context);
@@ -243,7 +244,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result1 = await executor.ExecuteAsync(step, context);
@@ -268,7 +269,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -292,7 +293,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		await executor.ExecuteAsync(step, context);
@@ -315,7 +316,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -340,7 +341,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -366,7 +367,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("test-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -389,7 +390,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("checker-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -413,7 +414,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("error-detector");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -432,7 +433,7 @@ public class PromptExecutorEngineToolTests
 		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
 
 		var step = TestOrchestrations.CreatePromptStep("normal-step");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);

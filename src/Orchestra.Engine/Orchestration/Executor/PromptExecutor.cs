@@ -34,7 +34,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 		// Get the raw user prompt before input handler processing
 		var userPromptRaw = InjectParameters(step.UserPrompt, step.Parameters, context.Parameters);
-		userPromptRaw = TemplateResolver.Resolve(userPromptRaw, context.Parameters, context, step.DependsOn);
+		userPromptRaw = TemplateResolver.Resolve(userPromptRaw, context.Parameters, context, step.DependsOn, step);
 
 		// Create event processor to handle agent events and collect trace data
 		var eventProcessor = new AgentEventProcessor(_reporter, step.Name);
@@ -213,7 +213,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Resolve {{stepName.output}} and {{stepName.rawOutput}} template expressions inline.
 		// This uses the same TemplateResolver as Command/Http/Transform steps, with a fallback
 		// to TryGetResult for steps not listed in DependsOn (e.g. transitive dependencies).
-		userPrompt = TemplateResolver.Resolve(userPrompt, context.Parameters, context, step.DependsOn);
+		userPrompt = TemplateResolver.Resolve(userPrompt, context.Parameters, context, step.DependsOn, step);
 
 		var dependencyOutputsDict = context.GetDependencyOutputs(step.DependsOn);
 		var dependencyOutputs = _formatter.FormatDependencyOutputs(dependencyOutputsDict);

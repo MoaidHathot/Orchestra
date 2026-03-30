@@ -7,6 +7,7 @@ namespace Orchestra.Engine.Tests.Executor;
 
 public class CommandStepExecutorTests
 {
+	private static readonly OrchestrationInfo s_defaultInfo = new("test-orchestration", "1.0.0", "run123", DateTimeOffset.UtcNow);
 	private readonly IOrchestrationReporter _reporter = Substitute.For<IOrchestrationReporter>();
 	private readonly ILogger<CommandStepExecutor> _logger = NullLoggerFactory.Instance.CreateLogger<CommandStepExecutor>();
 
@@ -41,7 +42,7 @@ public class CommandStepExecutorTests
 		// Arrange
 		var executor = CreateExecutor();
 		var step = CreateCommandStep(command: "dotnet", arguments: ["--version"]);
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -59,7 +60,7 @@ public class CommandStepExecutorTests
 		var step = CreateCommandStep(
 			command: "cmd",
 			arguments: ["/c", "echo Hello Orchestra"]);
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -79,7 +80,7 @@ public class CommandStepExecutorTests
 		// Arrange
 		var executor = CreateExecutor();
 		var step = CreateCommandStep(command: "nonexistent-binary-xyz-123");
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -100,7 +101,7 @@ public class CommandStepExecutorTests
 		var step = CreateCommandStep(
 			command: "cmd",
 			arguments: ["/c", "exit 1"]);
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -126,6 +127,7 @@ public class CommandStepExecutorTests
 
 		var context = new OrchestrationExecutionContext
 		{
+			OrchestrationInfo = s_defaultInfo,
 			Parameters = new Dictionary<string, string>
 			{
 				["message"] = "resolved-value"
@@ -150,7 +152,7 @@ public class CommandStepExecutorTests
 			arguments: ["/c", "echo {{step1.output}}"],
 			dependsOn: ["step1"]);
 
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		context.AddResult("step1", ExecutionResult.Succeeded("dep-output"));
 
 		// Act
@@ -177,7 +179,7 @@ public class CommandStepExecutorTests
 			{
 				["ORCHESTRA_TEST_VAR"] = "env-value-123"
 			});
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -203,6 +205,7 @@ public class CommandStepExecutorTests
 
 		var context = new OrchestrationExecutionContext
 		{
+			OrchestrationInfo = s_defaultInfo,
 			Parameters = new Dictionary<string, string>
 			{
 				["envValue"] = "dynamic-env-resolved"
@@ -230,7 +233,7 @@ public class CommandStepExecutorTests
 			command: "cmd",
 			arguments: ["/c", "echo stdout-data && echo stderr-data 1>&2"],
 			includeStdErr: true);
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -250,7 +253,7 @@ public class CommandStepExecutorTests
 			command: "cmd",
 			arguments: ["/c", "echo stdout-only && echo hidden-stderr 1>&2"],
 			includeStdErr: false);
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
@@ -280,7 +283,7 @@ public class CommandStepExecutorTests
 			Model = "claude-opus-4.5"
 		};
 
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var act = () => executor.ExecuteAsync(wrongStep, context);
@@ -303,7 +306,7 @@ public class CommandStepExecutorTests
 		var step = CreateCommandStep(
 			command: "cmd",
 			arguments: ["/c", "ping -n 30 127.0.0.1"]);
-		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>() };
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
 		// Act

@@ -38,7 +38,8 @@ public sealed partial class TransformStepExecutor : IStepExecutor
 				transformStep.Template,
 				context.Parameters,
 				context,
-				step.DependsOn);
+				step.DependsOn,
+				step);
 
 			LogTransformSuccess(step.Name, output.Length);
 

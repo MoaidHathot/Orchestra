@@ -1,0 +1,40 @@
+{
+  "name": "variables-and-metadata",
+  "description": "Demonstrates orchestration-level variables and built-in metadata template expressions. Variables let you define reusable values (with recursive expansion) that any step can reference via {{vars.name}}. Steps can also access orchestration metadata ({{orchestration.name}}, {{orchestration.runId}}, etc.) and their own step metadata ({{step.name}}, {{step.type}}).",
+  "version": "1.0.0",
+  "variables": {
+    "baseUrl": "https://api.example.com/v2",
+    "outputDir": "/reports/{{param.project}}",
+    "logPrefix": "[{{orchestration.name}}:{{orchestration.runId}}]"
+  },
+  "steps": [
+    {
+      "name": "fetch-data",
+      "type": "Http",
+      "dependsOn": [],
+      "method": "GET",
+      "url": "{{vars.baseUrl}}/projects/{{param.project}}/summary",
+      "headers": {
+        "Accept": "application/json",
+        "X-Request-Source": "{{orchestration.name}}/{{orchestration.version}}"
+      },
+      "parameters": ["project"]
+    },
+    {
+      "name": "generate-report",
+      "type": "Prompt",
+      "dependsOn": ["fetch-data"],
+      "systemPrompt": "You are a project reporting assistant. Generate clear, actionable reports from raw API data. Include the run metadata for traceability.",
+      "userPrompt": "{{vars.logPrefix}} Generate a project status report for {{param.project}}.\n\nStep executing: {{step.name}} ({{step.type}})\nOrchestration: {{orchestration.name}} v{{orchestration.version}}\nRun ID: {{orchestration.runId}}\nStarted at: {{orchestration.startedAt}}\n\nAPI Response:\n{{fetch-data.output}}\n\nSave the report to: {{vars.outputDir}}/status-report.md",
+      "model": "claude-opus-4.5",
+      "parameters": ["project"]
+    },
+    {
+      "name": "format-output",
+      "type": "Transform",
+      "dependsOn": ["generate-report"],
+      "template": "# Report: {{param.project}}\n\n**Orchestration:** {{orchestration.name}} v{{orchestration.version}}\n**Run ID:** {{orchestration.runId}}\n**Output Directory:** {{vars.outputDir}}\n\n---\n\n{{generate-report.output}}",
+      "parameters": ["project"]
+    }
+  ]
+}

@@ -918,6 +918,57 @@ public class OrchestrationParserTests
 
 	#endregion
 
+	#region Variables Parsing
+
+	[Fact]
+	public void ParseOrchestration_WithVariables_ParsesVariablesDictionary()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "vars-test",
+				"description": "Test with variables",
+				"variables": {
+					"outputDir": "/reports/daily",
+					"logLevel": "debug",
+					"greeting": "Hello from {{param.user}}"
+				},
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Variables.Should().HaveCount(3);
+		orchestration.Variables["outputDir"].Should().Be("/reports/daily");
+		orchestration.Variables["logLevel"].Should().Be("debug");
+		orchestration.Variables["greeting"].Should().Be("Hello from {{param.user}}");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithoutVariables_DefaultsToEmptyDictionary()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "no-vars",
+				"description": "Test without variables",
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Variables.Should().NotBeNull();
+		orchestration.Variables.Should().BeEmpty();
+	}
+
+	#endregion
+
 	#region Error Handling
 
 	[Fact]

@@ -106,6 +106,12 @@ public partial class OrchestrationExecutor
 		var context = new OrchestrationExecutionContext
 		{
 			Parameters = effectiveParams,
+			OrchestrationInfo = new OrchestrationInfo(
+				orchestration.Name,
+				orchestration.Version,
+				runId,
+				runStartedAt),
+			Variables = orchestration.Variables,
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
 		};
