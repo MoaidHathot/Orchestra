@@ -204,6 +204,7 @@ Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, head
 | Variables | `{{vars.name}}` | User-defined orchestration variables (with recursive expansion) |
 | Orchestration | `{{orchestration.property}}` | Built-in orchestration metadata |
 | Step | `{{step.property}}` | Current step metadata |
+| Environment | `{{env.VAR_NAME}}` | OS environment variable value |
 | Step Output | `{{stepName.output}}` | Output content from a completed step |
 | Step Raw Output | `{{stepName.rawOutput}}` | Raw (unprocessed) output from a completed step |
 
@@ -227,7 +228,7 @@ Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, head
 
 ```json
 {
-  "userPrompt": "{{orchestration.name}} v{{orchestration.version}} [Run: {{orchestration.runId}}]\nStep: {{step.name}} ({{step.type}})\nTopic: {{param.topic}}\nPrevious result: {{research.output}}"
+  "userPrompt": "{{orchestration.name}} v{{orchestration.version}} [Run: {{orchestration.runId}}]\nStep: {{step.name}} ({{step.type}})\nAPI Key: {{env.API_KEY}}\nTopic: {{param.topic}}\nPrevious result: {{research.output}}"
 }
 ```
 
@@ -271,7 +272,7 @@ Variable values can contain other template expressions, which are resolved when 
 In this example:
 - `{{vars.outputDir}}` resolves to `{{vars.baseDir}}/reports`, then `baseDir` resolves to `/data/prod/reports` (if `env=prod`)
 - `{{vars.logPrefix}}` resolves to `[my-pipeline:abc123]` using live orchestration metadata
-- Variables can reference `{{param.*}}`, `{{orchestration.*}}`, `{{step.*}}`, `{{stepName.output}}`, and other `{{vars.*}}`
+- Variables can reference `{{param.*}}`, `{{orchestration.*}}`, `{{step.*}}`, `{{env.*}}`, `{{stepName.output}}`, and other `{{vars.*}}`
 
 ### Circular Reference Protection
 
@@ -291,6 +292,31 @@ Using `{{vars.a}}` will resolve to `{{vars.a}}` (left as-is) rather than causing
 ### Unknown Variables
 
 References to undefined variables are left as-is in the output (e.g., `{{vars.nonexistent}}` remains `{{vars.nonexistent}}`).
+
+## Environment Variables
+
+Access OS environment variables directly in templates using the `{{env.VAR_NAME}}` syntax:
+
+```json
+{
+  "variables": {
+    "connectionString": "Server={{env.DB_HOST}};Database={{env.DB_NAME}}"
+  },
+  "steps": [
+    {
+      "name": "deploy",
+      "type": "Command",
+      "command": "docker",
+      "arguments": ["push", "{{env.CONTAINER_REGISTRY}}/{{vars.appName}}:latest"]
+    }
+  ]
+}
+```
+
+Key behaviors:
+- References to undefined environment variables are left as-is (e.g., `{{env.MISSING}}` remains `{{env.MISSING}}`)
+- Environment variable names are passed through as-is (case-sensitive on Linux, case-insensitive on Windows)
+- Can be used inside variable values for recursive expansion (e.g., a `vars` value containing `{{env.DB_HOST}}`)
 
 ## MCP Integration
 

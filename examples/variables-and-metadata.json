@@ -1,6 +1,6 @@
 {
   "name": "variables-and-metadata",
-  "description": "Demonstrates orchestration-level variables and built-in metadata template expressions. Variables let you define reusable values (with recursive expansion) that any step can reference via {{vars.name}}. Steps can also access orchestration metadata ({{orchestration.name}}, {{orchestration.runId}}, etc.) and their own step metadata ({{step.name}}, {{step.type}}).",
+  "description": "Demonstrates orchestration-level variables, environment variables, and built-in metadata template expressions. Variables let you define reusable values (with recursive expansion) that any step can reference via {{vars.name}}. Environment variables are accessed via {{env.VAR_NAME}}. Steps can also access orchestration metadata ({{orchestration.name}}, {{orchestration.runId}}, etc.) and their own step metadata ({{step.name}}, {{step.type}}).",
   "version": "1.0.0",
   "variables": {
     "baseUrl": "https://api.example.com/v2",
@@ -16,6 +16,7 @@
       "url": "{{vars.baseUrl}}/projects/{{param.project}}/summary",
       "headers": {
         "Accept": "application/json",
+        "Authorization": "Bearer {{env.API_TOKEN}}",
         "X-Request-Source": "{{orchestration.name}}/{{orchestration.version}}"
       },
       "parameters": ["project"]

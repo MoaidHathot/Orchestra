@@ -1,14 +1,14 @@
 {
   "name": "deployment-pipeline",
-  "description": "A multi-environment deployment pipeline that demonstrates orchestration variables, metadata expressions, and step metadata. Uses variables for environment-specific configuration, orchestration metadata for traceability in logs and reports, and step metadata for self-describing audit trails.",
+  "description": "A multi-environment deployment pipeline that demonstrates orchestration variables, metadata expressions, environment variables, and step metadata. Uses variables for environment-specific configuration, env vars for secrets and infrastructure config, orchestration metadata for traceability in logs and reports, and step metadata for self-describing audit trails.",
   "version": "2.1.0",
   "variables": {
     "appName": "customer-portal",
-    "registry": "ghcr.io/myorg/{{vars.appName}}",
+    "registry": "{{env.CONTAINER_REGISTRY}}/{{vars.appName}}",
     "deployRegion": "{{param.region}}",
     "artifactPath": "/artifacts/{{vars.appName}}/{{orchestration.runId}}",
     "logTag": "[{{orchestration.name}}:{{orchestration.runId}}]",
-    "slackWebhookUrl": "{{param.slackWebhookUrl}}"
+    "slackWebhookUrl": "{{env.SLACK_WEBHOOK_URL}}"
   },
   "steps": [
     {
@@ -69,7 +69,7 @@
         "X-Orchestration-Name": "{{orchestration.name}}"
       },
       "body": "{\"text\": \"Deployment plan ready for {{vars.appName}} v{{orchestration.version}} to {{vars.deployRegion}}. Run ID: {{orchestration.runId}}\"}",
-      "parameters": ["region", "slackWebhookUrl"],
+      "parameters": ["region"],
       "timeoutSeconds": 30
     }
   ]

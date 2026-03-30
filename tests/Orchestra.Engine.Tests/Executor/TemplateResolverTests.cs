@@ -601,6 +601,172 @@ public class TemplateResolverTests
 
 	#endregion
 
+	#region Env Namespace
+
+	[Fact]
+	public void Resolve_EnvExistingVariable_ReturnsValue()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_VAR", "test-value-123");
+		try
+		{
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>()
+			};
+			var template = "Value: {{env.ORCHESTRA_TEST_VAR}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+			// Assert
+			result.Should().Be("Value: test-value-123");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_VAR", null);
+		}
+	}
+
+	[Fact]
+	public void Resolve_EnvMissingVariable_LeavesAsIs()
+	{
+		// Arrange
+		// Ensure the variable does not exist
+		Environment.SetEnvironmentVariable("ORCHESTRA_NONEXISTENT_VAR", null);
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = "Value: {{env.ORCHESTRA_NONEXISTENT_VAR}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("Value: {{env.ORCHESTRA_NONEXISTENT_VAR}}");
+	}
+
+	[Fact]
+	public void Resolve_EnvMultipleVariables_ResolvesAll()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_HOST", "db.example.com");
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_PORT", "5432");
+		try
+		{
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>()
+			};
+			var template = "Connection: {{env.ORCHESTRA_TEST_HOST}}:{{env.ORCHESTRA_TEST_PORT}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+			// Assert
+			result.Should().Be("Connection: db.example.com:5432");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_HOST", null);
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_PORT", null);
+		}
+	}
+
+	[Fact]
+	public void Resolve_EnvEmptyValue_ResolvesToEmptyString()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_EMPTY", "");
+		try
+		{
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>()
+			};
+			var template = "Before[{{env.ORCHESTRA_TEST_EMPTY}}]After";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+			// Assert
+			result.Should().Be("Before[]After");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_EMPTY", null);
+		}
+	}
+
+	[Fact]
+	public void Resolve_EnvInVarsRecursiveExpansion_Resolves()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_DB_HOST", "prod-db.internal");
+		try
+		{
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>(),
+				Variables = new Dictionary<string, string>
+				{
+					["connectionString"] = "Server={{env.ORCHESTRA_TEST_DB_HOST}};Database=mydb"
+				}
+			};
+			var template = "{{vars.connectionString}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+			// Assert
+			result.Should().Be("Server=prod-db.internal;Database=mydb");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_DB_HOST", null);
+		}
+	}
+
+	[Fact]
+	public void Resolve_EnvMixedWithOtherNamespaces_ResolvesAll()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_API_KEY", "sk-abc123");
+		try
+		{
+			var info = new OrchestrationInfo("api-pipeline", "1.0.0", "run-1", DateTimeOffset.UtcNow);
+			var parameters = new Dictionary<string, string> { ["endpoint"] = "/users" };
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = info,
+				Parameters = parameters,
+				Variables = new Dictionary<string, string>
+				{
+					["baseUrl"] = "https://api.example.com"
+				}
+			};
+			var template = "{{vars.baseUrl}}{{param.endpoint}} [{{orchestration.name}}] key={{env.ORCHESTRA_TEST_API_KEY}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, parameters, context, [], s_defaultStep);
+
+			// Assert
+			result.Should().Be("https://api.example.com/users [api-pipeline] key=sk-abc123");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_API_KEY", null);
+		}
+	}
+
+	#endregion
+
 	#region Edge Cases
 
 	[Theory]
@@ -612,23 +778,32 @@ public class TemplateResolverTests
 	[InlineData("{{STEP.type}}", "Transform")]
 	[InlineData("{{VARS.region}}", "us-east-1")]
 	[InlineData("{{PARAM.env}}", "prod")]
+	[InlineData("{{ENV.ORCHESTRA_TEST_CASE}}", "case-test-value")]
 	public void Resolve_CaseInsensitiveNamespaceAndProperty_ResolvesCorrectly(string template, string expected)
 	{
 		// Arrange
-		var info = new OrchestrationInfo("my-pipeline", "2.0.0", "run-abc", DateTimeOffset.UtcNow);
-		var parameters = new Dictionary<string, string> { ["env"] = "prod" };
-		var context = new OrchestrationExecutionContext
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_CASE", "case-test-value");
+		try
 		{
-			OrchestrationInfo = info,
-			Parameters = parameters,
-			Variables = new Dictionary<string, string> { ["region"] = "us-east-1" }
-		};
+			var info = new OrchestrationInfo("my-pipeline", "2.0.0", "run-abc", DateTimeOffset.UtcNow);
+			var parameters = new Dictionary<string, string> { ["env"] = "prod" };
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = info,
+				Parameters = parameters,
+				Variables = new Dictionary<string, string> { ["region"] = "us-east-1" }
+			};
 
-		// Act
-		var result = TemplateResolver.Resolve(template, parameters, context, [], s_defaultStep);
+			// Act
+			var result = TemplateResolver.Resolve(template, parameters, context, [], s_defaultStep);
 
-		// Assert
-		result.Should().Be(expected);
+			// Assert
+			result.Should().Be(expected);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_CASE", null);
+		}
 	}
 
 	[Theory]
@@ -637,23 +812,32 @@ public class TemplateResolverTests
 	[InlineData("{{ step.name }}", "current-step")]
 	[InlineData("{{ vars.region }}", "us-east-1")]
 	[InlineData("{{   orchestration.version   }}", "2.0.0")]
+	[InlineData("{{ env.ORCHESTRA_TEST_WS }}", "ws-test-value")]
 	public void Resolve_WhitespaceInExpression_ResolvesCorrectly(string template, string expected)
 	{
 		// Arrange
-		var info = new OrchestrationInfo("my-pipeline", "2.0.0", "run-abc", DateTimeOffset.UtcNow);
-		var parameters = new Dictionary<string, string> { ["env"] = "prod" };
-		var context = new OrchestrationExecutionContext
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_WS", "ws-test-value");
+		try
 		{
-			OrchestrationInfo = info,
-			Parameters = parameters,
-			Variables = new Dictionary<string, string> { ["region"] = "us-east-1" }
-		};
+			var info = new OrchestrationInfo("my-pipeline", "2.0.0", "run-abc", DateTimeOffset.UtcNow);
+			var parameters = new Dictionary<string, string> { ["env"] = "prod" };
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = info,
+				Parameters = parameters,
+				Variables = new Dictionary<string, string> { ["region"] = "us-east-1" }
+			};
 
-		// Act
-		var result = TemplateResolver.Resolve(template, parameters, context, [], s_defaultStep);
+			// Act
+			var result = TemplateResolver.Resolve(template, parameters, context, [], s_defaultStep);
 
-		// Assert
-		result.Should().Be(expected);
+			// Assert
+			result.Should().Be(expected);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_WS", null);
+		}
 	}
 
 	[Fact]

@@ -9,6 +9,7 @@ namespace Orchestra.Engine;
 ///   {{orchestration.name}} — orchestration metadata (name, version, runId, startedAt)
 ///   {{step.name}}          — current step metadata (name, type)
 ///   {{vars.name}}          — user-defined orchestration variable (supports recursive expansion)
+///   {{env.VAR_NAME}}       — environment variable value
 ///   {{stepName.output}}    — output content from a completed dependency step
 ///   {{stepName.rawOutput}} — raw output from a completed dependency step
 /// </summary>
@@ -75,6 +76,14 @@ public static partial class TemplateResolver
 			{
 				var varName = expr["vars.".Length..];
 				return ResolveVariable(varName, parameters, context, dependsOn, currentStep, resolvingVars, match.Value);
+			}
+
+			// {{env.VAR_NAME}} — environment variable
+			if (expr.StartsWith("env.", StringComparison.OrdinalIgnoreCase))
+			{
+				var envVarName = expr["env.".Length..];
+				var envValue = Environment.GetEnvironmentVariable(envVarName);
+				return envValue ?? match.Value;
 			}
 
 			// {{stepName.output}} or {{stepName.rawOutput}} — dependency output reference

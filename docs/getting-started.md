@@ -205,6 +205,7 @@ Orchestra supports several template expression namespaces for dynamic values in 
 | `{{orchestration.startedAt}}` | Run start time (ISO 8601) |
 | `{{step.name}}` | Current step's name |
 | `{{step.type}}` | Current step's type |
+| `{{env.VAR_NAME}}` | OS environment variable value |
 | `{{stepName.output}}` | Output from a completed step |
 | `{{stepName.rawOutput}}` | Raw output from a completed step |
 

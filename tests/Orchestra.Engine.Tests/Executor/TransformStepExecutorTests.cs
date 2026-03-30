@@ -321,6 +321,83 @@ public class TransformStepExecutorTests
 
 	#endregion
 
+	#region Env Namespace Resolution
+
+	[Fact]
+	public async Task ExecuteAsync_EnvTemplate_ResolvesEnvironmentVariables()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_DB_URL", "postgres://db.example.com:5432/mydb");
+		try
+		{
+			var executor = CreateExecutor();
+			var step = CreateTransformStep(
+				template: "Database: {{env.ORCHESTRA_TEST_DB_URL}}");
+
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>()
+			};
+
+			// Act
+			var result = await executor.ExecuteAsync(step, context);
+
+			// Assert
+			result.Status.Should().Be(ExecutionStatus.Succeeded);
+			result.Content.Should().Be("Database: postgres://db.example.com:5432/mydb");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_DB_URL", null);
+		}
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_EnvMixedWithAllNamespaces_ResolvesEverything()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_SECRET", "sk-test-key");
+		try
+		{
+			var executor = CreateExecutor();
+			var info = new OrchestrationInfo("full-test", "3.0.0", "run-xyz", DateTimeOffset.UtcNow);
+
+			var step = CreateTransformStep(
+				name: "combined-step",
+				template: "Orch={{orchestration.name}}, Step={{step.name}}, Var={{vars.region}}, Param={{param.userId}}, Dep={{dep1.output}}, Secret={{env.ORCHESTRA_TEST_SECRET}}",
+				dependsOn: ["dep1"],
+				parameters: ["userId"]);
+
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = info,
+				Parameters = new Dictionary<string, string>
+				{
+					["userId"] = "user-42"
+				},
+				Variables = new Dictionary<string, string>
+				{
+					["region"] = "us-west-2"
+				}
+			};
+			context.AddResult("dep1", ExecutionResult.Succeeded("dependency-output-data"));
+
+			// Act
+			var result = await executor.ExecuteAsync(step, context);
+
+			// Assert
+			result.Status.Should().Be(ExecutionStatus.Succeeded);
+			result.Content.Should().Be("Orch=full-test, Step=combined-step, Var=us-west-2, Param=user-42, Dep=dependency-output-data, Secret=sk-test-key");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_SECRET", null);
+		}
+	}
+
+	#endregion
+
 	#region Cancellation
 
 	[Fact]

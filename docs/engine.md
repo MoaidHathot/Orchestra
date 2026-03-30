@@ -85,6 +85,7 @@ The engine uses `{{expression}}` syntax for dynamic values in prompts, URLs, hea
 | `orchestration` | `{{orchestration.property}}` | Replaced with orchestration metadata. Unknown properties throw `InvalidOperationException`. |
 | `step` | `{{step.property}}` | Replaced with current step metadata. Unknown properties throw `InvalidOperationException`. |
 | `vars` | `{{vars.name}}` | Replaced with the variable value (recursively expanded). Unknown variables are left as-is. |
+| `env` | `{{env.VAR_NAME}}` | Replaced with the OS environment variable value. Undefined variables are left as-is. |
 | Step output | `{{stepName.output}}` | Replaced with the processed output of the named step. |
 | Step raw output | `{{stepName.rawOutput}}` | Replaced with the raw (unprocessed) output of the named step. |
 
@@ -127,6 +128,15 @@ Templates are resolved by `TemplateResolver.Resolve()`, which is called by each 
 3. Replaces each match with the resolved value
 4. For `vars.*`, recursively resolves any nested template expressions in the variable's value
 5. Detects circular variable references and leaves them as-is to prevent infinite loops
+
+#### Environment Variables
+
+The `{{env.VAR_NAME}}` namespace reads OS environment variables at resolution time:
+
+- Variable names are passed through as-is to `Environment.GetEnvironmentVariable()` (case-sensitive on Linux, case-insensitive on Windows)
+- Undefined environment variables are left as-is in the output (e.g., `{{env.MISSING}}` remains `{{env.MISSING}}`)
+- Environment variables set to an empty string resolve to an empty string
+- Can be used inside variable values for recursive expansion (e.g., `"connectionString": "Server={{env.DB_HOST}};Database=mydb"`)
 
 ### Variables
 
