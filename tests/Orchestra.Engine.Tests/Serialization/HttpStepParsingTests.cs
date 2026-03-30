@@ -5,6 +5,7 @@ namespace Orchestra.Engine.Tests.Serialization;
 
 public class HttpStepParsingTests
 {
+	private static readonly StepParseContext s_context = new(BaseDirectory: null);
 	[Fact]
 	public void Parse_MinimalHttpStep_SetsDefaults()
 	{
@@ -19,7 +20,7 @@ public class HttpStepParsingTests
 		var parser = new HttpStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as HttpOrchestrationStep;
+		var step = parser.Parse(json, s_context) as HttpOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -66,7 +67,7 @@ public class HttpStepParsingTests
 		var parser = new HttpStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as HttpOrchestrationStep;
+		var step = parser.Parse(json, s_context) as HttpOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -105,7 +106,7 @@ public class HttpStepParsingTests
 		var parser = new HttpStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as HttpOrchestrationStep;
+		var step = parser.Parse(json, s_context) as HttpOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -133,7 +134,7 @@ public class HttpStepParsingTests
 		var parser = new HttpStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as HttpOrchestrationStep;
+		var step = parser.Parse(json, s_context) as HttpOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -163,7 +164,7 @@ public class HttpStepParsingTests
 		var parser = new HttpStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as HttpOrchestrationStep;
+		var step = parser.Parse(json, s_context) as HttpOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();

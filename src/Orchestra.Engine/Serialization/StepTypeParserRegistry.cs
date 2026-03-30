@@ -25,10 +25,10 @@ public sealed class StepTypeParserRegistry
 	/// Attempts to parse the step type from JSON.
 	/// Returns null if no parser is registered for the type.
 	/// </summary>
-	public OrchestrationStep? TryParse(string typeName, JsonElement root)
+	public OrchestrationStep? TryParse(string typeName, JsonElement root, StepParseContext context)
 	{
 		if (_parsers.TryGetValue(typeName, out var parser))
-			return parser.Parse(root);
+			return parser.Parse(root, context);
 
 		return null;
 	}

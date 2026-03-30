@@ -5,6 +5,7 @@ namespace Orchestra.Engine.Tests.Serialization;
 
 public class TransformStepParsingTests
 {
+	private static readonly StepParseContext s_context = new(BaseDirectory: null);
 	[Fact]
 	public void Parse_MinimalTransformStep_SetsDefaults()
 	{
@@ -19,7 +20,7 @@ public class TransformStepParsingTests
 		var parser = new TransformStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as TransformOrchestrationStep;
+		var step = parser.Parse(json, s_context) as TransformOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -57,7 +58,7 @@ public class TransformStepParsingTests
 		var parser = new TransformStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as TransformOrchestrationStep;
+		var step = parser.Parse(json, s_context) as TransformOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -90,7 +91,7 @@ public class TransformStepParsingTests
 		var parser = new TransformStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as TransformOrchestrationStep;
+		var step = parser.Parse(json, s_context) as TransformOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -113,7 +114,7 @@ public class TransformStepParsingTests
 		var parser = new TransformStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as TransformOrchestrationStep;
+		var step = parser.Parse(json, s_context) as TransformOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();

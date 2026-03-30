@@ -5,24 +5,27 @@ namespace Orchestra.Engine;
 /// <summary>
 /// Parser for Prompt step type JSON.
 /// Handles deserialization of <see cref="PromptOrchestrationStep"/> from orchestration JSON.
+/// Supports both inline prompt values and file-based prompt loading via <c>*File</c> properties.
 /// </summary>
 public sealed class PromptStepTypeParser : IStepTypeParser
 {
 	public string TypeName => "Prompt";
 
-	public OrchestrationStep Parse(JsonElement root)
+	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
 	{
+		var stepName = root.GetProperty("name").GetString()!;
+
 		return new PromptOrchestrationStep
 		{
-			Name = root.GetProperty("name").GetString()!,
+			Name = stepName,
 			Type = OrchestrationStepType.Prompt,
 			DependsOn = root.TryGetProperty("dependsOn", out var deps)
 				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
-			SystemPrompt = root.GetProperty("systemPrompt").GetString()!,
-			UserPrompt = root.GetProperty("userPrompt").GetString()!,
-			InputHandlerPrompt = root.TryGetProperty("inputHandlerPrompt", out var ihp) ? ihp.GetString() : null,
-			OutputHandlerPrompt = root.TryGetProperty("outputHandlerPrompt", out var ohp) ? ohp.GetString() : null,
+			SystemPrompt = ResolveRequiredPrompt(root, "systemPrompt", stepName, context),
+			UserPrompt = ResolveRequiredPrompt(root, "userPrompt", stepName, context),
+			InputHandlerPrompt = ResolveOptionalPrompt(root, "inputHandlerPrompt", stepName, context),
+			OutputHandlerPrompt = ResolveOptionalPrompt(root, "outputHandlerPrompt", stepName, context),
 			Model = root.GetProperty("model").GetString()!,
 			McpNames = root.TryGetProperty("mcps", out var mcps)
 				? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
@@ -46,19 +49,93 @@ public sealed class PromptStepTypeParser : IStepTypeParser
 				? DeserializeLoopConfig(loop)
 				: null,
 			Subagents = root.TryGetProperty("subagents", out var subagents)
-				? subagents.EnumerateArray().Select(DeserializeSubagent).ToArray()
+				? subagents.EnumerateArray().Select(e => DeserializeSubagent(e, stepName, context)).ToArray()
 				: [],
 		};
 	}
 
-	private static Subagent DeserializeSubagent(JsonElement element)
+	/// <summary>
+	/// Resolves a required prompt value from either an inline property or a file reference.
+	/// Exactly one of <paramref name="propertyName"/> or <c>{propertyName}File</c> must be specified.
+	/// </summary>
+	private static string ResolveRequiredPrompt(JsonElement root, string propertyName, string stepName, StepParseContext context)
 	{
+		var filePropertyName = propertyName + "File";
+		var hasInline = root.TryGetProperty(propertyName, out var inlineValue);
+		var hasFile = root.TryGetProperty(filePropertyName, out var fileValue);
+
+		if (hasInline && hasFile)
+			throw new JsonException(
+				$"Step '{stepName}': Cannot specify both '{propertyName}' and '{filePropertyName}'. Use one or the other.");
+
+		if (hasFile)
+			return ReadPromptFile(fileValue.GetString()!, filePropertyName, stepName, context);
+
+		if (hasInline)
+			return inlineValue.GetString()!;
+
+		throw new JsonException(
+			$"Step '{stepName}': Either '{propertyName}' or '{filePropertyName}' is required.");
+	}
+
+	/// <summary>
+	/// Resolves an optional prompt value from either an inline property or a file reference.
+	/// At most one of <paramref name="propertyName"/> or <c>{propertyName}File</c> may be specified.
+	/// </summary>
+	private static string? ResolveOptionalPrompt(JsonElement root, string propertyName, string stepName, StepParseContext context)
+	{
+		var filePropertyName = propertyName + "File";
+		var hasInline = root.TryGetProperty(propertyName, out var inlineValue);
+		var hasFile = root.TryGetProperty(filePropertyName, out var fileValue);
+
+		if (hasInline && hasFile)
+			throw new JsonException(
+				$"Step '{stepName}': Cannot specify both '{propertyName}' and '{filePropertyName}'. Use one or the other.");
+
+		if (hasFile)
+			return ReadPromptFile(fileValue.GetString()!, filePropertyName, stepName, context);
+
+		return hasInline ? inlineValue.GetString() : null;
+	}
+
+	/// <summary>
+	/// Reads a prompt file, resolving the path relative to the orchestration base directory.
+	/// Validates that the file exists and is readable at parse time (fail fast).
+	/// </summary>
+	private static string ReadPromptFile(string filePath, string propertyName, string stepName, StepParseContext context)
+	{
+		var resolvedPath = Path.IsPathRooted(filePath)
+			? filePath
+			: context.BaseDirectory is not null
+				? Path.GetFullPath(Path.Combine(context.BaseDirectory, filePath))
+				: Path.GetFullPath(filePath);
+
+		if (!File.Exists(resolvedPath))
+			throw new JsonException(
+				$"Step '{stepName}': File not found for '{propertyName}': {resolvedPath}");
+
+		try
+		{
+			return File.ReadAllText(resolvedPath);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+		{
+			throw new JsonException(
+				$"Step '{stepName}': Failed to read file for '{propertyName}': {resolvedPath} — {ex.Message}", ex);
+		}
+	}
+
+	private static Subagent DeserializeSubagent(JsonElement element, string stepName, StepParseContext context)
+	{
+		var subagentName = element.GetProperty("name").GetString()!;
+		var qualifiedName = $"{stepName}/subagent:{subagentName}";
+
 		return new Subagent
 		{
-			Name = element.GetProperty("name").GetString()!,
+			Name = subagentName,
 			DisplayName = element.TryGetProperty("displayName", out var dn) ? dn.GetString() : null,
 			Description = element.TryGetProperty("description", out var desc) ? desc.GetString() : null,
-			Prompt = element.GetProperty("prompt").GetString()!,
+			Prompt = ResolveRequiredPrompt(element, "prompt", qualifiedName, context),
 			Tools = element.TryGetProperty("tools", out var tools)
 				? tools.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: null,

@@ -5,6 +5,7 @@ namespace Orchestra.Engine.Tests.Serialization;
 
 public class CommandStepParsingTests
 {
+	private static readonly StepParseContext s_context = new(BaseDirectory: null);
 	[Fact]
 	public void Parse_MinimalCommandStep_SetsDefaults()
 	{
@@ -19,7 +20,7 @@ public class CommandStepParsingTests
 		var parser = new CommandStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as CommandOrchestrationStep;
+		var step = parser.Parse(json, s_context) as CommandOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -66,7 +67,7 @@ public class CommandStepParsingTests
 		var parser = new CommandStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as CommandOrchestrationStep;
+		var step = parser.Parse(json, s_context) as CommandOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -104,7 +105,7 @@ public class CommandStepParsingTests
 		var parser = new CommandStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as CommandOrchestrationStep;
+		var step = parser.Parse(json, s_context) as CommandOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -132,7 +133,7 @@ public class CommandStepParsingTests
 		var parser = new CommandStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as CommandOrchestrationStep;
+		var step = parser.Parse(json, s_context) as CommandOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();
@@ -163,7 +164,7 @@ public class CommandStepParsingTests
 		var parser = new CommandStepTypeParser();
 
 		// Act
-		var step = parser.Parse(json) as CommandOrchestrationStep;
+		var step = parser.Parse(json, s_context) as CommandOrchestrationStep;
 
 		// Assert
 		step.Should().NotBeNull();

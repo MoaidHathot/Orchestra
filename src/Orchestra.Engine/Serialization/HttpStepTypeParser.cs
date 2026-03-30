@@ -10,7 +10,7 @@ public sealed class HttpStepTypeParser : IStepTypeParser
 {
 	public string TypeName => "Http";
 
-	public OrchestrationStep Parse(JsonElement root)
+	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
 	{
 		return new HttpOrchestrationStep
 		{

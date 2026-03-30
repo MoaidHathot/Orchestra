@@ -10,7 +10,7 @@ public sealed class TransformStepTypeParser : IStepTypeParser
 {
 	public string TypeName => "Transform";
 
-	public OrchestrationStep Parse(JsonElement root)
+	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
 	{
 		return new TransformOrchestrationStep
 		{

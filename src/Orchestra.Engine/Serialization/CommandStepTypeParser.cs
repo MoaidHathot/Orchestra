@@ -10,7 +10,7 @@ public sealed class CommandStepTypeParser : IStepTypeParser
 {
 	public string TypeName => "Command";
 
-	public OrchestrationStep Parse(JsonElement root)
+	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
 	{
 		return new CommandOrchestrationStep
 		{

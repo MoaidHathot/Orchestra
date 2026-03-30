@@ -14,7 +14,9 @@ public static class OrchestrationParser
 		.Register(new TransformStepTypeParser())
 		.Register(new CommandStepTypeParser());
 
-	private static readonly JsonSerializerOptions s_options = CreateOptions(s_defaultParserRegistry);
+	private static readonly StepParseContext s_defaultContext = new(BaseDirectory: null);
+
+	private static readonly JsonSerializerOptions s_options = CreateOptions(s_defaultParserRegistry, s_defaultContext);
 
 	/// <summary>
 	/// Creates a <see cref="StepTypeParserRegistry"/> pre-populated with all built-in step type parsers.
@@ -29,14 +31,14 @@ public static class OrchestrationParser
 			.Register(new CommandStepTypeParser());
 	}
 
-	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry)
+	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry, StepParseContext context)
 	{
 		return new JsonSerializerOptions
 		{
 			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 			Converters =
 			{
-				new OrchestrationStepConverter(parserRegistry),
+				new OrchestrationStepConverter(parserRegistry, context),
 				new McpConverter(),
 				new TriggerConfigConverter(),
 				new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
@@ -59,7 +61,7 @@ public static class OrchestrationParser
 	/// </summary>
 	public static Orchestration ParseOrchestration(string json, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
 	{
-		var options = CreateOptions(parserRegistry);
+		var options = CreateOptions(parserRegistry, s_defaultContext);
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
@@ -70,7 +72,14 @@ public static class OrchestrationParser
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps)
 	{
 		var json = File.ReadAllText(path);
-		return ParseOrchestration(json, availableMcps);
+		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)));
+		var options = CreateOptions(s_defaultParserRegistry, context);
+
+		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
+			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+
+		ResolveStepMcps(orchestration, availableMcps);
+		return orchestration;
 	}
 
 	/// <summary>
@@ -79,7 +88,14 @@ public static class OrchestrationParser
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
 	{
 		var json = File.ReadAllText(path);
-		return ParseOrchestration(json, availableMcps, parserRegistry);
+		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)));
+		var options = CreateOptions(parserRegistry, context);
+
+		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
+			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+
+		ResolveStepMcps(orchestration, availableMcps);
+		return orchestration;
 	}
 
 	/// <summary>
@@ -98,7 +114,11 @@ public static class OrchestrationParser
 	public static Orchestration ParseOrchestrationFileMetadataOnly(string path)
 	{
 		var json = File.ReadAllText(path);
-		return ParseOrchestrationMetadataOnly(json);
+		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)));
+		var options = CreateOptions(s_defaultParserRegistry, context);
+
+		return JsonSerializer.Deserialize<Orchestration>(json, options)
+			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 	}
 
 	public static Mcp[] ParseMcps(string json)
@@ -216,10 +236,12 @@ public static class OrchestrationParser
 	private sealed class OrchestrationStepConverter : JsonConverter<OrchestrationStep>
 	{
 		private readonly StepTypeParserRegistry _parserRegistry;
+		private readonly StepParseContext _context;
 
-		public OrchestrationStepConverter(StepTypeParserRegistry parserRegistry)
+		public OrchestrationStepConverter(StepTypeParserRegistry parserRegistry, StepParseContext context)
 		{
 			_parserRegistry = parserRegistry;
+			_context = context;
 		}
 
 		public override OrchestrationStep Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
@@ -231,7 +253,7 @@ public static class OrchestrationParser
 				? typeProp.GetString()!
 				: throw new JsonException("Missing 'type' property on orchestration step.");
 
-			var step = _parserRegistry.TryParse(typeName, root);
+			var step = _parserRegistry.TryParse(typeName, root, _context);
 			if (step is not null)
 				return step;
 

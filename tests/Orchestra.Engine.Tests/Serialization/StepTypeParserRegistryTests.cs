@@ -6,6 +6,7 @@ namespace Orchestra.Engine.Tests.Serialization;
 
 public class StepTypeParserRegistryTests
 {
+	private static readonly StepParseContext s_context = new(BaseDirectory: null);
 	#region Register
 
 	[Fact]
@@ -60,7 +61,7 @@ public class StepTypeParserRegistryTests
 			DependsOn = [],
 			Parameters = []
 		};
-		firstParser.Parse(Arg.Any<JsonElement>()).Returns(firstStep);
+		firstParser.Parse(Arg.Any<JsonElement>(), Arg.Any<StepParseContext>()).Returns(firstStep);
 
 		var secondParser = Substitute.For<IStepTypeParser>();
 		secondParser.TypeName.Returns("Http");
@@ -73,12 +74,12 @@ public class StepTypeParserRegistryTests
 			DependsOn = [],
 			Parameters = []
 		};
-		secondParser.Parse(Arg.Any<JsonElement>()).Returns(secondStep);
+		secondParser.Parse(Arg.Any<JsonElement>(), Arg.Any<StepParseContext>()).Returns(secondStep);
 
 		// Act
 		registry.Register(firstParser);
 		registry.Register(secondParser);
-		var result = registry.TryParse("Http", json);
+		var result = registry.TryParse("Http", json, s_context);
 
 		// Assert
 		result.Should().BeSameAs(secondStep);
@@ -107,18 +108,18 @@ public class StepTypeParserRegistryTests
 			DependsOn = [],
 			Parameters = []
 		};
-		parser.Parse(Arg.Any<JsonElement>()).Returns(mockStep);
+		parser.Parse(Arg.Any<JsonElement>(), Arg.Any<StepParseContext>()).Returns(mockStep);
 
 		registry.Register(parser);
 
 		// Act
-		var result = registry.TryParse("Http", json);
+		var result = registry.TryParse("Http", json, s_context);
 
 		// Assert
 		result.Should().NotBeNull();
 		result.Should().BeSameAs(mockStep);
 		result!.Name.Should().Be("test");
-		parser.Received(1).Parse(Arg.Any<JsonElement>());
+		parser.Received(1).Parse(Arg.Any<JsonElement>(), Arg.Any<StepParseContext>());
 	}
 
 	[Fact]
@@ -129,7 +130,7 @@ public class StepTypeParserRegistryTests
 		var json = JsonSerializer.Deserialize<JsonElement>("""{"name": "test", "type": "Unknown"}""");
 
 		// Act
-		var result = registry.TryParse("Unknown", json);
+		var result = registry.TryParse("Unknown", json, s_context);
 
 		// Assert
 		result.Should().BeNull();
@@ -153,22 +154,22 @@ public class StepTypeParserRegistryTests
 			DependsOn = [],
 			Parameters = []
 		};
-		parser.Parse(Arg.Any<JsonElement>()).Returns(mockStep);
+		parser.Parse(Arg.Any<JsonElement>(), Arg.Any<StepParseContext>()).Returns(mockStep);
 
 		registry.Register(parser);
 
 		// Act & Assert — lowercase
-		var resultLower = registry.TryParse("http", json);
+		var resultLower = registry.TryParse("http", json, s_context);
 		resultLower.Should().NotBeNull();
 		resultLower.Should().BeSameAs(mockStep);
 
 		// Act & Assert — uppercase
-		var resultUpper = registry.TryParse("HTTP", json);
+		var resultUpper = registry.TryParse("HTTP", json, s_context);
 		resultUpper.Should().NotBeNull();
 		resultUpper.Should().BeSameAs(mockStep);
 
 		// Act & Assert — mixed case
-		var resultMixed = registry.TryParse("hTtP", json);
+		var resultMixed = registry.TryParse("hTtP", json, s_context);
 		resultMixed.Should().NotBeNull();
 		resultMixed.Should().BeSameAs(mockStep);
 	}

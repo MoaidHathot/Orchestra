@@ -17,5 +17,7 @@ public interface IStepTypeParser
 	/// <summary>
 	/// Parses the JSON element into a concrete <see cref="OrchestrationStep"/>.
 	/// </summary>
-	OrchestrationStep Parse(JsonElement root);
+	/// <param name="root">The JSON element representing the step.</param>
+	/// <param name="context">Parsing context providing base directory for resolving file references.</param>
+	OrchestrationStep Parse(JsonElement root, StepParseContext context);
 }
