@@ -15,7 +15,7 @@
       "type": "Command",
       "dependsOn": [],
       "command": "dnx",
-      "arguments": ["Icm.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "incidents", "--acknowledged", "no", "--states", "ACTIVE"],
+      "arguments": ["Icm.Cli", "--source", "https://pkgs.dev.azure.com/msazure/One/_packaging/ZTS/nuget/v3/index.json", "--yes", "--", "incidents", "--acknowledged", "no", "--states", "ACTIVE", "--severity", "3"],
       "timeoutSeconds": 120
     },
     {
