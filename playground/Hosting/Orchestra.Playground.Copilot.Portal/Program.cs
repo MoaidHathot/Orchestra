@@ -368,11 +368,11 @@ app.MapPost("/api/cancel/{executionId}", (
 {
 	if (activeExecutionInfos.TryGetValue(executionId, out var info))
 	{
-		info.Status = "Cancelling";
+		info.Status = HostExecutionStatus.Cancelling;
 		if (info.Reporter is SseReporter sseReporter)
-			sseReporter.ReportStatusChange("Cancelling");
+			sseReporter.ReportStatusChange(HostExecutionStatus.Cancelling);
 		info.CancellationTokenSource.Cancel();
-		return Results.Ok(new { cancelled = true, executionId, status = "Cancelling" });
+		return Results.Ok(new { cancelled = true, executionId, status = HostExecutionStatus.Cancelling });
 	}
 	return Results.NotFound(new { error = $"No active execution with ID '{executionId}'." });
 });

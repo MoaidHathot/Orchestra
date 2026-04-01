@@ -132,9 +132,9 @@ public static partial class ExecutionApi
 					if (result.Status == ExecutionStatus.Cancelled)
 					{
 						// Engine already saved the run record with Cancelled status.
-						reporter.ReportOrchestrationCancelled();
-						executionInfo.Status = "Cancelled";
-						return;
+				reporter.ReportOrchestrationCancelled();
+					executionInfo.Status = HostExecutionStatus.Cancelled;
+					return;
 					}
 
 					foreach (var (stepName, stepResult) in result.StepResults)
@@ -143,22 +143,22 @@ public static partial class ExecutionApi
 							reporter.ReportStepOutput(stepName, stepResult.Content);
 					}
 
-					reporter.ReportOrchestrationDone(result);
-					executionInfo.Status = "Completed";
+				reporter.ReportOrchestrationDone(result);
+				executionInfo.Status = HostExecutionStatus.Completed;
 				}
 				catch (OperationCanceledException)
 				{
 					// Engine may not have saved the run record if cancellation occurred
 					// before steps could complete, so save a cancelled record from SSE events.
 					reporter.ReportOrchestrationCancelled();
-					executionInfo.Status = "Cancelled";
+					executionInfo.Status = HostExecutionStatus.Cancelled;
 					await SaveCancelledRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, logger);
 				}
 				catch (Exception ex)
 				{
 					reporter.ReportStepError("orchestration", ex.Message);
-					reporter.ReportOrchestrationError(ex.Message);
-					executionInfo.Status = "Failed";
+				reporter.ReportOrchestrationError(ex.Message);
+				executionInfo.Status = HostExecutionStatus.Failed;
 					await SaveFailedRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, ex.Message, logger);
 				}
 				finally

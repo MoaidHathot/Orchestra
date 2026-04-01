@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.Api;
 using Orchestra.Host.Registry;
 
 namespace Orchestra.Host.Triggers;
@@ -356,9 +357,9 @@ public partial class TriggerManager : BackgroundService
 
 				executionInfo.Status = result.Status switch
 				{
-					ExecutionStatus.Succeeded or ExecutionStatus.NoAction => "Completed",
-					ExecutionStatus.Cancelled => "Cancelled",
-					_ => "Failed"
+					ExecutionStatus.Succeeded or ExecutionStatus.NoAction => HostExecutionStatus.Completed,
+					ExecutionStatus.Cancelled => HostExecutionStatus.Cancelled,
+					_ => HostExecutionStatus.Failed
 				};
 
 				// Persist history
@@ -393,11 +394,11 @@ public partial class TriggerManager : BackgroundService
 			}
 			catch (OperationCanceledException)
 			{
-				executionInfo.Status = "Cancelled";
+				executionInfo.Status = HostExecutionStatus.Cancelled;
 			}
 			catch (Exception)
 			{
-				executionInfo.Status = "Failed";
+				executionInfo.Status = HostExecutionStatus.Failed;
 			}
 			finally
 			{
@@ -417,11 +418,13 @@ public partial class TriggerManager : BackgroundService
 	{
 		if (_activeExecutions.TryGetValue(executionId, out var cts))
 		{
-			cts.Cancel();
 			if (_activeExecutionInfos.TryGetValue(executionId, out var info))
 			{
-				info.Status = "Cancelling";
+				info.Status = HostExecutionStatus.Cancelling;
+				if (info.Reporter is SseReporter sseReporter)
+					sseReporter.ReportStatusChange(HostExecutionStatus.Cancelling);
 			}
+			cts.Cancel();
 			return true;
 		}
 		return false;
@@ -818,9 +821,9 @@ public partial class TriggerManager : BackgroundService
 				{
 					info.Status = executionResult?.Status switch
 					{
-						ExecutionStatus.Cancelled => "Cancelled",
-						ExecutionStatus.Failed => "Failed",
-						_ => "Completed"
+						ExecutionStatus.Cancelled => HostExecutionStatus.Cancelled,
+						ExecutionStatus.Failed => HostExecutionStatus.Failed,
+						_ => HostExecutionStatus.Completed
 					};
 					_executionCallback?.OnExecutionCompleted(info);
 
@@ -986,9 +989,9 @@ public partial class TriggerManager : BackgroundService
 				{
 					info.Status = executionResult?.Status switch
 					{
-						ExecutionStatus.Cancelled => "Cancelled",
-						ExecutionStatus.Failed => "Failed",
-						_ => "Completed"
+						ExecutionStatus.Cancelled => HostExecutionStatus.Cancelled,
+						ExecutionStatus.Failed => HostExecutionStatus.Failed,
+						_ => HostExecutionStatus.Completed
 					};
 					_executionCallback?.OnExecutionCompleted(info);
 

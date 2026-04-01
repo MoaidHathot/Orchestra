@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Orchestra.Engine;
 
 namespace Orchestra.Host.Triggers;
@@ -44,6 +45,30 @@ public enum TriggerSource
 }
 
 /// <summary>
+/// Status of an orchestration execution in the Host layer.
+/// Serializes to PascalCase strings (e.g., "Running", "Cancelling") for backward
+/// compatibility with frontend clients and SSE event payloads.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum HostExecutionStatus
+{
+	/// <summary>Execution is actively running.</summary>
+	Running,
+
+	/// <summary>Cancel has been requested; awaiting engine completion.</summary>
+	Cancelling,
+
+	/// <summary>Execution completed successfully.</summary>
+	Completed,
+
+	/// <summary>Execution was cancelled.</summary>
+	Cancelled,
+
+	/// <summary>Execution failed with an error.</summary>
+	Failed,
+}
+
+/// <summary>
 /// Information about an actively running orchestration execution.
 /// </summary>
 public class ActiveExecutionInfo
@@ -62,9 +87,9 @@ public class ActiveExecutionInfo
 	public Dictionary<string, string>? Parameters { get; init; }
 
 	/// <summary>
-	/// Status: "Running", "Cancelling", "Cancelled", "Completed"
+	/// Current execution status.
 	/// </summary>
-	public string Status { get; set; } = "Running";
+	public HostExecutionStatus Status { get; set; } = HostExecutionStatus.Running;
 
 	/// <summary>
 	/// Total number of steps in the orchestration.

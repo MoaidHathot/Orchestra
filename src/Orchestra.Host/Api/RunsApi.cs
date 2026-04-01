@@ -293,7 +293,7 @@ public static class RunsApi
 			// Add executions that are still running (filter out completed/cancelled/failed)
 			foreach (var info in activeExecutionInfos.Values)
 			{
-				if (info.Status is "Completed" or "Cancelled" or "Failed")
+				if (info.Status is HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed)
 					continue;
 
 				activeList.Add(new
@@ -401,11 +401,11 @@ public static class RunsApi
 		{
 			if (activeExecutionInfos.TryGetValue(executionId, out var info))
 			{
-				info.Status = "Cancelling";
+				info.Status = HostExecutionStatus.Cancelling;
 				if (info.Reporter is SseReporter sseReporter)
-					sseReporter.ReportStatusChange("Cancelling");
+					sseReporter.ReportStatusChange(HostExecutionStatus.Cancelling);
 				info.CancellationTokenSource.Cancel();
-				return Results.Ok(new { cancelled = true, executionId, status = "Cancelling" });
+				return Results.Ok(new { cancelled = true, executionId, status = HostExecutionStatus.Cancelling });
 			}
 			return ProblemDetailsHelpers.NotFound($"No active execution with ID '{executionId}'.");
 		});

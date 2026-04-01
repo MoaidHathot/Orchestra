@@ -616,7 +616,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 			TriggeredBy = "manual",
 			CancellationTokenSource = cts,
 			Reporter = reporter,
-			Status = "Running"
+			Status = HostExecutionStatus.Running
 		};
 		activeInfos[executionId] = info;
 
@@ -636,7 +636,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 			cts.Token.IsCancellationRequested.Should().BeTrue();
 
 			// Verify the status was updated on the info object
-			info.Status.Should().Be("Cancelling");
+			info.Status.Should().Be(HostExecutionStatus.Cancelling);
 		}
 		finally
 		{
@@ -670,6 +670,102 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
 		var content = await response.Content.ReadAsStringAsync();
 		content.Should().NotContain("<!DOCTYPE html>", "Cancel endpoint should return JSON, not SPA fallback");
+	}
+
+	[Fact]
+	public async Task Cancel_DoubleCancelSameExecution_SecondCallStillReturnsOk()
+	{
+		// Arrange — calling cancel twice on the same execution should work both times
+		var executionId = $"test-double-cancel-{Guid.NewGuid():N}";
+		var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var activeInfos = _factory.Services.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
+
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationId = "test-orch-id",
+			OrchestrationName = "Double Cancel Test",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			Status = HostExecutionStatus.Running
+		};
+		activeInfos[executionId] = info;
+
+		try
+		{
+			// Act — cancel twice
+			var response1 = await _client.PostAsync($"/api/cancel/{executionId}", null);
+			var response2 = await _client.PostAsync($"/api/cancel/{executionId}", null);
+
+			// Assert — both calls succeed
+			response1.StatusCode.Should().Be(HttpStatusCode.OK);
+			response2.StatusCode.Should().Be(HttpStatusCode.OK);
+
+			var result1 = await response1.Content.ReadFromJsonAsync<JsonElement>();
+			result1.GetProperty("cancelled").GetBoolean().Should().BeTrue();
+
+			var result2 = await response2.Content.ReadFromJsonAsync<JsonElement>();
+			result2.GetProperty("cancelled").GetBoolean().Should().BeTrue();
+
+			// Token should be cancelled
+			cts.Token.IsCancellationRequested.Should().BeTrue();
+			info.Status.Should().Be(HostExecutionStatus.Cancelling);
+		}
+		finally
+		{
+			activeInfos.TryRemove(executionId, out _);
+			reporter.Dispose();
+			cts.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task Cancel_WithSseReporter_EmitsStatusChangedSseEvent()
+	{
+		// Arrange — verify that cancellation via the API emits an SSE status-changed event
+		var executionId = $"test-sse-cancel-{Guid.NewGuid():N}";
+		var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var activeInfos = _factory.Services.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
+
+		// Subscribe to SSE events before cancel
+		var (replay, future) = reporter.Subscribe();
+		replay.Should().BeEmpty();
+		future.Should().NotBeNull();
+
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationId = "test-orch-id",
+			OrchestrationName = "SSE Cancel Test",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			Status = HostExecutionStatus.Running
+		};
+		activeInfos[executionId] = info;
+
+		try
+		{
+			// Act — cancel via the Portal's /api/cancel endpoint
+			var response = await _client.PostAsync($"/api/cancel/{executionId}", null);
+			response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+			// Assert — SSE event was emitted
+			var evt = await future!.ReadAsync();
+			evt.Type.Should().Be("status-changed");
+			evt.Data.Should().Contain("Cancelling");
+		}
+		finally
+		{
+			activeInfos.TryRemove(executionId, out _);
+			reporter.Dispose();
+			cts.Dispose();
+		}
 	}
 
 	#endregion
@@ -842,10 +938,10 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	}
 
 	[Theory]
-	[InlineData("Completed")]
-	[InlineData("Cancelled")]
-	[InlineData("Failed")]
-	public async Task Active_CompletedExecution_IsFilteredOutOfRunningList(string terminalStatus)
+	[InlineData(HostExecutionStatus.Completed)]
+	[InlineData(HostExecutionStatus.Cancelled)]
+	[InlineData(HostExecutionStatus.Failed)]
+	public async Task Active_CompletedExecution_IsFilteredOutOfRunningList(HostExecutionStatus terminalStatus)
 	{
 		// Arrange - Insert a fake execution that has already finished
 		var executionId = $"test-filtered-{Guid.NewGuid():N}";
@@ -909,7 +1005,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 			TriggeredBy = "loop",
 			CancellationTokenSource = cts,
 			Reporter = reporter,
-			Status = "Running",
+			Status = HostExecutionStatus.Running,
 			TotalSteps = 3
 		};
 		activeInfos[executionId] = info;
@@ -953,7 +1049,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 			TriggeredBy = "manual",
 			CancellationTokenSource = cts,
 			Reporter = reporter,
-			Status = "Cancelling",
+			Status = HostExecutionStatus.Cancelling,
 			TotalSteps = 5,
 			CompletedSteps = 2
 		};

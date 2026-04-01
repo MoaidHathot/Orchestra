@@ -313,6 +313,8 @@ function getDefinitionClassDefs(): string {
   code += '  classDef hasLoop fill:#2d1f2d,stroke:#a371f7,color:#e6edf3\n';
   // Subagent node style (font-size applied via <small> tags in labels)
   code += '  classDef subagentNode fill:#161b22,stroke:#8b949e,color:#8b949e\n';
+  // Disabled step style (muted colors, dashed border)
+  code += '  classDef disabledStep fill:#161b22,stroke:#484f58,color:#6e7681,stroke-dasharray:5 5\n';
   return code;
 }
 
@@ -338,6 +340,7 @@ export function generateDefinitionDagCode(
   const stepsWithOutputHandler: string[] = [];
   const stepsWithBothHandlers: string[] = [];
   const stepsWithLoop: string[] = [];
+  const disabledSteps: string[] = [];
   const subagentNodeIds: string[] = [];
 
   const loopEdges: string[] = [];
@@ -379,6 +382,12 @@ export function generateDefinitionDagCode(
       labelLine1 += ` <small>[${stepType.toUpperCase()}]</small>`;
     }
 
+    // Disabled indicator
+    const isDisabled = step.enabled === false || (s.enabled === false);
+    if (isDisabled) {
+      disabledSteps.push(safeId);
+    }
+
     const labelParts = [escLabel(labelLine1)];
 
     // Add type-specific metadata
@@ -389,6 +398,11 @@ export function generateDefinitionDagCode(
     const subagents = (s.subagents as Array<{ name: string; displayName?: string; description?: string }>) || [];
     if (subagents.length > 0) {
       labelParts.push(`<small>\u{1F916} ${subagents.length} subagent${subagents.length > 1 ? 's' : ''}</small>`);
+    }
+
+    // Disabled badge (shown after metadata so it appears at the bottom)
+    if (isDisabled) {
+      labelParts.push(`<small>\u{1F6AB} DISABLED</small>`);
     }
 
     const label = labelParts.join('<br/>');
@@ -474,6 +488,11 @@ export function generateDefinitionDagCode(
     mermaidCode += `  class ${subagentNodeIds.join(',')} subagentNode\n`;
   }
 
+  // Apply disabled class last so it overrides type/handler styles
+  if (disabledSteps.length > 0) {
+    mermaidCode += `  class ${disabledSteps.join(',')} disabledStep\n`;
+  }
+
   return { mermaidCode, stepNameToId };
 }
 
@@ -547,6 +566,7 @@ export function generateExecutionDagCode(
   const subgraphSections: string[] = [];
   const subagentEdges: string[] = [];
   const subagentNodeIds: string[] = [];
+  const disabledSteps: string[] = [];
 
   steps.forEach((step) => {
     const stepName = getStepName(step as unknown as LooseStep | string);
@@ -593,6 +613,13 @@ export function generateExecutionDagCode(
     // Type badge
     const typeBadge = stepType !== 'prompt' ? ` <small>[${stepType.toUpperCase()}]</small>` : '';
 
+    // Disabled indicator
+    const isDisabled = (typeof step === 'object') &&
+      ((step as Step).enabled === false || s.enabled === false);
+    if (isDisabled) {
+      disabledSteps.push(safeId);
+    }
+
     // Build label
     const labelParts = [escLabel(`${typeIcon}${stepName}${statusIcon}${loopIndicator}${typeBadge}`)];
 
@@ -608,6 +635,11 @@ export function generateExecutionDagCode(
       : [];
     if (subagents.length > 0) {
       labelParts.push(`<small>\u{1F916} ${subagents.length} subagent${subagents.length > 1 ? 's' : ''}</small>`);
+    }
+
+    // Disabled badge (shown after metadata so it appears at the bottom)
+    if (isDisabled) {
+      labelParts.push(`<small>\u{1F6AB} DISABLED</small>`);
     }
 
     const label = labelParts.join('<br/>');
@@ -674,6 +706,8 @@ export function generateExecutionDagCode(
   mermaidCode += '  classDef noaction fill:#21262d,stroke:#8b949e,color:#8b949e\n';
   mermaidCode += '  classDef completedEarly fill:#0c2a3d,stroke:#38bdf8,color:#38bdf8\n';
   mermaidCode += '  classDef subagentNode fill:#161b22,stroke:#8b949e,color:#8b949e\n';
+  // Disabled step style (muted colors, dashed border) - applied last to override status styles
+  mermaidCode += '  classDef disabledStep fill:#161b22,stroke:#484f58,color:#6e7681,stroke-dasharray:5 5\n';
 
   // Apply status classes
   for (const [status, ids] of Object.entries(statusGroups)) {
@@ -685,6 +719,11 @@ export function generateExecutionDagCode(
   // Apply subagent node class
   if (subagentNodeIds.length > 0) {
     mermaidCode += `  class ${subagentNodeIds.join(',')} subagentNode\n`;
+  }
+
+  // Apply disabled class last so it overrides status styles
+  if (disabledSteps.length > 0) {
+    mermaidCode += `  class ${disabledSteps.join(',')} disabledStep\n`;
   }
 
   return { mermaidCode, stepNameToId };

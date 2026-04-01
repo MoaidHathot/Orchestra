@@ -299,7 +299,7 @@ public class SseReporterTests : IDisposable
 	[Fact]
 	public void ReportStatusChange_AddsEvent()
 	{
-		_reporter.ReportStatusChange("Running");
+		_reporter.ReportStatusChange(HostExecutionStatus.Running);
 
 		_reporter.AccumulatedEventCount.Should().Be(1);
 		_reporter.AccumulatedEvents[0].Type.Should().Be("status-changed");
@@ -360,6 +360,109 @@ public class SseReporterTests : IDisposable
 
 		_reporter.AccumulatedEvents.Should().Contain(e => e.Type == "orchestration-error");
 		_reporter.AccumulatedEvents[0].Data.Should().Contain("something failed");
+	}
+
+	[Fact]
+	public async Task ReportStatusChange_Cancelling_SentToSubscribers()
+	{
+		// Arrange - subscribe before reporting
+		var (_, future) = _reporter.Subscribe();
+		future.Should().NotBeNull();
+
+		// Act
+		_reporter.ReportStatusChange(HostExecutionStatus.Cancelling);
+
+		// Assert
+		var evt = await future!.ReadAsync();
+		evt.Type.Should().Be("status-changed");
+		evt.Data.Should().Contain("Cancelling");
+	}
+
+	[Fact]
+	public async Task CancellationFlow_StatusChangeThenCancelled_BothEventsDelivered()
+	{
+		// Arrange — Simulates the full cancellation SSE flow:
+		// 1. status-changed (Cancelling)
+		// 2. orchestration-cancelled
+		var (_, future) = _reporter.Subscribe();
+		future.Should().NotBeNull();
+
+		// Act
+		_reporter.ReportStatusChange(HostExecutionStatus.Cancelling);
+		_reporter.ReportOrchestrationCancelled();
+
+		// Assert — both events arrive in order
+		var evt1 = await future!.ReadAsync();
+		evt1.Type.Should().Be("status-changed");
+		evt1.Data.Should().Contain("Cancelling");
+
+		var evt2 = await future!.ReadAsync();
+		evt2.Type.Should().Be("orchestration-cancelled");
+	}
+
+	[Fact]
+	public async Task CancellationFlow_CompleteThenCancelled_ChannelIsClosed()
+	{
+		// Arrange
+		var (_, future) = _reporter.Subscribe();
+		future.Should().NotBeNull();
+
+		// Act — emit cancellation events then complete
+		_reporter.ReportStatusChange(HostExecutionStatus.Cancelling);
+		_reporter.ReportOrchestrationCancelled();
+		_reporter.Complete();
+
+		// Drain the channel — ChannelReader.Completion only resolves once
+		// all buffered items are consumed and the writer is completed.
+		var events = new List<SseEvent>();
+		while (await future!.WaitToReadAsync())
+		{
+			while (future.TryRead(out var evt))
+			{
+				events.Add(evt);
+			}
+		}
+
+		// Assert — channel is now closed after draining
+		future.Completion.IsCompleted.Should().BeTrue();
+		events.Should().HaveCount(2);
+		events[0].Type.Should().Be("status-changed");
+		events[1].Type.Should().Be("orchestration-cancelled");
+
+		// Accumulated events should contain both events
+		_reporter.AccumulatedEvents.Should().HaveCount(2);
+		_reporter.AccumulatedEvents[0].Type.Should().Be("status-changed");
+		_reporter.AccumulatedEvents[1].Type.Should().Be("orchestration-cancelled");
+	}
+
+	[Fact]
+	public void ReportStatusChange_AfterComplete_DoesNothing()
+	{
+		// Arrange
+		_reporter.Complete();
+
+		// Act — writing after completion should not throw or add events
+		_reporter.ReportStatusChange(HostExecutionStatus.Cancelling);
+
+		// Assert
+		_reporter.AccumulatedEventCount.Should().Be(0);
+	}
+
+	[Fact]
+	public async Task ReportStatusChange_LateSubscriber_ReceivesReplayOfCancellingEvent()
+	{
+		// Act — emit status change before subscriber connects
+		_reporter.ReportStatusChange(HostExecutionStatus.Cancelling);
+		_reporter.ReportOrchestrationCancelled();
+
+		// Subscribe late
+		var (replay, _) = _reporter.Subscribe();
+
+		// Assert — late subscriber should see both events in replay
+		replay.Should().HaveCount(2);
+		replay[0].Type.Should().Be("status-changed");
+		replay[0].Data.Should().Contain("Cancelling");
+		replay[1].Type.Should().Be("orchestration-cancelled");
 	}
 }
 

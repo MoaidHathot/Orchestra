@@ -125,6 +125,31 @@ function makeStepsWithLoop(): Step[] {
   ];
 }
 
+/** Orchestration with a disabled step. */
+function makeStepsWithDisabled(): Step[] {
+  return [
+    {
+      name: 'fetch-data',
+      type: 'Http',
+      method: 'GET',
+      url: 'https://api.example.com/data',
+    },
+    {
+      name: 'disabled-step',
+      type: 'Prompt',
+      model: 'claude-opus-4.5',
+      enabled: false,
+      dependsOn: ['fetch-data'],
+    },
+    {
+      name: 'final-step',
+      type: 'Prompt',
+      model: 'claude-opus-4.5',
+      dependsOn: ['disabled-step'],
+    },
+  ];
+}
+
 /** Orchestration with handler indicators. */
 function makeStepsWithHandlers(): Step[] {
   const steps: Step[] = [
@@ -251,6 +276,24 @@ describe('generateDefinitionDagCode', () => {
     await assertMermaidParses(mermaidCode);
   });
 
+  it('generates valid Mermaid with a disabled step', async () => {
+    const { mermaidCode } = generateDefinitionDagCode(makeStepsWithDisabled());
+    await assertMermaidParses(mermaidCode);
+
+    // Should contain the disabledStep classDef
+    expect(mermaidCode).toContain('classDef disabledStep');
+
+    // Should contain the DISABLED badge in the node label
+    expect(mermaidCode).toContain('DISABLED');
+
+    // Should apply the disabledStep class to the disabled step
+    expect(mermaidCode).toContain('class disabled_step disabledStep');
+
+    // Should NOT apply disabledStep class to enabled steps
+    expect(mermaidCode).not.toContain('class fetch_data disabledStep');
+    expect(mermaidCode).not.toContain('class final_step disabledStep');
+  });
+
   it('generates valid Mermaid for a complex orchestration', async () => {
     const { mermaidCode } = generateDefinitionDagCode(makeComplexOrchestration());
     await assertMermaidParses(mermaidCode);
@@ -335,6 +378,31 @@ describe('generateExecutionDagCode', () => {
 
     const { mermaidCode } = generateExecutionDagCode(steps, statuses);
     await assertMermaidParses(mermaidCode);
+  });
+
+  it('generates valid Mermaid for execution with a disabled step', async () => {
+    const steps = makeStepsWithDisabled();
+    const statuses: Record<string, string> = {
+      'fetch-data': 'completed',
+      'disabled-step': 'skipped',
+      'final-step': 'pending',
+    };
+
+    const { mermaidCode } = generateExecutionDagCode(steps, statuses);
+    await assertMermaidParses(mermaidCode);
+
+    // Should contain the disabledStep classDef
+    expect(mermaidCode).toContain('classDef disabledStep');
+
+    // Should contain the DISABLED badge in the node label
+    expect(mermaidCode).toContain('DISABLED');
+
+    // Should apply the disabledStep class to the disabled step
+    expect(mermaidCode).toContain('class disabled_step disabledStep');
+
+    // Should NOT apply disabledStep class to enabled steps
+    expect(mermaidCode).not.toContain('class fetch_data disabledStep');
+    expect(mermaidCode).not.toContain('class final_step disabledStep');
   });
 });
 

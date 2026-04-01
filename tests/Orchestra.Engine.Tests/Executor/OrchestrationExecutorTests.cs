@@ -395,6 +395,214 @@ public class OrchestrationExecutorTests
 		result.Status.Should().Be(ExecutionStatus.Cancelled);
 	}
 
+	[Fact]
+	public async Task ExecuteAsync_CancellationDuringExecution_LinearChainCompletesWithinTimeout()
+	{
+		// Arrange — This is the primary regression test for the "stuck in cancelling" bug.
+		// In a linear chain (A -> B -> C), cancelling while A is running caused
+		// Task.WhenAll to hang forever because B and C's TaskCompletionSources were
+		// never resolved.
+		var cts = new CancellationTokenSource();
+		var stepStarted = new TaskCompletionSource();
+
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			// Signal that step A has started, then block until cancelled
+			stepStarted.TrySetResult();
+
+			var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				await Task.Delay(Timeout.Infinite, ct);
+				return new AgentResult { Content = "unreachable" };
+			}, ct);
+
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.LinearChain(); // A -> B -> C
+
+		// Act — Start execution, wait for step A to begin, then cancel
+		var executeTask = executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
+		await stepStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		cts.Cancel();
+
+		// The executor must complete within a reasonable time — if it hangs, the bug is present
+		var result = await executeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults.Should().HaveCount(3);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Cancelled);
+		_reporter.Received().ReportStepCancelled("A");
+		_reporter.Received().ReportStepCancelled("B");
+		_reporter.Received().ReportStepCancelled("C");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_CancellationDuringExecution_DiamondDagCompletesWithinTimeout()
+	{
+		// Arrange — Diamond: A -> B, A -> C, B -> D, C -> D
+		// Cancel while A is running — B, C, D should all be cancelled and execution should finish
+		var cts = new CancellationTokenSource();
+		var stepStarted = new TaskCompletionSource();
+
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			stepStarted.TrySetResult();
+
+			var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				await Task.Delay(Timeout.Infinite, ct);
+				return new AgentResult { Content = "unreachable" };
+			}, ct);
+
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.DiamondDag(); // A -> B,C -> D
+
+		// Act
+		var executeTask = executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
+		await stepStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		cts.Cancel();
+
+		var result = await executeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults.Should().HaveCount(4);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["D"].Status.Should().Be(ExecutionStatus.Cancelled);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_CancellationAfterFirstStepSucceeds_DownstreamStepsCancelled()
+	{
+		// Arrange — A -> B -> C. Step A succeeds normally. Step B blocks until cancelled.
+		// After B starts, we cancel externally. B should be cancelled (it was running),
+		// C should be cancelled (dependency was cancelled), overall status should be Cancelled.
+		var cts = new CancellationTokenSource();
+		var stepBStarted = new TaskCompletionSource();
+		var stepCount = 0;
+
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var current = Interlocked.Increment(ref stepCount);
+			if (current == 1)
+			{
+				// Step A — completes successfully
+				var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+				channel.Writer.Complete();
+				return new AgentTask(channel.Reader, Task.FromResult(new AgentResult { Content = "Step A output" }));
+			}
+
+			// Step B — signal that it started, then block until cancelled
+			stepBStarted.TrySetResult();
+			var ch = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				await Task.Delay(Timeout.Infinite, ct);
+				return new AgentResult { Content = "unreachable" };
+			}, ct);
+			return new AgentTask(ch.Reader, resultTask);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.LinearChain(); // A -> B -> C
+
+		// Act — Start execution, wait for B to start running, then cancel
+		var executeTask = executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
+		await stepBStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		cts.Cancel();
+
+		var result = await executeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Cancelled);
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Cancelled);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_CancellationWithPartialParallelCompletion_MixedResults()
+	{
+		// Arrange — A and B have no deps and run in parallel. C depends on both.
+		// The first handler call completes fast, the second blocks until cancelled.
+		// Since A and B are parallel, we can't guarantee which is called first,
+		// so we just verify that one succeeded, one was cancelled, and C was cancelled.
+		var slowStepStarted = new TaskCompletionSource();
+		var cts = new CancellationTokenSource();
+		var callCount = 0;
+
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var current = Interlocked.Increment(ref callCount);
+			if (current == 1)
+			{
+				// First step to be called — complete fast
+				var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+				channel.Writer.Complete();
+				return new AgentTask(channel.Reader, Task.FromResult(new AgentResult { Content = "fast output" }));
+			}
+			else
+			{
+				// Second step to be called — wait forever until cancelled
+				slowStepStarted.TrySetResult();
+				var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+				var resultTask = Task.Run(async () =>
+				{
+					await Task.Delay(Timeout.Infinite, ct);
+					return new AgentResult { Content = "unreachable" };
+				}, ct);
+				return new AgentTask(channel.Reader, resultTask);
+			}
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "partial-cancel",
+			Description = "A(parallel), B(parallel), C(depends on A and B)",
+			Steps =
+			[
+				TestOrchestrations.CreatePromptStep("A"),
+				TestOrchestrations.CreatePromptStep("B"),
+				TestOrchestrations.CreatePromptStep("C", dependsOn: ["A", "B"])
+			]
+		};
+
+		// Act — wait for the slow step to start, then cancel
+		var executeTask = executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
+		await slowStepStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		cts.Cancel();
+
+		var result = await executeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+		// Assert — overall status is Cancelled
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+
+		// One of A/B succeeded (the fast one), the other was cancelled (the slow one)
+		var statuses = new[] { result.StepResults["A"].Status, result.StepResults["B"].Status };
+		statuses.Should().Contain(ExecutionStatus.Succeeded);
+		statuses.Should().Contain(ExecutionStatus.Cancelled);
+
+		// C depends on both so it should be cancelled (one dependency was cancelled)
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Cancelled);
+	}
+
 	#endregion
 
 	#region Run Store Integration

@@ -35,6 +35,7 @@ export interface SubagentInfo {
 export interface Step {
   name: string;
   type?: string;
+  enabled?: boolean;
   model?: string;
   systemPrompt?: string;
   userPrompt?: string;

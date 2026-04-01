@@ -206,7 +206,7 @@ public static class CheckpointApi
 					if (cancellationToken.IsCancellationRequested)
 					{
 						reporter.ReportOrchestrationCancelled();
-						executionInfo.Status = "Cancelled";
+						executionInfo.Status = HostExecutionStatus.Cancelled;
 						return;
 					}
 
@@ -217,18 +217,18 @@ public static class CheckpointApi
 					}
 
 					reporter.ReportOrchestrationDone(result);
-					executionInfo.Status = "Completed";
+					executionInfo.Status = HostExecutionStatus.Completed;
 				}
 				catch (OperationCanceledException)
 				{
 					reporter.ReportOrchestrationCancelled();
-					executionInfo.Status = "Cancelled";
+					executionInfo.Status = HostExecutionStatus.Cancelled;
 				}
 				catch (Exception ex)
 				{
 					reporter.ReportStepError("orchestration", ex.Message);
 					reporter.ReportOrchestrationError(ex.Message);
-					executionInfo.Status = "Failed";
+					executionInfo.Status = HostExecutionStatus.Failed;
 				}
 				finally
 				{

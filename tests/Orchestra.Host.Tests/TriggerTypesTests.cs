@@ -138,7 +138,7 @@ public class TriggerTypesTests
 		};
 
 		// Assert
-		info.Status.Should().Be("Running");
+		info.Status.Should().Be(HostExecutionStatus.Running);
 		info.TotalSteps.Should().Be(0);
 		info.CompletedSteps.Should().Be(0);
 		info.CurrentStep.Should().BeNull();

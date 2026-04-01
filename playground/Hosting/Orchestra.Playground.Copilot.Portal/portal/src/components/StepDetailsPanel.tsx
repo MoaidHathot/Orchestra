@@ -108,6 +108,7 @@ const KNOWN_PROPS: ReadonlySet<string> = new Set([
   'transform',
   'handler',
   'loop',
+  'enabled',
 ]);
 
 export default function StepDetailsPanel({ step }: Props): React.JSX.Element | null {
@@ -166,6 +167,31 @@ export default function StepDetailsPanel({ step }: Props): React.JSX.Element | n
             Type
           </div>
           <div style={{ color: '#d2a8ff' }}>{step.type}</div>
+        </div>
+      )}
+
+      {/* Enabled (only shown when explicitly disabled) */}
+      {step.enabled === false && (
+        <div style={{ marginBottom: '12px' }}>
+          <div
+            className="text-muted"
+            style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}
+          >
+            Enabled
+          </div>
+          <div
+            style={{
+              display: 'inline-block',
+              background: '#484f584d',
+              border: '1px solid #484f58',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '12px',
+              color: '#6e7681',
+            }}
+          >
+            Disabled
+          </div>
         </div>
       )}
 

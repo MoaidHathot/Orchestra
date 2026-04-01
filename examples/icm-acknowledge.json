@@ -26,18 +26,7 @@
       "userPrompt": "Review the following incident data and determine if any incidents are NOT yet acknowledged:\n\n{{fetch-active-incidents.output}}\n\nIf ALL incidents are already acknowledged (or there are no incidents at all), use the orchestra_complete tool to stop the orchestration early with status 'success'. Otherwise, output 'Proceeding with acknowledgment'.",
       "mcps": [],
       "model": "claude-opus-4.6",
-      "timeoutSeconds": 30
-    },
-    {
-      "name": "debug-icm-mcp",
-      "type": "Prompt",
-      "dependsOn": [],
-      "systemPrompt": "Your task is to check which IcM tools exist",
-      "userPrompt": "List all available tools and their descritpion. This is a debug step to verify that the orchestration can see the MCP tools correctly. Output a simple list of tool names and their descritpion and available information about them.",
-      "mcps": ["icm"],
-      "model": "claude-opus-4.6",
-      "timeoutSeconds": 30
-
+      "timeoutSeconds": 40
     },
     {
       "name": "acknowledge-incidents",

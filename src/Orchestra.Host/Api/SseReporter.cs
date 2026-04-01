@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using Orchestra.Engine;
+using Orchestra.Host.Triggers;
 
 namespace Orchestra.Host.Api;
 
@@ -490,7 +491,7 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	/// </summary>
 	public void ReportOrchestrationCancelled()
 	{
-		Write("orchestration-cancelled", new { status = "Cancelled" });
+		Write("orchestration-cancelled", new { status = HostExecutionStatus.Cancelled });
 	}
 
 	/// <summary>
@@ -498,13 +499,13 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	/// </summary>
 	public void ReportOrchestrationError(string errorMessage)
 	{
-		Write("orchestration-error", new { status = "Failed", error = errorMessage });
+		Write("orchestration-error", new { status = HostExecutionStatus.Failed, error = errorMessage });
 	}
 
 	/// <summary>
-	/// Reports a status change for the orchestration (e.g., "Cancelling").
+	/// Reports a status change for the orchestration (e.g., <see cref="HostExecutionStatus.Cancelling"/>).
 	/// </summary>
-	public void ReportStatusChange(string status)
+	public void ReportStatusChange(HostExecutionStatus status)
 	{
 		Write("status-changed", new { status });
 	}

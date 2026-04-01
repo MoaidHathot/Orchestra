@@ -303,7 +303,7 @@ public partial class OrchestrationExecutor
 				}
 
 				// After this step completes, check all dependents — launch any that are now ready
-				// (but only if orchestration hasn't been completed early)
+				// (but only if orchestration hasn't been completed early or cancelled externally)
 				if (!orchestrationCompleteCts.IsCancellationRequested)
 				{
 					foreach (var dependent in dependents[stepName])
@@ -314,6 +314,29 @@ public partial class OrchestrationExecutor
 						if (allDepsComplete)
 						{
 							TryLaunchStep(dependent);
+						}
+					}
+				}
+				else
+				{
+					// Cancellation was requested (external cancel or orchestration-complete).
+					// Resolve all pending step TCSs so that Task.WhenAll doesn't hang.
+					// The orchestra_complete path already resolves TCSs inline (above),
+					// but external cancellation does not — handle it here.
+					foreach (var (name, tcs) in completionSources)
+					{
+						if (!stepResults.ContainsKey(name))
+						{
+							var cancelledResult = ExecutionResult.Cancelled();
+							context.AddResult(name, cancelledResult);
+							stepResults[name] = cancelledResult;
+
+							var cancelRecord = BuildStepRecord(allSteps[name], cancelledResult, effectiveParams, DateTimeOffset.UtcNow);
+							stepRecords[name] = cancelRecord;
+							allStepRecords[name] = cancelRecord;
+
+							_reporter.ReportStepCancelled(name);
+							tcs.TrySetResult(cancelledResult);
 						}
 					}
 				}
