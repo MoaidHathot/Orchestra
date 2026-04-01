@@ -918,6 +918,139 @@ public class OrchestrationParserTests
 
 	#endregion
 
+	#region Skill Directories Parsing
+
+	[Fact]
+	public void ParseOrchestration_WithSkillDirectories_ParsesDirectories()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "skills-test",
+				"description": "Test with skill directories",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"skillDirectories": ["./skills/coding", "/absolute/path/to/skills"]
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.SkillDirectories.Should().HaveCount(2);
+		step.SkillDirectories[0].Should().Be("./skills/coding");
+		step.SkillDirectories[1].Should().Be("/absolute/path/to/skills");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithEmptySkillDirectories_ParsesAsEmptyArray()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "empty-skills-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"skillDirectories": []
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SkillDirectories.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithoutSkillDirectories_DefaultsToEmptyArray()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "no-skills",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SkillDirectories.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestration_SkillDirectoriesWithMcpsAndSubagents_AllParsed()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "combined-test",
+				"description": "Test with skills, MCPs, and subagents",
+				"steps": [
+					{
+						"name": "coordinator",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "You are a coordinator.",
+						"userPrompt": "Process this",
+						"model": "claude-opus-4.5",
+						"skillDirectories": ["./skills/devops"],
+						"subagents": [
+							{
+								"name": "helper",
+								"prompt": "You are a helper."
+							}
+						]
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SkillDirectories.Should().ContainSingle().Which.Should().Be("./skills/devops");
+		step.Subagents.Should().ContainSingle().Which.Name.Should().Be("helper");
+	}
+
+	#endregion
+
 	#region Variables Parsing
 
 	[Fact]
@@ -965,6 +1098,181 @@ public class OrchestrationParserTests
 		// Assert
 		orchestration.Variables.Should().NotBeNull();
 		orchestration.Variables.Should().BeEmpty();
+	}
+
+	#endregion
+
+	#region Step Enabled Parsing
+
+	[Fact]
+	public void ParseOrchestration_StepWithEnabledTrue_ParsesAsEnabled()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "enabled-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"enabled": true
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].Enabled.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ParseOrchestration_StepWithEnabledFalse_ParsesAsDisabled()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "disabled-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"enabled": false
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].Enabled.Should().BeFalse();
+	}
+
+	[Fact]
+	public void ParseOrchestration_StepWithoutEnabled_DefaultsToTrue()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "no-enabled-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].Enabled.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ParseOrchestration_CommandStepWithEnabledFalse_ParsesAsDisabled()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "disabled-command",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "command",
+						"dependsOn": [],
+						"command": "echo",
+						"arguments": ["hello"],
+						"enabled": false
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].Enabled.Should().BeFalse();
+		orchestration.Steps[0].Should().BeOfType<CommandOrchestrationStep>();
+	}
+
+	[Fact]
+	public void ParseOrchestration_HttpStepWithEnabledFalse_ParsesAsDisabled()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "disabled-http",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "http",
+						"dependsOn": [],
+						"url": "https://example.com",
+						"enabled": false
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].Enabled.Should().BeFalse();
+		orchestration.Steps[0].Should().BeOfType<HttpOrchestrationStep>();
+	}
+
+	[Fact]
+	public void ParseOrchestration_TransformStepWithEnabledFalse_ParsesAsDisabled()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "disabled-transform",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "transform",
+						"dependsOn": [],
+						"template": "{{step1.output}}",
+						"enabled": false
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].Enabled.Should().BeFalse();
+		orchestration.Steps[0].Should().BeOfType<TransformOrchestrationStep>();
 	}
 
 	#endregion

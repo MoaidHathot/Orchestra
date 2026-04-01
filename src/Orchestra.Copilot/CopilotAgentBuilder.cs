@@ -29,6 +29,7 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		var reporter = Reporter;
 		var engineTools = EngineTools;
 		var engineToolCtx = EngineToolCtx;
+		var skillDirectories = SkillDirectories;
 
 		await _client.StartAsync(cancellationToken);
 
@@ -43,6 +44,7 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			reporter: reporter,
 			engineTools: engineTools,
 			engineToolContext: engineToolCtx,
+			skillDirectories: skillDirectories,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()
 		);
 	}
@@ -62,6 +64,7 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			reporter: config.Reporter,
 			engineTools: config.EngineTools,
 			engineToolContext: config.EngineToolCtx,
+			skillDirectories: config.SkillDirectories,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()
 		);
 	}

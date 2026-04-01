@@ -52,7 +52,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			LogStepMcpNames(step.Name, string.Join(", ", step.McpNames));
 
 			// Create a fresh engine tool context for this execution
-			var engineToolCtx = new EngineToolContext();
+			var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore };
 			var engineTools = _engineToolRegistry.GetAll();
 
 		// Build and run the agent using an immutable config snapshot (thread-safe)
@@ -67,6 +67,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			Reporter = _reporter,
 			EngineTools = engineTools,
 			EngineToolCtx = engineToolCtx,
+			SkillDirectories = step.SkillDirectories,
 		};
 
 		var agent = await _agentBuilder

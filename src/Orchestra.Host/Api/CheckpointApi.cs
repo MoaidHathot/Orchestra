@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.Hosting;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
@@ -102,6 +103,7 @@ public static class CheckpointApi
 			ILoggerFactory loggerFactory,
 			ICheckpointStore checkpointStore,
 			FileSystemRunStore runStore,
+			OrchestrationHostOptions hostOptions,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
 		{
@@ -188,7 +190,7 @@ public static class CheckpointApi
 			}, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore);
+			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore, dataPath: hostOptions.DataPath);
 			var cancellationToken = cts.Token;
 
 			// Execute resume in background

@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
+using Orchestra.Host.Triggers;
 using Xunit;
 
 namespace Orchestra.Host.Tests;
@@ -359,5 +360,276 @@ public class SseReporterTests : IDisposable
 
 		_reporter.AccumulatedEvents.Should().Contain(e => e.Type == "orchestration-error");
 		_reporter.AccumulatedEvents[0].Data.Should().Contain("something failed");
+	}
+}
+
+/// <summary>
+/// Tests for DefaultExecutionCallback wiring SseReporter callbacks for progress tracking.
+/// </summary>
+public class DefaultExecutionCallbackTests
+{
+	[Fact]
+	public void OnExecutionStarted_WiresSseReporterCallbacks_ForStepProgress()
+	{
+		// Arrange
+		using var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = "exec-1",
+			OrchestrationId = "orch-1",
+			OrchestrationName = "Test",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "scheduler",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			TotalSteps = 3
+		};
+		var callback = new DefaultExecutionCallback();
+
+		// Act
+		callback.OnExecutionStarted(info);
+
+		// Simulate step events via the reporter
+		reporter.ReportStepStarted("Step1");
+		info.CurrentStep.Should().Be("Step1");
+		info.CompletedSteps.Should().Be(0);
+
+		reporter.ReportStepCompleted("Step1", new AgentResult { Content = "done" });
+		info.CurrentStep.Should().BeNull();
+		info.CompletedSteps.Should().Be(1);
+
+		reporter.ReportStepStarted("Step2");
+		info.CurrentStep.Should().Be("Step2");
+
+		reporter.ReportStepCompleted("Step2", new AgentResult { Content = "done" });
+		info.CompletedSteps.Should().Be(2);
+		info.CurrentStep.Should().BeNull();
+
+		reporter.Dispose();
+	}
+
+	[Fact]
+	public void OnStepStarted_UpdatesCurrentStep()
+	{
+		// Arrange
+		using var cts = new CancellationTokenSource();
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = "exec-2",
+			OrchestrationId = "orch-2",
+			OrchestrationName = "Test",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = new SseReporter()
+		};
+		var callback = new DefaultExecutionCallback();
+
+		// Act
+		callback.OnStepStarted(info, "MyStep");
+
+		// Assert
+		info.CurrentStep.Should().Be("MyStep");
+
+		((SseReporter)info.Reporter).Dispose();
+	}
+
+	[Fact]
+	public void OnStepCompleted_IncrementsCompletedStepsAndClearsCurrentStep()
+	{
+		// Arrange
+		using var cts = new CancellationTokenSource();
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = "exec-3",
+			OrchestrationId = "orch-3",
+			OrchestrationName = "Test",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = new SseReporter()
+		};
+		var callback = new DefaultExecutionCallback();
+
+		info.CurrentStep = "StepA";
+
+		// Act
+		callback.OnStepCompleted(info, "StepA");
+
+		// Assert
+		info.CompletedSteps.Should().Be(1);
+		info.CurrentStep.Should().BeNull();
+
+		((SseReporter)info.Reporter).Dispose();
+	}
+
+	[Fact]
+	public void OnExecutionStarted_WithNonSseReporter_DoesNotThrow()
+	{
+		// Arrange - use a reporter that is NOT SseReporter
+		using var cts = new CancellationTokenSource();
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = "exec-non-sse",
+			OrchestrationId = "orch-non-sse",
+			OrchestrationName = "Test",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = new NullReporter()
+		};
+		var callback = new DefaultExecutionCallback();
+
+		// Act - should not throw, but callbacks won't be wired
+		callback.OnExecutionStarted(info);
+
+		// Assert - progress stays at defaults since callbacks were not wired
+		info.CurrentStep.Should().BeNull();
+		info.CompletedSteps.Should().Be(0);
+	}
+
+	[Fact]
+	public void OnExecutionStarted_FullLifecycle_TracksAllStepsCorrectly()
+	{
+		// Arrange - simulate a 4-step orchestration
+		using var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = "exec-lifecycle",
+			OrchestrationId = "orch-lifecycle",
+			OrchestrationName = "Lifecycle Test",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "scheduler",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			TotalSteps = 4
+		};
+		var callback = new DefaultExecutionCallback();
+
+		// Act
+		callback.OnExecutionStarted(info);
+
+		// Verify initial state
+		info.CompletedSteps.Should().Be(0);
+		info.CurrentStep.Should().BeNull();
+
+		// Step 1
+		reporter.ReportStepStarted("Gather");
+		info.CurrentStep.Should().Be("Gather");
+		info.CompletedSteps.Should().Be(0);
+
+		reporter.ReportStepCompleted("Gather", new AgentResult { Content = "gathered" });
+		info.CurrentStep.Should().BeNull();
+		info.CompletedSteps.Should().Be(1);
+
+		// Step 2
+		reporter.ReportStepStarted("Analyze");
+		info.CurrentStep.Should().Be("Analyze");
+		info.CompletedSteps.Should().Be(1);
+
+		reporter.ReportStepCompleted("Analyze", new AgentResult { Content = "analyzed" });
+		info.CurrentStep.Should().BeNull();
+		info.CompletedSteps.Should().Be(2);
+
+		// Step 3
+		reporter.ReportStepStarted("Transform");
+		info.CurrentStep.Should().Be("Transform");
+
+		reporter.ReportStepCompleted("Transform", new AgentResult { Content = "transformed" });
+		info.CompletedSteps.Should().Be(3);
+
+		// Step 4
+		reporter.ReportStepStarted("Report");
+		info.CurrentStep.Should().Be("Report");
+
+		reporter.ReportStepCompleted("Report", new AgentResult { Content = "reported" });
+		info.CompletedSteps.Should().Be(4);
+		info.CurrentStep.Should().BeNull();
+
+		// Final state
+		info.CompletedSteps.Should().Be(info.TotalSteps);
+
+		reporter.Dispose();
+	}
+
+	[Fact]
+	public void OnExecutionStarted_CallbackWiringIsIdempotent_LastWinsForSameReporter()
+	{
+		// Arrange - calling OnExecutionStarted twice should overwrite callbacks
+		using var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var info1 = new ActiveExecutionInfo
+		{
+			ExecutionId = "exec-first",
+			OrchestrationId = "orch-first",
+			OrchestrationName = "First",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "scheduler",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			TotalSteps = 2
+		};
+		var info2 = new ActiveExecutionInfo
+		{
+			ExecutionId = "exec-second",
+			OrchestrationId = "orch-second",
+			OrchestrationName = "Second",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "scheduler",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			TotalSteps = 2
+		};
+		var callback = new DefaultExecutionCallback();
+
+		// Act - wire to info1, then rewire to info2
+		callback.OnExecutionStarted(info1);
+		callback.OnExecutionStarted(info2);
+
+		// Now step events should only update info2
+		reporter.ReportStepStarted("StepA");
+		info1.CurrentStep.Should().BeNull("info1 callbacks were overwritten");
+		info2.CurrentStep.Should().Be("StepA");
+
+		reporter.ReportStepCompleted("StepA", new AgentResult { Content = "done" });
+		info1.CompletedSteps.Should().Be(0, "info1 callbacks were overwritten");
+		info2.CompletedSteps.Should().Be(1);
+
+		reporter.Dispose();
+	}
+
+	/// <summary>Minimal reporter that does nothing -- used to test non-SseReporter path.</summary>
+	private class NullReporter : IOrchestrationReporter
+	{
+		public void ReportSessionStarted(string requestedModel, string? selectedModel) { }
+		public void ReportModelChange(string? previousModel, string newModel) { }
+		public void ReportUsage(string stepName, string model, AgentUsage usage) { }
+		public void ReportContentDelta(string stepName, string chunk) { }
+		public void ReportReasoningDelta(string stepName, string chunk) { }
+		public void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer) { }
+		public void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error) { }
+		public void ReportStepError(string stepName, string errorMessage) { }
+		public void ReportStepCancelled(string stepName) { }
+		public void ReportStepCompleted(string stepName, AgentResult result) { }
+		public void ReportStepTrace(string stepName, StepExecutionTrace trace) { }
+		public void ReportModelMismatch(ModelMismatchInfo mismatch) { }
+		public void ReportStepOutput(string stepName, string content) { }
+		public void ReportStepStarted(string stepName) { }
+		public void ReportStepSkipped(string stepName, string reason) { }
+		public void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay) { }
+		public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations) { }
+		public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps) { }
+		public void ReportSessionWarning(string warningType, string message) { }
+		public void ReportSessionInfo(string infoType, string message) { }
+		public void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers) { }
+		public void ReportMcpServerStatusChanged(string serverName, string status) { }
+		public void ReportSubagentSelected(string stepName, string agentName, string? displayName, string[]? tools) { }
+		public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description) { }
+		public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName) { }
+		public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error) { }
+		public void ReportSubagentDeselected(string stepName) { }
+		public void ReportRunContext(RunContext context) { }
 	}
 }

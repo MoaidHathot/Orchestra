@@ -783,4 +783,202 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	}
 
 	#endregion
+
+	#region GET /api/active - Progress and filtering
+
+	[Fact]
+	public async Task Active_RunningExecution_ReturnsProgressFields()
+	{
+		// Arrange - Insert a fake running execution with progress data
+		var executionId = $"test-progress-{Guid.NewGuid():N}";
+		var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var activeInfos = _factory.Services.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
+
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationId = "orch-progress-test",
+			OrchestrationName = "Progress Test Orchestration",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			TotalSteps = 9,
+			CompletedSteps = 4,
+			CurrentStep = "Analyze Data"
+		};
+		activeInfos[executionId] = info;
+
+		try
+		{
+			// Act
+			var response = await _client.GetAsync("/api/active");
+			response.StatusCode.Should().Be(HttpStatusCode.OK);
+			var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+			// Assert - Find our execution in the running list
+			var running = result.GetProperty("running");
+			var found = false;
+			foreach (var exec in running.EnumerateArray())
+			{
+				if (exec.GetProperty("executionId").GetString() == executionId)
+				{
+					found = true;
+					exec.GetProperty("totalSteps").GetInt32().Should().Be(9);
+					exec.GetProperty("completedSteps").GetInt32().Should().Be(4);
+					exec.GetProperty("currentStep").GetString().Should().Be("Analyze Data");
+					break;
+				}
+			}
+			found.Should().BeTrue("the running execution should appear in /api/active with progress fields");
+		}
+		finally
+		{
+			activeInfos.TryRemove(executionId, out _);
+			reporter.Dispose();
+			cts.Dispose();
+		}
+	}
+
+	[Theory]
+	[InlineData("Completed")]
+	[InlineData("Cancelled")]
+	[InlineData("Failed")]
+	public async Task Active_CompletedExecution_IsFilteredOutOfRunningList(string terminalStatus)
+	{
+		// Arrange - Insert a fake execution that has already finished
+		var executionId = $"test-filtered-{Guid.NewGuid():N}";
+		var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var activeInfos = _factory.Services.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
+
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationId = "orch-filter-test",
+			OrchestrationName = "Filter Test Orchestration",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "scheduler",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			Status = terminalStatus,
+			TotalSteps = 5,
+			CompletedSteps = 5
+		};
+		activeInfos[executionId] = info;
+
+		try
+		{
+			// Act
+			var response = await _client.GetAsync("/api/active");
+			response.StatusCode.Should().Be(HttpStatusCode.OK);
+			var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+			// Assert - The execution should NOT appear in the running list
+			var running = result.GetProperty("running");
+			foreach (var exec in running.EnumerateArray())
+			{
+				exec.GetProperty("executionId").GetString().Should()
+					.NotBe(executionId, $"execution with status '{terminalStatus}' should be filtered out");
+			}
+		}
+		finally
+		{
+			activeInfos.TryRemove(executionId, out _);
+			reporter.Dispose();
+			cts.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task Active_RunningExecution_AppearsInRunningList()
+	{
+		// Arrange
+		var executionId = $"test-running-{Guid.NewGuid():N}";
+		var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var activeInfos = _factory.Services.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
+
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationId = "orch-running-test",
+			OrchestrationName = "Running Test Orchestration",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "loop",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			Status = "Running",
+			TotalSteps = 3
+		};
+		activeInfos[executionId] = info;
+
+		try
+		{
+			// Act
+			var response = await _client.GetAsync("/api/active");
+			response.StatusCode.Should().Be(HttpStatusCode.OK);
+			var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+			// Assert - The execution SHOULD appear in the running list
+			var running = result.GetProperty("running");
+			var found = running.EnumerateArray().Any(exec =>
+				exec.GetProperty("executionId").GetString() == executionId);
+			found.Should().BeTrue("a running execution should appear in /api/active running list");
+		}
+		finally
+		{
+			activeInfos.TryRemove(executionId, out _);
+			reporter.Dispose();
+			cts.Dispose();
+		}
+	}
+
+	[Fact]
+	public async Task Active_CancellingExecution_StillAppearsInRunningList()
+	{
+		// Arrange - "Cancelling" is a transient state and should still appear
+		var executionId = $"test-cancelling-{Guid.NewGuid():N}";
+		var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var activeInfos = _factory.Services.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
+
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationId = "orch-cancelling-test",
+			OrchestrationName = "Cancelling Test Orchestration",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			Status = "Cancelling",
+			TotalSteps = 5,
+			CompletedSteps = 2
+		};
+		activeInfos[executionId] = info;
+
+		try
+		{
+			// Act
+			var response = await _client.GetAsync("/api/active");
+			response.StatusCode.Should().Be(HttpStatusCode.OK);
+			var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+			// Assert - "Cancelling" is still in-flight, should appear
+			var running = result.GetProperty("running");
+			var found = running.EnumerateArray().Any(exec =>
+				exec.GetProperty("executionId").GetString() == executionId);
+			found.Should().BeTrue("a cancelling execution should still appear in the running list");
+		}
+		finally
+		{
+			activeInfos.TryRemove(executionId, out _);
+			reporter.Dispose();
+			cts.Dispose();
+		}
+	}
+
+	#endregion
 }

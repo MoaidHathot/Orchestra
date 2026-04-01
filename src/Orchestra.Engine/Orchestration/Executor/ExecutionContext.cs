@@ -34,6 +34,14 @@ public class OrchestrationExecutionContext
 	public RetryPolicy? DefaultRetryPolicy { get; init; }
 
 	/// <summary>
+	/// The temp file store for this orchestration run, providing file I/O operations
+	/// scoped to a run-specific temp directory. Available via <c>{{orchestration.tempDir}}</c>
+	/// template expressions.
+	/// May be null when no data path is configured.
+	/// </summary>
+	public OrchestrationTempFileStore? TempFileStore { get; init; }
+
+	/// <summary>
 	/// Tracks which template expressions (env vars, variables) were resolved during execution.
 	/// Thread-safe for concurrent step execution.
 	/// </summary>

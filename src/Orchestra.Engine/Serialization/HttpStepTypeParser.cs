@@ -19,6 +19,7 @@ public sealed class HttpStepTypeParser : IStepTypeParser
 			DependsOn = root.TryGetProperty("dependsOn", out var deps)
 				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
+			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
 			Method = root.TryGetProperty("method", out var method)
 				? method.GetString()!
 				: "GET",

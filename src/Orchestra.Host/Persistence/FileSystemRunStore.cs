@@ -162,6 +162,7 @@ public class FileSystemRunStore : IRunStore
 			ErrorMessage = errorMsg,
 			CompletionReason = record.CompletionReason,
 			CompletedByStep = record.CompletedByStep,
+			IsIncomplete = record.IsIncomplete,
 		};
 
 		lock (_indexWriteLock)
@@ -385,6 +386,7 @@ public class FileSystemRunStore : IRunStore
 							ErrorMessage = errorMsg2,
 							CompletionReason = record.CompletionReason,
 							CompletedByStep = record.CompletedByStep,
+							IsIncomplete = record.IsIncomplete,
 						};
 
 						// During initial load we are the only writer (protected by _indexLoadLock),
@@ -522,6 +524,13 @@ public class RunIndex
 	/// The name of the step that triggered early completion via orchestra_complete.
 	/// </summary>
 	public string? CompletedByStep { get; init; }
+
+	/// <summary>
+	/// When true, indicates the orchestration did not fully complete.
+	/// This covers cases where all terminal steps had NoAction/Skipped status,
+	/// or the orchestration was completed early via orchestra_complete.
+	/// </summary>
+	public bool IsIncomplete { get; init; }
 }
 
 /// <summary>

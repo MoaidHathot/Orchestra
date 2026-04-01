@@ -96,6 +96,13 @@ export default function ExecutionModal({
     Record<TraceSectionKey, boolean>
   >({} as Record<TraceSectionKey, boolean>);
 
+  // Reset local state when switching to a different execution
+  useEffect(() => {
+    setSelectedStep(null);
+    setShowRunContext(false);
+    setExpandedTraceSections({} as Record<TraceSectionKey, boolean>);
+  }, [executionId]);
+
   // Toggle trace section
   const toggleTraceSection = useCallback((section: TraceSectionKey) => {
     setExpandedTraceSections((prev) => ({

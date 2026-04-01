@@ -30,4 +30,11 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// allowing the runtime to automatically delegate to subagents based on user intent.
 	/// </summary>
 	public Subagent[] Subagents { get; init; } = [];
+
+	/// <summary>
+	/// Optional list of directories containing Agent Skills (SKILL.md files).
+	/// Skills provide specialized knowledge and workflows that the agent can discover
+	/// and activate on demand. Paths are passed as-is to the underlying SDK.
+	/// </summary>
+	public string[] SkillDirectories { get; internal set; } = [];
 }

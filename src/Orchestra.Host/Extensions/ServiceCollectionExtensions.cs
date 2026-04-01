@@ -84,7 +84,8 @@ public static class ServiceCollectionExtensions
 				runsPath,
 				sp.GetRequiredService<IRunStore>(),
 				sp.GetRequiredService<ICheckpointStore>(),
-				sp.GetRequiredService<ITriggerExecutionCallback>());
+				sp.GetRequiredService<ITriggerExecutionCallback>(),
+				dataPath: options.DataPath);
 		});
 		services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
 

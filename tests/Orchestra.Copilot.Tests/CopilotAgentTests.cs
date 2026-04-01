@@ -395,6 +395,56 @@ public class CopilotAgentTests
 
 	#endregion
 
+	#region Skill Directories Configuration
+
+	[Fact]
+	public void Agent_WithSkillDirectories_ConfiguresCorrectly()
+	{
+		// Arrange & Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSkillDirectories("./skills/coding", "./skills/writing");
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithEmptySkillDirectories_ConfiguresCorrectly()
+	{
+		// Arrange & Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithSkillDirectories();
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Agent_WithSkillDirectoriesAndMcps_ConfiguresCorrectly()
+	{
+		// Arrange
+		var mcp = new LocalMcp
+		{
+			Name = "test-mcp",
+			Type = McpType.Local,
+			Command = "node",
+			Arguments = ["server.js"]
+		};
+
+		// Act
+		var builder = new CopilotAgentBuilder()
+			.WithModel("claude-opus-4.5")
+			.WithMcp(mcp)
+			.WithSkillDirectories("./skills/coding");
+
+		// Assert
+		builder.Should().NotBeNull();
+	}
+
+	#endregion
+
 	#region BuildSessionConfig MCP Tools Tests
 
 	private static CopilotAgent CreateAgentWithMcps(params Mcp[] mcps)
@@ -410,6 +460,7 @@ public class CopilotAgentTests
 			reporter: NullOrchestrationReporter.Instance,
 			engineTools: [],
 			engineToolContext: null,
+			skillDirectories: [],
 			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
 		);
 	}
@@ -516,6 +567,97 @@ public class CopilotAgentTests
 
 		// Assert
 		config.McpServers.Should().BeNull();
+	}
+
+	#endregion
+
+	#region BuildSessionConfig Skill Directories Tests
+
+	private static CopilotAgent CreateAgentWithSkillDirectories(params string[] skillDirectories)
+	{
+		return new CopilotAgent(
+			client: new CopilotClient(),
+			model: "test-model",
+			systemPrompt: null,
+			mcps: [],
+			subagents: [],
+			reasoningLevel: null,
+			systemPromptMode: null,
+			reporter: NullOrchestrationReporter.Instance,
+			engineTools: [],
+			engineToolContext: null,
+			skillDirectories: skillDirectories,
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
+		);
+	}
+
+	[Fact]
+	public void BuildSessionConfig_WithSkillDirectories_SetsSkillDirectories()
+	{
+		// Arrange
+		var agent = CreateAgentWithSkillDirectories("./skills/coding", "./skills/writing");
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.SkillDirectories.Should().NotBeNull();
+		config.SkillDirectories.Should().HaveCount(2);
+		config.SkillDirectories.Should().Contain("./skills/coding");
+		config.SkillDirectories.Should().Contain("./skills/writing");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_WithSingleSkillDirectory_SetsSingleEntry()
+	{
+		// Arrange
+		var agent = CreateAgentWithSkillDirectories("/absolute/path/to/skills");
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.SkillDirectories.Should().ContainSingle().Which.Should().Be("/absolute/path/to/skills");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_NoSkillDirectories_SkillDirectoriesIsNull()
+	{
+		// Arrange
+		var agent = CreateAgentWithSkillDirectories();
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.SkillDirectories.Should().BeNull();
+	}
+
+	[Fact]
+	public void BuildSessionConfig_WithSkillDirectoriesAndMcps_SetsBoth()
+	{
+		// Arrange
+		var agent = new CopilotAgent(
+			client: new CopilotClient(),
+			model: "test-model",
+			systemPrompt: null,
+			mcps: [new LocalMcp { Name = "icm", Type = McpType.Local, Command = "dnx", Arguments = ["IcM.Mcp"] }],
+			subagents: [],
+			reasoningLevel: null,
+			systemPromptMode: null,
+			reporter: NullOrchestrationReporter.Instance,
+			engineTools: [],
+			engineToolContext: null,
+			skillDirectories: ["./skills/devops"],
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
+		);
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.McpServers.Should().ContainKey("icm");
+		config.SkillDirectories.Should().ContainSingle().Which.Should().Be("./skills/devops");
 	}
 
 	#endregion

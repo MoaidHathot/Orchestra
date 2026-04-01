@@ -22,6 +22,11 @@ public abstract class AgentBuilder
 	/// </summary>
 	protected EngineToolContext? EngineToolCtx { get; private set; }
 
+	/// <summary>
+	/// Directories containing Agent Skills (SKILL.md files) to load into the session.
+	/// </summary>
+	protected string[] SkillDirectories { get; private set; } = [];
+
 	public AgentBuilder WithModel(string model)
 	{
 		Model = model;
@@ -73,6 +78,17 @@ public abstract class AgentBuilder
 	{
 		EngineTools = tools;
 		EngineToolCtx = context;
+		return this;
+	}
+
+	/// <summary>
+	/// Configures directories containing Agent Skills (SKILL.md files) to load into the session.
+	/// Skills provide specialized knowledge and workflows that the agent can discover
+	/// and activate on demand.
+	/// </summary>
+	public AgentBuilder WithSkillDirectories(params string[] directories)
+	{
+		SkillDirectories = directories;
 		return this;
 	}
 

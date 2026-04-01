@@ -535,4 +535,213 @@ public class OrchestrationResultTests
 	}
 
 	#endregion
+
+	#region IsIncomplete
+
+	[Fact]
+	public void From_AllTerminalNoAction_IsIncompleteTrue()
+	{
+		// Arrange — single terminal step returns NoAction
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.NoAction("Nothing to do")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert — Succeeded but marked as incomplete
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.IsIncomplete.Should().BeTrue();
+	}
+
+	[Fact]
+	public void From_AllTerminalSkipped_IsIncompleteTrue()
+	{
+		// Arrange — single terminal step is skipped (without any failures)
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "A", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["A"] = ExecutionResult.NoAction("Nothing to do"),
+			["B"] = ExecutionResult.Skipped("Dependency had no action")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert — Cancelled because terminal has Skipped, not incomplete
+		// (Skipped terminal = Cancelled status which doesn't qualify as Succeeded + incomplete)
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.IsIncomplete.Should().BeFalse();
+	}
+
+	[Fact]
+	public void From_MixOfSucceededAndNoAction_IsIncompleteFalse()
+	{
+		// Arrange — two terminal steps: one succeeds, one NoAction
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "A", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["A"] = ExecutionResult.Succeeded("Output"),
+			["B"] = ExecutionResult.NoAction("Nothing to do")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert — Not all terminal steps are NoAction/Skipped, so not incomplete
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.IsIncomplete.Should().BeFalse();
+	}
+
+	[Fact]
+	public void From_FullySucceeded_IsIncompleteFalse()
+	{
+		// Arrange
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.Succeeded("Output")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.IsIncomplete.Should().BeFalse();
+	}
+
+	[Fact]
+	public void From_EarlyCompletionViaOrchestraComplete_IsIncompleteTrue()
+	{
+		// Arrange
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "step2", Type = OrchestrationStepType.Prompt, DependsOn = ["step1"], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.Succeeded("Output"),
+			["step2"] = ExecutionResult.Cancelled()
+		};
+
+		// Act
+		var result = OrchestrationResult.From(
+			orchestration, stepResults,
+			orchestrationCompleteStatus: ExecutionStatus.Succeeded,
+			orchestrationCompleteReason: "Nothing more to do",
+			orchestrationCompleteStepName: "step1");
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.IsIncomplete.Should().BeTrue();
+		result.CompletionReason.Should().Be("Nothing more to do");
+	}
+
+	[Fact]
+	public void From_EarlyCompletionWithFailedStatus_IsIncompleteTrue()
+	{
+		// Arrange — orchestra_complete called with failed status
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.Succeeded("Output")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(
+			orchestration, stepResults,
+			orchestrationCompleteStatus: ExecutionStatus.Failed,
+			orchestrationCompleteReason: "LLM decided to fail");
+
+		// Assert — even though it "failed", it's still marked incomplete
+		// because it was completed early via orchestra_complete
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.IsIncomplete.Should().BeTrue();
+	}
+
+	[Fact]
+	public void From_Failed_IsIncompleteFalse()
+	{
+		// Arrange — a step naturally fails
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.Failed("Error")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert — natural failure is not "incomplete"
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.IsIncomplete.Should().BeFalse();
+	}
+
+	#endregion
 }

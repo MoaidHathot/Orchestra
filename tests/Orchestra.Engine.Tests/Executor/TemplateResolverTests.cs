@@ -294,6 +294,56 @@ public class TemplateResolverTests
 	}
 
 	[Fact]
+	public void Resolve_OrchestrationTempDir_ReturnsTempDirectory()
+	{
+		// Arrange
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"orchestra-test-{Guid.NewGuid():N}");
+		try
+		{
+			var store = new OrchestrationTempFileStore(tempRoot, "my-pipeline", "run-abc");
+			var info = new OrchestrationInfo("my-pipeline", "2.0.0", "run-abc", DateTimeOffset.UtcNow);
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = info,
+				Parameters = new Dictionary<string, string>(),
+				TempFileStore = store
+			};
+			var template = "TempDir: {{orchestration.tempDir}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+			// Assert
+			result.Should().Be($"TempDir: {store.TempDirectory}");
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot))
+				Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void Resolve_OrchestrationTempDir_NoStore_ReturnsEmptyString()
+	{
+		// Arrange
+		var info = new OrchestrationInfo("my-pipeline", "2.0.0", "run-abc", DateTimeOffset.UtcNow);
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = info,
+			Parameters = new Dictionary<string, string>(),
+			TempFileStore = null
+		};
+		var template = "TempDir: {{orchestration.tempDir}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("TempDir: ");
+	}
+
+	[Fact]
 	public void Resolve_OrchestrationAllProperties_ResolvesAll()
 	{
 		// Arrange

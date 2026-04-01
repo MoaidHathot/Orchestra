@@ -7,6 +7,12 @@ namespace Orchestra.Engine;
 public sealed class EngineToolContext
 {
 	/// <summary>
+	/// The temp file store for the current orchestration run.
+	/// Provides file I/O operations scoped to a run-specific temp directory.
+	/// May be null when no data path is configured (e.g., in-memory mode).
+	/// </summary>
+	public OrchestrationTempFileStore? TempFileStore { get; init; }
+	/// <summary>
 	/// When set, the prompt step result will be overridden to the specified status
 	/// regardless of the LLM's output content.
 	/// </summary>

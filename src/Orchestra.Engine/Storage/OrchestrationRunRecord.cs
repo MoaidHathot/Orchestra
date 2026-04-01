@@ -60,6 +60,13 @@ public class OrchestrationRunRecord
 	public string? CompletedByStep { get; init; }
 
 	/// <summary>
+	/// When true, indicates the orchestration did not fully complete.
+	/// This covers cases where all terminal steps had NoAction/Skipped status,
+	/// or the orchestration was completed early via orchestra_complete.
+	/// </summary>
+	public bool IsIncomplete { get; init; }
+
+	/// <summary>
 	/// Runtime context of this run, including resolved variables, accessed env vars,
 	/// orchestration metadata, and data directory path.
 	/// </summary>

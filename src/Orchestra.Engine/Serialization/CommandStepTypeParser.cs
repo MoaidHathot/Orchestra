@@ -19,6 +19,7 @@ public sealed class CommandStepTypeParser : IStepTypeParser
 			DependsOn = root.TryGetProperty("dependsOn", out var deps)
 				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
+			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
 			Command = root.GetProperty("command").GetString()!,
 			Arguments = root.TryGetProperty("arguments", out var args)
 				? args.EnumerateArray().Select(e => e.GetString()!).ToArray()

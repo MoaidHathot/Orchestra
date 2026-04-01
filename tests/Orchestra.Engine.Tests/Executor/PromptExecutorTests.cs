@@ -1109,4 +1109,51 @@ public class PromptExecutorTests
 	}
 
 	#endregion
+
+	#region Skill Directories
+
+	[Fact]
+	public async Task ExecuteAsync_WithSkillDirectories_PassesSkillDirectoriesToBuilder()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("skill-step");
+		step.SkillDirectories = ["./skills/coding", "/absolute/skills/devops"];
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		agentBuilder.CapturedConfig.Should().NotBeNull();
+		agentBuilder.CapturedConfig!.SkillDirectories.Should().HaveCount(2);
+		agentBuilder.CapturedConfig.SkillDirectories.Should().Contain("./skills/coding");
+		agentBuilder.CapturedConfig.SkillDirectories.Should().Contain("/absolute/skills/devops");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithoutSkillDirectories_PassesEmptyArray()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("no-skills-step");
+
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		agentBuilder.CapturedConfig.Should().NotBeNull();
+		agentBuilder.CapturedConfig!.SkillDirectories.Should().BeEmpty();
+	}
+
+	#endregion
 }

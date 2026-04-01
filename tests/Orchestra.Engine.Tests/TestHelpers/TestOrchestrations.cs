@@ -170,7 +170,8 @@ public static class TestOrchestrations
 		string[]? parameters = null,
 		string systemPrompt = "You are a test assistant.",
 		string userPrompt = "Test prompt",
-		string model = "claude-opus-4.5")
+		string model = "claude-opus-4.5",
+		bool enabled = true)
 	{
 		return new PromptOrchestrationStep
 		{
@@ -178,6 +179,7 @@ public static class TestOrchestrations
 			Type = OrchestrationStepType.Prompt,
 			DependsOn = dependsOn ?? [],
 			Parameters = parameters ?? [],
+			Enabled = enabled,
 			SystemPrompt = systemPrompt,
 			UserPrompt = userPrompt,
 			Model = model
@@ -226,4 +228,77 @@ public static class TestOrchestrations
 			SystemPromptMode = systemPromptMode
 		};
 	}
+
+	/// <summary>
+	/// Creates a single disabled step orchestration.
+	/// </summary>
+	public static Orchestration DisabledSingleStep(string name = "disabled-single") => new()
+	{
+		Name = name,
+		Description = "Single disabled step",
+		Steps =
+		[
+			CreatePromptStep("step1", enabled: false)
+		]
+	};
+
+	/// <summary>
+	/// Creates a linear chain where the middle step is disabled: A -> B(disabled) -> C
+	/// </summary>
+	public static Orchestration DisabledMiddleStep(string name = "disabled-middle") => new()
+	{
+		Name = name,
+		Description = "Linear chain with disabled middle step: A -> B(disabled) -> C",
+		Steps =
+		[
+			CreatePromptStep("A"),
+			CreatePromptStep("B", dependsOn: ["A"], enabled: false),
+			CreatePromptStep("C", dependsOn: ["B"])
+		]
+	};
+
+	/// <summary>
+	/// Creates a linear chain where the first step is disabled: A(disabled) -> B -> C
+	/// </summary>
+	public static Orchestration DisabledFirstStep(string name = "disabled-first") => new()
+	{
+		Name = name,
+		Description = "Linear chain with disabled first step: A(disabled) -> B -> C",
+		Steps =
+		[
+			CreatePromptStep("A", enabled: false),
+			CreatePromptStep("B", dependsOn: ["A"]),
+			CreatePromptStep("C", dependsOn: ["B"])
+		]
+	};
+
+	/// <summary>
+	/// Creates parallel steps where one is disabled: A, B(disabled), C
+	/// </summary>
+	public static Orchestration DisabledParallelStep(string name = "disabled-parallel") => new()
+	{
+		Name = name,
+		Description = "Parallel steps with one disabled: A, B(disabled), C",
+		Steps =
+		[
+			CreatePromptStep("A"),
+			CreatePromptStep("B", enabled: false),
+			CreatePromptStep("C")
+		]
+	};
+
+	/// <summary>
+	/// Creates an orchestration where all steps are disabled.
+	/// </summary>
+	public static Orchestration AllStepsDisabled(string name = "all-disabled") => new()
+	{
+		Name = name,
+		Description = "All steps disabled",
+		Steps =
+		[
+			CreatePromptStep("A", enabled: false),
+			CreatePromptStep("B", enabled: false),
+			CreatePromptStep("C", enabled: false)
+		]
+	};
 }

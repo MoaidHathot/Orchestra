@@ -18,7 +18,7 @@ public static partial class TemplateResolver
 	[GeneratedRegex(@"\{\{(?<expr>[^}]+)\}\}", RegexOptions.Compiled)]
 	private static partial Regex TemplatePattern();
 
-	private static readonly string[] s_validOrchestrationProperties = ["name", "version", "runid", "startedat"];
+	private static readonly string[] s_validOrchestrationProperties = ["name", "version", "runid", "startedat", "tempdir"];
 	private static readonly string[] s_validStepProperties = ["name", "type"];
 
 	/// <summary>
@@ -62,7 +62,7 @@ public static partial class TemplateResolver
 			if (expr.StartsWith("orchestration.", StringComparison.OrdinalIgnoreCase))
 			{
 				var property = expr["orchestration.".Length..];
-				return ResolveOrchestrationProperty(property, context.OrchestrationInfo);
+				return ResolveOrchestrationProperty(property, context.OrchestrationInfo, context);
 			}
 
 			// {{step.property}} — current step metadata
@@ -127,7 +127,7 @@ public static partial class TemplateResolver
 	/// Resolves a built-in orchestration property by name.
 	/// Throws on unknown properties since the orchestration.* namespace is fixed.
 	/// </summary>
-	private static string ResolveOrchestrationProperty(string property, OrchestrationInfo info)
+	private static string ResolveOrchestrationProperty(string property, OrchestrationInfo info, OrchestrationExecutionContext context)
 	{
 		if (property.Equals("name", StringComparison.OrdinalIgnoreCase))
 			return info.Name;
@@ -137,6 +137,8 @@ public static partial class TemplateResolver
 			return info.RunId;
 		if (property.Equals("startedAt", StringComparison.OrdinalIgnoreCase))
 			return info.StartedAt.ToString("o");
+		if (property.Equals("tempDir", StringComparison.OrdinalIgnoreCase))
+			return context.TempFileStore?.TempDirectory ?? "";
 
 		throw new InvalidOperationException(
 			$"Unknown orchestration property '{{{{orchestration.{property}}}}}'. " +

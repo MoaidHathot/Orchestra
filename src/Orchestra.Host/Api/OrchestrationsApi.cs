@@ -57,39 +57,40 @@ public static class OrchestrationsApi
 						var hs = s as HttpOrchestrationStep;
 						var cs = s as CommandOrchestrationStep;
 						var ts = s as TransformOrchestrationStep;
-						return new
+					return new
+					{
+						name = s.Name,
+						type = s.Type.ToString(),
+						dependsOn = s.DependsOn,
+						parameters = s.Parameters,
+						enabled = s.Enabled,
+						model = ps?.Model,
+						mcps = ps?.Mcps.Select(m => new
 						{
-							name = s.Name,
-							type = s.Type.ToString(),
-							dependsOn = s.DependsOn,
-							parameters = s.Parameters,
-							model = ps?.Model,
-							mcps = ps?.Mcps.Select(m => new
-							{
-								name = m.Name,
-								type = m.Type
-							}).ToArray() ?? Array.Empty<object>(),
-							loopConfig = ps?.Loop is not null ? new
-							{
-								target = ps.Loop.Target,
-								maxIterations = ps.Loop.MaxIterations,
-								exitPattern = ps.Loop.ExitPattern
-							} : null,
-							subagents = ps?.Subagents.Length > 0 ? ps.Subagents.Select(sa => new
-							{
-								name = sa.Name,
-								displayName = sa.DisplayName,
-								description = sa.Description
-							}).ToArray() : null,
-							// Http step fields
-							method = hs?.Method,
-							url = hs?.Url,
-							// Command step fields
-							command = cs?.Command,
-							arguments = cs?.Arguments,
-							// Transform step fields
-							template = ts?.Template
-						};
+							name = m.Name,
+							type = m.Type
+						}).ToArray() ?? Array.Empty<object>(),
+						loopConfig = ps?.Loop is not null ? new
+						{
+							target = ps.Loop.Target,
+							maxIterations = ps.Loop.MaxIterations,
+							exitPattern = ps.Loop.ExitPattern
+						} : null,
+						subagents = ps?.Subagents.Length > 0 ? ps.Subagents.Select(sa => new
+						{
+							name = sa.Name,
+							displayName = sa.DisplayName,
+							description = sa.Description
+						}).ToArray() : null,
+						// Http step fields
+						method = hs?.Method,
+						url = hs?.Url,
+						// Command step fields
+						command = cs?.Command,
+						arguments = cs?.Arguments,
+						// Transform step fields
+						template = ts?.Template
+					};
 					}).ToArray(),
 					parameters = parameterNames,
 					hasParameters = parameterNames.Length > 0,
@@ -138,6 +139,7 @@ public static class OrchestrationsApi
 					type = s.Type.ToString(),
 					dependsOn = s.DependsOn,
 					parameters = s.Parameters,
+					enabled = s.Enabled,
 					model = ps?.Model,
 					reasoningLevel = ps?.ReasoningLevel?.ToString(),
 					systemPromptMode = ps?.SystemPromptMode?.ToString(),

@@ -26,6 +26,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly IRunStore _runStore;
 	private readonly ICheckpointStore _checkpointStore;
 	private readonly ITriggerExecutionCallback? _executionCallback;
+	private readonly string? _dataPath;
 	private readonly JsonSerializerOptions _jsonOptions;
 
 	/// <summary>
@@ -49,7 +50,8 @@ public partial class TriggerManager : BackgroundService
 		string runsDir,
 		IRunStore runStore,
 		ICheckpointStore checkpointStore,
-		ITriggerExecutionCallback? executionCallback = null)
+		ITriggerExecutionCallback? executionCallback = null,
+		string? dataPath = null)
 	{
 		_activeExecutions = activeExecutions;
 		_activeExecutionInfos = activeExecutionInfos;
@@ -62,6 +64,7 @@ public partial class TriggerManager : BackgroundService
 		_runStore = runStore;
 		_checkpointStore = checkpointStore;
 		_executionCallback = executionCallback;
+		_dataPath = dataPath;
 		Directory.CreateDirectory(_triggersDir);
 
 		_jsonOptions = new JsonSerializerOptions
@@ -321,7 +324,7 @@ public partial class TriggerManager : BackgroundService
 		var executionId = checkpoint.RunId;
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore);
+		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, dataPath: _dataPath);
 
 		using var cts = new CancellationTokenSource();
 		_activeExecutions[executionId] = cts;
@@ -351,7 +354,12 @@ public partial class TriggerManager : BackgroundService
 			{
 				var result = await executor.ResumeAsync(entry.Orchestration, checkpoint, cts.Token);
 
-				executionInfo.Status = result.Status is ExecutionStatus.Succeeded or ExecutionStatus.NoAction ? "Completed" : "Failed";
+				executionInfo.Status = result.Status switch
+				{
+					ExecutionStatus.Succeeded or ExecutionStatus.NoAction => "Completed",
+					ExecutionStatus.Cancelled => "Cancelled",
+					_ => "Failed"
+				};
 
 				// Persist history
 				try
@@ -698,7 +706,7 @@ public partial class TriggerManager : BackgroundService
 
 			// Create executor with reporter
 			var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore);
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, dataPath: _dataPath);
 
 			using var cts = new CancellationTokenSource();
 			_activeExecutions[executionId] = cts;
@@ -721,9 +729,11 @@ public partial class TriggerManager : BackgroundService
 			// Notify callback that execution has started (allows it to set up reporter callbacks)
 			_executionCallback?.OnExecutionStarted(executionInfo);
 
+			OrchestrationResult? executionResult = null;
 			try
 			{
 				var result = await executor.ExecuteAsync(orchestration, parameters, triggerId: reg.Id, cancellationToken: cts.Token);
+				executionResult = result;
 
 				// Persist history
 				try
@@ -806,7 +816,12 @@ public partial class TriggerManager : BackgroundService
 				// Update status and notify callback
 				if (_activeExecutionInfos.TryGetValue(executionId, out var info))
 				{
-					info.Status = "Completed";
+					info.Status = executionResult?.Status switch
+					{
+						ExecutionStatus.Cancelled => "Cancelled",
+						ExecutionStatus.Failed => "Failed",
+						_ => "Completed"
+					};
 					_executionCallback?.OnExecutionCompleted(info);
 
 					// Remove after a short delay — tracked for graceful shutdown
@@ -902,7 +917,7 @@ public partial class TriggerManager : BackgroundService
 
 			// Create executor with reporter
 			var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore);
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, dataPath: _dataPath);
 
 			using var cts = new CancellationTokenSource();
 			_activeExecutions[executionId] = cts;
@@ -923,9 +938,11 @@ public partial class TriggerManager : BackgroundService
 
 			_executionCallback?.OnExecutionStarted(executionInfo);
 
+			OrchestrationResult? executionResult = null;
 			try
 			{
 				var orchResult = await executor.ExecuteAsync(orchestration, parameters, triggerId: reg.Id, cancellationToken: cts.Token);
+				executionResult = orchResult;
 
 				// Persist history
 				try
@@ -967,7 +984,12 @@ public partial class TriggerManager : BackgroundService
 				_activeExecutions.TryRemove(executionId, out _);
 				if (_activeExecutionInfos.TryGetValue(executionId, out var info))
 				{
-					info.Status = "Completed";
+					info.Status = executionResult?.Status switch
+					{
+						ExecutionStatus.Cancelled => "Cancelled",
+						ExecutionStatus.Failed => "Failed",
+						_ => "Completed"
+					};
 					_executionCallback?.OnExecutionCompleted(info);
 
 					TrackBackgroundTask(Task.Run(async () =>

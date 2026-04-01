@@ -23,11 +23,29 @@ public class EngineToolRegistryTests
 	}
 
 	[Fact]
-	public void CreateDefault_ContainsTwoTools()
+	public void CreateDefault_ContainsSaveToFileTool()
 	{
 		var registry = EngineToolRegistry.CreateDefault();
 
-		registry.Count.Should().Be(2);
+		registry.TryGet("orchestra_save_file", out var tool).Should().BeTrue();
+		tool.Should().BeOfType<SaveToFileTool>();
+	}
+
+	[Fact]
+	public void CreateDefault_ContainsReadFromFileTool()
+	{
+		var registry = EngineToolRegistry.CreateDefault();
+
+		registry.TryGet("orchestra_read_file", out var tool).Should().BeTrue();
+		tool.Should().BeOfType<ReadFromFileTool>();
+	}
+
+	[Fact]
+	public void CreateDefault_ContainsFourTools()
+	{
+		var registry = EngineToolRegistry.CreateDefault();
+
+		registry.Count.Should().Be(4);
 	}
 
 	[Fact]
@@ -60,7 +78,7 @@ public class EngineToolRegistryTests
 
 		var tools = registry.GetAll();
 
-		tools.Should().HaveCount(2);
+		tools.Should().HaveCount(4);
 	}
 
 	[Fact]

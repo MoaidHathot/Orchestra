@@ -14,6 +14,7 @@ public partial class OrchestrationExecutor
 	private readonly IRunStore _runStore;
 	private readonly ICheckpointStore _checkpointStore;
 	private readonly StepExecutorRegistry _stepExecutorRegistry;
+	private readonly string? _dataPath;
 
 	public OrchestrationExecutor(
 		IScheduler scheduler,
@@ -24,7 +25,8 @@ public partial class OrchestrationExecutor
 		IRunStore? runStore = null,
 		ICheckpointStore? checkpointStore = null,
 		StepExecutorRegistry? stepExecutorRegistry = null,
-		EngineToolRegistry? engineToolRegistry = null)
+		EngineToolRegistry? engineToolRegistry = null,
+		string? dataPath = null)
 	{
 		_scheduler = scheduler;
 		_agentBuilder = agentBuilder;
@@ -34,6 +36,7 @@ public partial class OrchestrationExecutor
 		_logger = loggerFactory.CreateLogger<OrchestrationExecutor>();
 		_runStore = runStore ?? NullRunStore.Instance;
 		_checkpointStore = checkpointStore ?? NullCheckpointStore.Instance;
+		_dataPath = dataPath;
 
 		// If no registry is provided, create a default one with all built-in step types
 		if (stepExecutorRegistry is not null)
@@ -103,6 +106,13 @@ public partial class OrchestrationExecutor
 		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
 		var effectiveParams = parameters ?? [];
 
+		// Create temp file store if a data path is configured
+		OrchestrationTempFileStore? tempFileStore = null;
+		if (_dataPath is not null)
+		{
+			tempFileStore = new OrchestrationTempFileStore(_dataPath, orchestration.Name, runId);
+		}
+
 		var context = new OrchestrationExecutionContext
 		{
 			Parameters = effectiveParams,
@@ -114,6 +124,7 @@ public partial class OrchestrationExecutor
 			Variables = orchestration.Variables,
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
+			TempFileStore = tempFileStore,
 		};
 		var stepResults = new ConcurrentDictionary<string, ExecutionResult>();
 		var stepRecords = new ConcurrentDictionary<string, StepRunRecord>();
@@ -364,6 +375,7 @@ public partial class OrchestrationExecutor
 			FinalContent = finalContent,
 			CompletionReason = orchestrationResult.CompletionReason,
 			CompletedByStep = orchestrationResult.CompletedByStep,
+			IsIncomplete = orchestrationResult.IsIncomplete,
 			Context = new RunContext
 			{
 				RunId = runId,
@@ -604,6 +616,14 @@ public partial class OrchestrationExecutor
 			LogStepCancelledBeforeStart(step.Name);
 			_reporter.ReportStepCancelled(step.Name);
 			return ExecutionResult.Cancelled();
+		}
+
+		// Check if this step is disabled
+		if (!step.Enabled)
+		{
+			LogStepDisabled(step.Name);
+			_reporter.ReportStepSkipped(step.Name, "Step is disabled (enabled: false)");
+			return ExecutionResult.Succeeded(string.Empty);
 		}
 
 		// Check if any dependency failed or was skipped
@@ -983,6 +1003,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' requested orchestration completion: {Reason}")]
 	private partial void LogOrchestrationCompleteRequested(string stepName, string reason);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' is disabled (enabled: false), skipping with empty result.")]
+	private partial void LogStepDisabled(string stepName);
 
 	#endregion
 }

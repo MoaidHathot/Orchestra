@@ -15,11 +15,24 @@ public class DefaultExecutionCallback : ITriggerExecutionCallback
 	public IOrchestrationReporter CreateReporter() => new SseReporter();
 
 	/// <summary>
-	/// Called when an execution starts.
+	/// Called when an execution starts. Wires reporter callbacks for step progress tracking.
 	/// </summary>
 	public void OnExecutionStarted(ActiveExecutionInfo info)
 	{
-		// Default implementation - no action needed
+		// Wire reporter callbacks so progress is tracked on the ActiveExecutionInfo.
+		// This mirrors what ExecutionApi does for manual executions.
+		if (info.Reporter is SseReporter sseReporter)
+		{
+			sseReporter.OnStepStarted = stepName =>
+			{
+				info.CurrentStep = stepName;
+			};
+			sseReporter.OnStepCompleted = stepName =>
+			{
+				info.CompletedSteps++;
+				info.CurrentStep = null;
+			};
+		}
 	}
 
 	/// <summary>

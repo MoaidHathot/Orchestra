@@ -546,6 +546,90 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 
 	#endregion
 
+	#region 2d. Step enabled field — enabled: false must be preserved in API responses
+
+	private async Task<string> RegisterOrchestrationWithDisabledStepAsync()
+	{
+		var name = $"Disabled Step Test {Guid.NewGuid():N}";
+		var json = $$"""
+		{
+			"name": "{{name}}",
+			"description": "Test orchestration with a disabled step",
+			"steps": [
+				{
+					"name": "enabled-step",
+					"type": "Prompt",
+					"dependsOn": [],
+					"systemPrompt": "Test",
+					"userPrompt": "Hello",
+					"model": "claude-opus-4.5"
+				},
+				{
+					"name": "disabled-step",
+					"type": "Prompt",
+					"dependsOn": ["enabled-step"],
+					"systemPrompt": "Test",
+					"userPrompt": "Hello",
+					"model": "claude-opus-4.5",
+					"enabled": false
+				}
+			]
+		}
+		""";
+
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+			new { json }, _jsonOptions);
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		return result.GetProperty("id").GetString()!;
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_StepEnabledFalseIsPreserved()
+	{
+		var id = await RegisterOrchestrationWithDisabledStepAsync();
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		var enabledStep = orch.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "enabled-step");
+		enabledStep.GetProperty("enabled").GetBoolean().Should().BeTrue(
+			"steps without explicit 'enabled' should default to true");
+
+		var disabledStep = orch.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "disabled-step");
+		disabledStep.GetProperty("enabled").GetBoolean().Should().BeFalse(
+			"steps with 'enabled': false must preserve that value in the API response");
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrationById_StepEnabledFalseIsPreserved()
+	{
+		var id = await RegisterOrchestrationWithDisabledStepAsync();
+
+		var response = await _client.GetAsync($"/api/orchestrations/{id}");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+		var enabledStep = result.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "enabled-step");
+		enabledStep.GetProperty("enabled").GetBoolean().Should().BeTrue(
+			"steps without explicit 'enabled' should default to true");
+
+		var disabledStep = result.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "disabled-step");
+		disabledStep.GetProperty("enabled").GetBoolean().Should().BeFalse(
+			"steps with 'enabled': false must preserve that value in the API response");
+	}
+
+	#endregion
+
 	#region 3. DELETE /api/orchestrations/{id} — Delete orchestration
 
 	[Fact]

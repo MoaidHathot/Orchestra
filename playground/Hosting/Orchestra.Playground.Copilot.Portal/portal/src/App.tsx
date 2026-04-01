@@ -64,6 +64,7 @@ interface ExecutionDetailsResponse {
   status: string;
   completionReason?: string;
   completedByStep?: string;
+  isIncomplete?: boolean;
   finalContent?: string;
   steps?: ExecutionDetailStep[];
   context?: RunContext | null;
@@ -109,6 +110,7 @@ interface HistoryListEntry {
   completionReason?: string;
   completedByStep?: string;
   isActive?: boolean;
+  isIncomplete?: boolean;
   startedAt?: string;
   durationSeconds?: number;
   parameters?: Record<string, unknown>;
@@ -228,7 +230,7 @@ function App(): React.JSX.Element {
         } catch (err) {
           console.error('Failed to refresh active:', err);
         }
-      }, 2000);
+      }, 1000);
       return () => clearInterval(interval);
     }
   }, [activeData.running.length, activeData.pending.length, orchestrations]);
@@ -635,6 +637,12 @@ function App(): React.JSX.Element {
   const runOrchestration = async (id: string | undefined, params: Record<string, string> = {}): Promise<void> => {
     if (!id) return;
 
+    // Close any existing EventSource before opening a new one
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
     const orchestration = orchestrations.find(o => o.id === id);
     const initialStatuses = buildInitialStatuses(orchestration);
 
@@ -736,6 +744,12 @@ function App(): React.JSX.Element {
     orchestration: Orchestration | undefined,
   ): Promise<void> => {
     if (!execution?.executionId) return;
+
+    // Close any existing EventSource before opening a new one
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
 
     const initialStatuses = buildInitialStatuses(orchestration);
 
@@ -1125,10 +1139,10 @@ function App(): React.JSX.Element {
                   }}
                   aria-label={`${exec.orchestrationName} - ${exec.status || 'Running'} - ${formatTime(exec.startedAt)}`}
                 >
-                  <div className={`history-status-icon ${exec.completionReason && exec.status === 'Succeeded' ? 'completed-early' : exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
+                  <div className={`history-status-icon ${(exec.isIncomplete || exec.completionReason) && exec.status === 'Succeeded' ? 'completed-early' : exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
                     {exec.isActive ? (
                       <span className="spinner" style={{ width: '12px', height: '12px' }}></span>
-                    ) : exec.status === 'Succeeded' && exec.completionReason ? (
+                    ) : exec.status === 'Succeeded' && (exec.completionReason || exec.isIncomplete) ? (
                       <Icons.SkipForward />
                     ) : exec.status === 'Succeeded' ? (
                       <Icons.Check />
@@ -1222,7 +1236,7 @@ function App(): React.JSX.Element {
                   <div className="cards-grid">
                     {activeData.running.map(exec => (
                       <ActiveOrchestrationCard
-                        key={exec.id}
+                        key={exec.executionId}
                         execution={exec}
                         type="running"
                         orchestrations={orchestrations}

@@ -42,6 +42,8 @@ public sealed class EngineToolRegistry
 	{
 		return new EngineToolRegistry()
 			.Register(new SetStatusTool())
-			.Register(new CompleteTool());
+			.Register(new CompleteTool())
+			.Register(new SaveToFileTool())
+			.Register(new ReadFromFileTool());
 	}
 }

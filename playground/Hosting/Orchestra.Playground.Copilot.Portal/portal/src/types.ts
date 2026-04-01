@@ -162,7 +162,7 @@ export interface ActiveData {
 }
 
 export interface ActiveExecution {
-  id: string;
+  executionId: string;
   orchestrationId: string;
   orchestrationName: string;
   status: string;
@@ -171,7 +171,9 @@ export interface ActiveExecution {
   parameters?: Record<string, unknown>;
   webhookUrl?: string;
   stepCount?: number;
-  completedStepCount?: number;
+  totalSteps?: number;
+  completedSteps?: number;
+  currentStep?: string;
 }
 
 export interface PendingExecution {

@@ -67,7 +67,8 @@ public static class RunsApi
 				status = s.Status.ToString(),
 				completionReason = s.CompletionReason,
 				completedByStep = s.CompletedByStep,
-				isActive = false
+				isActive = false,
+				isIncomplete = s.IsIncomplete
 			});
 
 			// Combine: running first, then completed
@@ -143,7 +144,8 @@ public static class RunsApi
 					status = s.Status.ToString(),
 					completionReason = s.CompletionReason,
 					completedByStep = s.CompletedByStep,
-					isActive = false
+					isActive = false,
+					isIncomplete = s.IsIncomplete
 				});
 				allItems.AddRange(completedItems.Cast<object>());
 			}
@@ -163,7 +165,9 @@ public static class RunsApi
 				durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
 				status = s.Status.ToString(),
 				completionReason = s.CompletionReason,
-				isActive = false
+				completedByStep = s.CompletedByStep,
+				isActive = false,
+				isIncomplete = s.IsIncomplete
 			});
 			allItems.AddRange(completedItems.Cast<object>());
 			}
@@ -201,6 +205,7 @@ public static class RunsApi
 				status = record.Status.ToString(),
 				completionReason = record.CompletionReason,
 				completedByStep = record.CompletedByStep,
+				isIncomplete = record.IsIncomplete,
 				parameters = record.Parameters,
 				finalContent = record.FinalContent,
 				context = record.Context is { } ctx ? new
@@ -285,9 +290,12 @@ public static class RunsApi
 			// Combine manual executions and trigger-based executions
 			var activeList = new List<object>();
 
-			// Add manual executions
+			// Add executions that are still running (filter out completed/cancelled/failed)
 			foreach (var info in activeExecutionInfos.Values)
 			{
+				if (info.Status is "Completed" or "Cancelled" or "Failed")
+					continue;
+
 				activeList.Add(new
 				{
 					executionId = info.ExecutionId,

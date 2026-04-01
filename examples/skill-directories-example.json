@@ -1,0 +1,31 @@
+{
+  "name": "skill-directories-orchestration",
+  "description": "Demonstrates using Agent Skills (SKILL.md directories) to provide specialized knowledge and workflows to agents. Skills are loaded from filesystem directories and are session-level only.",
+  "steps": [
+    {
+      "name": "code-review",
+      "type": "prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are an expert code reviewer. Use your loaded skills to guide your review process with best practices and specialized workflows.",
+      "userPrompt": "Review the following code changes and provide feedback:\n\n{{changes}}",
+      "parameters": ["changes"],
+      "model": "claude-opus-4.5",
+      "skillDirectories": [
+        "./skills/code-review",
+        "./skills/security-analysis"
+      ]
+    },
+    {
+      "name": "summarize-review",
+      "type": "prompt",
+      "dependsOn": ["code-review"],
+      "systemPrompt": "You are a technical writer. Summarize code review findings into a concise executive summary.",
+      "userPrompt": "Create a concise summary of this code review:\n\n{{code-review.output}}",
+      "model": "claude-opus-4.5"
+    }
+  ],
+  "trigger": {
+    "type": "webhook",
+    "enabled": true
+  }
+}

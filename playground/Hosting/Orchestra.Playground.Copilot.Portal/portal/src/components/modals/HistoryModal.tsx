@@ -15,6 +15,7 @@ interface HistoryExecution {
   completionReason?: string;
   completedByStep?: string;
   isActive?: boolean;
+  isIncomplete?: boolean;
   startedAt?: string;
   durationSeconds?: number;
   parameters?: Record<string, unknown>;
@@ -30,7 +31,7 @@ interface PaginatedHistoryResponse {
 
 const PAGE_SIZE = 100;
 
-type StatusFilter = 'all' | 'Succeeded' | 'Failed' | 'Cancelled' | 'Running';
+type StatusFilter = 'all' | 'Succeeded' | 'Failed' | 'Cancelled' | 'Running' | 'Incomplete';
 
 interface Props {
   open: boolean;
@@ -102,6 +103,12 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
         if (statusFilter === 'Running') {
           return exec.isActive;
         }
+        if (statusFilter === 'Incomplete') {
+          return exec.isIncomplete || (exec.completionReason && exec.status === 'Succeeded');
+        }
+        if (statusFilter === 'Succeeded') {
+          return exec.status === 'Succeeded' && !exec.isIncomplete && !exec.completionReason;
+        }
         return exec.status === statusFilter;
       });
     }
@@ -111,9 +118,10 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
 
   // Unique orchestration names for the count display
   const statusCounts = useMemo(() => {
-    const counts = { all: history.length, Succeeded: 0, Failed: 0, Cancelled: 0, Running: 0 };
+    const counts = { all: history.length, Succeeded: 0, Failed: 0, Cancelled: 0, Running: 0, Incomplete: 0 };
     for (const exec of history) {
       if (exec.isActive) counts.Running++;
+      else if (exec.isIncomplete || (exec.completionReason && exec.status === 'Succeeded')) counts.Incomplete++;
       else if (exec.status === 'Succeeded') counts.Succeeded++;
       else if (exec.status === 'Failed') counts.Failed++;
       else if (exec.status === 'Cancelled') counts.Cancelled++;
@@ -135,6 +143,7 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
   const statusFilters: { value: StatusFilter; label: string; color: string }[] = [
     { value: 'all', label: 'All', color: 'var(--text-muted)' },
     { value: 'Succeeded', label: 'Succeeded', color: 'var(--success)' },
+    { value: 'Incomplete', label: 'Incomplete', color: 'var(--text-muted)' },
     { value: 'Failed', label: 'Failed', color: 'var(--error)' },
     { value: 'Cancelled', label: 'Cancelled', color: 'var(--warning)' },
     { value: 'Running', label: 'Running', color: 'var(--warning)' },
@@ -210,10 +219,10 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
                   }}
                   aria-label={`${exec.orchestrationName} - ${exec.status || 'Running'} - ${formatTime(exec.startedAt)}`}
                 >
-                  <div className={`history-status-icon ${exec.completionReason && exec.status === 'Succeeded' ? 'completed-early' : exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
+                  <div className={`history-status-icon ${(exec.isIncomplete || exec.completionReason) && exec.status === 'Succeeded' ? 'completed-early' : exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
                     {exec.isActive ? (
                       <span className="spinner" style={{ width: '12px', height: '12px' }}></span>
-                    ) : exec.status === 'Succeeded' && exec.completionReason ? (
+                    ) : exec.status === 'Succeeded' && (exec.completionReason || exec.isIncomplete) ? (
                       <Icons.SkipForward />
                     ) : exec.status === 'Succeeded' ? (
                       <Icons.Check />

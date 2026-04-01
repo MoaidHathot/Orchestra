@@ -22,6 +22,7 @@ public sealed class PromptStepTypeParser : IStepTypeParser
 			DependsOn = root.TryGetProperty("dependsOn", out var deps)
 				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
+			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
 			SystemPrompt = ResolveRequiredPrompt(root, "systemPrompt", stepName, context),
 			UserPrompt = ResolveRequiredPrompt(root, "userPrompt", stepName, context),
 			InputHandlerPrompt = ResolveOptionalPrompt(root, "inputHandlerPrompt", stepName, context),
@@ -50,6 +51,9 @@ public sealed class PromptStepTypeParser : IStepTypeParser
 				: null,
 			Subagents = root.TryGetProperty("subagents", out var subagents)
 				? subagents.EnumerateArray().Select(e => DeserializeSubagent(e, stepName, context)).ToArray()
+				: [],
+			SkillDirectories = root.TryGetProperty("skillDirectories", out var skillDirs)
+				? skillDirs.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
 		};
 	}

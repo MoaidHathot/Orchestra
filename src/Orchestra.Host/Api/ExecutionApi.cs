@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.Hosting;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
@@ -32,6 +33,7 @@ public static partial class ExecutionApi
 			IScheduler scheduler,
 			ILoggerFactory loggerFactory,
 			FileSystemRunStore runStore,
+			OrchestrationHostOptions hostOptions,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
 		{
@@ -111,7 +113,7 @@ public static partial class ExecutionApi
 			await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { executionId }, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore);
+			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, dataPath: hostOptions.DataPath);
 			var cancellationToken = cts.Token;
 			var runId = executionId;
 			var runStartedAt = DateTimeOffset.UtcNow;

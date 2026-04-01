@@ -18,6 +18,7 @@ public partial class CopilotAgent : IAgent
 	private readonly IOrchestrationReporter _reporter;
 	private readonly IReadOnlyCollection<IEngineTool> _engineTools;
 	private readonly EngineToolContext? _engineToolContext;
+	private readonly string[] _skillDirectories;
 	private readonly ILogger<CopilotAgent> _logger;
 
 	internal CopilotAgent(
@@ -31,6 +32,7 @@ public partial class CopilotAgent : IAgent
 			IOrchestrationReporter reporter,
 			IReadOnlyCollection<IEngineTool> engineTools,
 			EngineToolContext? engineToolContext,
+			string[] skillDirectories,
 			ILogger<CopilotAgent> logger)
 	{
 		_client = client;
@@ -43,6 +45,7 @@ public partial class CopilotAgent : IAgent
 		_reporter = reporter;
 		_engineTools = engineTools;
 		_engineToolContext = engineToolContext;
+		_skillDirectories = skillDirectories;
 		_logger = logger;
 	}
 
@@ -136,6 +139,11 @@ public partial class CopilotAgent : IAgent
 		if (_engineTools.Count > 0 && _engineToolContext is not null)
 		{
 			config.Tools = BuildEngineTools();
+		}
+
+		if (_skillDirectories.Length > 0)
+		{
+			config.SkillDirectories = [.. _skillDirectories];
 		}
 
 		return config;

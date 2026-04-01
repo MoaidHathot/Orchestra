@@ -652,6 +652,184 @@ public class OrchestrationExecutorTests
 
 	#endregion
 
+	#region Disabled Steps
+
+	[Fact]
+	public async Task ExecuteAsync_DisabledSingleStep_ReturnsSucceededWithEmptyContent()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Should not be called");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.DisabledSingleStep();
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["step1"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["step1"].Content.Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_DisabledStep_ReportsStepSkipped()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.DisabledSingleStep();
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		_reporter.Received().ReportStepSkipped("step1", "Step is disabled (enabled: false)");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_DisabledMiddleStep_DownstreamStepsStillRun()
+	{
+		// Arrange — A -> B(disabled) -> C
+		// B returns empty, C should still run since B is "succeeded" with empty content.
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.DisabledMiddleStep();
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["A"].Content.Should().Be("Output");
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["B"].Content.Should().BeEmpty();
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["C"].Content.Should().Be("Output");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_DisabledFirstStep_DownstreamStepsStillRun()
+	{
+		// Arrange — A(disabled) -> B -> C
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.DisabledFirstStep();
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["A"].Content.Should().BeEmpty();
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["B"].Content.Should().Be("Output");
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["C"].Content.Should().Be("Output");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_DisabledParallelStep_OtherStepsStillRun()
+	{
+		// Arrange — A, B(disabled), C (parallel)
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.DisabledParallelStep();
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["A"].Content.Should().Be("Output");
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["B"].Content.Should().BeEmpty();
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["C"].Content.Should().Be("Output");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_AllStepsDisabled_ReturnsSucceeded()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Should not be called");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.AllStepsDisabled();
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults.Should().HaveCount(3);
+		result.StepResults.Values.Should().AllSatisfy(r =>
+		{
+			r.Status.Should().Be(ExecutionStatus.Succeeded);
+			r.Content.Should().BeEmpty();
+		});
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_DisabledStep_DoesNotExecuteStepLogic()
+	{
+		// Arrange — Track whether any step actually executes
+		var executionCount = 0;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			Interlocked.Increment(ref executionCount);
+			return MockAgentBuilderExtensions.CreateWithResponse("Output")
+				.BuildAgentAsync(ct).Result.SendAsync(prompt, ct);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.DisabledSingleStep();
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — No agent calls should have been made
+		executionCount.Should().Be(0);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_EnabledStepExplicitly_RunsNormally()
+	{
+		// Arrange — Step with enabled: true (explicit) should run normally
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+
+		var orchestration = new Orchestration
+		{
+			Name = "explicit-enabled",
+			Description = "Explicitly enabled step",
+			Steps =
+			[
+				new PromptOrchestrationStep
+				{
+					Name = "step1",
+					Type = OrchestrationStepType.Prompt,
+					DependsOn = [],
+					Enabled = true,
+					SystemPrompt = "You are a test assistant.",
+					UserPrompt = "Test prompt",
+					Model = "claude-opus-4.5"
+				}
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["step1"].Content.Should().Be("Output");
+	}
+
+	#endregion
+
 	#region Concurrency Safety (AgentBuildConfig)
 
 	[Fact]

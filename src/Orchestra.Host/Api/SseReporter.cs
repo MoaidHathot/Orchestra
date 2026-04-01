@@ -480,6 +480,7 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			status = orchestrationResult.Status.ToString(),
 			completionReason = orchestrationResult.CompletionReason,
 			completedByStep = orchestrationResult.CompletedByStep,
+			isIncomplete = orchestrationResult.IsIncomplete,
 			results,
 		});
 	}
