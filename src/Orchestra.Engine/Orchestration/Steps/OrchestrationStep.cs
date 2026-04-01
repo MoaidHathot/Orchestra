@@ -4,7 +4,7 @@ public abstract class OrchestrationStep
 {
 	public required string Name { get; init; }
 	public required OrchestrationStepType Type { get; init; }
-	public required string[] DependsOn { get; init; }
+	public string[] DependsOn { get; init; } = [];
 	public string[] Parameters { get; init; } = [];
 
 	/// <summary>
@@ -16,8 +16,9 @@ public abstract class OrchestrationStep
 
 	/// <summary>
 	/// Optional timeout in seconds for this step. When set, the step will be cancelled
-	/// if it takes longer than this duration. If not set, the step runs with no timeout
-	/// (only the global cancellation token applies).
+	/// if it takes longer than this duration. If not set, falls back to the orchestration's
+	/// <see cref="Orchestration.DefaultStepTimeoutSeconds"/> (if any).
+	/// Set to 0 to explicitly disable timeout for this step, even when a default is configured.
 	/// </summary>
 	public int? TimeoutSeconds { get; init; }
 

@@ -134,7 +134,6 @@ public class TransformStepParsingTests
 					{
 						"name": "prompt-step",
 						"type": "Prompt",
-						"dependsOn": [],
 						"systemPrompt": "You are a helpful assistant.",
 						"userPrompt": "Summarize the input.",
 						"model": "claude-opus-4.5"

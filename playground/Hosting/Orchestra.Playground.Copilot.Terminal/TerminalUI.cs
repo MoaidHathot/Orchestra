@@ -1960,7 +1960,7 @@ public class TerminalUI
 		var rows = new List<IRenderable>
 		{
 			new Markup($"[bold cyan]Orchestration:[/] {Markup.Escape(active.OrchestrationName)}"),
-			new Markup($"[bold cyan]Status:[/] [green bold]{Markup.Escape(active.Status)}[/]"),
+			new Markup($"[bold cyan]Status:[/] [green bold]{Markup.Escape(active.Status.ToString())}[/]"),
 			new Markup($"[bold cyan]Current Step:[/] [yellow]{Markup.Escape(active.CurrentStep ?? "-")}[/]"),
 			new Rule("[dim]Progress[/]") { Style = Style.Parse("dim") },
 			new Markup(progressBarText),

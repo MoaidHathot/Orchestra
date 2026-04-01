@@ -193,7 +193,6 @@ public class HttpStepParsingTests
 						"headers": {
 							"Content-Type": "application/json"
 						},
-						"dependsOn": [],
 						"timeoutSeconds": 15
 					}
 				]
@@ -218,5 +217,33 @@ public class HttpStepParsingTests
 		step.Headers["Content-Type"].Should().Be("application/json");
 		step.DependsOn.Should().BeEmpty();
 		step.TimeoutSeconds.Should().Be(15);
+	}
+
+	[Fact]
+	public void ParseOrchestration_HttpStepWithoutMethod_DefaultsToGet()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "http-no-method",
+				"description": "HTTP step without explicit method",
+				"steps": [
+					{
+						"name": "api-call",
+						"type": "Http",
+						"url": "https://api.example.com/data"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationMetadataOnly(json);
+
+		// Assert
+		var step = orchestration.Steps[0] as HttpOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.Method.Should().Be("GET");
+		step.DependsOn.Should().BeEmpty();
 	}
 }

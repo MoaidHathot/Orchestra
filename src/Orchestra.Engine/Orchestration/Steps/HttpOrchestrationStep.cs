@@ -8,9 +8,9 @@ namespace Orchestra.Engine;
 public class HttpOrchestrationStep : OrchestrationStep
 {
 	/// <summary>
-	/// The HTTP method (GET, POST, PUT, PATCH, DELETE). Defaults to GET.
+	/// The HTTP method (GET, POST, PUT, PATCH, DELETE). Defaults to GET when not specified.
 	/// </summary>
-	public required string Method { get; init; }
+	public string Method { get; init; } = "GET";
 
 	/// <summary>
 	/// The URL to send the request to. Supports template expressions.

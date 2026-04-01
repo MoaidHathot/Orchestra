@@ -288,4 +288,163 @@ public class TimeoutEnforcementTests
 		result.StepResults["A"].ErrorMessage.Should().Contain("timed out");
 		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Skipped);
 	}
+
+	#region DefaultStepTimeoutSeconds
+
+	[Fact]
+	public async Task ExecuteAsync_StepWithoutTimeout_UsesDefaultStepTimeout()
+	{
+		// Arrange - step has no TimeoutSeconds, orchestration has DefaultStepTimeoutSeconds = 1
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				await Task.Delay(TimeSpan.FromSeconds(10), ct);
+				channel.Writer.Complete();
+				return new AgentResult { Content = "unreachable" };
+			}, ct);
+
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "default-step-timeout",
+			Description = "Step inherits default timeout",
+			DefaultStepTimeoutSeconds = 1,
+			Steps =
+			[
+				new PromptOrchestrationStep
+				{
+					Name = "slow-step",
+					Type = OrchestrationStepType.Prompt,
+					DependsOn = [],
+					Parameters = [],
+					SystemPrompt = "Test",
+					UserPrompt = "Test",
+					Model = "claude-opus-4.5"
+					// No TimeoutSeconds — should fall back to DefaultStepTimeoutSeconds = 1
+				}
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert — step should time out via the default
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["slow-step"].Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["slow-step"].ErrorMessage.Should().Contain("timed out");
+		result.StepResults["slow-step"].ErrorMessage.Should().Contain("1 seconds");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_StepWithExplicitTimeout_OverridesDefaultStepTimeout()
+	{
+		// Arrange - step has TimeoutSeconds = 1, orchestration has DefaultStepTimeoutSeconds = 60
+		// The step-level value should win
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				await Task.Delay(TimeSpan.FromSeconds(10), ct);
+				channel.Writer.Complete();
+				return new AgentResult { Content = "unreachable" };
+			}, ct);
+
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "step-override-default",
+			Description = "Step timeout overrides default",
+			DefaultStepTimeoutSeconds = 60,
+			Steps =
+			[
+				new PromptOrchestrationStep
+				{
+					Name = "step1",
+					Type = OrchestrationStepType.Prompt,
+					DependsOn = [],
+					Parameters = [],
+					SystemPrompt = "Test",
+					UserPrompt = "Test",
+					Model = "claude-opus-4.5",
+					TimeoutSeconds = 1 // Should use 1, not 60
+				}
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert — step should time out at 1 second (step-level wins)
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["step1"].Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["step1"].ErrorMessage.Should().Contain("timed out");
+		result.StepResults["step1"].ErrorMessage.Should().Contain("1 seconds");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_StepWithZeroTimeout_IgnoresDefaultStepTimeout()
+	{
+		// Arrange - step has TimeoutSeconds = 0 (explicit disable), orchestration has DefaultStepTimeoutSeconds = 1
+		// The step should NOT time out even though default is 1 second
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				await Task.Delay(100, ct); // Slight delay that would exceed timeout if applied
+				await channel.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.MessageDelta,
+					Content = "Completed despite default timeout"
+				}, ct);
+				channel.Writer.Complete();
+				return new AgentResult { Content = "Completed despite default timeout" };
+			}, ct);
+
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "zero-overrides-default",
+			Description = "Zero timeout disables default",
+			DefaultStepTimeoutSeconds = 1,
+			Steps =
+			[
+				new PromptOrchestrationStep
+				{
+					Name = "step1",
+					Type = OrchestrationStepType.Prompt,
+					DependsOn = [],
+					Parameters = [],
+					SystemPrompt = "Test",
+					UserPrompt = "Test",
+					Model = "claude-opus-4.5",
+					TimeoutSeconds = 0 // Explicit disable — should ignore DefaultStepTimeoutSeconds
+				}
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert — step should succeed (no timeout applied)
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["step1"].Status.Should().Be(ExecutionStatus.Succeeded);
+	}
+
+	#endregion
 }

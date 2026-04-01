@@ -45,6 +45,14 @@ public class Orchestration
 	public RetryPolicy? DefaultRetryPolicy { get; init; }
 
 	/// <summary>
+	/// Default timeout in seconds applied to all steps that don't define their own
+	/// <see cref="OrchestrationStep.TimeoutSeconds"/>.
+	/// When null, steps without an explicit timeout run with no per-step timeout
+	/// (only the orchestration-level timeout applies).
+	/// </summary>
+	public int? DefaultStepTimeoutSeconds { get; init; }
+
+	/// <summary>
 	/// Maximum time in seconds for the entire orchestration to complete.
 	/// When elapsed, all running steps are cancelled via CancellationToken.
 	/// Default is 3600 seconds (1 hour). Set to null or 0 to disable.

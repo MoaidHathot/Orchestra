@@ -34,6 +34,13 @@ public class OrchestrationExecutionContext
 	public RetryPolicy? DefaultRetryPolicy { get; init; }
 
 	/// <summary>
+	/// Default per-step timeout from the orchestration.
+	/// Applied to steps that don't define their own TimeoutSeconds.
+	/// When null, no default per-step timeout is applied.
+	/// </summary>
+	public int? DefaultStepTimeoutSeconds { get; init; }
+
+	/// <summary>
 	/// The temp file store for this orchestration run, providing file I/O operations
 	/// scoped to a run-specific temp directory. Available via <c>{{orchestration.tempDir}}</c>
 	/// template expressions.

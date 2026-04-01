@@ -190,7 +190,6 @@ public class CommandStepParsingTests
 						"command": "dotnet",
 						"arguments": ["build", "--no-restore"],
 						"workingDirectory": "/src/project",
-						"dependsOn": [],
 						"timeoutSeconds": 120,
 						"includeStdErr": true
 					}
@@ -232,7 +231,6 @@ public class CommandStepParsingTests
 						"type": "Command",
 						"command": "dotnet",
 						"arguments": ["test", "--verbosity", "minimal"],
-						"dependsOn": [],
 						"timeoutSeconds": 300
 					},
 					{

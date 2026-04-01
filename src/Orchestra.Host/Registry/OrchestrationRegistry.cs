@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -259,7 +261,8 @@ public partial class OrchestrationRegistry
 	/// </summary>
 	public static string GenerateId(string name, string path)
 	{
-		var hash = path.GetHashCode().ToString("x8");
+		var hash = Convert.ToHexString(
+			SHA256.HashData(Encoding.UTF8.GetBytes(path)))[..8].ToLowerInvariant();
 		return $"{SanitizeId(name)}-{hash[..4]}";
 	}
 

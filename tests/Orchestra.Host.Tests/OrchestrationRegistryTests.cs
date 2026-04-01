@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Orchestra.Host.Registry;
+using Orchestra.Host.Triggers;
 using Orchestra.Engine;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -343,5 +344,34 @@ public class OrchestrationRegistryTests : IDisposable
 		id.Should().NotContain("@");
 		id.Should().NotContain("#");
 		id.Should().MatchRegex(@"^[a-z0-9\-]+$");
+	}
+
+	[Fact]
+	public void GenerateId_IsDeterministicAcrossProcessRestarts()
+	{
+		// This test verifies the ID is based on a deterministic hash (SHA-256),
+		// not string.GetHashCode() which is randomized per-process in .NET 6+.
+		// The expected value is pre-computed and must remain stable across runs.
+		var name = "my-orchestration";
+		var path = "/path/to/orchestration.json";
+
+		var id = OrchestrationRegistry.GenerateId(name, path);
+
+		// SHA-256 of the path produces a fixed hash; first 4 hex chars = "1510"
+		id.Should().Be("my-orchestration-1510");
+	}
+
+	[Fact]
+	public void GenerateId_MatchesGenerateTriggerId()
+	{
+		// OrchestrationRegistry.GenerateId and TriggerManager.GenerateTriggerId
+		// must produce the same ID for the same inputs.
+		var name = "my-orchestration";
+		var path = "/path/to/orchestration.json";
+
+		var registryId = OrchestrationRegistry.GenerateId(name, path);
+		var triggerId = Triggers.TriggerManager.GenerateTriggerId(path, name);
+
+		registryId.Should().Be(triggerId);
 	}
 }

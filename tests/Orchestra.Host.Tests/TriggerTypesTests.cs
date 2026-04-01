@@ -341,6 +341,21 @@ public class TriggerTypesTests
 	}
 
 	[Fact]
+	public void GenerateTriggerId_IsDeterministicAcrossProcessRestarts()
+	{
+		// This test verifies the ID is based on a deterministic hash (SHA-256),
+		// not string.GetHashCode() which is randomized per-process in .NET 6+.
+		// The expected value is pre-computed and must remain stable across runs.
+		var path = "/path/to/orchestration.json";
+		var name = "my-orchestration";
+
+		var id = TriggerManager.GenerateTriggerId(path, name);
+
+		// SHA-256 of the path produces a fixed hash; first 4 hex chars = "1510"
+		id.Should().Be("my-orchestration-1510");
+	}
+
+	[Fact]
 	public void TriggerStatus_AllValuesExist()
 	{
 		// Assert - verify all expected enum values exist

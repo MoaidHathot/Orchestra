@@ -38,19 +38,19 @@ interface BuilderStep {
 interface OrchestrationConfig {
   name: string;
   description: string;
-  version: string;
-  timeoutSeconds: number;
+  version?: string;
+  timeoutSeconds?: number;
   triggerType: 'none' | 'webhook' | 'scheduler' | 'loop';
   triggerEnabled: boolean;
   // webhook
   webhookSecret: string;
-  webhookMaxConcurrent: number;
+  webhookMaxConcurrent?: number;
   // scheduler
   schedulerCron: string;
-  schedulerIntervalSeconds: number;
+  schedulerIntervalSeconds?: number;
   // loop
-  loopDelaySeconds: number;
-  loopMaxIterations: number;
+  loopDelaySeconds?: number;
+  loopMaxIterations?: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -67,16 +67,10 @@ const ZOOM_STEP = 0.001;
 const DEFAULT_CONFIG: OrchestrationConfig = {
   name: 'New Orchestration',
   description: '',
-  version: '1.0.0',
-  timeoutSeconds: 300,
   triggerType: 'none',
   triggerEnabled: false,
   webhookSecret: '',
-  webhookMaxConcurrent: 1,
   schedulerCron: '',
-  schedulerIntervalSeconds: 60,
-  loopDelaySeconds: 5,
-  loopMaxIterations: 100,
 };
 
 const TYPE_COLORS: Record<BuilderStep['type'], string> = {
@@ -807,23 +801,24 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
     const result: Record<string, unknown> = {
       name: config.name,
       description: config.description,
-      version: config.version,
       steps: stepsPayload,
     };
+    if (config.version) result.version = config.version;
+    if (config.timeoutSeconds != null) result.timeoutSeconds = config.timeoutSeconds;
 
     if (config.triggerType !== 'none' && config.triggerEnabled) {
       const trigger: Record<string, unknown> = { type: config.triggerType };
       if (config.triggerType === 'webhook') {
         if (config.webhookSecret) trigger.secret = config.webhookSecret;
-        trigger.maxConcurrent = config.webhookMaxConcurrent;
+        if (config.webhookMaxConcurrent != null) trigger.maxConcurrent = config.webhookMaxConcurrent;
       }
       if (config.triggerType === 'scheduler') {
         if (config.schedulerCron) trigger.cron = config.schedulerCron;
-        trigger.intervalSeconds = config.schedulerIntervalSeconds;
+        if (config.schedulerIntervalSeconds != null) trigger.intervalSeconds = config.schedulerIntervalSeconds;
       }
       if (config.triggerType === 'loop') {
-        trigger.delaySeconds = config.loopDelaySeconds;
-        trigger.maxIterations = config.loopMaxIterations;
+        if (config.loopDelaySeconds != null) trigger.delaySeconds = config.loopDelaySeconds;
+        if (config.loopMaxIterations != null) trigger.maxIterations = config.loopMaxIterations;
       }
       result.trigger = trigger;
     }
@@ -1177,9 +1172,10 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
             <input
               className="builder-field-input"
               type="text"
-              value={config.version}
+              placeholder="1.0.0 (default)"
+              value={config.version ?? ''}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setConfig(prev => ({ ...prev, version: e.target.value }))
+                setConfig(prev => ({ ...prev, version: e.target.value || undefined }))
               }
             />
           </div>
@@ -1189,11 +1185,12 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
               className="builder-field-input"
               type="number"
               min={0}
-              value={config.timeoutSeconds}
+              placeholder="3600 (default)"
+              value={config.timeoutSeconds ?? ''}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                 setConfig(prev => ({
                   ...prev,
-                  timeoutSeconds: parseInt(e.target.value, 10) || 0,
+                  timeoutSeconds: e.target.value ? parseInt(e.target.value, 10) : undefined,
                 }))
               }
             />
@@ -1242,11 +1239,12 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
                   className="builder-field-input"
                   type="number"
                   min={1}
-                  value={config.webhookMaxConcurrent}
+                  placeholder="1 (default)"
+                  value={config.webhookMaxConcurrent ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setConfig(prev => ({
                       ...prev,
-                      webhookMaxConcurrent: parseInt(e.target.value, 10) || 1,
+                      webhookMaxConcurrent: e.target.value ? parseInt(e.target.value, 10) : undefined,
                     }))
                   }
                 />
@@ -1274,11 +1272,12 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
                   className="builder-field-input"
                   type="number"
                   min={1}
-                  value={config.schedulerIntervalSeconds}
+                  placeholder="60 (default)"
+                  value={config.schedulerIntervalSeconds ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setConfig(prev => ({
                       ...prev,
-                      schedulerIntervalSeconds: parseInt(e.target.value, 10) || 60,
+                      schedulerIntervalSeconds: e.target.value ? parseInt(e.target.value, 10) : undefined,
                     }))
                   }
                 />
@@ -1294,11 +1293,12 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
                   className="builder-field-input"
                   type="number"
                   min={0}
-                  value={config.loopDelaySeconds}
+                  placeholder="0 (default)"
+                  value={config.loopDelaySeconds ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setConfig(prev => ({
                       ...prev,
-                      loopDelaySeconds: parseInt(e.target.value, 10) || 0,
+                      loopDelaySeconds: e.target.value ? parseInt(e.target.value, 10) : undefined,
                     }))
                   }
                 />
@@ -1309,11 +1309,12 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
                   className="builder-field-input"
                   type="number"
                   min={1}
-                  value={config.loopMaxIterations}
+                  placeholder="Unlimited (default)"
+                  value={config.loopMaxIterations ?? ''}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setConfig(prev => ({
                       ...prev,
-                      loopMaxIterations: parseInt(e.target.value, 10) || 100,
+                      loopMaxIterations: e.target.value ? parseInt(e.target.value, 10) : undefined,
                     }))
                   }
                 />

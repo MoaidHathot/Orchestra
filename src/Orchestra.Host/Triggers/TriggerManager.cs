@@ -1069,7 +1069,9 @@ public partial class TriggerManager : BackgroundService
 	{
 		// Use the same algorithm as OrchestrationRegistry.GenerateId for consistency
 		var name = orchestrationName ?? Path.GetFileNameWithoutExtension(orchestrationPath);
-		var hash = orchestrationPath.GetHashCode().ToString("x8");
+		var hash = Convert.ToHexString(
+			System.Security.Cryptography.SHA256.HashData(
+				System.Text.Encoding.UTF8.GetBytes(orchestrationPath)))[..8].ToLowerInvariant();
 		var sanitizedName = SanitizeIdName(name);
 		return $"{sanitizedName}-{hash[..4]}";
 	}

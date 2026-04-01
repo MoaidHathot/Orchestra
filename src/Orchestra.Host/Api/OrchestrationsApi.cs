@@ -125,7 +125,20 @@ public static class OrchestrationsApi
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
 			var o = entry.Orchestration;
-			var schedule = scheduler.Schedule(o);
+
+			// Try to compute the schedule; if the orchestration has invalid dependencies
+			// (e.g. a step references a non-existent step), we still want to return the
+			// orchestration data so the user can view and fix it.
+			Schedule? schedule = null;
+			string[]? validationErrors = null;
+			try
+			{
+				schedule = scheduler.Schedule(o);
+			}
+			catch (InvalidOperationException ex)
+			{
+				validationErrors = [ex.Message];
+			}
 
 			var steps = o.Steps.Select(s =>
 			{
@@ -186,11 +199,11 @@ public static class OrchestrationsApi
 				};
 			}).ToArray();
 
-			var layers = schedule.Entries.Select((entry, index) => new
+			var layers = schedule?.Entries.Select((entry, index) => new
 			{
 				layer = index + 1,
 				steps = entry.Steps.Select(s => s.Name).ToArray()
-			}).ToArray();
+			}).ToArray() ?? [];
 
 			// Look up the trigger registration to get the webhook URL if applicable
 			var triggerRegistration = triggerManager.GetTrigger(entry.Id);
@@ -214,6 +227,7 @@ public static class OrchestrationsApi
 				version = o.Version,
 				contentHash = entry.ContentHash,
 				versionCount,
+				validationErrors,
 				steps,
 				layers,
 				parameters = allParameters,

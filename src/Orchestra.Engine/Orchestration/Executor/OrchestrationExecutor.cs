@@ -124,6 +124,7 @@ public partial class OrchestrationExecutor
 			Variables = orchestration.Variables,
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
+			DefaultStepTimeoutSeconds = orchestration.DefaultStepTimeoutSeconds,
 			TempFileStore = tempFileStore,
 		};
 		var stepResults = new ConcurrentDictionary<string, ExecutionResult>();
@@ -683,16 +684,17 @@ public partial class OrchestrationExecutor
 		LogRunningStep(step.Name);
 		_reporter.ReportStepStarted(step.Name);
 
-		// Apply per-step timeout if configured
+		// Apply per-step timeout if configured (step-level overrides orchestration default)
 		CancellationTokenSource? timeoutCts = null;
 		var effectiveToken = cancellationToken;
+		var effectiveStepTimeout = step.TimeoutSeconds ?? context.DefaultStepTimeoutSeconds;
 
-		if (step.TimeoutSeconds is > 0)
+		if (effectiveStepTimeout is > 0)
 		{
 			timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-			timeoutCts.CancelAfter(TimeSpan.FromSeconds(step.TimeoutSeconds.Value));
+			timeoutCts.CancelAfter(TimeSpan.FromSeconds(effectiveStepTimeout.Value));
 			effectiveToken = timeoutCts.Token;
-			LogStepTimeout(step.Name, step.TimeoutSeconds.Value);
+			LogStepTimeout(step.Name, effectiveStepTimeout.Value);
 		}
 
 		try
@@ -716,8 +718,8 @@ public partial class OrchestrationExecutor
 		}
 		catch (OperationCanceledException) when (timeoutCts is not null && timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
-			var message = $"Step timed out after {step.TimeoutSeconds} seconds.";
-			LogStepTimedOut(step.Name, step.TimeoutSeconds!.Value);
+			var message = $"Step timed out after {effectiveStepTimeout} seconds.";
+			LogStepTimedOut(step.Name, effectiveStepTimeout!.Value);
 			_reporter.ReportStepError(step.Name, message);
 			return ExecutionResult.Failed(message);
 		}
