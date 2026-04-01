@@ -21,7 +21,7 @@
     {
       "name": "check-incidents",
       "type": "Prompt",
-      "dependsOn": ["fetch-active-incidents", "debug-icm-mcp"],
+      "dependsOn": ["fetch-active-incidents"],
       "systemPrompt": "You are a gate-check assistant. Your ONLY job is to determine whether there are any unacknowledged incidents in the provided data. You have access to the orchestra_complete tool. If there are NO unacknowledged incidents, call orchestra_complete with status 'success' and a reason explaining that no action is needed. If there ARE unacknowledged incidents, output the text 'Proceeding with acknowledgment' and do nothing else.",
       "userPrompt": "Review the following incident data and determine if any incidents are NOT yet acknowledged:\n\n{{fetch-active-incidents.output}}\n\nIf ALL incidents are already acknowledged (or there are no incidents at all), use the orchestra_complete tool to stop the orchestration early with status 'success'. Otherwise, output 'Proceeding with acknowledgment'.",
       "mcps": [],

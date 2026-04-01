@@ -272,6 +272,37 @@
       text-transform: uppercase;
       letter-spacing: 0.5px;
     }
+    .history-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .history-filter-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 0.15s;
+      padding: 0;
+    }
+    .history-filter-btn:hover {
+      background: var(--surface-hover);
+      color: var(--text);
+    }
+    .history-filter-btn.active {
+      background: rgba(56, 189, 248, 0.15);
+      border-color: rgba(56, 189, 248, 0.4);
+      color: #38bdf8;
+    }
+    .history-filter-btn.active:hover {
+      background: rgba(56, 189, 248, 0.25);
+    }
     .history-list {
       flex: 1;
       overflow-y: auto;

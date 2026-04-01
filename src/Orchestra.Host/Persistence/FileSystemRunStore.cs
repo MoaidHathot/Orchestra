@@ -313,6 +313,13 @@ public partial class FileSystemRunStore : IRunStore
 	}
 
 	/// <summary>
+	/// Eagerly loads the run index into memory so that subsequent queries are fast.
+	/// Safe to call multiple times; only the first call performs actual I/O.
+	/// </summary>
+	public Task PreloadIndexAsync(CancellationToken cancellationToken = default)
+		=> EnsureIndexLoadedAsync(cancellationToken);
+
+	/// <summary>
 	/// Gets lightweight run summaries for the history panel.
 	/// </summary>
 	public async Task<IReadOnlyList<RunIndex>> GetRunSummariesAsync(
@@ -361,57 +368,71 @@ public partial class FileSystemRunStore : IRunStore
 
 			if (!Directory.Exists(_rootPath)) return;
 
+			// Collect all run.json paths first, then read them in parallel.
+			var runPaths = new List<(string RunDir, string RunJsonPath)>();
 			foreach (var orchestrationDir in Directory.EnumerateDirectories(_rootPath))
 			{
 				foreach (var runDir in Directory.EnumerateDirectories(orchestrationDir))
 				{
 					var runJsonPath = Path.Combine(runDir, "run.json");
-					if (!File.Exists(runJsonPath)) continue;
+					if (File.Exists(runJsonPath))
+						runPaths.Add((runDir, runJsonPath));
+				}
+			}
 
-					try
+			// Read and deserialize all run records in parallel.
+			var tasks = runPaths.Select(async entry =>
+			{
+				try
+				{
+					var json = await File.ReadAllTextAsync(entry.RunJsonPath, cancellationToken);
+					var record = JsonSerializer.Deserialize<OrchestrationRunRecord>(json, _jsonOptions);
+					if (record is null) return null;
+
+					var (failedStep2, errorMsg2) = ExtractFailureInfo(record);
+					return new RunIndex
 					{
-						var json = await File.ReadAllTextAsync(runJsonPath, cancellationToken);
-						var record = JsonSerializer.Deserialize<OrchestrationRunRecord>(json, _jsonOptions);
-						if (record is null) continue;
+						RunId = record.RunId,
+						OrchestrationName = record.OrchestrationName,
+						OrchestrationVersion = record.OrchestrationVersion,
+						TriggeredBy = record.TriggeredBy,
+						StartedAt = record.StartedAt,
+						CompletedAt = record.CompletedAt,
+						Status = record.Status,
+						TriggerId = record.TriggerId,
+						FolderPath = entry.RunDir,
+						FailedStepName = failedStep2,
+						ErrorMessage = errorMsg2,
+						CompletionReason = record.CompletionReason,
+						CompletedByStep = record.CompletedByStep,
+						IsIncomplete = record.IsIncomplete,
+					};
+				}
+				catch (Exception ex)
+				{
+					LogCorruptRunRecord(entry.RunJsonPath, ex);
+					return null;
+				}
+			});
 
-						var (failedStep2, errorMsg2) = ExtractFailureInfo(record);
-						var index = new RunIndex
-						{
-							RunId = record.RunId,
-							OrchestrationName = record.OrchestrationName,
-							OrchestrationVersion = record.OrchestrationVersion,
-							TriggeredBy = record.TriggeredBy,
-							StartedAt = record.StartedAt,
-							CompletedAt = record.CompletedAt,
-							Status = record.Status,
-							TriggerId = record.TriggerId,
-							FolderPath = runDir,
-							FailedStepName = failedStep2,
-							ErrorMessage = errorMsg2,
-							CompletionReason = record.CompletionReason,
-							CompletedByStep = record.CompletedByStep,
-							IsIncomplete = record.IsIncomplete,
-						};
+			var results = await Task.WhenAll(tasks);
 
-						// During initial load we are the only writer (protected by _indexLoadLock),
-						// but we still take _indexWriteLock for consistency.
-						lock (_indexWriteLock)
-						{
-							_indexByOrchestration
-								.GetOrAdd(record.OrchestrationName, _ => [])
-								.Add(index);
+			// Insert all results into the index under a single lock.
+			lock (_indexWriteLock)
+			{
+				foreach (var index in results)
+				{
+					if (index is null) continue;
 
-							if (record.TriggerId is { } tid)
-							{
-								_indexByTrigger
-									.GetOrAdd(tid, _ => [])
-									.Add(index);
-							}
-						}
-					}
-					catch (Exception ex)
+					_indexByOrchestration
+						.GetOrAdd(index.OrchestrationName, _ => [])
+						.Add(index);
+
+					if (index.TriggerId is { } tid)
 					{
-						LogCorruptRunRecord(runJsonPath, ex);
+						_indexByTrigger
+							.GetOrAdd(tid, _ => [])
+							.Add(index);
 					}
 				}
 			}

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './App.css';
 import { api } from './api';
 import { Icons } from './icons';
-import { formatTime } from './utils';
+import { formatTime, isIncompleteExecution } from './utils';
 import type {
   Orchestration,
   ActiveData,
@@ -150,6 +150,7 @@ function App(): React.JSX.Element {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOrchId, setSelectedOrchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [activeData, setActiveData] = useState<ActiveData>({ running: [], pending: [] });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -178,6 +179,19 @@ function App(): React.JSX.Element {
   const [activeModal, setActiveModal] = useState<ActiveModalState>({ open: false, data: null, loading: false });
   const [builderModal, setBuilderModal] = useState(false);
 
+  // History filter state (persisted in localStorage)
+  const [hideIncomplete, setHideIncomplete] = useState<boolean>(() => {
+    const stored = localStorage.getItem('orchestra-hide-incomplete');
+    return stored === null ? true : stored === 'true';
+  });
+  const toggleHideIncomplete = useCallback(() => {
+    setHideIncomplete(prev => {
+      const next = !prev;
+      localStorage.setItem('orchestra-hide-incomplete', String(next));
+      return next;
+    });
+  }, []);
+
   // Status bar state
   const [serverStatus, setServerStatus] = useState<ServerStatus>({
     outlook: null,
@@ -192,19 +206,29 @@ function App(): React.JSX.Element {
   // ── Load data ─────────────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
+    // Load orchestrations first (fast) so the list appears immediately,
+    // then load history and active data in the background.
     try {
-      const [orchData, histData, activeDataResult] = await Promise.all([
-        api.get<OrchestrationsResponse>('/api/orchestrations'),
+      const orchData = await api.get<OrchestrationsResponse>('/api/orchestrations');
+      setOrchestrations(orchData.orchestrations || []);
+    } catch (err) {
+      console.error('Failed to load orchestrations:', err);
+    } finally {
+      setLoading(false);
+    }
+
+    // Load history and active data in parallel (may be slower due to cold index)
+    try {
+      const [histData, activeDataResult] = await Promise.all([
         api.get<HistoryResponse>('/api/history?limit=15'),
         api.get<ActiveData>('/api/active'),
       ]);
-      setOrchestrations(orchData.orchestrations || []);
       setHistory(histData.runs || []);
       setActiveData(activeDataResult || { running: [], pending: [] });
     } catch (err) {
-      console.error('Failed to load data:', err);
+      console.error('Failed to load history/active data:', err);
     } finally {
-      setLoading(false);
+      setHistoryLoading(false);
     }
   }, []);
 
@@ -292,6 +316,12 @@ function App(): React.JSX.Element {
     filteredOrchestrations.filter(o => o.enabled !== false),
     [filteredOrchestrations]
   );
+
+  // Filter history to optionally hide incomplete/early-exit executions
+  const filteredHistory = useMemo(() => {
+    if (!hideIncomplete) return history;
+    return history.filter(exec => !isIncompleteExecution(exec));
+  }, [history, hideIncomplete]);
 
   // ── SSE helper factories ──────────────────────────────────────────────────
   // Both runOrchestration and attachToExecution share identical SSE wiring.
@@ -1089,17 +1119,39 @@ function App(): React.JSX.Element {
         <div className="history-section" aria-label="Recent executions">
           <div className="history-header">
             <span className="history-title" id="history-title">Recent Executions</span>
-            <button className="btn btn-sm" onClick={() => { setHistoryModal({ open: true }); setSidebarOpen(false); }}>
-              Show All
-            </button>
+            <div className="history-header-actions">
+              <button
+                className={`history-filter-btn${hideIncomplete ? ' active' : ''}`}
+                onClick={toggleHideIncomplete}
+                title={hideIncomplete ? 'Showing completed only — click to show all' : 'Showing all — click to hide incomplete'}
+                aria-label={hideIncomplete ? 'Show incomplete executions' : 'Hide incomplete executions'}
+                aria-pressed={hideIncomplete}
+              >
+                <Icons.Filter />
+              </button>
+              <button className="btn btn-sm" onClick={() => { setHistoryModal({ open: true }); setSidebarOpen(false); }}>
+                Show All
+              </button>
+            </div>
           </div>
           <div className="history-list" role="list" aria-labelledby="history-title">
-            {history.length === 0 ? (
+            {historyLoading ? (
               <div className="empty-state" style={{ padding: '20px' }}>
-                <div className="empty-text">No executions yet</div>
+                <div className="spinner" style={{ width: '16px', height: '16px' }}></div>
+              </div>
+            ) : filteredHistory.length === 0 ? (
+              <div className="empty-state" style={{ padding: '20px' }}>
+                <div className="empty-text">
+                  {history.length === 0 ? 'No executions yet' : 'No matching executions'}
+                </div>
+                {history.length > 0 && hideIncomplete && (
+                  <button className="btn btn-sm" style={{ marginTop: '8px' }} onClick={toggleHideIncomplete}>
+                    Show incomplete
+                  </button>
+                )}
               </div>
             ) : (
-              history.map(exec => (
+              filteredHistory.map(exec => (
                 <div
                   key={exec.runId}
                   className="history-item"

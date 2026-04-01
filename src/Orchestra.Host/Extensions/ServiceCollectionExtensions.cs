@@ -233,6 +233,11 @@ public static class ServiceProviderExtensions
 			}
 		}
 
+		// Fire-and-forget preload of the run-history index so the first
+		// /api/history request doesn't pay the cold-load penalty.
+		var runStore = services.GetRequiredService<FileSystemRunStore>();
+		_ = Task.Run(() => runStore.PreloadIndexAsync());
+
 		return services;
 	}
 }

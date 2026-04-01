@@ -23,22 +23,14 @@ public static class OrchestrationsApi
 		var group = endpoints.MapGroup("/api/orchestrations");
 
 		// GET /api/orchestrations - List all registered orchestrations
-		group.MapGet("", async (OrchestrationRegistry registry, TriggerManager triggerManager) =>
+		group.MapGet("", (OrchestrationRegistry registry, TriggerManager triggerManager) =>
 		{
-			var orchestrations = await Task.WhenAll(registry.GetAll().Select(async o =>
+			var orchestrations = registry.GetAll().Select(o =>
 			{
 				var trigger = triggerManager.GetTrigger(o.Id);
 				var lastRun = trigger?.LastFireTime;
 				var nextRun = trigger?.NextFireTime;
 				var parameterNames = o.Orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray();
-
-				// Get version count if version store is available
-				int? versionCount = null;
-				if (registry.VersionStore is not null)
-				{
-					var versions = await registry.VersionStore.ListVersionsAsync(o.Id);
-					versionCount = versions.Count;
-				}
 
 				return new
 				{
@@ -49,7 +41,6 @@ public static class OrchestrationsApi
 					description = o.Orchestration.Description,
 					version = o.Orchestration.Version,
 					contentHash = o.ContentHash,
-					versionCount,
 					stepCount = o.Orchestration.Steps.Length,
 					steps = o.Orchestration.Steps.Select(s =>
 					{
@@ -112,7 +103,7 @@ public static class OrchestrationsApi
 						.Distinct()
 						.ToArray()
 				};
-			}));
+			}).ToArray();
 
 			return Results.Json(new { count = orchestrations.Length, orchestrations }, jsonOptions);
 		});

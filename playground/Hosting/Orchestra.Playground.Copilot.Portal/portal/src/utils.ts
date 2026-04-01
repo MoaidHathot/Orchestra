@@ -30,3 +30,19 @@ export function formatTime(dateStr: string | null | undefined): string {
   const d = new Date(dateStr);
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
+
+/**
+ * Returns true if a history entry represents an incomplete/early-exit execution.
+ * An execution is considered incomplete when:
+ * - `isIncomplete` flag is true, OR
+ * - it has a `completionReason` AND status is 'Succeeded' (early exit via orchestra_complete)
+ */
+export function isIncompleteExecution(exec: {
+  isActive?: boolean;
+  isIncomplete?: boolean;
+  completionReason?: string;
+  status?: string;
+}): boolean {
+  if (exec.isActive) return false;
+  return !!(exec.isIncomplete || (exec.completionReason && exec.status === 'Succeeded'));
+}
