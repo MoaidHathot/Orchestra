@@ -27,6 +27,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly IRunStore _runStore;
 	private readonly ICheckpointStore _checkpointStore;
 	private readonly ITriggerExecutionCallback? _executionCallback;
+	private readonly EngineToolRegistry _engineToolRegistry;
 	private readonly string? _dataPath;
 	private readonly JsonSerializerOptions _jsonOptions;
 
@@ -39,7 +40,7 @@ public partial class TriggerManager : BackgroundService
 	/// <summary>
 	/// Maximum time to wait for in-flight tasks during graceful shutdown.
 	/// </summary>
-	public static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(30);
+	public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
 	public TriggerManager(
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
@@ -52,6 +53,7 @@ public partial class TriggerManager : BackgroundService
 		IRunStore runStore,
 		ICheckpointStore checkpointStore,
 		ITriggerExecutionCallback? executionCallback = null,
+		EngineToolRegistry? engineToolRegistry = null,
 		string? dataPath = null)
 	{
 		_activeExecutions = activeExecutions;
@@ -65,6 +67,7 @@ public partial class TriggerManager : BackgroundService
 		_runStore = runStore;
 		_checkpointStore = checkpointStore;
 		_executionCallback = executionCallback;
+		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 		_dataPath = dataPath;
 		Directory.CreateDirectory(_triggersDir);
 
@@ -122,7 +125,7 @@ public partial class TriggerManager : BackgroundService
 			orchDesc = orch.Description;
 			orchVersion = orch.Version;
 		}
-		catch { /* best-effort metadata extraction */ }
+		catch (Exception ex) { LogMetadataExtractionFailed(orchestrationPath, ex); }
 
 		// Use the provided orchestrationId if given, otherwise generate one from the path and name
 		var id = orchestrationId ?? GenerateTriggerId(orchestrationPath, orchName);
@@ -147,6 +150,22 @@ public partial class TriggerManager : BackgroundService
 			registration.NextFireTime = CalculateNextFireTime(schedulerConfig);
 		}
 
+		// Preserve runtime state from existing registration (if re-registering)
+		if (_triggers.TryGetValue(id, out var existing))
+		{
+			registration.RunCount = existing.RunCount;
+			registration.LastFireTime = existing.LastFireTime;
+			registration.LastExecutionId = existing.LastExecutionId;
+			registration.LastError = existing.LastError;
+
+			// If the existing trigger has an active execution, carry it over
+			if (existing.ActiveExecutionId is not null)
+			{
+				registration.ActiveExecutionId = existing.ActiveExecutionId;
+				registration.Status = existing.Status;
+			}
+		}
+
 		_triggers[id] = registration;
 
 		// Persist if user-defined
@@ -167,12 +186,18 @@ public partial class TriggerManager : BackgroundService
 	{
 		if (_triggers.TryRemove(id, out var reg))
 		{
-			// Remove persisted override file
+			// Remove persisted override file (user triggers)
 			var sidecarPath = GetSidecarPath(reg.OrchestrationPath);
 			if (File.Exists(sidecarPath))
 			{
 				try { File.Delete(sidecarPath); }
-				catch { /* best-effort */ }
+				catch (Exception ex) { LogSidecarDeleteFailed(sidecarPath, ex); }
+			}
+
+			// Remove JSON trigger enabled-state override if present
+			if (reg.Source == TriggerSource.Json)
+			{
+				RemoveJsonTriggerEnabledOverride(id);
 			}
 
 			LogTriggerRemoved(id);
@@ -205,6 +230,10 @@ public partial class TriggerManager : BackgroundService
 		if (reg.Source == TriggerSource.User)
 		{
 			PersistTriggerOverride(reg);
+		}
+		else if (reg.Source == TriggerSource.Json)
+		{
+			PersistJsonTriggerEnabledOverride(id, enabled);
 		}
 
 		LogTriggerEnabledChanged(id, enabled);
@@ -298,7 +327,7 @@ public partial class TriggerManager : BackgroundService
 			var orch = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
 			orchName = orch.Name;
 		}
-		catch { /* best-effort metadata extraction */ }
+		catch (Exception ex) { LogMetadataExtractionFailed(orchestrationPath, ex); }
 
 		var tempReg = new TriggerRegistration
 		{
@@ -325,7 +354,7 @@ public partial class TriggerManager : BackgroundService
 		var executionId = checkpoint.RunId;
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, dataPath: _dataPath);
+		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, dataPath: _dataPath);
 
 		using var cts = new CancellationTokenSource();
 		_activeExecutions[executionId] = cts;
@@ -390,15 +419,16 @@ public partial class TriggerManager : BackgroundService
 					var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
 					await File.WriteAllTextAsync(historyPath, historyJson);
 				}
-				catch { /* best-effort history persist */ }
+				catch (Exception ex) { LogHistoryPersistFailed(executionId, ex); }
 			}
 			catch (OperationCanceledException)
 			{
 				executionInfo.Status = HostExecutionStatus.Cancelled;
 			}
-			catch (Exception)
+			catch (Exception ex)
 			{
 				executionInfo.Status = HostExecutionStatus.Failed;
+				LogOrchestrationResumeFailed(entry.Id, executionId, ex);
 			}
 			finally
 			{
@@ -494,9 +524,9 @@ public partial class TriggerManager : BackgroundService
 
 				RegisterTrigger(file, null, orchestration.Trigger, null, TriggerSource.Json);
 			}
-			catch
+			catch (Exception ex)
 			{
-				// Not a valid orchestration file, skip
+				LogOrchestrationFileScanFailed(file, ex);
 			}
 		}
 	}
@@ -643,209 +673,12 @@ public partial class TriggerManager : BackgroundService
 		TriggerRegistration reg,
 		Dictionary<string, string>? parameters)
 	{
-		reg.Status = TriggerStatus.Running;
-		reg.LastFireTime = DateTime.UtcNow;
-		reg.RunCount++;
-		reg.LastError = null;
-
-		var executionId = Guid.NewGuid().ToString("N")[..12];
-		reg.ActiveExecutionId = executionId;
-
-		LogTriggerFiring(reg.Id, reg.OrchestrationPath, executionId, reg.RunCount);
-
-		try
-		{
-			// Parse orchestration
-			Mcp[] mcps = [];
-			if (!string.IsNullOrWhiteSpace(reg.McpPath) && File.Exists(reg.McpPath))
-			{
-				mcps = OrchestrationParser.ParseMcpFile(reg.McpPath);
-			}
-
-			var orchestration = OrchestrationParser.ParseOrchestrationFile(reg.OrchestrationPath, mcps);
-			var schedule = _scheduler.Schedule(orchestration);
-
-			// ── Input Handler Prompt: transform raw parameters via LLM ──
-			if (!string.IsNullOrWhiteSpace(reg.Config.InputHandlerPrompt) && parameters is { Count: > 0 })
-			{
-				try
-				{
-				var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
-				var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
-
-				var agent = await _agentBuilder
-					.BuildAgentAsync(new AgentBuildConfig
-					{
-						Model = "gpt-4o-mini",
-						SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
-						Mcps = [],
-					});
-
-				var task = agent.SendAsync(fullPrompt);
-				var result = await task.GetResultAsync();
-
-				// Parse the LLM response as JSON parameters
-				var content = result.Content.Trim();
-				// Strip markdown code fences if present
-					if (content.StartsWith("```"))
-					{
-						var firstNewline = content.IndexOf('\n');
-						if (firstNewline >= 0) content = content[(firstNewline + 1)..];
-						if (content.EndsWith("```")) content = content[..^3].TrimEnd();
-					}
-
-					var transformed = JsonSerializer.Deserialize<Dictionary<string, string>>(content, _jsonOptions);
-					if (transformed is { Count: > 0 })
-					{
-						LogInputHandlerTransformed(reg.Id, parameters.Count, transformed.Count);
-						parameters = transformed;
-					}
-				}
-				catch (Exception ex)
-				{
-					LogInputHandlerFailed(ex, reg.Id);
-				}
-			}
-
-			// Create executor with reporter
-			var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, dataPath: _dataPath);
-
-			using var cts = new CancellationTokenSource();
-			_activeExecutions[executionId] = cts;
-
-			// Track in activeExecutionInfos for UI visibility
-			var executionInfo = new ActiveExecutionInfo
-			{
-				ExecutionId = executionId,
-				OrchestrationId = reg.Id,
-				OrchestrationName = orchestration.Name,
-				StartedAt = DateTimeOffset.UtcNow,
-				TriggeredBy = reg.Config.Type.ToString().ToLowerInvariant(),
-				CancellationTokenSource = cts,
-				Reporter = reporter,
-				Parameters = parameters,
-				TotalSteps = orchestration.Steps.Length
-			};
-			_activeExecutionInfos[executionId] = executionInfo;
-
-			// Notify callback that execution has started (allows it to set up reporter callbacks)
-			_executionCallback?.OnExecutionStarted(executionInfo);
-
-			OrchestrationResult? executionResult = null;
-			try
-			{
-				var result = await executor.ExecuteAsync(orchestration, parameters, triggerId: reg.Id, cancellationToken: cts.Token);
-				executionResult = result;
-
-				// Persist history
-				try
-				{
-					var historyEntry = new
-					{
-						id = executionId,
-						orchestrationName = orchestration.Name,
-						orchestrationDescription = orchestration.Description,
-						orchestrationVersion = orchestration.Version,
-						orchestrationPath = reg.OrchestrationPath,
-						triggerId = reg.Id,
-						triggerType = reg.Config.Type.ToString(),
-						startedAt = reg.LastFireTime?.ToString("o"),
-						status = result.Status.ToString(),
-						stepCount = orchestration.Steps.Length,
-						results = result.StepResults.ToDictionary(
-							kv => kv.Key,
-							kv => new
-							{
-								status = kv.Value.Status.ToString(),
-								content = kv.Value.Content,
-								error = kv.Value.ErrorMessage,
-							}),
-					};
-					var historyJson = JsonSerializer.Serialize(historyEntry, _jsonOptions);
-					var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
-					await File.WriteAllTextAsync(historyPath, historyJson);
-				}
-				catch { /* best-effort */ }
-
-				// Handle loop trigger
-				if (reg.Config is LoopTriggerConfig loopConfig)
-				{
-					var shouldContinue = result.Status == ExecutionStatus.Succeeded || loopConfig.ContinueOnFailure;
-					var withinLimit = !loopConfig.MaxIterations.HasValue || reg.RunCount < loopConfig.MaxIterations.Value;
-
-					if (shouldContinue && withinLimit && reg.Config.Enabled)
-					{
-						if (loopConfig.DelaySeconds > 0)
-						{
-							reg.Status = TriggerStatus.Waiting;
-							reg.NextFireTime = DateTime.UtcNow.AddSeconds(loopConfig.DelaySeconds);
-						}
-						else
-						{
-							// Immediately re-run — tracked for graceful shutdown
-							TrackBackgroundTask(Task.Run(async () =>
-							{
-								await Task.Delay(100); // Small delay to avoid tight loops
-								await ExecuteOrchestrationAsync(reg, parameters);
-							}));
-							return executionId;
-						}
-					}
-					else
-					{
-						reg.Status = loopConfig.MaxIterations.HasValue && reg.RunCount >= loopConfig.MaxIterations.Value
-							? TriggerStatus.Completed
-							: TriggerStatus.Paused;
-					}
-				}
-				// Handle webhook trigger - return to Waiting status to accept next invocation
-				else if (reg.Config is WebhookTriggerConfig)
-				{
-					reg.Status = TriggerStatus.Waiting;
-				}
-				// Handle scheduler trigger - return to Waiting with next fire time
-				else if (reg.Config is SchedulerTriggerConfig schedulerConfig)
-				{
-					reg.Status = TriggerStatus.Waiting;
-					reg.NextFireTime = CalculateNextFireTime(schedulerConfig);
-				}
-
-				return executionId;
-			}
-			finally
-			{
-				_activeExecutions.TryRemove(executionId, out _);
-				// Update status and notify callback
-				if (_activeExecutionInfos.TryGetValue(executionId, out var info))
-				{
-					info.Status = executionResult?.Status switch
-					{
-						ExecutionStatus.Cancelled => HostExecutionStatus.Cancelled,
-						ExecutionStatus.Failed => HostExecutionStatus.Failed,
-						_ => HostExecutionStatus.Completed
-					};
-					_executionCallback?.OnExecutionCompleted(info);
-
-					// Remove after a short delay — tracked for graceful shutdown
-					TrackBackgroundTask(Task.Run(async () =>
-					{
-						await Task.Delay(5000);
-						_activeExecutionInfos.TryRemove(executionId, out _);
-					}));
-				}
-				reg.LastExecutionId = executionId;
-				reg.ActiveExecutionId = null;
-			}
-		}
-		catch (Exception ex)
-		{
-			reg.Status = TriggerStatus.Error;
-			reg.LastError = ex.Message;
-			reg.ActiveExecutionId = null;
-			LogOrchestrationExecutionFailed(ex, reg.Id);
+		var (executionId, result) = await ExecuteOrchestrationCoreAsync(reg, parameters);
+		if (executionId is null)
 			return null;
-		}
+
+		HandlePostExecutionTriggerStatus(reg, result!, parameters);
+		return executionId;
 	}
 
 	/// <summary>
@@ -853,6 +686,23 @@ public partial class TriggerManager : BackgroundService
 	/// Used for synchronous webhook responses where the caller needs the result.
 	/// </summary>
 	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationWithResultAsync(
+		TriggerRegistration reg,
+		Dictionary<string, string>? parameters)
+	{
+		var (executionId, result) = await ExecuteOrchestrationCoreAsync(reg, parameters);
+		if (executionId is null)
+			return (null, null);
+
+		// Webhook sync responses always return to Waiting
+		reg.Status = TriggerStatus.Waiting;
+		return (executionId, result);
+	}
+
+	/// <summary>
+	/// Shared execution logic: sets up trigger state, parses orchestration,
+	/// transforms parameters via input handler, executes, persists history, and cleans up.
+	/// </summary>
+	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationCoreAsync(
 		TriggerRegistration reg,
 		Dictionary<string, string>? parameters)
 	{
@@ -883,21 +733,21 @@ public partial class TriggerManager : BackgroundService
 			{
 				try
 				{
-				var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
-				var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
+					var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
+					var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
-				var agent = await _agentBuilder
-					.BuildAgentAsync(new AgentBuildConfig
-					{
-						Model = "gpt-4o-mini",
-						SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
-						Mcps = [],
-					});
+					var agent = await _agentBuilder
+						.BuildAgentAsync(new AgentBuildConfig
+						{
+							Model = "gpt-4o-mini",
+							SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
+							Mcps = [],
+						});
 
-				var task = agent.SendAsync(fullPrompt);
-				var result = await task.GetResultAsync();
+					var task = agent.SendAsync(fullPrompt);
+					var result = await task.GetResultAsync();
 
-				var content = result.Content.Trim();
+					var content = result.Content.Trim();
 					if (content.StartsWith("```"))
 					{
 						var firstNewline = content.IndexOf('\n');
@@ -920,11 +770,12 @@ public partial class TriggerManager : BackgroundService
 
 			// Create executor with reporter
 			var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, dataPath: _dataPath);
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, engineToolRegistry: _engineToolRegistry, dataPath: _dataPath);
 
 			using var cts = new CancellationTokenSource();
 			_activeExecutions[executionId] = cts;
 
+			// Track in activeExecutionInfos for UI visibility
 			var executionInfo = new ActiveExecutionInfo
 			{
 				ExecutionId = executionId,
@@ -939,6 +790,7 @@ public partial class TriggerManager : BackgroundService
 			};
 			_activeExecutionInfos[executionId] = executionInfo;
 
+			// Notify callback that execution has started (allows it to set up reporter callbacks)
 			_executionCallback?.OnExecutionStarted(executionInfo);
 
 			OrchestrationResult? executionResult = null;
@@ -975,16 +827,14 @@ public partial class TriggerManager : BackgroundService
 					var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
 					await File.WriteAllTextAsync(historyPath, historyJson);
 				}
-				catch { /* best-effort */ }
-
-				// Webhook trigger - return to Waiting status
-				reg.Status = TriggerStatus.Waiting;
+				catch (Exception ex) { LogHistoryPersistFailed(executionId, ex); }
 
 				return (executionId, orchResult);
 			}
 			finally
 			{
 				_activeExecutions.TryRemove(executionId, out _);
+				// Update status and notify callback
 				if (_activeExecutionInfos.TryGetValue(executionId, out var info))
 				{
 					info.Status = executionResult?.Status switch
@@ -995,6 +845,7 @@ public partial class TriggerManager : BackgroundService
 					};
 					_executionCallback?.OnExecutionCompleted(info);
 
+					// Remove after a short delay — tracked for graceful shutdown
 					TrackBackgroundTask(Task.Run(async () =>
 					{
 						await Task.Delay(5000);
@@ -1012,6 +863,55 @@ public partial class TriggerManager : BackgroundService
 			reg.ActiveExecutionId = null;
 			LogOrchestrationExecutionFailed(ex, reg.Id);
 			return (null, null);
+		}
+	}
+
+	/// <summary>
+	/// Updates trigger status based on trigger type after a successful execution.
+	/// Handles loop re-scheduling, webhook waiting, and scheduler next-fire-time.
+	/// </summary>
+	internal void HandlePostExecutionTriggerStatus(
+		TriggerRegistration reg,
+		OrchestrationResult result,
+		Dictionary<string, string>? parameters)
+	{
+		if (reg.Config is LoopTriggerConfig loopConfig)
+		{
+			var shouldContinue = result.Status == ExecutionStatus.Succeeded || loopConfig.ContinueOnFailure;
+			var withinLimit = !loopConfig.MaxIterations.HasValue || reg.RunCount < loopConfig.MaxIterations.Value;
+
+			if (shouldContinue && withinLimit && reg.Config.Enabled)
+			{
+				if (loopConfig.DelaySeconds > 0)
+				{
+					reg.Status = TriggerStatus.Waiting;
+					reg.NextFireTime = DateTime.UtcNow.AddSeconds(loopConfig.DelaySeconds);
+				}
+				else
+				{
+					// Immediately re-run — tracked for graceful shutdown
+					TrackBackgroundTask(Task.Run(async () =>
+					{
+						await Task.Delay(100); // Small delay to avoid tight loops
+						await ExecuteOrchestrationAsync(reg, parameters);
+					}));
+				}
+			}
+			else
+			{
+				reg.Status = loopConfig.MaxIterations.HasValue && reg.RunCount >= loopConfig.MaxIterations.Value
+					? TriggerStatus.Completed
+					: TriggerStatus.Paused;
+			}
+		}
+		else if (reg.Config is WebhookTriggerConfig)
+		{
+			reg.Status = TriggerStatus.Waiting;
+		}
+		else if (reg.Config is SchedulerTriggerConfig schedulerConfig)
+		{
+			reg.Status = TriggerStatus.Waiting;
+			reg.NextFireTime = CalculateNextFireTime(schedulerConfig);
 		}
 	}
 
@@ -1051,6 +951,70 @@ public partial class TriggerManager : BackgroundService
 		{
 			LogTriggerPersistFailed(ex, reg.Id);
 		}
+	}
+
+	/// <summary>
+	/// Persists an enabled-state override for a JSON-sourced trigger.
+	/// This stores a lightweight sidecar file so that the user's enable/disable
+	/// decision survives a restart (where the JSON file would otherwise reset it).
+	/// </summary>
+	private void PersistJsonTriggerEnabledOverride(string triggerId, bool enabled)
+	{
+		try
+		{
+			var overridePath = GetJsonTriggerOverridePath(triggerId);
+			var data = new JsonTriggerEnabledOverride { TriggerId = triggerId, Enabled = enabled };
+			var json = JsonSerializer.Serialize(data, _jsonOptions);
+			File.WriteAllText(overridePath, json);
+		}
+		catch (Exception ex)
+		{
+			LogTriggerPersistFailed(ex, triggerId);
+		}
+	}
+
+	/// <summary>
+	/// Checks for a persisted enabled-state override for a JSON-sourced trigger.
+	/// Returns null if no override exists.
+	/// </summary>
+	public bool? GetJsonTriggerEnabledOverride(string triggerId)
+	{
+		var overridePath = GetJsonTriggerOverridePath(triggerId);
+		if (!File.Exists(overridePath))
+			return null;
+
+		try
+		{
+			var json = File.ReadAllText(overridePath);
+			var data = JsonSerializer.Deserialize<JsonTriggerEnabledOverride>(json, _jsonOptions);
+			return data?.Enabled;
+		}
+		catch (Exception ex)
+		{
+			LogOverrideReadFailed(overridePath, ex);
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// Removes the persisted enabled-state override for a JSON-sourced trigger.
+	/// </summary>
+	private void RemoveJsonTriggerEnabledOverride(string triggerId)
+	{
+		var overridePath = GetJsonTriggerOverridePath(triggerId);
+		if (File.Exists(overridePath))
+		{
+			try { File.Delete(overridePath); }
+			catch (Exception ex) { LogOverrideDeleteFailed(overridePath, ex); }
+		}
+	}
+
+	private string GetJsonTriggerOverridePath(string triggerId)
+	{
+		var safeName = Convert.ToHexString(
+			System.Security.Cryptography.SHA256.HashData(
+				System.Text.Encoding.UTF8.GetBytes(triggerId)))[..16];
+		return Path.Combine(_triggersDir, $"{safeName}.json-override.json");
 	}
 
 	private string GetSidecarPath(string orchestrationPath)
@@ -1141,16 +1105,6 @@ public partial class TriggerManager : BackgroundService
 			MaxConcurrent = w.MaxConcurrent,
 			Response = w.Response,
 		},
-			EmailTriggerConfig e => new EmailTriggerConfig
-			{
-				Type = e.Type,
-				Enabled = enabled,
-				FolderPath = e.FolderPath,
-				PollIntervalSeconds = e.PollIntervalSeconds,
-				MaxItemsPerPoll = e.MaxItemsPerPoll,
-				SubjectContains = e.SubjectContains,
-				SenderContains = e.SenderContains,
-			},
 			_ => config,
 		};
 	}
@@ -1194,16 +1148,6 @@ public partial class TriggerManager : BackgroundService
 				? DeserializeWebhookResponseConfig(responseProp)
 				: null,
 		},
-			TriggerType.Email => new EmailTriggerConfig
-			{
-				Type = TriggerType.Email,
-				Enabled = enabled,
-				FolderPath = element.TryGetProperty("folderPath", out var folderPath) ? folderPath.GetString() ?? "Inbox" : "Inbox",
-				PollIntervalSeconds = element.TryGetProperty("pollIntervalSeconds", out var pollInterval) ? pollInterval.GetInt32() : 60,
-				MaxItemsPerPoll = element.TryGetProperty("maxItemsPerPoll", out var maxItems) ? maxItems.GetInt32() : 10,
-				SubjectContains = element.TryGetProperty("subjectContains", out var subjectContains) ? subjectContains.GetString() : null,
-				SenderContains = element.TryGetProperty("senderContains", out var senderContains) ? senderContains.GetString() : null,
-			},
 			_ => null,
 		};
 	}
@@ -1224,6 +1168,12 @@ public partial class TriggerManager : BackgroundService
 		public string? McpPath { get; init; }
 		public required TriggerConfig Trigger { get; init; }
 		public Dictionary<string, string>? Parameters { get; init; }
+	}
+
+	private class JsonTriggerEnabledOverride
+	{
+		public required string TriggerId { get; init; }
+		public required bool Enabled { get; init; }
 	}
 
 	// ── Structured Logging ──
@@ -1284,4 +1234,25 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Graceful shutdown complete")]
 	private partial void LogGracefulShutdownComplete();
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Failed to extract metadata from orchestration file '{Path}'")]
+	private partial void LogMetadataExtractionFailed(string path, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Failed to delete sidecar file '{Path}'")]
+	private partial void LogSidecarDeleteFailed(string path, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to persist run history for execution '{ExecutionId}'")]
+	private partial void LogHistoryPersistFailed(string executionId, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Orchestration resume failed for '{OrchestrationId}' (execution '{ExecutionId}')")]
+	private partial void LogOrchestrationResumeFailed(string orchestrationId, string executionId, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Skipping invalid orchestration file during scan: '{File}'")]
+	private partial void LogOrchestrationFileScanFailed(string file, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Failed to read trigger override file '{Path}'")]
+	private partial void LogOverrideReadFailed(string path, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Failed to delete trigger override file '{Path}'")]
+	private partial void LogOverrideDeleteFailed(string path, Exception ex);
 }

@@ -34,6 +34,7 @@ public static partial class ExecutionApi
 			ILoggerFactory loggerFactory,
 			FileSystemRunStore runStore,
 			OrchestrationHostOptions hostOptions,
+			EngineToolRegistry engineToolRegistry,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
 		{
@@ -68,7 +69,7 @@ public static partial class ExecutionApi
 							parameters[prop.Name] = prop.Value.GetString() ?? "";
 					}
 				}
-				catch { /* Invalid parameters JSON */ }
+				catch (JsonException) { /* Invalid parameters JSON */ }
 			}
 
 			// Set up SSE response
@@ -113,7 +114,7 @@ public static partial class ExecutionApi
 			await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { executionId }, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, dataPath: hostOptions.DataPath);
+			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, engineToolRegistry: engineToolRegistry, dataPath: hostOptions.DataPath);
 			var cancellationToken = cts.Token;
 			var runId = executionId;
 			var runStartedAt = DateTimeOffset.UtcNow;
@@ -354,7 +355,7 @@ public static partial class ExecutionApi
 						break;
 				}
 			}
-			catch { /* Ignore parse errors */ }
+			catch (JsonException) { /* Ignore parse errors */ }
 		}
 
 		// Build step records for ALL steps
@@ -483,7 +484,7 @@ public static partial class ExecutionApi
 						break;
 				}
 			}
-			catch { /* Ignore parse errors */ }
+			catch (JsonException) { /* Ignore parse errors */ }
 		}
 
 		foreach (var stepName in stepsStarted)

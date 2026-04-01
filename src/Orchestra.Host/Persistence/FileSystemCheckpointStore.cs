@@ -99,9 +99,9 @@ public partial class FileSystemCheckpointStore : ICheckpointStore
 				Directory.Delete(orchestrationDir);
 			}
 		}
-		catch
+		catch (Exception ex)
 		{
-			// Ignore cleanup failures
+			_logger.LogDebug(ex, "Failed to clean up empty orchestration directory '{Directory}'", orchestrationDir);
 		}
 
 		return Task.CompletedTask;

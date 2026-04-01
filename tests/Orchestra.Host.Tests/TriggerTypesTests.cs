@@ -89,22 +89,6 @@ public class TriggerTypesTests
 	}
 
 	[Fact]
-	public void EmailTriggerConfig_DefaultValues()
-	{
-		// Act
-		var config = new EmailTriggerConfig { Type = TriggerType.Email };
-
-		// Assert
-		config.Type.Should().Be(TriggerType.Email);
-		config.Enabled.Should().BeTrue();
-		config.FolderPath.Should().Be("Inbox");
-		config.PollIntervalSeconds.Should().Be(60);
-		config.MaxItemsPerPoll.Should().Be(10);
-		config.SubjectContains.Should().BeNull();
-		config.SenderContains.Should().BeNull();
-	}
-
-	[Fact]
 	public void TriggerRegistration_DefaultStatus()
 	{
 		// Act
@@ -252,35 +236,6 @@ public class TriggerTypesTests
 	}
 
 	[Fact]
-	public void CloneTriggerConfigWithEnabled_EmailConfig_ClonesCorrectly()
-	{
-		// Arrange
-		var original = new EmailTriggerConfig
-		{
-			Type = TriggerType.Email,
-			Enabled = true,
-			FolderPath = "Custom/Folder",
-			PollIntervalSeconds = 120,
-			MaxItemsPerPoll = 20,
-			SubjectContains = "[ALERT]",
-			SenderContains = "@example.com"
-		};
-
-		// Act
-		var cloned = TriggerManager.CloneTriggerConfigWithEnabled(original, false);
-
-		// Assert
-		cloned.Should().BeOfType<EmailTriggerConfig>();
-		var emailClone = (EmailTriggerConfig)cloned;
-		emailClone.Enabled.Should().BeFalse();
-		emailClone.FolderPath.Should().Be("Custom/Folder");
-		emailClone.PollIntervalSeconds.Should().Be(120);
-		emailClone.MaxItemsPerPoll.Should().Be(20);
-		emailClone.SubjectContains.Should().Be("[ALERT]");
-		emailClone.SenderContains.Should().Be("@example.com");
-	}
-
-	[Fact]
 	public void GenerateTriggerId_SamePath_ProducesSameId()
 	{
 		// Arrange
@@ -376,7 +331,6 @@ public class TriggerTypesTests
 		values.Should().Contain(TriggerType.Scheduler);
 		values.Should().Contain(TriggerType.Loop);
 		values.Should().Contain(TriggerType.Webhook);
-		values.Should().Contain(TriggerType.Email);
 	}
 
 	[Fact]

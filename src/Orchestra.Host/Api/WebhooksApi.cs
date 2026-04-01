@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Triggers;
 
@@ -21,7 +22,7 @@ public static partial class WebhooksApi
 		var group = endpoints.MapGroup("/api/webhooks");
 
 		// POST /api/webhooks/{id} - Webhook receiver endpoint for external systems
-		group.MapPost("/{id}", async (HttpContext httpContext, string id, TriggerManager triggerManager) =>
+		group.MapPost("/{id}", async (HttpContext httpContext, string id, TriggerManager triggerManager, ILogger<TriggerManager> logger) =>
 		{
 			var t = triggerManager.GetTrigger(id);
 			if (t == null)
@@ -30,32 +31,35 @@ public static partial class WebhooksApi
 			if (t.Config is not WebhookTriggerConfig webhookConfig)
 				return ProblemDetailsHelpers.BadRequest($"Trigger '{id}' is not a webhook trigger.");
 
-			// Validate webhook secret if configured
+			// Read raw body bytes (needed for both HMAC validation and JSON parsing)
+			httpContext.Request.EnableBuffering();
+			using var ms = new MemoryStream();
+			await httpContext.Request.Body.CopyToAsync(ms);
+			var bodyBytes = ms.ToArray();
+
+			// Validate HMAC signature if a secret is configured
 			if (!string.IsNullOrWhiteSpace(webhookConfig.Secret))
 			{
-				var providedSecret = httpContext.Request.Headers["X-Webhook-Secret"].FirstOrDefault()
-					?? httpContext.Request.Query["secret"].FirstOrDefault();
-
-				if (providedSecret != webhookConfig.Secret)
+				var signatureHeader = httpContext.Request.Headers[WebhookSignatureValidator.SignatureHeaderName].FirstOrDefault();
+				if (!WebhookSignatureValidator.Validate(signatureHeader, webhookConfig.Secret, bodyBytes))
 					return Results.Unauthorized();
 			}
 
 			// Parse parameters from webhook body
 			Dictionary<string, string>? webhookParams = null;
-			if (httpContext.Request.ContentLength > 0)
+			if (bodyBytes.Length > 0)
 			{
 				try
 				{
-					using var reader = new StreamReader(httpContext.Request.Body);
-					var body = await reader.ReadToEndAsync();
+					var body = System.Text.Encoding.UTF8.GetString(bodyBytes);
 					if (!string.IsNullOrWhiteSpace(body))
 					{
 						webhookParams = JsonSerializer.Deserialize<Dictionary<string, string>>(body, jsonOptions);
 					}
 				}
-				catch
+				catch (Exception ex)
 				{
-					// Best-effort body parsing - continue without params
+					logger.LogError(ex, "Failed to parse webhook request body for trigger '{TriggerId}'", id);
 				}
 			}
 
@@ -80,8 +84,8 @@ public static partial class WebhooksApi
 			}, jsonOptions);
 		});
 
-		// POST /api/webhooks/{id}/validate - Validate webhook secret without firing
-		group.MapPost("/{id}/validate", (HttpContext httpContext, string id, TriggerManager triggerManager) =>
+		// POST /api/webhooks/{id}/validate - Validate webhook signature without firing
+		group.MapPost("/{id}/validate", async (HttpContext httpContext, string id, TriggerManager triggerManager) =>
 		{
 			var t = triggerManager.GetTrigger(id);
 			if (t == null)
@@ -90,14 +94,17 @@ public static partial class WebhooksApi
 			if (t.Config is not WebhookTriggerConfig webhookConfig)
 				return ProblemDetailsHelpers.BadRequest($"Trigger '{id}' is not a webhook trigger.");
 
-			// Validate webhook secret if configured
+			// Validate HMAC signature if a secret is configured
 			if (!string.IsNullOrWhiteSpace(webhookConfig.Secret))
 			{
-				var providedSecret = httpContext.Request.Headers["X-Webhook-Secret"].FirstOrDefault()
-					?? httpContext.Request.Query["secret"].FirstOrDefault();
+				httpContext.Request.EnableBuffering();
+				using var ms = new MemoryStream();
+				await httpContext.Request.Body.CopyToAsync(ms);
+				var bodyBytes = ms.ToArray();
 
-				if (providedSecret != webhookConfig.Secret)
-					return Results.Json(new { valid = false, message = "Invalid secret" }, jsonOptions);
+				var signatureHeader = httpContext.Request.Headers[WebhookSignatureValidator.SignatureHeaderName].FirstOrDefault();
+				if (!WebhookSignatureValidator.Validate(signatureHeader, webhookConfig.Secret, bodyBytes))
+					return Results.Json(new { valid = false, message = "Invalid signature" }, jsonOptions);
 			}
 
 			return Results.Json(new

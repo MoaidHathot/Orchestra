@@ -1700,7 +1700,7 @@
       <div class="tf-group">
         <label>Secret (optional)</label>
         <input type="text" id="tfSecret" placeholder="my-webhook-secret">
-        <div class="tf-hint">Callers must send this in X-Webhook-Secret header or ?secret= query</div>
+        <div class="tf-hint">Callers must compute HMAC-SHA256 and send it in X-Hub-Signature-256 header as sha256=&lt;hex&gt;</div>
       </div>
       <div class="tf-group">
         <label>Max Concurrent (0 = unlimited)</label>

@@ -86,12 +86,6 @@ public class TerminalUI
 	// Webhook fields
 	private string _triggerCreateSecret = "";
 	private string _triggerCreateMaxConcurrent = "1";
-	// Email fields
-	private string _triggerCreateFolderPath = "Inbox";
-	private string _triggerCreatePollInterval = "60";
-	private string _triggerCreateMaxItems = "10";
-	private string _triggerCreateSubjectContains = "";
-	private string _triggerCreateSenderContains = "";
 	// Common
 	private string _triggerCreateInputHandlerPrompt = "";
 	private bool _triggerCreateEditingField;
@@ -4024,11 +4018,6 @@ public class TerminalUI
 		_triggerCreateContinueOnFailure = false;
 		_triggerCreateSecret = "";
 		_triggerCreateMaxConcurrent = "1";
-		_triggerCreateFolderPath = "Inbox";
-		_triggerCreatePollInterval = "60";
-		_triggerCreateMaxItems = "10";
-		_triggerCreateSubjectContains = "";
-		_triggerCreateSenderContains = "";
 		_triggerCreateInputHandlerPrompt = "";
 		_triggerCreateEditingField = false;
 		_triggerCreateEditFieldIndex = -1;
@@ -4061,13 +4050,6 @@ public class TerminalUI
 			case TriggerType.Webhook:
 				fields.Add(("Secret", _triggerCreateSecret, false));
 				fields.Add(("Max Concurrent", _triggerCreateMaxConcurrent, false));
-				break;
-			case TriggerType.Email:
-				fields.Add(("Folder Path", _triggerCreateFolderPath, false));
-				fields.Add(("Poll Interval (seconds)", _triggerCreatePollInterval, false));
-				fields.Add(("Max Items per Poll", _triggerCreateMaxItems, false));
-				fields.Add(("Subject Contains", _triggerCreateSubjectContains, false));
-				fields.Add(("Sender Contains", _triggerCreateSenderContains, false));
 				break;
 		}
 
@@ -4111,17 +4093,6 @@ public class TerminalUI
 					case 0: _triggerCreateSecret = value; break;
 					case 1: _triggerCreateMaxConcurrent = value; break;
 					case 2: _triggerCreateInputHandlerPrompt = value; break;
-				}
-				break;
-			case TriggerType.Email:
-				switch (adjustedIndex)
-				{
-					case 0: _triggerCreateFolderPath = value; break;
-					case 1: _triggerCreatePollInterval = value; break;
-					case 2: _triggerCreateMaxItems = value; break;
-					case 3: _triggerCreateSubjectContains = value; break;
-					case 4: _triggerCreateSenderContains = value; break;
-					case 5: _triggerCreateInputHandlerPrompt = value; break;
 				}
 				break;
 		}
@@ -4178,17 +4149,6 @@ public class TerminalUI
 				MaxConcurrent = int.TryParse(_triggerCreateMaxConcurrent, out var maxConc) ? maxConc : 1,
 				InputHandlerPrompt = string.IsNullOrWhiteSpace(_triggerCreateInputHandlerPrompt) ? null : _triggerCreateInputHandlerPrompt.Trim(),
 			},
-			TriggerType.Email => new EmailTriggerConfig
-			{
-				Type = TriggerType.Email,
-				Enabled = _triggerCreateEnabled,
-				FolderPath = string.IsNullOrWhiteSpace(_triggerCreateFolderPath) ? "Inbox" : _triggerCreateFolderPath.Trim(),
-				PollIntervalSeconds = int.TryParse(_triggerCreatePollInterval, out var pollSec) ? pollSec : 60,
-				MaxItemsPerPoll = int.TryParse(_triggerCreateMaxItems, out var maxItems) ? maxItems : 10,
-				SubjectContains = string.IsNullOrWhiteSpace(_triggerCreateSubjectContains) ? null : _triggerCreateSubjectContains.Trim(),
-				SenderContains = string.IsNullOrWhiteSpace(_triggerCreateSenderContains) ? null : _triggerCreateSenderContains.Trim(),
-				InputHandlerPrompt = string.IsNullOrWhiteSpace(_triggerCreateInputHandlerPrompt) ? null : _triggerCreateInputHandlerPrompt.Trim(),
-			},
 			_ => new SchedulerTriggerConfig { Type = TriggerType.Scheduler, Enabled = _triggerCreateEnabled }
 		};
 	}
@@ -4226,15 +4186,6 @@ public class TerminalUI
 				summary.Add(("Secret", string.IsNullOrWhiteSpace(_triggerCreateSecret) ? "(none)" : "(set)"));
 				summary.Add(("Max Concurrent", _triggerCreateMaxConcurrent));
 				break;
-			case TriggerType.Email:
-				summary.Add(("Folder", _triggerCreateFolderPath));
-				summary.Add(("Poll Interval", $"{_triggerCreatePollInterval}s"));
-				summary.Add(("Max Items", _triggerCreateMaxItems));
-				if (!string.IsNullOrWhiteSpace(_triggerCreateSubjectContains))
-					summary.Add(("Subject Filter", _triggerCreateSubjectContains));
-				if (!string.IsNullOrWhiteSpace(_triggerCreateSenderContains))
-					summary.Add(("Sender Filter", _triggerCreateSenderContains));
-				break;
 		}
 
 		if (!string.IsNullOrWhiteSpace(_triggerCreateInputHandlerPrompt))
@@ -4266,10 +4217,6 @@ public class TerminalUI
 			case TriggerType.Webhook:
 				if (!string.IsNullOrWhiteSpace(_triggerCreateMaxConcurrent) && (!int.TryParse(_triggerCreateMaxConcurrent, out var maxC) || maxC <= 0))
 					return "Max concurrent must be a positive integer";
-				break;
-			case TriggerType.Email:
-				if (!string.IsNullOrWhiteSpace(_triggerCreatePollInterval) && (!int.TryParse(_triggerCreatePollInterval, out var poll) || poll <= 0))
-					return "Poll interval must be a positive integer (seconds)";
 				break;
 		}
 
@@ -4581,7 +4528,6 @@ public class TerminalUI
 			[TriggerType.Scheduler] = "Run on a cron schedule or at fixed intervals",
 			[TriggerType.Loop] = "Re-run automatically after each completion",
 			[TriggerType.Webhook] = "Trigger via HTTP POST from external services",
-			[TriggerType.Email] = "Poll an Outlook folder for new emails"
 		};
 
 		for (int i = 0; i < types.Length; i++)

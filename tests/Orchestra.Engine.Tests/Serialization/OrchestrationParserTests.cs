@@ -511,35 +511,6 @@ public class OrchestrationParserTests
 		trigger.ContinueOnFailure.Should().BeTrue();
 	}
 
-	[Fact]
-	public void ParseOrchestration_EmailTrigger_ParsesCorrectly()
-	{
-		// Arrange
-		var json = """
-			{
-				"name": "email-test",
-				"description": "Test",
-				"trigger": {
-					"type": "email",
-					"folderPath": "Inbox/Test",
-					"pollIntervalSeconds": 120,
-					"subjectContains": "Important"
-				},
-				"steps": []
-			}
-			""";
-
-		// Act
-		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
-
-		// Assert
-		orchestration.Trigger.Should().BeOfType<EmailTriggerConfig>();
-		var trigger = orchestration.Trigger as EmailTriggerConfig;
-		trigger!.FolderPath.Should().Be("Inbox/Test");
-		trigger.PollIntervalSeconds.Should().Be(120);
-		trigger.SubjectContains.Should().Be("Important");
-	}
-
 	#endregion
 
 	#region MCP Parsing

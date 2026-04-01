@@ -26,6 +26,9 @@ public static class ServiceCollectionExtensions
 		Action<OrchestrationHostOptions>? configure = null)
 	{
 		var options = new OrchestrationHostOptions();
+
+		// Load config file first (orchestra.json), then let programmatic overrides win
+		OrchestraConfigLoader.LoadAndApply(options);
 		configure?.Invoke(options);
 
 		// Ensure data path exists
@@ -37,14 +40,20 @@ public static class ServiceCollectionExtensions
 		// Register engine services (if not already registered by the consumer)
 		services.TryAddSingleton<IScheduler, OrchestrationScheduler>();
 
+		// Engine tool registry (default includes all built-in tools; consumers can customize via AddEngineTools)
+		if (!services.Any(d => d.ServiceType == typeof(EngineToolRegistry)))
+		{
+			services.AddSingleton(EngineToolRegistry.CreateDefault());
+		}
+
 		// Register default execution callback if none provided
 		// This must be done before TriggerManager is created
 		services.TryAddSingleton<ITriggerExecutionCallback, DefaultExecutionCallback>();
 
 		// File-based run store
-		var runStore = new FileSystemRunStore(options.DataPath);
-		services.AddSingleton<FileSystemRunStore>(runStore);
-		services.AddSingleton<IRunStore>(runStore);
+		services.AddSingleton<FileSystemRunStore>(sp =>
+			new FileSystemRunStore(options.DataPath, sp.GetRequiredService<ILogger<FileSystemRunStore>>()));
+		services.AddSingleton<IRunStore>(sp => sp.GetRequiredService<FileSystemRunStore>());
 
 		// File-based checkpoint store
 		services.AddSingleton<FileSystemCheckpointStore>(sp =>
@@ -60,12 +69,18 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton(activeExecutions);
 		services.AddSingleton(activeExecutionInfos);
 
-		// Orchestration registry
+		// Version store for tracking orchestration version history
+		services.AddSingleton<FileSystemOrchestrationVersionStore>(sp =>
+			new FileSystemOrchestrationVersionStore(options.DataPath, sp.GetRequiredService<ILogger<FileSystemOrchestrationVersionStore>>()));
+		services.AddSingleton<IOrchestrationVersionStore>(sp => sp.GetRequiredService<FileSystemOrchestrationVersionStore>());
+
+		// Orchestration registry (with version store wired up)
 		var registryPersistPath = Path.Combine(options.DataPath, "registered-orchestrations.json");
 		services.AddSingleton<OrchestrationRegistry>(sp =>
 		{
 			var logger = sp.GetService<ILogger<OrchestrationRegistry>>();
-			return new OrchestrationRegistry(persistPath: registryPersistPath, logger: logger);
+			var versionStore = sp.GetRequiredService<IOrchestrationVersionStore>();
+			return new OrchestrationRegistry(persistPath: registryPersistPath, logger: logger, versionStore: versionStore, dataPath: options.DataPath);
 		});
 
 		// TriggerManager as a hosted background service
@@ -74,7 +89,7 @@ public static class ServiceCollectionExtensions
 			var runsPath = Path.Combine(options.DataPath, "runs");
 			Directory.CreateDirectory(runsPath);
 
-			return new TriggerManager(
+			var triggerManager = new TriggerManager(
 				sp.GetRequiredService<ConcurrentDictionary<string, CancellationTokenSource>>(),
 				sp.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>(),
 				sp.GetRequiredService<AgentBuilder>(),
@@ -85,9 +100,22 @@ public static class ServiceCollectionExtensions
 				sp.GetRequiredService<IRunStore>(),
 				sp.GetRequiredService<ICheckpointStore>(),
 				sp.GetRequiredService<ITriggerExecutionCallback>(),
+				sp.GetRequiredService<EngineToolRegistry>(),
 				dataPath: options.DataPath);
+
+			// Apply shutdown timeout from configuration
+			triggerManager.ShutdownTimeout = TimeSpan.FromSeconds(options.ShutdownTimeoutSeconds);
+
+			return triggerManager;
 		});
 		services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
+
+		// Run retention background service (only when retention limits are configured)
+		if (!options.Retention.IsForever)
+		{
+			services.AddSingleton(options.Retention);
+			services.AddHostedService<RunRetentionService>();
+		}
 
 		return services;
 	}
@@ -112,6 +140,25 @@ public static class ServiceCollectionExtensions
 		ITriggerExecutionCallback callback)
 	{
 		services.AddSingleton(callback);
+		return services;
+	}
+
+	/// <summary>
+	/// Configures the engine tool registry with custom tools.
+	/// Call this before AddOrchestraHost to customize the tools available to prompt steps.
+	/// The configure action receives a default registry pre-populated with built-in tools.
+	/// </summary>
+	public static IServiceCollection AddEngineTools(
+		this IServiceCollection services,
+		Action<EngineToolRegistry> configure)
+	{
+		var registry = EngineToolRegistry.CreateDefault();
+		configure(registry);
+		// Remove any previously registered EngineToolRegistry
+		var existing = services.FirstOrDefault(d => d.ServiceType == typeof(EngineToolRegistry));
+		if (existing is not null)
+			services.Remove(existing);
+		services.AddSingleton(registry);
 		return services;
 	}
 
@@ -159,15 +206,29 @@ public static class ServiceProviderExtensions
 		{
 			foreach (var entry in registry.GetAll())
 			{
-				if (entry.Orchestration.Trigger is { } trigger && trigger.Enabled)
+				if (entry.Orchestration.Trigger is { } trigger)
 				{
+					var triggerId = entry.Id;
+
+					// Check for a persisted enabled-state override (user disabled/enabled this JSON trigger previously)
+					var enabledOverride = triggerManager.GetJsonTriggerEnabledOverride(triggerId);
+					var effectiveEnabled = enabledOverride ?? trigger.Enabled;
+
+					if (!effectiveEnabled && !trigger.Enabled)
+						continue; // Disabled in JSON and no override — skip entirely
+
+					// Register with the effective enabled state
+					var effectiveTrigger = effectiveEnabled != trigger.Enabled
+						? TriggerManager.CloneTriggerConfigWithEnabled(trigger, effectiveEnabled)
+						: trigger;
+
 					triggerManager.RegisterTrigger(
 						entry.Path,
 						entry.McpPath,
-						trigger,
+						effectiveTrigger,
 						null,
 						TriggerSource.Json,
-						entry.Id);
+						triggerId);
 				}
 			}
 		}

@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Orchestra.Engine\Orchestra.Engine.csproj" />
     <ProjectReference Include="..\..\..\src\Orchestra.Copilot\Orchestra.Copilot.csproj" />
+    <ProjectReference Include="..\..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
   </ItemGroup>
 
 </Project>

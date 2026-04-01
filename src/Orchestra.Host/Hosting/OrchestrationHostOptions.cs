@@ -42,4 +42,22 @@ public class OrchestrationHostOptions
 	/// Default: true
 	/// </summary>
 	public bool RegisterJsonTriggers { get; set; } = true;
+
+	/// <summary>
+	/// Retention policy for automatic cleanup of old run records.
+	/// Default: no limits (runs are kept forever).
+	/// </summary>
+	public RetentionPolicy Retention { get; set; } = new();
+
+	/// <summary>
+	/// Maximum time in seconds to wait for in-flight tasks during graceful shutdown.
+	/// Default: 30
+	/// </summary>
+	public int ShutdownTimeoutSeconds { get; set; } = 30;
+
+	/// <summary>
+	/// Minimum log level for the file logger.
+	/// Default: "Information"
+	/// </summary>
+	public string LogLevel { get; set; } = "Information";
 }

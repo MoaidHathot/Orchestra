@@ -101,7 +101,7 @@ public static class TriggersApi
 					}
 				}
 			}
-			catch { }
+			catch (JsonException) { }
 
 			var (found, executionId) = await triggerManager.FireTriggerAsync(id, parameters);
 			if (!found)
@@ -157,17 +157,6 @@ public static class TriggersApi
 				timeoutSeconds = w.Response.TimeoutSeconds,
 			} : null
 		},
-			EmailTriggerConfig e => new
-			{
-				type = "email",
-				enabled = e.Enabled,
-				folderPath = e.FolderPath,
-				pollIntervalSeconds = e.PollIntervalSeconds,
-				maxItemsPerPoll = e.MaxItemsPerPoll,
-				subjectContains = e.SubjectContains,
-				senderContains = e.SenderContains,
-				inputHandlerPrompt = e.InputHandlerPrompt
-			},
 			_ => new { type = config.Type.ToString().ToLowerInvariant(), enabled = config.Enabled }
 		};
 	}

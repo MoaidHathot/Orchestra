@@ -316,17 +316,6 @@ public static class OrchestrationParser
 				? ParseWebhookResponseConfig(responseProp)
 				: null,
 		},
-			TriggerType.Email => new EmailTriggerConfig
-			{
-				Type = TriggerType.Email,
-				Enabled = enabled,
-				InputHandlerPrompt = inputHandlerPrompt,
-				FolderPath = root.TryGetProperty("folderPath", out var folderPath) ? folderPath.GetString() ?? "Inbox" : "Inbox",
-				PollIntervalSeconds = root.TryGetProperty("pollIntervalSeconds", out var pollInterval) ? pollInterval.GetInt32() : 60,
-				MaxItemsPerPoll = root.TryGetProperty("maxItemsPerPoll", out var maxItems) ? maxItems.GetInt32() : 10,
-				SubjectContains = root.TryGetProperty("subjectContains", out var subjectContains) ? subjectContains.GetString() : null,
-				SenderContains = root.TryGetProperty("senderContains", out var senderContains) ? senderContains.GetString() : null,
-			},
 			_ => throw new JsonException($"Unknown trigger type: '{type}'."),
 			};
 		}

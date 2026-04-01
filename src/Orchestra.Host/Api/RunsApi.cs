@@ -344,7 +344,7 @@ public static class RunsApi
 			// Add pending/waiting triggers
 			var pendingTriggers = triggerManager.GetAllTriggers()
 				.Where(t => t.Config.Enabled && t.Status == TriggerStatus.Waiting &&
-					(t.NextFireTime.HasValue || t.Config is WebhookTriggerConfig || t.Config is EmailTriggerConfig));
+					(t.NextFireTime.HasValue || t.Config is WebhookTriggerConfig));
 
 			var pending = pendingTriggers.Select(t =>
 			{
@@ -367,7 +367,6 @@ public static class RunsApi
 						SchedulerTriggerConfig => "scheduler",
 						LoopTriggerConfig => "loop",
 						WebhookTriggerConfig => "webhook",
-						EmailTriggerConfig => "email",
 						_ => "trigger"
 					},
 					triggeredBy = t.Config switch
@@ -375,13 +374,10 @@ public static class RunsApi
 						SchedulerTriggerConfig => "scheduler",
 						LoopTriggerConfig => "loop",
 						WebhookTriggerConfig => "webhook",
-						EmailTriggerConfig => "email",
 						_ => "trigger"
 					},
 					source = "pending",
 					webhookUrl = t.Config is WebhookTriggerConfig ? $"/api/webhooks/{t.Id}" : null,
-					emailFolder = t.Config is EmailTriggerConfig e ? e.FolderPath : null,
-					pollInterval = t.Config is EmailTriggerConfig em ? em.PollIntervalSeconds : (int?)null
 				};
 			});
 

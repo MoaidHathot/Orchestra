@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Host.Logging;
 using Xunit;
@@ -73,7 +74,7 @@ public class FileLoggingTests : IDisposable
 	[Fact]
 	public void FileLogger_IsEnabled_ReturnsTrueForInformationAndAbove()
 	{
-		// Arrange
+		// Arrange — default minimum level is Information
 		var logPath = Path.Combine(_tempDir, "test.log");
 		using var provider = new FileLoggerProvider(logPath);
 		var logger = provider.CreateLogger("Test");
@@ -251,5 +252,152 @@ public class FileLoggingTests : IDisposable
 
 		// Act & Assert (should not throw)
 		provider.Dispose();
+	}
+
+	// ── Configurable LogLevel tests ──
+
+	[Fact]
+	public void FileLogger_IsEnabled_RespectsCustomMinimumLevel_Debug()
+	{
+		// Arrange — set minimum to Debug
+		var logPath = Path.Combine(_tempDir, "debug-level.log");
+		using var provider = new FileLoggerProvider(logPath, LogLevel.Debug);
+		var logger = provider.CreateLogger("Test");
+
+		// Assert
+		logger.IsEnabled(LogLevel.Trace).Should().BeFalse();
+		logger.IsEnabled(LogLevel.Debug).Should().BeTrue();
+		logger.IsEnabled(LogLevel.Information).Should().BeTrue();
+		logger.IsEnabled(LogLevel.Warning).Should().BeTrue();
+	}
+
+	[Fact]
+	public void FileLogger_IsEnabled_RespectsCustomMinimumLevel_Warning()
+	{
+		// Arrange — set minimum to Warning
+		var logPath = Path.Combine(_tempDir, "warning-level.log");
+		using var provider = new FileLoggerProvider(logPath, LogLevel.Warning);
+		var logger = provider.CreateLogger("Test");
+
+		// Assert
+		logger.IsEnabled(LogLevel.Trace).Should().BeFalse();
+		logger.IsEnabled(LogLevel.Debug).Should().BeFalse();
+		logger.IsEnabled(LogLevel.Information).Should().BeFalse();
+		logger.IsEnabled(LogLevel.Warning).Should().BeTrue();
+		logger.IsEnabled(LogLevel.Error).Should().BeTrue();
+		logger.IsEnabled(LogLevel.Critical).Should().BeTrue();
+	}
+
+	[Fact]
+	public void FileLogger_IsEnabled_RespectsCustomMinimumLevel_Trace()
+	{
+		// Arrange — set minimum to Trace (everything enabled)
+		var logPath = Path.Combine(_tempDir, "trace-level.log");
+		using var provider = new FileLoggerProvider(logPath, LogLevel.Trace);
+		var logger = provider.CreateLogger("Test");
+
+		// Assert
+		logger.IsEnabled(LogLevel.Trace).Should().BeTrue();
+		logger.IsEnabled(LogLevel.Debug).Should().BeTrue();
+		logger.IsEnabled(LogLevel.Information).Should().BeTrue();
+	}
+
+	[Fact]
+	public void FileLogger_Log_WritesDebugMessages_WhenMinimumLevelIsDebug()
+	{
+		// Arrange
+		var logPath = Path.Combine(_tempDir, "debug-write.log");
+		using var provider = new FileLoggerProvider(logPath, LogLevel.Debug);
+		var logger = provider.CreateLogger("Test");
+
+		// Act
+		logger.LogDebug("Debug message");
+
+		// Assert
+		File.Exists(logPath).Should().BeTrue();
+		var content = File.ReadAllText(logPath);
+		content.Should().Contain("[Debug]");
+		content.Should().Contain("Debug message");
+	}
+
+	[Fact]
+	public void FileLogger_Log_SkipsInformationMessages_WhenMinimumLevelIsWarning()
+	{
+		// Arrange
+		var logPath = Path.Combine(_tempDir, "warning-write.log");
+		using var provider = new FileLoggerProvider(logPath, LogLevel.Warning);
+		var logger = provider.CreateLogger("Test");
+
+		// Act
+		logger.LogInformation("Info message");
+		logger.LogWarning("Warning message");
+
+		// Assert
+		File.Exists(logPath).Should().BeTrue();
+		var content = File.ReadAllText(logPath);
+		content.Should().NotContain("Info message");
+		content.Should().Contain("Warning message");
+	}
+
+	[Fact]
+	public void FileLogger_Log_SkipsAllBelowError_WhenMinimumLevelIsError()
+	{
+		// Arrange
+		var logPath = Path.Combine(_tempDir, "error-write.log");
+		using var provider = new FileLoggerProvider(logPath, LogLevel.Error);
+		var logger = provider.CreateLogger("Test");
+
+		// Act
+		logger.LogDebug("Debug");
+		logger.LogInformation("Info");
+		logger.LogWarning("Warning");
+		logger.LogError("Error message");
+		logger.LogCritical("Critical message");
+
+		// Assert
+		var content = File.ReadAllText(logPath);
+		content.Should().NotContain("[Debug]");
+		content.Should().NotContain("[Information]");
+		content.Should().NotContain("[Warning]");
+		content.Should().Contain("[Error]");
+		content.Should().Contain("[Critical]");
+	}
+
+	[Fact]
+	public void FileLoggerProvider_DefaultMinimumLevel_IsInformation()
+	{
+		// Arrange — no explicit LogLevel specified
+		var logPath = Path.Combine(_tempDir, "default-level.log");
+		using var provider = new FileLoggerProvider(logPath);
+		var logger = provider.CreateLogger("Test");
+
+		// Assert — should behave same as Information level
+		logger.IsEnabled(LogLevel.Debug).Should().BeFalse();
+		logger.IsEnabled(LogLevel.Information).Should().BeTrue();
+	}
+
+	[Fact]
+	public void AddFile_Extension_AcceptsMinimumLevel()
+	{
+		// Arrange — verify the extension method signature accepts LogLevel
+		var logPath = Path.Combine(_tempDir, "extension-level.log");
+		var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+		services.AddLogging(builder =>
+		{
+			builder.SetMinimumLevel(LogLevel.Debug);
+			builder.AddFile(logPath, LogLevel.Debug);
+		});
+
+		using var sp = services.BuildServiceProvider();
+		var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+		var logger = loggerFactory.CreateLogger("Test");
+
+		// Act
+		logger.LogDebug("Debug from extension");
+
+		// Assert
+		File.Exists(logPath).Should().BeTrue();
+		var content = File.ReadAllText(logPath);
+		content.Should().Contain("[Debug]");
 	}
 }

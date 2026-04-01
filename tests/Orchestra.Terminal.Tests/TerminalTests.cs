@@ -1858,24 +1858,6 @@ public class TriggerCreateTests
 	}
 
 	[Fact]
-	public void GetTriggerConfigFields_Email_Returns_Expected_Fields()
-	{
-		var ui = CreateTestUI();
-		ui.ResetTriggerCreateState();
-		SetTriggerType(ui, TriggerType.Email);
-		var fields = ui.GetTriggerConfigFields();
-
-		fields.Should().HaveCount(7); // Enabled, FolderPath, PollInterval, MaxItems, SubjectContains, SenderContains, InputHandler
-		fields[0].Name.Should().Be("Enabled");
-		fields[1].Name.Should().Be("Folder Path");
-		fields[2].Name.Should().Be("Poll Interval (seconds)");
-		fields[3].Name.Should().Be("Max Items per Poll");
-		fields[4].Name.Should().Be("Subject Contains");
-		fields[5].Name.Should().Be("Sender Contains");
-		fields[6].Name.Should().Be("Input Handler Prompt");
-	}
-
-	[Fact]
 	public void BuildTriggerConfig_Scheduler_Creates_Valid_Config()
 	{
 		var ui = CreateTestUI();
@@ -1932,27 +1914,6 @@ public class TriggerCreateTests
 		var webhook = (WebhookTriggerConfig)config;
 		webhook.Secret.Should().Be("my-secret-key");
 		webhook.MaxConcurrent.Should().Be(3);
-	}
-
-	[Fact]
-	public void BuildTriggerConfig_Email_Creates_Valid_Config()
-	{
-		var ui = CreateTestUI();
-		ui.ResetTriggerCreateState();
-		SetTriggerType(ui, TriggerType.Email);
-		ui.SetTriggerConfigFieldValue(1, "Inbox/Teams"); // FolderPath
-		ui.SetTriggerConfigFieldValue(4, "status update"); // SubjectContains
-
-		var config = ui.BuildTriggerConfig();
-
-		config.Should().BeOfType<EmailTriggerConfig>();
-		config.Type.Should().Be(TriggerType.Email);
-
-		var email = (EmailTriggerConfig)config;
-		email.FolderPath.Should().Be("Inbox/Teams");
-		email.SubjectContains.Should().Be("status update");
-		email.PollIntervalSeconds.Should().Be(60); // default
-		email.MaxItemsPerPoll.Should().Be(10); // default
 	}
 
 	[Fact]
@@ -2078,29 +2039,6 @@ public class TriggerCreateTests
 	}
 
 	[Fact]
-	public void SetTriggerConfigFieldValue_Email_All_Fields()
-	{
-		var ui = CreateTestUI();
-		ui.ResetTriggerCreateState();
-		SetTriggerType(ui, TriggerType.Email);
-
-		ui.SetTriggerConfigFieldValue(1, "Inbox/Archive");
-		ui.SetTriggerConfigFieldValue(2, "120");
-		ui.SetTriggerConfigFieldValue(3, "20");
-		ui.SetTriggerConfigFieldValue(4, "urgent");
-		ui.SetTriggerConfigFieldValue(5, "boss@example.com");
-		ui.SetTriggerConfigFieldValue(6, "Transform this email");
-
-		var config = (EmailTriggerConfig)ui.BuildTriggerConfig();
-		config.FolderPath.Should().Be("Inbox/Archive");
-		config.PollIntervalSeconds.Should().Be(120);
-		config.MaxItemsPerPoll.Should().Be(20);
-		config.SubjectContains.Should().Be("urgent");
-		config.SenderContains.Should().Be("boss@example.com");
-		config.InputHandlerPrompt.Should().Be("Transform this email");
-	}
-
-	[Fact]
 	public void GetTriggerConfigFields_Default_Values_Are_Correct()
 	{
 		var ui = CreateTestUI();
@@ -2126,19 +2064,6 @@ public class TriggerCreateTests
 		fields[1].Value.Should().Be("0"); // Delay default
 		fields[2].Value.Should().Be(""); // MaxIterations default
 		fields[3].Value.Should().Be("No"); // ContinueOnFailure default
-	}
-
-	[Fact]
-	public void GetTriggerConfigFields_Email_Default_Values()
-	{
-		var ui = CreateTestUI();
-		ui.ResetTriggerCreateState();
-		SetTriggerType(ui, TriggerType.Email);
-
-		var fields = ui.GetTriggerConfigFields();
-		fields[1].Value.Should().Be("Inbox"); // FolderPath default
-		fields[2].Value.Should().Be("60"); // PollInterval default
-		fields[3].Value.Should().Be("10"); // MaxItems default
 	}
 
 	// Helper: create a TerminalUI with mock/null dependencies for testing

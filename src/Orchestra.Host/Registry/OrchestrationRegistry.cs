@@ -16,11 +16,12 @@ public partial class OrchestrationRegistry
 {
 	private readonly ConcurrentDictionary<string, OrchestrationEntry> _entries = new();
 	private readonly string _persistPath;
+	private readonly string? _managedOrchestrationsPath;
 	private readonly ILogger<OrchestrationRegistry> _logger;
 	private readonly IOrchestrationVersionStore? _versionStore;
 	private readonly JsonSerializerOptions _jsonOptions;
 
-	public OrchestrationRegistry(string? persistPath = null, ILogger<OrchestrationRegistry>? logger = null, IOrchestrationVersionStore? versionStore = null)
+	public OrchestrationRegistry(string? persistPath = null, ILogger<OrchestrationRegistry>? logger = null, IOrchestrationVersionStore? versionStore = null, string? dataPath = null)
 	{
 		_persistPath = persistPath ?? Path.Combine(
 			Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -33,6 +34,13 @@ public partial class OrchestrationRegistry
 			WriteIndented = true,
 			PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 		};
+
+		// Set up managed orchestrations directory
+		if (dataPath is not null)
+		{
+			_managedOrchestrationsPath = Path.Combine(dataPath, "orchestrations");
+			Directory.CreateDirectory(_managedOrchestrationsPath);
+		}
 	}
 
 	/// <summary>
@@ -48,6 +56,8 @@ public partial class OrchestrationRegistry
 
 	/// <summary>
 	/// Registers an orchestration from a file path.
+	/// If a managed orchestrations directory is configured, the file is copied there
+	/// and the managed path is stored instead of the original.
 	/// </summary>
 	public OrchestrationEntry Register(string path, string? mcpPath, Orchestration? preloaded = null, bool persist = true)
 	{
@@ -66,10 +76,17 @@ public partial class OrchestrationRegistry
 		// Compute content hash if we have the raw JSON
 		var contentHash = rawJson is not null ? FileSystemOrchestrationVersionStore.ComputeContentHash(rawJson) : null;
 
+		// Copy to managed location if configured
+		var effectivePath = path;
+		if (_managedOrchestrationsPath is not null && rawJson is not null)
+		{
+			effectivePath = CopyToManagedLocation(id, orchestration.Name, rawJson);
+		}
+
 		var entry = new OrchestrationEntry
 		{
 			Id = id,
-			Path = path,
+			Path = effectivePath,
 			McpPath = mcpPath,
 			Orchestration = orchestration,
 			RegisteredAt = DateTimeOffset.UtcNow,
@@ -88,6 +105,40 @@ public partial class OrchestrationRegistry
 			SaveToDisk();
 
 		return entry;
+	}
+
+	/// <summary>
+	/// Registers an orchestration directly from JSON content (no source file needed).
+	/// The content is written to the managed location if configured, or a temp directory otherwise.
+	/// </summary>
+	public OrchestrationEntry RegisterFromJson(string json, string? mcpJson, Orchestration? preloaded = null, bool persist = true)
+	{
+		// Parse MCPs if provided
+		Mcp[] mcps = [];
+		if (!string.IsNullOrWhiteSpace(mcpJson))
+			mcps = OrchestrationParser.ParseMcps(mcpJson);
+
+		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestration(json, mcps);
+
+		// Write to managed location or temp
+		string filePath;
+		if (_managedOrchestrationsPath is not null)
+		{
+			// Generate an ID using a temporary path for consistent hashing
+			var tempId = GenerateId(orchestration.Name, $"json-import:{orchestration.Name}");
+			filePath = CopyToManagedLocation(tempId, orchestration.Name, json);
+		}
+		else
+		{
+			// Fallback: write to a temp directory (legacy behavior)
+			var tempDir = Path.Combine(Path.GetTempPath(), "orchestra-host");
+			Directory.CreateDirectory(tempDir);
+			var fileName = $"{SanitizePath(orchestration.Name)}.json";
+			filePath = Path.Combine(tempDir, fileName);
+			File.WriteAllText(filePath, json);
+		}
+
+		return Register(filePath, mcpPath: null, preloaded: orchestration, persist: persist);
 	}
 
 	private async Task SnapshotVersionAsync(string orchestrationId, OrchestrationEntry entry, string rawJson, string contentHash)
@@ -244,9 +295,9 @@ public partial class OrchestrationRegistry
 				Register(file, mcpPath, persist: false);
 				loaded++;
 			}
-			catch
+			catch (Exception ex)
 			{
-				// Not a valid orchestration file, skip
+				_logger.LogDebug(ex, "Skipping invalid orchestration file '{File}'", file);
 			}
 		}
 
@@ -271,6 +322,31 @@ public partial class OrchestrationRegistry
 		return new string(name
 			.ToLowerInvariant()
 			.Select(c => char.IsLetterOrDigit(c) ? c : '-')
+			.ToArray())
+			.Trim('-');
+	}
+
+	/// <summary>
+	/// Copies an orchestration JSON to the managed orchestrations directory.
+	/// Returns the managed file path.
+	/// </summary>
+	private string CopyToManagedLocation(string id, string name, string jsonContent)
+	{
+		var fileName = $"{SanitizePath(name)}-{id.Split('-').Last()}.json";
+		var managedPath = Path.Combine(_managedOrchestrationsPath!, fileName);
+		File.WriteAllText(managedPath, jsonContent);
+		LogOrchestrationCopiedToManaged(name, managedPath);
+		return managedPath;
+	}
+
+	/// <summary>
+	/// Sanitizes a name for use in a file path (removes special characters).
+	/// </summary>
+	private static string SanitizePath(string name)
+	{
+		var invalid = Path.GetInvalidFileNameChars();
+		return new string(name
+			.Select(c => invalid.Contains(c) || c == ' ' ? '-' : c)
 			.ToArray())
 			.Trim('-');
 	}
@@ -300,6 +376,9 @@ public partial class OrchestrationRegistry
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to snapshot version for orchestration '{OrchestrationId}'")]
 	private partial void LogVersionSnapshotFailed(Exception ex, string orchestrationId);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Orchestration '{Name}' copied to managed location: {ManagedPath}")]
+	private partial void LogOrchestrationCopiedToManaged(string name, string managedPath);
 }
 
 /// <summary>

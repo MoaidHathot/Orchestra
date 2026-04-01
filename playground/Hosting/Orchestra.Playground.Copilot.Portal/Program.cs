@@ -333,21 +333,9 @@ app.MapPost("/api/orchestrations/add-json", (AddJsonRequest request, Orchestrati
 		if (string.IsNullOrWhiteSpace(request.Json))
 			return Results.BadRequest(new { error = "JSON content is required." });
 
-		Mcp[] mcps = [];
-		if (!string.IsNullOrWhiteSpace(request.McpJson))
-			mcps = OrchestrationParser.ParseMcps(request.McpJson);
+		var entry = registry.RegisterFromJson(request.Json, request.McpJson);
 
-		var orchestration = OrchestrationParser.ParseOrchestration(request.Json, mcps);
-
-		var tempDir = Path.Combine(Path.GetTempPath(), "orchestra-host");
-		Directory.CreateDirectory(tempDir);
-		var fileName = $"{orchestration.Name}.json";
-		var tempPath = Path.Combine(tempDir, fileName);
-		File.WriteAllText(tempPath, request.Json);
-
-		var entry = registry.Register(tempPath, null, orchestration);
-
-		if (orchestration.Trigger is { Enabled: true } trigger)
+		if (entry.Orchestration.Trigger is { Enabled: true } trigger)
 		{
 			triggerManager.RegisterTrigger(entry.Path, entry.McpPath, trigger, null, TriggerSource.Json, entry.Id);
 		}

@@ -1,0 +1,468 @@
+using FluentAssertions;
+using Orchestra.Host.Hosting;
+using Xunit;
+
+namespace Orchestra.Host.Tests;
+
+/// <summary>
+/// Unit tests for OrchestraConfigLoader and RetentionPolicy.
+/// </summary>
+public class OrchestraConfigLoaderTests : IDisposable
+{
+	private readonly string _tempDir;
+	private readonly Dictionary<string, string?> _savedEnvVars = new();
+
+	public OrchestraConfigLoaderTests()
+	{
+		_tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-config-tests-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(_tempDir);
+
+		// Save and clear relevant env vars so tests are isolated
+		SaveAndClear("ORCHESTRA_CONFIG_PATH");
+		SaveAndClear("XDG_CONFIG_HOME");
+	}
+
+	public void Dispose()
+	{
+		// Restore env vars
+		foreach (var kv in _savedEnvVars)
+			Environment.SetEnvironmentVariable(kv.Key, kv.Value);
+
+		if (Directory.Exists(_tempDir))
+		{
+			try { Directory.Delete(_tempDir, recursive: true); }
+			catch { /* best-effort cleanup */ }
+		}
+	}
+
+	private void SaveAndClear(string name)
+	{
+		_savedEnvVars[name] = Environment.GetEnvironmentVariable(name);
+		Environment.SetEnvironmentVariable(name, null);
+	}
+
+	private string WriteConfigFile(string directory, string content)
+	{
+		var dir = Path.Combine(directory, OrchestraConfigLoader.ConfigDirectoryName);
+		Directory.CreateDirectory(dir);
+		var path = Path.Combine(dir, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(path, content);
+		return path;
+	}
+
+	// ── ApplyConfig tests ──
+
+	[Fact]
+	public void ApplyConfig_NullFields_DoesNotOverrideDefaults()
+	{
+		// Arrange
+		var options = new OrchestrationHostOptions();
+		var defaultDataPath = options.DataPath;
+		var config = new OrchestraConfigFile();
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.DataPath.Should().Be(defaultDataPath);
+		options.ShutdownTimeoutSeconds.Should().Be(30);
+		options.LogLevel.Should().Be("Information");
+		options.Retention.IsForever.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ApplyConfig_AllFields_OverridesDefaults()
+	{
+		// Arrange
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile
+		{
+			DataPath = "/custom/data",
+			HostBaseUrl = "http://localhost:9999",
+			OrchestrationsScanPath = "/custom/orchestrations",
+			ShutdownTimeoutSeconds = 120,
+			LogLevel = "Debug",
+			Retention = new RetentionPolicyConfig
+			{
+				MaxRunsPerOrchestration = 50,
+				MaxRunAgeDays = 7,
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.DataPath.Should().Be("/custom/data");
+		options.HostBaseUrl.Should().Be("http://localhost:9999");
+		options.OrchestrationsScanPath.Should().Be("/custom/orchestrations");
+		options.ShutdownTimeoutSeconds.Should().Be(120);
+		options.LogLevel.Should().Be("Debug");
+		options.Retention.MaxRunsPerOrchestration.Should().Be(50);
+		options.Retention.MaxRunAgeDays.Should().Be(7);
+		options.Retention.IsForever.Should().BeFalse();
+	}
+
+	[Fact]
+	public void ApplyConfig_PartialRetention_OnlyOverridesSpecified()
+	{
+		// Arrange
+		var options = new OrchestrationHostOptions();
+		options.Retention.MaxRunsPerOrchestration = 100;
+		var config = new OrchestraConfigFile
+		{
+			Retention = new RetentionPolicyConfig
+			{
+				MaxRunAgeDays = 30,
+				// MaxRunsPerOrchestration is null — should not change existing value
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.Retention.MaxRunsPerOrchestration.Should().Be(100);
+		options.Retention.MaxRunAgeDays.Should().Be(30);
+	}
+
+	// ── LoadAndApply tests ──
+
+	[Fact]
+	public void LoadAndApply_NoConfigFile_UsesDefaults()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", null);
+		var options = new OrchestrationHostOptions();
+		var defaultDataPath = options.DataPath;
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert — nothing should have changed
+		options.DataPath.Should().Be(defaultDataPath);
+		options.ShutdownTimeoutSeconds.Should().Be(30);
+	}
+
+	[Fact]
+	public void LoadAndApply_ViaEnvVar_LoadsConfig()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "custom-orchestra.json");
+		File.WriteAllText(configPath, """
+		{
+			"dataPath": "/env-var-data",
+			"shutdownTimeoutSeconds": 60
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert
+		options.DataPath.Should().Be("/env-var-data");
+		options.ShutdownTimeoutSeconds.Should().Be(60);
+	}
+
+	[Fact]
+	public void LoadAndApply_ViaXdgConfigHome_LoadsConfig()
+	{
+		// Arrange
+		var xdgDir = Path.Combine(_tempDir, "xdg-config");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", xdgDir);
+
+		WriteConfigFile(xdgDir, """
+		{
+			"logLevel": "Warning"
+		}
+		""");
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert
+		options.LogLevel.Should().Be("Warning");
+	}
+
+	[Fact]
+	public void LoadAndApply_EnvVarTakesPrecedenceOverXdg()
+	{
+		// Arrange — set up both env var and XDG
+		var configPath = Path.Combine(_tempDir, "env-config.json");
+		File.WriteAllText(configPath, """
+		{
+			"logLevel": "Error"
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var xdgDir = Path.Combine(_tempDir, "xdg-config");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", xdgDir);
+		WriteConfigFile(xdgDir, """
+		{
+			"logLevel": "Trace"
+		}
+		""");
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert — env var path should win
+		options.LogLevel.Should().Be("Error");
+	}
+
+	[Fact]
+	public void LoadAndApply_InvalidJson_UsesDefaults()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "bad.json");
+		File.WriteAllText(configPath, "{ this is not valid json }}}");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+		var defaultDataPath = options.DataPath;
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert — should gracefully fall back to defaults
+		options.DataPath.Should().Be(defaultDataPath);
+	}
+
+	[Fact]
+	public void LoadAndApply_SupportsJsonComments()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "commented.json");
+		File.WriteAllText(configPath, """
+		{
+			// This is a comment
+			"shutdownTimeoutSeconds": 45
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert
+		options.ShutdownTimeoutSeconds.Should().Be(45);
+	}
+
+	[Fact]
+	public void LoadAndApply_SupportsTrailingCommas()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "trailing.json");
+		File.WriteAllText(configPath, """
+		{
+			"shutdownTimeoutSeconds": 90,
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert
+		options.ShutdownTimeoutSeconds.Should().Be(90);
+	}
+
+	// ── ResolveConfigPath tests ──
+
+	[Fact]
+	public void ResolveConfigPath_EnvVar_ReturnsEnvVarPath()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "explicit.json");
+		File.WriteAllText(configPath, "{}");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		// Act
+		var result = OrchestraConfigLoader.ResolveConfigPath();
+
+		// Assert
+		result.Should().Be(configPath);
+	}
+
+	[Fact]
+	public void ResolveConfigPath_EnvVar_NonExistentFile_FallsThrough()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", "/non/existent/path.json");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", null);
+
+		// Act
+		var result = OrchestraConfigLoader.ResolveConfigPath();
+
+		// Assert — should not return the non-existent path; may return null or platform fallback
+		result.Should().NotBe("/non/existent/path.json");
+	}
+
+	[Fact]
+	public void ResolveConfigPath_XdgConfigHome_ReturnsXdgPath()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
+		var xdgDir = Path.Combine(_tempDir, "xdg");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", xdgDir);
+		var expectedPath = WriteConfigFile(xdgDir, "{}");
+
+		// Act
+		var result = OrchestraConfigLoader.ResolveConfigPath();
+
+		// Assert
+		result.Should().Be(expectedPath);
+	}
+
+	[Fact]
+	public void ResolveConfigPath_NoFilesExist_ReturnsNull()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(_tempDir, "empty-xdg"));
+
+		// Act
+		var result = OrchestraConfigLoader.ResolveConfigPath();
+
+		// Assert — may return null if platform fallback doesn't exist either
+		// At minimum, should not throw
+		// (Platform fallback might exist on the test machine, so we just verify no exception)
+	}
+
+	// ── RetentionPolicy tests ──
+
+	[Fact]
+	public void RetentionPolicy_Default_IsForever()
+	{
+		var policy = new RetentionPolicy();
+		policy.IsForever.Should().BeTrue();
+	}
+
+	[Fact]
+	public void RetentionPolicy_NullValues_IsForever()
+	{
+		var policy = new RetentionPolicy
+		{
+			MaxRunsPerOrchestration = null,
+			MaxRunAgeDays = null,
+		};
+		policy.IsForever.Should().BeTrue();
+	}
+
+	[Fact]
+	public void RetentionPolicy_ZeroValues_IsForever()
+	{
+		var policy = new RetentionPolicy
+		{
+			MaxRunsPerOrchestration = 0,
+			MaxRunAgeDays = 0,
+		};
+		policy.IsForever.Should().BeTrue();
+	}
+
+	[Fact]
+	public void RetentionPolicy_WithMaxRuns_NotForever()
+	{
+		var policy = new RetentionPolicy { MaxRunsPerOrchestration = 10 };
+		policy.IsForever.Should().BeFalse();
+	}
+
+	[Fact]
+	public void RetentionPolicy_WithMaxAge_NotForever()
+	{
+		var policy = new RetentionPolicy { MaxRunAgeDays = 30 };
+		policy.IsForever.Should().BeFalse();
+	}
+
+	[Fact]
+	public void RetentionPolicy_WithBothLimits_NotForever()
+	{
+		var policy = new RetentionPolicy
+		{
+			MaxRunsPerOrchestration = 50,
+			MaxRunAgeDays = 7,
+		};
+		policy.IsForever.Should().BeFalse();
+	}
+
+	// ── GetDefaultConfigPath tests ──
+
+	[Fact]
+	public void GetDefaultConfigPath_WithXdg_UsesXdg()
+	{
+		// Arrange
+		var xdgDir = Path.Combine(_tempDir, "default-xdg");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", xdgDir);
+
+		// Act
+		var result = OrchestraConfigLoader.GetDefaultConfigPath();
+
+		// Assert
+		result.Should().Be(Path.Combine(xdgDir, OrchestraConfigLoader.ConfigDirectoryName, OrchestraConfigLoader.ConfigFileName));
+	}
+
+	[Fact]
+	public void GetDefaultConfigPath_WithoutXdg_UsesPlatformDefault()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", null);
+
+		// Act
+		var result = OrchestraConfigLoader.GetDefaultConfigPath();
+
+		// Assert
+		result.Should().NotBeNullOrWhiteSpace();
+		result.Should().EndWith(Path.Combine(OrchestraConfigLoader.ConfigDirectoryName, OrchestraConfigLoader.ConfigFileName));
+	}
+
+	// ── Full round-trip test ──
+
+	[Fact]
+	public void LoadAndApply_FullConfig_RoundTrip()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "full.json");
+		File.WriteAllText(configPath, """
+		{
+			"dataPath": "/round-trip/data",
+			"hostBaseUrl": "http://my-host:8080",
+			"orchestrationsScanPath": "/round-trip/orchestrations",
+			"shutdownTimeoutSeconds": 180,
+			"logLevel": "Trace",
+			"retention": {
+				"maxRunsPerOrchestration": 25,
+				"maxRunAgeDays": 14
+			}
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert
+		options.DataPath.Should().Be("/round-trip/data");
+		options.HostBaseUrl.Should().Be("http://my-host:8080");
+		options.OrchestrationsScanPath.Should().Be("/round-trip/orchestrations");
+		options.ShutdownTimeoutSeconds.Should().Be(180);
+		options.LogLevel.Should().Be("Trace");
+		options.Retention.MaxRunsPerOrchestration.Should().Be(25);
+		options.Retention.MaxRunAgeDays.Should().Be(14);
+		options.Retention.IsForever.Should().BeFalse();
+	}
+}

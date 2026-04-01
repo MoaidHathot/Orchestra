@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 
 namespace Orchestra.Host.Persistence;
@@ -16,10 +18,11 @@ namespace Orchestra.Host.Persistence;
 ///     {step-name}-result.json          - final result or exception
 ///     result.md                        - human-readable final output
 /// </summary>
-public class FileSystemRunStore : IRunStore
+public partial class FileSystemRunStore : IRunStore
 {
 	private readonly string _rootPath;
 	private readonly JsonSerializerOptions _jsonOptions;
+	private readonly ILogger<FileSystemRunStore> _logger;
 
 	// In-memory index for fast lookups - populated on first access.
 	// A single lock protects all mutations to the inner List<RunIndex> values.
@@ -32,9 +35,10 @@ public class FileSystemRunStore : IRunStore
 	private volatile bool _indexLoaded;
 	private readonly SemaphoreSlim _indexLoadLock = new(1, 1);
 
-	public FileSystemRunStore(string rootPath)
+	public FileSystemRunStore(string rootPath, ILogger<FileSystemRunStore>? logger = null)
 	{
 		_rootPath = Path.Combine(rootPath, "executions");
+		_logger = logger ?? NullLogger<FileSystemRunStore>.Instance;
 		_jsonOptions = new JsonSerializerOptions
 		{
 			WriteIndented = true,
@@ -298,9 +302,9 @@ public class FileSystemRunStore : IRunStore
 			{
 				Directory.Delete(match.FolderPath, recursive: true);
 			}
-			catch
+			catch (Exception ex)
 			{
-				// Folder deletion failed, but index was already updated
+				LogRunFolderDeleteFailed(match.FolderPath, ex);
 				return false;
 			}
 		}
@@ -405,9 +409,9 @@ public class FileSystemRunStore : IRunStore
 							}
 						}
 					}
-					catch
+					catch (Exception ex)
 					{
-						// Skip corrupt records
+						LogCorruptRunRecord(runJsonPath, ex);
 					}
 				}
 			}
@@ -473,8 +477,9 @@ public class FileSystemRunStore : IRunStore
 			var json = await File.ReadAllTextAsync(runJsonPath, cancellationToken);
 			return JsonSerializer.Deserialize<OrchestrationRunRecord>(json, _jsonOptions);
 		}
-		catch
+		catch (Exception ex)
 		{
+			LogRunRecordLoadFailed(runJsonPath, ex);
 			return null;
 		}
 	}
@@ -487,6 +492,107 @@ public class FileSystemRunStore : IRunStore
 			sanitized[i] = Array.IndexOf(invalid, name[i]) >= 0 ? '_' : name[i];
 		return new string(sanitized);
 	}
+
+	/// <summary>
+	/// Applies a retention policy to all stored runs.
+	/// Deletes runs that exceed the max count per orchestration or max age.
+	/// Returns the number of runs deleted.
+	/// </summary>
+	public async Task<int> ApplyRetentionAsync(
+		Hosting.RetentionPolicy policy,
+		CancellationToken cancellationToken = default)
+	{
+		if (policy.IsForever)
+			return 0;
+
+		await EnsureIndexLoadedAsync(cancellationToken);
+
+		var toDelete = new List<(string OrchestrationName, RunIndex Index)>();
+
+		lock (_indexWriteLock)
+		{
+			foreach (var (orchestrationName, indices) in _indexByOrchestration)
+			{
+				// Sort newest first for max-count enforcement
+				var sorted = indices.OrderByDescending(i => i.StartedAt).ToList();
+
+				for (var i = 0; i < sorted.Count; i++)
+				{
+					var run = sorted[i];
+					var shouldDelete = false;
+
+					// Check max age
+					if (policy.MaxRunAgeDays is > 0)
+					{
+						var age = DateTimeOffset.UtcNow - run.StartedAt;
+						if (age.TotalDays > policy.MaxRunAgeDays.Value)
+							shouldDelete = true;
+					}
+
+					// Check max count per orchestration (keep only the newest N)
+					if (policy.MaxRunsPerOrchestration is > 0 && i >= policy.MaxRunsPerOrchestration.Value)
+					{
+						shouldDelete = true;
+					}
+
+					if (shouldDelete)
+					{
+						toDelete.Add((orchestrationName, run));
+					}
+				}
+			}
+		}
+
+		// Delete outside the lock to avoid holding it during I/O
+		var deleted = 0;
+		foreach (var (orchestrationName, run) in toDelete)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+
+			try
+			{
+				// Remove from indices
+				lock (_indexWriteLock)
+				{
+					if (_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
+					{
+						indices.RemoveAll(i => i.RunId == run.RunId);
+					}
+
+					if (run.TriggerId is { } tid && _indexByTrigger.TryGetValue(tid, out var triggerIndices))
+					{
+						triggerIndices.RemoveAll(i => i.RunId == run.RunId);
+					}
+				}
+
+				// Delete the folder
+				if (Directory.Exists(run.FolderPath))
+				{
+					Directory.Delete(run.FolderPath, recursive: true);
+				}
+
+				deleted++;
+			}
+			catch (Exception ex)
+			{
+				LogRetentionDeleteFailed(run.FolderPath, ex);
+			}
+		}
+
+		return deleted;
+	}
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to delete run folder '{FolderPath}'")]
+	private partial void LogRunFolderDeleteFailed(string folderPath, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Skipping corrupt run record '{FilePath}'")]
+	private partial void LogCorruptRunRecord(string filePath, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load run record from '{FilePath}'")]
+	private partial void LogRunRecordLoadFailed(string filePath, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to delete run during retention cleanup '{FolderPath}'")]
+	private partial void LogRetentionDeleteFailed(string folderPath, Exception ex);
 }
 
 /// <summary>

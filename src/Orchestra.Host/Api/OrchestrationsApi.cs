@@ -307,26 +307,10 @@ public static class OrchestrationsApi
 				if (string.IsNullOrWhiteSpace(request.Json))
 					return ProblemDetailsHelpers.BadRequest("JSON content is required.");
 
-				// Parse the MCPs if provided
-				Mcp[] mcps = [];
-				if (!string.IsNullOrWhiteSpace(request.McpJson))
-				{
-					mcps = OrchestrationParser.ParseMcps(request.McpJson);
-				}
-
-				var orchestration = OrchestrationParser.ParseOrchestration(request.Json, mcps);
-
-				// Save to temp file so we have a path
-				var tempDir = Path.Combine(Path.GetTempPath(), "orchestra-host");
-				Directory.CreateDirectory(tempDir);
-				var fileName = $"{SanitizePath(orchestration.Name)}.json";
-				var tempPath = Path.Combine(tempDir, fileName);
-				File.WriteAllText(tempPath, request.Json);
-
-				var entry = registry.Register(tempPath, null, orchestration);
+				var entry = registry.RegisterFromJson(request.Json, request.McpJson);
 
 				// If the orchestration has an enabled trigger, register it with TriggerManager
-				if (orchestration.Trigger is { Enabled: true } trigger)
+				if (entry.Orchestration.Trigger is { Enabled: true } trigger)
 				{
 					triggerManager.RegisterTrigger(
 						entry.Path,
@@ -566,15 +550,6 @@ public static class OrchestrationsApi
 			},
 			_ => null
 		};
-	}
-
-	private static string SanitizePath(string name)
-	{
-		var invalid = Path.GetInvalidFileNameChars();
-		var sanitized = new char[name.Length];
-		for (var i = 0; i < name.Length; i++)
-			sanitized[i] = Array.IndexOf(invalid, name[i]) >= 0 ? '_' : name[i];
-		return new string(sanitized);
 	}
 }
 

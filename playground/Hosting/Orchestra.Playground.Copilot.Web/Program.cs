@@ -6,6 +6,8 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging.Console;
 using Orchestra.Copilot;
 using Orchestra.Engine;
+using Orchestra.Host.Extensions;
+using Orchestra.Host.Triggers;
 using Orchestra.Playground.Copilot.Web;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -18,34 +20,14 @@ builder.Logging.AddSimpleConsole(options =>
 	options.ColorBehavior = LoggerColorBehavior.Enabled;
 });
 
-// Register engine services as singletons (reporter is per-request, not registered here)
+// Register CopilotAgentBuilder before AddOrchestraHost (which uses TryAddSingleton for IScheduler)
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
-builder.Services.AddSingleton<IScheduler, OrchestrationScheduler>();
 
-// Run results storage — defaults to "results" subfolder, override via --results-path
-var resultsPath = builder.Configuration["results-path"]
-	?? Path.Combine(builder.Environment.ContentRootPath, "results");
-builder.Services.AddSingleton<IRunStore>(new FileSystemRunStore(resultsPath));
-
-// Shared active executions dictionary (used by both direct execution and TriggerManager)
-var activeExecutions = new ConcurrentDictionary<string, CancellationTokenSource>();
-builder.Services.AddSingleton(activeExecutions);
-
-// Register TriggerManager as a hosted background service
-builder.Services.AddSingleton<TriggerManager>(sp =>
+// Register Orchestra Host services (TriggerManager, IRunStore, ICheckpointStore, etc.)
+builder.Services.AddOrchestraHost(options =>
 {
-	var runsPath = Path.Combine(builder.Environment.ContentRootPath, "runs");
-	Directory.CreateDirectory(runsPath);
-	return new TriggerManager(
-		sp.GetRequiredService<ConcurrentDictionary<string, CancellationTokenSource>>(),
-		sp.GetRequiredService<AgentBuilder>(),
-		sp.GetRequiredService<IScheduler>(),
-		sp.GetRequiredService<ILoggerFactory>(),
-		sp.GetRequiredService<ILogger<TriggerManager>>(),
-		runsPath,
-		sp.GetRequiredService<IRunStore>());
+	options.DataPath = builder.Environment.ContentRootPath;
 });
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
 
 var app = builder.Build();
 
@@ -188,7 +170,8 @@ app.MapPost("/api/execute", async (
 	AgentBuilder agentBuilder,
 	IScheduler scheduler,
 	ILoggerFactory loggerFactory,
-	IRunStore runStore) =>
+	IRunStore runStore,
+	ConcurrentDictionary<string, CancellationTokenSource> activeExecutions) =>
 {
 	try
 	{
@@ -364,7 +347,7 @@ app.MapPost("/api/execute", async (
 
 // ── POST /api/cancel/{executionId} ──────────────────────────────────────
 // Cancels a running orchestration execution
-app.MapPost("/api/cancel/{executionId}", (string executionId) =>
+app.MapPost("/api/cancel/{executionId}", (string executionId, ConcurrentDictionary<string, CancellationTokenSource> activeExecutions) =>
 {
 	if (activeExecutions.TryRemove(executionId, out var cts))
 	{
@@ -1395,13 +1378,17 @@ app.MapPost("/api/webhook/{id}", async (HttpContext httpContext, string id, Trig
 	if (t.Config is not WebhookTriggerConfig webhookConfig)
 		return Results.BadRequest(new { error = $"Trigger '{id}' is not a webhook trigger." });
 
-	// Validate webhook secret if configured
+	// Validate HMAC signature if a secret is configured
 	if (!string.IsNullOrWhiteSpace(webhookConfig.Secret))
 	{
-		var providedSecret = httpContext.Request.Headers["X-Webhook-Secret"].FirstOrDefault()
-			?? httpContext.Request.Query["secret"].FirstOrDefault();
+		httpContext.Request.EnableBuffering();
+		using var ms = new MemoryStream();
+		await httpContext.Request.Body.CopyToAsync(ms);
+		var bodyBytes = ms.ToArray();
+		httpContext.Request.Body.Position = 0; // Reset for downstream body reading
 
-		if (providedSecret != webhookConfig.Secret)
+		var signatureHeader = httpContext.Request.Headers[Orchestra.Host.Api.WebhookSignatureValidator.SignatureHeaderName].FirstOrDefault();
+		if (!Orchestra.Host.Api.WebhookSignatureValidator.Validate(signatureHeader, webhookConfig.Secret, bodyBytes))
 			return Results.Unauthorized();
 	}
 
@@ -1424,7 +1411,7 @@ app.MapPost("/api/webhook/{id}", async (HttpContext httpContext, string id, Trig
 		}
 	}
 
-	var (found, executionId) = await triggerManager.FireWebhookTriggerAsync(id, webhookParams);
+	var (found, executionId, _) = await triggerManager.FireWebhookTriggerAsync(id, webhookParams);
 	if (!found)
 		return Results.NotFound(new { error = $"Trigger '{id}' not found." });
 

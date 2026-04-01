@@ -686,7 +686,7 @@ function App(): React.JSX.Element {
     if (!executionId) return;
     try {
       setExecutionModal(prev => ({ ...prev, status: 'cancelling' }));
-      await api.post(`/api/cancel/${executionId}`);
+      await api.post(`/api/active/${executionId}/cancel`);
 
       if (!eventSourceRef.current) {
         setExecutionModal(prev => ({ ...prev, status: 'cancelled' }));
@@ -941,17 +941,6 @@ function App(): React.JSX.Element {
         status: 'error',
         errorMessage: message,
       }));
-    }
-  };
-
-  // ── Toggle enabled ────────────────────────────────────────────────────────
-
-  const toggleEnabled = async (id: string, enabled: boolean): Promise<void> => {
-    try {
-      await api.post(`/api/orchestrations/${id}/toggle`, { enabled });
-      loadData();
-    } catch (err) {
-      console.error('Failed to toggle:', err);
     }
   };
 

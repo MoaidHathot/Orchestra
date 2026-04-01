@@ -8,11 +8,13 @@ namespace Orchestra.Host.Logging;
 public class FileLoggerProvider : ILoggerProvider
 {
 	private readonly string _path;
+	private readonly LogLevel _minimumLevel;
 	private readonly object _lock = new();
 
-	public FileLoggerProvider(string path)
+	public FileLoggerProvider(string path, LogLevel minimumLevel = LogLevel.Information)
 	{
 		_path = path;
+		_minimumLevel = minimumLevel;
 
 		// Ensure directory exists
 		var dir = Path.GetDirectoryName(path);
@@ -20,7 +22,7 @@ public class FileLoggerProvider : ILoggerProvider
 			Directory.CreateDirectory(dir);
 	}
 
-	public ILogger CreateLogger(string categoryName) => new FileLogger(_path, categoryName, _lock);
+	public ILogger CreateLogger(string categoryName) => new FileLogger(_path, categoryName, _lock, _minimumLevel);
 
 	public void Dispose() { }
 }
@@ -33,17 +35,19 @@ public class FileLogger : ILogger
 	private readonly string _path;
 	private readonly string _category;
 	private readonly object _lock;
+	private readonly LogLevel _minimumLevel;
 
-	public FileLogger(string path, string category, object lockObj)
+	public FileLogger(string path, string category, object lockObj, LogLevel minimumLevel = LogLevel.Information)
 	{
 		_path = path;
 		_category = category;
 		_lock = lockObj;
+		_minimumLevel = minimumLevel;
 	}
 
 	public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
-	public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Information;
+	public bool IsEnabled(LogLevel logLevel) => logLevel >= _minimumLevel;
 
 	public void Log<TState>(
 		LogLevel logLevel,
@@ -73,13 +77,13 @@ public static class FileLoggingExtensions
 	/// <summary>
 	/// Adds file-based logging to the logging builder.
 	/// </summary>
-	public static ILoggingBuilder AddFile(this ILoggingBuilder builder, string path)
+	public static ILoggingBuilder AddFile(this ILoggingBuilder builder, string path, LogLevel minimumLevel = LogLevel.Information)
 	{
 		var dir = Path.GetDirectoryName(path);
 		if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
 			Directory.CreateDirectory(dir);
 
-		builder.AddProvider(new FileLoggerProvider(path));
+		builder.AddProvider(new FileLoggerProvider(path, minimumLevel));
 		return builder;
 	}
 }

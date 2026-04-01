@@ -16,10 +16,4 @@ public enum TriggerType
 	/// Triggered by an external HTTP POST (Power Automate, Zapier, etc.).
 	/// </summary>
 	Webhook,
-
-	/// <summary>
-	/// Triggered by unread emails in an Outlook folder.
-	/// Polls Outlook via COM interop and marks processed emails as read.
-	/// </summary>
-	Email,
 }
