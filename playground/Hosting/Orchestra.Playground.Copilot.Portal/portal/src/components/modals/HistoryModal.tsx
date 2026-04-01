@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import type { Orchestration } from '../../types';
 import { api } from '../../api';
 import { Icons } from '../../icons';
@@ -29,7 +29,13 @@ interface PaginatedHistoryResponse {
   runs: HistoryExecution[];
 }
 
-const PAGE_SIZE = 100;
+interface SearchHistoryResponse {
+  total: number;
+  count: number;
+  runs: HistoryExecution[];
+}
+
+const PAGE_SIZE = 300;
 
 type StatusFilter = 'all' | 'Succeeded' | 'Failed' | 'Cancelled' | 'Running' | 'Incomplete';
 
@@ -51,6 +57,12 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+
+  // "Search all" toggle -- when enabled, searches across ALL stored orchestrations via the backend
+  const [searchAll, setSearchAll] = useState(false);
+  const [serverSearchResults, setServerSearchResults] = useState<HistoryExecution[] | null>(null);
+  const [serverSearchLoading, setServerSearchLoading] = useState(false);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -82,13 +94,74 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
     if (open) {
       setSearchQuery('');
       setStatusFilter('all');
+      setServerSearchResults(null);
+      setServerSearchLoading(false);
     }
   }, [open]);
 
-  const filteredHistory = useMemo(() => {
+  // Debounced server-side search when searchAll is enabled
+  const performServerSearch = useCallback((query: string) => {
+    if (!query.trim()) {
+      setServerSearchResults(null);
+      setServerSearchLoading(false);
+      return;
+    }
+
+    setServerSearchLoading(true);
+    api.get<SearchHistoryResponse>(`/api/history/search?query=${encodeURIComponent(query)}`)
+      .then(data => {
+        setServerSearchResults(data.runs || []);
+      })
+      .catch(() => {
+        setServerSearchResults(null);
+      })
+      .finally(() => setServerSearchLoading(false));
+  }, []);
+
+  // When searchAll is toggled on or search query changes with searchAll enabled, trigger server search
+  useEffect(() => {
+    if (!searchAll || !searchQuery.trim()) {
+      setServerSearchResults(null);
+      return;
+    }
+
+    // Debounce the server search
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
+    }
+    searchDebounceRef.current = setTimeout(() => {
+      performServerSearch(searchQuery);
+    }, 300);
+
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+      }
+    };
+  }, [searchAll, searchQuery, performServerSearch]);
+
+  // Determine which results to show based on search mode
+  const displayResults = useMemo(() => {
+    // If searchAll is on and we have a query, use server results
+    if (searchAll && searchQuery.trim() && serverSearchResults !== null) {
+      let results = serverSearchResults;
+
+      // Apply status filter on top of server results
+      if (statusFilter !== 'all') {
+        results = results.filter(exec => {
+          if (statusFilter === 'Running') return exec.isActive;
+          if (statusFilter === 'Incomplete') return exec.isIncomplete || (exec.completionReason && exec.status === 'Succeeded');
+          if (statusFilter === 'Succeeded') return exec.status === 'Succeeded' && !exec.isIncomplete && !exec.completionReason;
+          return exec.status === statusFilter;
+        });
+      }
+
+      return results;
+    }
+
+    // Otherwise, filter locally from loaded history
     let results = history;
 
-    // Filter by search query
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       results = results.filter(exec =>
@@ -97,29 +170,25 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
       );
     }
 
-    // Filter by status
     if (statusFilter !== 'all') {
       results = results.filter(exec => {
-        if (statusFilter === 'Running') {
-          return exec.isActive;
-        }
-        if (statusFilter === 'Incomplete') {
-          return exec.isIncomplete || (exec.completionReason && exec.status === 'Succeeded');
-        }
-        if (statusFilter === 'Succeeded') {
-          return exec.status === 'Succeeded' && !exec.isIncomplete && !exec.completionReason;
-        }
+        if (statusFilter === 'Running') return exec.isActive;
+        if (statusFilter === 'Incomplete') return exec.isIncomplete || (exec.completionReason && exec.status === 'Succeeded');
+        if (statusFilter === 'Succeeded') return exec.status === 'Succeeded' && !exec.isIncomplete && !exec.completionReason;
         return exec.status === statusFilter;
       });
     }
 
     return results;
-  }, [history, searchQuery, statusFilter]);
+  }, [history, searchQuery, statusFilter, searchAll, serverSearchResults]);
 
-  // Unique orchestration names for the count display
+  // Status counts based on loaded history (always from local data)
   const statusCounts = useMemo(() => {
-    const counts = { all: history.length, Succeeded: 0, Failed: 0, Cancelled: 0, Running: 0, Incomplete: 0 };
-    for (const exec of history) {
+    const source = (searchAll && searchQuery.trim() && serverSearchResults !== null)
+      ? serverSearchResults
+      : history;
+    const counts = { all: source.length, Succeeded: 0, Failed: 0, Cancelled: 0, Running: 0, Incomplete: 0 };
+    for (const exec of source) {
       if (exec.isActive) counts.Running++;
       else if (exec.isIncomplete || (exec.completionReason && exec.status === 'Succeeded')) counts.Incomplete++;
       else if (exec.status === 'Succeeded') counts.Succeeded++;
@@ -127,7 +196,7 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
       else if (exec.status === 'Cancelled') counts.Cancelled++;
     }
     return counts;
-  }, [history]);
+  }, [history, searchAll, searchQuery, serverSearchResults]);
 
   const handleClick = (exec: HistoryExecution) => {
     if (exec.isActive && exec.executionId && onAttachToExecution) {
@@ -149,6 +218,8 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
     { value: 'Running', label: 'Running', color: 'var(--warning)' },
   ];
 
+  const isSearching = serverSearchLoading;
+
   return (
     <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label="Execution history">
@@ -159,17 +230,39 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
         <div className="modal-body">
           {/* Filter controls */}
           <div style={{ marginBottom: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {/* Search bar */}
-            <div className="search-box" role="search">
-              <span className="search-icon" aria-hidden="true"><Icons.Search /></span>
-              <input
-                type="text"
-                placeholder="Search by name or run ID..."
-                value={searchQuery}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-                aria-label="Search execution history"
-                data-autofocus
-              />
+            {/* Search bar with "Search All" toggle */}
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <div className="search-box" role="search" style={{ flex: 1 }}>
+                <span className="search-icon" aria-hidden="true"><Icons.Search /></span>
+                <input
+                  type="text"
+                  placeholder={searchAll ? 'Search all orchestrations...' : 'Search by name or run ID...'}
+                  value={searchQuery}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                  aria-label="Search execution history"
+                  data-autofocus
+                />
+                {isSearching && (
+                  <span style={{ position: 'absolute', right: '10px', top: '50%', transform: 'translateY(-50%)' }}>
+                    <span className="spinner" style={{ width: '14px', height: '14px' }}></span>
+                  </span>
+                )}
+              </div>
+              <button
+                className={`btn btn-sm ${searchAll ? 'btn-primary' : ''}`}
+                onClick={() => setSearchAll(prev => !prev)}
+                title={searchAll
+                  ? 'Searching all stored orchestrations — click to search loaded only'
+                  : 'Searching loaded orchestrations only — click to search all'}
+                aria-pressed={searchAll}
+                style={{
+                  whiteSpace: 'nowrap',
+                  minWidth: 'fit-content',
+                  ...(searchAll ? {} : { borderColor: 'var(--text-muted)', color: 'var(--text-muted)' }),
+                }}
+              >
+                <Icons.Search /> Search All
+              </button>
             </div>
 
             {/* Status filter pills */}
@@ -190,20 +283,29 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
 
           {loading ? (
             <div className="empty-state"><div className="spinner"></div></div>
-          ) : filteredHistory.length === 0 ? (
+          ) : displayResults.length === 0 ? (
             <div className="empty-state">
               <div className="empty-title">
-                {history.length === 0 ? 'No Execution History' : 'No matching executions'}
+                {history.length === 0 && !searchQuery ? 'No Execution History' : 'No matching executions'}
               </div>
-              {history.length > 0 && (
+              {(history.length > 0 || searchQuery) && (
                 <div className="empty-text">
-                  Try adjusting your search or filter criteria
+                  {searchAll && searchQuery
+                    ? 'No results found across all stored orchestrations'
+                    : 'Try adjusting your search or filter criteria'}
+                  {!searchAll && searchQuery && (
+                    <div style={{ marginTop: '8px' }}>
+                      <button className="btn btn-sm btn-primary" onClick={() => setSearchAll(true)}>
+                        Search All Orchestrations
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }} role="list" aria-label="Execution results">
-              {filteredHistory.map(exec => (
+              {displayResults.map(exec => (
                 <div
                   key={exec.runId}
                   className="history-item"
@@ -269,8 +371,13 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
         </div>
         <div className="modal-footer">
           <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginRight: 'auto' }}>
-            Showing {filteredHistory.length} of {totalExecutions} executions
-            {history.length < totalExecutions && ` (${history.length} loaded)`}
+            {searchAll && searchQuery.trim() && serverSearchResults !== null
+              ? `Found ${displayResults.length} results across all orchestrations`
+              : <>
+                  Showing {displayResults.length} of {totalExecutions} executions
+                  {history.length < totalExecutions && ` (${history.length} loaded)`}
+                </>
+            }
           </span>
           <button className="btn" onClick={onClose}>Close</button>
         </div>

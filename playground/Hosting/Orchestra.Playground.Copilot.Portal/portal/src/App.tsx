@@ -259,10 +259,11 @@ function App(): React.JSX.Element {
     }
   }, [activeData.running.length, activeData.pending.length, orchestrations]);
 
-  // Auto-refresh history every 5 seconds when there are enabled triggers
+  // Auto-refresh history every 5 seconds when there are enabled triggers or active executions
   useEffect(() => {
     const hasEnabledTriggers = orchestrations.some(o => o.enabled);
-    if (hasEnabledTriggers) {
+    const hasActiveInHistory = history.some(h => h.isActive);
+    if (hasEnabledTriggers || hasActiveInHistory) {
       const interval = setInterval(async () => {
         try {
           const histData = await api.get<HistoryResponse>('/api/history?limit=15');
@@ -273,7 +274,7 @@ function App(): React.JSX.Element {
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [orchestrations]);
+  }, [orchestrations, history]);
 
   // Poll server status (including Outlook connection status) every 5 seconds
   useEffect(() => {
