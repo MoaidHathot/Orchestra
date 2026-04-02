@@ -465,6 +465,71 @@ public static class OrchestrationsApi
 			}
 		});
 
+		// POST /api/orchestrations/export - Export orchestrations to a directory
+		group.MapPost("/export", (ExportOrchestrationsRequest request, OrchestrationRegistry registry) =>
+		{
+			try
+			{
+				if (string.IsNullOrWhiteSpace(request.Directory))
+					return ProblemDetailsHelpers.BadRequest("Directory path is required.");
+
+				Directory.CreateDirectory(request.Directory);
+
+				var entries = request.OrchestrationIds is { Length: > 0 }
+					? registry.GetAll().Where(e => request.OrchestrationIds.Contains(e.Id, StringComparer.OrdinalIgnoreCase)).ToArray()
+					: registry.GetAll().ToArray();
+
+				var exported = new List<object>();
+				var skipped = new List<object>();
+				var errors = new List<object>();
+
+				foreach (var entry in entries)
+				{
+					var sanitizedName = new string(entry.Orchestration.Name
+						.Select(c => Path.GetInvalidFileNameChars().Contains(c) || c == ' ' ? '-' : c)
+						.ToArray()).Trim('-');
+					var fileName = $"{sanitizedName}.json";
+					var filePath = Path.Combine(request.Directory, fileName);
+
+					if (File.Exists(filePath) && !request.OverwriteExisting)
+					{
+						skipped.Add(new { id = entry.Id, name = entry.Orchestration.Name, reason = "File already exists" });
+						continue;
+					}
+
+					try
+					{
+						// Read the managed copy (the source of truth)
+						if (!File.Exists(entry.Path))
+						{
+							errors.Add(new { id = entry.Id, name = entry.Orchestration.Name, error = "Orchestration source file not found" });
+							continue;
+						}
+
+						var json = File.ReadAllText(entry.Path);
+						File.WriteAllText(filePath, json);
+						exported.Add(new { id = entry.Id, name = entry.Orchestration.Name, path = filePath });
+					}
+					catch (Exception ex)
+					{
+						errors.Add(new { id = entry.Id, name = entry.Orchestration.Name, error = ex.Message });
+					}
+				}
+
+				return Results.Json(new
+				{
+					exportedCount = exported.Count,
+					exported,
+					skipped,
+					errors
+				}, jsonOptions);
+			}
+			catch (Exception ex)
+			{
+				return ProblemDetailsHelpers.BadRequest(ex.Message);
+			}
+		});
+
 		return endpoints;
 	}
 
@@ -552,3 +617,4 @@ public static class OrchestrationsApi
 public record AddOrchestrationsRequest(string[]? Paths, string? McpPath);
 public record AddJsonRequest(string Json, string? McpJson);
 public record FolderScanRequest(string? Directory);
+public record ExportOrchestrationsRequest(string? Directory, string[]? OrchestrationIds, bool OverwriteExisting = false);

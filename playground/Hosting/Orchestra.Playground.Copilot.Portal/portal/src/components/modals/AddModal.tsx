@@ -4,6 +4,7 @@ import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { Icons } from '../../icons';
 import { renderMermaidDag } from '../../mermaid';
 import type { Orchestration } from '../../types';
+import ExportModal from './ExportModal';
 
 /** Shape of a scanned file entry returned by /api/folder/scan. */
 interface ScannedFile {
@@ -106,6 +107,7 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
   const [previewOrch, setPreviewOrch] = useState<PreviewOrchestration | null>(null);
   const [previewTab, setPreviewTab] = useState<'details' | 'graph' | 'json'>('details');
   const previewDagRef = useRef<HTMLDivElement>(null);
+  const [exportModal, setExportModal] = useState(false);
 
   // Open folder browser dialog
   const openFolderDialog = async () => {
@@ -239,10 +241,15 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
 
   return (
     <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef} onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-modal="true" aria-label="Add Orchestration" style={{ maxWidth: previewFile ? '1000px' : '600px', transition: 'max-width 0.2s ease' }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-label="Orchestrations" style={{ maxWidth: previewFile ? '1000px' : '600px', transition: 'max-width 0.2s ease' }}>
         <div className="modal-header">
-          <div className="modal-title">Add Orchestrations</div>
-          <button className="modal-close" onClick={onClose} aria-label="Close"><Icons.X /></button>
+          <div className="modal-title"><Icons.Workflow /> Orchestrations</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button className="btn btn-sm" onClick={() => setExportModal(true)} title="Export orchestrations to files">
+              <Icons.Download /> Export
+            </button>
+            <button className="modal-close" onClick={onClose} aria-label="Close"><Icons.X /></button>
+          </div>
         </div>
         <div className="tabs">
           <div className={`tab ${activeTab === 'browse' ? 'active' : ''}`} onClick={() => setActiveTab('browse')}>Browse Files</div>
@@ -509,6 +516,14 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
           </button>
         </div>
       </div>
+
+      <ExportModal
+        open={exportModal}
+        onClose={() => setExportModal(false)}
+        title="Export Orchestrations"
+        endpoint="/api/orchestrations/export"
+        idsField="orchestrationIds"
+      />
     </div>
   );
 }

@@ -141,4 +141,53 @@ public class SaveToFileToolTests : IDisposable
 
 		result.Should().Contain(".txt");
 	}
+
+	#region Step-Aware File Saving (Fix #6)
+
+	[Fact]
+	public void Execute_WithStepName_RegistersFileForStep()
+	{
+		var tool = new SaveToFileTool();
+		var store = CreateStore();
+		var context = new EngineToolContext { TempFileStore = store, StepName = "research" };
+
+		tool.Execute("""{"content": "research data"}""", context);
+
+		// Verify the file was registered under the step name
+		var files = store.GetFilesForStep("research");
+		files.Should().HaveCount(1);
+		File.ReadAllText(files[0]).Should().Be("research data");
+	}
+
+	[Fact]
+	public void Execute_WithStepName_MultipleFiles_AllRegistered()
+	{
+		var tool = new SaveToFileTool();
+		var store = CreateStore();
+		var context = new EngineToolContext { TempFileStore = store, StepName = "data-gen" };
+
+		tool.Execute("""{"content": "file 1"}""", context);
+		tool.Execute("""{"content": "file 2", "extension": "json"}""", context);
+
+		var files = store.GetFilesForStep("data-gen");
+		files.Should().HaveCount(2);
+	}
+
+	[Fact]
+	public void Execute_WithoutStepName_DoesNotRegisterForStep()
+	{
+		var tool = new SaveToFileTool();
+		var store = CreateStore();
+		var context = new EngineToolContext { TempFileStore = store }; // No StepName
+
+		tool.Execute("""{"content": "anonymous"}""", context);
+
+		// File should exist in the directory but not registered to any step
+		var files = Directory.GetFiles(store.TempDirectory);
+		files.Should().HaveCount(1);
+		// No step registration
+		store.GetFilesForStep("").Should().BeEmpty();
+	}
+
+	#endregion
 }

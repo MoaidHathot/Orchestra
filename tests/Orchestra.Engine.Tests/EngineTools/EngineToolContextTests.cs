@@ -165,4 +165,24 @@ public class EngineToolContextTests
 		context.OrchestrationCompleteStatus.Should().Be(ExecutionStatus.Succeeded);
 		context.OrchestrationCompleteReason.Should().BeNull();
 	}
+
+	#region StepName (Fix #6)
+
+	[Fact]
+	public void NewContext_StepNameIsNull()
+	{
+		var context = new EngineToolContext();
+
+		context.StepName.Should().BeNull();
+	}
+
+	[Fact]
+	public void Context_WithStepName_ReturnsStepName()
+	{
+		var context = new EngineToolContext { StepName = "research" };
+
+		context.StepName.Should().Be("research");
+	}
+
+	#endregion
 }

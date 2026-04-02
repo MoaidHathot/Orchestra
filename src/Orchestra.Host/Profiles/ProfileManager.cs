@@ -360,6 +360,84 @@ public partial class ProfileManager : BackgroundService
 		return _store.GetHistory(profileId);
 	}
 
+	// ── Import / Export ──
+
+	/// <summary>
+	/// Result of importing a single profile.
+	/// </summary>
+	public record ImportProfileResult(string Id, string Name, bool Imported, string? SkipReason = null);
+
+	/// <summary>
+	/// Result of exporting a single profile.
+	/// </summary>
+	public record ExportProfileResult(string Id, string Name, string? Path, bool Exported, string? SkipReason = null);
+
+	/// <summary>
+	/// Imports a profile from an already-deserialized Profile object.
+	/// The profile is always imported as inactive. If overwriteExisting is false
+	/// and a profile with the same ID already exists, it is skipped.
+	/// </summary>
+	public ImportProfileResult ImportProfile(Profile profile, bool overwriteExisting)
+	{
+		// Force inactive on import
+		profile.IsActive = false;
+		profile.ActivatedAt = null;
+		profile.DeactivatedAt = null;
+		profile.UpdatedAt = DateTimeOffset.UtcNow;
+
+		if (_store.Exists(profile.Id) && !overwriteExisting)
+		{
+			LogProfileImportSkipped(profile.Id, profile.Name);
+			return new ImportProfileResult(profile.Id, profile.Name, false, "Profile already exists");
+		}
+
+		_store.Save(profile);
+		LogProfileImported(profile.Id, profile.Name);
+		return new ImportProfileResult(profile.Id, profile.Name, true);
+	}
+
+	/// <summary>
+	/// Exports profiles to a directory as individual JSON files.
+	/// </summary>
+	public List<ExportProfileResult> ExportProfiles(string directory, string[]? profileIds, bool overwriteExisting)
+	{
+		Directory.CreateDirectory(directory);
+
+		var profiles = profileIds is { Length: > 0 }
+			? _store.GetAll().Where(p => profileIds.Contains(p.Id, StringComparer.OrdinalIgnoreCase)).ToArray()
+			: _store.GetAll().ToArray();
+
+		var results = new List<ExportProfileResult>();
+
+		foreach (var profile in profiles)
+		{
+			var fileName = $"{profile.Id}.json";
+			var filePath = Path.Combine(directory, fileName);
+
+			if (File.Exists(filePath) && !overwriteExisting)
+			{
+				results.Add(new ExportProfileResult(profile.Id, profile.Name, filePath, false, "File already exists"));
+				LogProfileExportSkipped(profile.Id, filePath);
+				continue;
+			}
+
+			try
+			{
+				var json = System.Text.Json.JsonSerializer.Serialize(profile, ProfileStore.JsonOptions);
+				File.WriteAllText(filePath, json);
+				results.Add(new ExportProfileResult(profile.Id, profile.Name, filePath, true));
+				LogProfileExported(profile.Id, filePath);
+			}
+			catch (Exception ex)
+			{
+				results.Add(new ExportProfileResult(profile.Id, profile.Name, filePath, false, ex.Message));
+				LogProfileExportFailed(ex, profile.Id);
+			}
+		}
+
+		return results;
+	}
+
 	/// <summary>
 	/// Gets the profiles that an orchestration belongs to (matches the filter).
 	/// </summary>
@@ -593,4 +671,19 @@ public partial class ProfileManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Schedule deactivating profile '{ProfileId}' ({ProfileName})")]
 	private partial void LogScheduleDeactivating(string profileId, string profileName);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Profile '{ProfileId}' ({ProfileName}) imported successfully")]
+	private partial void LogProfileImported(string profileId, string profileName);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Profile '{ProfileId}' ({ProfileName}) import skipped: already exists")]
+	private partial void LogProfileImportSkipped(string profileId, string profileName);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Profile '{ProfileId}' exported to {FilePath}")]
+	private partial void LogProfileExported(string profileId, string filePath);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Profile '{ProfileId}' export skipped: file already exists at {FilePath}")]
+	private partial void LogProfileExportSkipped(string profileId, string filePath);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to export profile '{ProfileId}'")]
+	private partial void LogProfileExportFailed(Exception ex, string profileId);
 }

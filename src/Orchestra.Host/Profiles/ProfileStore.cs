@@ -17,7 +17,7 @@ public partial class ProfileStore
 	private readonly ILogger<ProfileStore> _logger;
 	private readonly ConcurrentDictionary<string, Profile> _profiles = new();
 
-	private static readonly JsonSerializerOptions s_jsonOptions = new()
+	internal static readonly JsonSerializerOptions JsonOptions = new()
 	{
 		WriteIndented = true,
 		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -48,7 +48,7 @@ public partial class ProfileStore
 			try
 			{
 				var json = File.ReadAllText(file);
-				var profile = JsonSerializer.Deserialize<Profile>(json, s_jsonOptions);
+				var profile = JsonSerializer.Deserialize<Profile>(json, JsonOptions);
 				if (profile is not null)
 					_profiles[profile.Id] = profile;
 			}
@@ -72,6 +72,11 @@ public partial class ProfileStore
 	/// </summary>
 	public Profile? Get(string id) =>
 		_profiles.TryGetValue(id, out var profile) ? profile : null;
+
+	/// <summary>
+	/// Checks whether a profile with the given ID exists.
+	/// </summary>
+	public bool Exists(string id) => _profiles.ContainsKey(id);
 
 	/// <summary>
 	/// Saves a profile to memory and disk.
@@ -118,7 +123,7 @@ public partial class ProfileStore
 			if (File.Exists(historyPath))
 			{
 				var existing = File.ReadAllText(historyPath);
-				history = JsonSerializer.Deserialize<List<ProfileHistoryEntry>>(existing, s_jsonOptions) ?? [];
+				history = JsonSerializer.Deserialize<List<ProfileHistoryEntry>>(existing, JsonOptions) ?? [];
 			}
 			else
 			{
@@ -131,7 +136,7 @@ public partial class ProfileStore
 			if (history.Count > 500)
 				history = history.Skip(history.Count - 500).ToList();
 
-			var json = JsonSerializer.Serialize(history, s_jsonOptions);
+			var json = JsonSerializer.Serialize(history, JsonOptions);
 			File.WriteAllText(historyPath, json);
 		}
 		catch (Exception ex)
@@ -152,7 +157,7 @@ public partial class ProfileStore
 		try
 		{
 			var json = File.ReadAllText(historyPath);
-			return JsonSerializer.Deserialize<List<ProfileHistoryEntry>>(json, s_jsonOptions) ?? [];
+			return JsonSerializer.Deserialize<List<ProfileHistoryEntry>>(json, JsonOptions) ?? [];
 		}
 		catch (Exception ex)
 		{
@@ -183,7 +188,7 @@ public partial class ProfileStore
 	{
 		try
 		{
-			var json = JsonSerializer.Serialize(profile, s_jsonOptions);
+			var json = JsonSerializer.Serialize(profile, JsonOptions);
 			File.WriteAllText(GetProfilePath(profile.Id), json);
 		}
 		catch (Exception ex)

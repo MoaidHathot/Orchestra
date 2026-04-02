@@ -225,14 +225,28 @@ public partial class OrchestrationExecutor
 
 				try
 				{
-					var result = await ExecuteWithRetryAsync(step, stepExecutor, context, stepResults, effectiveStepToken);
+		var result = await ExecuteWithRetryAsync(step, stepExecutor, context, stepResults, effectiveStepToken);
 
-					context.AddResult(step.Name, result);
-					stepResults[step.Name] = result;
+				context.AddResult(step.Name, result);
+				stepResults[step.Name] = result;
 
-					var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
-					stepRecords[step.Name] = record;
-					allStepRecords[step.Name] = record;
+				var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
+				stepRecords[step.Name] = record;
+				allStepRecords[step.Name] = record;
+
+				// Report step completed/failed/no-action to the reporter so the UI
+				// can update step status immediately (not just at orchestration-done).
+				// PromptExecutor already reports ReportStepCompleted for model metadata;
+				// this centralised call ensures all step types (Command, HTTP, Transform)
+				// also emit step-completed events.
+				if (result.Status == ExecutionStatus.Succeeded || result.Status == ExecutionStatus.NoAction)
+				{
+					_reporter.ReportStepCompleted(step.Name, new AgentResult
+					{
+						Content = result.Content,
+						ActualModel = result.ActualModel,
+					});
+				}
 
 					// Handle loop if configured (loop is a Prompt-only feature)
 					if (step is PromptOrchestrationStep promptStep && promptStep.Loop is not null && result.Status == ExecutionStatus.Succeeded)
@@ -362,6 +376,14 @@ public partial class OrchestrationExecutor
 
 		// Wait for all steps to complete
 		await Task.WhenAll(completionSources.Values.Select(tcs => tcs.Task));
+
+		// Log warnings for any unresolved template expressions
+		foreach (var unresolved in context.ResolutionTracker.UnresolvedExpressions)
+		{
+			LogUnresolvedTemplateExpression(unresolved.StepName, unresolved.Expression);
+			_reporter.ReportSessionWarning("unresolved-template",
+				$"Step '{unresolved.StepName}' has unresolved template expression: {unresolved.Expression}");
+		}
 
 		var orchestrationResult = OrchestrationResult.From(
 			orchestration, stepResults, orchestrationCompleteStatus, orchestrationCompleteReason, orchestrationCompleteStepName);
@@ -1031,6 +1053,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' is disabled (enabled: false), skipping with empty result.")]
 	private partial void LogStepDisabled(string stepName);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' has unresolved template expression: {Expression}")]
+	private partial void LogUnresolvedTemplateExpression(string stepName, string expression);
 
 	#endregion
 }

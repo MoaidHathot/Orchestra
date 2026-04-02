@@ -1038,6 +1038,90 @@ public class OrchestrationExecutorTests
 
 	#endregion
 
+	#region ReportStepCompleted (Fix #3: All step types emit step-completed)
+
+	[Fact]
+	public async Task ExecuteAsync_SingleStepSucceeds_ReportsStepCompleted()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Step output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.SingleStep();
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — ReportStepCompleted should be called centrally after execution
+		_reporter.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == "Step output"));
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LinearChainAllSucceed_ReportsStepCompletedForEachStep()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.LinearChain(); // A -> B -> C
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — All three steps should get step-completed events
+		_reporter.Received().ReportStepCompleted("A", Arg.Any<AgentResult>());
+		_reporter.Received().ReportStepCompleted("B", Arg.Any<AgentResult>());
+		_reporter.Received().ReportStepCompleted("C", Arg.Any<AgentResult>());
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ParallelStepsAllSucceed_ReportsStepCompletedForAll()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Parallel output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.ParallelSteps();
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — All three parallel steps should get step-completed events
+		_reporter.Received().ReportStepCompleted("A", Arg.Any<AgentResult>());
+		_reporter.Received().ReportStepCompleted("B", Arg.Any<AgentResult>());
+		_reporter.Received().ReportStepCompleted("C", Arg.Any<AgentResult>());
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_StepFails_DoesNotReportStepCompletedForFailedStep()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithException(new Exception("Error"));
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.SingleStep();
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — Failed steps should NOT get step-completed events
+		_reporter.DidNotReceive().ReportStepCompleted(Arg.Any<string>(), Arg.Any<AgentResult>());
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_DisabledStep_StillReportsStepCompleted()
+	{
+		// Arrange — Disabled steps return Succeeded with empty content,
+		// so they should still get a step-completed event (the UI needs it).
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.DisabledSingleStep();
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — Disabled steps return Succeeded status, so they DO get step-completed
+		_reporter.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == string.Empty));
+	}
+
+	#endregion
+
 	#region Concurrency Safety (AgentBuildConfig)
 
 	[Fact]

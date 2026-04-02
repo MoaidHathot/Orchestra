@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+
 namespace Orchestra.Engine;
 
 /// <summary>
@@ -9,6 +11,7 @@ namespace Orchestra.Engine;
 public sealed class OrchestrationTempFileStore
 {
 	private readonly string _directory;
+	private readonly ConcurrentDictionary<string, ConcurrentBag<string>> _stepFiles = new(StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
 	/// Creates a temp file store for a specific orchestration run.
@@ -44,6 +47,40 @@ public sealed class OrchestrationTempFileStore
 		File.WriteAllText(filePath, content);
 
 		return filePath;
+	}
+
+	/// <summary>
+	/// Saves string content to a file and registers it as belonging to the specified step.
+	/// Returns the full path to the saved file.
+	/// </summary>
+	/// <param name="content">The string content to save.</param>
+	/// <param name="stepName">The name of the step saving the file.</param>
+	/// <param name="extension">Optional file extension (without dot). Defaults to "txt".</param>
+	/// <returns>The full path to the saved file.</returns>
+	public string SaveFile(string content, string stepName, string? extension = null)
+	{
+		var filePath = SaveFile(content, extension);
+		RegisterFileForStep(stepName, filePath);
+		return filePath;
+	}
+
+	/// <summary>
+	/// Registers a file path as belonging to the specified step.
+	/// Thread-safe for concurrent step execution.
+	/// </summary>
+	public void RegisterFileForStep(string stepName, string filePath)
+	{
+		var bag = _stepFiles.GetOrAdd(stepName, _ => []);
+		bag.Add(filePath);
+	}
+
+	/// <summary>
+	/// Gets all file paths saved by the specified step.
+	/// Returns an empty array if no files were saved by the step.
+	/// </summary>
+	public string[] GetFilesForStep(string stepName)
+	{
+		return _stepFiles.TryGetValue(stepName, out var bag) ? [.. bag] : [];
 	}
 
 	/// <summary>

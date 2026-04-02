@@ -104,6 +104,62 @@ public class TemplateResolutionTrackerTests
 		tracker.AccessedEnvironmentVariables.Should().HaveCount(100);
 		tracker.ResolvedVariables.Should().HaveCount(100);
 	}
+
+	#region TrackUnresolvedExpression (Fix #4b)
+
+	[Fact]
+	public void TrackUnresolvedExpression_StoresExpressionAndStepName()
+	{
+		var tracker = new TemplateResolutionTracker();
+
+		tracker.TrackUnresolvedExpression("{{missing.output}}", "transform-step");
+
+		tracker.UnresolvedExpressions.Should().HaveCount(1);
+		tracker.UnresolvedExpressions.First().Expression.Should().Be("{{missing.output}}");
+		tracker.UnresolvedExpressions.First().StepName.Should().Be("transform-step");
+	}
+
+	[Fact]
+	public void TrackUnresolvedExpression_MultipleCalls_StoresAll()
+	{
+		var tracker = new TemplateResolutionTracker();
+
+		tracker.TrackUnresolvedExpression("{{step1.output}}", "stepA");
+		tracker.TrackUnresolvedExpression("{{step2.rawOutput}}", "stepB");
+		tracker.TrackUnresolvedExpression("{{step3.output}}", "stepA");
+
+		tracker.UnresolvedExpressions.Should().HaveCount(3);
+	}
+
+	[Fact]
+	public void EmptyTracker_HasEmptyUnresolvedExpressions()
+	{
+		var tracker = new TemplateResolutionTracker();
+
+		tracker.UnresolvedExpressions.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void TrackUnresolvedExpression_IsThreadSafe_ConcurrentAccess()
+	{
+		var tracker = new TemplateResolutionTracker();
+		var tasks = new List<Task>();
+
+		for (int i = 0; i < 100; i++)
+		{
+			var index = i;
+			tasks.Add(Task.Run(() =>
+			{
+				tracker.TrackUnresolvedExpression($"{{{{step{index}.output}}}}", $"step-{index}");
+			}));
+		}
+
+		Task.WaitAll(tasks.ToArray());
+
+		tracker.UnresolvedExpressions.Should().HaveCount(100);
+	}
+
+	#endregion
 }
 
 public class RunContextTests

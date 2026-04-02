@@ -817,6 +817,288 @@ public class TemplateResolverTests
 
 	#endregion
 
+	#region Step Files Namespace (Fix #6)
+
+	[Fact]
+	public void Resolve_StepFiles_ReturnsJsonArray()
+	{
+		// Arrange
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"orchestra-test-{Guid.NewGuid():N}");
+		try
+		{
+			var store = new OrchestrationTempFileStore(tempRoot, "orch", "run-1");
+			var file1 = store.SaveFile("content1", "research", "txt");
+			var file2 = store.SaveFile("content2", "research", "json");
+
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>(),
+				TempFileStore = store
+			};
+			var template = "Files: {{research.files}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, ["research"], s_defaultStep);
+
+			// Assert — Should be a JSON array containing both file paths
+			result.Should().StartWith("Files: [");
+			// Deserialize to verify both paths are present (JSON escapes backslashes on Windows)
+			var jsonPart = result["Files: ".Length..];
+			var files = System.Text.Json.JsonSerializer.Deserialize<string[]>(jsonPart);
+			files.Should().HaveCount(2);
+			files.Should().Contain(file1);
+			files.Should().Contain(file2);
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot))
+				Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void Resolve_StepFilesIndex_ReturnsSpecificFile()
+	{
+		// Arrange
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"orchestra-test-{Guid.NewGuid():N}");
+		try
+		{
+			var store = new OrchestrationTempFileStore(tempRoot, "orch", "run-1");
+			var file1 = store.SaveFile("content1", "research", "txt");
+			var file2 = store.SaveFile("content2", "research", "json");
+
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>(),
+				TempFileStore = store
+			};
+			var template = "First: {{research.files[0]}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, ["research"], s_defaultStep);
+
+			// Assert — Should contain one of the file paths (order depends on ConcurrentBag)
+			result.Should().StartWith("First: ");
+			var resolvedPath = result["First: ".Length..];
+			resolvedPath.Should().StartWith(store.TempDirectory);
+			// The path should be one of the two saved files
+			new[] { file1, file2 }.Should().Contain(resolvedPath);
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot))
+				Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void Resolve_StepFilesIndexOutOfRange_ReturnsEmpty()
+	{
+		// Arrange
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"orchestra-test-{Guid.NewGuid():N}");
+		try
+		{
+			var store = new OrchestrationTempFileStore(tempRoot, "orch", "run-1");
+			store.SaveFile("content", "research", "txt");
+
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>(),
+				TempFileStore = store
+			};
+			var template = "File: {{research.files[99]}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, ["research"], s_defaultStep);
+
+			// Assert — Out of range index returns empty string
+			result.Should().Be("File: ");
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot))
+				Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void Resolve_StepFilesNoFiles_ReturnsEmptyJsonArray()
+	{
+		// Arrange
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"orchestra-test-{Guid.NewGuid():N}");
+		try
+		{
+			var store = new OrchestrationTempFileStore(tempRoot, "orch", "run-1");
+			// No files saved for 'research'
+
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>(),
+				TempFileStore = store
+			};
+			var template = "Files: {{research.files}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, ["research"], s_defaultStep);
+
+			// Assert — Empty array
+			result.Should().Be("Files: []");
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot))
+				Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void Resolve_StepFilesNoStore_ReturnsEmptyJsonArray()
+	{
+		// Arrange — No TempFileStore configured
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+			TempFileStore = null
+		};
+		var template = "Files: {{research.files}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, ["research"], s_defaultStep);
+
+		// Assert — Returns empty array when no store
+		result.Should().Be("Files: []");
+	}
+
+	[Theory]
+	[InlineData("{{research.FILES}}", true)]
+	[InlineData("{{research.Files}}", true)]
+	[InlineData("{{research.files[0]}}", true)]
+	[InlineData("{{research.FILES[0]}}", true)]
+	public void Resolve_StepFilesCaseInsensitive_Resolves(string template, bool shouldResolve)
+	{
+		// Arrange
+		var tempRoot = Path.Combine(Path.GetTempPath(), $"orchestra-test-{Guid.NewGuid():N}");
+		try
+		{
+			var store = new OrchestrationTempFileStore(tempRoot, "orch", "run-1");
+			store.SaveFile("content", "research", "txt");
+
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>(),
+				TempFileStore = store
+			};
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, ["research"], s_defaultStep);
+
+			// Assert
+			if (shouldResolve)
+			{
+				result.Should().NotContain("{{");
+			}
+		}
+		finally
+		{
+			if (Directory.Exists(tempRoot))
+				Directory.Delete(tempRoot, recursive: true);
+		}
+	}
+
+	#endregion
+
+	#region Unresolved Template Tracking (Fix #4b)
+
+	[Fact]
+	public void Resolve_UnresolvedStepOutput_TracksExpression()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		// 'missing' step has no result in context
+		var template = "Value is {{missing.output}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, new Dictionary<string, string>(), context, [], s_defaultStep);
+
+		// Assert — Expression should be left as-is
+		result.Should().Be("Value is {{missing.output}}");
+		// And it should be tracked as unresolved
+		context.ResolutionTracker.UnresolvedExpressions.Should().HaveCount(1);
+		context.ResolutionTracker.UnresolvedExpressions.First().Expression.Should().Be("{{missing.output}}");
+		context.ResolutionTracker.UnresolvedExpressions.First().StepName.Should().Be("current-step");
+	}
+
+	[Fact]
+	public void Resolve_UnresolvedStepRawOutput_TracksExpression()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = "Value is {{missing.rawOutput}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, new Dictionary<string, string>(), context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("Value is {{missing.rawOutput}}");
+		context.ResolutionTracker.UnresolvedExpressions.Should().HaveCount(1);
+		context.ResolutionTracker.UnresolvedExpressions.First().Expression.Should().Be("{{missing.rawOutput}}");
+	}
+
+	[Fact]
+	public void Resolve_MultipleUnresolvedExpressions_TracksAll()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = "A: {{step1.output}} B: {{step2.output}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, new Dictionary<string, string>(), context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("A: {{step1.output}} B: {{step2.output}}");
+		context.ResolutionTracker.UnresolvedExpressions.Should().HaveCount(2);
+	}
+
+	[Fact]
+	public void Resolve_ResolvedStepOutput_DoesNotTrackAsUnresolved()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		context.AddResult("step1", ExecutionResult.Succeeded("resolved content"));
+		var template = "Value is {{step1.output}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, new Dictionary<string, string>(), context, ["step1"], s_defaultStep);
+
+		// Assert
+		result.Should().Be("Value is resolved content");
+		context.ResolutionTracker.UnresolvedExpressions.Should().BeEmpty();
+	}
+
+	#endregion
+
 	#region Edge Cases
 
 	[Theory]

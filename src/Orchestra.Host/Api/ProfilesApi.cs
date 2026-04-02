@@ -142,6 +142,210 @@ public static class ProfilesApi
 			return Results.Json(new { count = orchestrations.Length, orchestrations }, jsonOptions);
 		});
 
+		// POST /api/profiles/scan - Scan a directory for profile JSON files
+		group.MapPost("/scan", (ProfileScanRequest request) =>
+		{
+			try
+			{
+				if (string.IsNullOrWhiteSpace(request.Directory))
+					return ProblemDetailsHelpers.BadRequest("Directory path is required.");
+
+				if (!Directory.Exists(request.Directory))
+					return ProblemDetailsHelpers.BadRequest($"Directory not found: {request.Directory}");
+
+				var files = Directory.GetFiles(request.Directory, "*.json", SearchOption.TopDirectoryOnly);
+				var profiles = new List<object>();
+
+				foreach (var file in files.OrderBy(f => f))
+				{
+					try
+					{
+						var json = File.ReadAllText(file);
+						var profile = JsonSerializer.Deserialize<Profile>(json, ProfileStore.JsonOptions);
+
+						if (profile is null || string.IsNullOrWhiteSpace(profile.Name))
+						{
+							profiles.Add(new
+							{
+								path = file,
+								fileName = Path.GetFileName(file),
+								name = (string?)null,
+								description = (string?)null,
+								tags = Array.Empty<string>(),
+								hasSchedule = false,
+								valid = false,
+								error = "Not a valid profile: missing name"
+							});
+							continue;
+						}
+
+						profiles.Add(new
+						{
+							path = file,
+							fileName = Path.GetFileName(file),
+							name = profile.Name,
+							description = profile.Description,
+							tags = profile.Filter?.Tags ?? [],
+							hasSchedule = profile.Schedule is not null,
+							valid = true,
+							error = (string?)null
+						});
+					}
+					catch (Exception ex)
+					{
+						profiles.Add(new
+						{
+							path = file,
+							fileName = Path.GetFileName(file),
+							name = (string?)null,
+							description = (string?)null,
+							tags = Array.Empty<string>(),
+							hasSchedule = false,
+							valid = false,
+							error = ex.Message
+						});
+					}
+				}
+
+				return Results.Json(new
+				{
+					directory = request.Directory,
+					count = profiles.Count,
+					profiles
+				}, jsonOptions);
+			}
+			catch (Exception ex)
+			{
+				return ProblemDetailsHelpers.BadRequest(ex.Message);
+			}
+		});
+
+		// POST /api/profiles/import - Import profiles from file paths
+		group.MapPost("/import", (ImportProfilesRequest request, ProfileManager profileManager) =>
+		{
+			if (request.Paths is null || request.Paths.Length == 0)
+				return ProblemDetailsHelpers.BadRequest("At least one file path is required.");
+
+			var imported = new List<object>();
+			var skipped = new List<object>();
+			var errors = new List<object>();
+
+			foreach (var path in request.Paths)
+			{
+				try
+				{
+					if (!File.Exists(path))
+					{
+						errors.Add(new { path, error = "File not found" });
+						continue;
+					}
+
+					var json = File.ReadAllText(path);
+					var profile = JsonSerializer.Deserialize<Profile>(json, ProfileStore.JsonOptions);
+
+					if (profile is null || string.IsNullOrWhiteSpace(profile.Name))
+					{
+						errors.Add(new { path, error = "Not a valid profile: missing name" });
+						continue;
+					}
+
+					// Ensure the ID is regenerated from the name for consistency
+					var id = ProfileStore.GenerateId(profile.Name);
+					var importProfile = new Profile
+					{
+						Id = id,
+						Name = profile.Name,
+						Description = profile.Description,
+						IsActive = false,
+						Filter = profile.Filter ?? new ProfileFilter { Tags = ["*"] },
+						Schedule = profile.Schedule,
+						CreatedAt = profile.CreatedAt != default ? profile.CreatedAt : DateTimeOffset.UtcNow,
+						UpdatedAt = DateTimeOffset.UtcNow,
+					};
+
+					var result = profileManager.ImportProfile(importProfile, request.OverwriteExisting);
+					if (result.Imported)
+						imported.Add(new { id = result.Id, name = result.Name });
+					else
+						skipped.Add(new { id = result.Id, name = result.Name, reason = result.SkipReason });
+				}
+				catch (Exception ex)
+				{
+					errors.Add(new { path, error = ex.Message });
+				}
+			}
+
+			return Results.Json(new
+			{
+				importedCount = imported.Count,
+				imported,
+				skipped,
+				errors
+			}, jsonOptions);
+		});
+
+		// POST /api/profiles/import-json - Import a profile from raw JSON
+		group.MapPost("/import-json", (ImportProfileJsonRequest request, ProfileManager profileManager) =>
+		{
+			try
+			{
+				if (string.IsNullOrWhiteSpace(request.Json))
+					return ProblemDetailsHelpers.BadRequest("JSON content is required.");
+
+				var profile = JsonSerializer.Deserialize<Profile>(request.Json, ProfileStore.JsonOptions);
+				if (profile is null || string.IsNullOrWhiteSpace(profile.Name))
+					return ProblemDetailsHelpers.BadRequest("Not a valid profile: missing name.");
+
+				var id = ProfileStore.GenerateId(profile.Name);
+				var importProfile = new Profile
+				{
+					Id = id,
+					Name = profile.Name,
+					Description = profile.Description,
+					IsActive = false,
+					Filter = profile.Filter ?? new ProfileFilter { Tags = ["*"] },
+					Schedule = profile.Schedule,
+					CreatedAt = profile.CreatedAt != default ? profile.CreatedAt : DateTimeOffset.UtcNow,
+					UpdatedAt = DateTimeOffset.UtcNow,
+				};
+
+				var result = profileManager.ImportProfile(importProfile, request.OverwriteExisting);
+				if (result.Imported)
+					return Results.Json(new { id = result.Id, name = result.Name, imported = true }, jsonOptions, statusCode: 201);
+				else
+					return Results.Json(new { id = result.Id, name = result.Name, imported = false, reason = result.SkipReason }, jsonOptions);
+			}
+			catch (Exception ex)
+			{
+				return ProblemDetailsHelpers.BadRequest(ex.Message);
+			}
+		});
+
+		// POST /api/profiles/export - Export profiles to a directory
+		group.MapPost("/export", (ExportProfilesRequest request, ProfileManager profileManager) =>
+		{
+			try
+			{
+				if (string.IsNullOrWhiteSpace(request.Directory))
+					return ProblemDetailsHelpers.BadRequest("Directory path is required.");
+
+				var results = profileManager.ExportProfiles(request.Directory, request.ProfileIds, request.OverwriteExisting);
+				var exported = results.Where(r => r.Exported).Select(r => new { id = r.Id, name = r.Name, path = r.Path }).ToArray();
+				var exportSkipped = results.Where(r => !r.Exported).Select(r => new { id = r.Id, name = r.Name, reason = r.SkipReason }).ToArray();
+
+				return Results.Json(new
+				{
+					exportedCount = exported.Length,
+					exported,
+					skipped = exportSkipped
+				}, jsonOptions);
+			}
+			catch (Exception ex)
+			{
+				return ProblemDetailsHelpers.BadRequest(ex.Message);
+			}
+		});
+
 		return endpoints;
 	}
 
@@ -194,3 +398,10 @@ public static class ProfilesApi
 		public ProfileSchedule? Schedule { get; set; }
 	}
 }
+
+// ── Profile Import/Export Request DTOs ──
+
+public record ProfileScanRequest(string? Directory);
+public record ImportProfilesRequest(string[]? Paths, bool OverwriteExisting = false);
+public record ImportProfileJsonRequest(string? Json, bool OverwriteExisting = false);
+public record ExportProfilesRequest(string? Directory, string[]? ProfileIds, bool OverwriteExisting = false);

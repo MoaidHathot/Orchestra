@@ -52,7 +52,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			LogStepMcpNames(step.Name, string.Join(", ", step.McpNames));
 
 			// Create a fresh engine tool context for this execution
-			var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore };
+			var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore, StepName = step.Name };
 			var engineTools = _engineToolRegistry.GetAll();
 
 		// Build and run the agent using an immutable config snapshot (thread-safe)
@@ -104,10 +104,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			}
 
 			// Report model and usage metadata if available
-			if (result.ActualModel is not null)
-			{
-				_reporter.ReportStepCompleted(step.Name, result);
-			}
+			// Note: step-completed event is now emitted centrally by OrchestrationExecutor
+			// after this method returns, so we only report usage here.
 			if (result.Usage is not null && result.ActualModel is not null)
 			{
 				_reporter.ReportUsage(step.Name, result.ActualModel, result.Usage);

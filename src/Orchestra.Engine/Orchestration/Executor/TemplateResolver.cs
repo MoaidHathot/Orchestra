@@ -12,11 +12,16 @@ namespace Orchestra.Engine;
 ///   {{env.VAR_NAME}}       — environment variable value
 ///   {{stepName.output}}    — output content from a completed dependency step
 ///   {{stepName.rawOutput}} — raw output from a completed dependency step
+///   {{stepName.files}}     — JSON array of file paths saved by a step via orchestra_save_file
+///   {{stepName.files[N]}}  — Nth file path (0-based) saved by a step via orchestra_save_file
 /// </summary>
 public static partial class TemplateResolver
 {
 	[GeneratedRegex(@"\{\{(?<expr>[^}]+)\}\}", RegexOptions.Compiled)]
 	private static partial Regex TemplatePattern();
+
+	[GeneratedRegex(@"^files\[(\d+)\]$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
+	private static partial Regex FilesIndexPattern();
 
 	private static readonly string[] s_validOrchestrationProperties = ["name", "version", "runid", "startedat", "tempdir"];
 	private static readonly string[] s_validStepProperties = ["name", "type"];
@@ -101,21 +106,30 @@ public static partial class TemplateResolver
 					if (rawOutputs.TryGetValue(stepName, out var rawOutput))
 						return rawOutput;
 				}
-				else
+				else if (property.Equals("output", StringComparison.OrdinalIgnoreCase))
 				{
 					var outputs = context.GetDependencyOutputs(dependsOn);
 					if (outputs.TryGetValue(stepName, out var output))
 						return output;
+				}
+				else if (property.Equals("files", StringComparison.OrdinalIgnoreCase) ||
+						 FilesIndexPattern().IsMatch(property))
+				{
+					return ResolveStepFiles(stepName, property, context);
 				}
 
 				// Also check non-dependency steps by getting direct result
 				var result = context.TryGetResult(stepName);
 				if (result is not null)
 				{
-					return property.Equals("rawOutput", StringComparison.OrdinalIgnoreCase)
-						? result.RawContent ?? result.Content
-						: result.Content;
+					if (property.Equals("rawOutput", StringComparison.OrdinalIgnoreCase))
+						return result.RawContent ?? result.Content;
+					if (property.Equals("output", StringComparison.OrdinalIgnoreCase))
+						return result.Content;
 				}
+
+				// Track unresolved step output reference for diagnostics
+				tracker?.TrackUnresolvedExpression(match.Value, currentStep.Name);
 			}
 
 			// Not resolvable — leave as-is
@@ -200,5 +214,34 @@ public static partial class TemplateResolver
 		}
 
 		return resolved;
+	}
+
+	/// <summary>
+	/// Resolves step file references.
+	/// <c>files</c> returns a JSON array of all file paths saved by the step.
+	/// <c>files[N]</c> returns the Nth file path (0-based index).
+	/// </summary>
+	private static string ResolveStepFiles(string stepName, string property, OrchestrationExecutionContext context)
+	{
+		var files = context.TempFileStore?.GetFilesForStep(stepName) ?? [];
+
+		if (property.Equals("files", StringComparison.OrdinalIgnoreCase))
+		{
+			// Return JSON array of all file paths
+			return System.Text.Json.JsonSerializer.Serialize(files);
+		}
+
+		// files[N] — extract the index
+		var indexMatch = FilesIndexPattern().Match(property);
+		if (indexMatch.Success && int.TryParse(indexMatch.Groups[1].Value, out var index))
+		{
+			if (index >= 0 && index < files.Length)
+			{
+				return files[index];
+			}
+			return string.Empty; // Index out of range — return empty rather than leaving the template
+		}
+
+		return string.Empty;
 	}
 }

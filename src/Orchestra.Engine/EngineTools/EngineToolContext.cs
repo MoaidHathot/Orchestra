@@ -12,6 +12,12 @@ public sealed class EngineToolContext
 	/// May be null when no data path is configured (e.g., in-memory mode).
 	/// </summary>
 	public OrchestrationTempFileStore? TempFileStore { get; init; }
+
+	/// <summary>
+	/// The name of the step this context belongs to.
+	/// Used by engine tools to register artifacts (e.g., saved files) against the correct step.
+	/// </summary>
+	public string? StepName { get; init; }
 	/// <summary>
 	/// When set, the prompt step result will be overridden to the specified status
 	/// regardless of the LLM's output content.

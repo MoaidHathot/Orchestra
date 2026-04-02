@@ -3,6 +3,8 @@ import { Icons } from '../../icons';
 import { api } from '../../api';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import type { Profile, ProfileFilter, ProfileSchedule, ScheduleWindow, TagCount } from '../../types';
+import ImportProfilesModal from './ImportProfilesModal';
+import ExportModal from './ExportModal';
 
 // ── API response shapes ──
 
@@ -86,6 +88,8 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
   const [formOrchInput, setFormOrchInput] = useState('');
   const [formExcludeInput, setFormExcludeInput] = useState('');
   const [saving, setSaving] = useState(false);
+  const [importModal, setImportModal] = useState(false);
+  const [exportModal, setExportModal] = useState(false);
 
   // ── Load data ──
 
@@ -477,6 +481,12 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
         </div>
         <button className="btn btn-primary btn-sm" onClick={startCreate}>
           <Icons.Plus /> New Profile
+        </button>
+        <button className="btn btn-sm" onClick={() => setImportModal(true)} title="Import profiles from files">
+          <Icons.Upload /> Import
+        </button>
+        <button className="btn btn-sm" onClick={() => setExportModal(true)} title="Export profiles to files" disabled={profiles.length === 0}>
+          <Icons.Download /> Export
         </button>
       </div>
 
@@ -874,6 +884,20 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
           <button className="btn" onClick={onClose}>Close</button>
         </div>
       </div>
+
+      {/* Import/Export sub-modals */}
+      <ImportProfilesModal
+        open={importModal}
+        onClose={() => setImportModal(false)}
+        onImported={() => { loadData(); loadEffectiveSet(); }}
+      />
+      <ExportModal
+        open={exportModal}
+        onClose={() => setExportModal(false)}
+        title="Export Profiles"
+        endpoint="/api/profiles/export"
+        idsField="profileIds"
+      />
     </div>
   );
 }

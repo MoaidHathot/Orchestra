@@ -63,7 +63,9 @@ public sealed class SaveToFileTool : IEngineTool
 				? extProp.GetString()
 				: null;
 
-			var filePath = context.TempFileStore.SaveFile(content, extension);
+			var filePath = context.StepName is not null
+				? context.TempFileStore.SaveFile(content, context.StepName, extension)
+				: context.TempFileStore.SaveFile(content, extension);
 
 			return $"File saved successfully. File path: {filePath}";
 		}

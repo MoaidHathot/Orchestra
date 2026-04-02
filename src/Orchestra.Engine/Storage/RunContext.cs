@@ -78,6 +78,7 @@ public class TemplateResolutionTracker
 {
 	private readonly ConcurrentDictionary<string, string?> _accessedEnvVars = new();
 	private readonly ConcurrentDictionary<string, string> _resolvedVariables = new();
+	private readonly ConcurrentBag<UnresolvedExpression> _unresolvedExpressions = new();
 
 	/// <summary>
 	/// Records that an environment variable was accessed during template resolution.
@@ -96,6 +97,15 @@ public class TemplateResolutionTracker
 	}
 
 	/// <summary>
+	/// Records that a template expression could not be resolved and was left as-is.
+	/// This typically indicates a misconfigured step reference or missing dependency.
+	/// </summary>
+	public void TrackUnresolvedExpression(string expression, string stepName)
+	{
+		_unresolvedExpressions.Add(new UnresolvedExpression(expression, stepName));
+	}
+
+	/// <summary>
 	/// Gets all environment variables that were accessed during resolution.
 	/// </summary>
 	public IReadOnlyDictionary<string, string?> AccessedEnvironmentVariables => _accessedEnvVars;
@@ -104,4 +114,16 @@ public class TemplateResolutionTracker
 	/// Gets all variables that were resolved (with their final values).
 	/// </summary>
 	public IReadOnlyDictionary<string, string> ResolvedVariables => _resolvedVariables;
+
+	/// <summary>
+	/// Gets all template expressions that could not be resolved.
+	/// </summary>
+	public IReadOnlyCollection<UnresolvedExpression> UnresolvedExpressions => _unresolvedExpressions;
 }
+
+/// <summary>
+/// Records a template expression that could not be resolved during template processing.
+/// </summary>
+/// <param name="Expression">The original template expression (e.g., <c>{{stepName.output}}</c>).</param>
+/// <param name="StepName">The name of the step whose template contained the unresolved expression.</param>
+public record UnresolvedExpression(string Expression, string StepName);

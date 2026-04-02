@@ -1216,7 +1216,7 @@ function App(): React.JSX.Element {
             />
           </div>
           <button className="btn btn-primary btn-block" onClick={() => { setAddModal({ open: true }); setSidebarOpen(false); }}>
-            <Icons.Plus /> Add Orchestrations
+            <Icons.Workflow /> Orchestrations
           </button>
           <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setBuilderModal(true); setSidebarOpen(false); }}>
             <Icons.Steps aria-hidden="true" /> Visual Builder
@@ -1224,7 +1224,7 @@ function App(): React.JSX.Element {
           <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setMcpsModal({ open: true }); setSidebarOpen(false); }}>
             <Icons.Tool /> MCP Tools
           </button>
-          <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setProfilesModal(true); setSidebarOpen(false); }}>
+          <button className="btn btn-primary btn-block" style={{ marginTop: '8px' }} onClick={() => { setProfilesModal(true); setSidebarOpen(false); }}>
             <Icons.Shield /> Profiles & Tags
           </button>
 
