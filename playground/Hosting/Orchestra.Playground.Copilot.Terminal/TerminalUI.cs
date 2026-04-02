@@ -3,6 +3,7 @@ using Orchestra.Engine;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Triggers;
 using Orchestra.Host.Persistence;
+using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
 using Spectre.Console;
 using Spectre.Console.Rendering;
@@ -23,6 +24,8 @@ public class TerminalUI
 	private readonly TerminalOrchestrationReporter _reporter;
 	private readonly TerminalExecutionCallback _executionCallback;
 	private readonly OrchestrationHostOptions _hostOptions;
+	private readonly ProfileManager _profileManager;
+	private readonly OrchestrationTagStore _tagStore;
 
 	private TuiView _currentView = TuiView.Dashboard;
 	private int _selectedIndex;
@@ -96,6 +99,13 @@ public class TerminalUI
 	private string? _transientMessage;
 	private DateTime _transientMessageExpiry;
 
+	// Profile view state
+	private string? _selectedProfileId;
+	private IReadOnlyCollection<Host.Profiles.Profile>? _cachedProfiles;
+
+	// Profile-based orchestration filter (null = All, string = profile ID)
+	private string? _profileFilterId;
+
 	public TerminalUI(
 		OrchestrationRegistry registry,
 		TriggerManager triggerManager,
@@ -104,7 +114,9 @@ public class TerminalUI
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 		TerminalOrchestrationReporter reporter,
 		ITriggerExecutionCallback executionCallback,
-		OrchestrationHostOptions hostOptions)
+		OrchestrationHostOptions hostOptions,
+		ProfileManager profileManager,
+		OrchestrationTagStore tagStore)
 	{
 		_registry = registry;
 		_triggerManager = triggerManager;
@@ -114,6 +126,8 @@ public class TerminalUI
 		_reporter = reporter;
 		_executionCallback = (TerminalExecutionCallback)executionCallback;
 		_hostOptions = hostOptions;
+		_profileManager = profileManager;
+		_tagStore = tagStore;
 	}
 
 	public async Task RunAsync(CancellationToken cancellationToken)
@@ -288,6 +302,8 @@ public class TerminalUI
 		TuiView.RawJsonView => "Raw JSON",
 		TuiView.Checkpoints => "Checkpoints",
 		TuiView.TriggerCreate => "Create Trigger",
+		TuiView.Profiles => "Profiles",
+		TuiView.ProfileDetail => "Profile Detail",
 		_ => view.ToString()
 	};
 
@@ -394,6 +410,9 @@ public class TerminalUI
 			case ConsoleKey.D8 when !IsDetailView():
 				NavigateToTopLevel(TuiView.Checkpoints);
 				return;
+			case ConsoleKey.D9 when !IsDetailView():
+				NavigateToTopLevel(TuiView.Profiles);
+				return;
 			case ConsoleKey.Escape:
 				NavigateBack();
 				return;
@@ -462,6 +481,12 @@ public class TerminalUI
 		case TuiView.TriggerCreate:
 			HandleTriggerCreateInput(key);
 			break;
+		case TuiView.Profiles:
+			HandleProfilesInput(key);
+			break;
+		case TuiView.ProfileDetail:
+			HandleProfileDetailInput(key);
+			break;
 		}
 	}
 
@@ -477,10 +502,11 @@ public class TerminalUI
 			or TuiView.VersionDiff
 			or TuiView.DagView
 			or TuiView.RawJsonView
-			or TuiView.TriggerCreate;
+			or TuiView.TriggerCreate
+			or TuiView.ProfileDetail;
 
 	private static bool SupportsSearch(TuiView view) =>
-		view is TuiView.Orchestrations or TuiView.History or TuiView.Triggers or TuiView.McpServers;
+		view is TuiView.Orchestrations or TuiView.History or TuiView.Triggers or TuiView.McpServers or TuiView.Profiles;
 
 	private void HandleSearchInput(ConsoleKeyInfo key)
 	{
@@ -514,7 +540,7 @@ public class TerminalUI
 
 	private void HandleDashboardInput(ConsoleKeyInfo key)
 	{
-		var options = new[] { "Orchestrations", "Triggers", "History", "Active Executions", "Event Log", "MCP Servers", "Checkpoints", "Quit" };
+		var options = new[] { "Orchestrations", "Triggers", "History", "Active Executions", "Event Log", "MCP Servers", "Checkpoints", "Profiles", "Quit" };
 		switch (key.Key)
 		{
 			case ConsoleKey.UpArrow or ConsoleKey.K:
@@ -533,7 +559,8 @@ public class TerminalUI
 					case 4: NavigateTo(TuiView.EventLog); break;
 					case 5: NavigateTo(TuiView.McpServers); break;
 					case 6: NavigateTo(TuiView.Checkpoints); break;
-					case 7: _running = false; break;
+					case 7: NavigateTo(TuiView.Profiles); break;
+					case 8: _running = false; break;
 				}
 				break;
 		}
@@ -590,6 +617,10 @@ public class TerminalUI
 							ShowTransientMessage($"[green]Removed:[/] {Markup.Escape(entry.Orchestration.Name)}");
 						});
 				}
+				break;
+			case ConsoleKey.F:
+				// Cycle profile filter: All -> Profile1 -> Profile2 -> ... -> All
+				CycleProfileFilter();
 				break;
 		}
 	}
@@ -728,6 +759,10 @@ public class TerminalUI
 							ShowTransientMessage($"[yellow]Cancelled[/] {Markup.Escape(exec.OrchestrationName)}");
 						});
 				}
+				break;
+			case ConsoleKey.F:
+				// Cycle profile filter for active view
+				CycleProfileFilter();
 				break;
 		}
 	}
@@ -917,13 +952,32 @@ public class TerminalUI
 	private OrchestrationEntry[] GetFilteredOrchestrations()
 	{
 		var all = _registry.GetAll().ToArray();
-		if (string.IsNullOrEmpty(_searchQuery))
-			return all;
 
-		return all.Where(e =>
-			e.Orchestration.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
-			(e.Orchestration.Description?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false)
-		).ToArray();
+		// Apply text search filter
+		IEnumerable<OrchestrationEntry> filtered = all;
+		if (!string.IsNullOrEmpty(_searchQuery))
+		{
+			filtered = filtered.Where(e =>
+				e.Orchestration.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+				(e.Orchestration.Description?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false)
+			);
+		}
+
+		// Apply profile filter
+		if (_profileFilterId != null)
+		{
+			var profile = _profileManager.GetProfile(_profileFilterId);
+			if (profile != null)
+			{
+				filtered = filtered.Where(e =>
+				{
+					var tags = _tagStore.GetEffectiveTags(e.Id, e.Orchestration.Tags);
+					return profile.Filter.Matches(e.Id, tags);
+				});
+			}
+		}
+
+		return filtered.ToArray();
 	}
 
 	private TriggerRegistration[] GetFilteredTriggers()
@@ -967,6 +1021,61 @@ public class TerminalUI
 				r.TriggeredBy.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase));
 		}
 		return allRuns.Count;
+	}
+
+	private void CycleProfileFilter()
+	{
+		var allProfiles = _profileManager.GetAllProfiles().ToArray();
+		if (allProfiles.Length == 0)
+		{
+			_profileFilterId = null;
+			ShowTransientMessage("[dim]No profiles available[/]");
+			return;
+		}
+
+		if (_profileFilterId == null)
+		{
+			// Currently "All" -> go to first profile
+			_profileFilterId = allProfiles[0].Id;
+		}
+		else
+		{
+			// Find current index and advance
+			var currentIdx = Array.FindIndex(allProfiles, p => p.Id == _profileFilterId);
+			if (currentIdx >= 0 && currentIdx < allProfiles.Length - 1)
+			{
+				_profileFilterId = allProfiles[currentIdx + 1].Id;
+			}
+			else
+			{
+				// Wrap around to "All"
+				_profileFilterId = null;
+			}
+		}
+
+		_selectedIndex = 0;
+		var filterName = _profileFilterId != null
+			? allProfiles.FirstOrDefault(p => p.Id == _profileFilterId)?.Name ?? "Unknown"
+			: "All";
+		ShowTransientMessage($"[cyan]Filter:[/] {Markup.Escape(filterName)}");
+	}
+
+	private string GetProfileFilterLabel()
+	{
+		if (_profileFilterId == null)
+			return "";
+		var profile = _profileManager.GetProfile(_profileFilterId);
+		return profile != null ? $" [dim]| Filter: [cyan]{Markup.Escape(profile.Name)}[/][/]" : "";
+	}
+
+	private string[] GetMatchingProfileNames(string orchestrationId, string[] tags)
+	{
+		var allProfiles = (_cachedProfiles ??= _profileManager.GetAllProfiles()).ToArray();
+		var effectiveTags = _tagStore.GetEffectiveTags(orchestrationId, tags);
+		return allProfiles
+			.Where(p => p.Filter.Matches(orchestrationId, effectiveTags))
+			.Select(p => p.Name)
+			.ToArray();
 	}
 
 	#endregion
@@ -1372,13 +1481,15 @@ public class TerminalUI
 		var activeCount = _activeExecutionInfos.Count;
 		var orchestrationCount = _registry.Count;
 		var triggerCount = _triggerManager.GetAllTriggers().Count;
+		var activeProfileCount = _profileManager.GetAllProfiles().Count(p => p.IsActive);
 		var breadcrumb = GetBreadcrumb();
 
 		var headerText = new Markup(
 			$"[bold blue]Orchestra Terminal[/] | " +
 			$"Orchestrations: [green]{orchestrationCount}[/] | " +
 			$"Triggers: [yellow]{triggerCount}[/] | " +
-			$"Active: [cyan]{activeCount}[/]   " +
+			$"Active: [cyan]{activeCount}[/] | " +
+			$"Profiles: [mediumpurple1]{activeProfileCount}[/]   " +
 			breadcrumb);
 
 		return new Panel(headerText)
@@ -1470,6 +1581,8 @@ public class TerminalUI
 			TuiView.RawJsonView => RenderRawJsonView(),
 			TuiView.Checkpoints => RenderCheckpoints(),
 			TuiView.TriggerCreate => RenderTriggerCreate(),
+			TuiView.Profiles => RenderProfiles(),
+			TuiView.ProfileDetail => RenderProfileDetail(),
 			_ => new Panel("Unknown view")
 		};
 	}
@@ -1484,8 +1597,8 @@ public class TerminalUI
 			);
 
 		// Menu
-		var options = new[] { "Orchestrations", "Triggers", "History", "Active Executions", "Event Log", "MCP Servers", "Checkpoints", "Quit" };
-		var icons = new[] { "[green]2[/]", "[yellow]3[/]", "[blue]4[/]", "[cyan]5[/]", "[magenta]6[/]", "[aqua]7[/]", "[olive]8[/]", "[red]Q[/]" };
+		var options = new[] { "Orchestrations", "Triggers", "History", "Active Executions", "Event Log", "MCP Servers", "Checkpoints", "Profiles", "Quit" };
+		var icons = new[] { "[green]2[/]", "[yellow]3[/]", "[blue]4[/]", "[cyan]5[/]", "[magenta]6[/]", "[aqua]7[/]", "[olive]8[/]", "[mediumpurple1]9[/]", "[red]Q[/]" };
 		var menuTable = new Table().HideHeaders().NoBorder().AddColumn("").AddColumn("");
 
 		for (int i = 0; i < options.Length; i++)
@@ -1578,6 +1691,8 @@ public class TerminalUI
 			.AddColumn("Name")
 			.AddColumn("Version")
 			.AddColumn("Steps")
+			.AddColumn("Tags")
+			.AddColumn("Profiles")
 			.AddColumn("Trigger")
 			.AddColumn("Description")
 			.Border(TableBorder.Rounded)
@@ -1593,10 +1708,26 @@ public class TerminalUI
 			var desc = o.Description ?? "";
 			if (desc.Length > 40) desc = desc[..40] + "...";
 
+			// Show effective tags
+			var effectiveTags = _tagStore.GetEffectiveTags(entry.Id, o.Tags);
+			var tagsText = effectiveTags.Length > 0
+				? string.Join(" ", effectiveTags.Take(3).Select(t => $"[cyan]#{Markup.Escape(t)}[/]"))
+				  + (effectiveTags.Length > 3 ? $" [dim]+{effectiveTags.Length - 3}[/]" : "")
+				: "[dim]-[/]";
+
+			// Show matching profiles
+			var matchingProfiles = GetMatchingProfileNames(entry.Id, o.Tags);
+			var profilesText = matchingProfiles.Length > 0
+				? string.Join(" ", matchingProfiles.Take(2).Select(n => $"[green]{Markup.Escape(n)}[/]"))
+				  + (matchingProfiles.Length > 2 ? $" [dim]+{matchingProfiles.Length - 2}[/]" : "")
+				: "[dim]-[/]";
+
 			table.AddRow(
 				new Markup($"[{style}]{Markup.Escape(o.Name)}[/]"),
 				new Markup($"[{style}]{Markup.Escape(o.Version)}[/]"),
 				new Markup($"[{style}]{o.Steps.Length}[/]"),
+				new Markup(tagsText),
+				new Markup(profilesText),
 				new Markup($"[{style}]{triggerType}[/]"),
 				new Markup($"[dim]{Markup.Escape(desc)}[/]")
 			);
@@ -1611,7 +1742,7 @@ public class TerminalUI
 		}
 
 		return new Panel(table)
-			.Header("[bold]Orchestrations[/] [dim]|[/] [dim]r[/]=Run [dim]a[/]=Add [dim]s[/]=Scan [dim]d[/]=Delete [dim]Enter[/]=Details [dim]/[/]=Search")
+			.Header($"[bold]Orchestrations[/]{GetProfileFilterLabel()} [dim]|[/] [dim]r[/]=Run [dim]a[/]=Add [dim]s[/]=Scan [dim]d[/]=Delete [dim]f[/]=Filter [dim]Enter[/]=Details [dim]/[/]=Search")
 			.Border(BoxBorder.Rounded);
 	}
 
@@ -1758,6 +1889,23 @@ public class TerminalUI
 	private Panel RenderActive()
 	{
 		var active = _activeExecutionInfos.Values.ToArray();
+
+		// Apply profile filter to active executions
+		if (_profileFilterId != null)
+		{
+			var profile = _profileManager.GetProfile(_profileFilterId);
+			if (profile != null)
+			{
+				active = active.Where(exec =>
+				{
+					var entry = _registry.Get(exec.OrchestrationId);
+					if (entry == null) return false;
+					var tags = _tagStore.GetEffectiveTags(entry.Id, entry.Orchestration.Tags);
+					return profile.Filter.Matches(entry.Id, tags);
+				}).ToArray();
+			}
+		}
+
 		var table = new Table()
 			.AddColumn("Orchestration")
 			.AddColumn("Step")
@@ -1792,7 +1940,7 @@ public class TerminalUI
 		}
 
 		return new Panel(table)
-			.Header("[bold]Active Executions[/] [dim]|[/] [dim]c[/]=Cancel [dim]Enter[/]=Details")
+			.Header($"[bold]Active Executions[/]{GetProfileFilterLabel()} [dim]|[/] [dim]c[/]=Cancel [dim]f[/]=Filter [dim]Enter[/]=Details")
 			.Border(BoxBorder.Rounded);
 	}
 
@@ -1830,6 +1978,18 @@ public class TerminalUI
 		{
 			infoRows.Add(new Markup($"[bold]Parameters:[/]  {string.Join(", ", parameters.Select(p => $"[cyan]{Markup.Escape(p)}[/]"))}"));
 		}
+
+		// Show tags
+		var effectiveTags = _tagStore.GetEffectiveTags(entry.Id, o.Tags);
+		if (effectiveTags.Length > 0)
+		{
+			var tagChips = string.Join("  ", effectiveTags.Select(t => $"[cyan]#{Markup.Escape(t)}[/]"));
+			infoRows.Add(new Markup($"[bold]Tags:[/]        {tagChips}"));
+		}
+
+		// Show profile active status
+		var isActive = _profileManager.IsOrchestrationActive(entry.Id);
+		infoRows.Add(new Markup($"[bold]Profile:[/]     {(isActive ? "[green]Active[/]" : "[dim]Inactive[/]")}"));
 
 		// Show MCP servers used by this orchestration
 		var orchMcps = new List<Mcp>();
@@ -3397,6 +3557,7 @@ public class TerminalUI
 				rows.Add(new Markup("[bold]Dashboard:[/]"));
 				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate menu"));
 				rows.Add(new Markup("  [cyan]Enter[/]              Select item"));
+				rows.Add(new Markup("  [cyan]1-9[/]               Switch views"));
 				break;
 			case TuiView.Orchestrations:
 				rows.Add(new Markup("[bold]Orchestrations:[/]"));
@@ -3406,6 +3567,7 @@ public class TerminalUI
 				rows.Add(new Markup("  [cyan]a[/]                  Add orchestration from file path"));
 				rows.Add(new Markup("  [cyan]s[/]                  Scan directory for orchestrations"));
 				rows.Add(new Markup("  [cyan]d[/] / [cyan]Delete[/]       Remove orchestration"));
+				rows.Add(new Markup("  [cyan]f[/]                  Cycle profile filter"));
 				break;
 			case TuiView.Triggers:
 				rows.Add(new Markup("[bold]Triggers:[/]"));
@@ -3428,6 +3590,7 @@ public class TerminalUI
 				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate list"));
 				rows.Add(new Markup("  [cyan]Enter[/]              View execution details"));
 				rows.Add(new Markup("  [cyan]c[/]                  Cancel execution"));
+				rows.Add(new Markup("  [cyan]f[/]                  Cycle profile filter"));
 				break;
 			case TuiView.ExecutionDetail:
 				rows.Add(new Markup("[bold]Execution Detail:[/]"));
@@ -3500,6 +3663,21 @@ public class TerminalUI
 				rows.Add(new Markup("  [cyan]Shift+Tab[/]          Previous wizard step"));
 				rows.Add(new Markup("  [cyan]Esc[/]               Cancel / Go back"));
 				break;
+			case TuiView.Profiles:
+				rows.Add(new Markup("[bold]Profiles:[/]"));
+				rows.Add(new Markup("  [cyan]j/k[/] or [cyan]Up/Down[/]  Navigate list"));
+				rows.Add(new Markup("  [cyan]Enter[/]              View profile details"));
+				rows.Add(new Markup("  [cyan]e[/]                  Activate/deactivate profile"));
+				rows.Add(new Markup("  [cyan]d[/] / [cyan]Delete[/]       Delete profile"));
+				rows.Add(new Markup("  [cyan]F5[/]                 Refresh list"));
+				rows.Add(new Markup("  [cyan]Esc[/]               Go back"));
+				break;
+			case TuiView.ProfileDetail:
+				rows.Add(new Markup("[bold]Profile Detail:[/]"));
+				rows.Add(new Markup("  [cyan]e[/]                  Activate/deactivate profile"));
+				rows.Add(new Markup("  [cyan]d[/] / [cyan]Delete[/]       Delete profile"));
+				rows.Add(new Markup("  [cyan]Esc[/]               Go back"));
+				break;
 		}
 
 		rows.Add(new Markup(""));
@@ -3515,7 +3693,7 @@ public class TerminalUI
 	{
 		var shortcuts = _currentView switch
 		{
-			TuiView.Dashboard => "[dim]j/k[/] Navigate  [dim]Enter[/] Select  [dim]1-8[/] Views  [dim]?[/] Help  [dim]q[/] Quit",
+			TuiView.Dashboard => "[dim]j/k[/] Navigate  [dim]Enter[/] Select  [dim]1-9[/] Views  [dim]?[/] Help  [dim]q[/] Quit",
 			TuiView.Orchestrations => "[dim]j/k[/] Navigate  [dim]Enter[/] Details  [dim]r[/] Run  [dim]a[/] Add  [dim]s[/] Scan  [dim]d[/] Delete  [dim]/[/] Search  [dim]?[/] Help",
 			TuiView.Triggers => "[dim]j/k[/] Navigate  [dim]n[/] New  [dim]e[/] Enable/Disable  [dim]r[/] Run  [dim]d[/] Delete  [dim]/[/] Search  [dim]?[/] Help",
 			TuiView.History => "[dim]j/k[/] Navigate  [dim]Enter[/] Details  [dim]d[/] Delete  [dim]n/p[/] Page  [dim]/[/] Search  [dim]?[/] Help",
@@ -3531,6 +3709,8 @@ public class TerminalUI
 			TuiView.RawJsonView => "[dim]j/k[/] Scroll  [dim]PgUp/PgDn[/] Page  [dim]Esc[/] Back  [dim]?[/] Help",
 			TuiView.Checkpoints => "[dim]j/k[/] Navigate  [dim]Enter/r[/] Resume  [dim]d[/] Delete  [dim]x[/] Delete All  [dim]F5[/] Refresh  [dim]?[/] Help",
 			TuiView.TriggerCreate => "[dim]j/k[/] Navigate  [dim]Enter[/] Select/Edit  [dim]Tab[/] Next Step  [dim]Esc[/] Back/Cancel  [dim]?[/] Help",
+			TuiView.Profiles => "[dim]j/k[/] Navigate  [dim]Enter[/] Details  [dim]e[/] Activate/Deactivate  [dim]d[/] Delete  [dim]/[/] Search  [dim]?[/] Help",
+			TuiView.ProfileDetail => "[dim]e[/] Activate/Deactivate  [dim]d[/] Delete  [dim]Esc[/] Back  [dim]?[/] Help",
 			_ => ""
 		};
 
@@ -3994,6 +4174,325 @@ public class TerminalUI
 		return new Panel(new Rows(rows))
 			.Header($"[bold]Checkpoints[/] [dim]({checkpoints.Count})[/] [dim]|[/] [dim]Enter/r[/]=Resume [dim]d[/]=Delete [dim]x[/]=Delete All")
 			.Border(BoxBorder.Rounded);
+	}
+
+	#endregion
+
+	#region Profiles
+
+	private void HandleProfilesInput(ConsoleKeyInfo key)
+	{
+		var profiles = _cachedProfiles ??= _profileManager.GetAllProfiles();
+		var items = profiles.ToArray();
+		switch (key.Key)
+		{
+			case ConsoleKey.UpArrow or ConsoleKey.K:
+				_selectedIndex = Math.Max(0, _selectedIndex - 1);
+				break;
+			case ConsoleKey.DownArrow or ConsoleKey.J:
+				_selectedIndex = Math.Min(Math.Max(0, items.Length - 1), _selectedIndex + 1);
+				break;
+			case ConsoleKey.Enter:
+				// View profile detail
+				if (items.Length > 0 && _selectedIndex < items.Length)
+				{
+					_selectedProfileId = items[_selectedIndex].Id;
+					NavigateTo(TuiView.ProfileDetail);
+				}
+				break;
+			case ConsoleKey.E:
+				// Toggle enable/disable (activate/deactivate) profile
+				if (items.Length > 0 && _selectedIndex < items.Length)
+				{
+					var profile = items[_selectedIndex];
+					if (profile.IsActive)
+					{
+						_profileManager.DeactivateProfile(profile.Id);
+						ShowTransientMessage($"[yellow]Deactivated:[/] {Markup.Escape(profile.Name)}");
+					}
+					else
+					{
+						_profileManager.ActivateProfile(profile.Id);
+						ShowTransientMessage($"[green]Activated:[/] {Markup.Escape(profile.Name)}");
+					}
+					_cachedProfiles = null; // Refresh
+				}
+				break;
+			case ConsoleKey.D or ConsoleKey.Delete:
+				// Delete profile with confirmation
+				if (items.Length > 0 && _selectedIndex < items.Length)
+				{
+					var profile = items[_selectedIndex];
+					RequestConfirmation(
+						$"Delete profile [cyan]{Markup.Escape(profile.Name)}[/]? [dim](y/n)[/]",
+						() =>
+						{
+							_profileManager.DeleteProfile(profile.Id);
+							_cachedProfiles = null; // Refresh
+							_selectedIndex = Math.Max(0, _selectedIndex - 1);
+							ShowTransientMessage($"[green]Deleted:[/] {Markup.Escape(profile.Name)}");
+						});
+				}
+				break;
+			case ConsoleKey.F5:
+				// Force refresh
+				_cachedProfiles = null;
+				_selectedIndex = 0;
+				break;
+		}
+	}
+
+	private void HandleProfileDetailInput(ConsoleKeyInfo key)
+	{
+		var profile = _selectedProfileId != null ? _profileManager.GetProfile(_selectedProfileId) : null;
+		if (profile == null)
+		{
+			NavigateBack();
+			return;
+		}
+
+		switch (key.Key)
+		{
+			case ConsoleKey.E:
+				// Toggle activate/deactivate
+				if (profile.IsActive)
+				{
+					_profileManager.DeactivateProfile(profile.Id);
+					ShowTransientMessage($"[yellow]Deactivated:[/] {Markup.Escape(profile.Name)}");
+				}
+				else
+				{
+					_profileManager.ActivateProfile(profile.Id);
+					ShowTransientMessage($"[green]Activated:[/] {Markup.Escape(profile.Name)}");
+				}
+				_cachedProfiles = null;
+				break;
+			case ConsoleKey.D or ConsoleKey.Delete:
+				RequestConfirmation(
+					$"Delete profile [cyan]{Markup.Escape(profile.Name)}[/]? [dim](y/n)[/]",
+					() =>
+					{
+						_profileManager.DeleteProfile(profile.Id);
+						_cachedProfiles = null;
+						ShowTransientMessage($"[green]Deleted:[/] {Markup.Escape(profile.Name)}");
+						NavigateBack();
+					});
+				break;
+		}
+	}
+
+	private Panel RenderProfiles()
+	{
+		var profiles = _cachedProfiles ??= _profileManager.GetAllProfiles();
+		var items = profiles.ToArray();
+
+		if (items.Length == 0)
+		{
+			var emptyRows = new List<IRenderable>
+			{
+				new Markup(""),
+				new Markup("[dim]No profiles found.[/]"),
+				new Markup(""),
+				new Markup("[dim]Profiles control which orchestrations have their triggers armed.[/]"),
+				new Markup("[dim]A default profile with wildcard tag \"*\" is created automatically[/]"),
+				new Markup("[dim]when orchestrations are registered.[/]"),
+			};
+			return new Panel(new Rows(emptyRows))
+				.Header("[bold]Profiles[/] [dim](0)[/]")
+				.Border(BoxBorder.Rounded);
+		}
+
+		var effectiveSet = _profileManager.GetEffectiveActiveOrchestrationIds();
+
+		var table = new Table()
+			.Border(TableBorder.Rounded)
+			.AddColumn(new TableColumn("[bold]#[/]").Width(4))
+			.AddColumn(new TableColumn("[bold]Name[/]"))
+			.AddColumn(new TableColumn("[bold]Status[/]").Width(12))
+			.AddColumn(new TableColumn("[bold]Tags[/]"))
+			.AddColumn(new TableColumn("[bold]Schedule[/]").Width(22))
+			.AddColumn(new TableColumn("[bold]Matching[/]").Width(10));
+
+		for (var i = 0; i < items.Length; i++)
+		{
+			var profile = items[i];
+			var isSelected = i == _selectedIndex;
+			var prefix = isSelected ? "[bold cyan]> [/]" : "  ";
+			var style = isSelected ? "[bold]" : "[dim]";
+			var endStyle = "[/]";
+
+			var statusText = profile.IsActive
+				? "[green]Active[/]"
+				: "[dim]Inactive[/]";
+
+			// Tags display
+			var tagsText = profile.Filter.IsWildcard
+				? "[yellow]*[/] [dim](all)[/]"
+				: profile.Filter.Tags.Length > 0
+					? string.Join(", ", profile.Filter.Tags.Take(3).Select(t => $"[cyan]{Markup.Escape(t)}[/]"))
+					  + (profile.Filter.Tags.Length > 3 ? $" [dim]+{profile.Filter.Tags.Length - 3}[/]" : "")
+					: "[dim]none[/]";
+
+			// Schedule display
+			var scheduleText = "[dim]manual[/]";
+			if (profile.Schedule is { Windows.Length: > 0 })
+			{
+				var firstWindow = profile.Schedule.Windows[0];
+				var days = firstWindow.Days.Length > 0
+					? string.Join(",", firstWindow.Days.Take(2))
+					: "everyday";
+				scheduleText = $"{days} {firstWindow.StartTime}-{firstWindow.EndTime}";
+				if (profile.Schedule.Windows.Length > 1)
+					scheduleText += $" +{profile.Schedule.Windows.Length - 1}";
+			}
+
+			// Matching count
+			var matchCount = CountMatchingOrchestrations(profile);
+
+			table.AddRow(
+				new Markup($"{prefix}{style}{i + 1}{endStyle}"),
+				new Markup($"{prefix}{style}{Markup.Escape(profile.Name)}{endStyle}"),
+				new Markup(statusText),
+				new Markup(tagsText),
+				new Markup($"{style}{Markup.Escape(scheduleText)}{endStyle}"),
+				new Markup($"{style}{matchCount}{endStyle}")
+			);
+		}
+
+		var rows = new List<IRenderable> { table };
+
+		// Summary line
+		var activeProfileCount = items.Count(p => p.IsActive);
+		rows.Add(new Markup($"[dim]{items.Length} profiles ({activeProfileCount} active) | {effectiveSet.Count} orchestrations in effective active set[/]"));
+
+		return new Panel(new Rows(rows))
+			.Header($"[bold]Profiles[/] [dim]({items.Length})[/]")
+			.Border(BoxBorder.Rounded);
+	}
+
+	private Panel RenderProfileDetail()
+	{
+		var profile = _selectedProfileId != null ? _profileManager.GetProfile(_selectedProfileId) : null;
+		if (profile == null)
+		{
+			return new Panel(new Markup("[red]Profile not found[/]"))
+				.Header("[bold]Profile Detail[/]")
+				.Border(BoxBorder.Rounded);
+		}
+
+		var rows = new List<IRenderable>
+		{
+			new Markup($"[bold]Name:[/]        {Markup.Escape(profile.Name)}"),
+			new Markup($"[bold]ID:[/]          [dim]{Markup.Escape(profile.Id)}[/]"),
+			new Markup($"[bold]Status:[/]      {(profile.IsActive ? "[green]Active[/]" : "[dim]Inactive[/]")}"),
+			new Markup($"[bold]Description:[/] {Markup.Escape(profile.Description ?? "(none)")}"),
+			new Markup($"[bold]Created:[/]     {profile.CreatedAt:yyyy-MM-dd HH:mm:ss}"),
+			new Markup($"[bold]Updated:[/]     {profile.UpdatedAt:yyyy-MM-dd HH:mm:ss}"),
+		};
+
+		if (profile.ActivatedAt.HasValue)
+			rows.Add(new Markup($"[bold]Last Activated:[/]   {profile.ActivatedAt:yyyy-MM-dd HH:mm:ss}"));
+		if (profile.DeactivatedAt.HasValue)
+			rows.Add(new Markup($"[bold]Last Deactivated:[/] {profile.DeactivatedAt:yyyy-MM-dd HH:mm:ss}"));
+
+		rows.Add(new Markup(""));
+
+		// Filter section
+		rows.Add(new Markup("[bold underline]Filter[/]"));
+		if (profile.Filter.IsWildcard)
+		{
+			rows.Add(new Markup("  Tags: [yellow]*[/] [dim](matches all orchestrations)[/]"));
+		}
+		else if (profile.Filter.Tags.Length > 0)
+		{
+			var tagChips = string.Join("  ", profile.Filter.Tags.Select(t => $"[cyan]#{Markup.Escape(t)}[/]"));
+			rows.Add(new Markup($"  Tags: {tagChips}"));
+		}
+		else
+		{
+			rows.Add(new Markup("  Tags: [dim]none[/]"));
+		}
+
+		if (profile.Filter.OrchestrationIds.Length > 0)
+		{
+			rows.Add(new Markup($"  Include IDs: {string.Join(", ", profile.Filter.OrchestrationIds.Select(id => $"[green]{Markup.Escape(id)}[/]"))}"));
+		}
+		if (profile.Filter.ExcludeOrchestrationIds.Length > 0)
+		{
+			rows.Add(new Markup($"  Exclude IDs: {string.Join(", ", profile.Filter.ExcludeOrchestrationIds.Select(id => $"[red]{Markup.Escape(id)}[/]"))}"));
+		}
+
+		rows.Add(new Markup(""));
+
+		// Schedule section
+		rows.Add(new Markup("[bold underline]Schedule[/]"));
+		if (profile.Schedule is { Windows.Length: > 0 })
+		{
+			if (!string.IsNullOrWhiteSpace(profile.Schedule.Timezone))
+				rows.Add(new Markup($"  Timezone: [cyan]{Markup.Escape(profile.Schedule.Timezone)}[/]"));
+
+			foreach (var window in profile.Schedule.Windows)
+			{
+				var days = window.Days.Length > 0
+					? string.Join(", ", window.Days)
+					: "everyday";
+				rows.Add(new Markup($"  [cyan]{Markup.Escape(days)}[/]  {window.StartTime} - {window.EndTime}{(window.IsOvernight ? " [yellow](overnight)[/]" : "")}"));
+			}
+		}
+		else
+		{
+			rows.Add(new Markup("  [dim]No schedule (manually controlled)[/]"));
+		}
+
+		rows.Add(new Markup(""));
+
+		// Matching orchestrations section
+		rows.Add(new Markup("[bold underline]Matching Orchestrations[/]"));
+		var allEntries = _registry.GetAll().ToArray();
+		var matchingEntries = new List<(string Id, string Name, string[] Tags)>();
+		foreach (var entry in allEntries)
+		{
+			var effectiveTags = _tagStore.GetEffectiveTags(entry.Id, entry.Orchestration.Tags);
+			if (profile.Filter.Matches(entry.Id, effectiveTags))
+			{
+				matchingEntries.Add((entry.Id, entry.Orchestration.Name, effectiveTags));
+			}
+		}
+
+		if (matchingEntries.Count == 0)
+		{
+			rows.Add(new Markup("  [dim]No orchestrations match this profile's filter[/]"));
+		}
+		else
+		{
+			foreach (var (id, name, tags) in matchingEntries.Take(15))
+			{
+				var tagText = tags.Length > 0
+					? " " + string.Join(" ", tags.Take(3).Select(t => $"[dim]#{Markup.Escape(t)}[/]"))
+					: "";
+				rows.Add(new Markup($"  [green]\u2022[/] {Markup.Escape(name)}{tagText}"));
+			}
+			if (matchingEntries.Count > 15)
+			{
+				rows.Add(new Markup($"  [dim]... and {matchingEntries.Count - 15} more[/]"));
+			}
+		}
+
+		return new Panel(new Rows(rows))
+			.Header($"[bold]Profile:[/] {Markup.Escape(profile.Name)}")
+			.Border(BoxBorder.Rounded);
+	}
+
+	private int CountMatchingOrchestrations(Host.Profiles.Profile profile)
+	{
+		var count = 0;
+		foreach (var entry in _registry.GetAll())
+		{
+			var effectiveTags = _tagStore.GetEffectiveTags(entry.Id, entry.Orchestration.Tags);
+			if (profile.Filter.Matches(entry.Id, effectiveTags))
+				count++;
+		}
+		return count;
 	}
 
 	#endregion
@@ -4649,7 +5148,9 @@ public enum TuiView
 	DagView,
 	RawJsonView,
 	Checkpoints,
-	TriggerCreate
+	TriggerCreate,
+	Profiles,
+	ProfileDetail
 }
 
 /// <summary>

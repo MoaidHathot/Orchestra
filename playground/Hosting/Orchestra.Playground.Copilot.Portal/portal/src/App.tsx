@@ -12,6 +12,7 @@ import type {
   Step,
   TraceData,
   RunContext,
+  Profile,
 } from './types';
 import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
 import StatusBar from './components/StatusBar';
@@ -24,6 +25,7 @@ import RunModal from './components/modals/RunModal';
 import ExecutionModal from './components/modals/ExecutionModal';
 import McpsModal from './components/modals/McpsModal';
 import BuilderModal from './components/modals/BuilderModal';
+import ProfilesModal from './components/modals/ProfilesModal';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 
@@ -178,6 +180,14 @@ function App(): React.JSX.Element {
   const [mcpsModal, setMcpsModal] = useState<McpsModalState>({ open: false });
   const [activeModal, setActiveModal] = useState<ActiveModalState>({ open: false, data: null, loading: false });
   const [builderModal, setBuilderModal] = useState(false);
+  const [profilesModal, setProfilesModal] = useState(false);
+
+  // Profile data for filtering & membership display
+  const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [profileFilter, setProfileFilter] = useState<string[]>([]); // empty = all, array of profile ids = multi-select
+  const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
+  const [mainPaneProfileFilter, setMainPaneProfileFilter] = useState<string[]>([]); // same logic for main pane
+  const [mainPaneProfileDropdownOpen, setMainPaneProfileDropdownOpen] = useState(false);
 
   // History filter state (persisted in localStorage)
   const [hideIncomplete, setHideIncomplete] = useState<boolean>(() => {
@@ -233,6 +243,18 @@ function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  // Load profiles for filter & membership display
+  const loadProfiles = useCallback(async () => {
+    try {
+      const data = await api.get<{ count: number; profiles: Profile[] }>('/api/profiles');
+      setProfiles(data.profiles || []);
+    } catch (err) {
+      console.error('Failed to load profiles:', err);
+    }
+  }, []);
+
+  useEffect(() => { loadProfiles(); }, [loadProfiles]);
 
   // Reload data when coming back online
   useEffect(() => {
@@ -297,21 +319,94 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval);
   }, []);
 
+  // ── Profile membership helper ──────────────────────────────────────────────
+
+  /** Returns profiles that match a given orchestration based on filter rules. */
+  const getProfilesForOrchestration = useCallback((orch: Orchestration): Profile[] => {
+    return profiles.filter(p => {
+      const f = p.filter;
+      // Check explicit excludes
+      if (f.excludeOrchestrationIds?.length > 0 && f.excludeOrchestrationIds.includes(orch.id)) return false;
+      // Check explicit includes
+      if (f.orchestrationIds?.length > 0 && f.orchestrationIds.includes(orch.id)) return true;
+      // Check wildcard
+      if (f.tags?.includes('*')) return true;
+      // Check tag match
+      if (f.tags?.length > 0 && orch.tags?.length) {
+        return f.tags.some(t => orch.tags!.includes(t));
+      }
+      return false;
+    });
+  }, [profiles]);
+
+  /** Check if an orchestration (by ID) matches any of the given profile IDs. */
+  const orchMatchesProfileFilter = useCallback((orchId: string, selectedProfileIds: string[]): boolean => {
+    if (selectedProfileIds.length === 0) return true;
+    const orch = orchestrations.find(o => o.id === orchId);
+    if (!orch) return true; // if we can't find the orchestration, don't filter it out
+    const selectedProfiles = profiles.filter(p => selectedProfileIds.includes(p.id));
+    return selectedProfiles.some(sp => {
+      const f = sp.filter;
+      if (f.excludeOrchestrationIds?.length > 0 && f.excludeOrchestrationIds.includes(orchId)) return false;
+      if (f.orchestrationIds?.length > 0 && f.orchestrationIds.includes(orchId)) return true;
+      if (f.tags?.includes('*')) return true;
+      if (f.tags?.length > 0 && orch.tags?.length) {
+        return f.tags.some(t => orch.tags!.includes(t));
+      }
+      return false;
+    });
+  }, [profiles, orchestrations]);
+
+  // ── Filtered active data by main pane profile filter ──
+
+  const filteredActiveData = useMemo(() => {
+    if (mainPaneProfileFilter.length === 0) return activeData;
+    return {
+      running: activeData.running.filter(exec => orchMatchesProfileFilter(exec.orchestrationId, mainPaneProfileFilter)),
+      pending: activeData.pending.filter(exec => orchMatchesProfileFilter(exec.orchestrationId, mainPaneProfileFilter)),
+    };
+  }, [activeData, mainPaneProfileFilter, orchMatchesProfileFilter]);
+
   // ── Filtered / enabled orchestrations ─────────────────────────────────────
 
   const filteredOrchestrations = useMemo(() => {
-    if (!searchQuery) return orchestrations;
-    const q = searchQuery.toLowerCase();
-    return orchestrations.filter(o =>
-      o.name?.toLowerCase().includes(q) ||
-      o.description?.toLowerCase().includes(q) ||
-      o.triggerType?.toLowerCase().includes(q) ||
-      o.steps?.some((step: Step | string) => {
-        const stepName = typeof step === 'string' ? step : step.name;
-        return stepName?.toLowerCase().includes(q);
-      })
-    );
-  }, [orchestrations, searchQuery]);
+    let result = orchestrations;
+
+    // Text search filter
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(o =>
+        o.name?.toLowerCase().includes(q) ||
+        o.description?.toLowerCase().includes(q) ||
+        o.triggerType?.toLowerCase().includes(q) ||
+        o.steps?.some((step: Step | string) => {
+          const stepName = typeof step === 'string' ? step : step.name;
+          return stepName?.toLowerCase().includes(q);
+        })
+      );
+    }
+
+    // Multi-profile filter (union: orchestration matches if ANY selected profile includes it)
+    if (profileFilter.length > 0) {
+      const selectedProfiles = profiles.filter(p => profileFilter.includes(p.id));
+      if (selectedProfiles.length > 0) {
+        result = result.filter(o => {
+          return selectedProfiles.some(sp => {
+            const f = sp.filter;
+            if (f.excludeOrchestrationIds?.length > 0 && f.excludeOrchestrationIds.includes(o.id)) return false;
+            if (f.orchestrationIds?.length > 0 && f.orchestrationIds.includes(o.id)) return true;
+            if (f.tags?.includes('*')) return true;
+            if (f.tags?.length > 0 && o.tags?.length) {
+              return f.tags.some(t => o.tags!.includes(t));
+            }
+            return false;
+          });
+        });
+      }
+    }
+
+    return result;
+  }, [orchestrations, searchQuery, profileFilter, profiles]);
 
   const enabledOrchestrations = useMemo(() =>
     filteredOrchestrations.filter(o => o.enabled !== false),
@@ -999,8 +1094,89 @@ function App(): React.JSX.Element {
   useKeyboardShortcuts({
     onEscape: useCallback(() => {
       if (sidebarOpen) setSidebarOpen(false);
-    }, [sidebarOpen]),
+      if (profileDropdownOpen) setProfileDropdownOpen(false);
+      if (mainPaneProfileDropdownOpen) setMainPaneProfileDropdownOpen(false);
+    }, [sidebarOpen, profileDropdownOpen, mainPaneProfileDropdownOpen]),
   });
+
+  // ── Profile filter toggle helpers ──
+
+  const toggleSidebarProfileFilter = (profileId: string) => {
+    setProfileFilter(prev =>
+      prev.includes(profileId)
+        ? prev.filter(id => id !== profileId)
+        : [...prev, profileId]
+    );
+  };
+
+  const toggleMainPaneProfileFilter = (profileId: string) => {
+    setMainPaneProfileFilter(prev =>
+      prev.includes(profileId)
+        ? prev.filter(id => id !== profileId)
+        : [...prev, profileId]
+    );
+  };
+
+  // Close dropdowns on outside click
+  const sidebarDropdownRef = useRef<HTMLDivElement>(null);
+  const mainPaneDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (profileDropdownOpen && sidebarDropdownRef.current && !sidebarDropdownRef.current.contains(e.target as Node)) {
+        setProfileDropdownOpen(false);
+      }
+      if (mainPaneProfileDropdownOpen && mainPaneDropdownRef.current && !mainPaneDropdownRef.current.contains(e.target as Node)) {
+        setMainPaneProfileDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [profileDropdownOpen, mainPaneProfileDropdownOpen]);
+
+  /** Render a multi-profile checkbox dropdown */
+  const renderProfileMultiSelect = (
+    selectedIds: string[],
+    onToggle: (id: string) => void,
+    isOpen: boolean,
+    setIsOpen: (v: boolean) => void,
+    onClear: () => void,
+    label: string,
+    dropdownRef: React.RefObject<HTMLDivElement | null>,
+  ) => (
+    <div className="profile-multiselect" ref={dropdownRef as React.RefObject<HTMLDivElement>}>
+      <button
+        className={`profile-multiselect-trigger ${selectedIds.length > 0 ? 'has-selection' : ''}`}
+        onClick={() => setIsOpen(!isOpen)}
+        aria-label={label}
+      >
+        <Icons.Filter />
+        {selectedIds.length === 0 ? 'All profiles' : `${selectedIds.length} profile${selectedIds.length > 1 ? 's' : ''}`}
+        <span className="profile-multiselect-caret">{isOpen ? '\u25B2' : '\u25BC'}</span>
+      </button>
+      {isOpen && (
+        <div className="profile-multiselect-dropdown">
+          {profiles.map(p => (
+            <label key={p.id} className="profile-multiselect-option">
+              <input
+                type="checkbox"
+                checked={selectedIds.includes(p.id)}
+                onChange={() => onToggle(p.id)}
+              />
+              <span className={`status-dot ${p.isActive ? 'enabled' : 'disabled'}`}></span>
+              <span className="profile-multiselect-name">{p.name}</span>
+              {p.filter.tags?.includes('*') && <span className="tag-chip tag-wildcard tag-chip-small" style={{ marginLeft: 'auto' }}>all</span>}
+            </label>
+          ))}
+          {selectedIds.length > 0 && (
+            <button className="profile-multiselect-clear" onClick={() => { onClear(); setIsOpen(false); }}>
+              Clear filter
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1048,6 +1224,22 @@ function App(): React.JSX.Element {
           <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setMcpsModal({ open: true }); setSidebarOpen(false); }}>
             <Icons.Tool /> MCP Tools
           </button>
+          <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setProfilesModal(true); setSidebarOpen(false); }}>
+            <Icons.Shield /> Profiles & Tags
+          </button>
+
+          {/* Profile filter */}
+          {profiles.length > 0 && (
+            renderProfileMultiSelect(
+              profileFilter,
+              toggleSidebarProfileFilter,
+              profileDropdownOpen,
+              setProfileDropdownOpen,
+              () => setProfileFilter([]),
+              'Filter orchestrations by profile',
+              sidebarDropdownRef,
+            )
+          )}
         </div>
 
         <div className="orchestrations-list" role="listbox" aria-label="Orchestrations">
@@ -1111,6 +1303,27 @@ function App(): React.JSX.Element {
                     {orch.triggerType || 'Manual'}
                   </span>
                 </div>
+                {orch.tags && orch.tags.length > 0 && (
+                  <div className="orch-tags">
+                    {orch.tags.map(tag => (
+                      <span key={tag} className={`tag-chip ${tag === '*' ? 'tag-wildcard' : ''}`}>
+                        <Icons.Tag />{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {(() => {
+                  const matchedProfiles = getProfilesForOrchestration(orch);
+                  return matchedProfiles.length > 0 ? (
+                    <div className="orch-profiles">
+                      {matchedProfiles.map(p => (
+                        <span key={p.id} className={`profile-badge ${p.isActive ? 'active' : ''}`}>
+                          <Icons.Shield />{p.name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null;
+                })()}
               </div>
             ))
           )}
@@ -1242,26 +1455,39 @@ function App(): React.JSX.Element {
             <span className="main-title">Active Orchestrations</span>
           </div>
           <div className="main-actions">
+            {profiles.length > 0 && (
+              renderProfileMultiSelect(
+                mainPaneProfileFilter,
+                toggleMainPaneProfileFilter,
+                mainPaneProfileDropdownOpen,
+                setMainPaneProfileDropdownOpen,
+                () => setMainPaneProfileFilter([]),
+                'Filter active orchestrations by profile',
+                mainPaneDropdownRef,
+              )
+            )}
             <span className="text-muted" style={{ fontSize: '12px', marginRight: '8px' }}>
-              {activeData.running.length} running, {activeData.pending.length} pending
+              {filteredActiveData.running.length} running, {filteredActiveData.pending.length} pending
             </span>
             <button className="btn" onClick={loadData}>Refresh</button>
           </div>
         </div>
 
         <div className="cards-container" style={{ overflow: 'auto' }}>
-          {activeData.running.length === 0 && activeData.pending.length === 0 ? (
+          {filteredActiveData.running.length === 0 && filteredActiveData.pending.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><Icons.Activity /></div>
               <div className="empty-title">No Active Orchestrations</div>
               <div className="empty-text">
-                Run an orchestration from the sidebar to see it here, or add scheduled triggers.
+                {mainPaneProfileFilter.length > 0
+                  ? 'No active orchestrations match the selected profile filter.'
+                  : 'Run an orchestration from the sidebar to see it here, or add scheduled triggers.'}
               </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               {/* Running Section */}
-              {activeData.running.length > 0 && (
+              {filteredActiveData.running.length > 0 && (
                 <div>
                   <div style={{
                     fontSize: '13px',
@@ -1273,10 +1499,10 @@ function App(): React.JSX.Element {
                     color: 'var(--text)',
                   }}>
                     <span className="step-status-badge running" style={{ width: '8px', height: '8px', borderRadius: '50%' }}></span>
-                    Running ({activeData.running.length})
+                    Running ({filteredActiveData.running.length})
                   </div>
                   <div className="cards-grid">
-                    {activeData.running.map(exec => (
+                    {filteredActiveData.running.map(exec => (
                       <ActiveOrchestrationCard
                         key={exec.executionId}
                         execution={exec}
@@ -1303,7 +1529,7 @@ function App(): React.JSX.Element {
               )}
 
               {/* Pending Section */}
-              {activeData.pending.length > 0 && (
+              {filteredActiveData.pending.length > 0 && (
                 <div>
                   <div style={{
                     fontSize: '13px',
@@ -1315,10 +1541,10 @@ function App(): React.JSX.Element {
                     color: 'var(--text)',
                   }}>
                     <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--warning)' }}></span>
-                    Pending Triggers ({activeData.pending.length})
+                    Pending Triggers ({filteredActiveData.pending.length})
                   </div>
                   <div className="cards-grid">
-                    {activeData.pending.map((exec, idx) => (
+                    {filteredActiveData.pending.map((exec, idx) => (
                       <ActiveOrchestrationCard
                         key={exec.orchestrationId || idx}
                         execution={exec}
@@ -1453,6 +1679,10 @@ function App(): React.JSX.Element {
             console.error('Failed to save orchestration from builder:', err);
           }
         }}
+      />
+      <ProfilesModal
+        open={profilesModal}
+        onClose={() => { setProfilesModal(false); loadProfiles(); }}
       />
 
       {/* Status Bar */}

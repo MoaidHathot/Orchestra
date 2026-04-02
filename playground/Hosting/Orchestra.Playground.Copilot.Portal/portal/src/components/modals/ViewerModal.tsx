@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Orchestration, Step, McpConfig } from '../../types';
+import type { Orchestration, Step, McpConfig, TagCount } from '../../types';
 import { api } from '../../api';
 import { Icons } from '../../icons';
 import StepDetailsPanel from '../StepDetailsPanel';
@@ -36,6 +36,12 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
   const [error, setError] = useState<string | null>(null);
   const [selectedStep, setSelectedStep] = useState<LooseStep | null>(null);
 
+  // ── Tag editing state ──
+  const [tagInput, setTagInput] = useState('');
+  const [tagSaving, setTagSaving] = useState(false);
+  const [knownTags, setKnownTags] = useState<TagCount[]>([]);
+  const [tagDetails, setTagDetails] = useState<{ effectiveTags: string[]; authorTags: string[]; hostTags: string[] } | null>(null);
+
   // Fetch full orchestration details when modal opens
   useEffect(() => {
     if (open && orchestration?.id) {
@@ -43,9 +49,18 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
       setFullOrchestration(null);
       setSelectedStep(null);
       setError(null);
-      api.get<Orchestration>(`/api/orchestrations/${orchestration.id}`)
-        .then(data => {
+      setTagDetails(null);
+      setTagInput('');
+
+      Promise.all([
+        api.get<Orchestration>(`/api/orchestrations/${orchestration.id}`),
+        api.get<{ orchestrationId: string; effectiveTags: string[]; authorTags: string[]; hostTags: string[] }>(`/api/orchestrations/${orchestration.id}/tags`),
+        api.get<{ count: number; tags: TagCount[] }>('/api/tags'),
+      ])
+        .then(([data, tagData, tagsResp]) => {
           setFullOrchestration(data);
+          setTagDetails(tagData);
+          setKnownTags(tagsResp.tags || []);
         })
         .catch((err: Error) => {
           console.error('Failed to load orchestration details:', err);
@@ -54,6 +69,47 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
         .finally(() => setLoading(false));
     }
   }, [open, orchestration?.id]);
+
+  // ── Tag editing actions ──
+
+  const addTag = async () => {
+    const tag = tagInput.trim().toLowerCase();
+    if (!tag || !orchestration?.id) return;
+    setTagSaving(true);
+    try {
+      const result = await api.post<{ orchestrationId: string; effectiveTags: string[] }>(
+        `/api/orchestrations/${orchestration.id}/tags`,
+        { tags: [tag] }
+      );
+      setTagDetails(prev => prev ? { ...prev, effectiveTags: result.effectiveTags, hostTags: [...prev.hostTags, tag] } : prev);
+      setTagInput('');
+      // Reload known tags
+      const tagsResp = await api.get<{ count: number; tags: TagCount[] }>('/api/tags');
+      setKnownTags(tagsResp.tags || []);
+    } catch (err) {
+      console.error('Failed to add tag:', err);
+    } finally {
+      setTagSaving(false);
+    }
+  };
+
+  const removeTag = async (tag: string) => {
+    if (!orchestration?.id) return;
+    setTagSaving(true);
+    try {
+      const result = await api.delete<{ orchestrationId: string; effectiveTags: string[] }>(
+        `/api/orchestrations/${orchestration.id}/tags/${encodeURIComponent(tag)}`
+      );
+      setTagDetails(prev => prev ? { ...prev, effectiveTags: result.effectiveTags, hostTags: prev.hostTags.filter(t => t !== tag) } : prev);
+      // Reload known tags
+      const tagsResp = await api.get<{ count: number; tags: TagCount[] }>('/api/tags');
+      setKnownTags(tagsResp.tags || []);
+    } catch (err) {
+      console.error('Failed to remove tag:', err);
+    } finally {
+      setTagSaving(false);
+    }
+  };
 
   // Handle step click from DAG
   const handleStepClick = useCallback((stepName: string) => {
@@ -126,8 +182,11 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
                 onClick={() => {
                   setError(null);
                   setLoading(true);
-                  api.get<Orchestration>(`/api/orchestrations/${orchestration.id}`)
-                    .then(data => setFullOrchestration(data))
+                  Promise.all([
+                    api.get<Orchestration>(`/api/orchestrations/${orchestration.id}`),
+                    api.get<{ orchestrationId: string; effectiveTags: string[]; authorTags: string[]; hostTags: string[] }>(`/api/orchestrations/${orchestration.id}/tags`),
+                  ])
+                    .then(([data, tagData]) => { setFullOrchestration(data); setTagDetails(tagData); })
                     .catch((err: Error) => setError(err.message || 'Failed to load'))
                     .finally(() => setLoading(false));
                 }}
@@ -195,6 +254,89 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
                   <div className="form-group">
                     <label className="form-label">Description</label>
                     <p>{displayOrch.description || 'No description'}</p>
+                  </div>
+
+                  {/* Tags (editable) */}
+                  <div className="form-group">
+                    <label className="form-label">Tags</label>
+
+                    {/* Author-defined tags (read-only) */}
+                    {tagDetails?.authorTags && tagDetails.authorTags.length > 0 && (
+                      <div style={{ marginBottom: '8px' }}>
+                        <span className="text-muted" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Author-defined (from orchestration JSON):</span>
+                        <div className="profile-tags">
+                          {tagDetails.authorTags.map(tag => (
+                            <span key={tag} className={`tag-chip ${tag === '*' ? 'tag-wildcard' : ''}`}>
+                              <Icons.Tag />{tag}
+                              <Icons.Lock />
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Host-managed tags (editable) */}
+                    <div style={{ marginBottom: '8px' }}>
+                      <span className="text-muted" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>Host-managed tags (editable):</span>
+                      <div className="profile-tags">
+                        {tagDetails?.hostTags && tagDetails.hostTags.length > 0 ? (
+                          tagDetails.hostTags.map(tag => (
+                            <span key={tag} className="tag-chip">
+                              <Icons.Tag />{tag}
+                              <button
+                                className="tag-chip-remove"
+                                onClick={() => removeTag(tag)}
+                                disabled={tagSaving}
+                                aria-label={`Remove tag ${tag}`}
+                              >
+                                <Icons.X />
+                              </button>
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-muted" style={{ fontSize: '12px' }}>No host-managed tags</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Add tag input */}
+                    <div className="tag-editor-input-row">
+                      <input
+                        type="text"
+                        className="tag-editor-input"
+                        placeholder="Add a tag..."
+                        value={tagInput}
+                        onChange={(e) => setTagInput(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } }}
+                        disabled={tagSaving}
+                      />
+                      <button
+                        className="btn btn-sm"
+                        onClick={addTag}
+                        disabled={!tagInput.trim() || tagSaving}
+                      >
+                        {tagSaving ? '...' : 'Add'}
+                      </button>
+                    </div>
+
+                    {/* Quick-add from known tags */}
+                    {knownTags.length > 0 && (
+                      <div className="tag-editor-suggestions">
+                        <span className="text-muted" style={{ fontSize: '11px' }}>Known tags: </span>
+                        {knownTags
+                          .filter(t => !tagDetails?.effectiveTags?.includes(t.tag))
+                          .map(t => (
+                            <button
+                              key={t.tag}
+                              className="tag-chip tag-chip-small tag-chip-clickable"
+                              onClick={() => { setTagInput(t.tag); }}
+                              disabled={tagSaving}
+                            >
+                              <Icons.Tag />{t.tag}
+                            </button>
+                          ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Parameters */}

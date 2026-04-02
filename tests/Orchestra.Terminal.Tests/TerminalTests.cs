@@ -1,7 +1,9 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Persistence;
+using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
 using Orchestra.Playground.Copilot.Terminal;
@@ -274,7 +276,7 @@ public class TuiViewEnumTests
 	public void All_Views_Are_Defined()
 	{
 		var values = Enum.GetValues<TuiView>();
-		values.Should().HaveCount(16); // Dashboard, Orchestrations, Triggers, History, Active, OrchestrationDetail, ExecutionDetail, EventLog, McpServers, McpDetail, VersionHistory, VersionDiff, DagView, RawJsonView, Checkpoints, TriggerCreate
+		values.Should().HaveCount(18); // Dashboard, Orchestrations, Triggers, History, Active, OrchestrationDetail, ExecutionDetail, EventLog, McpServers, McpDetail, VersionHistory, VersionDiff, DagView, RawJsonView, Checkpoints, TriggerCreate, Profiles, ProfileDetail
 	}
 
 	[Fact]
@@ -1575,7 +1577,7 @@ public class CheckpointViewTests
 	public void TuiView_Checkpoints_Is_Second_To_Last_Value()
 	{
 		var values = Enum.GetValues<TuiView>();
-		values[^2].Should().Be(TuiView.Checkpoints);
+		values[^4].Should().Be(TuiView.Checkpoints);
 	}
 
 	[Fact]
@@ -1791,7 +1793,7 @@ public class TriggerCreateTests
 	public void TuiView_TriggerCreate_Is_Last_Value()
 	{
 		var values = Enum.GetValues<TuiView>();
-		values.Last().Should().Be(TuiView.TriggerCreate);
+		values[^3].Should().Be(TuiView.TriggerCreate);
 	}
 
 	[Fact]
@@ -2083,6 +2085,13 @@ public class TriggerCreateTests
 		var activeInfos = new System.Collections.Concurrent.ConcurrentDictionary<string, ActiveExecutionInfo>();
 		var hostOptions = new OrchestrationHostOptions();
 
+		// Create profile dependencies using a temp directory
+		var tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-test-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempDir);
+		var tagStore = new OrchestrationTagStore(tempDir, NullLogger<OrchestrationTagStore>.Instance);
+		var profileStore = new ProfileStore(tempDir, NullLogger<ProfileStore>.Instance);
+		var profileManager = new ProfileManager(profileStore, tagStore, registry, NullLogger<ProfileManager>.Instance);
+
 		var ui = new TerminalUI(
 			registry,
 			null!, // TriggerManager - not needed for config building/validation tests
@@ -2091,7 +2100,9 @@ public class TriggerCreateTests
 			activeInfos,
 			reporter,
 			callback,
-			hostOptions);
+			hostOptions,
+			profileManager,
+			tagStore);
 
 		return (ui, registry);
 	}

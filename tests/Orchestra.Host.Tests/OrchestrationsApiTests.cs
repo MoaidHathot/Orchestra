@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Middleware;
+using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
 using Xunit;
@@ -75,6 +76,7 @@ public class OrchestrationsApiTests : IDisposable
 					services.AddSingleton(registry);
 					services.AddSingleton<IScheduler>(scheduler);
 					services.AddSingleton(triggerManager);
+					services.AddSingleton(new OrchestrationTagStore(_tempDir, NullLoggerFactory.Instance.CreateLogger<OrchestrationTagStore>()));
 				});
 				webHost.Configure(app =>
 				{

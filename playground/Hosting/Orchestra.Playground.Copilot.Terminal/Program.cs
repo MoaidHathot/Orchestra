@@ -27,7 +27,8 @@ if (args.Contains("--help") || args.Contains("-h"))
 	Console.WriteLine("  ORCHESTRA_HOST_URL               Same as --host-url");
 	Console.WriteLine();
 	Console.WriteLine("Keyboard Shortcuts:");
-	Console.WriteLine("  1-7        Switch views (Dashboard, Orchestrations, Triggers, History, Active, Event Log, MCP Servers)");
+	Console.WriteLine("  1-8        Switch views (Dashboard, Orchestrations, Triggers, History, Active, Event Log, MCP Servers, Checkpoints)");
+	Console.WriteLine("  9          Profiles view (manage profiles & tags)");
 	Console.WriteLine("  j/k or ↑/↓ Navigate up/down");
 	Console.WriteLine("  Enter      Select item / Open detail");
 	Console.WriteLine("  r          Run selected orchestration/trigger");

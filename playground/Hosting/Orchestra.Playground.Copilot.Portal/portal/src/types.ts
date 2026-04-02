@@ -13,6 +13,7 @@ export interface Orchestration {
   mcps?: McpConfig[];
   registeredAt?: string;
   contentHash?: string;
+  tags?: string[];
 }
 
 /**
@@ -248,4 +249,49 @@ export interface BrowseEntry {
   isDirectory: boolean;
   isParent: boolean;
   size?: number;
+}
+
+// ── Profiles & Tags ──
+
+export interface ScheduleWindow {
+  days: string[];
+  startTime: string;
+  endTime: string;
+}
+
+export interface ProfileSchedule {
+  timezone?: string;
+  windows: ScheduleWindow[];
+}
+
+export interface ProfileFilter {
+  tags: string[];
+  orchestrationIds: string[];
+  excludeOrchestrationIds: string[];
+}
+
+export interface Profile {
+  id: string;
+  name: string;
+  description?: string;
+  isActive: boolean;
+  activatedAt?: string;
+  deactivatedAt?: string;
+  filter: ProfileFilter;
+  schedule?: ProfileSchedule | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProfileHistoryEntry {
+  profileId: string;
+  profileName: string;
+  action: string;
+  reason?: string;
+  timestamp: string;
+}
+
+export interface TagCount {
+  tag: string;
+  count: number;
 }

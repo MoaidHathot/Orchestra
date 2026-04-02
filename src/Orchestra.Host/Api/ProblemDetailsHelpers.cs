@@ -28,6 +28,16 @@ public static class ProblemDetailsHelpers
 			instance: instance);
 
 	/// <summary>
+	/// Creates a 409 Conflict Problem Details result.
+	/// </summary>
+	public static IResult Conflict(string detail, string? instance = null)
+		=> Results.Problem(
+			statusCode: StatusCodes.Status409Conflict,
+			title: "Conflict",
+			detail: detail,
+			instance: instance);
+
+	/// <summary>
 	/// Creates a 500 Internal Server Error Problem Details result.
 	/// </summary>
 	public static IResult InternalServerError(string detail, string? instance = null)

@@ -5,6 +5,7 @@ using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Persistence;
+using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
 
@@ -82,6 +83,25 @@ public static class ServiceCollectionExtensions
 			var versionStore = sp.GetRequiredService<IOrchestrationVersionStore>();
 			return new OrchestrationRegistry(persistPath: registryPersistPath, logger: logger, versionStore: versionStore, dataPath: options.DataPath);
 		});
+
+		// ── Profiles & Tags ──
+
+		// Tag store for host-managed orchestration tags
+		services.AddSingleton<OrchestrationTagStore>(sp =>
+			new OrchestrationTagStore(options.DataPath, sp.GetRequiredService<ILogger<OrchestrationTagStore>>()));
+
+		// Profile store for file-system profile persistence
+		services.AddSingleton<ProfileStore>(sp =>
+			new ProfileStore(options.DataPath, sp.GetRequiredService<ILogger<ProfileStore>>()));
+
+		// Profile manager as a hosted background service (schedule evaluation loop)
+		services.AddSingleton<ProfileManager>(sp =>
+			new ProfileManager(
+				sp.GetRequiredService<ProfileStore>(),
+				sp.GetRequiredService<OrchestrationTagStore>(),
+				sp.GetRequiredService<OrchestrationRegistry>(),
+				sp.GetRequiredService<ILogger<ProfileManager>>()));
+		services.AddHostedService(sp => sp.GetRequiredService<ProfileManager>());
 
 		// TriggerManager as a hosted background service
 		services.AddSingleton<TriggerManager>(sp =>
@@ -188,6 +208,7 @@ public static class ServiceProviderExtensions
 		var options = services.GetRequiredService<OrchestrationHostOptions>();
 		var registry = services.GetRequiredService<OrchestrationRegistry>();
 		var triggerManager = services.GetRequiredService<TriggerManager>();
+		var profileManager = services.GetRequiredService<ProfileManager>();
 
 		// Load persisted orchestrations
 		if (options.LoadPersistedOrchestrations)
@@ -230,6 +251,33 @@ public static class ServiceProviderExtensions
 						TriggerSource.Json,
 						triggerId);
 				}
+			}
+		}
+
+		// Initialize profile manager: loads profiles, ensures default, computes initial active set
+		profileManager.Initialize();
+
+		// Subscribe TriggerManager to profile changes: enable/disable triggers based on active set
+		profileManager.OnEffectiveActiveSetChanged += evt =>
+		{
+			foreach (var id in evt.ActivatedOrchestrationIds)
+			{
+				triggerManager.SetTriggerEnabled(id, true);
+			}
+			foreach (var id in evt.DeactivatedOrchestrationIds)
+			{
+				triggerManager.SetTriggerEnabled(id, false);
+			}
+		};
+
+		// Apply the initial effective active set to trigger states.
+		// Orchestrations NOT in the active set should have their triggers disabled.
+		var activeIds = profileManager.GetEffectiveActiveOrchestrationIds();
+		foreach (var trigger in triggerManager.GetAllTriggers())
+		{
+			if (!activeIds.Contains(trigger.Id) && trigger.Config.Enabled)
+			{
+				triggerManager.SetTriggerEnabled(trigger.Id, false);
 			}
 		}
 

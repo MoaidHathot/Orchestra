@@ -40,6 +40,8 @@ public static class EndpointRouteBuilderExtensions
 	///   <item><description>/api/checkpoints - Checkpoint management and resume</description></item>
 	///   <item><description>/api/orchestrations/{id}/resume/{runId} - SSE resume from checkpoint</description></item>
 	///   <item><description>/api/orchestrations/{id}/versions - Version history, snapshots, diffs</description></item>
+	///   <item><description>/api/profiles - Profile CRUD, activate/deactivate, effective set</description></item>
+	///   <item><description>/api/tags - Tag management, orchestration browse/search</description></item>
 	///   <item><description>/api/models - Available AI models</description></item>
 	///   <item><description>/api/mcps - MCP servers used by orchestrations</description></item>
 	///   <item><description>/api/status - Server status</description></item>
@@ -60,6 +62,8 @@ public static class EndpointRouteBuilderExtensions
 		endpoints.MapExecutionApi(jsonOptions);
 		endpoints.MapCheckpointApi(jsonOptions);
 		endpoints.MapVersionsApi(jsonOptions);
+		endpoints.MapProfilesApi(jsonOptions);
+		endpoints.MapTagsApi(jsonOptions);
 		endpoints.MapUtilityApi(jsonOptions);
 
 		return endpoints;
@@ -143,5 +147,25 @@ public static class EndpointRouteBuilderExtensions
 		JsonSerializerOptions? jsonOptions = null)
 	{
 		return endpoints.MapVersionsApi(jsonOptions ?? DefaultJsonOptions);
+	}
+
+	/// <summary>
+	/// Maps only the profile management endpoints.
+	/// </summary>
+	public static IEndpointRouteBuilder MapProfilesEndpoints(
+		this IEndpointRouteBuilder endpoints,
+		JsonSerializerOptions? jsonOptions = null)
+	{
+		return endpoints.MapProfilesApi(jsonOptions ?? DefaultJsonOptions);
+	}
+
+	/// <summary>
+	/// Maps only the tag management and orchestration browse endpoints.
+	/// </summary>
+	public static IEndpointRouteBuilder MapTagsEndpoints(
+		this IEndpointRouteBuilder endpoints,
+		JsonSerializerOptions? jsonOptions = null)
+	{
+		return endpoints.MapTagsApi(jsonOptions ?? DefaultJsonOptions);
 	}
 }

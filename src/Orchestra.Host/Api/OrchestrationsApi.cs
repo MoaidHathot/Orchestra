@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Orchestra.Engine;
 using Orchestra.Host.Persistence;
+using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
 
@@ -23,7 +24,7 @@ public static class OrchestrationsApi
 		var group = endpoints.MapGroup("/api/orchestrations");
 
 		// GET /api/orchestrations - List all registered orchestrations
-		group.MapGet("", (OrchestrationRegistry registry, TriggerManager triggerManager) =>
+		group.MapGet("", (OrchestrationRegistry registry, TriggerManager triggerManager, OrchestrationTagStore tagStore) =>
 		{
 			var orchestrations = registry.GetAll().Select(o =>
 			{
@@ -31,6 +32,7 @@ public static class OrchestrationsApi
 				var lastRun = trigger?.LastFireTime;
 				var nextRun = trigger?.NextFireTime;
 				var parameterNames = o.Orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray();
+				var effectiveTags = tagStore.GetEffectiveTags(o.Id, o.Orchestration.Tags);
 
 				return new
 				{
@@ -41,6 +43,7 @@ public static class OrchestrationsApi
 					description = o.Orchestration.Description,
 					version = o.Orchestration.Version,
 					contentHash = o.ContentHash,
+					tags = effectiveTags,
 					stepCount = o.Orchestration.Steps.Length,
 					steps = o.Orchestration.Steps.Select(s =>
 					{
@@ -109,7 +112,7 @@ public static class OrchestrationsApi
 		});
 
 		// GET /api/orchestrations/{id} - Get a specific orchestration
-		group.MapGet("/{id}", async (string id, OrchestrationRegistry registry, IScheduler scheduler, TriggerManager triggerManager) =>
+		group.MapGet("/{id}", async (string id, OrchestrationRegistry registry, IScheduler scheduler, TriggerManager triggerManager, OrchestrationTagStore tagStore) =>
 		{
 			var entry = registry.Get(id);
 			if (entry is null)
@@ -217,6 +220,7 @@ public static class OrchestrationsApi
 				description = o.Description,
 				version = o.Version,
 				contentHash = entry.ContentHash,
+				tags = tagStore.GetEffectiveTags(entry.Id, o.Tags),
 				versionCount,
 				validationErrors,
 				steps,

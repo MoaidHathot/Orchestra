@@ -65,4 +65,11 @@ public class Orchestration
 	/// which are resolved lazily when the variable is first referenced.
 	/// </summary>
 	public Dictionary<string, string> Variables { get; init; } = [];
+
+	/// <summary>
+	/// Optional author-defined tags for categorizing the orchestration.
+	/// At runtime, these are merged with host-managed tags to form effective tags.
+	/// Used by profiles to filter and group orchestrations.
+	/// </summary>
+	public string[] Tags { get; init; } = [];
 }

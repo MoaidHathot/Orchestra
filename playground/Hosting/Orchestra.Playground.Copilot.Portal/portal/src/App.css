@@ -1566,3 +1566,610 @@
       .builder-props { width: 100%; position: absolute; bottom: 0; left: 0; right: 0; height: 50vh; z-index: 10; }
       .builder-header input.builder-desc-input { display: none; }
     }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       Profiles & Tags
+       ═══════════════════════════════════════════════════════════════════ */
+
+    /* ── Tag chips ── */
+
+    .profile-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 500;
+      background: rgba(88, 166, 255, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(88, 166, 255, 0.25);
+      white-space: nowrap;
+    }
+    .tag-chip svg { width: 10px; height: 10px; }
+    .tag-chip-small {
+      padding: 2px 8px;
+      font-size: 10px;
+    }
+    .tag-chip-count {
+      background: rgba(88, 166, 255, 0.2);
+      padding: 0 5px;
+      border-radius: 8px;
+      margin-left: 2px;
+      font-size: 10px;
+    }
+    .tag-wildcard {
+      background: rgba(163, 113, 247, 0.12);
+      color: var(--purple);
+      border-color: rgba(163, 113, 247, 0.25);
+    }
+    .tag-exclude {
+      background: rgba(248, 81, 73, 0.12);
+      color: var(--error);
+      border-color: rgba(248, 81, 73, 0.25);
+    }
+    .tag-chip-clickable {
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .tag-chip-clickable:hover {
+      background: rgba(88, 166, 255, 0.22);
+      border-color: rgba(88, 166, 255, 0.5);
+    }
+    .tag-wildcard.tag-chip-clickable:hover {
+      background: rgba(163, 113, 247, 0.22);
+      border-color: rgba(163, 113, 247, 0.5);
+    }
+    .tag-chip-remove {
+      background: none;
+      border: none;
+      color: inherit;
+      cursor: pointer;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      opacity: 0.6;
+    }
+    .tag-chip-remove:hover {
+      opacity: 1;
+    }
+    .tag-chip-remove svg { width: 10px; height: 10px; }
+
+    /* ── Tag chips in orchestration list items ── */
+
+    .orch-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .orch-tags .tag-chip {
+      padding: 1px 6px;
+      font-size: 10px;
+      border-radius: 8px;
+    }
+    .orch-tags .tag-chip svg { width: 8px; height: 8px; }
+
+    /* ── Profile filter dropdown ── */
+
+    .profile-filter {
+      margin-top: 8px;
+    }
+    .profile-filter-select {
+      width: 100%;
+      padding: 6px 10px;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      appearance: auto;
+    }
+    .profile-filter-select:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    /* ── Profile membership badges on orchestration items ── */
+
+    .orch-profiles {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 3px;
+    }
+    .profile-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 1px 6px;
+      font-size: 10px;
+      border-radius: 8px;
+      background: var(--border);
+      color: var(--text-secondary);
+    }
+    .profile-badge svg { width: 8px; height: 8px; }
+    .profile-badge.active {
+      background: rgba(34, 197, 94, 0.15);
+      color: var(--success);
+    }
+
+    /* ── Profile summary bar ── */
+
+    .profile-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 16px;
+      background: var(--surface);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    .profile-summary-stats {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .profile-stat {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+    .profile-stat.active {
+      color: var(--success);
+    }
+
+    /* ── Profile tags bar ── */
+
+    .profile-tags-bar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 16px;
+      padding: 8px 12px;
+      background: var(--bg-secondary);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+
+    /* ── Profile cards ── */
+
+    .profile-cards {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .profile-card {
+      background: var(--surface);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      padding: 14px 16px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .profile-card:hover {
+      border-color: var(--border-light);
+      background: var(--surface-hover);
+    }
+    .profile-card.active {
+      border-color: rgba(63, 185, 80, 0.4);
+      background: rgba(63, 185, 80, 0.04);
+    }
+    .profile-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .profile-card-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .profile-card-name {
+      font-weight: 600;
+      font-size: 14px;
+    }
+    .profile-card-actions {
+      display: flex;
+      gap: 4px;
+    }
+    .profile-card-actions .btn-icon {
+      opacity: 0.5;
+      transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }
+    .profile-card:hover .profile-card-actions .btn-icon {
+      opacity: 1;
+    }
+    .profile-card-actions .btn-toggle {
+      opacity: 1;
+    }
+    .profile-card-actions .btn-toggle.enabled {
+      color: var(--success);
+    }
+    .profile-card-actions .btn-toggle:not(.enabled) {
+      color: var(--text-dim);
+    }
+    .profile-card-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+    .profile-card-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .profile-card-schedule {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .profile-card-footer {
+      margin-top: 8px;
+      border-top: 1px solid var(--border);
+      padding-top: 6px;
+    }
+
+    /* ── Profile detail ── */
+
+    .profile-detail {}
+    .profile-detail-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 20px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .profile-detail-section {
+      margin-bottom: 16px;
+      padding: 12px;
+      background: var(--surface);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+    .profile-detail-section-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--text);
+    }
+    .profile-detail-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 6px 12px;
+      font-size: 13px;
+    }
+
+    /* ── Schedule window display ── */
+
+    .schedule-window-display {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: var(--bg-secondary);
+      border-radius: 6px;
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+    .schedule-window-days {
+      color: var(--text);
+    }
+    .schedule-window-time {
+      color: var(--accent);
+      font-family: monospace;
+    }
+
+    /* ── Profile history list ── */
+
+    .profile-history-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .profile-history-entry {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      font-size: 12px;
+      background: var(--bg-secondary);
+      border-radius: 4px;
+    }
+    .profile-history-action {
+      font-weight: 600;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      text-transform: capitalize;
+    }
+    .profile-history-action.activated {
+      background: rgba(63, 185, 80, 0.15);
+      color: var(--success);
+    }
+    .profile-history-action.deactivated {
+      background: rgba(139, 148, 158, 0.15);
+      color: var(--text-muted);
+    }
+
+    /* ── Profile form ── */
+
+    .profile-form {}
+    .profile-form-row {
+      margin-bottom: 16px;
+    }
+    .profile-form-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
+    .profile-form-input {
+      width: 100%;
+      padding: 8px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .profile-form-input:focus {
+      border-color: var(--accent);
+    }
+    .profile-form-input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .profile-form-input-row .profile-form-input {
+      flex: 1;
+    }
+    .profile-form-suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 8px;
+      align-items: center;
+    }
+    .profile-form-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 24px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+    .profile-error {
+      background: rgba(248, 81, 73, 0.1);
+      border: 1px solid rgba(248, 81, 73, 0.3);
+      color: var(--error);
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+
+    /* ── Schedule editor ── */
+
+    .profile-schedule-editor {
+      margin-top: 8px;
+    }
+    .schedule-window {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 8px;
+    }
+    .schedule-window-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .schedule-days {
+      margin-bottom: 8px;
+    }
+    .schedule-day-shortcuts {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+    .schedule-day-pills {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+    }
+    .schedule-day-pill {
+      padding: 4px 10px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .schedule-day-pill.active {
+      background: rgba(88, 166, 255, 0.15);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .schedule-day-pill:hover {
+      border-color: var(--border-light);
+    }
+    .schedule-times {
+      display: flex;
+      gap: 12px;
+    }
+    .schedule-times > div {
+      flex: 1;
+    }
+    .schedule-times .profile-form-input {
+      margin-top: 4px;
+    }
+
+    /* time input styling for dark theme */
+    .schedule-times input[type="time"] {
+      color-scheme: dark;
+    }
+
+    /* ── Tag editor in ViewerModal ── */
+
+    .tag-editor-input-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+    }
+    .tag-editor-input {
+      flex: 1;
+      padding: 6px 10px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 12px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .tag-editor-input:focus {
+      border-color: var(--accent);
+    }
+    .tag-editor-suggestions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 8px;
+      align-items: center;
+    }
+
+    /* ── Multi-profile select dropdown ── */
+
+    .profile-multiselect {
+      position: relative;
+      margin-top: 8px;
+    }
+    .main-actions .profile-multiselect {
+      margin-top: 0;
+    }
+    .profile-multiselect-trigger {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      padding: 6px 10px;
+      background: var(--surface);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      text-align: left;
+    }
+    .main-actions .profile-multiselect-trigger {
+      width: auto;
+      min-width: 140px;
+    }
+    .profile-multiselect-trigger:hover {
+      border-color: var(--border-light);
+    }
+    .profile-multiselect-trigger:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    .profile-multiselect-trigger.has-selection {
+      color: var(--accent);
+      border-color: rgba(88, 166, 255, 0.4);
+    }
+    .profile-multiselect-trigger svg {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+    }
+    .profile-multiselect-caret {
+      margin-left: auto;
+      font-size: 8px;
+      opacity: 0.5;
+    }
+    .profile-multiselect-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      min-width: 200px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      z-index: 100;
+      max-height: 280px;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .profile-multiselect-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.1s;
+      color: var(--text);
+    }
+    .profile-multiselect-option:hover {
+      background: var(--surface-hover);
+    }
+    .profile-multiselect-option input[type="checkbox"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .profile-multiselect-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .profile-multiselect-clear {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      border-top: 1px solid var(--border);
+      background: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      text-align: center;
+      transition: color 0.15s;
+    }
+    .profile-multiselect-clear:hover {
+      color: var(--accent);
+    }
