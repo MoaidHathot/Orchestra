@@ -25,9 +25,10 @@ interface Props {
   orchestration: Orchestration | null;
   onClose: () => void;
   onRun?: () => void;
+  onTagsChanged?: () => void;
 }
 
-function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.Element | null {
+function ViewerModal({ open, orchestration, onClose, onRun, onTagsChanged }: Props): React.JSX.Element | null {
   const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
   const dagRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<'dag' | 'details' | 'json'>('dag');
@@ -86,6 +87,7 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
       // Reload known tags
       const tagsResp = await api.get<{ count: number; tags: TagCount[] }>('/api/tags');
       setKnownTags(tagsResp.tags || []);
+      onTagsChanged?.();
     } catch (err) {
       console.error('Failed to add tag:', err);
     } finally {
@@ -104,6 +106,7 @@ function ViewerModal({ open, orchestration, onClose, onRun }: Props): React.JSX.
       // Reload known tags
       const tagsResp = await api.get<{ count: number; tags: TagCount[] }>('/api/tags');
       setKnownTags(tagsResp.tags || []);
+      onTagsChanged?.();
     } catch (err) {
       console.error('Failed to remove tag:', err);
     } finally {

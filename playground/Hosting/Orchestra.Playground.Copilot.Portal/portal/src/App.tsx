@@ -1585,6 +1585,7 @@ function App(): React.JSX.Element {
             runOrchestration(orch?.id);
           }
         }}
+        onTagsChanged={() => { loadData(); loadProfiles(); }}
       />
       <HistoryModal
         {...historyModal}
