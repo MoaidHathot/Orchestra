@@ -207,6 +207,8 @@ Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, head
 | Environment | `{{env.VAR_NAME}}` | OS environment variable value |
 | Step Output | `{{stepName.output}}` | Output content from a completed step |
 | Step Raw Output | `{{stepName.rawOutput}}` | Raw (unprocessed) output from a completed step |
+| Step Files | `{{stepName.files}}` | JSON array of all file paths saved by a step via `orchestra_save_file` |
+| Step File (indexed) | `{{stepName.files[N]}}` | Path of the Nth file (0-based) saved by a step via `orchestra_save_file` |
 
 ### Orchestration Metadata Properties
 
@@ -272,7 +274,7 @@ Variable values can contain other template expressions, which are resolved when 
 In this example:
 - `{{vars.outputDir}}` resolves to `{{vars.baseDir}}/reports`, then `baseDir` resolves to `/data/prod/reports` (if `env=prod`)
 - `{{vars.logPrefix}}` resolves to `[my-pipeline:abc123]` using live orchestration metadata
-- Variables can reference `{{param.*}}`, `{{orchestration.*}}`, `{{step.*}}`, `{{env.*}}`, `{{stepName.output}}`, and other `{{vars.*}}`
+- Variables can reference `{{param.*}}`, `{{orchestration.*}}`, `{{step.*}}`, `{{env.*}}`, `{{stepName.output}}`, `{{stepName.files}}`, `{{stepName.files[N]}}`, and other `{{vars.*}}`
 
 ### Circular Reference Protection
 

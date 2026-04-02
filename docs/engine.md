@@ -88,6 +88,8 @@ The engine uses `{{expression}}` syntax for dynamic values in prompts, URLs, hea
 | `env` | `{{env.VAR_NAME}}` | Replaced with the OS environment variable value. Undefined variables are left as-is. |
 | Step output | `{{stepName.output}}` | Replaced with the processed output of the named step. |
 | Step raw output | `{{stepName.rawOutput}}` | Replaced with the raw (unprocessed) output of the named step. |
+| Step files | `{{stepName.files}}` | Replaced with a JSON array of all file paths saved by the named step via `orchestra_save_file`. |
+| Step file (indexed) | `{{stepName.files[N]}}` | Replaced with the path of the Nth file (0-based) saved by the named step via `orchestra_save_file`. |
 
 #### Orchestration Metadata
 

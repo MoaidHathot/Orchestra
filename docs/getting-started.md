@@ -208,6 +208,8 @@ Orchestra supports several template expression namespaces for dynamic values in 
 | `{{env.VAR_NAME}}` | OS environment variable value |
 | `{{stepName.output}}` | Output from a completed step |
 | `{{stepName.rawOutput}}` | Raw output from a completed step |
+| `{{stepName.files}}` | JSON array of file paths saved by a step via `orchestra_save_file` |
+| `{{stepName.files[N]}}` | Path of the Nth file (0-based) saved by a step |
 
 All expressions are case-insensitive and whitespace-tolerant.
 
