@@ -67,6 +67,15 @@ public partial class OrchestrationExecutor
 		// Scheduler validates the DAG (detects cycles, missing deps)
 		_ = _scheduler.Schedule(orchestration);
 
+		// Validate all template expressions before execution
+		var parseValidation = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+		if (!parseValidation.IsValid)
+			throw new InvalidOperationException(parseValidation.FormatErrors());
+
+		var runtimeValidation = TemplateExpressionValidator.ValidateRuntime(orchestration, parameters);
+		if (!runtimeValidation.IsValid)
+			throw new InvalidOperationException(runtimeValidation.FormatErrors());
+
 		// Apply orchestration-level timeout if configured
 		CancellationTokenSource? orchestrationTimeoutCts = null;
 		var effectiveCancellationToken = cancellationToken;
@@ -481,6 +490,16 @@ public partial class OrchestrationExecutor
 
 		// Scheduler validates the DAG (detects cycles, missing deps)
 		_ = _scheduler.Schedule(orchestration);
+
+		// Validate all template expressions before execution
+		var resumeParams = checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null;
+		var parseValidation = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+		if (!parseValidation.IsValid)
+			throw new InvalidOperationException(parseValidation.FormatErrors());
+
+		var runtimeValidation = TemplateExpressionValidator.ValidateRuntime(orchestration, resumeParams);
+		if (!runtimeValidation.IsValid)
+			throw new InvalidOperationException(runtimeValidation.FormatErrors());
 
 		// Apply orchestration-level timeout if configured
 		CancellationTokenSource? orchestrationTimeoutCts = null;

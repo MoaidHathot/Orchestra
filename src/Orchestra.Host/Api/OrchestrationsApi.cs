@@ -134,6 +134,16 @@ public static class OrchestrationsApi
 				validationErrors = [ex.Message];
 			}
 
+			// Validate template expressions (parse-time only — no runtime context)
+			var templateValidation = TemplateExpressionValidator.ValidateOrchestration(o);
+			if (!templateValidation.IsValid)
+			{
+				var templateErrors = templateValidation.Errors.Select(e => e.Message).ToArray();
+				validationErrors = validationErrors is not null
+					? [.. validationErrors, .. templateErrors]
+					: templateErrors;
+			}
+
 			var steps = o.Steps.Select(s =>
 			{
 				var ps = s as PromptOrchestrationStep;
