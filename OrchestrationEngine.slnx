@@ -2,20 +2,17 @@
   <Folder Name="/src/">
     <Project Path="src/Orchestra.Engine/Orchestra.Engine.csproj" />
     <Project Path="src/Orchestra.Copilot/Orchestra.Copilot.csproj" />
-    <Project Path="src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj" />
     <Project Path="src/Orchestra.Host/Orchestra.Host.csproj" />
     <Project Path="src/Orchestra.Server/Orchestra.Server.csproj" />
   </Folder>
   <Folder Name="/playground/">
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot/Orchestra.Playground.Copilot.csproj" />
-    <Project Path="playground/Hosting/Orchestra.Playground.Copilot.Web/Orchestra.Playground.Copilot.Web.csproj" />
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot.Portal/Orchestra.Playground.Copilot.Portal.csproj" />
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot.Terminal/Orchestra.Playground.Copilot.Terminal.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj" />
     <Project Path="tests/Orchestra.Engine.Tests/Orchestra.Engine.Tests.csproj" />
-    <Project Path="tests/Orchestra.Mcp.Graph.Tests/Orchestra.Mcp.Graph.Tests.csproj" />
     <Project Path="tests/Orchestra.Copilot.Tests/Orchestra.Copilot.Tests.csproj" />
     <Project Path="tests/Orchestra.Host.Tests/Orchestra.Host.Tests.csproj" />
     <Project Path="tests/Orchestra.Terminal.Tests/Orchestra.Terminal.Tests.csproj" />

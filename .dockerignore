@@ -11,7 +11,6 @@
 **/nul
 .github/
 tests/
-playground/Hosting/Orchestra.Playground.Copilot.Portal/
 playground/Hosting/Orchestra.Playground.Copilot.Terminal/
 playground/Hosting/Orchestra.Playground.Copilot/
 scripts/
@@ -20,5 +19,4 @@ docs/
 *.md
 .editorconfig
 .gitignore
-Dockerfile
 .dockerignore

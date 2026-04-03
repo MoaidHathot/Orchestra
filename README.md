@@ -345,13 +345,6 @@ Orchestra supports [Model Context Protocol](https://modelcontextprotocol.io/) se
       "type": "local",
       "command": "uvx",
       "arguments": ["mcp-server-fetch"]
-    },
-    {
-      "name": "graph",
-      "type": "local",
-      "command": "dotnet",
-      "arguments": ["run", "--project", "src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj"],
-      "workingDirectory": "P:/Github/Orchestra"
     }
   ]
 }
@@ -381,18 +374,6 @@ Define MCPs directly in the orchestration:
   ]
 }
 ```
-
-### Built-in Microsoft Graph MCP
-
-Orchestra includes `Orchestra.Mcp.Graph` with tools for Microsoft 365:
-
-| Category | Tools |
-|----------|-------|
-| Calendar | `get_upcoming_meetings`, `get_recent_meetings`, `get_todays_meetings`, `search_calendar` |
-| Mail | Email reading and management |
-| Chat | Teams chat integration |
-| Teams | Teams and channels management |
-| User | User profile information |
 
 ## Triggers
 

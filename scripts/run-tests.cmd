@@ -45,15 +45,6 @@ if errorlevel 1 (
 )
 
 echo.
-echo 5. Running Mcp.Graph Unit Tests...
-echo --------------------------------
-dotnet test tests/Orchestra.Mcp.Graph.Tests --no-build --logger "console;verbosity=detailed"
-if errorlevel 1 (
-    echo Mcp.Graph tests failed!
-    exit /b 1
-)
-
-echo.
 echo ================================
 echo All unit tests completed successfully!
 echo ================================

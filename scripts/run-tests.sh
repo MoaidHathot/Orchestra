@@ -32,11 +32,6 @@ echo "--------------------------------"
 dotnet test tests/Orchestra.Copilot.Tests --no-build --logger "console;verbosity=detailed"
 
 echo ""
-echo "5. Running Mcp.Graph Unit Tests..."
-echo "--------------------------------"
-dotnet test tests/Orchestra.Mcp.Graph.Tests --no-build --logger "console;verbosity=detailed"
-
-echo ""
 echo "================================"
 echo "All unit tests completed successfully!"
 echo "================================"

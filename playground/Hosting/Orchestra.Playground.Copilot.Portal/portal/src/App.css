@@ -737,6 +737,7 @@
     .file-item:last-child { border-bottom: none; }
     .file-item:hover { background: var(--surface-hover); }
     .file-item.selected { background: rgba(88, 166, 255, 0.15); }
+    .file-item.invalid { opacity: 0.6; cursor: not-allowed; }
     .file-icon { margin-right: 10px; color: var(--text-muted); }
     .file-name { flex: 1; font-size: 13px; }
 

@@ -221,7 +221,7 @@ function ImportProfilesModal({ open, onClose, onImported }: Props): React.JSX.El
                           <span className="file-icon"><Icons.File /></span>
                           <span className="file-name" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.fileName}</span>
                           {file.valid && <span className="file-orch-name" style={{ color: 'var(--text-muted)', fontSize: '10px' }}>{file.name}</span>}
-                          {!file.valid && <span style={{ color: 'var(--error)', fontSize: '10px' }}>Invalid</span>}
+                          {!file.valid && <span style={{ color: 'var(--error)', fontSize: '10px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={file.error}>{file.error || 'Invalid'}</span>}
                         </div>
                       ))}
                     </div>

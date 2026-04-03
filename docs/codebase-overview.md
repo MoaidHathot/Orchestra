@@ -18,7 +18,7 @@ Orchestra is an open-source AI orchestration framework written in C# targeting .
 | Test strategy | Unit (xUnit + NSubstitute), Integration (ASP.NET Testing), E2E (Playwright) |
 | Packaging | Central NuGet versioning (`Directory.Packages.props`) |
 | CI/CD | GitHub Actions (`.github/`) |
-| Containerisation | Docker (`Dockerfile` targets the Web playground) |
+| Containerisation | Docker |
 
 ---
 
@@ -28,24 +28,20 @@ Orchestra is an open-source AI orchestration framework written in C# targeting .
 
 ```
 Orchestra/
-├── src/                          # Core library source (4 projects)
+├── src/                          # Core library source (3 projects)
 │   ├── Orchestra.Engine/         # Core orchestration engine (class library)
 │   ├── Orchestra.Host/           # Hosting/API layer (class library)
-│   ├── Orchestra.Copilot/        # Copilot integration (class library)
-│   └── Orchestra.Mcp.Graph/      # MCP graph server (Exe)
-├── tests/                        # Test projects (7 total)
+│   └── Orchestra.Copilot/        # Copilot integration (class library)
+├── tests/                        # Test projects (5 total)
 │   ├── Orchestra.Engine.Tests/   # Unit — core engine
 │   ├── Orchestra.Host.Tests/     # Unit — hosting/API
 │   ├── Orchestra.Copilot.Tests/  # Unit — Copilot integration
-│   ├── Orchestra.Mcp.Graph.Tests/# Unit — MCP graph server
 │   ├── Orchestra.Terminal.Tests/ # Unit — terminal UI
-│   ├── Orchestra.Portal.Tests/   # Unit — portal
-│   └── Orchestra.Portal.E2E/     # E2E — Playwright
+│   └── Orchestra.Portal.Tests/   # Unit — portal
 ├── playground/
 │   └── Hosting/
 │       ├── Orchestra.Playground.Copilot/         # Console worker
 │       ├── Orchestra.Playground.Copilot.Terminal/ # Terminal UI host
-│       ├── Orchestra.Playground.Copilot.Web/      # ASP.NET Core host
 │       └── Orchestra.Playground.Copilot.Portal/   # Portal host
 ├── examples/                     # Declarative JSON orchestration definitions
 ├── docs/                         # Jekyll documentation site
@@ -56,7 +52,6 @@ Orchestra/
 ├── Directory.Build.props         # Global MSBuild settings (net10.0)
 ├── Directory.Packages.props      # Central NuGet versioning
 ├── nuget.config                  # NuGet feed config
-├── Dockerfile                    # Containerises Web playground
 └── .editorconfig                 # Code style enforcement
 ```
 
@@ -65,23 +60,19 @@ Orchestra/
 ```
 ┌─────────────────────────────────────────────┐
 │              Playground / Hosts             │
-│  Console  │  Terminal  │  Web  │  Portal    │
+│  Console  │  Terminal  │  Portal           │
 ├─────────────────────────────────────────────┤
 │          Orchestra.Host  (API layer)        │
 ├──────────────────────┬──────────────────────┤
 │  Orchestra.Engine    │  Orchestra.Copilot   │
 │  (pipeline core)     │  (Copilot SDK glue)  │
-├──────────────────────┴──────────────────────┤
-│         Orchestra.Mcp.Graph  (Exe)          │
-│         MCP graph server / sidecar          │
-└─────────────────────────────────────────────┘
+└──────────────────────┴──────────────────────┘
 ```
 
 - **Orchestra.Engine** — the central orchestration runtime: pipeline definitions, step execution, scheduling (Cronos), and state management.
 - **Orchestra.Host** — the ASP.NET Core hosting layer; exposes HTTP APIs and wires DI/lifetime management.
 - **Orchestra.Copilot** — thin adapter between the GitHub Copilot SDK and the orchestration engine.
-- **Orchestra.Mcp.Graph** — a standalone MCP server executable surfacing the orchestration graph over the Model Context Protocol.
-- **Playground** — four runnable surfaces (Console, Terminal, Web, Portal) for experimentation; not intended for production deployment.
+- **Playground** — three runnable surfaces (Console, Terminal, Portal) for experimentation; not intended for production deployment.
 
 ### Entry Points
 
@@ -89,9 +80,7 @@ Orchestra/
 |---|---|---|
 | Console worker | `Orchestra.Playground.Copilot` | `IHostedService` / Console |
 | Terminal UI | `Orchestra.Playground.Copilot.Terminal` | `Spectre.Console` TUI |
-| Web API | `Orchestra.Playground.Copilot.Web` | ASP.NET Core |
 | Portal | `Orchestra.Playground.Copilot.Portal` | React SPA + ASP.NET Core |
-| MCP server | `Orchestra.Mcp.Graph` | Standalone Exe |
 
 ---
 
@@ -104,7 +93,7 @@ Orchestra/
 | Backend | C# | .NET 10 (`net10.0`) |
 | Frontend | TypeScript | Node.js / Vite 6 |
 | Docs | Markdown / Liquid | Jekyll (GitHub Pages) |
-| Infrastructure | YAML / Dockerfile | GitHub Actions / Docker |
+| Infrastructure | YAML | GitHub Actions |
 
 ### Frameworks & Libraries
 
@@ -174,7 +163,7 @@ Orchestra/
 
 - [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (preview)
 - [Node.js](https://nodejs.org/) ≥ 20 (for the Portal frontend)
-- Docker (optional — for the containerised Web playground)
+- Docker (optional)
 - A GitHub Copilot-enabled account / token (for Copilot playground surfaces)
 
 ### Build & Run
@@ -188,14 +177,7 @@ dotnet build OrchestrationEngine.slnx
 dotnet test OrchestrationEngine.slnx
 
 # Run a specific playground surface
-dotnet run --project playground/Hosting/Orchestra.Playground.Copilot.Web
-
-# Run the MCP graph server standalone
-dotnet run --project src/Orchestra.Mcp.Graph
-
-# Build & run via Docker (Web surface)
-docker build -t orchestra .
-docker run -p 8080:8080 orchestra
+dotnet run --project playground/Hosting/Orchestra.Playground.Copilot.Portal
 ```
 
 ### Frontend (Portal)
@@ -233,12 +215,10 @@ ls examples/
 
 5. **Introduce architecture decision records (ADRs).** The project makes several bold technology choices (MCP, Copilot SDK, net10). Capturing *why* in `docs/adr/` helps future maintainers avoid re-litigating decisions.
 
-6. **Add a health-check endpoint to the Web playground.** This makes Docker deployments and CI smoke-tests more reliable (`/healthz` via `Microsoft.AspNetCore.Diagnostics.HealthChecks`).
+6. **Add a health-check endpoint to the Portal playground.** This makes CI smoke-tests more reliable (`/healthz` via `Microsoft.AspNetCore.Diagnostics.HealthChecks`).
 
 ### Low Priority / Nice-to-Have
 
 7. **Upgrade React to v19.** React 18 is still maintained, but v19 is stable and brings performance improvements and improved server-component support that may benefit the Portal.
 
-8. **Add integration tests for `Orchestra.Mcp.Graph`.** The MCP graph server is a standalone executable; an integration test using a loopback MCP client would increase confidence when the `ModelContextProtocol` SDK is updated.
-
-9. **Consider a `docker-compose.yml`** that brings up the Web playground + MCP graph server together, lowering the barrier for local end-to-end development.
+8. **Consider a `docker-compose.yml`** that brings up the Portal playground together with any MCP servers, lowering the barrier for local end-to-end development.
