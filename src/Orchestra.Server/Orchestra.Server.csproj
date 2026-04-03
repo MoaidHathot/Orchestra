@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <RootNamespace>Orchestra.Server</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Orchestra.Engine\Orchestra.Engine.csproj" />
+    <ProjectReference Include="..\Orchestra.Copilot\Orchestra.Copilot.csproj" />
+    <ProjectReference Include="..\Orchestra.Host\Orchestra.Host.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+  </ItemGroup>
+
+</Project>

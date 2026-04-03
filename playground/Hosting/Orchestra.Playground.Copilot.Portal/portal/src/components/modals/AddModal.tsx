@@ -199,9 +199,9 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
     setError('');
     try {
       if (activeTab === 'browse') {
-        await api.post('/api/orchestrations/add', { paths: selectedFiles });
+        await api.post('/api/orchestrations', { paths: selectedFiles });
       } else {
-        await api.post('/api/orchestrations/add-json', { json: jsonContent });
+        await api.post('/api/orchestrations/json', { json: jsonContent });
       }
       onAdded();
       onClose();

@@ -4,6 +4,7 @@
     <Project Path="src/Orchestra.Copilot/Orchestra.Copilot.csproj" />
     <Project Path="src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj" />
     <Project Path="src/Orchestra.Host/Orchestra.Host.csproj" />
+    <Project Path="src/Orchestra.Server/Orchestra.Server.csproj" />
   </Folder>
   <Folder Name="/playground/">
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot/Orchestra.Playground.Copilot.csproj" />
@@ -18,5 +19,6 @@
     <Project Path="tests/Orchestra.Copilot.Tests/Orchestra.Copilot.Tests.csproj" />
     <Project Path="tests/Orchestra.Host.Tests/Orchestra.Host.Tests.csproj" />
     <Project Path="tests/Orchestra.Terminal.Tests/Orchestra.Terminal.Tests.csproj" />
+    <Project Path="tests/Orchestra.Server.Tests/Orchestra.Server.Tests.csproj" />
   </Folder>
 </Solution>

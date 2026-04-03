@@ -14,14 +14,15 @@ using Xunit;
 namespace Orchestra.Portal.Tests;
 
 /// <summary>
-/// Integration tests for Portal-specific endpoints:
+/// Integration tests for Portal-specific and Host endpoints:
 /// - GET /api/browse - Browse directories
 /// - POST /api/folder/scan - Scan a folder for orchestration JSON files
 /// - GET /api/file/read - Read file content for preview
-/// - POST /api/orchestrations/add - Register orchestrations from file paths
-/// - POST /api/orchestrations/add-json - Register orchestration from pasted JSON
-/// - POST /api/cancel/{executionId} - Cancel an active execution
-/// - POST /api/orchestrations/{id}/toggle - Enable/disable an orchestration trigger
+/// - POST /api/orchestrations - Register orchestrations from file paths (Host canonical)
+/// - POST /api/orchestrations/json - Register orchestration from pasted JSON (Host canonical)
+/// - POST /api/active/{executionId}/cancel - Cancel an active execution (Host canonical)
+/// - POST /api/orchestrations/{id}/enable - Enable an orchestration trigger (Host canonical)
+/// - POST /api/orchestrations/{id}/disable - Disable an orchestration trigger (Host canonical)
 /// Note: GET /api/folder/browse is not tested here because it opens a native Windows dialog.
 /// </summary>
 public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory>, IDisposable
@@ -446,7 +447,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 	#endregion
 
-	#region POST /api/orchestrations/add
+	#region POST /api/orchestrations (add from file paths)
 
 	[Fact]
 	public async Task OrchestrationsAdd_WithValidFilePaths_RegistersOrchestrations()
@@ -457,7 +458,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		File.WriteAllText(filePath, json);
 
 		// Act
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations",
 			new { paths = new[] { filePath } }, _jsonOptions);
 
 		// Assert
@@ -478,7 +479,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		var fakePath = Path.Combine(_tempDir, "does-not-exist.json");
 
 		// Act
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations",
 			new { paths = new[] { fakePath } }, _jsonOptions);
 
 		// Assert
@@ -502,7 +503,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		""");
 
 		// Act
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations",
 			new { paths = new[] { filePath } }, _jsonOptions);
 
 		// Assert
@@ -513,14 +514,14 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 	#endregion
 
-	#region Helper: Register orchestration via add-json
+	#region Helper: Register orchestration via JSON endpoint
 
 	/// <summary>
-	/// Registers an orchestration via the /api/orchestrations/add-json endpoint and returns the response.
+	/// Registers an orchestration via the /api/orchestrations/json endpoint and returns the response.
 	/// </summary>
 	private async Task<JsonElement> RegisterOrchestrationViaJsonAsync(string json)
 	{
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
 			new { json }, _jsonOptions);
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		return await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -553,7 +554,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 	#endregion
 
-	#region POST /api/orchestrations/add-json
+	#region POST /api/orchestrations/json
 
 	[Fact]
 	public async Task OrchestrationsAddJson_WithValidJson_RegistersOrchestration()
@@ -562,7 +563,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		var json = CreateValidOrchestrationJson("Add JSON Test", "Test adding via pasted JSON");
 
 		// Act
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
 			new { json }, _jsonOptions);
 
 		// Assert
@@ -577,7 +578,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	public async Task OrchestrationsAddJson_WithEmptyJson_ReturnsBadRequest()
 	{
 		// Act
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
 			new { json = "" }, _jsonOptions);
 
 		// Assert
@@ -588,7 +589,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	public async Task OrchestrationsAddJson_WithInvalidJson_ReturnsBadRequest()
 	{
 		// Act
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
 			new { json = "{ invalid json }" }, _jsonOptions);
 
 		// Assert
@@ -597,7 +598,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 	#endregion
 
-	#region POST /api/cancel/{executionId}
+	#region POST /api/active/{executionId}/cancel
 
 	[Fact]
 	public async Task Cancel_WithActiveExecution_CancelsAndReturnsSuccess()
@@ -624,7 +625,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		try
 		{
 			// Act
-			var response = await _client.PostAsync($"/api/cancel/{executionId}", null);
+			var response = await _client.PostAsync($"/api/active/{executionId}/cancel", null);
 
 			// Assert
 			response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -652,25 +653,12 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	public async Task Cancel_WithNonExistentExecution_ReturnsNotFound()
 	{
 		// Act
-		var response = await _client.PostAsync("/api/cancel/nonexistent-execution-id", null);
+		var response = await _client.PostAsync("/api/active/nonexistent-execution-id/cancel", null);
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-		result.GetProperty("error").GetString().Should().Contain("No active execution");
-	}
-
-	[Fact]
-	public async Task Cancel_AlsoAvailableViaHostRoute()
-	{
-		// Verify the Host's canonical cancel route still works
-		// POST /api/active/{executionId}/cancel
-		var response = await _client.PostAsync("/api/active/nonexistent-id/cancel", null);
-
-		// Should return NotFound (not 404 from SPA fallback which would return HTML)
-		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-		var content = await response.Content.ReadAsStringAsync();
-		content.Should().NotContain("<!DOCTYPE html>", "Cancel endpoint should return JSON, not SPA fallback");
+		result.GetProperty("detail").GetString().Should().Contain("No active execution with ID");
 	}
 
 	[Fact]
@@ -698,8 +686,8 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		try
 		{
 			// Act — cancel twice
-			var response1 = await _client.PostAsync($"/api/cancel/{executionId}", null);
-			var response2 = await _client.PostAsync($"/api/cancel/{executionId}", null);
+			var response1 = await _client.PostAsync($"/api/active/{executionId}/cancel", null);
+			var response2 = await _client.PostAsync($"/api/active/{executionId}/cancel", null);
 
 			// Assert — both calls succeed
 			response1.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -752,8 +740,8 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 		try
 		{
-			// Act — cancel via the Portal's /api/cancel endpoint
-			var response = await _client.PostAsync($"/api/cancel/{executionId}", null);
+			// Act — cancel via the canonical /api/active/{executionId}/cancel endpoint
+			var response = await _client.PostAsync($"/api/active/{executionId}/cancel", null);
 			response.StatusCode.Should().Be(HttpStatusCode.OK);
 
 			// Assert — SSE event was emitted
@@ -771,29 +759,20 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 	#endregion
 
-	#region POST /api/orchestrations/{id}/toggle
+	#region POST /api/orchestrations/{id}/enable and /api/orchestrations/{id}/disable
 
 	[Fact]
-	public async Task Toggle_Enable_WithWebhookTrigger_EnablesTrigger()
+	public async Task Enable_WithWebhookTrigger_EnablesTrigger()
 	{
 		// Arrange - Register an orchestration with a disabled webhook trigger
-		var orchName = $"Toggle Enable Test {Guid.NewGuid():N}";
+		var orchName = $"Enable Test {Guid.NewGuid():N}";
 		var json = CreateOrchestrationWithTriggerJson(orchName, "Webhook", enabled: false);
 		var registered = await RegisterOrchestrationViaJsonAsync(json);
 		var orchestrationId = registered.GetProperty("id").GetString()!;
 
-		// First, enable via the Host's /enable endpoint to register the trigger
-		await _client.PostAsync($"/api/orchestrations/{orchestrationId}/enable", null);
-		await Task.Delay(200);
-
-		// Now disable it so we can test toggle
-		await _client.PostAsync($"/api/orchestrations/{orchestrationId}/disable", null);
-		await Task.Delay(200);
-
-		// Act - Toggle to enabled
-		var response = await _client.PostAsJsonAsync(
-			$"/api/orchestrations/{orchestrationId}/toggle",
-			new { enabled = true }, _jsonOptions);
+		// Act - Enable the trigger
+		var response = await _client.PostAsync(
+			$"/api/orchestrations/{orchestrationId}/enable", null);
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -803,19 +782,18 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	}
 
 	[Fact]
-	public async Task Toggle_Disable_WithWebhookTrigger_DisablesTrigger()
+	public async Task Disable_WithWebhookTrigger_DisablesTrigger()
 	{
 		// Arrange - Register an orchestration with an enabled webhook trigger
-		var orchName = $"Toggle Disable Test {Guid.NewGuid():N}";
+		var orchName = $"Disable Test {Guid.NewGuid():N}";
 		var json = CreateOrchestrationWithTriggerJson(orchName, "Webhook", enabled: true);
 		var registered = await RegisterOrchestrationViaJsonAsync(json);
 		var orchestrationId = registered.GetProperty("id").GetString()!;
 		await Task.Delay(200);
 
-		// Act - Toggle to disabled
-		var response = await _client.PostAsJsonAsync(
-			$"/api/orchestrations/{orchestrationId}/toggle",
-			new { enabled = false }, _jsonOptions);
+		// Act - Disable the trigger
+		var response = await _client.PostAsync(
+			$"/api/orchestrations/{orchestrationId}/disable", null);
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -825,21 +803,33 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	}
 
 	[Fact]
-	public async Task Toggle_WithNonExistentOrchestration_ReturnsNotFound()
+	public async Task Enable_WithNonExistentOrchestration_ReturnsNotFound()
 	{
 		// Act
-		var response = await _client.PostAsJsonAsync(
-			"/api/orchestrations/nonexistent-id/toggle",
-			new { enabled = true }, _jsonOptions);
+		var response = await _client.PostAsync(
+			"/api/orchestrations/nonexistent-id/enable", null);
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-		result.GetProperty("error").GetString().Should().Contain("not found");
+		result.GetProperty("detail").GetString().Should().Contain("not found");
 	}
 
 	[Fact]
-	public async Task Toggle_Enable_WithNoTriggerDefined_ReturnsBadRequest()
+	public async Task Disable_WithNonExistentOrchestration_ReturnsNotFound()
+	{
+		// Act
+		var response = await _client.PostAsync(
+			"/api/orchestrations/nonexistent-id/disable", null);
+
+		// Assert
+		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		result.GetProperty("detail").GetString().Should().Contain("not found");
+	}
+
+	[Fact]
+	public async Task Enable_WithNoTriggerDefined_ReturnsBadRequest()
 	{
 		// Arrange - Register an orchestration WITHOUT a trigger
 		var orchName = $"No Trigger Test {Guid.NewGuid():N}";
@@ -847,19 +837,18 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		var registered = await RegisterOrchestrationViaJsonAsync(json);
 		var orchestrationId = registered.GetProperty("id").GetString()!;
 
-		// Act - Try to enable toggle on an orchestration with no trigger
-		var response = await _client.PostAsJsonAsync(
-			$"/api/orchestrations/{orchestrationId}/toggle",
-			new { enabled = true }, _jsonOptions);
+		// Act - Try to enable on an orchestration with no trigger
+		var response = await _client.PostAsync(
+			$"/api/orchestrations/{orchestrationId}/enable", null);
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-		result.GetProperty("error").GetString().Should().Contain("no trigger");
+		result.GetProperty("detail").GetString().Should().Contain("no trigger defined");
 	}
 
 	[Fact]
-	public async Task Toggle_Disable_WithNoTriggerDefined_Succeeds()
+	public async Task Disable_WithNoTriggerDefined_Succeeds()
 	{
 		// Arrange - Register an orchestration WITHOUT a trigger
 		var orchName = $"No Trigger Disable Test {Guid.NewGuid():N}";
@@ -868,9 +857,8 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		var orchestrationId = registered.GetProperty("id").GetString()!;
 
 		// Act - Disabling should succeed (no-op) even without a trigger
-		var response = await _client.PostAsJsonAsync(
-			$"/api/orchestrations/{orchestrationId}/toggle",
-			new { enabled = false }, _jsonOptions);
+		var response = await _client.PostAsync(
+			$"/api/orchestrations/{orchestrationId}/disable", null);
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.OK);

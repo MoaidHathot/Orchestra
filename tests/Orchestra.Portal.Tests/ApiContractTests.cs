@@ -1,13 +1,8 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
-using Microsoft.Extensions.DependencyInjection;
-using Orchestra.Host.Api;
-using Orchestra.Host.Registry;
-using Orchestra.Host.Triggers;
 using Xunit;
 
 namespace Orchestra.Portal.Tests;
@@ -172,7 +167,7 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 			""";
 		}
 
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
 			new { json }, _jsonOptions);
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -486,7 +481,7 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 		}
 		""".Replace("NAME_PLACEHOLDER", name);
 
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
 			new { json }, _jsonOptions);
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -659,7 +654,7 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 		}
 		""";
 
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
 			new { json }, _jsonOptions);
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
@@ -773,35 +768,6 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 
 	#endregion
 
-	#region 6. POST /api/orchestrations/{id}/toggle — Toggle trigger enabled
-
-	[Fact]
-	public async Task Contract_ToggleOrchestration_RouteExists()
-	{
-		var (id, _) = await RegisterTestOrchestrationAsync(withWebhookTrigger: true, triggerEnabled: true);
-		await Task.Delay(200);
-
-		var response = await _client.PostAsJsonAsync(
-			$"/api/orchestrations/{id}/toggle",
-			new { enabled = false }, _jsonOptions);
-
-		await AssertIsApiResponse(response, $"POST /api/orchestrations/{id}/toggle");
-		response.StatusCode.Should().Be(HttpStatusCode.OK);
-	}
-
-	[Fact]
-	public async Task Contract_ToggleOrchestration_WithInvalidId_ReturnsNotFoundNotHtml()
-	{
-		var response = await _client.PostAsJsonAsync(
-			"/api/orchestrations/nonexistent-id/toggle",
-			new { enabled = true }, _jsonOptions);
-
-		await AssertIsApiResponse(response, "POST /api/orchestrations/nonexistent-id/toggle");
-		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-	}
-
-	#endregion
-
 	#region 7. GET /api/orchestrations/{id}/run — SSE run endpoint
 
 	[Fact]
@@ -865,58 +831,7 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 
 	#endregion
 
-	#region 9. POST /api/orchestrations/add — Portal alias
-
-	[Fact]
-	public async Task Contract_AddOrchestrations_RouteExists()
-	{
-		// Send a request with nonexistent paths — the route should exist and return
-		// a structured JSON response (with errors for bad paths), not HTML.
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add",
-			new { paths = new[] { "C:\\nonexistent\\file.json" } }, _jsonOptions);
-
-		await AssertIsApiResponse(response, "POST /api/orchestrations/add");
-		response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-		result.TryGetProperty("addedCount", out _).Should().BeTrue(
-			"Response should have 'addedCount' property");
-	}
-
-	#endregion
-
-	#region 10. POST /api/orchestrations/add-json — Portal alias
-
-	[Fact]
-	public async Task Contract_AddOrchestrationAddJson_RouteExists()
-	{
-		var response = await _client.PostAsJsonAsync("/api/orchestrations/add-json",
-			new { json = "{}" }, _jsonOptions);
-
-		// The route should be registered — we expect a 400 BadRequest for invalid JSON,
-		// NOT an HTML fallback or 405
-		await AssertIsApiResponse(response, "POST /api/orchestrations/add-json");
-		response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-	}
-
-	#endregion
-
-	#region 11. POST /api/cancel/{executionId} — Cancel execution (Portal alias)
-
-	[Fact]
-	public async Task Contract_CancelExecution_RouteExists()
-	{
-		// Even with a nonexistent execution ID, the route should be registered
-		// and return 404 NotFound (not HTML fallback)
-		var response = await _client.PostAsync("/api/cancel/nonexistent-exec-id", null);
-
-		await AssertIsApiResponse(response, "POST /api/cancel/nonexistent-exec-id");
-		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-	}
-
-	#endregion
-
-	#region 12. GET /api/execution/{executionId}/attach — SSE attach endpoint
+	#region 9. GET /api/execution/{executionId}/attach — SSE attach endpoint
 
 	[Fact]
 	public async Task Contract_AttachExecution_RouteExists()
@@ -1165,12 +1080,8 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 	[InlineData("DELETE", "/api/orchestrations/{id}")]
 	[InlineData("POST", "/api/orchestrations/{id}/enable")]
 	[InlineData("POST", "/api/orchestrations/{id}/disable")]
-	[InlineData("POST", "/api/orchestrations/{id}/toggle")]
 	[InlineData("GET", "/api/orchestrations/{id}/run")]
 	[InlineData("POST", "/api/orchestrations/json")]
-	[InlineData("POST", "/api/orchestrations/add")]
-	[InlineData("POST", "/api/orchestrations/add-json")]
-	[InlineData("POST", "/api/cancel/{executionId}")]
 	[InlineData("GET", "/api/execution/{executionId}/attach")]
 	[InlineData("GET", "/api/history?limit=15")]
 	[InlineData("GET", "/api/history/all?offset=0&limit=100")]
@@ -1199,10 +1110,7 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 			// Provide a minimal JSON body for POST endpoints
 			var body = urlTemplate switch
 			{
-				"/api/orchestrations/{id}/toggle" => """{"enabled":true}""",
 				"/api/orchestrations/json" => """{"json":"{}","mcpJson":null}""",
-				"/api/orchestrations/add" => """{"paths":[]}""",
-				"/api/orchestrations/add-json" => """{"json":"{}"}""",
 				"/api/folder/scan" => """{"directory":"C:\\test"}""",
 				_ => "{}"
 			};
