@@ -199,7 +199,16 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
     setError('');
     try {
       if (activeTab === 'browse') {
-        await api.post('/api/orchestrations', { paths: selectedFiles });
+        const result = await api.post<{ addedCount: number; errors: { path: string; error: string }[] }>('/api/orchestrations', { paths: selectedFiles });
+        if (result.errors?.length > 0) {
+          const errorMsg = result.errors.map(e => `${e.path}: ${e.error}`).join('\n');
+          if (result.addedCount === 0) {
+            setError(errorMsg);
+            return;
+          }
+          // Partial success — still close but log
+          console.warn('Some orchestrations failed to add:', result.errors);
+        }
       } else {
         await api.post('/api/orchestrations/json', { json: jsonContent });
       }

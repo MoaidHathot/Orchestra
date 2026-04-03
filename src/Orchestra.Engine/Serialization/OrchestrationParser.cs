@@ -48,7 +48,11 @@ public static class OrchestrationParser
 
 	public static Orchestration ParseOrchestration(string json, Mcp[] availableMcps)
 	{
-		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, s_options)
+		var variables = ExtractVariables(json);
+		var context = new StepParseContext(BaseDirectory: null, Variables: variables);
+		var options = CreateOptions(s_defaultParserRegistry, context);
+
+		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
 		ResolveStepMcps(orchestration, availableMcps);
@@ -61,7 +65,10 @@ public static class OrchestrationParser
 	/// </summary>
 	public static Orchestration ParseOrchestration(string json, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
 	{
-		var options = CreateOptions(parserRegistry, s_defaultContext);
+		var variables = ExtractVariables(json);
+		var context = new StepParseContext(BaseDirectory: null, Variables: variables);
+		var options = CreateOptions(parserRegistry, context);
+
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
@@ -72,7 +79,10 @@ public static class OrchestrationParser
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps)
 	{
 		var json = File.ReadAllText(path);
-		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)));
+		var variables = ExtractVariables(json);
+		var context = new StepParseContext(
+			BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)),
+			Variables: variables);
 		var options = CreateOptions(s_defaultParserRegistry, context);
 
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
@@ -88,7 +98,10 @@ public static class OrchestrationParser
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
 	{
 		var json = File.ReadAllText(path);
-		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)));
+		var variables = ExtractVariables(json);
+		var context = new StepParseContext(
+			BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)),
+			Variables: variables);
 		var options = CreateOptions(parserRegistry, context);
 
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
@@ -104,7 +117,10 @@ public static class OrchestrationParser
 	/// </summary>
 	public static Orchestration ParseOrchestrationMetadataOnly(string json)
 	{
-		return JsonSerializer.Deserialize<Orchestration>(json, s_options)
+		var context = new StepParseContext(BaseDirectory: null, MetadataOnly: true);
+		var options = CreateOptions(s_defaultParserRegistry, context);
+
+		return JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 	}
 
@@ -114,7 +130,7 @@ public static class OrchestrationParser
 	public static Orchestration ParseOrchestrationFileMetadataOnly(string path)
 	{
 		var json = File.ReadAllText(path);
-		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)));
+		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)), MetadataOnly: true);
 		var options = CreateOptions(s_defaultParserRegistry, context);
 
 		return JsonSerializer.Deserialize<Orchestration>(json, options)
@@ -333,6 +349,37 @@ public static class OrchestrationParser
 		public override void Write(Utf8JsonWriter writer, TriggerConfig value, JsonSerializerOptions options)
 		{
 			JsonSerializer.Serialize(writer, value, value.GetType(), options);
+		}
+	}
+
+	/// <summary>
+	/// Pre-extracts the <c>variables</c> dictionary from the raw orchestration JSON.
+	/// This allows <c>{{vars.*}}</c> expressions in file paths (e.g., <c>systemPromptFile</c>)
+	/// to be resolved at parse time, before the full deserialization pass runs.
+	/// Returns null when no variables are defined.
+	/// </summary>
+	private static IReadOnlyDictionary<string, string>? ExtractVariables(string json)
+	{
+		try
+		{
+			using var doc = JsonDocument.Parse(json);
+			if (!doc.RootElement.TryGetProperty("variables", out var vars) || vars.ValueKind != JsonValueKind.Object)
+				return null;
+
+			var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var prop in vars.EnumerateObject())
+			{
+				if (prop.Value.ValueKind == JsonValueKind.String)
+					dict[prop.Name] = prop.Value.GetString()!;
+			}
+
+			return dict.Count > 0 ? dict : null;
+		}
+		catch
+		{
+			// If we cannot pre-parse the JSON for variables, proceed without them.
+			// The main deserialization pass will surface any real JSON errors.
+			return null;
 		}
 	}
 }

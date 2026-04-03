@@ -7,7 +7,7 @@ namespace Orchestra.Engine;
 /// Handles deserialization of <see cref="PromptOrchestrationStep"/> from orchestration JSON.
 /// Supports both inline prompt values and file-based prompt loading via <c>*File</c> properties.
 /// </summary>
-public sealed class PromptStepTypeParser : IStepTypeParser
+public sealed partial class PromptStepTypeParser : IStepTypeParser
 {
 	public string TypeName => "Prompt";
 
@@ -104,15 +104,25 @@ public sealed class PromptStepTypeParser : IStepTypeParser
 
 	/// <summary>
 	/// Reads a prompt file, resolving the path relative to the orchestration base directory.
+	/// Expands <c>{{vars.*}}</c> expressions in the file path using pre-extracted variables.
 	/// Validates that the file exists and is readable at parse time (fail fast).
 	/// </summary>
 	private static string ReadPromptFile(string filePath, string propertyName, string stepName, StepParseContext context)
 	{
-		var resolvedPath = Path.IsPathRooted(filePath)
-			? filePath
+		// In metadata-only mode, skip file I/O entirely. Prompt files may reference
+		// template expressions (e.g., {{vars.promptsDir}}/file.md) that are not
+		// resolved during metadata parsing, so attempting to read them would fail.
+		if (context.MetadataOnly)
+			return string.Empty;
+
+		// Expand {{vars.*}} expressions in the file path using pre-extracted variables.
+		var expandedPath = ResolveVarsInPath(filePath, context.Variables);
+
+		var resolvedPath = Path.IsPathRooted(expandedPath)
+			? expandedPath
 			: context.BaseDirectory is not null
-				? Path.GetFullPath(Path.Combine(context.BaseDirectory, filePath))
-				: Path.GetFullPath(filePath);
+				? Path.GetFullPath(Path.Combine(context.BaseDirectory, expandedPath))
+				: Path.GetFullPath(expandedPath);
 
 		if (!File.Exists(resolvedPath))
 			throw new JsonException(
@@ -128,6 +138,25 @@ public sealed class PromptStepTypeParser : IStepTypeParser
 				$"Step '{stepName}': Failed to read file for '{propertyName}': {resolvedPath} — {ex.Message}", ex);
 		}
 	}
+
+	/// <summary>
+	/// Replaces <c>{{vars.name}}</c> placeholders in a path string using the provided variables.
+	/// Returns the original string unchanged if no variables are available or no expressions match.
+	/// </summary>
+	private static string ResolveVarsInPath(string path, IReadOnlyDictionary<string, string>? variables)
+	{
+		if (variables is null || !path.Contains("{{vars.", StringComparison.OrdinalIgnoreCase))
+			return path;
+
+		return VarsPattern().Replace(path, match =>
+		{
+			var varName = match.Groups["name"].Value;
+			return variables.TryGetValue(varName, out var value) ? value : match.Value;
+		});
+	}
+
+	[System.Text.RegularExpressions.GeneratedRegex(@"\{\{vars\.(?<name>[^}]+)\}\}", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled)]
+	private static partial System.Text.RegularExpressions.Regex VarsPattern();
 
 	private static Subagent DeserializeSubagent(JsonElement element, string stepName, StepParseContext context)
 	{

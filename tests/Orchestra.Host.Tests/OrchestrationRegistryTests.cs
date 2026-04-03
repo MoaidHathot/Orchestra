@@ -374,4 +374,196 @@ public class OrchestrationRegistryTests : IDisposable
 
 		registryId.Should().Be(triggerId);
 	}
+
+	#region Re-registration with stable IDs via SourcePath
+
+	[Fact]
+	public void Register_WithManagedDir_PersistsSourcePath()
+	{
+		// Arrange — when a managed orchestrations directory is configured,
+		// the entry should track the original source path.
+		var registry = new OrchestrationRegistry(_persistPath, dataPath: _tempDir);
+
+		var sourcePath = Path.Combine(_orchestrationsDir, "source-path-test.json");
+		File.WriteAllText(sourcePath, """
+			{
+				"name": "source-path-orch",
+				"description": "Test",
+				"steps": [{ "name": "s1", "type": "prompt", "systemPrompt": "SP", "userPrompt": "UP", "model": "claude-opus-4.5" }]
+			}
+			""");
+
+		// Act
+		var entry = registry.Register(sourcePath, mcpPath: null, persist: false);
+
+		// Assert
+		entry.SourcePath.Should().Be(sourcePath, "original source path should be tracked");
+		entry.Path.Should().NotBe(sourcePath, "effective path should be the managed copy");
+		File.Exists(entry.Path).Should().BeTrue("managed copy should exist");
+	}
+
+	[Fact]
+	public void Register_WithOriginalSourcePath_ProducesStableId()
+	{
+		// Arrange — simulate the reload scenario: an orchestration was first registered
+		// from a source path, then on restart it is re-loaded from its managed copy
+		// with the originalSourcePath parameter.
+		var registry = new OrchestrationRegistry(_persistPath, dataPath: _tempDir);
+
+		var sourcePath = Path.Combine(_orchestrationsDir, "stable-id-test.json");
+		File.WriteAllText(sourcePath, """
+			{
+				"name": "stable-id-orch",
+				"description": "Test",
+				"steps": [{ "name": "s1", "type": "prompt", "systemPrompt": "SP", "userPrompt": "UP", "model": "claude-opus-4.5" }]
+			}
+			""");
+
+		// Register from source — this is what the user does
+		var originalEntry = registry.Register(sourcePath, mcpPath: null, persist: false);
+		var managedPath = originalEntry.Path;
+
+		// Clear registry to simulate restart
+		registry.Clear();
+
+		// Act — reload from managed path, passing the persisted SourcePath
+		var reloadedEntry = registry.Register(managedPath, mcpPath: null, persist: false, originalSourcePath: sourcePath);
+
+		// Assert — ID should be the same despite loading from a different path
+		reloadedEntry.Id.Should().Be(originalEntry.Id, "ID must be stable across restarts when SourcePath is provided");
+		reloadedEntry.SourcePath.Should().Be(sourcePath, "original source path should be preserved");
+	}
+
+	[Fact]
+	public void LoadFromDisk_PreservesSourcePath_ProducesStableId()
+	{
+		// Arrange — full round-trip: register, persist to disk, reload from disk.
+		var registry1 = new OrchestrationRegistry(_persistPath, dataPath: _tempDir);
+
+		var sourcePath = Path.Combine(_orchestrationsDir, "roundtrip-test.json");
+		File.WriteAllText(sourcePath, """
+			{
+				"name": "roundtrip-orch",
+				"description": "Test",
+				"steps": [{ "name": "s1", "type": "prompt", "systemPrompt": "SP", "userPrompt": "UP", "model": "claude-opus-4.5" }]
+			}
+			""");
+
+		var originalEntry = registry1.Register(sourcePath, mcpPath: null, persist: true);
+		var originalId = originalEntry.Id;
+
+		// Act — create a new registry and load from disk (simulating restart)
+		var registry2 = new OrchestrationRegistry(_persistPath, dataPath: _tempDir);
+		var loaded = registry2.LoadFromDisk();
+
+		// Assert
+		loaded.Should().Be(1);
+		var reloadedEntry = registry2.GetAll().First();
+		reloadedEntry.Id.Should().Be(originalId, "ID must be stable across persist/reload cycle");
+		reloadedEntry.SourcePath.Should().Be(sourcePath);
+	}
+
+	[Fact]
+	public void Register_ReRegistrationFromSource_UpdatesManagedCopy()
+	{
+		// Arrange — after a round-trip (register -> persist -> reload), re-registering
+		// from the original source should update the entry in-place (same ID).
+		var registry1 = new OrchestrationRegistry(_persistPath, dataPath: _tempDir);
+
+		var sourcePath = Path.Combine(_orchestrationsDir, "reregister-test.json");
+		var jsonV1 = """
+			{
+				"name": "reregister-orch",
+				"description": "Version 1",
+				"steps": [{ "name": "s1", "type": "prompt", "systemPrompt": "SP", "userPrompt": "UP", "model": "claude-opus-4.5" }]
+			}
+			""";
+		File.WriteAllText(sourcePath, jsonV1);
+
+		// Register from source
+		var entry1 = registry1.Register(sourcePath, mcpPath: null, persist: true);
+
+		// Simulate restart — create a new registry and reload from disk
+		var registry2 = new OrchestrationRegistry(_persistPath, dataPath: _tempDir);
+		registry2.LoadFromDisk();
+		registry2.Count.Should().Be(1);
+
+		// User updates the source file and re-registers
+		var jsonV2 = jsonV1.Replace("Version 1", "Version 2");
+		File.WriteAllText(sourcePath, jsonV2);
+		var entry2 = registry2.Register(sourcePath, mcpPath: null, persist: true);
+
+		// Assert — same ID, updated content, no duplicates
+		entry2.Id.Should().Be(entry1.Id, "re-registration from same source should produce same ID");
+		registry2.Count.Should().Be(1, "should not create a duplicate entry");
+		registry2.Get(entry1.Id)!.Orchestration.Description.Should().Be("Version 2");
+	}
+
+	[Fact]
+	public void Register_DifferentNames_DoesNotReplace()
+	{
+		// Arrange — two orchestrations with different names should coexist
+		var registry = new OrchestrationRegistry(_persistPath);
+
+		var path1 = Path.Combine(_orchestrationsDir, "orch-a.json");
+		var path2 = Path.Combine(_orchestrationsDir, "orch-b.json");
+
+		File.WriteAllText(path1, """
+			{
+				"name": "orchestration-alpha",
+				"description": "Test",
+				"steps": [{ "name": "s1", "type": "prompt", "systemPrompt": "SP", "userPrompt": "UP", "model": "claude-opus-4.5" }]
+			}
+			""");
+		File.WriteAllText(path2, """
+			{
+				"name": "orchestration-beta",
+				"description": "Test",
+				"steps": [{ "name": "s1", "type": "prompt", "systemPrompt": "SP", "userPrompt": "UP", "model": "claude-opus-4.5" }]
+			}
+			""");
+
+		// Act
+		registry.Register(path1, mcpPath: null, persist: false);
+		registry.Register(path2, mcpPath: null, persist: false);
+
+		// Assert — both should coexist
+		registry.Count.Should().Be(2);
+	}
+
+	[Fact]
+	public void Register_SamePathSameName_UpdatesInPlace()
+	{
+		// Arrange — re-registering from the same path should update, not duplicate
+		var registry = new OrchestrationRegistry(_persistPath);
+		var orchPath = Path.Combine(_orchestrationsDir, "update-test.json");
+
+		File.WriteAllText(orchPath, """
+			{
+				"name": "update-orch",
+				"description": "Version 1",
+				"steps": [{ "name": "s1", "type": "prompt", "systemPrompt": "SP", "userPrompt": "UP", "model": "claude-opus-4.5" }]
+			}
+			""");
+
+		registry.Register(orchPath, mcpPath: null, persist: false);
+
+		// Update the file content
+		File.WriteAllText(orchPath, """
+			{
+				"name": "update-orch",
+				"description": "Version 2",
+				"steps": [{ "name": "s1", "type": "prompt", "systemPrompt": "SP", "userPrompt": "UP", "model": "claude-opus-4.5" }]
+			}
+			""");
+
+		// Act
+		registry.Register(orchPath, mcpPath: null, persist: false);
+
+		// Assert
+		registry.Count.Should().Be(1);
+		registry.GetAll().First().Orchestration.Description.Should().Be("Version 2");
+	}
+
+	#endregion
 }

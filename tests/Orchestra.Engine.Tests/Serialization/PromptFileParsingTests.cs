@@ -542,6 +542,217 @@ public class PromptFileParsingTests : IDisposable
 
 	#endregion
 
+	#region Variable Expansion in File Paths
+
+	[Fact]
+	public void ParseOrchestrationFile_SystemPromptFileWithVarsExpression_ResolvesPath()
+	{
+		// Arrange — systemPromptFile uses {{vars.promptsDir}} which should be expanded at parse time
+		var promptsDir = Path.Combine(_tempDir, "prompts");
+		Directory.CreateDirectory(promptsDir);
+		File.WriteAllText(Path.Combine(promptsDir, "system.md"), "Resolved system prompt content");
+
+		var orchestrationPath = CreateOrchestrationFile($$$"""
+			{
+				"name": "vars-file-test",
+				"description": "Test",
+				"variables": {
+					"promptsDir": "{{{promptsDir.Replace("\\", "\\\\")}}}"
+				},
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "{{vars.promptsDir}}/system.md",
+						"userPrompt": "Hello",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.SystemPrompt.Should().Be("Resolved system prompt content");
+	}
+
+	[Fact]
+	public void ParseOrchestrationFile_UserPromptFileWithVarsExpression_ResolvesPath()
+	{
+		// Arrange
+		var promptsDir = Path.Combine(_tempDir, "prompts");
+		Directory.CreateDirectory(promptsDir);
+		File.WriteAllText(Path.Combine(promptsDir, "user.md"), "Resolved user prompt content");
+
+		var orchestrationPath = CreateOrchestrationFile($$$"""
+			{
+				"name": "vars-user-file-test",
+				"description": "Test",
+				"variables": {
+					"promptsDir": "{{{promptsDir.Replace("\\", "\\\\")}}}"
+				},
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "System prompt",
+						"userPromptFile": "{{vars.promptsDir}}/user.md",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.UserPrompt.Should().Be("Resolved user prompt content");
+	}
+
+	[Fact]
+	public void ParseOrchestrationFile_MultipleVarsInPath_ResolvesAll()
+	{
+		// Arrange — path uses multiple variables
+		var baseDir = Path.Combine(_tempDir, "base");
+		var subDir = Path.Combine(baseDir, "sub");
+		Directory.CreateDirectory(subDir);
+		File.WriteAllText(Path.Combine(subDir, "prompt.md"), "Multi-var resolved content");
+
+		var orchestrationPath = CreateOrchestrationFile($$$"""
+			{
+				"name": "multi-vars-test",
+				"description": "Test",
+				"variables": {
+					"baseDir": "{{{baseDir.Replace("\\", "\\\\")}}}",
+					"subDir": "sub"
+				},
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "{{vars.baseDir}}/{{vars.subDir}}/prompt.md",
+						"userPrompt": "Hello",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SystemPrompt.Should().Be("Multi-var resolved content");
+	}
+
+	[Fact]
+	public void ParseOrchestrationFile_UndefinedVar_LeavesExpressionAndFailsFileNotFound()
+	{
+		// Arrange — vars.unknown is not defined, so the expression is left as-is
+		var orchestrationPath = CreateOrchestrationFile("""
+			{
+				"name": "undefined-var-test",
+				"description": "Test",
+				"variables": {},
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "{{vars.unknown}}/system.md",
+						"userPrompt": "Hello",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act
+		var act = () => OrchestrationParser.ParseOrchestrationFile(orchestrationPath, []);
+
+		// Assert — the unresolved expression causes a file-not-found error
+		act.Should().Throw<System.Text.Json.JsonException>()
+			.WithMessage("*File not found*");
+	}
+
+	[Fact]
+	public void ParseOrchestration_FromString_WithVars_ResolvesFilePathsRelativeToCwd()
+	{
+		// Arrange — when parsing from string, variables should still be extracted and expanded
+		var promptsDir = Path.Combine(_tempDir, "string-prompts");
+		Directory.CreateDirectory(promptsDir);
+		File.WriteAllText(Path.Combine(promptsDir, "system.md"), "String-parsed prompt content");
+
+		var json = $$$"""
+			{
+				"name": "string-vars-test",
+				"description": "Test",
+				"variables": {
+					"promptsDir": "{{{promptsDir.Replace("\\", "\\\\")}}}"
+				},
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "{{vars.promptsDir}}/system.md",
+						"userPrompt": "Hello",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SystemPrompt.Should().Be("String-parsed prompt content");
+	}
+
+	[Fact]
+	public void ParseOrchestrationFile_NoVariables_PromptFileStillWorks()
+	{
+		// Arrange — no variables block at all; regular file paths should still work
+		CreateTempFile("system.md", "No-vars system prompt");
+		var orchestrationPath = CreateOrchestrationFile("""
+			{
+				"name": "no-vars-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "system.md",
+						"userPrompt": "Hello",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SystemPrompt.Should().Be("No-vars system prompt");
+	}
+
+	#endregion
+
 	#region All Files
 
 	[Fact]
@@ -683,6 +894,179 @@ public class PromptFileParsingTests : IDisposable
 		var step = orchestration.Steps[0] as PromptOrchestrationStep;
 		step!.SystemPrompt.Should().Be("Inline system prompt");
 		step.UserPrompt.Should().Be("Inline user prompt");
+	}
+
+	#endregion
+
+	#region MetadataOnly Parsing — Prompt File References Skipped
+
+	[Fact]
+	public void ParseOrchestrationFileMetadataOnly_SystemPromptFileWithMissingFile_Succeeds()
+	{
+		// Arrange — systemPromptFile references a nonexistent file (simulates template expression paths
+		// like {{vars.promptsDir}}/file.md that can't be resolved during metadata scanning).
+		var orchestrationPath = CreateOrchestrationFile("""
+			{
+				"name": "metadata-test",
+				"description": "Test metadata parsing with missing prompt files",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "{{vars.promptsDir}}/nonexistent.md",
+						"userPrompt": "Hello",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act — should NOT throw, because metadata-only skips file reads
+		var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
+
+		// Assert
+		orchestration.Name.Should().Be("metadata-test");
+		orchestration.Steps.Should().HaveCount(1);
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.Name.Should().Be("step1");
+		step.SystemPrompt.Should().BeEmpty("prompt file content is not loaded in metadata-only mode");
+		step.UserPrompt.Should().Be("Hello");
+	}
+
+	[Fact]
+	public void ParseOrchestrationFileMetadataOnly_AllPromptFilesWithMissingFiles_Succeeds()
+	{
+		// Arrange — all four prompt properties use file references to nonexistent files
+		var orchestrationPath = CreateOrchestrationFile("""
+			{
+				"name": "all-files-metadata",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "{{vars.dir}}/system.md",
+						"userPromptFile": "{{vars.dir}}/user.md",
+						"inputHandlerPromptFile": "{{vars.dir}}/input.md",
+						"outputHandlerPromptFile": "{{vars.dir}}/output.md",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SystemPrompt.Should().BeEmpty();
+		step.UserPrompt.Should().BeEmpty();
+		step.InputHandlerPrompt.Should().BeEmpty();
+		step.OutputHandlerPrompt.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestrationFileMetadataOnly_SubagentPromptFileWithMissingFile_Succeeds()
+	{
+		// Arrange — subagent promptFile references a nonexistent file
+		var orchestrationPath = CreateOrchestrationFile("""
+			{
+				"name": "subagent-metadata",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "coordinator",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "You are a coordinator.",
+						"userPrompt": "Do the thing",
+						"model": "claude-opus-4.5",
+						"subagents": [
+							{
+								"name": "researcher",
+								"promptFile": "{{vars.agentDir}}/researcher.md"
+							}
+						]
+					}
+				]
+			}
+			""");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.Subagents.Should().HaveCount(1);
+		step.Subagents[0].Name.Should().Be("researcher");
+		step.Subagents[0].Prompt.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestrationMetadataOnly_FromString_SkipsPromptFileReads()
+	{
+		// Arrange — parsing from raw JSON string with prompt file references
+		var json = """
+			{
+				"name": "string-metadata-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "nonexistent/system.md",
+						"userPromptFile": "nonexistent/user.md",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""";
+
+		// Act — should NOT throw
+		var orchestration = OrchestrationParser.ParseOrchestrationMetadataOnly(json);
+
+		// Assert
+		orchestration.Name.Should().Be("string-metadata-test");
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SystemPrompt.Should().BeEmpty();
+		step.UserPrompt.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestrationFileMetadataOnly_WithExistingFiles_StillSkipsReads()
+	{
+		// Arrange — even when the files DO exist, metadata-only mode should not read them
+		// (consistent behavior: prompts are always empty in metadata mode)
+		CreateTempFile("system.md", "Real system prompt content");
+		var orchestrationPath = CreateOrchestrationFile("""
+			{
+				"name": "existing-files-metadata",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "system.md",
+						"userPrompt": "Hello",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
+
+		// Assert — prompt should be empty, NOT the file content
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SystemPrompt.Should().BeEmpty();
+		step.UserPrompt.Should().Be("Hello", "inline prompts are still parsed normally");
 	}
 
 	#endregion

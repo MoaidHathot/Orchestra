@@ -59,7 +59,7 @@ public partial class OrchestrationRegistry
 	/// If a managed orchestrations directory is configured, the file is copied there
 	/// and the managed path is stored instead of the original.
 	/// </summary>
-	public OrchestrationEntry Register(string path, string? mcpPath, Orchestration? preloaded = null, bool persist = true)
+	public OrchestrationEntry Register(string path, string? mcpPath, Orchestration? preloaded = null, bool persist = true, string? originalSourcePath = null)
 	{
 		// Read the raw JSON content for hashing and snapshots
 		string? rawJson = null;
@@ -71,22 +71,33 @@ public partial class OrchestrationRegistry
 			mcps = OrchestrationParser.ParseMcpFile(mcpPath);
 
 		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, mcps);
-		var id = GenerateId(orchestration.Name, path);
+
+		// Use the original source path for ID generation when available.
+		// This ensures a stable ID when the orchestration file has been copied
+		// to a managed location (whose path differs from the original).
+		var idPath = originalSourcePath ?? path;
+		var id = GenerateId(orchestration.Name, idPath);
 
 		// Compute content hash if we have the raw JSON
 		var contentHash = rawJson is not null ? FileSystemOrchestrationVersionStore.ComputeContentHash(rawJson) : null;
 
 		// Copy to managed location if configured
 		var effectivePath = path;
+		string? sourcePath = originalSourcePath;
 		if (_managedOrchestrationsPath is not null && rawJson is not null)
 		{
 			effectivePath = CopyToManagedLocation(id, orchestration.Name, rawJson);
+			// Track the original source path so we can regenerate the same ID on reload.
+			// If we're already loading from a managed copy (originalSourcePath provided),
+			// preserve that original source path.
+			sourcePath ??= path;
 		}
 
 		var entry = new OrchestrationEntry
 		{
 			Id = id,
 			Path = effectivePath,
+			SourcePath = sourcePath,
 			McpPath = mcpPath,
 			Orchestration = orchestration,
 			RegisteredAt = DateTimeOffset.UtcNow,
@@ -217,7 +228,8 @@ public partial class OrchestrationRegistry
 			var data = _entries.Values.Select(e => new PersistedOrchestration
 			{
 				Path = e.Path,
-				McpPath = e.McpPath
+				McpPath = e.McpPath,
+				SourcePath = e.SourcePath
 			}).ToList();
 
 			var json = JsonSerializer.Serialize(data, _jsonOptions);
@@ -260,7 +272,7 @@ public partial class OrchestrationRegistry
 
 				try
 				{
-					Register(item.Path, item.McpPath, persist: false);
+					Register(item.Path, item.McpPath, persist: false, originalSourcePath: item.SourcePath);
 					loaded++;
 				}
 				catch (Exception ex)
@@ -388,6 +400,13 @@ public class PersistedOrchestration
 {
 	public string Path { get; set; } = "";
 	public string? McpPath { get; set; }
+
+	/// <summary>
+	/// The original source path used when first registering the orchestration.
+	/// When a managed copy is created, this tracks the original file path so the
+	/// same deterministic ID can be regenerated on reload.
+	/// </summary>
+	public string? SourcePath { get; set; }
 }
 
 /// <summary>
@@ -397,6 +416,13 @@ public class OrchestrationEntry
 {
 	public required string Id { get; init; }
 	public required string Path { get; init; }
+
+	/// <summary>
+	/// The original source path that was used to generate the entry's ID.
+	/// Null when the entry was not copied to a managed location (Path == source).
+	/// </summary>
+	public string? SourcePath { get; init; }
+
 	public string? McpPath { get; init; }
 	public required Orchestration Orchestration { get; init; }
 	public DateTimeOffset RegisteredAt { get; init; }
