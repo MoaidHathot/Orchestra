@@ -249,7 +249,8 @@ public static class ServiceProviderExtensions
 						effectiveTrigger,
 						null,
 						TriggerSource.Json,
-						triggerId);
+						triggerId,
+						entry.Orchestration);
 				}
 			}
 		}

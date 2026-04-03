@@ -3,6 +3,7 @@ import type { Orchestration, Step, McpConfig, TagCount } from '../../types';
 import { api } from '../../api';
 import { Icons } from '../../icons';
 import StepDetailsPanel from '../StepDetailsPanel';
+import ZoomableDag from '../ZoomableDag';
 import { renderMermaidDag } from '../../mermaid';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 
@@ -219,9 +220,9 @@ function ViewerModal({ open, orchestration, onClose, onRun, onTagsChanged }: Pro
                   </div>
                   <div style={{ display: 'flex', gap: '16px', flex: 1 }}>
                     <div style={{ flex: selectedStep ? '1 1 60%' : '1 1 100%', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-                      <div className="dag-container" ref={dagRef} style={{ flex: 1 }}>
+                      <ZoomableDag className="dag-container" dagRef={dagRef} style={{ flex: 1 }}>
                         {/* Content managed by Mermaid - do not add React children here */}
-                      </div>
+                      </ZoomableDag>
                       {!selectedStep && steps.length > 0 && (
                         <div className="dag-hint">Click a node to view step details</div>
                       )}
@@ -368,27 +369,30 @@ function ViewerModal({ open, orchestration, onClose, onRun, onTagsChanged }: Pro
                     <div className="form-group">
                       <label className="form-label">MCPs ({mcps.length})</label>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {mcps.map((mcp, i) => (
-                          <div key={i} style={{
-                            padding: '8px 12px',
-                            background: 'var(--surface)',
-                            borderRadius: '6px',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center'
-                          }}>
-                            <div>
-                              <span style={{ color: '#a371f7', fontWeight: 500 }}>{mcp.name}</span>
-                              <span className="text-muted" style={{ marginLeft: '8px' }}>({mcp.type})</span>
+                        {mcps.map((mcp, i) => {
+                          const m = typeof mcp === 'string' ? { name: mcp } as McpConfig : mcp;
+                          return (
+                            <div key={i} style={{
+                              padding: '8px 12px',
+                              background: 'var(--surface)',
+                              borderRadius: '6px',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center'
+                            }}>
+                              <div>
+                                <span style={{ color: '#a371f7', fontWeight: 500 }}>{m.name}</span>
+                                {m.type && <span className="text-muted" style={{ marginLeft: '8px' }}>({m.type})</span>}
+                              </div>
+                              {m.url && (
+                                <span className="text-muted" style={{ fontSize: '12px' }}>{m.url}</span>
+                              )}
+                              {m.command && (
+                                <span className="text-muted" style={{ fontSize: '12px' }}>{m.command}</span>
+                              )}
                             </div>
-                            {mcp.url && (
-                              <span className="text-muted" style={{ fontSize: '12px' }}>{mcp.url}</span>
-                            )}
-                            {mcp.command && (
-                              <span className="text-muted" style={{ fontSize: '12px' }}>{mcp.command}</span>
-                            )}
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   )}

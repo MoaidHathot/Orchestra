@@ -4,6 +4,7 @@ import { Icons } from '../../icons';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import ZoomableDag from '../ZoomableDag';
 
 /** Extract a display name from a step MCP reference (string or object). */
 function mcpDisplayName(ref: StepMcpRef): string {
@@ -447,14 +448,16 @@ export default function ExecutionModal({
           )}
           <div className="execution-modal-content">
             {/* DAG Section */}
-            <div className="execution-dag-section" ref={dagRef}>
-              {!orchestration && (
+            <div className="execution-dag-section">
+              {!orchestration ? (
                 <div className="empty-state">
                   <div className="spinner"></div>
                   <div className="empty-text" style={{ marginTop: '8px' }}>
                     Loading orchestration...
                   </div>
                 </div>
+              ) : (
+                <ZoomableDag dagRef={dagRef} style={{ height: '100%' }} />
               )}
             </div>
 

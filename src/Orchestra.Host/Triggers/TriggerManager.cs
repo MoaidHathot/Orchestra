@@ -112,20 +112,25 @@ public partial class TriggerManager : BackgroundService
 		TriggerConfig config,
 		Dictionary<string, string>? parameters = null,
 		TriggerSource source = TriggerSource.User,
-		string? orchestrationId = null)
+		string? orchestrationId = null,
+		Orchestration? preloadedOrchestration = null)
 	{
-		// Try to load orchestration metadata for display
-		string? orchName = null;
-		string? orchDesc = null;
-		string? orchVersion = null;
-		try
+		// Use pre-loaded metadata if available, otherwise try to parse from file
+		string? orchName = preloadedOrchestration?.Name;
+		string? orchDesc = preloadedOrchestration?.Description;
+		string? orchVersion = preloadedOrchestration?.Version;
+
+		if (orchName is null)
 		{
-			var orch = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
-			orchName = orch.Name;
-			orchDesc = orch.Description;
-			orchVersion = orch.Version;
+			try
+			{
+				var orch = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
+				orchName = orch.Name;
+				orchDesc = orch.Description;
+				orchVersion = orch.Version;
+			}
+			catch (Exception ex) { LogMetadataExtractionFailed(orchestrationPath, ex); }
 		}
-		catch (Exception ex) { LogMetadataExtractionFailed(orchestrationPath, ex); }
 
 		// Use the provided orchestrationId if given, otherwise generate one from the path and name
 		var id = orchestrationId ?? GenerateTriggerId(orchestrationPath, orchName);
@@ -522,7 +527,7 @@ public partial class TriggerManager : BackgroundService
 				if (_triggers.TryGetValue(id, out var existing) && existing.Source == TriggerSource.User)
 					continue;
 
-				RegisterTrigger(file, null, orchestration.Trigger, null, TriggerSource.Json);
+				RegisterTrigger(file, null, orchestration.Trigger, null, TriggerSource.Json, preloadedOrchestration: orchestration);
 			}
 			catch (Exception ex)
 			{

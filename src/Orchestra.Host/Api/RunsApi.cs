@@ -408,11 +408,16 @@ public static class RunsApi
 						_ => "trigger"
 					};
 
+					// Resolve name: trigger metadata -> registry -> fallback
+					var orchName = trigger.OrchestrationName
+						?? registry.Get(trigger.Id)?.Orchestration.Name
+						?? "Unknown";
+
 					activeList.Add(new
 					{
 						executionId = trigger.ActiveExecutionId,
 						orchestrationId = trigger.Id,
-						orchestrationName = trigger.OrchestrationName ?? "Unknown",
+						orchestrationName = orchName,
 						startedAt = trigger.LastFireTime,
 						triggeredBy = triggerType,
 						source = "trigger"
@@ -430,10 +435,15 @@ public static class RunsApi
 				var orch = registry.Get(t.Id);
 				var stepCount = orch?.Orchestration?.Steps?.Length ?? 0;
 
+				// Resolve name: trigger metadata -> registry -> fallback
+				var orchName = t.OrchestrationName
+					?? orch?.Orchestration.Name
+					?? "Unknown";
+
 				return new
 				{
 					orchestrationId = t.Id,
-					orchestrationName = t.OrchestrationName ?? "Unknown",
+					orchestrationName = orchName,
 					orchestrationDescription = t.OrchestrationDescription,
 					stepCount,
 					nextFireTime = t.NextFireTime,

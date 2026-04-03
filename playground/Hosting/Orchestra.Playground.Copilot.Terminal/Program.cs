@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Orchestra.Copilot;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
+using Orchestra.Host.Hosting;
 using Orchestra.Host.Logging;
 using Orchestra.Host.Triggers;
 using Orchestra.Playground.Copilot.Terminal;
@@ -67,8 +68,15 @@ Directory.CreateDirectory(dataPath);
 var builder = Host.CreateApplicationBuilder(args);
 
 // Configure logging to file instead of console (TUI will handle display)
+// Read log level from orchestra.json config (if present) so Debug/Trace can be enabled centrally
+var configFile = OrchestraConfigLoader.Load();
+var fileLogLevel = Enum.TryParse<LogLevel>(configFile?.LogLevel, ignoreCase: true, out var parsedLevel)
+	? parsedLevel
+	: LogLevel.Information;
+
 builder.Logging.ClearProviders();
-builder.Logging.AddFile(Path.Combine(dataPath, "logs", "terminal.log"));
+builder.Logging.SetMinimumLevel(fileLogLevel);
+builder.Logging.AddFile(Path.Combine(dataPath, "logs", "terminal.log"), fileLogLevel);
 
 // Register engine services (required by Orchestra Host)
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();

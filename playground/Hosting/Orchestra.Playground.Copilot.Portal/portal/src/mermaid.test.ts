@@ -259,8 +259,8 @@ describe('generateDefinitionDagCode', () => {
     const { mermaidCode } = generateDefinitionDagCode(makeStepsWithSubagents());
     await assertMermaidParses(mermaidCode);
 
-    // Subagent subgraph
-    expect(mermaidCode).toContain('subgraph');
+    // Compact subagent node
+    expect(mermaidCode).toContain('Subagents');
     expect(mermaidCode).toContain('Research Agent');
     expect(mermaidCode).toContain('Writer Agent');
     expect(mermaidCode).toContain('2 subagents');
@@ -298,8 +298,8 @@ describe('generateDefinitionDagCode', () => {
     const { mermaidCode } = generateDefinitionDagCode(makeComplexOrchestration());
     await assertMermaidParses(mermaidCode);
 
-    // Should have subagent subgraph
-    expect(mermaidCode).toContain('subgraph');
+    // Should have compact subagent node
+    expect(mermaidCode).toContain('Subagents');
     expect(mermaidCode).toContain('3 subagents');
 
     // Should have dependency edges
@@ -347,7 +347,7 @@ describe('generateExecutionDagCode', () => {
 
     const { mermaidCode } = generateExecutionDagCode(steps, statuses);
     await assertMermaidParses(mermaidCode);
-    expect(mermaidCode).toContain('subgraph');
+    expect(mermaidCode).toContain('Subagents');
   });
 
   it('generates valid Mermaid for execution with failed/cancelled/skipped', async () => {

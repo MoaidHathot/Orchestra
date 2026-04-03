@@ -167,6 +167,28 @@ export const Icons = {
       <path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14ZM7.25 1.75a.75.75 0 0 1 1.5 0v6.19l2.72-2.72a.749.749 0 1 1 1.06 1.06l-4 4a.749.749 0 0 1-1.06 0l-4-4a.749.749 0 1 1 1.06-1.06l2.72 2.72V1.75Z" transform="rotate(180 8 8)" />
     </svg>
   ),
+  ZoomIn: (): React.JSX.Element => (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7" cy="7" r="5" />
+      <line x1="11.5" y1="11.5" x2="15" y2="15" />
+      <line x1="5" y1="7" x2="9" y2="7" />
+      <line x1="7" y1="5" x2="7" y2="9" />
+    </svg>
+  ),
+  ZoomOut: (): React.JSX.Element => (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7" cy="7" r="5" />
+      <line x1="11.5" y1="11.5" x2="15" y2="15" />
+      <line x1="5" y1="7" x2="9" y2="7" />
+    </svg>
+  ),
+  ZoomReset: (): React.JSX.Element => (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="7" cy="7" r="5" />
+      <line x1="11.5" y1="11.5" x2="15" y2="15" />
+      <path d="M5.5 7.5L7 9L9 5.5" />
+    </svg>
+  ),
   WifiOff: (props?: React.SVGProps<SVGSVGElement>): React.JSX.Element => (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" {...props}>
       <line x1="1" y1="1" x2="23" y2="23" />

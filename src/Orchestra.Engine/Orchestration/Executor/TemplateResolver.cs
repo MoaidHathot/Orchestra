@@ -40,6 +40,57 @@ public static partial class TemplateResolver
 	}
 
 	/// <summary>
+	/// Resolves only static/orchestration-level template expressions.
+	/// Handles: {{param.*}}, {{env.*}}, {{vars.*}}, {{orchestration.*}}.
+	/// Step-level expressions ({{step.*}}, {{stepName.output}}, etc.) are left as-is.
+	/// Use this for contexts where step outputs are not available, such as MCP configurations.
+	/// </summary>
+	public static string ResolveStatic(
+		string template,
+		Dictionary<string, string> parameters,
+		OrchestrationExecutionContext context)
+	{
+		return ResolveStatic(template, parameters, context, resolvingVars: null, tracker: context.ResolutionTracker);
+	}
+
+	/// <summary>
+	/// Creates a copy of an MCP configuration with all string fields resolved using
+	/// static/orchestration-level template expressions (param, env, vars, orchestration).
+	/// The <see cref="Mcp.Name"/> and <see cref="Mcp.Type"/> are preserved as-is since
+	/// they are identity/structural fields used for lookup and matching.
+	/// </summary>
+	public static Mcp ResolveStaticMcp(
+		Mcp mcp,
+		Dictionary<string, string> parameters,
+		OrchestrationExecutionContext context)
+	{
+		return mcp switch
+		{
+			LocalMcp local => new LocalMcp
+			{
+				Name = local.Name,
+				Type = local.Type,
+				Command = ResolveStatic(local.Command, parameters, context),
+				Arguments = local.Arguments
+					.Select(arg => ResolveStatic(arg, parameters, context))
+					.ToArray(),
+				WorkingDirectory = local.WorkingDirectory is not null
+					? ResolveStatic(local.WorkingDirectory, parameters, context)
+					: null,
+			},
+			RemoteMcp remote => new RemoteMcp
+			{
+				Name = remote.Name,
+				Type = remote.Type,
+				Endpoint = ResolveStatic(remote.Endpoint, parameters, context),
+				Headers = remote.Headers
+					.ToDictionary(h => h.Key, h => ResolveStatic(h.Value, parameters, context)),
+			},
+			_ => mcp, // Unknown subtype — return as-is
+		};
+	}
+
+	/// <summary>
 	/// Internal overload that tracks which variables are currently being resolved
 	/// to detect and prevent circular references.
 	/// </summary>
@@ -81,7 +132,7 @@ public static partial class TemplateResolver
 			if (expr.StartsWith("vars.", StringComparison.OrdinalIgnoreCase))
 			{
 				var varName = expr["vars.".Length..];
-				return ResolveVariable(varName, parameters, context, dependsOn, currentStep, resolvingVars, match.Value, tracker);
+				return ResolveVariable(varName, parameters, context, resolvingVars, match.Value, tracker);
 			}
 
 			// {{env.VAR_NAME}} — environment variable
@@ -138,6 +189,56 @@ public static partial class TemplateResolver
 	}
 
 	/// <summary>
+	/// Internal static-only resolution that handles param, env, vars, and orchestration
+	/// expressions. Step-level and step-output expressions are left as-is.
+	/// </summary>
+	private static string ResolveStatic(
+		string template,
+		Dictionary<string, string> parameters,
+		OrchestrationExecutionContext context,
+		HashSet<string>? resolvingVars,
+		TemplateResolutionTracker? tracker = null)
+	{
+		return TemplatePattern().Replace(template, match =>
+		{
+			var expr = match.Groups["expr"].Value.Trim();
+
+			// {{param.name}} — parameter reference
+			if (expr.StartsWith("param.", StringComparison.OrdinalIgnoreCase))
+			{
+				var paramName = expr["param.".Length..];
+				return parameters.TryGetValue(paramName, out var value) ? value : match.Value;
+			}
+
+			// {{orchestration.property}} — orchestration metadata
+			if (expr.StartsWith("orchestration.", StringComparison.OrdinalIgnoreCase))
+			{
+				var property = expr["orchestration.".Length..];
+				return ResolveOrchestrationProperty(property, context.OrchestrationInfo, context);
+			}
+
+			// {{vars.name}} — user-defined variable with static-only recursive expansion
+			if (expr.StartsWith("vars.", StringComparison.OrdinalIgnoreCase))
+			{
+				var varName = expr["vars.".Length..];
+				return ResolveVariable(varName, parameters, context, resolvingVars, match.Value, tracker);
+			}
+
+			// {{env.VAR_NAME}} — environment variable
+			if (expr.StartsWith("env.", StringComparison.OrdinalIgnoreCase))
+			{
+				var envVarName = expr["env.".Length..];
+				var envValue = Environment.GetEnvironmentVariable(envVarName);
+				tracker?.TrackEnvironmentVariable(envVarName, envValue);
+				return envValue ?? match.Value;
+			}
+
+			// Everything else (step.*, stepName.output, etc.) — leave as-is
+			return match.Value;
+		});
+	}
+
+	/// <summary>
 	/// Resolves a built-in orchestration property by name.
 	/// Throws on unknown properties since the orchestration.* namespace is fixed.
 	/// </summary>
@@ -177,14 +278,15 @@ public static partial class TemplateResolver
 
 	/// <summary>
 	/// Resolves a user-defined variable, recursively expanding any template expressions
-	/// in the variable's value. Detects circular references via a resolution stack.
+	/// in the variable's value using static-only resolution.
+	/// Variable values can reference other variables, parameters, environment variables,
+	/// and orchestration metadata — but NOT step outputs or step metadata.
+	/// Detects circular references via a resolution stack.
 	/// </summary>
 	private static string ResolveVariable(
 		string varName,
 		Dictionary<string, string> parameters,
 		OrchestrationExecutionContext context,
-		string[] dependsOn,
-		OrchestrationStep currentStep,
 		HashSet<string>? resolvingVars,
 		string originalMatch,
 		TemplateResolutionTracker? tracker = null)
@@ -201,8 +303,9 @@ public static partial class TemplateResolver
 		var stack = resolvingVars ?? [];
 		stack.Add(varName);
 
-		// Recursively resolve any template expressions within the variable value
-		var resolved = Resolve(rawValue, parameters, context, dependsOn, currentStep, stack, tracker);
+		// Recursively resolve using static-only resolution.
+		// Variables can only contain param, env, vars, and orchestration expressions.
+		var resolved = ResolveStatic(rawValue, parameters, context, stack, tracker);
 
 		// Pop from resolution stack
 		stack.Remove(varName);

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './App.css';
 import { api } from './api';
 import { Icons } from './icons';
-import { formatTime, isIncompleteExecution } from './utils';
+import { formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch } from './utils';
 import type {
   Orchestration,
   ActiveData,
@@ -194,6 +194,17 @@ function App(): React.JSX.Element {
     const stored = localStorage.getItem('orchestra-hide-incomplete');
     return stored === null ? true : stored === 'true';
   });
+  const [historyCollapsed, setHistoryCollapsed] = useState<boolean>(() => {
+    const stored = localStorage.getItem('orchestra-history-collapsed');
+    return stored === null ? true : stored === 'true';
+  });
+  const toggleHistoryCollapsed = useCallback(() => {
+    setHistoryCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('orchestra-history-collapsed', String(next));
+      return next;
+    });
+  }, []);
   const toggleHideIncomplete = useCallback(() => {
     setHideIncomplete(prev => {
       const next = !prev;
@@ -323,20 +334,7 @@ function App(): React.JSX.Element {
 
   /** Returns profiles that match a given orchestration based on filter rules. */
   const getProfilesForOrchestration = useCallback((orch: Orchestration): Profile[] => {
-    return profiles.filter(p => {
-      const f = p.filter;
-      // Check explicit excludes
-      if (f.excludeOrchestrationIds?.length > 0 && f.excludeOrchestrationIds.includes(orch.id)) return false;
-      // Check explicit includes
-      if (f.orchestrationIds?.length > 0 && f.orchestrationIds.includes(orch.id)) return true;
-      // Check wildcard
-      if (f.tags?.includes('*')) return true;
-      // Check tag match
-      if (f.tags?.length > 0 && orch.tags?.length) {
-        return f.tags.some(t => orch.tags!.includes(t));
-      }
-      return false;
-    });
+    return getMatchingProfiles(profiles, orch.id, orch.tags);
   }, [profiles]);
 
   /** Check if an orchestration (by ID) matches any of the given profile IDs. */
@@ -344,17 +342,7 @@ function App(): React.JSX.Element {
     if (selectedProfileIds.length === 0) return true;
     const orch = orchestrations.find(o => o.id === orchId);
     if (!orch) return true; // if we can't find the orchestration, don't filter it out
-    const selectedProfiles = profiles.filter(p => selectedProfileIds.includes(p.id));
-    return selectedProfiles.some(sp => {
-      const f = sp.filter;
-      if (f.excludeOrchestrationIds?.length > 0 && f.excludeOrchestrationIds.includes(orchId)) return false;
-      if (f.orchestrationIds?.length > 0 && f.orchestrationIds.includes(orchId)) return true;
-      if (f.tags?.includes('*')) return true;
-      if (f.tags?.length > 0 && orch.tags?.length) {
-        return f.tags.some(t => orch.tags!.includes(t));
-      }
-      return false;
-    });
+    return orchestrationMatchesProfileFilter(orchId, orch.tags, selectedProfileIds, profiles);
   }, [profiles, orchestrations]);
 
   // ── Filtered active data by main pane profile filter ──
@@ -372,37 +360,14 @@ function App(): React.JSX.Element {
   const filteredOrchestrations = useMemo(() => {
     let result = orchestrations;
 
-    // Text search filter
+    // Text search filter (searches name, description, trigger type, step names, and tags)
     if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      result = result.filter(o =>
-        o.name?.toLowerCase().includes(q) ||
-        o.description?.toLowerCase().includes(q) ||
-        o.triggerType?.toLowerCase().includes(q) ||
-        o.steps?.some((step: Step | string) => {
-          const stepName = typeof step === 'string' ? step : step.name;
-          return stepName?.toLowerCase().includes(q);
-        })
-      );
+      result = result.filter(o => orchestrationMatchesSearch(o, searchQuery));
     }
 
     // Multi-profile filter (union: orchestration matches if ANY selected profile includes it)
     if (profileFilter.length > 0) {
-      const selectedProfiles = profiles.filter(p => profileFilter.includes(p.id));
-      if (selectedProfiles.length > 0) {
-        result = result.filter(o => {
-          return selectedProfiles.some(sp => {
-            const f = sp.filter;
-            if (f.excludeOrchestrationIds?.length > 0 && f.excludeOrchestrationIds.includes(o.id)) return false;
-            if (f.orchestrationIds?.length > 0 && f.orchestrationIds.includes(o.id)) return true;
-            if (f.tags?.includes('*')) return true;
-            if (f.tags?.length > 0 && o.tags?.length) {
-              return f.tags.some(t => o.tags!.includes(t));
-            }
-            return false;
-          });
-        });
-      }
+      result = result.filter(o => orchestrationMatchesProfileFilter(o.id, o.tags, profileFilter, profiles));
     }
 
     return result;
@@ -1205,41 +1170,45 @@ function App(): React.JSX.Element {
             <Icons.Workflow />
             Orchestra Portal
           </div>
-          <div className="search-box" role="search">
-            <span className="search-icon" aria-hidden="true"><Icons.Search /></span>
-            <input
-              type="text"
-              placeholder="Search orchestrations..."
-              value={searchQuery}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
-              aria-label="Search orchestrations"
-            />
+          <div className="search-row" role="search">
+            <div className="search-box">
+              <span className="search-icon" aria-hidden="true"><Icons.Search /></span>
+              <input
+                type="text"
+                placeholder="Search orchestrations, tags..."
+                value={searchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchQuery(e.target.value)}
+                aria-label="Search orchestrations"
+              />
+            </div>
+            {profiles.length > 0 && (
+              renderProfileMultiSelect(
+                profileFilter,
+                toggleSidebarProfileFilter,
+                profileDropdownOpen,
+                setProfileDropdownOpen,
+                () => setProfileFilter([]),
+                'Filter orchestrations by profile',
+                sidebarDropdownRef,
+              )
+            )}
           </div>
-          <button className="btn btn-primary btn-block" onClick={() => { setAddModal({ open: true }); setSidebarOpen(false); }}>
-            <Icons.Workflow /> Orchestrations
-          </button>
-          <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setBuilderModal(true); setSidebarOpen(false); }}>
-            <Icons.Steps aria-hidden="true" /> Visual Builder
-          </button>
-          <button className="btn btn-block" style={{ marginTop: '8px' }} onClick={() => { setMcpsModal({ open: true }); setSidebarOpen(false); }}>
-            <Icons.Tool /> MCP Tools
-          </button>
-          <button className="btn btn-primary btn-block" style={{ marginTop: '8px' }} onClick={() => { setProfilesModal(true); setSidebarOpen(false); }}>
-            <Icons.Shield /> Profiles & Tags
-          </button>
-
-          {/* Profile filter */}
-          {profiles.length > 0 && (
-            renderProfileMultiSelect(
-              profileFilter,
-              toggleSidebarProfileFilter,
-              profileDropdownOpen,
-              setProfileDropdownOpen,
-              () => setProfileFilter([]),
-              'Filter orchestrations by profile',
-              sidebarDropdownRef,
-            )
-          )}
+          <div className="header-btn-row">
+            <button className="btn btn-primary" onClick={() => { setAddModal({ open: true }); setSidebarOpen(false); }}>
+              <Icons.Workflow /> Orchestrations
+            </button>
+            <button className="btn btn-primary" onClick={() => { setProfilesModal(true); setSidebarOpen(false); }}>
+              <Icons.Shield /> Profiles
+            </button>
+          </div>
+          <div className="header-btn-row">
+            <button className="btn" onClick={() => { setBuilderModal(true); setSidebarOpen(false); }}>
+              <Icons.Steps aria-hidden="true" /> Visual Builder
+            </button>
+            <button className="btn" onClick={() => { setMcpsModal({ open: true }); setSidebarOpen(false); }}>
+              <Icons.Tool /> MCP Tools
+            </button>
+          </div>
         </div>
 
         <div className="orchestrations-list" role="listbox" aria-label="Orchestrations">
@@ -1330,10 +1299,16 @@ function App(): React.JSX.Element {
         </div>
 
         {/* History Section */}
-        <div className="history-section" aria-label="Recent executions">
-          <div className="history-header">
-            <span className="history-title" id="history-title">Recent Executions</span>
-            <div className="history-header-actions">
+        <div className={`history-section ${historyCollapsed ? 'collapsed' : ''}`} aria-label="Recent executions">
+          <div className="history-header" onClick={toggleHistoryCollapsed} style={{ cursor: 'pointer' }} role="button" aria-expanded={!historyCollapsed} tabIndex={0} onKeyDown={(e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleHistoryCollapsed(); } }}>
+            <span className="history-title" id="history-title">
+              <span className="history-collapse-caret">{historyCollapsed ? '\u25B6' : '\u25BC'}</span>
+              Recent Executions
+              {historyCollapsed && filteredHistory.length > 0 && (
+                <span className="history-count-badge">{filteredHistory.length}</span>
+              )}
+            </span>
+            <div className="history-header-actions" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
               <button
                 className={`history-filter-btn${hideIncomplete ? ' active' : ''}`}
                 onClick={toggleHideIncomplete}
@@ -1348,6 +1323,7 @@ function App(): React.JSX.Element {
               </button>
             </div>
           </div>
+          {!historyCollapsed && (
           <div className="history-list" role="list" aria-labelledby="history-title">
             {historyLoading ? (
               <div className="empty-state" style={{ padding: '20px' }}>
@@ -1438,6 +1414,7 @@ function App(): React.JSX.Element {
               ))
             )}
           </div>
+          )}
         </div>
       </nav>
 
@@ -1508,6 +1485,7 @@ function App(): React.JSX.Element {
                         execution={exec}
                         type="running"
                         orchestrations={orchestrations}
+                        profiles={profiles}
                         onView={(execution, orch) => {
                           attachToExecution(execution, orch);
                         }}
@@ -1550,6 +1528,7 @@ function App(): React.JSX.Element {
                         execution={exec}
                         type="pending"
                         orchestrations={orchestrations}
+                        profiles={profiles}
                         onView={(_execution, orch) => {
                           if (orch) {
                             setViewerModal({ open: true, orchestration: orch });

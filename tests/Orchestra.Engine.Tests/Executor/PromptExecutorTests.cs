@@ -1136,6 +1136,37 @@ public class PromptExecutorTests
 	}
 
 	[Fact]
+	public async Task ExecuteAsync_WithSkillDirectories_ResolvesTemplateVariables()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("skill-step");
+		step.SkillDirectories = ["{{vars.skillsDir}}", "./relative/skills"];
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+			Variables = new Dictionary<string, string>
+			{
+				["skillsDir"] = @"P:\Github\OrcStra-Uruk\Skills"
+			}
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - Template variable should be resolved, relative path should remain as-is
+		agentBuilder.CapturedConfig.Should().NotBeNull();
+		agentBuilder.CapturedConfig!.SkillDirectories.Should().HaveCount(2);
+		agentBuilder.CapturedConfig.SkillDirectories[0].Should().Be(@"P:\Github\OrcStra-Uruk\Skills");
+		agentBuilder.CapturedConfig.SkillDirectories[1].Should().Be("./relative/skills");
+	}
+
+	[Fact]
 	public async Task ExecuteAsync_WithoutSkillDirectories_PassesEmptyArray()
 	{
 		// Arrange

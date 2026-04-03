@@ -98,7 +98,7 @@ public static class OrchestrationsApi
 					runCount = trigger?.RunCount ?? 0,
 					lastExecutionId = trigger?.LastExecutionId,
 					hasInlineMcps = o.Orchestration.Mcps.Length > 0,
-					mcps = o.Orchestration.Mcps.Select(m => m.Name).ToArray(),
+					mcps = o.Orchestration.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray(),
 				models = o.Orchestration.Steps
 						.OfType<PromptOrchestrationStep>()
 						.Select(s => s.Model)
@@ -282,7 +282,8 @@ public static class OrchestrationsApi
 							trigger,
 							null,
 							TriggerSource.Json,
-							entry.Id);
+							entry.Id,
+							entry.Orchestration);
 					}
 				}
 				catch (Exception ex)
@@ -313,7 +314,8 @@ public static class OrchestrationsApi
 						trigger,
 						null,
 						TriggerSource.Json,
-						entry.Id);
+						entry.Id,
+						entry.Orchestration);
 				}
 
 				return Results.Json(new
@@ -362,7 +364,8 @@ public static class OrchestrationsApi
 						enabledTrigger,
 						null,
 						TriggerSource.Json,
-						entry.Id);
+						entry.Id,
+						entry.Orchestration);
 				}
 				else
 				{

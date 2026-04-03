@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
@@ -1073,6 +1074,116 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 			activeInfos.TryRemove(executionId, out _);
 			reporter.Dispose();
 			cts.Dispose();
+		}
+	}
+
+	#endregion
+
+	#region GET /api/active - Registry fallback for orchestration name
+
+	[Fact]
+	public async Task Active_PendingTriggerWithNullOrchestrationName_FallsBackToRegistryName()
+	{
+		// Arrange - Register an orchestration via the JSON API so it's in the registry
+		var orchName = $"Registry Fallback Test {Guid.NewGuid():N}";
+		var orchJson = CreateValidOrchestrationJson(orchName);
+
+		var addResponse = await _client.PostAsJsonAsync("/api/orchestrations/json",
+			new { json = orchJson, mcpJson = (string?)null }, _jsonOptions);
+		addResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+		var addResult = await addResponse.Content.ReadFromJsonAsync<JsonElement>();
+		var orchId = addResult.GetProperty("id").GetString()!;
+
+		// Get the TriggerManager and register a trigger with the registry ID,
+		// then clear OrchestrationName to simulate the bug
+		var triggerManager = _factory.Services.GetRequiredService<TriggerManager>();
+
+		triggerManager.RegisterTrigger(
+			Path.Combine(_tempDir, "fallback-test.json"),
+			null,
+			new SchedulerTriggerConfig { Type = TriggerType.Scheduler, Enabled = true, IntervalSeconds = 9999 },
+			null,
+			TriggerSource.Json,
+			orchId);
+		var reg = triggerManager.GetTrigger(orchId);
+		reg.Should().NotBeNull();
+		reg!.OrchestrationName = null;
+
+		try
+		{
+			// Act
+			var response = await _client.GetAsync("/api/active");
+			response.StatusCode.Should().Be(HttpStatusCode.OK);
+			var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+			// Assert - Find the pending trigger and verify name comes from registry
+			var pending = result.GetProperty("pending");
+			var found = false;
+			foreach (var item in pending.EnumerateArray())
+			{
+				if (item.GetProperty("orchestrationId").GetString() == orchId)
+				{
+					found = true;
+					var name = item.GetProperty("orchestrationName").GetString();
+					name.Should().Be(orchName,
+						"when OrchestrationName is null, it should fall back to registry name");
+					break;
+				}
+			}
+			found.Should().BeTrue("the trigger should appear in the pending list");
+		}
+		finally
+		{
+			triggerManager.RemoveTrigger(orchId);
+		}
+	}
+
+	[Fact]
+	public async Task Active_PendingTriggerWithNullNameAndMissingRegistry_ReturnsUnknown()
+	{
+		// Arrange - Register a trigger that is NOT in the orchestration registry
+		var triggerManager = _factory.Services.GetRequiredService<TriggerManager>();
+		var fakeId = $"nonexistent-{Guid.NewGuid():N}";
+		var fakePath = Path.Combine(_tempDir, "does-not-exist.json");
+
+		triggerManager.RegisterTrigger(
+			fakePath,
+			null,
+			new SchedulerTriggerConfig { Type = TriggerType.Scheduler, Enabled = true, IntervalSeconds = 9999 },
+			null,
+			TriggerSource.Json,
+			fakeId);
+
+		var trigger = triggerManager.GetTrigger(fakeId);
+		trigger.Should().NotBeNull();
+		trigger!.OrchestrationName = null;
+
+		try
+		{
+			// Act
+			var response = await _client.GetAsync("/api/active");
+			response.StatusCode.Should().Be(HttpStatusCode.OK);
+			var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+			// Assert - The name should be "Unknown" since both trigger name and registry are null
+			var pending = result.GetProperty("pending");
+			var found = false;
+			foreach (var item in pending.EnumerateArray())
+			{
+				if (item.GetProperty("orchestrationId").GetString() == fakeId)
+				{
+					found = true;
+					var name = item.GetProperty("orchestrationName").GetString();
+					name.Should().Be("Unknown",
+						"when both trigger name and registry lookup fail, name should be 'Unknown'");
+					break;
+				}
+			}
+			found.Should().BeTrue("the trigger should appear in the pending list");
+		}
+		finally
+		{
+			triggerManager.RemoveTrigger(fakeId);
 		}
 	}
 

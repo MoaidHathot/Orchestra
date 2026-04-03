@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icons, getTriggerIcon } from '../icons';
-import { formatTimeAgo, formatTimeUntil } from '../utils';
-import type { Orchestration } from '../types';
+import { formatTimeAgo, formatTimeUntil, getMatchingProfiles } from '../utils';
+import type { Orchestration, Profile } from '../types';
 
 /** Combined execution shape used by both running and pending cards. */
 export interface CardExecution {
@@ -29,6 +29,7 @@ interface Props {
   onCancel?: (executionId: string) => void;
   onRun?: (orch: Orchestration) => void;
   orchestrations?: Orchestration[];
+  profiles?: Profile[];
 }
 
 export default function ActiveOrchestrationCard({
@@ -38,6 +39,7 @@ export default function ActiveOrchestrationCard({
   onCancel,
   onRun,
   orchestrations,
+  profiles,
 }: Props): React.JSX.Element {
   const isRunning = type === 'running';
   const isCancelling = execution.status === 'Cancelling';
@@ -300,30 +302,56 @@ export default function ActiveOrchestrationCard({
           <div style={{ marginBottom: '8px' }}>
             <div className="card-meta-label">MCPs</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '2px' }}>
-              {orch.mcps.map((mcp) => (
-                <span
-                  key={mcp.name}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '3px',
-                    padding: '2px 6px',
-                    fontSize: '10px',
-                    background: 'rgba(139, 92, 246, 0.15)',
-                    border: '1px solid rgba(139, 92, 246, 0.3)',
-                    borderRadius: '4px',
-                    color: '#a78bfa',
-                  }}
-                >
-                  <span style={{ width: '10px', height: '10px', display: 'inline-flex' }}>
-                    <Icons.Tool />
+              {orch.mcps.map((mcp) => {
+                const mcpName = typeof mcp === 'string' ? mcp : mcp.name;
+                return (
+                  <span
+                    key={mcpName}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      padding: '2px 6px',
+                      fontSize: '10px',
+                      background: 'rgba(139, 92, 246, 0.15)',
+                      border: '1px solid rgba(139, 92, 246, 0.3)',
+                      borderRadius: '4px',
+                      color: '#a78bfa',
+                    }}
+                  >
+                    {mcpName}
                   </span>
-                  {mcp.name}
-                </span>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
+
+        {/* Tags */}
+        {orch?.tags && orch.tags.length > 0 && (
+          <div className="orch-tags" style={{ marginBottom: '4px' }}>
+            {orch.tags.map(tag => (
+              <span key={tag} className={`tag-chip ${tag === '*' ? 'tag-wildcard' : ''}`}>
+                <Icons.Tag />{tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Profiles */}
+        {(() => {
+          const matchedProfiles = profiles && orch
+            ? getMatchingProfiles(profiles, orch.id, orch.tags)
+            : [];
+          return matchedProfiles.length > 0 ? (
+            <div className="orch-profiles">
+              {matchedProfiles.map(p => (
+                <span key={p.id} className={`profile-badge ${p.isActive ? 'active' : ''}`}>
+                  <Icons.Shield />{p.name}
+                </span>
+              ))}
+            </div>
+          ) : null;
+        })()}
 
         {/* Parameters preview for running */}
         {isRunning &&

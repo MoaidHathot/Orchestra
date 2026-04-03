@@ -151,32 +151,27 @@ function buildNodeDeclaration(safeId: string, label: string, stepType: string): 
 }
 
 /**
- * Build subagent section for a step. Returns mermaid code for a subgraph
- * wrapping the step node and its subagent nodes.
+ * Build subagent section for a step. Returns mermaid code for a single compact
+ * node listing all subagents, connected to the parent step via a dotted edge.
+ * This avoids the wide horizontal layout that individual subagent nodes create.
  */
 function buildSubagentSection(
   safeId: string,
   subagents: Array<{ name: string; displayName?: string; description?: string }>,
 ): { subgraphCode: string; subagentIds: string[] } {
-  const subagentIds: string[] = [];
+  const compactId = `${safeId}_sa_group`;
   let code = '';
 
-  // Create a subgraph that groups the parent step with its subagents
-  code += `  subgraph ${safeId}_agents [" "]\n`;
-  code += `    direction LR\n`;
-
-  // Add subagent nodes inside the subgraph
-  for (const sa of subagents) {
-    const subId = `${safeId}_sa_${safeNodeId(sa.name)}`;
-    subagentIds.push(subId);
+  // Build a compact label listing subagent names vertically
+  const lines = subagents.map(sa => {
     const displayName = sa.displayName || sa.name;
-    const desc = sa.description ? `<br/><small>${escLabel(sa.description.length > 40 ? sa.description.substring(0, 37) + '...' : sa.description)}</small>` : '';
-    code += `    ${subId}[/"${escLabel(displayName)}${desc}"/]\n`;
-  }
+    return escLabel(displayName);
+  });
+  const label = `<small>\u{1F916} Subagents</small><br/><small>${lines.join('<br/>')}</small>`;
 
-  code += `  end\n`;
+  code += `  ${compactId}[/"${label}"/]\n`;
 
-  return { subgraphCode: code, subagentIds };
+  return { subgraphCode: code, subagentIds: [compactId] };
 }
 
 /**

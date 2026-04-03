@@ -1173,9 +1173,10 @@ public class TemplateResolverTests
 	}
 
 	[Fact]
-	public void Resolve_VarsContainingStepOutput_ResolvesRecursively()
+	public void Resolve_VarsContainingStepOutput_LeavesStepOutputUnresolved()
 	{
-		// Arrange
+		// Arrange — variable values use static-only resolution, so step output
+		// references inside a variable are left as-is (not resolved).
 		var context = new OrchestrationExecutionContext
 		{
 			OrchestrationInfo = s_defaultInfo,
@@ -1191,8 +1192,9 @@ public class TemplateResolverTests
 		// Act
 		var result = TemplateResolver.Resolve(template, [], context, ["analysis"], s_defaultStep);
 
-		// Assert
-		result.Should().Be("Result: deep insights");
+		// Assert — step output expression is left as a literal because
+		// variable resolution uses static-only expansion
+		result.Should().Be("Result: {{analysis.output}}");
 	}
 
 	[Fact]
@@ -1239,6 +1241,496 @@ public class TemplateResolverTests
 
 		// Assert
 		result.Should().Be("Before[]After");
+	}
+
+	#endregion
+
+	#region ResolveStatic Tests
+
+	[Fact]
+	public void ResolveStatic_ParameterExpression_Resolves()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["project"] = "Orchestra" }
+		};
+		var template = "Project: {{param.project}}";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert
+		result.Should().Be("Project: Orchestra");
+	}
+
+	[Fact]
+	public void ResolveStatic_EnvironmentVariable_Resolves()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_TEST_STATIC", "resolved-env-value");
+		try
+		{
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>()
+			};
+			var template = "Env: {{env.ORCHESTRA_TEST_STATIC}}";
+
+			// Act
+			var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+			// Assert
+			result.Should().Be("Env: resolved-env-value");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_TEST_STATIC", null);
+		}
+	}
+
+	[Fact]
+	public void ResolveStatic_OrchestrationMetadata_Resolves()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = "Run: {{orchestration.name}} v{{orchestration.version}}";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert
+		result.Should().Be("Run: test-orchestration v1.0.0");
+	}
+
+	[Fact]
+	public void ResolveStatic_VarsExpression_Resolves()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["region"] = "us-east-1" },
+			Variables = new Dictionary<string, string>
+			{
+				["endpoint"] = "https://{{param.region}}.api.example.com"
+			}
+		};
+		var template = "Connecting to {{vars.endpoint}}";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert
+		result.Should().Be("Connecting to https://us-east-1.api.example.com");
+	}
+
+	[Fact]
+	public void ResolveStatic_StepOutput_LeavesAsIs()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		context.AddResult("analysis", ExecutionResult.Succeeded("deep insights"));
+		var template = "Output: {{analysis.output}}";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert — step output reference left as literal
+		result.Should().Be("Output: {{analysis.output}}");
+	}
+
+	[Fact]
+	public void ResolveStatic_StepRawOutput_LeavesAsIs()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		context.AddResult("analysis", ExecutionResult.Succeeded("content", "raw content"));
+		var template = "Raw: {{analysis.rawOutput}}";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert
+		result.Should().Be("Raw: {{analysis.rawOutput}}");
+	}
+
+	[Fact]
+	public void ResolveStatic_StepProperty_LeavesAsIs()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = "Step: {{step.name}}";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert — step metadata left as literal
+		result.Should().Be("Step: {{step.name}}");
+	}
+
+	[Fact]
+	public void ResolveStatic_MixedExpressions_ResolvesOnlyStatic()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["model"] = "claude-opus-4.5" },
+			Variables = new Dictionary<string, string>
+			{
+				["greeting"] = "Hello from {{param.model}}"
+			}
+		};
+		context.AddResult("step1", ExecutionResult.Succeeded("result1"));
+		var template = "{{vars.greeting}} | step={{step.name}} | output={{step1.output}}";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert — param/vars resolved, step.name and step output left as-is
+		result.Should().Be("Hello from claude-opus-4.5 | step={{step.name}} | output={{step1.output}}");
+	}
+
+	#endregion
+
+	#region ResolveStaticMcp Tests
+
+	[Fact]
+	public void ResolveStaticMcp_LocalMcp_ResolvesCommandAndArguments()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>
+			{
+				["tool_path"] = "/usr/local/bin/mytool",
+				["project_dir"] = "/home/user/project"
+			}
+		};
+		var mcp = new LocalMcp
+		{
+			Name = "my-tool",
+			Type = McpType.Local,
+			Command = "{{param.tool_path}}",
+			Arguments = ["--dir", "{{param.project_dir}}", "--verbose"],
+			WorkingDirectory = "{{param.project_dir}}/workspace"
+		};
+
+		// Act
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert
+		var local = resolved.Should().BeOfType<LocalMcp>().Subject;
+		local.Name.Should().Be("my-tool");             // Name preserved
+		local.Type.Should().Be(McpType.Local);         // Type preserved
+		local.Command.Should().Be("/usr/local/bin/mytool");
+		local.Arguments.Should().Equal("--dir", "/home/user/project", "--verbose");
+		local.WorkingDirectory.Should().Be("/home/user/project/workspace");
+	}
+
+	[Fact]
+	public void ResolveStaticMcp_LocalMcp_NullWorkingDirectory_PreservesNull()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var mcp = new LocalMcp
+		{
+			Name = "simple-tool",
+			Type = McpType.Local,
+			Command = "echo",
+			Arguments = ["hello"],
+			WorkingDirectory = null
+		};
+
+		// Act
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert
+		var local = resolved.Should().BeOfType<LocalMcp>().Subject;
+		local.WorkingDirectory.Should().BeNull();
+	}
+
+	[Fact]
+	public void ResolveStaticMcp_RemoteMcp_ResolvesEndpointAndHeaders()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>
+			{
+				["api_host"] = "api.example.com",
+				["api_key"] = "sk-test-12345"
+			}
+		};
+		var mcp = new RemoteMcp
+		{
+			Name = "remote-api",
+			Type = McpType.Remote,
+			Endpoint = "https://{{param.api_host}}/v1/mcp",
+			Headers = new Dictionary<string, string>
+			{
+				["Authorization"] = "Bearer {{param.api_key}}",
+				["Content-Type"] = "application/json"
+			}
+		};
+
+		// Act
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert
+		var remote = resolved.Should().BeOfType<RemoteMcp>().Subject;
+		remote.Name.Should().Be("remote-api");     // Name preserved
+		remote.Type.Should().Be(McpType.Remote);   // Type preserved
+		remote.Endpoint.Should().Be("https://api.example.com/v1/mcp");
+		remote.Headers["Authorization"].Should().Be("Bearer sk-test-12345");
+		remote.Headers["Content-Type"].Should().Be("application/json");
+	}
+
+	[Fact]
+	public void ResolveStaticMcp_UnresolvableExpressions_LeftAsLiterals()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>() // No parameters defined
+		};
+		var mcp = new LocalMcp
+		{
+			Name = "tool-with-missing-params",
+			Type = McpType.Local,
+			Command = "{{param.undefined_tool}}",
+			Arguments = ["--key", "{{param.undefined_key}}"],
+		};
+
+		// Act
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert — unresolvable expressions are left as literals
+		var local = resolved.Should().BeOfType<LocalMcp>().Subject;
+		local.Command.Should().Be("{{param.undefined_tool}}");
+		local.Arguments.Should().Equal("--key", "{{param.undefined_key}}");
+	}
+
+	[Fact]
+	public void ResolveStaticMcp_WithEnvVar_ResolvesEnvironmentVariable()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_MCP_TEST_TOKEN", "secret-token-123");
+		try
+		{
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>()
+			};
+		var mcp = new RemoteMcp
+		{
+			Name = "env-api",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com",
+				Headers = new Dictionary<string, string>
+				{
+					["Authorization"] = "Bearer {{env.ORCHESTRA_MCP_TEST_TOKEN}}"
+				}
+			};
+
+			// Act
+			var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+			// Assert
+			var remote = resolved.Should().BeOfType<RemoteMcp>().Subject;
+			remote.Headers["Authorization"].Should().Be("Bearer secret-token-123");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_MCP_TEST_TOKEN", null);
+		}
+	}
+
+	[Fact]
+	public void ResolveStaticMcp_WithVarsAndOrchestration_ResolvesNested()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["region"] = "us-east-1" },
+			Variables = new Dictionary<string, string>
+			{
+				["base_url"] = "https://{{param.region}}.mcp.example.com"
+			}
+		};
+		var mcp = new RemoteMcp
+		{
+			Name = "regional-mcp",
+			Type = McpType.Remote,
+			Endpoint = "{{vars.base_url}}/{{orchestration.name}}",
+			Headers = new Dictionary<string, string>
+			{
+				["X-Run-Id"] = "{{orchestration.runId}}"
+			}
+		};
+
+		// Act
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert
+		var remote = resolved.Should().BeOfType<RemoteMcp>().Subject;
+		remote.Endpoint.Should().Be("https://us-east-1.mcp.example.com/test-orchestration");
+		remote.Headers["X-Run-Id"].Should().Be("run123");
+	}
+
+	[Fact]
+	public void ResolveStaticMcp_StepOutputInMcpField_LeftAsLiteral()
+	{
+		// Arrange — step output expressions in MCP fields should not resolve
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		context.AddResult("setup", ExecutionResult.Succeeded("http://localhost:3000"));
+		var mcp = new RemoteMcp
+		{
+			Name = "dynamic-api",
+			Type = McpType.Remote,
+			Endpoint = "{{setup.output}}/mcp",
+			Headers = new Dictionary<string, string>()
+		};
+
+		// Act
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert — step output left as-is since MCP uses static resolution
+		var remote = resolved.Should().BeOfType<RemoteMcp>().Subject;
+		remote.Endpoint.Should().Be("{{setup.output}}/mcp");
+	}
+
+	#endregion
+
+	#region ResolveVariable Tightening Tests
+
+	[Fact]
+	public void Resolve_VarsReferencingOtherVars_StillResolves()
+	{
+		// Arrange — vars referencing vars should still work
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["base"] = "https://api.example.com" },
+			Variables = new Dictionary<string, string>
+			{
+				["api_url"] = "{{param.base}}/v2",
+				["full_endpoint"] = "{{vars.api_url}}/data"
+			}
+		};
+		var template = "Endpoint: {{vars.full_endpoint}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, [], s_defaultStep);
+
+		// Assert — nested var → param resolution works
+		result.Should().Be("Endpoint: https://api.example.com/v2/data");
+	}
+
+	[Fact]
+	public void Resolve_VarsReferencingEnv_StillResolves()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_VAR_TEST_KEY", "env-secret");
+		try
+		{
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>(),
+				Variables = new Dictionary<string, string>
+				{
+					["auth_header"] = "Bearer {{env.ORCHESTRA_VAR_TEST_KEY}}"
+				}
+			};
+			var template = "Header: {{vars.auth_header}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, context.Parameters, context, [], s_defaultStep);
+
+			// Assert
+			result.Should().Be("Header: Bearer env-secret");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_VAR_TEST_KEY", null);
+		}
+	}
+
+	[Fact]
+	public void Resolve_VarsReferencingOrchestrationMetadata_StillResolves()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+			Variables = new Dictionary<string, string>
+			{
+				["run_label"] = "{{orchestration.name}}-{{orchestration.runId}}"
+			}
+		};
+		var template = "Label: {{vars.run_label}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("Label: test-orchestration-run123");
+	}
+
+	[Fact]
+	public void Resolve_VarsReferencingStepMetadata_LeavesStepPartUnresolved()
+	{
+		// Arrange — step.name inside a variable should NOT resolve
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+			Variables = new Dictionary<string, string>
+			{
+				["context_info"] = "Step={{step.name}}"
+			}
+		};
+		var template = "Info: {{vars.context_info}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, [], s_defaultStep);
+
+		// Assert — step.name left as-is inside variable resolution
+		result.Should().Be("Info: Step={{step.name}}");
 	}
 
 	#endregion

@@ -197,6 +197,88 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 			"Response should have 'orchestrations' array matching frontend OrchestrationsResponse type");
 	}
 
+	[Fact]
+	public async Task Contract_GetOrchestrations_McpsContainNameAndTypeObjects()
+	{
+		// Arrange - Register an orchestration with inline MCPs
+		var name = $"MCP Shape Test {Guid.NewGuid():N}";
+		var json = $$"""
+		{
+			"name": "{{name}}",
+			"description": "Orchestration with MCPs for shape testing",
+			"mcps": [
+				{
+					"name": "test-local-mcp",
+					"type": "local",
+					"command": "echo",
+					"arguments": ["hello"]
+				},
+				{
+					"name": "test-remote-mcp",
+					"type": "remote",
+					"endpoint": "https://example.com/mcp"
+				}
+			],
+			"steps": [{
+				"name": "test-step",
+				"type": "Prompt",
+				"dependsOn": [],
+				"systemPrompt": "Test",
+				"userPrompt": "Hello",
+				"model": "claude-opus-4.5"
+			}]
+		}
+		""";
+
+		var addResponse = await _client.PostAsJsonAsync("/api/orchestrations/json",
+			new { json, mcpJson = (string?)null }, _jsonOptions);
+		addResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		// Act - Get the orchestrations list
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+		// Assert - Find our orchestration and verify MCP shape
+		var orchestrations = result.GetProperty("orchestrations");
+		JsonElement? targetOrch = null;
+		foreach (var orch in orchestrations.EnumerateArray())
+		{
+			if (orch.GetProperty("name").GetString() == name)
+			{
+				targetOrch = orch;
+				break;
+			}
+		}
+
+		targetOrch.Should().NotBeNull($"orchestration '{name}' should be in the list");
+		var mcps = targetOrch!.Value.GetProperty("mcps");
+		mcps.ValueKind.Should().Be(JsonValueKind.Array);
+		mcps.GetArrayLength().Should().Be(2);
+
+		// Each MCP must be an object with "name" and "type" — NOT a bare string
+		foreach (var mcp in mcps.EnumerateArray())
+		{
+			mcp.ValueKind.Should().Be(JsonValueKind.Object,
+				"MCP entries in the list endpoint should be objects, not strings");
+			mcp.TryGetProperty("name", out var mcpName).Should().BeTrue(
+				"each MCP object should have a 'name' property");
+			mcpName.ValueKind.Should().Be(JsonValueKind.String);
+			mcpName.GetString().Should().NotBeNullOrEmpty();
+
+			mcp.TryGetProperty("type", out var mcpType).Should().BeTrue(
+				"each MCP object should have a 'type' property");
+			mcpType.ValueKind.Should().Be(JsonValueKind.String);
+		}
+
+		// Verify specific MCP names
+		var mcpNames = mcps.EnumerateArray()
+			.Select(m => m.GetProperty("name").GetString())
+			.ToArray();
+		mcpNames.Should().Contain("test-local-mcp");
+		mcpNames.Should().Contain("test-remote-mcp");
+	}
+
 	#endregion
 
 	#region 2. GET /api/orchestrations/{id} — Get single orchestration

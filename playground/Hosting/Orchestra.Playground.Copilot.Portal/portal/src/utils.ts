@@ -1,3 +1,5 @@
+import type { Profile, ProfileFilter } from './types';
+
 export function formatTimeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return 'Unknown';
   const date = new Date(dateStr);
@@ -45,4 +47,79 @@ export function isIncompleteExecution(exec: {
 }): boolean {
   if (exec.isActive) return false;
   return !!(exec.isIncomplete || (exec.completionReason && exec.status === 'Succeeded'));
+}
+
+// ── Profile / tag filtering helpers ──────────────────────────────────────────
+
+/**
+ * Checks whether a profile filter matches an orchestration based on its filter rules.
+ * Uses case-insensitive tag comparison to match the backend ProfileFilter.Matches() behavior.
+ */
+export function profileFilterMatchesOrchestration(
+  filter: ProfileFilter,
+  orchestrationId: string,
+  orchestrationTags: string[] | undefined,
+): boolean {
+  // Excluded IDs always take precedence
+  if (filter.excludeOrchestrationIds?.length > 0 && filter.excludeOrchestrationIds.includes(orchestrationId))
+    return false;
+  // Explicit ID inclusion
+  if (filter.orchestrationIds?.length > 0 && filter.orchestrationIds.includes(orchestrationId))
+    return true;
+  // Wildcard matches everything
+  if (filter.tags?.includes('*'))
+    return true;
+  // Tag intersection (case-insensitive, matching backend OrdinalIgnoreCase behavior)
+  if (filter.tags?.length > 0 && orchestrationTags?.length) {
+    return filter.tags.some(t => orchestrationTags.some(ot => ot.toLowerCase() === t.toLowerCase()));
+  }
+  return false;
+}
+
+/**
+ * Returns all profiles whose filter matches the given orchestration.
+ */
+export function getMatchingProfiles(
+  profiles: Profile[],
+  orchestrationId: string,
+  orchestrationTags: string[] | undefined,
+): Profile[] {
+  return profiles.filter(p => profileFilterMatchesOrchestration(p.filter, orchestrationId, orchestrationTags));
+}
+
+/**
+ * Checks if an orchestration (by ID) matches any of the given selected profile IDs.
+ * Returns true if no profile filter is applied (empty selection = show all).
+ */
+export function orchestrationMatchesProfileFilter(
+  orchId: string,
+  orchTags: string[] | undefined,
+  selectedProfileIds: string[],
+  profiles: Profile[],
+): boolean {
+  if (selectedProfileIds.length === 0) return true;
+  const selectedProfiles = profiles.filter(p => selectedProfileIds.includes(p.id));
+  return selectedProfiles.some(sp => profileFilterMatchesOrchestration(sp.filter, orchId, orchTags));
+}
+
+/**
+ * Checks whether an orchestration matches a text search query.
+ * Searches name, description, trigger type, tags, and step names.
+ */
+export function orchestrationMatchesSearch(
+  orch: { name?: string; description?: string; triggerType?: string; tags?: string[]; steps?: ({ name?: string } | string)[] },
+  query: string,
+): boolean {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return !!(
+    orch.name?.toLowerCase().includes(q) ||
+    orch.description?.toLowerCase().includes(q) ||
+    orch.triggerType?.toLowerCase().includes(q) ||
+    orch.tags?.some(tag => tag.toLowerCase().includes(q)) ||
+    orch.steps?.some(step => {
+      const stepName = typeof step === 'string' ? step : step.name;
+      return stepName?.toLowerCase().includes(q);
+    })
+  );
 }

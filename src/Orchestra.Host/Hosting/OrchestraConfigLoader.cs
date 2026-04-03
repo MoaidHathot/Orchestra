@@ -85,6 +85,34 @@ public static class OrchestraConfigLoader
 	}
 
 	/// <summary>
+	/// Loads the configuration file and returns the deserialized config, or null if no file exists
+	/// or it cannot be parsed. Useful for consumers that need to read config values (such as LogLevel)
+	/// before calling <see cref="LoadAndApply"/>.
+	/// </summary>
+	public static OrchestraConfigFile? Load(ILogger? logger = null)
+	{
+		logger ??= NullLogger.Instance;
+
+		var configPath = ResolveConfigPath();
+		if (configPath is null)
+		{
+			logger.LogDebug("No Orchestra configuration file found.");
+			return null;
+		}
+
+		try
+		{
+			var json = File.ReadAllText(configPath);
+			return JsonSerializer.Deserialize<OrchestraConfigFile>(json, JsonOptions);
+		}
+		catch (Exception ex)
+		{
+			logger.LogWarning(ex, "Failed to load Orchestra configuration from {ConfigPath}.", configPath);
+			return null;
+		}
+	}
+
+	/// <summary>
 	/// Loads configuration from the resolved config file path and applies it to the options.
 	/// Values in the config file are applied first, then the programmatic configure action
 	/// runs on top (allowing overrides).

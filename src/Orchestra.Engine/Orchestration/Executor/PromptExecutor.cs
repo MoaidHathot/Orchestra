@@ -39,8 +39,16 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Create event processor to handle agent events and collect trace data
 		var eventProcessor = new AgentEventProcessor(_reporter, step.Name);
 
-		// Build MCP server descriptions for trace diagnostics
-		var mcpServerDescriptions = BuildMcpServerDescriptions(step.Mcps);
+		// Resolve template expressions in MCP configurations (param, env, vars, orchestration)
+		// before building diagnostics or the agent config, so resolved values are visible.
+		var resolvedMcps = step.Mcps
+			.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context))
+			.ToArray();
+
+		var resolvedSubagents = ResolveSubagentMcps(step.Subagents, context);
+
+		// Build MCP server descriptions for trace diagnostics (using resolved values)
+		var mcpServerDescriptions = BuildMcpServerDescriptions(resolvedMcps);
 
 		try
 		{
@@ -60,14 +68,16 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		{
 			Model = step.Model,
 			SystemPrompt = step.SystemPrompt,
-			Mcps = step.Mcps,
-			Subagents = step.Subagents,
+			Mcps = resolvedMcps,
+			Subagents = resolvedSubagents,
 			ReasoningLevel = step.ReasoningLevel,
 			SystemPromptMode = step.SystemPromptMode ?? context.DefaultSystemPromptMode,
 			Reporter = _reporter,
 			EngineTools = engineTools,
 			EngineToolCtx = engineToolCtx,
-			SkillDirectories = step.SkillDirectories,
+			SkillDirectories = step.SkillDirectories
+				.Select(dir => TemplateResolver.Resolve(dir, context.Parameters, context, step.DependsOn, step))
+				.ToArray(),
 		};
 
 		var agent = await _agentBuilder
@@ -85,10 +95,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			// unreliable output. Fail the step early with a clear error rather than
 			// propagating the LLM's confused response as a "success."
 			var failedMcpServers = eventProcessor.GetFailedMcpServers();
-			if (failedMcpServers.Count > 0 && step.Mcps.Length > 0)
+			if (failedMcpServers.Count > 0 && resolvedMcps.Length > 0)
 			{
 				var requiredFailed = failedMcpServers
-					.Where(f => step.Mcps.Any(m => string.Equals(m.Name, f, StringComparison.OrdinalIgnoreCase)))
+					.Where(f => resolvedMcps.Any(m => string.Equals(m.Name, f, StringComparison.OrdinalIgnoreCase)))
 					.ToList();
 
 				if (requiredFailed.Count > 0)
@@ -252,6 +262,44 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			descriptions.Add(desc);
 		}
 		return descriptions;
+	}
+
+	/// <summary>
+	/// Creates copies of subagents with their MCP configurations resolved using
+	/// static/orchestration-level template expressions (param, env, vars, orchestration).
+	/// Returns the original array if no subagents have MCPs to resolve.
+	/// </summary>
+	private static Subagent[] ResolveSubagentMcps(
+		Subagent[] subagents,
+		OrchestrationExecutionContext context)
+	{
+		if (subagents.Length == 0)
+			return subagents;
+
+		// Check if any subagent has MCPs — if not, skip cloning entirely
+		if (!subagents.Any(s => s.Mcps.Length > 0))
+			return subagents;
+
+		return subagents.Select(s =>
+		{
+			if (s.Mcps.Length == 0)
+				return s;
+
+			// Clone the subagent with resolved MCP configurations
+			var resolved = new Subagent
+			{
+				Name = s.Name,
+				DisplayName = s.DisplayName,
+				Description = s.Description,
+				Prompt = s.Prompt,
+				Tools = s.Tools,
+				Infer = s.Infer,
+			};
+			resolved.Mcps = s.Mcps
+				.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context))
+				.ToArray();
+			return resolved;
+		}).ToArray();
 	}
 
 	private async Task<string> RunHandlerAsync(

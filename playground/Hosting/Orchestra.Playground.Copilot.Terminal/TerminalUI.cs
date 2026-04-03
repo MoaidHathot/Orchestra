@@ -953,14 +953,19 @@ public class TerminalUI
 	{
 		var all = _registry.GetAll().ToArray();
 
-		// Apply text search filter
+		// Apply text search filter (name, description, or tags)
 		IEnumerable<OrchestrationEntry> filtered = all;
 		if (!string.IsNullOrEmpty(_searchQuery))
 		{
 			filtered = filtered.Where(e =>
-				e.Orchestration.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
-				(e.Orchestration.Description?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false)
-			);
+			{
+				if (e.Orchestration.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase))
+					return true;
+				if (e.Orchestration.Description?.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ?? false)
+					return true;
+				var tags = _tagStore.GetEffectiveTags(e.Id, e.Orchestration.Tags);
+				return tags.Any(t => t.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase));
+			});
 		}
 
 		// Apply profile filter

@@ -465,4 +465,105 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.Retention.MaxRunAgeDays.Should().Be(14);
 		options.Retention.IsForever.Should().BeFalse();
 	}
+
+	// ── Load (returns OrchestraConfigFile) tests ──
+
+	[Fact]
+	public void Load_NoConfigFile_ReturnsNull()
+	{
+		// Arrange
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(_tempDir, "empty"));
+
+		// Act
+		var result = OrchestraConfigLoader.Load();
+
+		// Assert
+		result.Should().BeNull();
+	}
+
+	[Fact]
+	public void Load_ValidConfig_ReturnsDeserializedConfig()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "load-test.json");
+		File.WriteAllText(configPath, """
+		{
+			"dataPath": "/load/data",
+			"logLevel": "Debug",
+			"shutdownTimeoutSeconds": 99
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		// Act
+		var result = OrchestraConfigLoader.Load();
+
+		// Assert
+		result.Should().NotBeNull();
+		result!.DataPath.Should().Be("/load/data");
+		result.LogLevel.Should().Be("Debug");
+		result.ShutdownTimeoutSeconds.Should().Be(99);
+		result.HostBaseUrl.Should().BeNull();
+	}
+
+	[Fact]
+	public void Load_InvalidJson_ReturnsNull()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "bad-load.json");
+		File.WriteAllText(configPath, "not valid json {{{");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		// Act
+		var result = OrchestraConfigLoader.Load();
+
+		// Assert
+		result.Should().BeNull();
+	}
+
+	[Fact]
+	public void Load_EmptyJson_ReturnsEmptyConfig()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "empty-load.json");
+		File.WriteAllText(configPath, "{}");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		// Act
+		var result = OrchestraConfigLoader.Load();
+
+		// Assert
+		result.Should().NotBeNull();
+		result!.DataPath.Should().BeNull();
+		result.LogLevel.Should().BeNull();
+		result.ShutdownTimeoutSeconds.Should().BeNull();
+	}
+
+	[Fact]
+	public void Load_WithRetention_ReturnsFullConfig()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "retention-load.json");
+		File.WriteAllText(configPath, """
+		{
+			"logLevel": "Trace",
+			"retention": {
+				"maxRunsPerOrchestration": 10,
+				"maxRunAgeDays": 7
+			}
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		// Act
+		var result = OrchestraConfigLoader.Load();
+
+		// Assert
+		result.Should().NotBeNull();
+		result!.LogLevel.Should().Be("Trace");
+		result.Retention.Should().NotBeNull();
+		result.Retention!.MaxRunsPerOrchestration.Should().Be(10);
+		result.Retention.MaxRunAgeDays.Should().Be(7);
+	}
 }
