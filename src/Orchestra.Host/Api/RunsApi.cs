@@ -400,13 +400,14 @@ public static class RunsApi
 				// Avoid duplicates if somehow tracked in both
 				if (!activeExecutionInfos.ContainsKey(trigger.ActiveExecutionId!))
 				{
-					var triggerType = trigger.Config switch
-					{
-						SchedulerTriggerConfig => "scheduler",
-						LoopTriggerConfig => "loop",
-						WebhookTriggerConfig => "webhook",
-						_ => "trigger"
-					};
+				var triggerType = trigger.Config switch
+				{
+					SchedulerTriggerConfig => "scheduler",
+					LoopTriggerConfig => "loop",
+					WebhookTriggerConfig => "webhook",
+					ManualTriggerConfig => "manual",
+					_ => "trigger"
+				};
 
 					// Resolve name: trigger metadata -> registry -> fallback
 					var orchName = trigger.OrchestrationName
@@ -451,20 +452,22 @@ public static class RunsApi
 					lastExecutionId = t.LastExecutionId,
 					runCount = t.RunCount,
 					status = t.Status.ToString().ToLowerInvariant(),
-					triggerType = t.Config switch
-					{
-						SchedulerTriggerConfig => "scheduler",
-						LoopTriggerConfig => "loop",
-						WebhookTriggerConfig => "webhook",
-						_ => "trigger"
-					},
-					triggeredBy = t.Config switch
-					{
-						SchedulerTriggerConfig => "scheduler",
-						LoopTriggerConfig => "loop",
-						WebhookTriggerConfig => "webhook",
-						_ => "trigger"
-					},
+				triggerType = t.Config switch
+				{
+					SchedulerTriggerConfig => "scheduler",
+					LoopTriggerConfig => "loop",
+					WebhookTriggerConfig => "webhook",
+					ManualTriggerConfig => "manual",
+					_ => "trigger"
+				},
+				triggeredBy = t.Config switch
+				{
+					SchedulerTriggerConfig => "scheduler",
+					LoopTriggerConfig => "loop",
+					WebhookTriggerConfig => "webhook",
+					ManualTriggerConfig => "manual",
+					_ => "trigger"
+				},
 					source = "pending",
 					webhookUrl = t.Config is WebhookTriggerConfig ? $"/api/webhooks/{t.Id}" : null,
 				};

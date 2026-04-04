@@ -203,12 +203,17 @@ public static class TagsApi
 					tags = x.effectiveTags,
 					isActive = x.isActive,
 					stepCount = x.entry.Orchestration.Steps.Length,
-					trigger = x.trigger is not null ? new
-					{
-						type = x.trigger.Config.Type.ToString().ToLowerInvariant(),
-						enabled = x.trigger.Config.Enabled,
-						status = x.trigger.Status.ToString(),
-					} : null,
+				trigger = x.trigger is not null ? new
+				{
+					type = x.trigger.Config.Type.ToString().ToLowerInvariant(),
+					enabled = x.trigger.Config.Enabled,
+					status = x.trigger.Status.ToString(),
+				} : new
+				{
+					type = x.entry.Orchestration.Trigger.Type.ToString().ToLowerInvariant(),
+					enabled = x.entry.Orchestration.Trigger.Enabled,
+					status = "Idle",
+				},
 					profiles = x.profiles.Select(p => new
 					{
 						id = p.Id,

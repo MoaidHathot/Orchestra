@@ -1973,10 +1973,7 @@ public class TerminalUI
 			infoRows.Add(new Markup($"[bold]MCP Config:[/]  [dim]{Markup.Escape(entry.McpPath)}[/]"));
 		}
 
-		if (o.Trigger != null)
-		{
-			infoRows.Add(new Markup($"[bold]Trigger:[/]     {o.Trigger.Type} [dim](enabled: {o.Trigger.Enabled})[/]"));
-		}
+		infoRows.Add(new Markup($"[bold]Trigger:[/]     {o.Trigger.Type} [dim](enabled: {o.Trigger.Enabled})[/]"));
 
 		var parameters = GetOrchestrationParameters(entry);
 		if (parameters.Length > 0)
@@ -4998,9 +4995,11 @@ public class TerminalUI
 			var entry = entries[i];
 			var isSelected = i == _triggerCreateSelectedIndex;
 			var prefix = isSelected ? "[bold cyan]> [/]" : "  ";
-			var style = isSelected ? "bold" : "dim";
-			var hasTrigger = entry.Orchestration.Trigger != null;
-			var triggerInfo = hasTrigger ? "[yellow](has trigger)[/]" : "";
+		var style = isSelected ? "bold" : "dim";
+		var triggerType = entry.Orchestration.Trigger.Type;
+		var triggerInfo = triggerType != TriggerType.Manual
+			? $"[yellow]({triggerType})[/]"
+			: "[dim](manual)[/]";
 
 			table.AddRow(
 				new Markup($"{prefix}[{style}]{Markup.Escape(entry.Orchestration.Name)}[/]"),

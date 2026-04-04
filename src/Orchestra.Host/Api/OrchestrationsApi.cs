@@ -88,9 +88,9 @@ public static class OrchestrationsApi
 					}).ToArray(),
 					parameters = parameterNames,
 					hasParameters = parameterNames.Length > 0,
-					trigger = FormatTriggerInfoWithWebhook(o.Orchestration.Trigger, trigger, parameterNames),
-					triggerType = o.Orchestration.Trigger?.Type.ToString() ?? "Manual",
-					enabled = trigger?.Config.Enabled ?? o.Orchestration.Trigger?.Enabled ?? false,
+				trigger = FormatTriggerInfoWithWebhook(o.Orchestration.Trigger, trigger, parameterNames),
+				triggerType = o.Orchestration.Trigger.Type.ToString(),
+				enabled = trigger?.Config.Enabled ?? o.Orchestration.Trigger.Enabled,
 					isActive = trigger?.Status.ToString() == "Running",
 					lastExecutionTime = lastRun?.ToString("o"),
 					lastExecutionStatus = trigger?.LastError is null ? "Success" : "Failed",
@@ -283,18 +283,18 @@ public static class OrchestrationsApi
 						name = entry.Orchestration.Name
 					});
 
-					// Register trigger if orchestration has one
-					if (entry.Orchestration.Trigger is { } trigger && trigger.Enabled)
-					{
-						triggerManager.RegisterTrigger(
-							entry.Path,
-							entry.McpPath,
-							trigger,
-							null,
-							TriggerSource.Json,
-							entry.Id,
-							entry.Orchestration);
-					}
+				// Register trigger for this orchestration
+				if (entry.Orchestration.Trigger.Enabled)
+				{
+					triggerManager.RegisterTrigger(
+						entry.Path,
+						entry.McpPath,
+						entry.Orchestration.Trigger,
+						null,
+						TriggerSource.Json,
+						entry.Id,
+						entry.Orchestration);
+				}
 				}
 				catch (Exception ex)
 				{
@@ -315,18 +315,18 @@ public static class OrchestrationsApi
 
 				var entry = registry.RegisterFromJson(request.Json, request.McpJson);
 
-				// If the orchestration has an enabled trigger, register it with TriggerManager
-				if (entry.Orchestration.Trigger is { Enabled: true } trigger)
-				{
-					triggerManager.RegisterTrigger(
-						entry.Path,
-						entry.McpPath,
-						trigger,
-						null,
-						TriggerSource.Json,
-						entry.Id,
-						entry.Orchestration);
-				}
+			// Register trigger for this orchestration
+			if (entry.Orchestration.Trigger.Enabled)
+			{
+				triggerManager.RegisterTrigger(
+					entry.Path,
+					entry.McpPath,
+					entry.Orchestration.Trigger,
+					null,
+					TriggerSource.Json,
+					entry.Id,
+					entry.Orchestration);
+			}
 
 				return Results.Json(new
 				{
@@ -360,31 +360,25 @@ public static class OrchestrationsApi
 			if (entry is null)
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
-			// If the orchestration has a trigger but it's not registered yet, register it now
-			if (entry.Orchestration.Trigger is { } trigger)
+			var existingTrigger = triggerManager.GetTrigger(id);
+			if (existingTrigger == null)
 			{
-				var existingTrigger = triggerManager.GetTrigger(id);
-				if (existingTrigger == null)
-				{
-					// Register the trigger with enabled = true
-					var enabledTrigger = TriggerManager.CloneTriggerConfigWithEnabled(trigger, true);
-					triggerManager.RegisterTrigger(
-						entry.Path,
-						entry.McpPath,
-						enabledTrigger,
-						null,
-						TriggerSource.Json,
-						entry.Id,
-						entry.Orchestration);
-				}
-				else
-				{
-					triggerManager.SetTriggerEnabled(id, true);
-				}
-				return Results.Ok(new { id, enabled = true });
+				// Register the trigger with enabled = true
+				var enabledTrigger = TriggerManager.CloneTriggerConfigWithEnabled(entry.Orchestration.Trigger, true);
+				triggerManager.RegisterTrigger(
+					entry.Path,
+					entry.McpPath,
+					enabledTrigger,
+					null,
+					TriggerSource.Json,
+					entry.Id,
+					entry.Orchestration);
 			}
-
-			return ProblemDetailsHelpers.BadRequest($"Orchestration '{id}' has no trigger defined.");
+			else
+			{
+				triggerManager.SetTriggerEnabled(id, true);
+			}
+			return Results.Ok(new { id, enabled = true });
 		});
 
 		// POST /api/orchestrations/{id}/disable - Disable an orchestration's trigger
@@ -546,7 +540,7 @@ public static class OrchestrationsApi
 		return endpoints;
 	}
 
-	private static object? FormatTriggerInfo(TriggerConfig? config)
+	private static object? FormatTriggerInfo(TriggerConfig config)
 	{
 		return config switch
 		{
@@ -572,11 +566,16 @@ public static class OrchestrationsApi
 				enabled = w.Enabled,
 				maxConcurrent = w.MaxConcurrent
 			},
+			ManualTriggerConfig m => new
+			{
+				type = "manual",
+				enabled = m.Enabled
+			},
 			_ => null
 		};
 	}
 
-	private static object? FormatTriggerInfoWithWebhook(TriggerConfig? config, TriggerRegistration? registration, string[] parameters)
+	private static object? FormatTriggerInfoWithWebhook(TriggerConfig config, TriggerRegistration? registration, string[] parameters)
 	{
 		return config switch
 		{
@@ -620,6 +619,11 @@ public static class OrchestrationsApi
 						? "This webhook has an input handler that will parse the raw payload using an LLM"
 						: null
 				} : null
+			},
+			ManualTriggerConfig m => new
+			{
+				type = "manual",
+				enabled = m.Enabled
 			},
 			_ => null
 		};

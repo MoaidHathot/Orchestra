@@ -18,10 +18,11 @@ builder.Logging.AddSimpleConsole(options =>
 // Register engine services (required by Orchestra Host)
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 
-// Determine data path - supports test isolation via environment variable or configuration
+// Determine data path - supports test isolation via configuration or environment variable
+// Priority: configuration "data-path" > env var ORCHESTRA_PORTAL_DATA_PATH > default
 // Default: %LOCALAPPDATA%/OrchestraHost (from OrchestrationHostOptions)
-var dataPath = Environment.GetEnvironmentVariable("ORCHESTRA_PORTAL_DATA_PATH")
-	?? builder.Configuration["data-path"]
+var dataPath = builder.Configuration["data-path"]
+	?? Environment.GetEnvironmentVariable("ORCHESTRA_PORTAL_DATA_PATH")
 	?? builder.Configuration["executions-path"];
 
 // Determine orchestrations scan path

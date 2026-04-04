@@ -293,6 +293,19 @@ function App(): React.JSX.Element {
     }
   }, [activeData.running.length, activeData.pending.length, orchestrations]);
 
+  // Auto-refresh orchestrations list every 5 seconds for external changes
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const data = await api.get<OrchestrationsResponse>('/api/orchestrations');
+        setOrchestrations(data.orchestrations || []);
+      } catch (err) {
+        console.error('Failed to refresh orchestrations:', err);
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Auto-refresh history every 5 seconds when there are enabled triggers or active executions
   useEffect(() => {
     const hasEnabledTriggers = orchestrations.some(o => o.enabled);
@@ -346,77 +359,60 @@ function App(): React.JSX.Element {
     return orchestrationMatchesProfileFilter(orchId, orch.tags, selectedProfileIds, profiles);
   }, [profiles, orchestrations]);
 
-  // ── Filtered active data by main pane profile filter ──
+  // ── Orchestration view: single-source categorized list ──
+  // Uses orchestrations as the source of truth, overlays execution state from activeData.
+  // No cross-referencing between two independently-polled endpoints.
 
-  const filteredActiveData = useMemo(() => {
-    if (mainPaneProfileFilter.length === 0) return activeData;
-    return {
-      running: activeData.running.filter(exec => orchMatchesProfileFilter(exec.orchestrationId, mainPaneProfileFilter)),
-      pending: activeData.pending.filter(exec => orchMatchesProfileFilter(exec.orchestrationId, mainPaneProfileFilter)),
-    };
-  }, [activeData, mainPaneProfileFilter, orchMatchesProfileFilter]);
-
-  /**
-   * Extended view: when a profile filter is applied, compute all 4 orchestration categories:
-   * - running: currently executing
-   * - pending: trigger armed, waiting to fire
-   * - manual: no trigger, available for manual run
-   * - disabled: part of the profile but trigger is disabled
-   */
-  const profileOrchestrationView = useMemo<{
+  const orchestrationView = useMemo<{
     running: CardExecution[];
-    pending: CardExecution[];
-    manual: CardExecution[];
+    enabled: CardExecution[];
     disabled: CardExecution[];
-    hasProfileFilter: boolean;
   }>(() => {
-    const hasProfileFilter = mainPaneProfileFilter.length > 0;
-
-    // Get orchestrations matched by the selected profiles
-    const matchedOrchs = hasProfileFilter
+    // Filter orchestrations by profile if applicable
+    const matchedOrchs = mainPaneProfileFilter.length > 0
       ? orchestrations.filter(o => orchMatchesProfileFilter(o.id, mainPaneProfileFilter))
       : orchestrations;
 
-    // Build sets for quick lookup
-    const runningIds = new Set(filteredActiveData.running.map(e => e.orchestrationId));
-    const pendingIds = new Set(filteredActiveData.pending.map(e => e.orchestrationId));
+    // Build a set of running orchestration IDs from active data
+    const runningExecsByOrchId = new Map<string, CardExecution[]>();
+    for (const exec of activeData.running) {
+      const existing = runningExecsByOrchId.get(exec.orchestrationId) || [];
+      existing.push(exec);
+      runningExecsByOrchId.set(exec.orchestrationId, existing);
+    }
 
-    // Categorize matched orchestrations that aren't already running or pending
-    const manual: CardExecution[] = [];
+    const running: CardExecution[] = [];
+    const enabled: CardExecution[] = [];
     const disabled: CardExecution[] = [];
 
     for (const orch of matchedOrchs) {
-      if (runningIds.has(orch.id) || pendingIds.has(orch.id)) continue;
+      const rt = orch as RuntimeOrchestration;
+      const isEnabled = rt.enabled !== false; // default true for ManualTriggerConfig
 
+      // Check if this orchestration has running executions
+      const runningExecs = runningExecsByOrchId.get(orch.id);
+      if (runningExecs && runningExecs.length > 0) {
+        // Add all running executions as separate cards
+        running.push(...runningExecs);
+      }
+
+      // Also build a card for the orchestration definition itself
       const cardExec: CardExecution = {
         orchestrationId: orch.id,
         orchestrationName: orch.name,
-        stepCount: (orch as RuntimeOrchestration).stepCount || orch.steps?.length,
-        triggeredBy: (orch as RuntimeOrchestration).triggerType || 'Manual',
+        stepCount: rt.stepCount || orch.steps?.length,
+        triggeredBy: rt.triggerType || 'Manual',
       };
 
-      const triggerType = (orch as RuntimeOrchestration).triggerType;
-      const isEnabled = (orch as RuntimeOrchestration & { enabled?: boolean }).enabled;
-
-      if (!triggerType || triggerType === 'Manual') {
-        // No trigger defined -- manual only
-        manual.push(cardExec);
-      } else if (!isEnabled) {
-        // Has a trigger but it's disabled
+      if (isEnabled) {
+        enabled.push(cardExec);
+      } else {
         disabled.push(cardExec);
       }
-      // If enabled with trigger but not in pending, it might be a non-scheduled trigger
-      // that is waiting (e.g., webhook) -- those should already appear in pending
     }
 
-    return {
-      running: filteredActiveData.running,
-      pending: filteredActiveData.pending,
-      manual,
-      disabled,
-      hasProfileFilter,
-    };
-  }, [orchestrations, filteredActiveData, mainPaneProfileFilter, orchMatchesProfileFilter]);
+    return { running, enabled, disabled };
+  }, [orchestrations, activeData, mainPaneProfileFilter, orchMatchesProfileFilter]);
 
   // ── Filtered / enabled orchestrations ─────────────────────────────────────
 
@@ -1520,9 +1516,9 @@ function App(): React.JSX.Element {
               />
             )}
             <span className="text-muted" style={{ fontSize: '12px', marginRight: '8px' }}>
-              {profileOrchestrationView.running.length} running, {profileOrchestrationView.pending.length} pending
-              {(profileOrchestrationView.manual.length > 0 || profileOrchestrationView.disabled.length > 0) && (
-                <>, {profileOrchestrationView.manual.length + profileOrchestrationView.disabled.length} other</>
+              {orchestrationView.running.length} running, {orchestrationView.enabled.length} enabled
+              {orchestrationView.disabled.length > 0 && (
+                <>, {orchestrationView.disabled.length} disabled</>
               )}
             </span>
             <button className="btn" onClick={loadData}>Refresh</button>
@@ -1530,32 +1526,31 @@ function App(): React.JSX.Element {
         </div>
 
         <div className="cards-container" style={{ overflow: 'auto' }}>
-          {profileOrchestrationView.running.length === 0
-            && profileOrchestrationView.pending.length === 0
-            && profileOrchestrationView.manual.length === 0
-            && profileOrchestrationView.disabled.length === 0 ? (
+          {orchestrationView.running.length === 0
+            && orchestrationView.enabled.length === 0
+            && orchestrationView.disabled.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><Icons.Activity /></div>
-              <div className="empty-title">No Active Orchestrations</div>
+              <div className="empty-title">No Orchestrations</div>
               <div className="empty-text">
                 {mainPaneProfileFilter.length > 0
                   ? 'No orchestrations match the selected profile filter.'
-                  : 'Run an orchestration from the sidebar to see it here, or add scheduled triggers.'}
+                  : 'Add orchestrations to get started.'}
               </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               {/* Running Section */}
-              {profileOrchestrationView.running.length > 0 && (
+              {orchestrationView.running.length > 0 && (
                 <div>
                   <div className="cards-section-header">
                     <span className="cards-section-dot cards-section-dot-running"></span>
-                    Running ({profileOrchestrationView.running.length})
+                    Running ({orchestrationView.running.length})
                   </div>
                   <div className="cards-grid">
-                    {profileOrchestrationView.running.map(exec => (
+                    {orchestrationView.running.map(exec => (
                       <ActiveOrchestrationCard
-                        key={exec.executionId}
+                        key={exec.executionId || exec.orchestrationId}
                         execution={exec}
                         type="running"
                         orchestrations={orchestrations}
@@ -1580,17 +1575,17 @@ function App(): React.JSX.Element {
                 </div>
               )}
 
-              {/* Pending / Trigger Armed Section */}
-              {profileOrchestrationView.pending.length > 0 && (
+              {/* Enabled Section */}
+              {orchestrationView.enabled.length > 0 && (
                 <div>
                   <div className="cards-section-header">
                     <span className="cards-section-dot cards-section-dot-pending"></span>
-                    Trigger Armed ({profileOrchestrationView.pending.length})
+                    Enabled ({orchestrationView.enabled.length})
                   </div>
                   <div className="cards-grid">
-                    {profileOrchestrationView.pending.map((exec, idx) => (
+                    {orchestrationView.enabled.map(exec => (
                       <ActiveOrchestrationCard
-                        key={exec.orchestrationId || idx}
+                        key={exec.orchestrationId}
                         execution={exec}
                         type="pending"
                         orchestrations={orchestrations}
@@ -1613,48 +1608,15 @@ function App(): React.JSX.Element {
                 </div>
               )}
 
-              {/* Manual Only Section */}
-              {profileOrchestrationView.manual.length > 0 && (
-                <div>
-                  <div className="cards-section-header">
-                    <span className="cards-section-dot cards-section-dot-manual"></span>
-                    Manual ({profileOrchestrationView.manual.length})
-                  </div>
-                  <div className="cards-grid">
-                    {profileOrchestrationView.manual.map(exec => (
-                      <ActiveOrchestrationCard
-                        key={exec.orchestrationId}
-                        execution={exec}
-                        type="manual"
-                        orchestrations={orchestrations}
-                        profiles={profiles}
-                        onView={(_execution, orch) => {
-                          if (orch) {
-                            setViewerModal({ open: true, orchestration: orch });
-                          }
-                        }}
-                        onRun={(orch: Orchestration) => {
-                          if ((orch as RuntimeOrchestration)?.hasParameters) {
-                            setRunModal({ open: true, orchestration: orch });
-                          } else {
-                            runOrchestration(orch?.id);
-                          }
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Trigger Disabled Section */}
-              {profileOrchestrationView.disabled.length > 0 && (
+              {/* Disabled Section */}
+              {orchestrationView.disabled.length > 0 && (
                 <div>
                   <div className="cards-section-header">
                     <span className="cards-section-dot cards-section-dot-disabled"></span>
-                    Trigger Disabled ({profileOrchestrationView.disabled.length})
+                    Disabled ({orchestrationView.disabled.length})
                   </div>
                   <div className="cards-grid">
-                    {profileOrchestrationView.disabled.map(exec => (
+                    {orchestrationView.disabled.map(exec => (
                       <ActiveOrchestrationCard
                         key={exec.orchestrationId}
                         execution={exec}

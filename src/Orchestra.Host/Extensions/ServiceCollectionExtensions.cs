@@ -227,31 +227,29 @@ public static class ServiceProviderExtensions
 		{
 			foreach (var entry in registry.GetAll())
 			{
-				if (entry.Orchestration.Trigger is { } trigger)
-				{
-					var triggerId = entry.Id;
+				var trigger = entry.Orchestration.Trigger;
+				var triggerId = entry.Id;
 
-					// Check for a persisted enabled-state override (user disabled/enabled this JSON trigger previously)
-					var enabledOverride = triggerManager.GetJsonTriggerEnabledOverride(triggerId);
-					var effectiveEnabled = enabledOverride ?? trigger.Enabled;
+				// Check for a persisted enabled-state override (user disabled/enabled this JSON trigger previously)
+				var enabledOverride = triggerManager.GetJsonTriggerEnabledOverride(triggerId);
+				var effectiveEnabled = enabledOverride ?? trigger.Enabled;
 
-					if (!effectiveEnabled && !trigger.Enabled)
-						continue; // Disabled in JSON and no override — skip entirely
+				if (!effectiveEnabled && !trigger.Enabled)
+					continue; // Disabled in JSON and no override — skip entirely
 
-					// Register with the effective enabled state
-					var effectiveTrigger = effectiveEnabled != trigger.Enabled
-						? TriggerManager.CloneTriggerConfigWithEnabled(trigger, effectiveEnabled)
-						: trigger;
+				// Register with the effective enabled state
+				var effectiveTrigger = effectiveEnabled != trigger.Enabled
+					? TriggerManager.CloneTriggerConfigWithEnabled(trigger, effectiveEnabled)
+					: trigger;
 
-					triggerManager.RegisterTrigger(
-						entry.Path,
-						entry.McpPath,
-						effectiveTrigger,
-						null,
-						TriggerSource.Json,
-						triggerId,
-						entry.Orchestration);
-				}
+				triggerManager.RegisterTrigger(
+					entry.Path,
+					entry.McpPath,
+					effectiveTrigger,
+					null,
+					TriggerSource.Json,
+					triggerId,
+					entry.Orchestration);
 			}
 		}
 

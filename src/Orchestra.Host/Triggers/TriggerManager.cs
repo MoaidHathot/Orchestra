@@ -143,7 +143,9 @@ public partial class TriggerManager : BackgroundService
 			Config = config,
 			Parameters = parameters,
 			Source = source,
-			Status = config.Enabled ? TriggerStatus.Waiting : TriggerStatus.Paused,
+			Status = config is ManualTriggerConfig
+				? TriggerStatus.Idle
+				: config.Enabled ? TriggerStatus.Waiting : TriggerStatus.Paused,
 			OrchestrationName = orchName,
 			OrchestrationDescription = orchDesc,
 			OrchestrationVersion = orchVersion,
@@ -327,19 +329,25 @@ public partial class TriggerManager : BackgroundService
 	{
 		// Create a temporary trigger registration for execution
 		string? orchName = null;
+		TriggerConfig triggerConfig;
 		try
 		{
 			var orch = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
 			orchName = orch.Name;
+			triggerConfig = orch.Trigger;
 		}
-		catch (Exception ex) { LogMetadataExtractionFailed(orchestrationPath, ex); }
+		catch (Exception ex)
+		{
+			LogMetadataExtractionFailed(orchestrationPath, ex);
+			triggerConfig = new ManualTriggerConfig { Type = TriggerType.Manual, Enabled = true };
+		}
 
 		var tempReg = new TriggerRegistration
 		{
 			Id = orchestrationId ?? GenerateTriggerId(orchestrationPath, orchName),
 			OrchestrationPath = orchestrationPath,
 			McpPath = mcpPath,
-			Config = new LoopTriggerConfig { Type = TriggerType.Loop, Enabled = true, MaxIterations = 1 },
+			Config = triggerConfig,
 			Parameters = parameters,
 			Source = TriggerSource.User,
 			Status = TriggerStatus.Running,
@@ -507,7 +515,9 @@ public partial class TriggerManager : BackgroundService
 
 	/// <summary>
 	/// Scans orchestration files and registers any JSON-defined triggers that aren't
-	/// already overridden by user triggers.
+	/// already overridden by user triggers. This includes ManualTriggerConfig for
+	/// orchestrations with no explicit trigger, ensuring every orchestration has
+	/// a trigger registration.
 	/// </summary>
 	public void ScanForJsonTriggers(string directory)
 	{
@@ -519,7 +529,6 @@ public partial class TriggerManager : BackgroundService
 			try
 			{
 				var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(file);
-				if (orchestration.Trigger == null) continue;
 
 				// Generate ID using orchestration name for consistency with OrchestrationRegistry
 				var id = GenerateTriggerId(file, orchestration.Name);
@@ -918,6 +927,11 @@ public partial class TriggerManager : BackgroundService
 			reg.Status = TriggerStatus.Waiting;
 			reg.NextFireTime = CalculateNextFireTime(schedulerConfig);
 		}
+		else if (reg.Config is ManualTriggerConfig)
+		{
+			// Manual triggers return to Idle after execution completes.
+			reg.Status = TriggerStatus.Idle;
+		}
 	}
 
 	/// <summary>
@@ -1110,6 +1124,12 @@ public partial class TriggerManager : BackgroundService
 			MaxConcurrent = w.MaxConcurrent,
 			Response = w.Response,
 		},
+			ManualTriggerConfig m => new ManualTriggerConfig
+			{
+				Type = m.Type,
+				Enabled = enabled,
+				InputHandlerPrompt = m.InputHandlerPrompt,
+			},
 			_ => config,
 		};
 	}
@@ -1153,6 +1173,11 @@ public partial class TriggerManager : BackgroundService
 				? DeserializeWebhookResponseConfig(responseProp)
 				: null,
 		},
+			TriggerType.Manual => new ManualTriggerConfig
+			{
+				Type = TriggerType.Manual,
+				Enabled = enabled,
+			},
 			_ => null,
 		};
 	}

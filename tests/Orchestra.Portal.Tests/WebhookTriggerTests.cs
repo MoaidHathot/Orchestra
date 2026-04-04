@@ -215,7 +215,7 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 	}
 
 	[Fact]
-	public async Task WebhookTrigger_WhenDisabled_ReturnsAcceptedFalse()
+	public async Task WebhookTrigger_WhenDisabled_ReturnsNotFound()
 	{
 		// Arrange - Register with disabled trigger, then check behavior
 		var testName = $"Test Webhook Disabled {Guid.NewGuid():N}";
@@ -246,10 +246,8 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 		// Act
 		var response = await _client.PostAsJsonAsync($"/api/webhooks/{triggerId}", new { }, _jsonOptions);
 
-		// Assert - Should be accepted:false (trigger exists but is disabled)
-		response.StatusCode.Should().Be(HttpStatusCode.OK);
-		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-		result.GetProperty("accepted").GetBoolean().Should().BeFalse();
+		// Assert - Should return 404 (trigger is disabled, endpoint is not listening)
+		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
 	}
 
 	[Fact]

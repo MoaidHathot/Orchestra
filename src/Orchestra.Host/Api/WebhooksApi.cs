@@ -73,15 +73,17 @@ public static partial class WebhooksApi
 				return FormatSyncResponse(orchResult, responseConfig, executionId, id, jsonOptions);
 			}
 
-			// Async (fire-and-forget) response
-			var accepted = executionId != null;
-			return Results.Json(new
-			{
-				accepted,
-				triggerId = id,
-				executionId,
-				message = accepted ? null : "Trigger is disabled or paused"
-			}, jsonOptions);
+		// Async (fire-and-forget) response
+		var accepted = executionId != null;
+		if (!accepted)
+			return ProblemDetailsHelpers.NotFound($"Webhook trigger '{id}' is disabled.");
+
+		return Results.Json(new
+		{
+			accepted,
+			triggerId = id,
+			executionId,
+		}, jsonOptions);
 		});
 
 		// POST /api/webhooks/{id}/validate - Validate webhook signature without firing

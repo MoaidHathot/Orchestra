@@ -16,4 +16,10 @@ public enum TriggerType
 	/// Triggered by an external HTTP POST (Power Automate, Zapier, etc.).
 	/// </summary>
 	Webhook,
+
+	/// <summary>
+	/// No automated trigger — the orchestration is run manually by a user.
+	/// This is the default when no trigger is specified in the orchestration definition.
+	/// </summary>
+	Manual,
 }

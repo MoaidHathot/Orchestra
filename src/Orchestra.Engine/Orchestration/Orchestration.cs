@@ -13,10 +13,11 @@ public class Orchestration
 	public string Version { get; init; } = "1.0.0";
 
 	/// <summary>
-	/// Optional trigger configuration defined in the orchestration JSON.
+	/// Trigger configuration for the orchestration.
+	/// Defaults to <see cref="ManualTriggerConfig"/> (manual-only, no automated trigger).
 	/// Can be overridden by user-defined triggers set via the UI.
 	/// </summary>
-	public TriggerConfig? Trigger { get; init; }
+	public TriggerConfig Trigger { get; init; } = new ManualTriggerConfig { Type = TriggerType.Manual };
 
 	/// <summary>
 	/// Optional inline MCP server definitions in the orchestration JSON.

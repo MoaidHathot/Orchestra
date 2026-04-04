@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
@@ -8,6 +9,8 @@ namespace Orchestra.Portal.Tests;
 /// <summary>
 /// Custom WebApplicationFactory for Portal integration tests.
 /// Creates an isolated test environment with its own data directory.
+/// Each instance injects its unique data path via IConfiguration, avoiding
+/// process-global environment variables that cause race conditions in parallel test runs.
 /// </summary>
 public class PortalWebApplicationFactory : WebApplicationFactory<Program>
 {
@@ -17,19 +20,22 @@ public class PortalWebApplicationFactory : WebApplicationFactory<Program>
 	{
 		_testDataPath = Path.Combine(Path.GetTempPath(), "Orchestra.Portal.Tests", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(_testDataPath);
-		
-		// Set environment variable for test isolation before application starts
-		Environment.SetEnvironmentVariable("ORCHESTRA_PORTAL_DATA_PATH", _testDataPath);
 	}
 
 	protected override void ConfigureWebHost(IWebHostBuilder builder)
 	{
 		builder.UseEnvironment("Testing");
 
-		// Note: The OrchestrationRegistry uses a hardcoded path to LocalApplicationData.
-		// For full test isolation, we'd need to modify the Program.cs to read the path from
-		// configuration. For now, tests will share the same persisted orchestrations file,
-		// but each test run creates unique orchestration names to avoid conflicts.
+		// Inject the unique test data path via configuration instead of
+		// a process-global environment variable. Program.cs reads this via
+		// builder.Configuration["data-path"].
+		builder.ConfigureAppConfiguration((_, config) =>
+		{
+			config.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["data-path"] = _testDataPath,
+			});
+		});
 	}
 
 	public string TestDataPath => _testDataPath;
@@ -50,7 +56,5 @@ public class PortalWebApplicationFactory : WebApplicationFactory<Program>
 				// Ignore cleanup errors in tests
 			}
 		}
-		
-		Environment.SetEnvironmentVariable("ORCHESTRA_PORTAL_DATA_PATH", null);
 	}
 }

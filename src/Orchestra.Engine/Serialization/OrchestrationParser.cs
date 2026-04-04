@@ -332,6 +332,12 @@ public static class OrchestrationParser
 				? ParseWebhookResponseConfig(responseProp)
 				: null,
 		},
+			TriggerType.Manual => new ManualTriggerConfig
+			{
+				Type = TriggerType.Manual,
+				Enabled = enabled,
+				InputHandlerPrompt = inputHandlerPrompt,
+			},
 			_ => throw new JsonException($"Unknown trigger type: '{type}'."),
 			};
 		}

@@ -829,22 +829,23 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	}
 
 	[Fact]
-	public async Task Enable_WithNoTriggerDefined_ReturnsBadRequest()
+	public async Task Enable_WithNoTriggerDefined_Succeeds()
 	{
-		// Arrange - Register an orchestration WITHOUT a trigger
+		// Arrange - Register an orchestration WITHOUT an explicit trigger (gets ManualTriggerConfig)
 		var orchName = $"No Trigger Test {Guid.NewGuid():N}";
 		var json = CreateValidOrchestrationJson(orchName, "No trigger orchestration");
 		var registered = await RegisterOrchestrationViaJsonAsync(json);
 		var orchestrationId = registered.GetProperty("id").GetString()!;
 
-		// Act - Try to enable on an orchestration with no trigger
+		// Act - Enabling should succeed (ManualTriggerConfig is always present)
 		var response = await _client.PostAsync(
 			$"/api/orchestrations/{orchestrationId}/enable", null);
 
 		// Assert
-		response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-		result.GetProperty("detail").GetString().Should().Contain("no trigger defined");
+		result.GetProperty("id").GetString().Should().Be(orchestrationId);
+		result.GetProperty("enabled").GetBoolean().Should().BeTrue();
 	}
 
 	[Fact]
