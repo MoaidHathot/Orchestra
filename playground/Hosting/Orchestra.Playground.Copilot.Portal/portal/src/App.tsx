@@ -158,6 +158,14 @@ function App(): React.JSX.Element {
   const [activeData, setActiveData] = useState<ActiveData>({ running: [], pending: [] });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Polling config from server (loaded once on init)
+  const [pollingConfig, setPollingConfig] = useState({
+    activeExecutionsMs: 1000,
+    orchestrationsMs: 5000,
+    historyMs: 5000,
+    serverStatusMs: 5000,
+  });
+
   // Modal states
   const [viewerModal, setViewerModal] = useState<ViewerModalState>({ open: false, orchestration: null });
   const [historyModal, setHistoryModal] = useState<HistoryModalState>({ open: false });
@@ -256,6 +264,20 @@ function App(): React.JSX.Element {
 
   useEffect(() => { loadData(); }, [loadData]);
 
+  // Load polling config from server (once on init)
+  useEffect(() => {
+    (async () => {
+      try {
+        const config = await api.get<{ polling: typeof pollingConfig }>('/api/config');
+        if (config?.polling) {
+          setPollingConfig(config.polling);
+        }
+      } catch (err) {
+        console.error('Failed to load config, using defaults:', err);
+      }
+    })();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Load profiles for filter & membership display
   const loadProfiles = useCallback(async () => {
     try {
@@ -275,7 +297,7 @@ function App(): React.JSX.Element {
     }
   }, [onlineStatus.isOnline, onlineStatus.isServerReachable, loadData]);
 
-  // Auto-refresh active orchestrations every 2 seconds when there are running or pending ones
+  // Auto-refresh active orchestrations when there are running or pending ones
   useEffect(() => {
     const hasActiveOrPending = activeData.running.length > 0 || activeData.pending.length > 0;
     const hasEnabledTriggers = orchestrations.some(o => o.enabled);
@@ -288,12 +310,12 @@ function App(): React.JSX.Element {
         } catch (err) {
           console.error('Failed to refresh active:', err);
         }
-      }, 1000);
+      }, pollingConfig.activeExecutionsMs);
       return () => clearInterval(interval);
     }
-  }, [activeData.running.length, activeData.pending.length, orchestrations]);
+  }, [activeData.running.length, activeData.pending.length, orchestrations, pollingConfig.activeExecutionsMs]);
 
-  // Auto-refresh orchestrations list every 5 seconds for external changes
+  // Auto-refresh orchestrations list for external changes
   useEffect(() => {
     const interval = setInterval(async () => {
       try {
@@ -302,11 +324,11 @@ function App(): React.JSX.Element {
       } catch (err) {
         console.error('Failed to refresh orchestrations:', err);
       }
-    }, 5000);
+    }, pollingConfig.orchestrationsMs);
     return () => clearInterval(interval);
-  }, []);
+  }, [pollingConfig.orchestrationsMs]);
 
-  // Auto-refresh history every 5 seconds when there are enabled triggers or active executions
+  // Auto-refresh history when there are enabled triggers or active executions
   useEffect(() => {
     const hasEnabledTriggers = orchestrations.some(o => o.enabled);
     const hasActiveInHistory = history.some(h => h.isActive);
@@ -318,10 +340,10 @@ function App(): React.JSX.Element {
         } catch (err) {
           console.error('Failed to refresh history:', err);
         }
-      }, 5000);
+      }, pollingConfig.historyMs);
       return () => clearInterval(interval);
     }
-  }, [orchestrations, history]);
+  }, [orchestrations, history, pollingConfig.historyMs]);
 
   // Poll server status (including Outlook connection status) every 5 seconds
   useEffect(() => {
@@ -340,9 +362,9 @@ function App(): React.JSX.Element {
     };
 
     fetchStatus();
-    const interval = setInterval(fetchStatus, 5000);
+    const interval = setInterval(fetchStatus, pollingConfig.serverStatusMs);
     return () => clearInterval(interval);
-  }, []);
+  }, [pollingConfig.serverStatusMs]);
 
   // ── Profile membership helper ──────────────────────────────────────────────
 

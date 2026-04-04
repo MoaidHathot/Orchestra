@@ -126,6 +126,21 @@ public static class UtilityApi
 			return Results.Json(new { count = mcps.Length, mcps }, jsonOptions);
 		});
 
+		// GET /api/config - Client-facing configuration (polling intervals, etc.)
+		endpoints.MapGet("/api/config", (OrchestrationHostOptions options) =>
+		{
+			return Results.Json(new
+			{
+				polling = new
+				{
+					activeExecutionsMs = options.Polling.ActiveExecutionsMs,
+					orchestrationsMs = options.Polling.OrchestrationsMs,
+					historyMs = options.Polling.HistoryMs,
+					serverStatusMs = options.Polling.ServerStatusMs,
+				}
+			}, jsonOptions);
+		});
+
 		return endpoints;
 	}
 }

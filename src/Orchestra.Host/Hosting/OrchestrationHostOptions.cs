@@ -60,4 +60,41 @@ public class OrchestrationHostOptions
 	/// Default: "Information"
 	/// </summary>
 	public string LogLevel { get; set; } = "Information";
+
+	/// <summary>
+	/// Polling intervals for the web UI, in milliseconds.
+	/// These control how frequently the portal refreshes data from the server.
+	/// </summary>
+	public PollingOptions Polling { get; set; } = new();
+}
+
+/// <summary>
+/// Polling interval configuration for the web UI.
+/// All values are in milliseconds.
+/// </summary>
+public class PollingOptions
+{
+	/// <summary>
+	/// How often to poll for active execution updates (running/pending).
+	/// Default: 1000ms (1 second).
+	/// </summary>
+	public int ActiveExecutionsMs { get; set; } = 1000;
+
+	/// <summary>
+	/// How often to poll the orchestrations list for external changes.
+	/// Default: 5000ms (5 seconds).
+	/// </summary>
+	public int OrchestrationsMs { get; set; } = 5000;
+
+	/// <summary>
+	/// How often to poll execution history.
+	/// Default: 5000ms (5 seconds).
+	/// </summary>
+	public int HistoryMs { get; set; } = 5000;
+
+	/// <summary>
+	/// How often to poll server status (connections, counts, etc.).
+	/// Default: 5000ms (5 seconds).
+	/// </summary>
+	public int ServerStatusMs { get; set; } = 5000;
 }

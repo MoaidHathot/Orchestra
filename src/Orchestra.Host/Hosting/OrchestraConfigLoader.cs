@@ -178,6 +178,21 @@ public static class OrchestraConfigLoader
 			if (config.Retention.MaxRunAgeDays.HasValue)
 				options.Retention.MaxRunAgeDays = config.Retention.MaxRunAgeDays.Value;
 		}
+
+		if (config.Polling is not null)
+		{
+			if (config.Polling.ActiveExecutionsMs.HasValue)
+				options.Polling.ActiveExecutionsMs = config.Polling.ActiveExecutionsMs.Value;
+
+			if (config.Polling.OrchestrationsMs.HasValue)
+				options.Polling.OrchestrationsMs = config.Polling.OrchestrationsMs.Value;
+
+			if (config.Polling.HistoryMs.HasValue)
+				options.Polling.HistoryMs = config.Polling.HistoryMs.Value;
+
+			if (config.Polling.ServerStatusMs.HasValue)
+				options.Polling.ServerStatusMs = config.Polling.ServerStatusMs.Value;
+		}
 	}
 
 	private static string? GetPlatformConfigPath()
@@ -235,6 +250,38 @@ public class OrchestraConfigFile
 	/// Minimum log level for the file logger. Values: Trace, Debug, Information, Warning, Error, Critical.
 	/// </summary>
 	public string? LogLevel { get; set; }
+
+	/// <summary>
+	/// Polling intervals for the web UI, in milliseconds.
+	/// </summary>
+	public PollingConfig? Polling { get; set; }
+}
+
+/// <summary>
+/// Polling interval configuration section of the config file.
+/// All values are in milliseconds. Null means use the default.
+/// </summary>
+public class PollingConfig
+{
+	/// <summary>
+	/// How often to poll for active execution updates. Default: 1000ms.
+	/// </summary>
+	public int? ActiveExecutionsMs { get; set; }
+
+	/// <summary>
+	/// How often to poll the orchestrations list. Default: 5000ms.
+	/// </summary>
+	public int? OrchestrationsMs { get; set; }
+
+	/// <summary>
+	/// How often to poll execution history. Default: 5000ms.
+	/// </summary>
+	public int? HistoryMs { get; set; }
+
+	/// <summary>
+	/// How often to poll server status. Default: 5000ms.
+	/// </summary>
+	public int? ServerStatusMs { get; set; }
 }
 
 /// <summary>
