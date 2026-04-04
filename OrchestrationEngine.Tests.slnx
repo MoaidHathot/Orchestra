@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/Orchestra.Engine.Tests/Orchestra.Engine.Tests.csproj" />
+    <Project Path="tests/Orchestra.Copilot.Tests/Orchestra.Copilot.Tests.csproj" />
+    <Project Path="tests/Orchestra.Host.Tests/Orchestra.Host.Tests.csproj" />
+    <Project Path="tests/Orchestra.Terminal.Tests/Orchestra.Terminal.Tests.csproj" />
+    <Project Path="tests/Orchestra.Server.Tests/Orchestra.Server.Tests.csproj" />
+    <Project Path="tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj" />
+  </Folder>
+</Solution>
