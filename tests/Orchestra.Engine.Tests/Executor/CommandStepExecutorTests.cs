@@ -41,7 +41,7 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
-		var step = CreateCommandStep(command: "dotnet", arguments: ["--version"]);
+		var step = CreateCommandStep(command: "echo", arguments: ["hello"]);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
@@ -57,6 +57,7 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
+		// echo is a shell built-in, works on both platforms when passed through the shell
 		var (cmd, args) = GetEchoCommand("Hello Orchestra");
 		var step = CreateCommandStep(command: cmd, arguments: args);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
@@ -308,7 +309,6 @@ public class CommandStepExecutorTests
 		// Arrange
 		var executor = CreateExecutor();
 		// Use a cross-platform command that runs long enough to cancel.
-		// The executor wraps commands in the platform shell, so pass raw commands.
 		var step = OperatingSystem.IsWindows()
 			? CreateCommandStep(command: "ping", arguments: ["-n", "30", "127.0.0.1"])
 			: CreateCommandStep(command: "sleep", arguments: ["30"]);
@@ -340,19 +340,9 @@ public class CommandStepExecutorTests
 
 	#region Cross-platform helpers
 
-	/// <summary>Returns a raw command that echoes the given text to stdout.
-	/// The CommandStepExecutor already wraps commands in the platform shell,
-	/// so we pass raw commands (not shell-wrapped).</summary>
+	/// <summary>Returns a command that echoes text to stdout.</summary>
 	private static (string cmd, string[] args) GetEchoCommand(string text) =>
 		("echo", [text]);
-
-	/// <summary>Returns a raw shell command string as a single argument.
-	/// On Windows, 'exit 1' needs to go through cmd /c, but the executor already does that.
-	/// On Linux, we need a command that returns a non-zero exit code.</summary>
-	private static (string cmd, string[] args) GetShellCommand(string shellCommand) =>
-		OperatingSystem.IsWindows()
-			? ("cmd", ["/c", shellCommand])
-			: ("sh", ["-c", shellCommand]);
 
 	/// <summary>Returns a command that prints an environment variable.</summary>
 	private static (string cmd, string[] args) GetEnvPrintCommand(string envVarName) =>
@@ -360,7 +350,8 @@ public class CommandStepExecutorTests
 			? ("cmd", ["/c", $"echo %{envVarName}%"])
 			: ("printenv", [envVarName]);
 
-	/// <summary>Returns a command that writes to both stdout and stderr.</summary>
+	/// <summary>Returns a command that writes to both stdout and stderr.
+	/// Uses shell syntax (&&, >&2) so wraps in an explicit shell on both platforms.</summary>
 	private static (string cmd, string[] args) GetStdoutAndStderrCommand(string stdoutText, string stderrText) =>
 		OperatingSystem.IsWindows()
 			? ("cmd", ["/c", $"echo {stdoutText} && echo {stderrText} 1>&2"])

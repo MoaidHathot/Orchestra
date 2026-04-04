@@ -92,15 +92,26 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			var startInfo = new ProcessStartInfo
 			{
 				FileName = isWindows ? "cmd.exe" : "/bin/sh",
-				// Use the Arguments string property (not ArgumentList) so that
-				// cmd.exe /c receives the command line verbatim without extra quoting.
-				Arguments = isWindows ? $"/c {fullCommandLine}" : $"-c {fullCommandLine}",
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
 				RedirectStandardInput = resolvedStdin is not null,
 				UseShellExecute = false,
 				CreateNoWindow = true,
 			};
+
+			if (isWindows)
+			{
+				// Use the Arguments string property so that cmd.exe /c receives
+				// the command line verbatim without extra quoting.
+				startInfo.Arguments = $"/c {fullCommandLine}";
+			}
+			else
+			{
+				// Use ArgumentList on Linux to ensure the full command line is passed
+				// as a single argument to /bin/sh -c, preventing word splitting.
+				startInfo.ArgumentList.Add("-c");
+				startInfo.ArgumentList.Add(fullCommandLine);
+			}
 
 			// Set working directory
 			if (workingDirectory is not null)
