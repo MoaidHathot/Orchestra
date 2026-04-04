@@ -36,10 +36,10 @@ jobs:
           dotnet-quality: 'preview'
 
       - name: Restore dependencies
-        run: dotnet restore
+        run: dotnet restore OrchestrationEngine.slnx
 
       - name: Build
-        run: dotnet build --no-restore --configuration Release
+        run: dotnet build OrchestrationEngine.slnx --no-restore --configuration Release
 
       - name: Run unit tests
         run: >
