@@ -73,4 +73,18 @@ public class Orchestration
 	/// Used by profiles to filter and group orchestrations.
 	/// </summary>
 	public string[] Tags { get; init; } = [];
+
+	/// <summary>
+	/// Optional typed input schema for the orchestration.
+	/// When defined, this is the authoritative source of truth for parameter definitions,
+	/// providing types, descriptions, required flags, defaults, and enum constraints.
+	/// Step-level <c>Parameters</c> arrays still declare which inputs each step needs,
+	/// but validation and documentation use this schema.
+	/// <para>
+	/// When not defined, the orchestration falls back to the legacy behavior:
+	/// parameter names are collected from step-level <c>Parameters</c> arrays
+	/// and treated as required string values with no defaults or descriptions.
+	/// </para>
+	/// </summary>
+	public Dictionary<string, InputDefinition>? Inputs { get; init; }
 }

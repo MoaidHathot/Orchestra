@@ -281,6 +281,195 @@ public class OrchestrationExecutorTests
 
 	#endregion
 
+	#region Input Schema Validation
+
+	[Fact]
+	public async Task ExecuteAsync_WithInputs_MissingRequired_ThrowsInvalidOperationException()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithInputs();
+
+		// Act - provide only optional inputs, missing required ones
+		var act = () => executor.ExecuteAsync(orchestration, new Dictionary<string, string>
+		{
+			["dryRun"] = "true"
+		});
+
+		// Assert
+		await act.Should().ThrowAsync<InvalidOperationException>()
+			.WithMessage("*Missing required input*serviceName*");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithInputs_AllRequiredProvided_Succeeds()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithInputs();
+
+		var parameters = new Dictionary<string, string>
+		{
+			["serviceName"] = "api",
+			["environment"] = "staging"
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration, parameters);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithInputs_InvalidEnum_ThrowsInvalidOperationException()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithInputs();
+
+		var parameters = new Dictionary<string, string>
+		{
+			["serviceName"] = "api",
+			["environment"] = "development" // Not in enum: staging, production
+		};
+
+		// Act
+		var act = () => executor.ExecuteAsync(orchestration, parameters);
+
+		// Assert
+		await act.Should().ThrowAsync<InvalidOperationException>()
+			.WithMessage("*environment*not one of the allowed values*");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithInputs_InvalidBoolean_ThrowsInvalidOperationException()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithInputs();
+
+		var parameters = new Dictionary<string, string>
+		{
+			["serviceName"] = "api",
+			["environment"] = "staging",
+			["dryRun"] = "maybe" // Not a valid boolean
+		};
+
+		// Act
+		var act = () => executor.ExecuteAsync(orchestration, parameters);
+
+		// Assert
+		await act.Should().ThrowAsync<InvalidOperationException>()
+			.WithMessage("*dryRun*boolean*maybe*");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithInputs_InvalidNumber_ThrowsInvalidOperationException()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithInputs();
+
+		var parameters = new Dictionary<string, string>
+		{
+			["serviceName"] = "api",
+			["environment"] = "staging",
+			["retryCount"] = "abc" // Not a valid number
+		};
+
+		// Act
+		var act = () => executor.ExecuteAsync(orchestration, parameters);
+
+		// Assert
+		await act.Should().ThrowAsync<InvalidOperationException>()
+			.WithMessage("*retryCount*numeric*abc*");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithInputs_DefaultsApplied_ForOptionalInputs()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithInputs();
+
+		// Only provide required inputs; optional ones should get defaults
+		var parameters = new Dictionary<string, string>
+		{
+			["serviceName"] = "api",
+			["environment"] = "staging"
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration, parameters);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithInputs_NoParams_ThrowsForAllRequired()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithRequiredInputs();
+
+		// Act - provide no parameters
+		var act = () => executor.ExecuteAsync(orchestration);
+
+		// Assert
+		await act.Should().ThrowAsync<InvalidOperationException>()
+			.WithMessage("*Missing required input*name*")
+			.WithMessage("*Missing required input*count*");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LegacyParameters_StillWork_WithoutInputs()
+	{
+		// Arrange - using the old-style WithParameters (no Inputs defined)
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithParameters();
+
+		var parameters = new Dictionary<string, string>
+		{
+			["param1"] = "value1",
+			["param2"] = "value2",
+			["param3"] = "value3"
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration, parameters);
+
+		// Assert - legacy behavior preserved
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LegacyParameters_Missing_StillThrows()
+	{
+		// Arrange - using the old-style WithParameters (no Inputs defined)
+		var agentBuilder = new MockAgentBuilder().WithResponse("Output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.WithParameters();
+
+		// Act - missing all parameters
+		var act = () => executor.ExecuteAsync(orchestration);
+
+		// Assert - legacy behavior preserved
+		await act.Should().ThrowAsync<InvalidOperationException>()
+			.WithMessage("*Missing required parameters*");
+	}
+
+	#endregion
+
 	#region DAG Validation
 
 	[Fact]

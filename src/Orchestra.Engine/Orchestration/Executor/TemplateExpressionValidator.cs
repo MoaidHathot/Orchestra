@@ -83,10 +83,19 @@ public static partial class TemplateExpressionValidator
 		var result = new TemplateValidationResult();
 		var stepNames = new HashSet<string>(orchestration.Steps.Select(s => s.Name), StringComparer.OrdinalIgnoreCase);
 
-		// Collect all declared parameter names across all steps
+		// Collect all declared parameter names:
+		// - From orchestration-level Inputs (if defined, this is the authoritative source)
+		// - From step-level Parameters arrays (legacy behavior, and for declaring which inputs each step needs)
 		var allParamNames = new HashSet<string>(
 			orchestration.Steps.SelectMany(s => s.Parameters),
 			StringComparer.OrdinalIgnoreCase);
+
+		// When Inputs is defined, include its keys as valid parameter names too
+		if (orchestration.Inputs is not null)
+		{
+			foreach (var key in orchestration.Inputs.Keys)
+				allParamNames.Add(key);
+		}
 
 		// Build reachability map: for each step, what steps can it reach via DependsOn (transitive)
 		var reachability = BuildReachabilityMap(orchestration);

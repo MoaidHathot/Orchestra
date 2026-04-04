@@ -301,4 +301,42 @@ public static class TestOrchestrations
 			CreatePromptStep("C", enabled: false)
 		]
 	};
+
+	/// <summary>
+	/// Creates an orchestration with typed input definitions.
+	/// </summary>
+	public static Orchestration WithInputs(string name = "with-inputs") => new()
+	{
+		Name = name,
+		Description = "Orchestration with typed inputs",
+		Inputs = new Dictionary<string, InputDefinition>
+		{
+			["serviceName"] = new() { Type = InputType.String, Description = "Service name", Required = true },
+			["environment"] = new() { Type = InputType.String, Description = "Target env", Required = true, Enum = ["staging", "production"] },
+			["dryRun"] = new() { Type = InputType.Boolean, Description = "Dry run mode", Required = false, Default = "false" },
+			["retryCount"] = new() { Type = InputType.Number, Description = "Retry count", Required = false, Default = "3" },
+		},
+		Steps =
+		[
+			CreatePromptStep("deploy", parameters: ["serviceName", "environment", "dryRun", "retryCount"]),
+		]
+	};
+
+	/// <summary>
+	/// Creates an orchestration with typed input definitions where all inputs are required.
+	/// </summary>
+	public static Orchestration WithRequiredInputs(string name = "required-inputs") => new()
+	{
+		Name = name,
+		Description = "Orchestration with all required inputs",
+		Inputs = new Dictionary<string, InputDefinition>
+		{
+			["name"] = new() { Type = InputType.String, Description = "Name", Required = true },
+			["count"] = new() { Type = InputType.Number, Description = "Count", Required = true },
+		},
+		Steps =
+		[
+			CreatePromptStep("step1", parameters: ["name", "count"]),
+		]
+	};
 }

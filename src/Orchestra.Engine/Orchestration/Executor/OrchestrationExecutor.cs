@@ -62,7 +62,7 @@ public partial class OrchestrationExecutor
 	{
 		LogStartingOrchestration(orchestration.Name);
 
-		ValidateParameters(orchestration, parameters);
+		parameters = ValidateAndApplyDefaults(orchestration, parameters);
 
 		// Scheduler validates the DAG (detects cycles, missing deps)
 		_ = _scheduler.Schedule(orchestration);
@@ -486,13 +486,12 @@ public partial class OrchestrationExecutor
 	{
 		LogResumingOrchestration(orchestration.Name, checkpoint.RunId);
 
-		ValidateParameters(orchestration, checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null);
+		var resumeParams = ValidateAndApplyDefaults(orchestration, checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null);
 
 		// Scheduler validates the DAG (detects cycles, missing deps)
 		_ = _scheduler.Schedule(orchestration);
 
 		// Validate all template expressions before execution
-		var resumeParams = checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null;
 		var parseValidation = TemplateExpressionValidator.ValidateOrchestration(orchestration);
 		if (!parseValidation.IsValid)
 			throw new InvalidOperationException(parseValidation.FormatErrors());
@@ -582,7 +581,26 @@ public partial class OrchestrationExecutor
 		}
 	}
 
-	private static void ValidateParameters(Orchestration orchestration, Dictionary<string, string>? parameters)
+	/// <summary>
+	/// Validates orchestration parameters and applies defaults from the input schema.
+	/// When <see cref="Orchestration.Inputs"/> is defined, validates types, enum constraints,
+	/// and applies defaults for optional inputs. When not defined, falls back to legacy
+	/// behavior of collecting required parameter names from step-level <c>Parameters</c> arrays.
+	/// </summary>
+	/// <returns>The effective parameters dictionary with defaults applied.</returns>
+	private static Dictionary<string, string>? ValidateAndApplyDefaults(Orchestration orchestration, Dictionary<string, string>? parameters)
+	{
+		if (orchestration.Inputs is not null)
+			return ValidateWithInputSchema(orchestration, parameters);
+
+		return ValidateLegacyParameters(orchestration, parameters);
+	}
+
+	/// <summary>
+	/// Legacy parameter validation: collects required parameter names from step-level
+	/// <c>Parameters</c> arrays and ensures all are provided. No type checking or defaults.
+	/// </summary>
+	private static Dictionary<string, string>? ValidateLegacyParameters(Orchestration orchestration, Dictionary<string, string>? parameters)
 	{
 		var requiredByStep = orchestration.Steps
 			.SelectMany(step => step.Parameters.Select(param => (param, step.Name)))
@@ -590,7 +608,7 @@ public partial class OrchestrationExecutor
 			.ToDictionary(g => g.Key, g => g.Select(x => x.Name).ToArray());
 
 		if (requiredByStep.Count == 0)
-			return;
+			return parameters;
 
 		var missing = parameters is null
 			? requiredByStep.Keys.ToArray()
@@ -605,6 +623,78 @@ public partial class OrchestrationExecutor
 				$"Missing required parameters: {details}. " +
 				$"Provide them via -param key=value.");
 		}
+
+		return parameters;
+	}
+
+	/// <summary>
+	/// Validates parameters against the orchestration's typed input schema.
+	/// Checks required inputs, applies defaults, validates types, and enforces enum constraints.
+	/// </summary>
+	private static Dictionary<string, string>? ValidateWithInputSchema(Orchestration orchestration, Dictionary<string, string>? parameters)
+	{
+		var inputs = orchestration.Inputs!;
+
+		if (inputs.Count == 0)
+			return parameters;
+
+		var effective = parameters is not null
+			? new Dictionary<string, string>(parameters)
+			: new Dictionary<string, string>();
+
+		var errors = new List<string>();
+
+		foreach (var (name, definition) in inputs)
+		{
+			if (effective.TryGetValue(name, out var value))
+			{
+				// Validate type
+				var typeError = ValidateInputType(name, value, definition.Type);
+				if (typeError is not null)
+					errors.Add(typeError);
+
+				// Validate enum constraint
+				if (definition.Enum.Length > 0 &&
+					!definition.Enum.Contains(value, StringComparer.OrdinalIgnoreCase))
+				{
+					errors.Add($"Input '{name}' value '{value}' is not one of the allowed values: {string.Join(", ", definition.Enum)}.");
+				}
+			}
+			else if (definition.Required)
+			{
+				var desc = definition.Description is not null ? $" ({definition.Description})" : "";
+				errors.Add($"Missing required input '{name}'{desc}.");
+			}
+			else if (definition.Default is not null)
+			{
+				// Apply default value for optional inputs
+				effective[name] = definition.Default;
+			}
+		}
+
+		if (errors.Count > 0)
+		{
+			throw new InvalidOperationException(
+				$"Input validation failed: {string.Join(" ", errors)} " +
+				$"Provide them via -param key=value.");
+		}
+
+		return effective.Count > 0 ? effective : null;
+	}
+
+	/// <summary>
+	/// Validates that a parameter value matches the expected <see cref="InputType"/>.
+	/// </summary>
+	private static string? ValidateInputType(string name, string value, InputType type)
+	{
+		return type switch
+		{
+			InputType.Boolean when !bool.TryParse(value, out _) =>
+				$"Input '{name}' expects a boolean value ('true' or 'false'), got '{value}'.",
+			InputType.Number when !double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out _) =>
+				$"Input '{name}' expects a numeric value, got '{value}'.",
+			_ => null,
+		};
 	}
 
 	/// <summary>

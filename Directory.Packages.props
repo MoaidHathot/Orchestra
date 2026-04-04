@@ -16,6 +16,7 @@
     <!-- Scheduling -->
     <PackageVersion Include="Cronos" Version="0.8.4" />
     <!-- UI -->
+    <PackageVersion Include="ModelContextProtocol.AspNetCore" Version="1.2.0" />
     <PackageVersion Include="Spectre.Console" Version="0.50.0" />
     <!-- Testing -->
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />

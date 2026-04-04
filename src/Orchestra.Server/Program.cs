@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Console;
 using Orchestra.Copilot;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
+using Orchestra.Host.McpServer;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +33,9 @@ builder.Services.AddOrchestraHost(options =>
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
 });
+
+// Add Orchestra MCP server (data-plane enabled by default, control-plane disabled by default)
+builder.Services.AddOrchestraMcpServer();
 
 // CORS: allow localhost access for local programs and tools
 builder.Services.AddCors(options =>
@@ -71,6 +75,9 @@ app.MapOpenApi();
 
 // Map all Orchestra Host API endpoints
 app.MapOrchestraHostEndpoints();
+
+// Map Orchestra MCP server endpoints
+app.MapOrchestraMcpEndpoints();
 
 app.Run();
 

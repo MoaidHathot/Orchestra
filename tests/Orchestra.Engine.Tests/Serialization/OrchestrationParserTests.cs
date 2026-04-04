@@ -1359,4 +1359,141 @@ public class OrchestrationParserTests
 	}
 
 	#endregion
+
+	#region Inputs Parsing
+
+	[Fact]
+	public void ParseOrchestration_WithInputs_ParsesTypedInputDefinitions()
+	{
+		var json = """
+			{
+				"name": "with-inputs",
+				"description": "Test",
+				"inputs": {
+					"serviceName": {
+						"type": "string",
+						"description": "Name of the service to deploy",
+						"required": true
+					},
+					"environment": {
+						"type": "string",
+						"description": "Target environment",
+						"enum": ["staging", "production"]
+					},
+					"dryRun": {
+						"type": "boolean",
+						"description": "Simulate without deploying",
+						"required": false,
+						"default": "false"
+					},
+					"retryCount": {
+						"type": "number",
+						"description": "Number of retries",
+						"required": false,
+						"default": "3"
+					}
+				},
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"systemPrompt": "Deploy {{param.serviceName}}",
+						"userPrompt": "Deploy to {{param.environment}}",
+						"model": "claude-opus-4.5",
+						"parameters": ["serviceName", "environment", "dryRun", "retryCount"]
+					}
+				]
+			}
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Inputs.Should().NotBeNull();
+		orchestration.Inputs.Should().HaveCount(4);
+
+		orchestration.Inputs!["serviceName"].Type.Should().Be(InputType.String);
+		orchestration.Inputs["serviceName"].Description.Should().Be("Name of the service to deploy");
+		orchestration.Inputs["serviceName"].Required.Should().BeTrue();
+
+		orchestration.Inputs["environment"].Type.Should().Be(InputType.String);
+		orchestration.Inputs["environment"].Enum.Should().BeEquivalentTo("staging", "production");
+
+		orchestration.Inputs["dryRun"].Type.Should().Be(InputType.Boolean);
+		orchestration.Inputs["dryRun"].Required.Should().BeFalse();
+		orchestration.Inputs["dryRun"].Default.Should().Be("false");
+
+		orchestration.Inputs["retryCount"].Type.Should().Be(InputType.Number);
+		orchestration.Inputs["retryCount"].Required.Should().BeFalse();
+		orchestration.Inputs["retryCount"].Default.Should().Be("3");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithoutInputs_InputsIsNull()
+	{
+		var json = """
+			{
+				"name": "no-inputs",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.5",
+						"parameters": ["param1"]
+					}
+				]
+			}
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Inputs.Should().BeNull();
+		orchestration.Steps[0].Parameters.Should().Contain("param1");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithMinimalInputs_UsesDefaults()
+	{
+		var json = """
+			{
+				"name": "minimal-inputs",
+				"description": "Test",
+				"inputs": {
+					"name": {}
+				},
+				"steps": []
+			}
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Inputs.Should().NotBeNull();
+		orchestration.Inputs!["name"].Type.Should().Be(InputType.String);
+		orchestration.Inputs["name"].Required.Should().BeTrue();
+		orchestration.Inputs["name"].Description.Should().BeNull();
+		orchestration.Inputs["name"].Default.Should().BeNull();
+		orchestration.Inputs["name"].Enum.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithEmptyInputs_ParsesEmptyDictionary()
+	{
+		var json = """
+			{
+				"name": "empty-inputs",
+				"description": "Test",
+				"inputs": {},
+				"steps": []
+			}
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Inputs.Should().NotBeNull();
+		orchestration.Inputs.Should().BeEmpty();
+	}
+
+	#endregion
 }

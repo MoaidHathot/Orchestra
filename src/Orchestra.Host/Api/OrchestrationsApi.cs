@@ -88,6 +88,16 @@ public static class OrchestrationsApi
 					}).ToArray(),
 					parameters = parameterNames,
 					hasParameters = parameterNames.Length > 0,
+					inputs = o.Orchestration.Inputs?.ToDictionary(
+						kvp => kvp.Key,
+						kvp => new
+						{
+							type = kvp.Value.Type.ToString().ToLowerInvariant(),
+							description = kvp.Value.Description,
+							required = kvp.Value.Required,
+							@default = kvp.Value.Default,
+							@enum = kvp.Value.Enum.Length > 0 ? kvp.Value.Enum : null,
+						}),
 				trigger = FormatTriggerInfoWithWebhook(o.Orchestration.Trigger, trigger, parameterNames),
 				triggerType = o.Orchestration.Trigger.Type.ToString(),
 				enabled = trigger?.Config.Enabled ?? o.Orchestration.Trigger.Enabled,
@@ -236,6 +246,16 @@ public static class OrchestrationsApi
 				steps,
 				layers,
 				parameters = allParameters,
+				inputs = o.Inputs?.ToDictionary(
+					kvp => kvp.Key,
+					kvp => new
+					{
+						type = kvp.Value.Type.ToString().ToLowerInvariant(),
+						description = kvp.Value.Description,
+						required = kvp.Value.Required,
+						@default = kvp.Value.Default,
+						@enum = kvp.Value.Enum.Length > 0 ? kvp.Value.Enum : null,
+					}),
 				trigger = FormatTriggerInfoWithWebhook(o.Trigger, triggerRegistration, allParameters),
 				mcps = o.Mcps.Select(m => new
 				{

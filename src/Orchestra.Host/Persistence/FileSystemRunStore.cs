@@ -338,6 +338,22 @@ public partial class FileSystemRunStore : IRunStore
 	}
 
 	/// <summary>
+	/// Finds a run index by run ID across all orchestrations.
+	/// Returns null if no matching run is found.
+	/// </summary>
+	public async Task<RunIndex?> FindRunByIdAsync(string runId, CancellationToken cancellationToken = default)
+	{
+		await EnsureIndexLoadedAsync(cancellationToken);
+
+		lock (_indexWriteLock)
+		{
+			return _indexByOrchestration.Values
+				.SelectMany(v => v)
+				.FirstOrDefault(i => string.Equals(i.RunId, runId, StringComparison.OrdinalIgnoreCase));
+		}
+	}
+
+	/// <summary>
 	/// Gets lightweight run summaries for a specific orchestration.
 	/// </summary>
 	public async Task<IReadOnlyList<RunIndex>> GetRunSummariesAsync(
