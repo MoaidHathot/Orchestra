@@ -15,6 +15,7 @@ import type {
   Profile,
 } from './types';
 import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
+import type { CardExecution } from './components/ActiveOrchestrationCard';
 import StatusBar from './components/StatusBar';
 import OfflineBanner from './components/OfflineBanner';
 import ViewerModal from './components/modals/ViewerModal';
@@ -26,6 +27,7 @@ import ExecutionModal from './components/modals/ExecutionModal';
 import McpsModal from './components/modals/McpsModal';
 import BuilderModal from './components/modals/BuilderModal';
 import ProfilesModal from './components/modals/ProfilesModal';
+import ProfileSelector from './components/ProfileSelector';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 
@@ -187,7 +189,6 @@ function App(): React.JSX.Element {
   const [profileFilter, setProfileFilter] = useState<string[]>([]); // empty = all, array of profile ids = multi-select
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [mainPaneProfileFilter, setMainPaneProfileFilter] = useState<string[]>([]); // same logic for main pane
-  const [mainPaneProfileDropdownOpen, setMainPaneProfileDropdownOpen] = useState(false);
 
   // History filter state (persisted in localStorage)
   const [hideIncomplete, setHideIncomplete] = useState<boolean>(() => {
@@ -354,6 +355,68 @@ function App(): React.JSX.Element {
       pending: activeData.pending.filter(exec => orchMatchesProfileFilter(exec.orchestrationId, mainPaneProfileFilter)),
     };
   }, [activeData, mainPaneProfileFilter, orchMatchesProfileFilter]);
+
+  /**
+   * Extended view: when a profile filter is applied, compute all 4 orchestration categories:
+   * - running: currently executing
+   * - pending: trigger armed, waiting to fire
+   * - manual: no trigger, available for manual run
+   * - disabled: part of the profile but trigger is disabled
+   */
+  const profileOrchestrationView = useMemo<{
+    running: CardExecution[];
+    pending: CardExecution[];
+    manual: CardExecution[];
+    disabled: CardExecution[];
+    hasProfileFilter: boolean;
+  }>(() => {
+    const hasProfileFilter = mainPaneProfileFilter.length > 0;
+
+    // Get orchestrations matched by the selected profiles
+    const matchedOrchs = hasProfileFilter
+      ? orchestrations.filter(o => orchMatchesProfileFilter(o.id, mainPaneProfileFilter))
+      : orchestrations;
+
+    // Build sets for quick lookup
+    const runningIds = new Set(filteredActiveData.running.map(e => e.orchestrationId));
+    const pendingIds = new Set(filteredActiveData.pending.map(e => e.orchestrationId));
+
+    // Categorize matched orchestrations that aren't already running or pending
+    const manual: CardExecution[] = [];
+    const disabled: CardExecution[] = [];
+
+    for (const orch of matchedOrchs) {
+      if (runningIds.has(orch.id) || pendingIds.has(orch.id)) continue;
+
+      const cardExec: CardExecution = {
+        orchestrationId: orch.id,
+        orchestrationName: orch.name,
+        stepCount: (orch as RuntimeOrchestration).stepCount || orch.steps?.length,
+        triggeredBy: (orch as RuntimeOrchestration).triggerType || 'Manual',
+      };
+
+      const triggerType = (orch as RuntimeOrchestration).triggerType;
+      const isEnabled = (orch as RuntimeOrchestration & { enabled?: boolean }).enabled;
+
+      if (!triggerType || triggerType === 'Manual') {
+        // No trigger defined -- manual only
+        manual.push(cardExec);
+      } else if (!isEnabled) {
+        // Has a trigger but it's disabled
+        disabled.push(cardExec);
+      }
+      // If enabled with trigger but not in pending, it might be a non-scheduled trigger
+      // that is waiting (e.g., webhook) -- those should already appear in pending
+    }
+
+    return {
+      running: filteredActiveData.running,
+      pending: filteredActiveData.pending,
+      manual,
+      disabled,
+      hasProfileFilter,
+    };
+  }, [orchestrations, filteredActiveData, mainPaneProfileFilter, orchMatchesProfileFilter]);
 
   // ── Filtered / enabled orchestrations ─────────────────────────────────────
 
@@ -1060,8 +1123,7 @@ function App(): React.JSX.Element {
     onEscape: useCallback(() => {
       if (sidebarOpen) setSidebarOpen(false);
       if (profileDropdownOpen) setProfileDropdownOpen(false);
-      if (mainPaneProfileDropdownOpen) setMainPaneProfileDropdownOpen(false);
-    }, [sidebarOpen, profileDropdownOpen, mainPaneProfileDropdownOpen]),
+    }, [sidebarOpen, profileDropdownOpen]),
   });
 
   // ── Profile filter toggle helpers ──
@@ -1082,22 +1144,18 @@ function App(): React.JSX.Element {
     );
   };
 
-  // Close dropdowns on outside click
+  // Close sidebar dropdown on outside click
   const sidebarDropdownRef = useRef<HTMLDivElement>(null);
-  const mainPaneDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (profileDropdownOpen && sidebarDropdownRef.current && !sidebarDropdownRef.current.contains(e.target as Node)) {
         setProfileDropdownOpen(false);
       }
-      if (mainPaneProfileDropdownOpen && mainPaneDropdownRef.current && !mainPaneDropdownRef.current.contains(e.target as Node)) {
-        setMainPaneProfileDropdownOpen(false);
-      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, [profileDropdownOpen, mainPaneProfileDropdownOpen]);
+  }, [profileDropdownOpen]);
 
   /** Render a multi-profile checkbox dropdown */
   const renderProfileMultiSelect = (
@@ -1245,15 +1303,34 @@ function App(): React.JSX.Element {
                 <div className="orch-item-header">
                   <span className="orch-name">{orch.name}</span>
                   <div className="orch-status" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span className={`status-dot ${orch.status === 'Running' ? 'running' : orch.enabled ? 'enabled' : 'disabled'}`}></span>
-                    <button
-                      className={`btn-icon btn-toggle ${orch.enabled ? 'enabled' : ''}`}
-                      onClick={(e: React.MouseEvent) => toggleOrchestration(orch.id, orch.enabled, e)}
-                      title={orch.enabled ? 'Disable trigger' : 'Enable trigger'}
-                      aria-label={orch.enabled ? `Disable ${orch.name} trigger` : `Enable ${orch.name} trigger`}
-                    >
-                      {orch.enabled ? <Icons.Check /> : <Icons.Play />}
-                    </button>
+                    <span className={`status-dot ${orch.status === 'Running' ? 'running' : orch.triggerType === 'Manual' || !orch.triggerType ? 'manual' : orch.enabled ? 'enabled' : 'disabled'}`}></span>
+                    {orch.triggerType && orch.triggerType !== 'Manual' ? (
+                      <button
+                        className={`btn-icon btn-toggle ${orch.enabled ? 'enabled' : ''}`}
+                        onClick={(e: React.MouseEvent) => toggleOrchestration(orch.id, orch.enabled, e)}
+                        title={orch.enabled ? 'Disable trigger' : 'Enable trigger'}
+                        aria-label={orch.enabled ? `Disable ${orch.name} trigger` : `Enable ${orch.name} trigger`}
+                      >
+                        {orch.enabled ? <Icons.Check /> : <Icons.Play />}
+                      </button>
+                    ) : (
+                      <button
+                        className="btn-icon"
+                        onClick={(e: React.MouseEvent) => {
+                          e.stopPropagation();
+                          if ((orch as RuntimeOrchestration)?.hasParameters) {
+                            setRunModal({ open: true, orchestration: orch });
+                          } else {
+                            runOrchestration(orch.id);
+                          }
+                          setSidebarOpen(false);
+                        }}
+                        title="Run orchestration"
+                        aria-label={`Run ${orch.name}`}
+                      >
+                        <Icons.Play />
+                      </button>
+                    )}
                     <button
                       className="btn-icon btn-delete-small"
                       onClick={(e: React.MouseEvent) => deleteOrchestration(orch.id, e)}
@@ -1433,53 +1510,50 @@ function App(): React.JSX.Element {
           </div>
           <div className="main-actions">
             {profiles.length > 0 && (
-              renderProfileMultiSelect(
-                mainPaneProfileFilter,
-                toggleMainPaneProfileFilter,
-                mainPaneProfileDropdownOpen,
-                setMainPaneProfileDropdownOpen,
-                () => setMainPaneProfileFilter([]),
-                'Filter active orchestrations by profile',
-                mainPaneDropdownRef,
-              )
+              <ProfileSelector
+                profiles={profiles}
+                selectedProfileIds={mainPaneProfileFilter}
+                onToggleProfile={toggleMainPaneProfileFilter}
+                onClearFilter={() => setMainPaneProfileFilter([])}
+                onProfileChanged={loadProfiles}
+                onManageProfiles={() => setProfilesModal(true)}
+              />
             )}
             <span className="text-muted" style={{ fontSize: '12px', marginRight: '8px' }}>
-              {filteredActiveData.running.length} running, {filteredActiveData.pending.length} pending
+              {profileOrchestrationView.running.length} running, {profileOrchestrationView.pending.length} pending
+              {(profileOrchestrationView.manual.length > 0 || profileOrchestrationView.disabled.length > 0) && (
+                <>, {profileOrchestrationView.manual.length + profileOrchestrationView.disabled.length} other</>
+              )}
             </span>
             <button className="btn" onClick={loadData}>Refresh</button>
           </div>
         </div>
 
         <div className="cards-container" style={{ overflow: 'auto' }}>
-          {filteredActiveData.running.length === 0 && filteredActiveData.pending.length === 0 ? (
+          {profileOrchestrationView.running.length === 0
+            && profileOrchestrationView.pending.length === 0
+            && profileOrchestrationView.manual.length === 0
+            && profileOrchestrationView.disabled.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><Icons.Activity /></div>
               <div className="empty-title">No Active Orchestrations</div>
               <div className="empty-text">
                 {mainPaneProfileFilter.length > 0
-                  ? 'No active orchestrations match the selected profile filter.'
+                  ? 'No orchestrations match the selected profile filter.'
                   : 'Run an orchestration from the sidebar to see it here, or add scheduled triggers.'}
               </div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               {/* Running Section */}
-              {filteredActiveData.running.length > 0 && (
+              {profileOrchestrationView.running.length > 0 && (
                 <div>
-                  <div style={{
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    marginBottom: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    color: 'var(--text)',
-                  }}>
-                    <span className="step-status-badge running" style={{ width: '8px', height: '8px', borderRadius: '50%' }}></span>
-                    Running ({filteredActiveData.running.length})
+                  <div className="cards-section-header">
+                    <span className="cards-section-dot cards-section-dot-running"></span>
+                    Running ({profileOrchestrationView.running.length})
                   </div>
                   <div className="cards-grid">
-                    {filteredActiveData.running.map(exec => (
+                    {profileOrchestrationView.running.map(exec => (
                       <ActiveOrchestrationCard
                         key={exec.executionId}
                         execution={exec}
@@ -1506,27 +1580,85 @@ function App(): React.JSX.Element {
                 </div>
               )}
 
-              {/* Pending Section */}
-              {filteredActiveData.pending.length > 0 && (
+              {/* Pending / Trigger Armed Section */}
+              {profileOrchestrationView.pending.length > 0 && (
                 <div>
-                  <div style={{
-                    fontSize: '13px',
-                    fontWeight: '600',
-                    marginBottom: '12px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    color: 'var(--text)',
-                  }}>
-                    <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--warning)' }}></span>
-                    Pending Triggers ({filteredActiveData.pending.length})
+                  <div className="cards-section-header">
+                    <span className="cards-section-dot cards-section-dot-pending"></span>
+                    Trigger Armed ({profileOrchestrationView.pending.length})
                   </div>
                   <div className="cards-grid">
-                    {filteredActiveData.pending.map((exec, idx) => (
+                    {profileOrchestrationView.pending.map((exec, idx) => (
                       <ActiveOrchestrationCard
                         key={exec.orchestrationId || idx}
                         execution={exec}
                         type="pending"
+                        orchestrations={orchestrations}
+                        profiles={profiles}
+                        onView={(_execution, orch) => {
+                          if (orch) {
+                            setViewerModal({ open: true, orchestration: orch });
+                          }
+                        }}
+                        onRun={(orch: Orchestration) => {
+                          if ((orch as RuntimeOrchestration)?.hasParameters) {
+                            setRunModal({ open: true, orchestration: orch });
+                          } else {
+                            runOrchestration(orch?.id);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Manual Only Section */}
+              {profileOrchestrationView.manual.length > 0 && (
+                <div>
+                  <div className="cards-section-header">
+                    <span className="cards-section-dot cards-section-dot-manual"></span>
+                    Manual ({profileOrchestrationView.manual.length})
+                  </div>
+                  <div className="cards-grid">
+                    {profileOrchestrationView.manual.map(exec => (
+                      <ActiveOrchestrationCard
+                        key={exec.orchestrationId}
+                        execution={exec}
+                        type="manual"
+                        orchestrations={orchestrations}
+                        profiles={profiles}
+                        onView={(_execution, orch) => {
+                          if (orch) {
+                            setViewerModal({ open: true, orchestration: orch });
+                          }
+                        }}
+                        onRun={(orch: Orchestration) => {
+                          if ((orch as RuntimeOrchestration)?.hasParameters) {
+                            setRunModal({ open: true, orchestration: orch });
+                          } else {
+                            runOrchestration(orch?.id);
+                          }
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Trigger Disabled Section */}
+              {profileOrchestrationView.disabled.length > 0 && (
+                <div>
+                  <div className="cards-section-header">
+                    <span className="cards-section-dot cards-section-dot-disabled"></span>
+                    Trigger Disabled ({profileOrchestrationView.disabled.length})
+                  </div>
+                  <div className="cards-grid">
+                    {profileOrchestrationView.disabled.map(exec => (
+                      <ActiveOrchestrationCard
+                        key={exec.orchestrationId}
+                        execution={exec}
+                        type="disabled"
                         orchestrations={orchestrations}
                         profiles={profiles}
                         onView={(_execution, orch) => {

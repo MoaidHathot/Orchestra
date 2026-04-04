@@ -39,6 +39,14 @@ public class Profile
 	public DateTimeOffset? DeactivatedAt { get; set; }
 
 	/// <summary>
+	/// What triggered the current activation: "manual" or "schedule".
+	/// Null when the profile is inactive. When set to "manual", the schedule
+	/// evaluator will not automatically deactivate this profile -- the user
+	/// must deactivate it explicitly.
+	/// </summary>
+	public string? ActivationTrigger { get; set; }
+
+	/// <summary>
 	/// Filter that determines which orchestrations belong to this profile.
 	/// </summary>
 	public required ProfileFilter Filter { get; set; }

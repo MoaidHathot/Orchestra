@@ -22,7 +22,7 @@ public static class ProfilesApi
 		// GET /api/profiles - List all profiles
 		group.MapGet("", (ProfileManager profileManager) =>
 		{
-			var profiles = profileManager.GetAllProfiles().Select(p => FormatProfile(p)).ToArray();
+			var profiles = profileManager.GetAllProfiles().Select(p => FormatProfile(p, profileManager)).ToArray();
 			return Results.Json(new { count = profiles.Length, profiles }, jsonOptions);
 		});
 
@@ -39,7 +39,7 @@ public static class ProfilesApi
 			if (profile is null)
 				return ProblemDetailsHelpers.Conflict("A profile with this name already exists.");
 
-			return Results.Json(FormatProfile(profile), jsonOptions, statusCode: 201);
+			return Results.Json(FormatProfile(profile, profileManager), jsonOptions, statusCode: 201);
 		});
 
 		// GET /api/profiles/{id} - Get a specific profile
@@ -49,7 +49,7 @@ public static class ProfilesApi
 			if (profile is null)
 				return ProblemDetailsHelpers.NotFound($"Profile '{id}' not found.");
 
-			return Results.Json(FormatProfile(profile), jsonOptions);
+			return Results.Json(FormatProfile(profile, profileManager), jsonOptions);
 		});
 
 		// PUT /api/profiles/{id} - Update a profile
@@ -63,7 +63,7 @@ public static class ProfilesApi
 			if (updated is null)
 				return ProblemDetailsHelpers.NotFound($"Profile '{id}' not found.");
 
-			return Results.Json(FormatProfile(updated), jsonOptions);
+			return Results.Json(FormatProfile(updated, profileManager), jsonOptions);
 		});
 
 		// DELETE /api/profiles/{id} - Delete a profile
@@ -349,14 +349,38 @@ public static class ProfilesApi
 		return endpoints;
 	}
 
-	private static object FormatProfile(Profile profile)
+	private static object FormatProfile(Profile profile, ProfileManager? profileManager = null)
 	{
+		// Compute schedule metadata if available
+		string? nextScheduledTransition = null;
+		string? nextTransitionType = null;
+		if (profile.Schedule is not null)
+		{
+			var now = DateTimeOffset.UtcNow;
+			var nextTransition = profile.Schedule.GetNextTransitionTime(now);
+			if (nextTransition is not null)
+			{
+				nextScheduledTransition = nextTransition.Value.ToString("o");
+				// If the profile is currently active (per schedule), next transition is deactivation; otherwise activation
+				var isScheduleActive = profile.Schedule.IsActiveAt(now);
+				nextTransitionType = isScheduleActive ? "deactivation" : "activation";
+			}
+		}
+
+		// Compute matched orchestration count if profile manager is available
+		int? matchedOrchestrationCount = null;
+		if (profileManager is not null)
+		{
+			matchedOrchestrationCount = profileManager.GetOrchestrationsByProfile(profile.Id).Count;
+		}
+
 		return new
 		{
 			id = profile.Id,
 			name = profile.Name,
 			description = profile.Description,
 			isActive = profile.IsActive,
+			activationTrigger = profile.ActivationTrigger,
 			activatedAt = profile.ActivatedAt?.ToString("o"),
 			deactivatedAt = profile.DeactivatedAt?.ToString("o"),
 			filter = new
@@ -375,6 +399,9 @@ public static class ProfilesApi
 					endTime = w.EndTime,
 				}).ToArray(),
 			} : null,
+			nextScheduledTransition,
+			nextTransitionType,
+			matchedOrchestrationCount,
 			createdAt = profile.CreatedAt.ToString("o"),
 			updatedAt = profile.UpdatedAt.ToString("o"),
 		};

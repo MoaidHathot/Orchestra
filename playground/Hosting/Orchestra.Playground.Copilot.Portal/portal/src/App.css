@@ -255,6 +255,7 @@
     .status-dot.enabled { background: var(--success); }
     .status-dot.disabled { background: var(--text-dim); }
     .status-dot.running { background: var(--warning); animation: pulse 1.5s infinite; }
+    .status-dot.manual { background: var(--text-muted); }
     @keyframes pulse {
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
@@ -285,6 +286,7 @@
     .badge-scheduler { background: rgba(57, 197, 207, 0.15); border-color: var(--cyan); color: var(--cyan); }
     .badge-webhook { background: rgba(219, 109, 40, 0.15); border-color: var(--orange); color: var(--orange); }
     .badge-email { background: rgba(88, 166, 255, 0.15); border-color: var(--accent); color: var(--accent); }
+    .badge-manual { background: rgba(139, 148, 158, 0.15); border-color: var(--text-muted); color: var(--text-muted); }
 
     /* Left Pane - History Section */
     .history-section {
@@ -455,6 +457,38 @@
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
       gap: 16px;
+    }
+    .cards-section-header {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+    }
+    .cards-section-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .cards-section-dot-running {
+      background: var(--primary);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .cards-section-dot-pending {
+      background: var(--success);
+    }
+    .cards-section-dot-manual {
+      background: var(--text-muted);
+    }
+    .cards-section-dot-disabled {
+      background: var(--text-dim);
+      opacity: 0.5;
+    }
+    .orch-card-disabled {
+      filter: saturate(0.3);
     }
     .orch-card {
       background: var(--surface);
@@ -1957,6 +1991,9 @@
       margin-top: 8px;
       border-top: 1px solid var(--border);
       padding-top: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
 
     /* ── Profile detail ── */
@@ -2105,6 +2142,100 @@
       border-radius: 6px;
       font-size: 13px;
       margin-bottom: 12px;
+    }
+
+    /* ── Profile card orchestration count ── */
+
+    .profile-card-orch-count {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .profile-card-orch-count svg {
+      width: 12px;
+      height: 12px;
+    }
+
+    /* ── Profile detail - matched orchestrations list ── */
+
+    .profile-orch-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 240px;
+      overflow-y: auto;
+    }
+    .profile-orch-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      background: var(--bg);
+    }
+    .profile-orch-item:hover {
+      background: var(--surface-hover);
+    }
+    .profile-orch-name {
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .profile-orch-tags {
+      display: flex;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    /* ── Profile form - orchestration picker ── */
+
+    .profile-form-orch-picker {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-top: 6px;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px;
+    }
+    .profile-form-orch-option {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 8px;
+      background: none;
+      border: none;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: inherit;
+      color: var(--text);
+      cursor: pointer;
+      transition: background 0.1s;
+      text-align: left;
+    }
+    .profile-form-orch-option:hover {
+      background: var(--surface-hover);
+    }
+    .profile-form-orch-option svg {
+      width: 12px;
+      height: 12px;
+      color: var(--text-muted);
+      flex-shrink: 0;
+    }
+    .profile-form-orch-option-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     /* ── Schedule editor ── */
@@ -2304,4 +2435,230 @@
     }
     .profile-multiselect-clear:hover {
       color: var(--accent);
+    }
+
+    /* ── Profile Selector (nav bar dropdown) ── */
+
+    .profile-selector {
+      position: relative;
+    }
+
+    .profile-selector-trigger {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--surface);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      white-space: nowrap;
+    }
+    .profile-selector-trigger:hover {
+      border-color: var(--border-light);
+      background: var(--surface-hover);
+    }
+    .profile-selector-trigger:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+    .profile-selector-trigger.has-active {
+      color: var(--text);
+    }
+    .profile-selector-trigger.has-filter {
+      color: var(--accent);
+      border-color: rgba(88, 166, 255, 0.4);
+    }
+    .profile-selector-trigger svg {
+      width: 12px;
+      height: 12px;
+      flex-shrink: 0;
+    }
+    .profile-selector-text {
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .profile-selector-active-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--success);
+      flex-shrink: 0;
+    }
+    .profile-selector-caret {
+      margin-left: 2px;
+      font-size: 8px;
+      opacity: 0.5;
+    }
+
+    .profile-selector-dropdown {
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      min-width: 320px;
+      max-width: 420px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+      z-index: 200;
+      max-height: 480px;
+      overflow-y: auto;
+    }
+
+    .profile-selector-section {
+      padding: 4px 0;
+    }
+    .profile-selector-section + .profile-selector-section {
+      border-top: 1px solid var(--border);
+    }
+    .profile-selector-section-header {
+      padding: 8px 14px 4px;
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-dim);
+    }
+
+    .profile-selector-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      cursor: pointer;
+      transition: background 0.1s;
+      gap: 8px;
+    }
+    .profile-selector-item:hover {
+      background: var(--surface-hover);
+    }
+    .profile-selector-item.selected {
+      background: rgba(88, 166, 255, 0.08);
+    }
+    .profile-selector-item.inactive {
+      opacity: 0.7;
+    }
+    .profile-selector-item.inactive:hover {
+      opacity: 1;
+    }
+
+    .profile-selector-item-main {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1;
+      min-width: 0;
+    }
+    .profile-selector-item-main input[type="checkbox"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .profile-selector-item-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      flex: 1;
+    }
+    .profile-selector-item-name {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .profile-selector-item-status {
+      font-size: 10px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .profile-selector-item-count {
+      font-size: 10px;
+      color: var(--text-muted);
+      background: var(--surface-hover);
+      padding: 1px 6px;
+      border-radius: 8px;
+      flex-shrink: 0;
+    }
+
+    .profile-selector-toggle-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: transparent;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.15s;
+      color: var(--text-muted);
+    }
+    .profile-selector-toggle-btn svg {
+      width: 12px;
+      height: 12px;
+    }
+    .profile-selector-toggle-btn.activate:hover {
+      color: var(--success);
+      border-color: var(--success);
+      background: rgba(63, 185, 80, 0.1);
+    }
+    .profile-selector-toggle-btn.deactivate:hover {
+      color: var(--danger);
+      border-color: var(--danger);
+      background: rgba(248, 81, 73, 0.1);
+    }
+    .profile-selector-toggle-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .profile-selector-footer {
+      border-top: 1px solid var(--border);
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .profile-selector-clear-btn,
+    .profile-selector-manage-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      padding: 7px 12px;
+      border: none;
+      border-radius: 6px;
+      background: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: color 0.15s, background 0.15s;
+    }
+    .profile-selector-clear-btn:hover {
+      color: var(--accent);
+      background: var(--surface-hover);
+    }
+    .profile-selector-manage-btn:hover {
+      color: var(--text);
+      background: var(--surface-hover);
+    }
+    .profile-selector-manage-btn svg {
+      width: 12px;
+      height: 12px;
     }

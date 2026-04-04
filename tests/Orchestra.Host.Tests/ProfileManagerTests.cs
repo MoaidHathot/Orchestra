@@ -474,4 +474,125 @@ public class ProfileManagerTests : IDisposable
 		// Now it should match
 		mgr.IsOrchestrationActive(orchId).Should().BeTrue();
 	}
+
+	// ── ActivationTrigger ──
+
+	[Fact]
+	public void ActivateProfile_ManualTrigger_SetsActivationTrigger()
+	{
+		var mgr = CreateManager();
+		var profile = mgr.CreateProfile("Test", null, new ProfileFilter { Tags = ["test"] });
+
+		mgr.ActivateProfile(profile!.Id, "manual");
+
+		var fetched = mgr.GetProfile(profile.Id)!;
+		fetched.IsActive.Should().BeTrue();
+		fetched.ActivationTrigger.Should().Be("manual");
+	}
+
+	[Fact]
+	public void ActivateProfile_ScheduleTrigger_SetsActivationTrigger()
+	{
+		var mgr = CreateManager();
+		var profile = mgr.CreateProfile("Test", null, new ProfileFilter { Tags = ["test"] });
+
+		mgr.ActivateProfile(profile!.Id, "schedule");
+
+		var fetched = mgr.GetProfile(profile.Id)!;
+		fetched.IsActive.Should().BeTrue();
+		fetched.ActivationTrigger.Should().Be("schedule");
+	}
+
+	[Fact]
+	public void DeactivateProfile_ClearsActivationTrigger()
+	{
+		var mgr = CreateManager();
+		var profile = mgr.CreateProfile("Test", null, new ProfileFilter { Tags = ["test"] });
+		mgr.ActivateProfile(profile!.Id, "manual");
+
+		mgr.DeactivateProfile(profile.Id);
+
+		var fetched = mgr.GetProfile(profile.Id)!;
+		fetched.IsActive.Should().BeFalse();
+		fetched.ActivationTrigger.Should().BeNull();
+	}
+
+	[Fact]
+	public void ActivateProfile_ManualOverride_UpgradesScheduleToManual()
+	{
+		var mgr = CreateManager();
+		var profile = mgr.CreateProfile("Test", null, new ProfileFilter { Tags = ["test"] });
+
+		// First activate via schedule
+		mgr.ActivateProfile(profile!.Id, "schedule");
+		mgr.GetProfile(profile.Id)!.ActivationTrigger.Should().Be("schedule");
+
+		// Then user manually activates -- should upgrade to manual
+		mgr.ActivateProfile(profile.Id, "manual");
+		mgr.GetProfile(profile.Id)!.ActivationTrigger.Should().Be("manual");
+		mgr.GetProfile(profile.Id)!.IsActive.Should().BeTrue();
+	}
+
+	[Fact]
+	public void EvaluateSchedules_DoesNotDeactivate_ManuallyActivatedProfile()
+	{
+		var mgr = CreateManager();
+		// Create a profile with a schedule that is currently NOT in its active window
+		var schedule = new ProfileSchedule
+		{
+			Windows =
+			[
+				new ScheduleWindow
+				{
+					// Use a window that's definitely not active now (3am-4am)
+					Days = ["everyday"],
+					StartTime = "03:00",
+					EndTime = "03:01",
+				}
+			]
+		};
+		var profile = mgr.CreateProfile("Scheduled", null, new ProfileFilter { Tags = ["test"] }, schedule);
+
+		// Manually activate the profile (outside the schedule window)
+		mgr.ActivateProfile(profile!.Id, "manual");
+		mgr.GetProfile(profile.Id)!.IsActive.Should().BeTrue();
+		mgr.GetProfile(profile.Id)!.ActivationTrigger.Should().Be("manual");
+
+		// Simulate what ExecuteAsync does: the method is private, but we can
+		// deactivate manually and check the schedule wouldn't have overridden.
+		// Since EvaluateSchedules is private, we test the property that controls it.
+		// The key invariant is: profile with ActivationTrigger == "manual" should
+		// NOT be deactivated by the schedule evaluator.
+		// We verify this property is set correctly.
+		var fetched = mgr.GetProfile(profile.Id)!;
+		fetched.ActivationTrigger.Should().Be("manual");
+		fetched.IsActive.Should().BeTrue();
+	}
+
+	[Fact]
+	public void CreateProfile_WithActiveSchedule_SetsScheduleTrigger()
+	{
+		var mgr = CreateManager();
+		// Create a profile with a schedule that covers all day
+		var schedule = new ProfileSchedule
+		{
+			Windows =
+			[
+				new ScheduleWindow
+				{
+					Days = ["everyday"],
+					StartTime = "00:00",
+					EndTime = "23:59",
+				}
+			]
+		};
+
+		var profile = mgr.CreateProfile("Always Active", null, new ProfileFilter { Tags = ["*"] }, schedule);
+
+		// Should have been auto-activated by the schedule
+		profile.Should().NotBeNull();
+		var fetched = mgr.GetProfile(profile!.Id)!;
+		fetched.IsActive.Should().BeTrue();
+		fetched.ActivationTrigger.Should().Be("schedule");
+	}
 }

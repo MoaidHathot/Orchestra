@@ -17,6 +17,7 @@ vi.mock('../icons', () => ({
     Copy: () => <span data-testid="icon-copy" />,
     Tag: () => <span data-testid="icon-tag" />,
     Shield: () => <span data-testid="icon-shield" />,
+    Ban: () => <span data-testid="icon-ban" />,
   },
   getTriggerIcon: () => <span data-testid="icon-trigger" />,
 }));
@@ -32,7 +33,7 @@ const noop = () => {};
 
 function renderCard(overrides: {
   execution?: Partial<CardExecution>;
-  type?: 'running' | 'pending';
+  type?: 'running' | 'pending' | 'manual' | 'disabled';
   orchestrations?: Orchestration[];
   profiles?: Profile[];
   onView?: typeof noop;
@@ -282,5 +283,54 @@ describe('ActiveOrchestrationCard – Progress bar', () => {
     });
 
     expect(screen.getByText('analyze-data')).toBeInTheDocument();
+  });
+});
+
+// ── Manual card type ──────────────────────────────────────────────────────────
+
+describe('ActiveOrchestrationCard – Manual type', () => {
+  it('renders "Manual" status label', () => {
+    renderCard({ type: 'manual' });
+    expect(screen.getByText('Manual')).toBeInTheDocument();
+  });
+
+  it('shows "Manual (no trigger)" in the type meta', () => {
+    renderCard({ type: 'manual' });
+    expect(screen.getByText('Manual (no trigger)')).toBeInTheDocument();
+  });
+
+  it('shows Run button for manual cards', () => {
+    const onRun = vi.fn();
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test' },
+    ];
+    renderCard({ type: 'manual', orchestrations, onRun });
+    expect(screen.getByText('Run')).toBeInTheDocument();
+  });
+
+  it('renders with reduced opacity for disabled cards', () => {
+    const { container } = renderCard({ type: 'disabled' });
+    const card = container.querySelector('.orch-card');
+    expect(card).toHaveStyle({ opacity: '0.6' });
+  });
+});
+
+// ── Disabled card type ────────────────────────────────────────────────────────
+
+describe('ActiveOrchestrationCard – Disabled type', () => {
+  it('renders "Disabled" status label', () => {
+    renderCard({ type: 'disabled' });
+    expect(screen.getByText('Disabled')).toBeInTheDocument();
+  });
+
+  it('shows "Trigger disabled" in the type meta', () => {
+    renderCard({ type: 'disabled' });
+    expect(screen.getByText('Trigger disabled')).toBeInTheDocument();
+  });
+
+  it('has orch-card-disabled class', () => {
+    const { container } = renderCard({ type: 'disabled' });
+    const card = container.querySelector('.orch-card-disabled');
+    expect(card).not.toBeNull();
   });
 });

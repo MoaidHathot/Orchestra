@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Icons } from '../../icons';
 import { api } from '../../api';
+import { formatTimeAgo, formatTimeUntil } from '../../utils';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
-import type { Profile, ProfileFilter, ProfileSchedule, ScheduleWindow, TagCount } from '../../types';
+import type { Profile, ProfileFilter, ProfileSchedule, ScheduleWindow, TagCount, Orchestration } from '../../types';
 import ImportProfilesModal from './ImportProfilesModal';
 import ExportModal from './ExportModal';
 
@@ -16,6 +17,17 @@ interface ProfilesResponse {
 interface TagsResponse {
   count: number;
   tags: TagCount[];
+}
+
+interface OrchestrationsResponse {
+  orchestrations: Orchestration[];
+}
+
+interface ProfileOrchestrationEntry {
+  id: string;
+  name: string;
+  description?: string;
+  tags: string[];
 }
 
 interface ProfileHistoryResponse {
@@ -66,6 +78,7 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
   // ── Data state ──
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [tags, setTags] = useState<TagCount[]>([]);
+  const [allOrchestrations, setAllOrchestrations] = useState<Orchestration[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -87,9 +100,11 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
   const [formTagInput, setFormTagInput] = useState('');
   const [formOrchInput, setFormOrchInput] = useState('');
   const [formExcludeInput, setFormExcludeInput] = useState('');
+  const [formExcludeSearch, setFormExcludeSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [importModal, setImportModal] = useState(false);
   const [exportModal, setExportModal] = useState(false);
+  const [profileOrchestrations, setProfileOrchestrations] = useState<ProfileOrchestrationEntry[]>([]);
 
   // ── Load data ──
 
@@ -97,12 +112,14 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
     setLoading(true);
     setError(null);
     try {
-      const [profilesData, tagsData] = await Promise.all([
+      const [profilesData, tagsData, orchData] = await Promise.all([
         api.get<ProfilesResponse>('/api/profiles'),
         api.get<TagsResponse>('/api/tags'),
+        api.get<OrchestrationsResponse>('/api/orchestrations'),
       ]);
       setProfiles(profilesData.profiles || []);
       setTags(tagsData.tags || []);
+      setAllOrchestrations(orchData.orchestrations || []);
     } catch (err) {
       console.error('Failed to load profiles:', err);
       setError(err instanceof Error ? err.message : 'Failed to load profiles');
@@ -196,11 +213,16 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
   const openDetail = async (profile: Profile) => {
     setSelectedProfile(profile);
     setView('detail');
+    setProfileOrchestrations([]);
     try {
-      const history = await api.get<ProfileHistoryResponse>(`/api/profiles/${profile.id}/history`);
+      const [history, orchs] = await Promise.all([
+        api.get<ProfileHistoryResponse>(`/api/profiles/${profile.id}/history`),
+        api.get<{ count: number; orchestrations: ProfileOrchestrationEntry[] }>(`/api/profiles/${profile.id}/orchestrations`),
+      ]);
       setProfileHistory(history);
+      setProfileOrchestrations(orchs.orchestrations || []);
     } catch (err) {
-      console.error('Failed to load profile history:', err);
+      console.error('Failed to load profile details:', err);
       setProfileHistory(null);
     }
   };
@@ -562,6 +584,11 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
 
               <div className="profile-card-meta">
                 {renderTagChips(profile.filter.tags)}
+                {profile.matchedOrchestrationCount != null && (
+                  <span className="profile-card-orch-count">
+                    <Icons.Workflow /> {profile.matchedOrchestrationCount} orchestration{profile.matchedOrchestrationCount !== 1 ? 's' : ''}
+                  </span>
+                )}
                 {profile.schedule && profile.schedule.windows.length > 0 && (
                   <span className="profile-card-schedule">
                     <Icons.Calendar /> {profile.schedule.windows.length} schedule window{profile.schedule.windows.length !== 1 ? 's' : ''}
@@ -571,8 +598,21 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
 
               <div className="profile-card-footer">
                 <span className="text-muted" style={{ fontSize: '11px' }}>
-                  {profile.isActive ? `Active since ${fmtDate(profile.activatedAt)}` : `Last active ${fmtDate(profile.deactivatedAt)}`}
+                  {profile.isActive
+                    ? profile.activationTrigger === 'manual'
+                      ? `Active (manual) since ${fmtDate(profile.activatedAt)}`
+                      : profile.activationTrigger === 'schedule'
+                        ? `Active (scheduled) since ${fmtDate(profile.activatedAt)}`
+                        : `Active since ${fmtDate(profile.activatedAt)}`
+                    : `Last active ${fmtDate(profile.deactivatedAt)}`}
                 </span>
+                {profile.nextScheduledTransition && (
+                  <span className="text-muted" style={{ fontSize: '11px' }}>
+                    {profile.nextTransitionType === 'activation'
+                      ? `Activates ${formatTimeUntil(profile.nextScheduledTransition)}`
+                      : `Deactivates ${formatTimeUntil(profile.nextScheduledTransition)}`}
+                  </span>
+                )}
               </div>
             </div>
           ))}
@@ -663,14 +703,65 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
           </div>
         )}
 
-        {/* Timestamps */}
+        {/* Timestamps and activation info */}
         <div className="profile-detail-section">
           <div className="profile-detail-section-title">Info</div>
           <div className="profile-detail-grid">
+            <span className="text-muted">Status:</span>
+            <span>
+              {p.isActive
+                ? p.activationTrigger === 'manual'
+                  ? 'Active (manual override)'
+                  : p.activationTrigger === 'schedule'
+                    ? 'Active (scheduled)'
+                    : 'Active'
+                : 'Inactive'}
+            </span>
+            {p.isActive && p.activatedAt && (
+              <>
+                <span className="text-muted">Active since:</span>
+                <span>{fmtDate(p.activatedAt)} ({formatTimeAgo(p.activatedAt)})</span>
+              </>
+            )}
+            {p.nextScheduledTransition && (
+              <>
+                <span className="text-muted">Next transition:</span>
+                <span>
+                  {p.nextTransitionType === 'activation' ? 'Activates' : 'Deactivates'}{' '}
+                  {formatTimeUntil(p.nextScheduledTransition)} ({fmtDate(p.nextScheduledTransition)})
+                </span>
+              </>
+            )}
             <span className="text-muted">Created:</span><span>{fmtDate(p.createdAt)}</span>
             <span className="text-muted">Updated:</span><span>{fmtDate(p.updatedAt)}</span>
             <span className="text-muted">ID:</span><span style={{ fontFamily: 'monospace', fontSize: '12px' }}>{p.id}</span>
           </div>
+        </div>
+
+        {/* Matched Orchestrations */}
+        <div className="profile-detail-section">
+          <div className="profile-detail-section-title">
+            <Icons.Workflow /> Matched Orchestrations ({profileOrchestrations.length})
+          </div>
+          {profileOrchestrations.length === 0 ? (
+            <div className="text-muted" style={{ fontSize: '12px' }}>No orchestrations match this profile's filter.</div>
+          ) : (
+            <div className="profile-orch-list">
+              {profileOrchestrations.map(orch => (
+                <div key={orch.id} className="profile-orch-item">
+                  <span className="profile-orch-name">{orch.name}</span>
+                  {orch.tags && orch.tags.length > 0 && (
+                    <div className="profile-orch-tags">
+                      {orch.tags.slice(0, 5).map(tag => (
+                        <span key={tag} className="tag-chip tag-chip-small"><Icons.Tag />{tag}</span>
+                      ))}
+                      {orch.tags.length > 5 && <span className="text-muted" style={{ fontSize: '10px' }}>+{orch.tags.length - 5}</span>}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* History */}
@@ -813,26 +904,60 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
       <div className="profile-form-row">
         <label className="profile-form-label">Exclude Orchestration IDs (optional)</label>
         <div className="profile-tags">
-          {formExcludeIds.map(id => (
-            <span key={id} className="tag-chip tag-exclude">
-              {id}
-              <button className="tag-chip-remove" onClick={() => removeFormExcludeId(id)}>
-                <Icons.X />
-              </button>
-            </span>
-          ))}
+          {formExcludeIds.map(id => {
+            const orchName = allOrchestrations.find(o => o.id === id)?.name;
+            return (
+              <span key={id} className="tag-chip tag-exclude">
+                {orchName || id}
+                <button className="tag-chip-remove" onClick={() => removeFormExcludeId(id)}>
+                  <Icons.X />
+                </button>
+              </span>
+            );
+          })}
         </div>
         <div className="profile-form-input-row">
           <input
             type="text"
             className="profile-form-input"
-            placeholder="Orchestration ID to exclude..."
-            value={formExcludeInput}
-            onChange={(e) => setFormExcludeInput(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addFormExcludeId(); } }}
+            placeholder="Search orchestrations by name..."
+            value={formExcludeSearch}
+            onChange={(e) => setFormExcludeSearch(e.target.value)}
           />
-          <button className="btn btn-sm" onClick={addFormExcludeId} disabled={!formExcludeInput.trim()}>Add</button>
         </div>
+        {/* Searchable orchestration list for exclusion */}
+        {allOrchestrations.length > 0 && (
+          <div className="profile-form-orch-picker">
+            {allOrchestrations
+              .filter(o =>
+                !formExcludeIds.includes(o.id) &&
+                (!formExcludeSearch || o.name.toLowerCase().includes(formExcludeSearch.toLowerCase()) || o.id.toLowerCase().includes(formExcludeSearch.toLowerCase()))
+              )
+              .slice(0, 10)
+              .map(o => (
+                <button
+                  key={o.id}
+                  className="profile-form-orch-option"
+                  onClick={() => {
+                    setFormExcludeIds([...formExcludeIds, o.id]);
+                    setFormExcludeSearch('');
+                  }}
+                  title={`ID: ${o.id}`}
+                >
+                  <span className="profile-form-orch-option-name">{o.name}</span>
+                  <Icons.Plus />
+                </button>
+              ))}
+            {allOrchestrations.filter(o =>
+              !formExcludeIds.includes(o.id) &&
+              (!formExcludeSearch || o.name.toLowerCase().includes(formExcludeSearch.toLowerCase()) || o.id.toLowerCase().includes(formExcludeSearch.toLowerCase()))
+            ).length > 10 && (
+              <div className="text-muted" style={{ fontSize: '11px', padding: '4px 8px' }}>
+                Type to filter more results...
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Schedule */}

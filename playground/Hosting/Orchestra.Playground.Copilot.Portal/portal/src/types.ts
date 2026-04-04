@@ -275,10 +275,14 @@ export interface Profile {
   name: string;
   description?: string;
   isActive: boolean;
+  activationTrigger?: string | null;
   activatedAt?: string;
   deactivatedAt?: string;
   filter: ProfileFilter;
   schedule?: ProfileSchedule | null;
+  nextScheduledTransition?: string | null;
+  nextTransitionType?: string | null;
+  matchedOrchestrationCount?: number | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -167,6 +167,9 @@ public partial class ProfileManager : BackgroundService
 
 	/// <summary>
 	/// Activates a profile. Recomputes the effective active set and notifies listeners.
+	/// The trigger parameter records what caused the activation ("manual" or "schedule").
+	/// Manual activations persist until the user explicitly deactivates -- the schedule
+	/// evaluator will not override them.
 	/// </summary>
 	public bool ActivateProfile(string id, string trigger = "manual")
 	{
@@ -175,9 +178,21 @@ public partial class ProfileManager : BackgroundService
 			return false;
 
 		if (profile.IsActive)
-			return true; // Already active
+		{
+			// If already active via schedule but user is now manually activating,
+			// upgrade to manual override so the schedule won't deactivate it.
+			if (trigger == "manual" && profile.ActivationTrigger != "manual")
+			{
+				profile.ActivationTrigger = "manual";
+				profile.UpdatedAt = DateTimeOffset.UtcNow;
+				_store.Save(profile);
+				LogProfileActivated(id, "manual-override");
+			}
+			return true;
+		}
 
 		profile.IsActive = true;
+		profile.ActivationTrigger = trigger;
 		profile.ActivatedAt = DateTimeOffset.UtcNow;
 		profile.UpdatedAt = DateTimeOffset.UtcNow;
 		_store.Save(profile);
@@ -190,6 +205,7 @@ public partial class ProfileManager : BackgroundService
 
 	/// <summary>
 	/// Deactivates a profile. Recomputes the effective active set and notifies listeners.
+	/// Clears the activation trigger so the schedule evaluator can resume control.
 	/// </summary>
 	public bool DeactivateProfile(string id, string trigger = "manual")
 	{
@@ -201,6 +217,7 @@ public partial class ProfileManager : BackgroundService
 			return true; // Already inactive
 
 		profile.IsActive = false;
+		profile.ActivationTrigger = null;
 		profile.DeactivatedAt = DateTimeOffset.UtcNow;
 		profile.UpdatedAt = DateTimeOffset.UtcNow;
 		_store.Save(profile);
@@ -524,6 +541,8 @@ public partial class ProfileManager : BackgroundService
 
 	/// <summary>
 	/// Evaluates all profile schedules and activates/deactivates profiles as needed.
+	/// Profiles that were manually activated are skipped -- the schedule will not
+	/// override a manual activation.
 	/// </summary>
 	private void EvaluateSchedules()
 	{
@@ -541,8 +560,10 @@ public partial class ProfileManager : BackgroundService
 				LogScheduleActivating(profile.Id, profile.Name);
 				ActivateProfile(profile.Id, "schedule");
 			}
-			else if (!shouldBeActive && profile.IsActive)
+			else if (!shouldBeActive && profile.IsActive && profile.ActivationTrigger != "manual")
 			{
+				// Only deactivate if the profile was NOT manually activated.
+				// Manual activations persist until the user explicitly deactivates.
 				LogScheduleDeactivating(profile.Id, profile.Name);
 				DeactivateProfile(profile.Id, "schedule");
 			}

@@ -24,7 +24,7 @@ export interface CardExecution {
 
 interface Props {
   execution: CardExecution;
-  type: 'running' | 'pending';
+  type: 'running' | 'pending' | 'manual' | 'disabled';
   onView: (execution: CardExecution, orch: Orchestration | undefined) => void;
   onCancel?: (executionId: string) => void;
   onRun?: (orch: Orchestration) => void;
@@ -42,6 +42,8 @@ export default function ActiveOrchestrationCard({
   profiles,
 }: Props): React.JSX.Element {
   const isRunning = type === 'running';
+  const isManual = type === 'manual';
+  const isDisabled = type === 'disabled';
   const isCancelling = execution.status === 'Cancelling';
   const orch = orchestrations?.find((o) => o.id === execution.orchestrationId);
 
@@ -60,15 +62,77 @@ export default function ActiveOrchestrationCard({
   const getStatusColor = (): string => {
     if (isCancelling) return 'var(--warning)';
     if (isRunning) return 'var(--primary)';
+    if (isManual) return 'var(--text-dim)';
+    if (isDisabled) return 'var(--text-dim)';
     return 'var(--warning)';
+  };
+
+  const getStatusBadgeClass = (): string => {
+    if (isCancelling) return 'cancelling';
+    if (isRunning) return 'running';
+    if (isManual) return 'manual';
+    if (isDisabled) return 'disabled';
+    return 'pending';
+  };
+
+  const getStatusLabel = (): React.JSX.Element => {
+    if (isCancelling) {
+      return (
+        <>
+          <span style={{ width: '12px', height: '12px', color: 'var(--warning)', display: 'inline-flex' }}>
+            <Icons.Spinner />
+          </span>
+          <span style={{ color: 'var(--warning)' }}>Cancelling</span>
+        </>
+      );
+    }
+    if (isRunning) {
+      return (
+        <>
+          <span style={{ width: '12px', height: '12px', display: 'inline-flex' }}>
+            <Icons.Spinner />
+          </span>
+          Running
+        </>
+      );
+    }
+    if (isManual) {
+      return (
+        <>
+          <span style={{ width: '12px', height: '12px', display: 'inline-flex' }}>
+            <Icons.Play />
+          </span>
+          Manual
+        </>
+      );
+    }
+    if (isDisabled) {
+      return (
+        <>
+          <span style={{ width: '12px', height: '12px', display: 'inline-flex', opacity: 0.5 }}>
+            <Icons.Ban />
+          </span>
+          <span style={{ opacity: 0.5 }}>Disabled</span>
+        </>
+      );
+    }
+    return (
+      <>
+        <span style={{ width: '12px', height: '12px', display: 'inline-flex' }}>
+          <Icons.Clock />
+        </span>
+        Pending
+      </>
+    );
   };
 
   return (
     <div
-      className="orch-card"
+      className={`orch-card ${isDisabled ? 'orch-card-disabled' : ''}`}
       style={{
         borderLeft: `4px solid ${getStatusColor()}`,
         cursor: 'pointer',
+        opacity: isDisabled ? 0.6 : 1,
       }}
       onClick={() => onView(execution, orch)}
     >
@@ -76,13 +140,13 @@ export default function ActiveOrchestrationCard({
         <div className="card-title-area">
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div
-              className={`step-status-badge ${isCancelling ? 'cancelling' : isRunning ? 'running' : 'pending'}`}
+              className={`step-status-badge ${getStatusBadgeClass()}`}
               style={{
                 width: '10px',
                 height: '10px',
                 borderRadius: '50%',
                 flexShrink: 0,
-                background: isCancelling ? 'var(--warning)' : undefined,
+                background: isCancelling ? 'var(--warning)' : isDisabled ? 'var(--text-dim)' : isManual ? 'var(--text-muted)' : undefined,
               }}
             />
             <div className="card-title">{execution.orchestrationName}</div>
@@ -91,28 +155,7 @@ export default function ActiveOrchestrationCard({
             className="card-version"
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
-            {isCancelling ? (
-              <>
-                <span style={{ width: '12px', height: '12px', color: 'var(--warning)', display: 'inline-flex' }}>
-                  <Icons.Spinner />
-                </span>
-                <span style={{ color: 'var(--warning)' }}>Cancelling</span>
-              </>
-            ) : isRunning ? (
-              <>
-                <span style={{ width: '12px', height: '12px', display: 'inline-flex' }}>
-                  <Icons.Spinner />
-                </span>
-                Running
-              </>
-            ) : (
-              <>
-                <span style={{ width: '12px', height: '12px', display: 'inline-flex' }}>
-                  <Icons.Clock />
-                </span>
-                Pending
-              </>
-            )}
+            {getStatusLabel()}
           </div>
         </div>
       </div>
@@ -204,6 +247,29 @@ export default function ActiveOrchestrationCard({
                       {execution.currentStep}
                     </div>
                   )}
+                </div>
+              )}
+            </>
+          ) : isManual || isDisabled ? (
+            <>
+              <div className="card-meta-item">
+                <div className="card-meta-label">Type</div>
+                <div className="card-meta-value">
+                  {isManual ? 'Manual (no trigger)' : 'Trigger disabled'}
+                </div>
+              </div>
+              <div className="card-meta-item">
+                <div className="card-meta-label">Steps</div>
+                <div className="card-meta-value">
+                  {orch?.steps?.length || '-'}
+                </div>
+              </div>
+              {orch?.description && (
+                <div className="card-meta-item" style={{ gridColumn: '1 / -1' }}>
+                  <div className="card-meta-label">Description</div>
+                  <div className="card-meta-value" style={{ whiteSpace: 'pre-wrap' }}>
+                    {orch.description.length > 120 ? orch.description.slice(0, 120) + '...' : orch.description}
+                  </div>
                 </div>
               )}
             </>
