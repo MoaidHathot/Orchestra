@@ -57,9 +57,8 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
-		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "echo Hello Orchestra"]);
+		var (cmd, args) = GetEchoCommand("Hello Orchestra");
+		var step = CreateCommandStep(command: cmd, arguments: args);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
@@ -98,9 +97,8 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
-		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "exit 1"]);
+		var (cmd, args) = GetShellCommand("exit 1");
+		var step = CreateCommandStep(command: cmd, arguments: args);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
@@ -120,9 +118,10 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
+		var (cmd, args) = GetEchoCommand("{{param.message}}");
 		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "echo {{param.message}}"],
+			command: cmd,
+			arguments: args,
 			parameters: ["message"]);
 
 		var context = new OrchestrationExecutionContext
@@ -147,9 +146,10 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
+		var (cmd, args) = GetEchoCommand("{{step1.output}}");
 		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "echo {{step1.output}}"],
+			command: cmd,
+			arguments: args,
 			dependsOn: ["step1"]);
 
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
@@ -172,9 +172,10 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
+		var (cmd, args) = GetEnvPrintCommand("ORCHESTRA_TEST_VAR");
 		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "echo %ORCHESTRA_TEST_VAR%"],
+			command: cmd,
+			arguments: args,
 			environment: new Dictionary<string, string>
 			{
 				["ORCHESTRA_TEST_VAR"] = "env-value-123"
@@ -194,9 +195,10 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
+		var (cmd, args) = GetEnvPrintCommand("ORCHESTRA_DYNAMIC");
 		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "echo %ORCHESTRA_DYNAMIC%"],
+			command: cmd,
+			arguments: args,
 			environment: new Dictionary<string, string>
 			{
 				["ORCHESTRA_DYNAMIC"] = "{{param.envValue}}"
@@ -229,9 +231,10 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
+		var (cmd, args) = GetStdoutAndStderrCommand("stdout-data", "stderr-data");
 		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "echo stdout-data && echo stderr-data 1>&2"],
+			command: cmd,
+			arguments: args,
 			includeStdErr: true);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
@@ -249,9 +252,10 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
+		var (cmd, args) = GetStdoutAndStderrCommand("stdout-only", "hidden-stderr");
 		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "echo stdout-only && echo hidden-stderr 1>&2"],
+			command: cmd,
+			arguments: args,
 			includeStdErr: false);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
@@ -302,10 +306,11 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
-		// Use a command that takes a long time
-		var step = CreateCommandStep(
-			command: "cmd",
-			arguments: ["/c", "ping -n 30 127.0.0.1"]);
+		// Use a cross-platform command that runs long enough to cancel
+		var (cmd, args) = OperatingSystem.IsWindows()
+			? ("cmd", new[] { "/c", "ping -n 30 127.0.0.1" })
+			: ("sleep", new[] { "30" });
+		var step = CreateCommandStep(command: cmd, arguments: args);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
@@ -329,6 +334,34 @@ public class CommandStepExecutorTests
 		// Assert
 		executor.StepType.Should().Be(OrchestrationStepType.Command);
 	}
+
+	#endregion
+
+	#region Cross-platform helpers
+
+	/// <summary>Returns a cross-platform command that echoes the given text to stdout.</summary>
+	private static (string cmd, string[] args) GetEchoCommand(string text) =>
+		OperatingSystem.IsWindows()
+			? ("cmd", ["/c", $"echo {text}"])
+			: ("/bin/sh", ["-c", $"echo {text}"]);
+
+	/// <summary>Returns a cross-platform shell command.</summary>
+	private static (string cmd, string[] args) GetShellCommand(string shellCommand) =>
+		OperatingSystem.IsWindows()
+			? ("cmd", ["/c", shellCommand])
+			: ("/bin/sh", ["-c", shellCommand]);
+
+	/// <summary>Returns a cross-platform command that prints an environment variable.</summary>
+	private static (string cmd, string[] args) GetEnvPrintCommand(string envVarName) =>
+		OperatingSystem.IsWindows()
+			? ("cmd", ["/c", $"echo %{envVarName}%"])
+			: ("/bin/sh", ["-c", $"echo ${envVarName}"]);
+
+	/// <summary>Returns a cross-platform command that writes to both stdout and stderr.</summary>
+	private static (string cmd, string[] args) GetStdoutAndStderrCommand(string stdoutText, string stderrText) =>
+		OperatingSystem.IsWindows()
+			? ("cmd", ["/c", $"echo {stdoutText} && echo {stderrText} 1>&2"])
+			: ("/bin/sh", ["-c", $"echo {stdoutText} && echo {stderrText} >&2"]);
 
 	#endregion
 }

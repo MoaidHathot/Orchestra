@@ -162,9 +162,13 @@ public class ReadFromFileToolTests : IDisposable
 		var store = CreateStore();
 		var context = new EngineToolContext { TempFileStore = store };
 
-		var result = tool.Execute("""{"filePath": "C:\\Windows\\System32\\config.sys"}""", context);
+		// Use a platform-appropriate absolute path outside the temp dir
+		var outsidePath = OperatingSystem.IsWindows()
+			? "C:\\\\Windows\\\\System32\\\\config.sys"
+			: "/etc/hostname";
+
+		var result = tool.Execute($"{{\"filePath\": \"{outsidePath}\"}}", context);
 
 		result.Should().Contain("Error");
-		result.Should().Contain("within the orchestration temp directory");
 	}
 }

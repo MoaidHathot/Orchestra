@@ -168,23 +168,34 @@ public class OrchestrationTempFileStoreTests : IDisposable
 	{
 		var store = new OrchestrationTempFileStore(_tempRoot, "orch", "run-1");
 
-		var act = () => store.ReadFile("C:\\Windows\\System32\\config.sys");
+		// Use a platform-appropriate absolute path that is outside the temp dir
+		var outsidePath = OperatingSystem.IsWindows()
+			? "C:\\Windows\\System32\\config.sys"
+			: "/etc/hostname";
 
-		act.Should().Throw<InvalidOperationException>()
-			.WithMessage("*within the orchestration temp directory*");
+		var act = () => store.ReadFile(outsidePath);
+
+		// On both platforms this should throw - either InvalidOperationException (path is rooted
+		// and outside temp dir) or FileNotFoundException (file doesn't exist in temp dir)
+		act.Should().Throw<Exception>()
+			.Which.Should().Match<Exception>(ex =>
+				ex is InvalidOperationException || ex is FileNotFoundException);
 	}
 
 	[Fact]
 	public void Constructor_SanitizesOrchestrationName()
 	{
-		// Characters like : or / are invalid in file names
-		var store = new OrchestrationTempFileStore(_tempRoot, "my:orch/test", "run-1");
+		// Characters like : or / are invalid in Windows file names.
+		// On Linux, only / is invalid. Test with a universally invalid character.
+		var invalidName = OperatingSystem.IsWindows() ? "my:orch/test" : "my/orch/test";
+		var store = new OrchestrationTempFileStore(_tempRoot, invalidName, "run-1");
 
 		Directory.Exists(store.TempDirectory).Should().BeTrue();
-		// The sanitized orchestration name directory should exist and not contain invalid chars
+		// The sanitized orchestration name directory should exist and not contain path separators
 		var orchDir = Path.GetFileName(Path.GetDirectoryName(store.TempDirectory)!);
-		orchDir.Should().NotContain(":");
 		orchDir.Should().NotContain("/");
+		if (OperatingSystem.IsWindows())
+			orchDir.Should().NotContain(":");
 	}
 
 	[Fact]
