@@ -30,4 +30,11 @@ public class McpServerOptions
 	/// Default: "/mcp/control".
 	/// </summary>
 	public string ControlPlaneRoute { get; set; } = "/mcp/control";
+
+	/// <summary>
+	/// Maximum nesting depth for orchestration-to-orchestration invocations.
+	/// 0 = top-level only (no nesting), 5 = up to 5 levels of nesting.
+	/// Default: 5.
+	/// </summary>
+	public int MaxNestingDepth { get; set; } = 5;
 }

@@ -386,4 +386,103 @@ public class ServerIntegrationTests : IClassFixture<ServerWebApplicationFactory>
 	}
 
 	#endregion
+
+	#region MCP Server Endpoints
+
+	[Fact]
+	public async Task McpDataPlane_PostEndpoint_ReturnsNon404()
+	{
+		// The MCP data-plane endpoint should be mapped and not return 404.
+		// MCP uses POST for JSON-RPC over Streamable HTTP.
+		var content = new StringContent(
+			"""{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}""",
+			Encoding.UTF8,
+			"application/json");
+
+		var response = await _client.PostAsync("/mcp/data", content);
+
+		// The endpoint should exist (not 404) — actual MCP protocol handling may return various codes
+		response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
+			"MCP data-plane endpoint /mcp/data should be mapped");
+	}
+
+	[Fact]
+	public async Task McpControlPlane_PostEndpoint_Returns404_WhenDisabled()
+	{
+		// Control plane is disabled by default, so it should return 404
+		var content = new StringContent(
+			"""{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}""",
+			Encoding.UTF8,
+			"application/json");
+
+		var response = await _client.PostAsync("/mcp/control", content);
+
+		response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+			"MCP control-plane endpoint /mcp/control should not be mapped when disabled (default)");
+	}
+
+	#endregion
+
+	#region Typed Inputs
+
+	[Fact]
+	public async Task RegisterOrchestration_WithInputs_ReturnsInputsInResponse()
+	{
+		var json = """
+		{
+			"name": "inputs-test",
+			"description": "Test orchestration with typed inputs",
+			"inputs": {
+				"env": {
+					"type": "string",
+					"description": "Target environment",
+					"enum": ["staging", "production"]
+				},
+				"dryRun": {
+					"type": "boolean",
+					"required": false,
+					"default": "false"
+				}
+			},
+			"steps": [{
+				"name": "deploy",
+				"type": "Prompt",
+				"dependsOn": [],
+				"systemPrompt": "Deploy",
+				"userPrompt": "Deploy to {{param.env}}",
+				"parameters": ["env", "dryRun"],
+				"model": "claude-opus-4.5"
+			}]
+		}
+		""";
+
+		// Register via JSON
+		var registerResponse = await _client.PostAsJsonAsync("/api/orchestrations/json", new { json, mcpJson = (string?)null });
+		registerResponse.IsSuccessStatusCode.Should().BeTrue();
+
+		var registerResult = await registerResponse.Content.ReadFromJsonAsync<JsonElement>(_jsonOptions);
+		var id = registerResult.GetProperty("id").GetString()!;
+
+		// Get details and verify inputs are present
+		var getResponse = await _client.GetAsync($"/api/orchestrations/{id}");
+		getResponse.IsSuccessStatusCode.Should().BeTrue();
+
+		var details = await getResponse.Content.ReadFromJsonAsync<JsonElement>(_jsonOptions);
+		details.TryGetProperty("inputs", out var inputs).Should().BeTrue("response should include 'inputs' property");
+		inputs.ValueKind.Should().Be(JsonValueKind.Object);
+
+		inputs.TryGetProperty("env", out var envInput).Should().BeTrue();
+		envInput.GetProperty("type").GetString().Should().Be("string");
+		envInput.GetProperty("enum").GetArrayLength().Should().Be(2);
+
+		inputs.TryGetProperty("dryRun", out var dryRunInput).Should().BeTrue();
+		dryRunInput.GetProperty("type").GetString().Should().Be("boolean");
+		dryRunInput.GetProperty("required").GetBoolean().Should().BeFalse();
+		dryRunInput.GetProperty("default").GetString().Should().Be("false");
+
+		// Cleanup
+		await _client.DeleteAsync($"/api/orchestrations/{id}");
+	}
+
+	#endregion
 }

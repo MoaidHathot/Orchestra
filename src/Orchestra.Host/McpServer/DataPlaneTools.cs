@@ -92,6 +92,7 @@ public sealed class DataPlaneTools
 		FileSystemRunStore runStore,
 		OrchestrationHostOptions hostOptions,
 		EngineToolRegistry engineToolRegistry,
+		McpServerOptions mcpOptions,
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 		[Description("The orchestration ID to invoke.")] string orchestrationId,
@@ -99,6 +100,7 @@ public sealed class DataPlaneTools
 		[Description("Execution mode: 'async' (default, returns immediately with execution ID) or 'sync' (blocks until completion).")] string mode = "async",
 		[Description("Maximum seconds to wait in sync mode. Default: 300 (5 minutes). Ignored in async mode.")] int timeoutSeconds = 300,
 		[Description("Optional metadata JSON object with key-value pairs for tracking (e.g., correlation IDs, ticket numbers).")] string? metadata = null,
+		[Description("Parent execution ID for nested invocations. Set automatically when called from within an orchestration.")] string? parentExecutionId = null,
 		CancellationToken cancellationToken = default)
 	{
 		var entry = registry.Get(orchestrationId);
@@ -161,7 +163,42 @@ public sealed class DataPlaneTools
 		// Create execution infrastructure
 		var executionId = Guid.NewGuid().ToString("N")[..12];
 		var reporter = NullOrchestrationReporter.Instance;
-		var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+
+		// ── Nesting: compute depth and enforce limit ──
+		var parentDepth = 0;
+		string? rootExecutionId = executionId;
+
+		if (!string.IsNullOrWhiteSpace(parentExecutionId) &&
+			activeExecutionInfos.TryGetValue(parentExecutionId, out var parentInfo))
+		{
+			parentDepth = (parentInfo.NestingMetadata?.Depth ?? 0) + 1;
+			rootExecutionId = parentInfo.NestingMetadata?.RootExecutionId ?? parentExecutionId;
+
+			if (parentDepth > mcpOptions.MaxNestingDepth)
+			{
+				return JsonSerializer.Serialize(new
+				{
+					error = $"Maximum nesting depth ({mcpOptions.MaxNestingDepth}) exceeded. " +
+						$"This orchestration would be at depth {parentDepth}. " +
+						$"Root execution: {rootExecutionId}.",
+				}, s_jsonOptions);
+			}
+		}
+
+		var nestingMetadata = new ExecutionMetadata
+		{
+			ParentExecutionId = parentExecutionId,
+			ParentStepName = null, // Set by the calling step if available
+			RootExecutionId = rootExecutionId,
+			Depth = parentDepth,
+			UserMetadata = parsedMetadata ?? [],
+		};
+
+		// Link cancellation to parent if nested
+		var cts = !string.IsNullOrWhiteSpace(parentExecutionId) &&
+			activeExecutions.TryGetValue(parentExecutionId, out var parentCts)
+				? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, parentCts.Token)
+				: CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
 		activeExecutions[executionId] = cts;
 		var executionInfo = new ActiveExecutionInfo
@@ -170,11 +207,12 @@ public sealed class DataPlaneTools
 			OrchestrationId = orchestrationId,
 			OrchestrationName = orchestration.Name,
 			StartedAt = DateTimeOffset.UtcNow,
-			TriggeredBy = "mcp",
+			TriggeredBy = parentDepth > 0 ? $"orchestration:{parentExecutionId}" : "mcp",
 			CancellationTokenSource = cts,
 			Reporter = reporter,
 			Parameters = parsedParams,
 			TotalSteps = orchestration.Steps.Length,
+			NestingMetadata = nestingMetadata,
 		};
 		activeExecutionInfos[executionId] = executionInfo;
 
@@ -317,6 +355,12 @@ public sealed class DataPlaneTools
 				completedSteps = info.CompletedSteps,
 				currentStep = info.CurrentStep,
 				parameters = info.Parameters,
+				nesting = info.NestingMetadata is not null ? new
+				{
+					parentExecutionId = info.NestingMetadata.ParentExecutionId,
+					rootExecutionId = info.NestingMetadata.RootExecutionId,
+					depth = info.NestingMetadata.Depth,
+				} : null,
 			}, s_jsonOptions);
 		}
 

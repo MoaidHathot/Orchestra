@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Orchestra.Engine/Orchestra.Engine.csproj" />
+    <Project Path="src/Orchestra.Cli/Orchestra.Cli.csproj" />
     <Project Path="src/Orchestra.Copilot/Orchestra.Copilot.csproj" />
     <Project Path="src/Orchestra.Host/Orchestra.Host.csproj" />
     <Project Path="src/Orchestra.Server/Orchestra.Server.csproj" />

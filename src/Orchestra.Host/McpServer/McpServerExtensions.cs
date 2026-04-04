@@ -26,8 +26,9 @@ public static class McpServerExtensions
 		configure?.Invoke(options);
 		services.AddSingleton(options);
 
-		// Register the MCP server with HTTP transport and data plane tools
-		services.AddMcpServer(mcpOptions =>
+		// Register all tools. Route-based filtering in ConfigureSessionOptions
+		// controls which tools are available per endpoint.
+		var builder = services.AddMcpServer(mcpOptions =>
 		{
 			mcpOptions.ServerInfo = new()
 			{
@@ -35,8 +36,36 @@ public static class McpServerExtensions
 				Version = "1.0.0",
 			};
 		})
-		.WithHttpTransport()
+		.WithHttpTransport(httpOptions =>
+		{
+			httpOptions.ConfigureSessionOptions = (httpContext, sessionOptions, _) =>
+			{
+				var toolCollection = sessionOptions.ToolCollection;
+				if (toolCollection is null)
+					return Task.CompletedTask;
+
+				var path = httpContext.Request.Path.Value ?? "";
+
+				if (path.StartsWith(options.ControlPlaneRoute, StringComparison.OrdinalIgnoreCase))
+				{
+					// Control plane: keep only ControlPlaneTools
+					RemoveToolsNotOfType<ControlPlaneTools>(toolCollection);
+				}
+				else
+				{
+					// Data plane (default): keep only DataPlaneTools
+					RemoveToolsNotOfType<DataPlaneTools>(toolCollection);
+				}
+
+				return Task.CompletedTask;
+			};
+		})
 		.WithTools<DataPlaneTools>();
+
+		if (options.ControlPlaneEnabled)
+		{
+			builder.WithTools<ControlPlaneTools>();
+		}
 
 		return services;
 	}
@@ -56,6 +85,30 @@ public static class McpServerExtensions
 			endpoints.MapMcp(options.DataPlaneRoute);
 		}
 
+		if (options.ControlPlaneEnabled)
+		{
+			endpoints.MapMcp(options.ControlPlaneRoute);
+		}
+
 		return endpoints;
+	}
+
+	/// <summary>
+	/// Removes all tools from the collection that were NOT defined in the specified type.
+	/// Uses reflection to match tool names against methods with <see cref="McpServerToolAttribute"/>.
+	/// </summary>
+	private static void RemoveToolsNotOfType<T>(McpServerPrimitiveCollection<McpServerTool> tools)
+	{
+		var keepNames = new HashSet<string>(
+			typeof(T).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+				.Where(m => m.GetCustomAttributes(typeof(McpServerToolAttribute), false).Length > 0)
+				.Select(m => m.Name),
+			StringComparer.OrdinalIgnoreCase);
+
+		var toRemove = tools.Where(t => !keepNames.Contains(t.ProtocolTool.Name)).ToList();
+		foreach (var tool in toRemove)
+		{
+			tools.Remove(tool);
+		}
 	}
 }

@@ -582,6 +582,105 @@ GET /api/status
 
 ---
 
+## MCP Server Endpoints
+
+Orchestra exposes orchestrations to external AI agents via Model Context Protocol (MCP) server endpoints using Streamable HTTP transport.
+
+### Data Plane (`/mcp/data`)
+
+Enabled by default. Provides orchestration discovery and invocation.
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `ListOrchestrations` | List and filter orchestrations by tags or name pattern |
+| `InvokeOrchestration` | Invoke an orchestration by ID (async or sync mode) |
+| `GetOrchestrationStatus` | Check execution status and results by execution ID |
+| `CancelOrchestration` | Cancel a running execution |
+
+**InvokeOrchestration Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `orchestrationId` | string | required | Orchestration ID to invoke |
+| `parameters` | string (JSON) | `null` | JSON object with parameter key-value pairs |
+| `mode` | string | `"async"` | `"async"` (returns immediately) or `"sync"` (blocks until done) |
+| `timeoutSeconds` | int | `300` | Sync mode timeout in seconds |
+| `metadata` | string (JSON) | `null` | Optional tracking metadata (e.g., correlation IDs) |
+| `parentExecutionId` | string | `null` | Parent execution ID for nested invocations |
+
+**Nesting:**
+
+Orchestrations can invoke other orchestrations via the MCP data plane. Nesting is tracked automatically:
+- `parentExecutionId`, `rootExecutionId`, and `depth` are included in status responses
+- Configurable maximum nesting depth (default: 5)
+- Child cancellation tokens are linked to parent tokens
+
+### Control Plane (`/mcp/control`)
+
+Disabled by default. Enable via configuration:
+
+```csharp
+builder.Services.AddOrchestraMcpServer(options =>
+{
+    options.ControlPlaneEnabled = true;
+});
+```
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| `GetOrchestrationDetails` | Get full orchestration details including steps |
+| `RegisterOrchestration` | Register an orchestration from a file path |
+| `RemoveOrchestration` | Remove a registered orchestration |
+| `ScanDirectory` | Scan a directory for orchestration files |
+| `ListTags` | List all tags with counts |
+| `AddTags` | Add tags to an orchestration |
+| `RemoveTag` | Remove a tag from an orchestration |
+| `ListProfiles` | List all profiles |
+| `CreateProfile` | Create a new profile |
+| `DeleteProfile` | Delete a profile |
+| `ActivateProfile` | Activate a profile |
+| `DeactivateProfile` | Deactivate a profile |
+| `ListTriggers` | List all triggers |
+| `EnableTrigger` | Enable a trigger |
+| `DisableTrigger` | Disable a trigger |
+| `ListRuns` | List recent run history |
+| `GetRun` | Get full run details |
+
+### Configuration
+
+```csharp
+builder.Services.AddOrchestraMcpServer(options =>
+{
+    options.DataPlaneEnabled = true;          // default
+    options.DataPlaneRoute = "/mcp/data";     // default
+    options.ControlPlaneEnabled = false;      // default
+    options.ControlPlaneRoute = "/mcp/control"; // default
+    options.MaxNestingDepth = 5;              // default
+});
+```
+
+### Connecting
+
+Any MCP-compatible client can connect. From within an orchestration, use `{{server.url}}`:
+
+```json
+{
+  "mcps": [
+    {
+      "name": "orchestra",
+      "type": "remote",
+      "endpoint": "{{server.url}}/mcp/data"
+    }
+  ]
+}
+```
+
+---
+
 ## Error Responses
 
 All endpoints may return error responses:

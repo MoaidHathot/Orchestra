@@ -115,4 +115,10 @@ public class ActiveExecutionInfo
 	/// Callback invoked when a step completes.
 	/// </summary>
 	public Action<string>? OnStepCompleted { get; set; }
+
+	/// <summary>
+	/// Execution nesting metadata for parent-child tracking.
+	/// Null for legacy executions that predate nesting support.
+	/// </summary>
+	public McpServer.ExecutionMetadata? NestingMetadata { get; init; }
 }
