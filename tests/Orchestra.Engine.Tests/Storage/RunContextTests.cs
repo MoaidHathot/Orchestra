@@ -84,7 +84,7 @@ public class TemplateResolutionTrackerTests
 	}
 
 	[Fact]
-	public void IsThreadSafe_ConcurrentAccess()
+	public async Task IsThreadSafe_ConcurrentAccess()
 	{
 		var tracker = new TemplateResolutionTracker();
 		var tasks = new List<Task>();
@@ -99,7 +99,7 @@ public class TemplateResolutionTrackerTests
 			}));
 		}
 
-		Task.WaitAll(tasks.ToArray());
+		await Task.WhenAll(tasks);
 
 		tracker.AccessedEnvironmentVariables.Should().HaveCount(100);
 		tracker.ResolvedVariables.Should().HaveCount(100);
@@ -140,7 +140,7 @@ public class TemplateResolutionTrackerTests
 	}
 
 	[Fact]
-	public void TrackUnresolvedExpression_IsThreadSafe_ConcurrentAccess()
+	public async Task TrackUnresolvedExpression_IsThreadSafe_ConcurrentAccess()
 	{
 		var tracker = new TemplateResolutionTracker();
 		var tasks = new List<Task>();
@@ -154,7 +154,7 @@ public class TemplateResolutionTrackerTests
 			}));
 		}
 
-		Task.WaitAll(tasks.ToArray());
+		await Task.WhenAll(tasks);
 
 		tracker.UnresolvedExpressions.Should().HaveCount(100);
 	}

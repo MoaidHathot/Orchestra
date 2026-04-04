@@ -334,7 +334,7 @@ public class OrchestrationTempFileStoreTests : IDisposable
 	}
 
 	[Fact]
-	public void SaveFile_WithStepName_ConcurrentAccess_IsThreadSafe()
+	public async Task SaveFile_WithStepName_ConcurrentAccess_IsThreadSafe()
 	{
 		var store = new OrchestrationTempFileStore(_tempRoot, "orch", "run-1");
 		var tasks = new List<Task>();
@@ -348,7 +348,7 @@ public class OrchestrationTempFileStoreTests : IDisposable
 			}));
 		}
 
-		Task.WaitAll(tasks.ToArray());
+		await Task.WhenAll(tasks);
 
 		store.GetFilesForStep("concurrent-step").Should().HaveCount(50);
 	}

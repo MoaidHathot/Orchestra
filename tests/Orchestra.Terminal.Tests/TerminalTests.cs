@@ -527,7 +527,7 @@ public class StreamingReporterTests
 	}
 
 	[Fact]
-	public void ContentDelta_ThreadSafe_ConcurrentWrites()
+	public async Task ContentDelta_ThreadSafe_ConcurrentWrites()
 	{
 		var reporter = new TerminalOrchestrationReporter();
 		var tasks = new List<Task>();
@@ -545,7 +545,7 @@ public class StreamingReporterTests
 			}));
 		}
 
-		Task.WaitAll(tasks.ToArray());
+		await Task.WhenAll(tasks);
 
 		// All 10 steps should have content
 		reporter.GetStreamingStepNames().Should().HaveCount(10);
@@ -1683,18 +1683,18 @@ public class CheckpointViewTests
 	}
 
 	[Fact]
-	public void NullCheckpointStore_ListReturnsEmpty()
+	public async Task NullCheckpointStore_ListReturnsEmpty()
 	{
 		var store = new NullCheckpointStore();
-		var result = store.ListCheckpointsAsync().GetAwaiter().GetResult();
+		var result = await store.ListCheckpointsAsync();
 		result.Should().BeEmpty();
 	}
 
 	[Fact]
-	public void NullCheckpointStore_LoadReturnsNull()
+	public async Task NullCheckpointStore_LoadReturnsNull()
 	{
 		var store = new NullCheckpointStore();
-		var result = store.LoadCheckpointAsync("orch", "run1").GetAwaiter().GetResult();
+		var result = await store.LoadCheckpointAsync("orch", "run1");
 		result.Should().BeNull();
 	}
 

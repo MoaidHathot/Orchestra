@@ -85,7 +85,7 @@ public class OrchestrationTests
 	}
 
 	[Fact]
-	public void Orchestration_Trigger_DefaultsToNull()
+	public void Orchestration_Trigger_DefaultsToManualTrigger()
 	{
 		// Arrange & Act
 		var orchestration = new Orchestration
@@ -96,7 +96,8 @@ public class OrchestrationTests
 		};
 
 		// Assert
-		orchestration.Trigger.Should().BeNull();
+		orchestration.Trigger.Should().BeOfType<ManualTriggerConfig>();
+		orchestration.Trigger.Type.Should().Be(TriggerType.Manual);
 	}
 
 	[Fact]
