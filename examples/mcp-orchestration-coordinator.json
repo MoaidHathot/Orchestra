@@ -1,0 +1,53 @@
+{
+  "name": "mcp-orchestration-coordinator",
+  "description": "Demonstrates using Orchestra's data-plane MCP server to invoke other orchestrations from within a prompt step. A coordinator step uses the Orchestra MCP to list available orchestrations, then invokes them as needed. This pattern enables orchestration-to-orchestration communication without hardcoding webhook URLs.",
+  "inputs": {
+    "taskDescription": {
+      "type": "string",
+      "description": "Description of the task to coordinate across orchestrations",
+      "required": true
+    },
+    "targetTags": {
+      "type": "string",
+      "description": "Comma-separated tags to filter which orchestrations the coordinator can invoke",
+      "required": false,
+      "default": "automatable"
+    }
+  },
+  "mcps": [
+    {
+      "name": "orchestra",
+      "type": "remote",
+      "endpoint": "{{server.url}}/mcp/data"
+    }
+  ],
+  "steps": [
+    {
+      "name": "discover",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are an orchestration discovery agent. Use the Orchestra MCP tools to find orchestrations that match the user's needs. List their IDs, names, descriptions, and required parameters.",
+      "userPrompt": "Find all orchestrations tagged with '{{param.targetTags}}' that could help with the following task:\n\n{{param.taskDescription}}\n\nUse the ListOrchestrations tool to discover available orchestrations. Return a structured list of matching orchestrations with their IDs and required parameters.",
+      "parameters": ["taskDescription", "targetTags"],
+      "mcps": ["orchestra"],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "coordinate",
+      "type": "Prompt",
+      "dependsOn": ["discover"],
+      "systemPrompt": "You are an orchestration coordinator. Based on the discovered orchestrations, invoke the appropriate ones to complete the user's task. Use async invocation and track execution IDs. After invoking, check the status of each execution and compile the results.",
+      "userPrompt": "Based on the discovered orchestrations:\n\n{{discover.output}}\n\nCoordinate the execution of the relevant orchestrations to complete this task:\n{{param.taskDescription}}\n\nUse InvokeOrchestration to start each orchestration with the appropriate parameters, then use GetOrchestrationStatus to check their results. Compile a summary of all outcomes.",
+      "parameters": ["taskDescription"],
+      "mcps": ["orchestra"],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "summary",
+      "type": "Transform",
+      "dependsOn": ["coordinate"],
+      "template": "# Coordination Report\n\n**Task:** {{param.taskDescription}}\n**Run ID:** {{orchestration.runId}}\n**Started:** {{orchestration.startedAt}}\n\n## Results\n\n{{coordinate.output}}",
+      "parameters": ["taskDescription"]
+    }
+  ]
+}

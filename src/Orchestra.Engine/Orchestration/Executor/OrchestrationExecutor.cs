@@ -15,6 +15,7 @@ public partial class OrchestrationExecutor
 	private readonly ICheckpointStore _checkpointStore;
 	private readonly StepExecutorRegistry _stepExecutorRegistry;
 	private readonly string? _dataPath;
+	private readonly string? _serverUrl;
 
 	public OrchestrationExecutor(
 		IScheduler scheduler,
@@ -26,7 +27,8 @@ public partial class OrchestrationExecutor
 		ICheckpointStore? checkpointStore = null,
 		StepExecutorRegistry? stepExecutorRegistry = null,
 		EngineToolRegistry? engineToolRegistry = null,
-		string? dataPath = null)
+		string? dataPath = null,
+		string? serverUrl = null)
 	{
 		_scheduler = scheduler;
 		_agentBuilder = agentBuilder;
@@ -37,6 +39,7 @@ public partial class OrchestrationExecutor
 		_runStore = runStore ?? NullRunStore.Instance;
 		_checkpointStore = checkpointStore ?? NullCheckpointStore.Instance;
 		_dataPath = dataPath;
+		_serverUrl = serverUrl;
 
 		// If no registry is provided, create a default one with all built-in step types
 		if (stepExecutorRegistry is not null)
@@ -135,6 +138,7 @@ public partial class OrchestrationExecutor
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
 			DefaultStepTimeoutSeconds = orchestration.DefaultStepTimeoutSeconds,
 			TempFileStore = tempFileStore,
+			ServerUrl = _serverUrl,
 		};
 		var stepResults = new ConcurrentDictionary<string, ExecutionResult>();
 		var stepRecords = new ConcurrentDictionary<string, StepRunRecord>();

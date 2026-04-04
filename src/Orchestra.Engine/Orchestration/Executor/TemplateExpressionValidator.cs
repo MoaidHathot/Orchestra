@@ -69,7 +69,10 @@ public static partial class TemplateExpressionValidator
 		new(["name", "type"], StringComparer.OrdinalIgnoreCase);
 
 	private static readonly HashSet<string> s_knownNamespaces =
-		new(["param", "orchestration", "step", "vars", "env"], StringComparer.OrdinalIgnoreCase);
+		new(["param", "orchestration", "step", "vars", "env", "server"], StringComparer.OrdinalIgnoreCase);
+
+	private static readonly HashSet<string> s_validServerProperties =
+		new(["url"], StringComparer.OrdinalIgnoreCase);
 
 	private static readonly HashSet<string> s_validStepOutputSuffixes =
 		new(["output", "rawoutput", "files"], StringComparer.OrdinalIgnoreCase);
@@ -285,6 +288,19 @@ public static partial class TemplateExpressionValidator
 			{
 				result.Errors.Add(new TemplateValidationError(
 					$"Unknown step property '{property}'. Valid properties: {string.Join(", ", s_validStepProperties)}.",
+					stepName, fieldName, fullExpr));
+			}
+			return;
+		}
+
+		// {{server.property}}
+		if (expr.StartsWith("server.", StringComparison.OrdinalIgnoreCase))
+		{
+			var property = expr["server.".Length..];
+			if (!s_validServerProperties.Contains(property))
+			{
+				result.Errors.Add(new TemplateValidationError(
+					$"Unknown server property '{property}'. Valid properties: {string.Join(", ", s_validServerProperties)}.",
 					stepName, fieldName, fullExpr));
 			}
 			return;

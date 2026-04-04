@@ -121,7 +121,8 @@ public static class ServiceCollectionExtensions
 				sp.GetRequiredService<ICheckpointStore>(),
 				sp.GetRequiredService<ITriggerExecutionCallback>(),
 				sp.GetRequiredService<EngineToolRegistry>(),
-				dataPath: options.DataPath);
+				dataPath: options.DataPath,
+				serverUrl: options.HostBaseUrl);
 
 			// Apply shutdown timeout from configuration
 			triggerManager.ShutdownTimeout = TimeSpan.FromSeconds(options.ShutdownTimeoutSeconds);

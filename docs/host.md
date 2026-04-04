@@ -74,6 +74,45 @@ app.Run();
 
 ## API Endpoints
 
+### MCP Server
+
+Orchestra.Host includes a built-in MCP (Model Context Protocol) server that exposes orchestrations to external AI agents via Streamable HTTP transport.
+
+#### Setup
+
+```csharp
+using Orchestra.Host.McpServer;
+
+builder.Services.AddOrchestraMcpServer();
+
+var app = builder.Build();
+app.MapOrchestraMcpEndpoints(); // Maps /mcp/data
+```
+
+#### McpServerOptions
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `DataPlaneEnabled` | `bool` | `true` | Enable the data-plane MCP endpoint |
+| `DataPlaneRoute` | `string` | `"/mcp/data"` | Route path for the data-plane endpoint |
+| `ControlPlaneEnabled` | `bool` | `false` | Enable the control-plane MCP endpoint (opt-in) |
+| `ControlPlaneRoute` | `string` | `"/mcp/control"` | Route path for the control-plane endpoint |
+
+#### Data-Plane Tools
+
+The data-plane MCP server provides four tools:
+
+| Tool | Description |
+|------|-------------|
+| `ListOrchestrations` | List and filter orchestrations by tags or name pattern. Returns IDs, names, descriptions, parameter schemas. |
+| `InvokeOrchestration` | Invoke an orchestration by ID with parameters. Supports `async` (default) and `sync` modes. |
+| `GetOrchestrationStatus` | Check the status and result of an execution by execution ID. |
+| `CancelOrchestration` | Cancel a running execution by execution ID. |
+
+`InvokeOrchestration` supports two modes:
+- **`async`** (default): Returns immediately with an `executionId`. Use `GetOrchestrationStatus` to poll for results.
+- **`sync`**: Blocks until the orchestration completes or the timeout is reached (default: 300 seconds).
+
 ### Orchestrations
 
 | Method | Endpoint | Description |

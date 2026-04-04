@@ -54,6 +54,13 @@ public class OrchestrationExecutionContext
 	/// </summary>
 	public TemplateResolutionTracker ResolutionTracker { get; } = new();
 
+	/// <summary>
+	/// The base URL of the Orchestra server, accessible via <c>{{server.url}}</c>.
+	/// Set by the host layer. When null, <c>{{server.url}}</c> falls back to
+	/// the <c>ORCHESTRA_SERVER_URL</c> environment variable.
+	/// </summary>
+	public string? ServerUrl { get; init; }
+
 	private readonly ConcurrentDictionary<string, ExecutionResult> _results = new();
 	private readonly ConcurrentDictionary<string, string> _loopFeedback = new();
 

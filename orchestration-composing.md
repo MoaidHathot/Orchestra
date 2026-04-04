@@ -66,6 +66,7 @@ Minimal valid orchestration:
 | `description` | `string` | **Yes** | -- | Human-readable description of what this orchestration does. |
 | `steps` | `Step[]` | **Yes** | -- | Array of step definitions forming the execution DAG. |
 | `version` | `string` | No | `"1.0.0"` | Semantic version for tracking changes. Accessible via `{{orchestration.version}}`. |
+| `inputs` | `object` | No | `null` | Typed input schema. Keys are input names, values are `InputDefinition` objects. When defined, provides type validation, descriptions, defaults, and enum constraints. |
 | `trigger` | `TriggerConfig` | No | Manual | How the orchestration is triggered. Defaults to manual (on-demand). |
 | `mcps` | `Mcp[]` | No | `[]` | Inline MCP (Model Context Protocol) server definitions available to steps. |
 | `defaultSystemPromptMode` | `string` | No | `null` | Default system prompt mode for all Prompt steps. Values: `"append"` or `"replace"`. |
@@ -74,6 +75,80 @@ Minimal valid orchestration:
 | `timeoutSeconds` | `int` | No | `3600` | Maximum time in seconds for the entire orchestration run. Set to `0` or `null` to disable. |
 | `variables` | `object` | No | `{}` | Key-value pairs of user-defined variables. Values can contain template expressions. Accessed via `{{vars.name}}`. |
 | `tags` | `string[]` | No | `[]` | Tags for categorizing and filtering orchestrations. |
+
+---
+
+## Typed Inputs
+
+The `inputs` property defines a strongly-typed schema for orchestration parameters. When present, it is the authoritative source for parameter definitions, providing type validation, descriptions, default values, and enum constraints.
+
+When `inputs` is not defined, the orchestration uses legacy behavior: parameter names are collected from step-level `parameters` arrays and treated as required string values.
+
+### InputDefinition Properties
+
+Each key in the `inputs` object is the input name. Each value is an `InputDefinition`:
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | `string` | No | `"string"` | Data type. One of: `"string"`, `"boolean"`, `"number"`. |
+| `description` | `string` | No | `null` | Human-readable description. Used for documentation and MCP tool schema generation. |
+| `required` | `bool` | No | `true` | Whether this input must be provided at runtime. |
+| `default` | `string` | No | `null` | Default value for optional inputs. Ignored when `required` is `true`. |
+| `enum` | `string[]` | No | `[]` | Allowed values. When non-empty, the provided value must be one of these (case-insensitive). |
+
+### Validation Rules
+
+When `inputs` is defined, the engine validates parameters before execution:
+
+1. **Missing required inputs** produce an error listing the input name and its description.
+2. **Type validation**: Boolean inputs must be `"true"` or `"false"`. Number inputs must be parseable as a numeric value.
+3. **Enum constraints**: When `enum` is non-empty, the provided value must match one of the allowed values (case-insensitive comparison).
+4. **Default application**: Optional inputs (`required: false`) that are not provided receive their `default` value automatically.
+
+### Example
+
+```json
+{
+  "name": "deploy-service",
+  "description": "Deploys a service to a target environment",
+  "inputs": {
+    "serviceName": {
+      "type": "string",
+      "description": "Name of the service to deploy",
+      "required": true
+    },
+    "environment": {
+      "type": "string",
+      "description": "Target environment",
+      "enum": ["staging", "production"]
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "Simulate without deploying",
+      "required": false,
+      "default": "false"
+    },
+    "replicas": {
+      "type": "number",
+      "description": "Number of replicas",
+      "required": false,
+      "default": "3"
+    }
+  },
+  "steps": [
+    {
+      "name": "deploy",
+      "type": "Prompt",
+      "systemPrompt": "You are a deployment assistant.",
+      "userPrompt": "Deploy {{param.serviceName}} to {{param.environment}} (replicas: {{param.replicas}}, dry run: {{param.dryRun}}).",
+      "parameters": ["serviceName", "environment", "replicas", "dryRun"],
+      "model": "claude-opus-4.5"
+    }
+  ]
+}
+```
+
+In this example, running the orchestration with only `serviceName=api` and `environment=staging` succeeds because `dryRun` defaults to `"false"` and `replicas` defaults to `"3"`. Providing `environment=development` fails because it is not in the allowed enum values.
 
 ---
 

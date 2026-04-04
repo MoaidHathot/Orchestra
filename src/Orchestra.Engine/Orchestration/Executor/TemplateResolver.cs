@@ -10,6 +10,7 @@ namespace Orchestra.Engine;
 ///   {{step.name}}          — current step metadata (name, type)
 ///   {{vars.name}}          — user-defined orchestration variable (supports recursive expansion)
 ///   {{env.VAR_NAME}}       — environment variable value
+///   {{server.url}}         — Orchestra server base URL (set by host, falls back to ORCHESTRA_SERVER_URL env var)
 ///   {{stepName.output}}    — output content from a completed dependency step
 ///   {{stepName.rawOutput}} — raw output from a completed dependency step
 ///   {{stepName.files}}     — JSON array of file paths saved by a step via orchestra_save_file
@@ -25,6 +26,7 @@ public static partial class TemplateResolver
 
 	private static readonly string[] s_validOrchestrationProperties = ["name", "version", "runid", "startedat", "tempdir"];
 	private static readonly string[] s_validStepProperties = ["name", "type"];
+	private static readonly string[] s_validServerProperties = ["url"];
 
 	/// <summary>
 	/// Resolves all template expressions in the input string.
@@ -144,6 +146,13 @@ public static partial class TemplateResolver
 				return envValue ?? match.Value;
 			}
 
+			// {{server.property}} — server metadata
+			if (expr.StartsWith("server.", StringComparison.OrdinalIgnoreCase))
+			{
+				var property = expr["server.".Length..];
+				return ResolveServerProperty(property, context);
+			}
+
 			// {{stepName.output}} or {{stepName.rawOutput}} — dependency output reference
 			var dotIndex = expr.IndexOf('.');
 			if (dotIndex > 0)
@@ -233,6 +242,13 @@ public static partial class TemplateResolver
 				return envValue ?? match.Value;
 			}
 
+			// {{server.property}} — server metadata
+			if (expr.StartsWith("server.", StringComparison.OrdinalIgnoreCase))
+			{
+				var property = expr["server.".Length..];
+				return ResolveServerProperty(property, context);
+			}
+
 			// Everything else (step.*, stepName.output, etc.) — leave as-is
 			return match.Value;
 		});
@@ -274,6 +290,26 @@ public static partial class TemplateResolver
 		throw new InvalidOperationException(
 			$"Unknown step property '{{{{step.{property}}}}}'. " +
 			$"Valid properties: {string.Join(", ", s_validStepProperties)}.");
+	}
+
+	/// <summary>
+	/// Resolves a server property by name.
+	/// Falls back to the <c>ORCHESTRA_SERVER_URL</c> environment variable when
+	/// <see cref="OrchestrationExecutionContext.ServerUrl"/> is not set.
+	/// Returns the original template expression if the URL cannot be determined.
+	/// </summary>
+	private static string ResolveServerProperty(string property, OrchestrationExecutionContext context)
+	{
+		if (property.Equals("url", StringComparison.OrdinalIgnoreCase))
+		{
+			var url = context.ServerUrl
+				?? Environment.GetEnvironmentVariable("ORCHESTRA_SERVER_URL");
+			return url ?? "{{server.url}}";
+		}
+
+		throw new InvalidOperationException(
+			$"Unknown server property '{{{{server.{property}}}}}'. " +
+			$"Valid properties: {string.Join(", ", s_validServerProperties)}.");
 	}
 
 	/// <summary>

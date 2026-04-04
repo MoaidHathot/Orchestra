@@ -1,0 +1,60 @@
+{
+  "name": "typed-inputs-deployment",
+  "description": "Demonstrates typed input schema with type validation, enum constraints, and default values. The orchestration validates that 'serviceName' and 'environment' are provided, enforces that 'environment' is one of the allowed values, and applies defaults for optional inputs like 'dryRun' and 'replicas'.",
+  "version": "1.0.0",
+  "inputs": {
+    "serviceName": {
+      "type": "string",
+      "description": "Name of the service to deploy",
+      "required": true
+    },
+    "environment": {
+      "type": "string",
+      "description": "Target deployment environment",
+      "required": true,
+      "enum": ["staging", "production"]
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "When true, simulates the deployment without making changes",
+      "required": false,
+      "default": "false"
+    },
+    "replicas": {
+      "type": "number",
+      "description": "Number of container replicas to deploy",
+      "required": false,
+      "default": "3"
+    }
+  },
+  "variables": {
+    "deployTag": "{{param.serviceName}}-{{param.environment}}-{{orchestration.runId}}"
+  },
+  "steps": [
+    {
+      "name": "validate-config",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a deployment configuration validator. Check that the deployment parameters are sensible and flag any concerns.",
+      "userPrompt": "Validate the following deployment configuration:\n- Service: {{param.serviceName}}\n- Environment: {{param.environment}}\n- Replicas: {{param.replicas}}\n- Dry Run: {{param.dryRun}}\n- Deploy Tag: {{vars.deployTag}}\n\nList any warnings or concerns. If everything looks good, respond with VALIDATED.",
+      "parameters": ["serviceName", "environment", "replicas", "dryRun"],
+      "model": "claude-opus-4.5"
+    },
+    {
+      "name": "generate-manifest",
+      "type": "Transform",
+      "dependsOn": ["validate-config"],
+      "template": "# Deployment Manifest\n\n**Service:** {{param.serviceName}}\n**Environment:** {{param.environment}}\n**Replicas:** {{param.replicas}}\n**Dry Run:** {{param.dryRun}}\n**Tag:** {{vars.deployTag}}\n**Run ID:** {{orchestration.runId}}\n**Started:** {{orchestration.startedAt}}\n\n## Validation\n{{validate-config.output}}",
+      "parameters": ["serviceName", "environment", "replicas", "dryRun"]
+    },
+    {
+      "name": "deploy",
+      "type": "Prompt",
+      "dependsOn": ["generate-manifest"],
+      "systemPrompt": "You are a deployment automation assistant. Generate the deployment commands based on the manifest. If dry run is true, prefix each command with '# DRY RUN: '.",
+      "userPrompt": "Based on the following deployment manifest, generate the deployment commands:\n\n{{generate-manifest.output}}",
+      "parameters": ["serviceName", "environment", "dryRun"],
+      "model": "claude-opus-4.5"
+    }
+  ]
+}

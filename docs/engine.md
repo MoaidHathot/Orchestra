@@ -31,12 +31,34 @@ public class Orchestration
     public required string Description { get; init; }
     public required OrchestrationStep[] Steps { get; init; }
     public string Version { get; init; } = "1.0.0";
+    public Dictionary<string, InputDefinition>? Inputs { get; init; }
     public Dictionary<string, string> Variables { get; init; } = [];
     public TriggerConfig? Trigger { get; init; }
     public Mcp[] Mcps { get; init; } = [];
     public SystemPromptMode? DefaultSystemPromptMode { get; init; }
 }
 ```
+
+### Typed Inputs
+
+Define a strongly-typed input schema using the `Inputs` property:
+
+```csharp
+public class InputDefinition
+{
+    public InputType Type { get; init; } = InputType.String;
+    public string? Description { get; init; }
+    public bool Required { get; init; } = true;
+    public string? Default { get; init; }
+    public string[] Enum { get; init; } = [];
+}
+
+public enum InputType { String, Boolean, Number }
+```
+
+When `Inputs` is defined on an orchestration, parameters are validated against the schema before execution. The engine checks required inputs, validates types (boolean must be `"true"`/`"false"`, number must be parseable), enforces enum constraints, and applies default values for optional inputs not provided.
+
+When `Inputs` is not defined, the engine falls back to legacy behavior: parameter names are collected from step-level `Parameters` arrays and all are treated as required strings.
 
 ### Steps
 

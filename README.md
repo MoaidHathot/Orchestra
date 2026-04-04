@@ -6,9 +6,11 @@ A declarative orchestration engine for LLM (Large Language Model) workflows. Def
 
 - **Declarative JSON Pipelines** - Define complex LLM workflows as simple JSON files
 - **DAG-Based Execution** - Automatic parallel execution of independent steps
+- **Typed Input Schema** - Define strongly-typed parameters with types, descriptions, defaults, and enum constraints
 - **Variables & Metadata** - Reusable variables with recursive expansion, plus built-in orchestration and step metadata
 - **Template Expressions** - Rich expression syntax for parameters, variables, metadata, and step outputs
 - **MCP Integration** - Extend LLM capabilities with Model Context Protocol servers
+- **MCP Server** - Expose orchestrations to external AI agents via a data-plane MCP endpoint
 - **Quality Control Loops** - Retry steps with feedback until criteria are met
 - **Handler Transformations** - Transform inputs and outputs between steps
 - **Multiple Triggers** - Scheduler, webhook, email, and loop-based automation
@@ -59,9 +61,11 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
 
 - [Orchestration Schema](#orchestration-schema)
 - [Step Configuration](#step-configuration)
+- [Typed Inputs](#typed-inputs)
 - [Template Expressions](#template-expressions)
 - [Variables](#variables)
 - [MCP Integration](#mcp-integration)
+- [MCP Server](#mcp-server)
 - [Triggers](#triggers)
 - [System Prompt Modes](#system-prompt-modes)
 - [IPromptFormatter](#ipromptformatter)
@@ -77,6 +81,7 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
 | `name` | string | Yes | Unique name for the orchestration |
 | `description` | string | Yes | Human-readable description |
 | `version` | string | No | Version string (default: `"1.0.0"`) |
+| `inputs` | object | No | Typed input schema with types, descriptions, defaults, and enum constraints |
 | `variables` | object | No | User-defined variables accessible via `{{vars.name}}` |
 | `defaultSystemPromptMode` | enum | No | Default mode for all steps: `append` or `replace` |
 | `mcps` | array | No | Inline MCP server definitions |
@@ -192,6 +197,80 @@ Implement quality control by retrying steps until criteria are met:
 
 The `quality-checker` step will re-run `writer` with feedback until `APPROVED` appears in the response or `maxIterations` is reached.
 
+## Typed Inputs
+
+Define a strongly-typed input schema at the orchestration level using the `inputs` property. This provides type validation, descriptions, default values, and enum constraints for parameters.
+
+When `inputs` is defined, it is the authoritative source of truth for parameter definitions. Step-level `parameters` arrays still declare which inputs each step needs, but validation uses the orchestration-level schema.
+
+When `inputs` is not defined, the orchestration falls back to legacy behavior: parameter names are collected from step-level `parameters` arrays and treated as required strings.
+
+### Input Definition Properties
+
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `type` | enum | No | `"string"` | Data type: `"string"`, `"boolean"`, or `"number"` |
+| `description` | string | No | `null` | Human-readable description of the input |
+| `required` | bool | No | `true` | Whether the input must be provided at runtime |
+| `default` | string | No | `null` | Default value for optional inputs (ignored when `required` is `true`) |
+| `enum` | string[] | No | `[]` | Allowed values. When non-empty, the input value must be one of these |
+
+### Example
+
+```json
+{
+  "name": "deploy-service",
+  "description": "Deploys a service to a target environment",
+  "inputs": {
+    "serviceName": {
+      "type": "string",
+      "description": "Name of the service to deploy",
+      "required": true
+    },
+    "environment": {
+      "type": "string",
+      "description": "Target environment",
+      "enum": ["staging", "production"]
+    },
+    "dryRun": {
+      "type": "boolean",
+      "description": "Simulate the deployment without making changes",
+      "required": false,
+      "default": "false"
+    },
+    "replicas": {
+      "type": "number",
+      "description": "Number of replicas to deploy",
+      "required": false,
+      "default": "3"
+    }
+  },
+  "steps": [
+    {
+      "name": "deploy",
+      "type": "Prompt",
+      "systemPrompt": "You are a deployment assistant.",
+      "userPrompt": "Deploy {{param.serviceName}} to {{param.environment}} with {{param.replicas}} replicas. Dry run: {{param.dryRun}}.",
+      "parameters": ["serviceName", "environment", "dryRun", "replicas"],
+      "model": "claude-opus-4.5"
+    }
+  ]
+}
+```
+
+### Validation
+
+When `inputs` is defined, the engine validates parameters before execution:
+
+- **Required inputs**: Missing required inputs throw an error with their description
+- **Type validation**: Boolean inputs must be `"true"` or `"false"`, number inputs must be parseable as a number
+- **Enum constraints**: Values must match one of the allowed enum values (case-insensitive)
+- **Defaults**: Optional inputs that are not provided receive their default value automatically
+
+### Backward Compatibility
+
+Orchestrations without an `inputs` property continue to work as before. Parameter names are collected from step-level `parameters` arrays and all are treated as required strings with no type checking.
+
 ## Template Expressions
 
 Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, headers, templates, and command arguments. All expressions are case-insensitive and whitespace-tolerant (e.g., `{{ orchestration.NAME }}` works).
@@ -205,6 +284,7 @@ Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, head
 | Orchestration | `{{orchestration.property}}` | Built-in orchestration metadata |
 | Step | `{{step.property}}` | Current step metadata |
 | Environment | `{{env.VAR_NAME}}` | OS environment variable value |
+| Server | `{{server.url}}` | Orchestra server base URL (from `HostBaseUrl` or `ORCHESTRA_SERVER_URL` env var) |
 | Step Output | `{{stepName.output}}` | Output content from a completed step |
 | Step Raw Output | `{{stepName.rawOutput}}` | Raw (unprocessed) output from a completed step |
 | Step Files | `{{stepName.files}}` | JSON array of all file paths saved by a step via `orchestra_save_file` |
@@ -378,6 +458,69 @@ Define MCPs directly in the orchestration:
 ## Triggers
 
 Automate orchestration execution with triggers.
+
+### MCP Server
+
+Orchestra can expose orchestrations to external AI agents via a data-plane MCP (Model Context Protocol) server. This allows any MCP-compatible client to discover and invoke orchestrations.
+
+### Setup
+
+The MCP server is enabled by default when using `Orchestra.Host`:
+
+```csharp
+builder.Services.AddOrchestraMcpServer();
+
+var app = builder.Build();
+app.MapOrchestraMcpEndpoints(); // Maps /mcp/data
+```
+
+### Available Tools
+
+The data-plane MCP server exposes four tools:
+
+| Tool | Description |
+|------|-------------|
+| `ListOrchestrations` | List and filter orchestrations by tags or name pattern. Returns IDs, names, descriptions, parameters, and input schemas. |
+| `InvokeOrchestration` | Invoke an orchestration by ID. Supports async (default) and sync modes. Parameters are validated against the input schema. |
+| `GetOrchestrationStatus` | Check the status and result of a running or completed execution by execution ID. |
+| `CancelOrchestration` | Cancel a running execution. |
+
+### Invocation Modes
+
+- **Async** (default): Returns immediately with an execution ID. Use `GetOrchestrationStatus` to poll for results.
+- **Sync**: Blocks until the orchestration completes (with configurable timeout). Returns the full result.
+
+### Configuration
+
+```csharp
+builder.Services.AddOrchestraMcpServer(options =>
+{
+    options.DataPlaneEnabled = true;          // default: true
+    options.DataPlaneRoute = "/mcp/data";     // default
+    options.ControlPlaneEnabled = false;      // default: false (opt-in)
+    options.ControlPlaneRoute = "/mcp/control"; // default
+});
+```
+
+### Connecting from an MCP Client
+
+Any MCP-compatible client can connect to the data-plane endpoint. For example, to use it from another orchestration's prompt step, define it as a remote MCP:
+
+```json
+{
+  "mcps": [
+    {
+      "name": "orchestra",
+      "type": "remote",
+      "endpoint": "{{server.url}}/mcp/data"
+    }
+  ]
+}
+```
+
+The `{{server.url}}` expression resolves to the running Orchestra server's base URL at runtime. It uses the configured `HostBaseUrl` and falls back to the `ORCHESTRA_SERVER_URL` environment variable.
+
+## Triggers
 
 ### Scheduler Trigger
 
@@ -689,12 +832,13 @@ See the `examples/` folder for complete orchestration examples:
 | Example | Description |
 |---------|-------------|
 | `deployment-pipeline.json` | Deployment pipeline with variables, metadata, and mixed step types |
+| `typed-inputs-deployment.json` | Typed input schema with type validation, enum constraints, and defaults |
+| `mcp-orchestration-coordinator.json` | Coordinator that invokes other orchestrations via the data-plane MCP |
 | `variables-and-metadata.json` | Variables, orchestration metadata, and step metadata expressions |
 | `weather-roads-seattle.json` | Parallel weather monitoring |
 | `command-build-and-analyze.json` | Command steps with build and git analysis |
 | `system-prompt-mode-example.json` | System prompt mode demonstration |
 | `advanced-combined-features.json` | Full pipeline with loops and MCPs |
-| `email-trigger-example.json` | Email-triggered processing |
 | `webhook-triggered-notification.json` | Webhook event handling |
 | `subagents-research-team.json` | Multi-agent orchestration with subagents |
 

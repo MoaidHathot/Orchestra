@@ -29,6 +29,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly ITriggerExecutionCallback? _executionCallback;
 	private readonly EngineToolRegistry _engineToolRegistry;
 	private readonly string? _dataPath;
+	private readonly string? _serverUrl;
 	private readonly JsonSerializerOptions _jsonOptions;
 
 	/// <summary>
@@ -54,7 +55,8 @@ public partial class TriggerManager : BackgroundService
 		ICheckpointStore checkpointStore,
 		ITriggerExecutionCallback? executionCallback = null,
 		EngineToolRegistry? engineToolRegistry = null,
-		string? dataPath = null)
+		string? dataPath = null,
+		string? serverUrl = null)
 	{
 		_activeExecutions = activeExecutions;
 		_activeExecutionInfos = activeExecutionInfos;
@@ -69,6 +71,7 @@ public partial class TriggerManager : BackgroundService
 		_executionCallback = executionCallback;
 		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 		_dataPath = dataPath;
+		_serverUrl = serverUrl;
 		Directory.CreateDirectory(_triggersDir);
 
 		_jsonOptions = new JsonSerializerOptions
@@ -367,7 +370,7 @@ public partial class TriggerManager : BackgroundService
 		var executionId = checkpoint.RunId;
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, dataPath: _dataPath);
+		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, dataPath: _dataPath, serverUrl: _serverUrl);
 
 		using var cts = new CancellationTokenSource();
 		_activeExecutions[executionId] = cts;
@@ -784,7 +787,7 @@ public partial class TriggerManager : BackgroundService
 
 			// Create executor with reporter
 			var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, engineToolRegistry: _engineToolRegistry, dataPath: _dataPath);
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, engineToolRegistry: _engineToolRegistry, dataPath: _dataPath, serverUrl: _serverUrl);
 
 			using var cts = new CancellationTokenSource();
 			_activeExecutions[executionId] = cts;

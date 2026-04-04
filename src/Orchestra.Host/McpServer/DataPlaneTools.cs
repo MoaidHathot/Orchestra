@@ -182,7 +182,8 @@ public sealed class DataPlaneTools
 			scheduler, agentBuilder, reporter, loggerFactory,
 			runStore: runStore,
 			engineToolRegistry: engineToolRegistry,
-			dataPath: hostOptions.DataPath);
+			dataPath: hostOptions.DataPath,
+			serverUrl: hostOptions.HostBaseUrl);
 
 		var isSync = string.Equals(mode, "sync", StringComparison.OrdinalIgnoreCase);
 
