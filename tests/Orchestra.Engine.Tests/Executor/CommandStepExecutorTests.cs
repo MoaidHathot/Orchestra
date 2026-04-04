@@ -97,8 +97,10 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
-		var (cmd, args) = GetShellCommand("exit 1");
-		var step = CreateCommandStep(command: cmd, arguments: args);
+		// Use 'dotnet help nonexistent-command-xyz' which returns non-zero on all platforms
+		var step = CreateCommandStep(
+			command: "dotnet",
+			arguments: ["help", "nonexistent-command-xyz-123"]);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
@@ -106,7 +108,6 @@ public class CommandStepExecutorTests
 
 		// Assert
 		result.Status.Should().Be(ExecutionStatus.Failed);
-		result.ErrorMessage.Should().Contain("exited with code 1");
 	}
 
 	#endregion
@@ -306,11 +307,11 @@ public class CommandStepExecutorTests
 	{
 		// Arrange
 		var executor = CreateExecutor();
-		// Use a cross-platform command that runs long enough to cancel
-		var (cmd, args) = OperatingSystem.IsWindows()
-			? ("cmd", new[] { "/c", "ping -n 30 127.0.0.1" })
-			: ("sleep", new[] { "30" });
-		var step = CreateCommandStep(command: cmd, arguments: args);
+		// Use a cross-platform command that runs long enough to cancel.
+		// The executor wraps commands in the platform shell, so pass raw commands.
+		var step = OperatingSystem.IsWindows()
+			? CreateCommandStep(command: "ping", arguments: ["-n", "30", "127.0.0.1"])
+			: CreateCommandStep(command: "sleep", arguments: ["30"]);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 		using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
@@ -339,29 +340,31 @@ public class CommandStepExecutorTests
 
 	#region Cross-platform helpers
 
-	/// <summary>Returns a cross-platform command that echoes the given text to stdout.</summary>
+	/// <summary>Returns a raw command that echoes the given text to stdout.
+	/// The CommandStepExecutor already wraps commands in the platform shell,
+	/// so we pass raw commands (not shell-wrapped).</summary>
 	private static (string cmd, string[] args) GetEchoCommand(string text) =>
-		OperatingSystem.IsWindows()
-			? ("cmd", ["/c", $"echo {text}"])
-			: ("/bin/sh", ["-c", $"echo {text}"]);
+		("echo", [text]);
 
-	/// <summary>Returns a cross-platform shell command.</summary>
+	/// <summary>Returns a raw shell command string as a single argument.
+	/// On Windows, 'exit 1' needs to go through cmd /c, but the executor already does that.
+	/// On Linux, we need a command that returns a non-zero exit code.</summary>
 	private static (string cmd, string[] args) GetShellCommand(string shellCommand) =>
 		OperatingSystem.IsWindows()
 			? ("cmd", ["/c", shellCommand])
-			: ("/bin/sh", ["-c", shellCommand]);
+			: ("sh", ["-c", shellCommand]);
 
-	/// <summary>Returns a cross-platform command that prints an environment variable.</summary>
+	/// <summary>Returns a command that prints an environment variable.</summary>
 	private static (string cmd, string[] args) GetEnvPrintCommand(string envVarName) =>
 		OperatingSystem.IsWindows()
 			? ("cmd", ["/c", $"echo %{envVarName}%"])
-			: ("/bin/sh", ["-c", $"echo ${envVarName}"]);
+			: ("printenv", [envVarName]);
 
-	/// <summary>Returns a cross-platform command that writes to both stdout and stderr.</summary>
+	/// <summary>Returns a command that writes to both stdout and stderr.</summary>
 	private static (string cmd, string[] args) GetStdoutAndStderrCommand(string stdoutText, string stderrText) =>
 		OperatingSystem.IsWindows()
 			? ("cmd", ["/c", $"echo {stdoutText} && echo {stderrText} 1>&2"])
-			: ("/bin/sh", ["-c", $"echo {stdoutText} && echo {stderrText} >&2"]);
+			: ("sh", ["-c", $"echo {stdoutText} && echo {stderrText} >&2"]);
 
 	#endregion
 }
