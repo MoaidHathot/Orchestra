@@ -705,6 +705,157 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 			"steps with 'enabled': false must preserve that value in the API response");
 	}
 
+	[Fact]
+	public async Task Contract_GetOrchestrations_VariablesIncludedWhenDefined()
+	{
+		var name = $"Variables Test {Guid.NewGuid():N}";
+		var json = """
+		{
+			"name": "PLACEHOLDER",
+			"description": "Orchestration with variables",
+			"variables": {
+				"organization": "contoso",
+				"model": "claude-opus-4.5"
+			},
+			"steps": [{
+				"name": "test-step",
+				"type": "Prompt",
+				"systemPrompt": "Test",
+				"userPrompt": "Hello {{vars.organization}}",
+				"model": "{{vars.model}}"
+			}]
+		}
+		""".Replace("PLACEHOLDER", name);
+
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
+			new { json }, _jsonOptions);
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var addResult = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var id = addResult.GetProperty("id").GetString()!;
+
+		var listResponse = await _client.GetAsync("/api/orchestrations");
+		var result = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		orch.TryGetProperty("variables", out var variables).Should().BeTrue(
+			"orchestrations with variables should include them in the list response");
+		variables.ValueKind.Should().Be(JsonValueKind.Object);
+		variables.GetProperty("organization").GetString().Should().Be("contoso");
+		variables.GetProperty("model").GetString().Should().Be("claude-opus-4.5");
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_VariablesOmittedWhenEmpty()
+	{
+		var (id, _) = await RegisterTestOrchestrationAsync();
+
+		var listResponse = await _client.GetAsync("/api/orchestrations");
+		var result = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		orch.TryGetProperty("variables", out _).Should().BeFalse(
+			"orchestrations without variables should omit the field (WhenWritingNull)");
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_ReferencedEnvVarsExtracted()
+	{
+		var name = $"EnvRefs Test {Guid.NewGuid():N}";
+		var json = """
+		{
+			"name": "PLACEHOLDER",
+			"description": "Orchestration referencing env vars",
+			"variables": {
+				"token": "{{env.GITHUB_TOKEN}}"
+			},
+			"steps": [{
+				"name": "test-step",
+				"type": "Prompt",
+				"systemPrompt": "Use token {{env.API_KEY}}",
+				"userPrompt": "Hello",
+				"model": "claude-opus-4.5"
+			}]
+		}
+		""".Replace("PLACEHOLDER", name);
+
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
+			new { json }, _jsonOptions);
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var addResult = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var id = addResult.GetProperty("id").GetString()!;
+
+		var listResponse = await _client.GetAsync("/api/orchestrations");
+		var result = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		orch.TryGetProperty("referencedEnvVars", out var envVars).Should().BeTrue(
+			"orchestrations referencing env vars should include referencedEnvVars");
+		envVars.ValueKind.Should().Be(JsonValueKind.Array);
+		var envVarList = envVars.EnumerateArray().Select(v => v.GetString()).ToArray();
+		envVarList.Should().Contain("API_KEY");
+		envVarList.Should().Contain("GITHUB_TOKEN");
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_InputsIncludedWhenDefined()
+	{
+		var name = $"Inputs Test {Guid.NewGuid():N}";
+		var json = """
+		{
+			"name": "PLACEHOLDER",
+			"description": "Orchestration with inputs",
+			"inputs": {
+				"destination": {
+					"type": "string",
+					"description": "Travel destination",
+					"required": true
+				},
+				"budget": {
+					"type": "number",
+					"required": false,
+					"default": "1000"
+				}
+			},
+			"steps": [{
+				"name": "test-step",
+				"type": "Prompt",
+				"systemPrompt": "Test",
+				"userPrompt": "Plan a trip to {{param.destination}} with budget {{param.budget}}",
+				"model": "claude-opus-4.5",
+				"parameters": ["destination", "budget"]
+			}]
+		}
+		""".Replace("PLACEHOLDER", name);
+
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json",
+			new { json }, _jsonOptions);
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var addResult = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var id = addResult.GetProperty("id").GetString()!;
+
+		var listResponse = await _client.GetAsync("/api/orchestrations");
+		var result = await listResponse.Content.ReadFromJsonAsync<JsonElement>();
+		var orch = result.GetProperty("orchestrations").EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		orch.TryGetProperty("inputs", out var inputs).Should().BeTrue(
+			"orchestrations with inputs should include them in the list response");
+		inputs.ValueKind.Should().Be(JsonValueKind.Object);
+
+		var dest = inputs.GetProperty("destination");
+		dest.GetProperty("type").GetString().Should().Be("string");
+		dest.GetProperty("description").GetString().Should().Be("Travel destination");
+		dest.GetProperty("required").GetBoolean().Should().BeTrue();
+
+		var budget = inputs.GetProperty("budget");
+		budget.GetProperty("type").GetString().Should().Be("number");
+		budget.GetProperty("required").GetBoolean().Should().BeFalse();
+		budget.GetProperty("default").GetString().Should().Be("1000");
+	}
+
 	#endregion
 
 	#region 3. DELETE /api/orchestrations/{id} — Delete orchestration

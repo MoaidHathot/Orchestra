@@ -158,6 +158,9 @@ function App(): React.JSX.Element {
   const [activeData, setActiveData] = useState<ActiveData>({ running: [], pending: [] });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  // Track run contexts per execution ID (from SSE run-context events)
+  const runContextsRef = useRef<Map<string, RunContext>>(new Map());
+
   // Polling config from server (loaded once on init)
   const [pollingConfig, setPollingConfig] = useState({
     activeExecutionsMs: 1000,
@@ -454,9 +457,20 @@ function App(): React.JSX.Element {
     const disabled: CardExecution[] = [];
     const matchedOrchIds = new Set(matchedOrchs.map(o => o.id));
 
+    // Build a lookup from pending data for trigger metadata (nextFireTime, etc.)
+    const pendingByOrchId = new Map(
+      activeData.pending.map(p => [p.orchestrationId, p])
+    );
+
     // Always show ALL running executions regardless of profile filter
     for (const exec of activeData.running) {
-      running.push(exec);
+      // Attach runContext if available (from SSE run-context events)
+      const ctx = exec.executionId ? runContextsRef.current.get(exec.executionId) : undefined;
+      if (ctx) {
+        running.push({ ...exec, runContext: ctx });
+      } else {
+        running.push(exec);
+      }
     }
 
     for (const orch of matchedOrchs) {
@@ -470,12 +484,21 @@ function App(): React.JSX.Element {
         ? getMatchingProfiles(profiles, orch.id, orch.tags).length > 0
         : true; // no profiles configured = no greying out
 
+      // Merge trigger metadata from activeData.pending
+      const pendingInfo = pendingByOrchId.get(orch.id);
+
       // Also build a card for the orchestration definition itself
       const cardExec: CardExecution = {
         orchestrationId: orch.id,
         orchestrationName: orch.name,
         stepCount: rt.stepCount || orch.steps?.length,
         triggeredBy: rt.triggerType || 'Manual',
+        // Merge pending trigger data when available
+        nextFireTime: pendingInfo?.nextFireTime,
+        lastFireTime: pendingInfo?.lastFireTime,
+        runCount: pendingInfo?.runCount,
+        status: pendingInfo?.status,
+        webhookUrl: pendingInfo?.webhookUrl,
       };
 
       if (!isEnabled || (!hasTrigger && !matchedByAnyProfile)) {
@@ -524,6 +547,7 @@ function App(): React.JSX.Element {
   function wireEventSource(
     eventSource: EventSource,
     initialStatuses: Record<string, StepStatusValue>,
+    knownExecutionId?: string,
   ): void {
     // Track state locally for batching updates
     const stepEvents: Record<string, StepEvent[]> = {};
@@ -532,6 +556,8 @@ function App(): React.JSX.Element {
     const stepTraces: Record<string, TraceData> = {};
     let streamingContent = '';
     let finalResult = '';
+    // Mutable tracker for execution ID (may be set later by execution-started event)
+    let trackedExecutionId = knownExecutionId;
 
     // ---- local helpers ----
 
@@ -595,6 +621,10 @@ function App(): React.JSX.Element {
       try {
         const data = JSON.parse(e.data) as RunContext;
         setExecutionModal(prev => ({ ...prev, runContext: data }));
+        // Also store in the per-execution map so cards can display it
+        if (trackedExecutionId) {
+          runContextsRef.current.set(trackedExecutionId, data);
+        }
       } catch { /* ignore */ }
     });
 
@@ -737,6 +767,7 @@ function App(): React.JSX.Element {
       try {
         const data: SSEEventData = JSON.parse(e.data);
         if (data.executionId) {
+          trackedExecutionId = data.executionId as string;
           setExecutionModal(prev => ({ ...prev, executionId: data.executionId as string }));
           loadData();
         }
@@ -996,7 +1027,7 @@ function App(): React.JSX.Element {
     try {
       const eventSource = new EventSource(`/api/execution/${execution.executionId}/attach`);
       eventSourceRef.current = eventSource;
-      wireEventSource(eventSource, initialStatuses);
+      wireEventSource(eventSource, initialStatuses, execution.executionId);
     } catch (err) {
       console.error('Attach error:', err);
       const message = err instanceof Error ? err.message : 'Failed to attach to execution';

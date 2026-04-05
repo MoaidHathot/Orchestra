@@ -9,8 +9,12 @@ export interface Orchestration {
   enabled?: boolean;
   steps?: Step[];
   parameters?: string[];
+  inputs?: Record<string, InputDefinition>;
+  variables?: Record<string, string>;
+  referencedEnvVars?: string[];
   trigger?: TriggerConfig;
   mcps?: McpConfig[];
+  models?: string[];
   registeredAt?: string;
   contentHash?: string;
   tags?: string[];
@@ -86,6 +90,14 @@ export interface TriggerConfig {
   webhookPath?: string;
   emailFilter?: string;
   [key: string]: unknown;
+}
+
+export interface InputDefinition {
+  type: string;
+  description?: string;
+  required?: boolean;
+  default?: string;
+  enum?: string[];
 }
 
 export interface McpConfig {
@@ -181,9 +193,17 @@ export interface ActiveExecution {
 export interface PendingExecution {
   orchestrationId: string;
   orchestrationName: string;
-  scheduledAt?: string;
+  orchestrationDescription?: string;
+  stepCount?: number;
+  nextFireTime?: string;
+  lastFireTime?: string;
+  lastExecutionId?: string;
+  runCount?: number;
+  status?: string;
   triggerType?: string;
-  nextRunAt?: string;
+  triggeredBy?: string;
+  source?: string;
+  webhookUrl?: string;
 }
 
 // Server status from /api/status

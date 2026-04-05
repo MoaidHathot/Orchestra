@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -98,6 +99,8 @@ public static class OrchestrationsApi
 							@default = kvp.Value.Default,
 							@enum = kvp.Value.Enum.Length > 0 ? kvp.Value.Enum : null,
 						}),
+					variables = o.Orchestration.Variables.Count > 0 ? o.Orchestration.Variables : null,
+					referencedEnvVars = ExtractReferencedEnvVars(o.Orchestration),
 				trigger = FormatTriggerInfoWithWebhook(o.Orchestration.Trigger, trigger, parameterNames),
 				triggerType = o.Orchestration.Trigger.Type.ToString(),
 				enabled = trigger?.Config.Enabled ?? o.Orchestration.Trigger.Enabled,
@@ -256,6 +259,8 @@ public static class OrchestrationsApi
 						@default = kvp.Value.Default,
 						@enum = kvp.Value.Enum.Length > 0 ? kvp.Value.Enum : null,
 					}),
+				variables = o.Variables.Count > 0 ? o.Variables : null,
+				referencedEnvVars = ExtractReferencedEnvVars(o),
 				trigger = FormatTriggerInfoWithWebhook(o.Trigger, triggerRegistration, allParameters),
 				mcps = o.Mcps.Select(m => new
 				{
@@ -647,6 +652,79 @@ public static class OrchestrationsApi
 			},
 			_ => null
 		};
+	}
+
+	private static readonly Regex EnvExpressionPattern = new(@"\{\{env\.([^}]+)\}\}", RegexOptions.Compiled);
+
+	/// <summary>
+	/// Extracts all referenced environment variable names from an orchestration's template expressions.
+	/// Scans variables, step prompts, URLs, commands, headers, bodies, and MCP endpoints.
+	/// </summary>
+	private static string[] ExtractReferencedEnvVars(Orchestration orchestration)
+	{
+		var envVars = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		void Scan(string? text)
+		{
+			if (string.IsNullOrEmpty(text)) return;
+			foreach (Match m in EnvExpressionPattern.Matches(text))
+				envVars.Add(m.Groups[1].Value);
+		}
+
+		// Scan orchestration-level variables
+		foreach (var v in orchestration.Variables.Values)
+			Scan(v);
+
+		// Scan MCP endpoints/commands
+		foreach (var mcp in orchestration.Mcps)
+		{
+			if (mcp is RemoteMcp remote) Scan(remote.Endpoint);
+			if (mcp is LocalMcp local)
+			{
+				Scan(local.Command);
+				foreach (var arg in local.Arguments) Scan(arg);
+			}
+		}
+
+		// Scan steps
+		foreach (var step in orchestration.Steps)
+		{
+			if (step is PromptOrchestrationStep ps)
+			{
+				Scan(ps.SystemPrompt);
+				Scan(ps.UserPrompt);
+				Scan(ps.InputHandlerPrompt);
+				Scan(ps.OutputHandlerPrompt);
+				Scan(ps.Model);
+				foreach (var mcp in ps.Mcps)
+				{
+					if (mcp is RemoteMcp remote) Scan(remote.Endpoint);
+					if (mcp is LocalMcp local)
+					{
+						Scan(local.Command);
+						foreach (var arg in local.Arguments) Scan(arg);
+					}
+				}
+			}
+			else if (step is HttpOrchestrationStep hs)
+			{
+				Scan(hs.Url);
+				Scan(hs.Body);
+				foreach (var h in hs.Headers.Values) Scan(h);
+			}
+			else if (step is CommandOrchestrationStep cs)
+			{
+				Scan(cs.Command);
+				foreach (var arg in cs.Arguments) Scan(arg);
+				foreach (var env in cs.Environment.Values) Scan(env);
+			}
+			else if (step is TransformOrchestrationStep ts)
+			{
+				Scan(ts.Template);
+			}
+		}
+
+		return envVars.Count > 0 ? [.. envVars.Order()] : [];
 	}
 }
 

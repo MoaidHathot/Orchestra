@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icons, getTriggerIcon } from '../icons';
 import { formatTimeAgo, formatTimeUntil, getMatchingProfiles } from '../utils';
-import type { Orchestration, Profile } from '../types';
+import type { Orchestration, Profile, InputDefinition, RunContext } from '../types';
 
 /** Combined execution shape used by both running and pending cards. */
 export interface CardExecution {
@@ -20,6 +20,8 @@ export interface CardExecution {
   nextFireTime?: string;
   lastFireTime?: string;
   runCount?: number;
+  /** Run context from SSE stream - available for running orchestrations that have emitted it */
+  runContext?: RunContext;
 }
 
 interface Props {
@@ -454,8 +456,8 @@ export default function ActiveOrchestrationCard({
                     >
                       <span style={{ color: '#ff7b72' }}>{k}:</span>{' '}
                       {typeof v === 'string'
-                        ? v.slice(0, 30)
-                        : JSON.stringify(v).slice(0, 30)}
+                        ? v.slice(0, 50)
+                        : JSON.stringify(v).slice(0, 50)}
                     </div>
                   ))}
                 {Object.keys(execution.parameters).length > 3 && (
@@ -466,6 +468,21 @@ export default function ActiveOrchestrationCard({
               </div>
             </div>
           )}
+
+        {/* Resolved context for running orchestrations (from SSE run-context event) */}
+        {isRunning && execution.runContext && (
+          <OrchestrationContextSection
+            runContext={execution.runContext}
+            orch={orch}
+          />
+        )}
+
+        {/* Orchestration context for non-running cards (definition view) */}
+        {!isRunning && orch && (
+          <OrchestrationContextSection
+            orch={orch}
+          />
+        )}
 
         <div className="card-actions" style={{ marginTop: '6px' }}>
           <button
@@ -503,6 +520,182 @@ export default function ActiveOrchestrationCard({
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ── Key-value row for context sections ─────────────────────────────────── */
+
+function ContextRow({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <div
+      style={{
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span style={{ color: color || '#ff7b72' }}>{label}:</span>{' '}
+      <span style={{ color: 'var(--text-muted)' }}>{value.length > 60 ? value.slice(0, 60) + '...' : value}</span>
+    </div>
+  );
+}
+
+/* ── Context section showing variables, inputs, env vars, models ──────── */
+
+interface OrchestrationContextSectionProps {
+  /** Orchestration definition (for definition-time data) */
+  orch?: Orchestration;
+  /** Run context from SSE stream (for runtime-resolved data) */
+  runContext?: RunContext;
+}
+
+function OrchestrationContextSection({ orch, runContext }: OrchestrationContextSectionProps) {
+  const hasRunContext = !!runContext;
+
+  // Collect data sections
+  const sections: { title: string; entries: { key: string; value: string; color?: string }[] }[] = [];
+
+  // Variables
+  if (hasRunContext) {
+    // Show resolved variables (prefer resolvedVariables, fall back to raw variables)
+    const resolved = runContext.resolvedVariables;
+    const raw = runContext.variables;
+    const vars = resolved && Object.keys(resolved).length > 0
+      ? { ...raw, ...resolved }
+      : raw;
+    if (vars && Object.keys(vars).length > 0) {
+      sections.push({
+        title: 'Variables',
+        entries: Object.entries(vars).map(([k, v]) => ({
+          key: k,
+          value: v ?? '',
+          color: resolved?.[k] !== undefined ? '#7ee787' : '#ff7b72',
+        })),
+      });
+    }
+  } else if (orch?.variables && Object.keys(orch.variables).length > 0) {
+    sections.push({
+      title: 'Variables',
+      entries: Object.entries(orch.variables).map(([k, v]) => ({
+        key: k,
+        value: v,
+      })),
+    });
+  }
+
+  // Inputs / Parameters
+  if (hasRunContext && runContext.parameters && Object.keys(runContext.parameters).length > 0) {
+    // Already shown in the parameters section above for running cards;
+    // skip to avoid duplication
+  } else if (!hasRunContext && orch?.inputs && Object.keys(orch.inputs).length > 0) {
+    const inputEntries = Object.entries(orch.inputs).map(([k, def]: [string, InputDefinition]) => {
+      const parts: string[] = [];
+      parts.push(def.type || 'string');
+      if (def.required === false) parts.push('optional');
+      if (def.default) parts.push(`default: ${def.default}`);
+      if (def.enum && def.enum.length > 0) parts.push(`[${def.enum.join(', ')}]`);
+      if (def.description) parts.push(`- ${def.description}`);
+      return { key: k, value: parts.join(', '), color: '#79c0ff' as string | undefined };
+    });
+    sections.push({ title: 'Inputs', entries: inputEntries });
+  } else if (!hasRunContext && orch?.parameters && orch.parameters.length > 0 && !orch.inputs) {
+    // Legacy parameter names without input definitions
+    sections.push({
+      title: 'Parameters',
+      entries: orch.parameters.map(p => ({ key: p, value: '{{param.' + p + '}}', color: '#79c0ff' })),
+    });
+  }
+
+  // Environment variables
+  if (hasRunContext && runContext.accessedEnvironmentVariables) {
+    const envEntries = Object.entries(runContext.accessedEnvironmentVariables)
+      .map(([k, v]) => ({
+        key: k,
+        value: v !== null ? v : '(not set)',
+        color: v !== null ? '#7ee787' : '#f85149',
+      }));
+    if (envEntries.length > 0) {
+      sections.push({ title: 'Environment', entries: envEntries });
+    }
+  } else if (!hasRunContext && orch?.referencedEnvVars && orch.referencedEnvVars.length > 0) {
+    sections.push({
+      title: 'Environment',
+      entries: orch.referencedEnvVars.map(v => ({
+        key: v,
+        value: '{{env.' + v + '}}',
+        color: '#d2a8ff',
+      })),
+    });
+  }
+
+  // Models (definition cards only, running cards show model in step details)
+  if (!hasRunContext && orch?.models && orch.models.length > 0) {
+    sections.push({
+      title: 'Models',
+      entries: orch.models.map(m => ({ key: m, value: '', color: '#ffa657' })),
+    });
+  }
+
+  if (sections.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        marginTop: '8px',
+        padding: '6px 8px',
+        background: 'var(--bg)',
+        borderRadius: '6px',
+        fontSize: '11px',
+        fontFamily: 'monospace',
+      }}
+    >
+      {sections.map((section, si) => (
+        <div key={section.title} style={{ marginTop: si > 0 ? '6px' : 0 }}>
+          <div className="card-meta-label" style={{ marginBottom: '2px', fontSize: '10px' }}>
+            {section.title}
+            {hasRunContext && section.title === 'Variables' && (
+              <span style={{ marginLeft: '6px', color: 'var(--text-dim)', fontWeight: 'normal' }}>
+                (resolved)
+              </span>
+            )}
+            {hasRunContext && section.title === 'Environment' && (
+              <span style={{ marginLeft: '6px', color: 'var(--text-dim)', fontWeight: 'normal' }}>
+                (runtime)
+              </span>
+            )}
+          </div>
+          {section.title === 'Models' ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+              {section.entries.map(e => (
+                <span
+                  key={e.key}
+                  style={{
+                    display: 'inline-flex',
+                    padding: '1px 6px',
+                    fontSize: '10px',
+                    background: 'rgba(255, 166, 87, 0.12)',
+                    border: '1px solid rgba(255, 166, 87, 0.3)',
+                    borderRadius: '4px',
+                    color: '#ffa657',
+                  }}
+                >
+                  {e.key}
+                </span>
+              ))}
+            </div>
+          ) : (
+            section.entries.slice(0, 5).map(e => (
+              <ContextRow key={e.key} label={e.key} value={e.value} color={e.color} />
+            ))
+          )}
+          {section.entries.length > 5 && (
+            <div style={{ color: 'var(--text-dim)', fontSize: '10px' }}>
+              +{section.entries.length - 5} more...
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
