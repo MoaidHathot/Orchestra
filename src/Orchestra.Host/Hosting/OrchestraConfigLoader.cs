@@ -255,6 +255,11 @@ public class OrchestraConfigFile
 	/// Polling intervals for the web UI, in milliseconds.
 	/// </summary>
 	public PollingConfig? Polling { get; set; }
+
+	/// <summary>
+	/// MCP server endpoint configuration.
+	/// </summary>
+	public McpServerConfig? McpServer { get; set; }
 }
 
 /// <summary>
@@ -300,4 +305,40 @@ public class RetentionPolicyConfig
 	/// 0 or null means no age limit (keep forever).
 	/// </summary>
 	public int? MaxRunAgeDays { get; set; }
+}
+
+/// <summary>
+/// MCP server configuration section of the config file.
+/// </summary>
+public class McpServerConfig
+{
+	/// <summary>
+	/// Whether the data-plane MCP server is enabled.
+	/// Default: true.
+	/// </summary>
+	public bool? DataPlaneEnabled { get; set; }
+
+	/// <summary>
+	/// Route path for the data-plane MCP endpoint.
+	/// Default: "/mcp/data".
+	/// </summary>
+	public string? DataPlaneRoute { get; set; }
+
+	/// <summary>
+	/// Whether the control-plane MCP server is enabled.
+	/// Default: false.
+	/// </summary>
+	public bool? ControlPlaneEnabled { get; set; }
+
+	/// <summary>
+	/// Route path for the control-plane MCP endpoint.
+	/// Default: "/mcp/control".
+	/// </summary>
+	public string? ControlPlaneRoute { get; set; }
+
+	/// <summary>
+	/// Maximum nesting depth for orchestration-to-orchestration invocations.
+	/// 0 = top-level only (no nesting). Default: 5.
+	/// </summary>
+	public int? MaxNestingDepth { get; set; }
 }

@@ -255,6 +255,8 @@ function App(): React.JSX.Element {
       ]);
       setHistory(histData.runs || []);
       setActiveData(activeDataResult || { running: [], pending: [] });
+      // Full refresh: clear the missing-execution tracker to avoid stale retains
+      missingRunningIdsRef.current.clear();
     } catch (err) {
       console.error('Failed to load history/active data:', err);
     } finally {
@@ -297,6 +299,9 @@ function App(): React.JSX.Element {
     }
   }, [onlineStatus.isOnline, onlineStatus.isServerReachable, loadData]);
 
+  // Track which execution IDs have been seen as missing (for 2-poll confirmation)
+  const missingRunningIdsRef = useRef<Set<string>>(new Set());
+
   // Auto-refresh active orchestrations when there are running or pending ones
   useEffect(() => {
     const hasActiveOrPending = activeData.running.length > 0 || activeData.pending.length > 0;
@@ -306,7 +311,47 @@ function App(): React.JSX.Element {
       const interval = setInterval(async () => {
         try {
           const data = await api.get<ActiveData>('/api/active');
-          setActiveData(data || { running: [], pending: [] });
+          const newRunning = data?.running || [];
+          const newRunningIds = new Set(newRunning.map(r => r.executionId));
+
+          // Reconcile: keep previously-running executions for one extra poll cycle
+          // to avoid transient disappearances from the UI
+          setActiveData(prev => {
+            const prevRunningIds = new Set(prev.running.map(r => r.executionId));
+            const retained: typeof prev.running = [];
+
+            for (const exec of prev.running) {
+              if (!exec.executionId) continue;
+              if (!newRunningIds.has(exec.executionId)) {
+                // This execution was running but is now missing from the server response
+                if (!missingRunningIdsRef.current.has(exec.executionId)) {
+                  // First time missing: retain it for one more cycle
+                  missingRunningIdsRef.current.add(exec.executionId);
+                  retained.push(exec);
+                }
+                // Second time missing: let it drop (confirmed gone)
+              }
+            }
+
+            // Clear missing tracker for IDs that reappeared
+            for (const id of missingRunningIdsRef.current) {
+              if (newRunningIds.has(id)) {
+                missingRunningIdsRef.current.delete(id);
+              }
+            }
+
+            // Clean up old entries from the missing tracker
+            for (const id of missingRunningIdsRef.current) {
+              if (!prevRunningIds.has(id)) {
+                missingRunningIdsRef.current.delete(id);
+              }
+            }
+
+            return {
+              running: [...newRunning, ...retained],
+              pending: data?.pending || [],
+            };
+          });
         } catch (err) {
           console.error('Failed to refresh active:', err);
         }
@@ -328,11 +373,12 @@ function App(): React.JSX.Element {
     return () => clearInterval(interval);
   }, [pollingConfig.orchestrationsMs]);
 
-  // Auto-refresh history when there are enabled triggers or active executions
+  // Auto-refresh history when there are enabled triggers, active executions, or running items
   useEffect(() => {
     const hasEnabledTriggers = orchestrations.some(o => o.enabled);
     const hasActiveInHistory = history.some(h => h.isActive);
-    if (hasEnabledTriggers || hasActiveInHistory) {
+    const hasRunning = activeData.running.length > 0;
+    if (hasEnabledTriggers || hasActiveInHistory || hasRunning) {
       const interval = setInterval(async () => {
         try {
           const histData = await api.get<HistoryResponse>('/api/history?limit=15');
@@ -343,7 +389,7 @@ function App(): React.JSX.Element {
       }, pollingConfig.historyMs);
       return () => clearInterval(interval);
     }
-  }, [orchestrations, history, pollingConfig.historyMs]);
+  }, [orchestrations, history, activeData.running.length, pollingConfig.historyMs]);
 
   // Poll server status (including Outlook connection status) every 5 seconds
   useEffect(() => {
@@ -395,7 +441,7 @@ function App(): React.JSX.Element {
       ? orchestrations.filter(o => orchMatchesProfileFilter(o.id, mainPaneProfileFilter))
       : orchestrations;
 
-    // Build a set of running orchestration IDs from active data
+    // Build a set of running orchestration IDs from active data (unfiltered — always show running)
     const runningExecsByOrchId = new Map<string, CardExecution[]>();
     for (const exec of activeData.running) {
       const existing = runningExecsByOrchId.get(exec.orchestrationId) || [];
@@ -406,17 +452,23 @@ function App(): React.JSX.Element {
     const running: CardExecution[] = [];
     const enabled: CardExecution[] = [];
     const disabled: CardExecution[] = [];
+    const matchedOrchIds = new Set(matchedOrchs.map(o => o.id));
+
+    // Always show ALL running executions regardless of profile filter
+    for (const exec of activeData.running) {
+      running.push(exec);
+    }
 
     for (const orch of matchedOrchs) {
       const rt = orch as RuntimeOrchestration;
       const isEnabled = rt.enabled !== false; // default true for ManualTriggerConfig
+      const hasTrigger = !!(rt.triggerType && rt.triggerType !== 'Manual');
 
-      // Check if this orchestration has running executions
-      const runningExecs = runningExecsByOrchId.get(orch.id);
-      if (runningExecs && runningExecs.length > 0) {
-        // Add all running executions as separate cards
-        running.push(...runningExecs);
-      }
+      // Orchestrations without a trigger that aren't matched by any profile
+      // should appear greyed out (disabled) when profiles exist
+      const matchedByAnyProfile = profiles.length > 0
+        ? getMatchingProfiles(profiles, orch.id, orch.tags).length > 0
+        : true; // no profiles configured = no greying out
 
       // Also build a card for the orchestration definition itself
       const cardExec: CardExecution = {
@@ -426,10 +478,10 @@ function App(): React.JSX.Element {
         triggeredBy: rt.triggerType || 'Manual',
       };
 
-      if (isEnabled) {
-        enabled.push(cardExec);
-      } else {
+      if (!isEnabled || (!hasTrigger && !matchedByAnyProfile)) {
         disabled.push(cardExec);
+      } else {
+        enabled.push(cardExec);
       }
     }
 

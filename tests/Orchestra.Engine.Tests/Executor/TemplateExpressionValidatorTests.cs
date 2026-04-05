@@ -44,7 +44,11 @@ public class TemplateExpressionValidatorTests
 		string[]? parameters = null,
 		Mcp[]? mcps = null,
 		Subagent[]? subagents = null,
-		string[]? skillDirectories = null)
+		string[]? skillDirectories = null,
+		string model = "claude-opus-4.5",
+		string systemPrompt = "You are a helpful assistant.",
+		string? inputHandlerPrompt = null,
+		string? outputHandlerPrompt = null)
 	{
 		return new PromptOrchestrationStep
 		{
@@ -52,9 +56,11 @@ public class TemplateExpressionValidatorTests
 			Type = OrchestrationStepType.Prompt,
 			DependsOn = dependsOn ?? [],
 			Parameters = parameters ?? [],
-			SystemPrompt = "You are a helpful assistant.",
+			SystemPrompt = systemPrompt,
 			UserPrompt = userPrompt,
-			Model = "claude-opus-4.5",
+			Model = model,
+			InputHandlerPrompt = inputHandlerPrompt,
+			OutputHandlerPrompt = outputHandlerPrompt,
 			Mcps = mcps ?? [],
 			Subagents = subagents ?? [],
 			SkillDirectories = skillDirectories ?? [],
@@ -1008,6 +1014,109 @@ public class TemplateExpressionValidatorTests
 		var formatted = result.FormatErrors();
 
 		formatted.Should().Contain("[Orchestration]");
+	}
+
+	#endregion
+
+	#region ValidateOrchestration -- Prompt Step Fields (Model, SystemPrompt, Handlers)
+
+	[Fact]
+	public void ValidateOrchestration_ModelWithValidVarsTemplate_IsValid()
+	{
+		var orchestration = CreateOrchestration(
+			variables: new Dictionary<string, string> { ["defaultModel"] = "claude-opus-4.5" },
+			steps:
+			[
+				CreatePromptStep("step1", "Test prompt", model: "{{vars.defaultModel}}")
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ModelWithUndefinedVariable_ReturnsError()
+	{
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreatePromptStep("step1", "Test prompt", model: "{{vars.missingModel}}")
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.FieldName == "Model" &&
+			e.Expression == "{{vars.missingModel}}");
+	}
+
+	[Fact]
+	public void ValidateOrchestration_SystemPromptWithValidVarsTemplate_IsValid()
+	{
+		var orchestration = CreateOrchestration(
+			variables: new Dictionary<string, string> { ["project"] = "Orchestra" },
+			steps:
+			[
+				CreatePromptStep("step1", "Test prompt",
+					systemPrompt: "You review code for {{vars.project}}.")
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ValidateOrchestration_SystemPromptWithStepOutputTemplate_IsValid()
+	{
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateTransformStep("context", "some context"),
+				CreatePromptStep("step1", "Test prompt",
+					dependsOn: ["context"],
+					systemPrompt: "You are a reviewer. Context: {{context.output}}")
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ValidateOrchestration_OutputHandlerPromptWithValidTemplate_IsValid()
+	{
+		var orchestration = CreateOrchestration(
+			variables: new Dictionary<string, string> { ["format"] = "JSON" },
+			steps:
+			[
+				CreatePromptStep("step1", "Test prompt",
+					outputHandlerPrompt: "Format the output as {{vars.format}}")
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ValidateOrchestration_InputHandlerPromptWithUndefinedVariable_ReturnsError()
+	{
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreatePromptStep("step1", "Test prompt",
+					inputHandlerPrompt: "Transform using {{vars.missingTransform}}")
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.FieldName == "InputHandlerPrompt" &&
+			e.Expression == "{{vars.missingTransform}}");
 	}
 
 	#endregion

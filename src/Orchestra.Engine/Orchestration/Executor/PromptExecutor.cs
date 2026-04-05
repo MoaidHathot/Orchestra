@@ -50,6 +50,15 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Build MCP server descriptions for trace diagnostics (using resolved values)
 		var mcpServerDescriptions = BuildMcpServerDescriptions(resolvedMcps);
 
+		// Resolve static template expressions in model and prompt fields.
+		// These fields support param, env, vars, orchestration expressions (not step outputs
+		// for model; full resolution including step outputs for prompts).
+		var resolvedModel = TemplateResolver.ResolveStatic(step.Model, context.Parameters, context);
+		var resolvedSystemPrompt = TemplateResolver.Resolve(step.SystemPrompt, context.Parameters, context, step.DependsOn, step);
+		var resolvedOutputHandlerPrompt = step.OutputHandlerPrompt is not null
+			? TemplateResolver.Resolve(step.OutputHandlerPrompt, context.Parameters, context, step.DependsOn, step)
+			: null;
+
 		try
 		{
 			// Build the user prompt, incorporating dependency outputs and parameters
@@ -66,8 +75,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Build and run the agent using an immutable config snapshot (thread-safe)
 		var config = new AgentBuildConfig
 		{
-			Model = step.Model,
-			SystemPrompt = step.SystemPrompt,
+			Model = resolvedModel,
+			SystemPrompt = resolvedSystemPrompt,
 			Mcps = resolvedMcps,
 			Subagents = resolvedSubagents,
 			ReasoningLevel = step.ReasoningLevel,
@@ -105,7 +114,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				{
 					var serverList = string.Join(", ", requiredFailed);
 					var errorMessage = $"Required MCP server(s) failed to start: {serverList}. The step cannot execute without these tools.";
-					var mcpFailTrace = eventProcessor.BuildPartialTrace(step.SystemPrompt, userPromptRaw, mcpServerDescriptions);
+					var mcpFailTrace = eventProcessor.BuildPartialTrace(resolvedSystemPrompt, userPromptRaw, mcpServerDescriptions);
 					_reporter.ReportStepTrace(step.Name, mcpFailTrace);
 					_reporter.ReportStepError(step.Name, errorMessage);
 					LogMcpServersFailed(step.Name, serverList);
@@ -126,10 +135,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			string? outputHandlerResult = null;
 
 			// Apply output handler if specified
-			if (step.OutputHandlerPrompt is not null)
+			if (resolvedOutputHandlerPrompt is not null)
 			{
 				rawContent = content;
-				content = await RunHandlerAsync(step.OutputHandlerPrompt, content, step.Model, cancellationToken);
+				content = await RunHandlerAsync(resolvedOutputHandlerPrompt, content, resolvedModel, cancellationToken);
 				outputHandlerResult = content;
 			}
 
@@ -146,7 +155,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 			// Build the execution trace from collected data
 			var trace = eventProcessor.BuildTrace(
-				step.SystemPrompt,
+				resolvedSystemPrompt,
 				userPromptRaw,
 				userPrompt,
 				rawContent ?? result.Content,
@@ -205,7 +214,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		catch (Exception ex)
 		{
 			// Build partial trace even on failure
-			var trace = eventProcessor.BuildPartialTrace(step.SystemPrompt, userPromptRaw, mcpServerDescriptions);
+			var trace = eventProcessor.BuildPartialTrace(resolvedSystemPrompt, userPromptRaw, mcpServerDescriptions);
 
 			// Report the partial trace for live trace viewing
 			_reporter.ReportStepTrace(step.Name, trace);

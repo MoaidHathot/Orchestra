@@ -96,7 +96,10 @@ builder.Services.AddOrchestraHost(options =>
 	options.OrchestrationsScanPath = orchestrationPath;
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
-	options.HostBaseUrl = hostUrl;
+
+	// Only override HostBaseUrl if explicitly provided (don't clobber orchestra.json value with null)
+	if (hostUrl is not null)
+		options.HostBaseUrl = hostUrl;
 });
 
 // TUI component

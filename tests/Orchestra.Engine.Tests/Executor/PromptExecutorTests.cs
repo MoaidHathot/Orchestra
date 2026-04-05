@@ -1187,4 +1187,147 @@ public class PromptExecutorTests
 	}
 
 	#endregion
+
+	#region Template Resolution in Model
+
+	[Fact]
+	public async Task ExecuteAsync_WithModelTemplateVariable_ResolvesBeforePassingToBuilder()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("model-var-step", model: "{{vars.defaultModel}}");
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+			Variables = new Dictionary<string, string>
+			{
+				["defaultModel"] = "claude-opus-4.5"
+			}
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - Model should be resolved from the variable, not the literal template string
+		agentBuilder.CapturedConfig.Should().NotBeNull();
+		agentBuilder.CapturedConfig!.Model.Should().Be("claude-opus-4.5");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithModelParameterTemplate_ResolvesBeforePassingToBuilder()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("model-param-step", model: "{{param.model}}");
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>
+			{
+				["model"] = "gpt-4o"
+			},
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		agentBuilder.CapturedConfig.Should().NotBeNull();
+		agentBuilder.CapturedConfig!.Model.Should().Be("gpt-4o");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithLiteralModel_PassesModelUnchanged()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("literal-model-step", model: "claude-opus-4.5");
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		agentBuilder.CapturedConfig.Should().NotBeNull();
+		agentBuilder.CapturedConfig!.Model.Should().Be("claude-opus-4.5");
+	}
+
+	#endregion
+
+	#region Template Resolution in SystemPrompt
+
+	[Fact]
+	public async Task ExecuteAsync_WithSystemPromptTemplateVariable_ResolvesBeforePassingToBuilder()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("sysprompt-step",
+			systemPrompt: "You are reviewing code for {{vars.project}}.");
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+			Variables = new Dictionary<string, string>
+			{
+				["project"] = "Orchestra"
+			}
+		};
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		agentBuilder.CapturedConfig.Should().NotBeNull();
+		agentBuilder.CapturedConfig!.SystemPrompt.Should().Be("You are reviewing code for Orchestra.");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithSystemPromptStepOutputTemplate_ResolvesBeforePassingToBuilder()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("sysprompt-step",
+			dependsOn: ["context-step"],
+			systemPrompt: "You are a reviewer. Context: {{context-step.output}}");
+
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+		context.AddResult("context-step", ExecutionResult.Succeeded("important context data"));
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		agentBuilder.CapturedConfig.Should().NotBeNull();
+		agentBuilder.CapturedConfig!.SystemPrompt.Should().Be("You are a reviewer. Context: important context data");
+	}
+
+	#endregion
 }

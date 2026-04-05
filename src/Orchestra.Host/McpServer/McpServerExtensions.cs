@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Server;
+using Orchestra.Host.Hosting;
 
 namespace Orchestra.Host.McpServer;
 
@@ -23,6 +24,24 @@ public static class McpServerExtensions
 		Action<McpServerOptions>? configure = null)
 	{
 		var options = new McpServerOptions();
+
+		// Apply config file settings first (if present)
+		var configFile = OrchestraConfigLoader.Load();
+		if (configFile?.McpServer is { } mcpConfig)
+		{
+			if (mcpConfig.DataPlaneEnabled.HasValue)
+				options.DataPlaneEnabled = mcpConfig.DataPlaneEnabled.Value;
+			if (mcpConfig.DataPlaneRoute is not null)
+				options.DataPlaneRoute = mcpConfig.DataPlaneRoute;
+			if (mcpConfig.ControlPlaneEnabled.HasValue)
+				options.ControlPlaneEnabled = mcpConfig.ControlPlaneEnabled.Value;
+			if (mcpConfig.ControlPlaneRoute is not null)
+				options.ControlPlaneRoute = mcpConfig.ControlPlaneRoute;
+			if (mcpConfig.MaxNestingDepth.HasValue)
+				options.MaxNestingDepth = mcpConfig.MaxNestingDepth.Value;
+		}
+
+		// Then let programmatic overrides win
 		configure?.Invoke(options);
 		services.AddSingleton(options);
 

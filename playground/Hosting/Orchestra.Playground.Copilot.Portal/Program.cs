@@ -3,6 +3,7 @@ using Orchestra.Copilot;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
+using Orchestra.Host.McpServer;
 using Orchestra.Playground.Copilot.Portal;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -42,6 +43,9 @@ builder.Services.AddOrchestraHost(options =>
 	options.RegisterJsonTriggers = true;
 });
 
+// Add Orchestra MCP server (data-plane enabled by default, control-plane disabled by default)
+builder.Services.AddOrchestraMcpServer();
+
 // Portal-specific services
 builder.Services.AddSingleton<PortalStatusService>();
 
@@ -61,6 +65,9 @@ app.UseStaticFiles();
 // /api/history, /api/active, /api/models, /api/mcps, /api/status,
 // and SSE streaming endpoints
 app.MapOrchestraHostEndpoints();
+
+// Map Orchestra MCP server endpoints
+app.MapOrchestraMcpEndpoints();
 
 // Portal-specific endpoints that extend Host functionality
 

@@ -450,6 +450,18 @@ public partial class TriggerManager : BackgroundService
 			{
 				_activeExecutions.TryRemove(executionId, out _);
 				_backgroundTasks.TryRemove(taskId, out _);
+
+				// Update status and remove after a short delay (matching ExecuteOrchestrationCoreAsync behavior)
+				if (_activeExecutionInfos.TryGetValue(executionId, out var resumeInfo))
+				{
+					_executionCallback?.OnExecutionCompleted(resumeInfo);
+
+					TrackBackgroundTask(Task.Run(async () =>
+					{
+						await Task.Delay(5000);
+						_activeExecutionInfos.TryRemove(executionId, out _);
+					}));
+				}
 			}
 		});
 

@@ -586,7 +586,13 @@ public static partial class TemplateExpressionValidator
 
 	private static IEnumerable<(string, string)> GetPromptStepFields(PromptOrchestrationStep step)
 	{
+		yield return ("Model", step.Model);
+		yield return ("SystemPrompt", step.SystemPrompt);
 		yield return ("UserPrompt", step.UserPrompt);
+		if (step.InputHandlerPrompt is not null)
+			yield return ("InputHandlerPrompt", step.InputHandlerPrompt);
+		if (step.OutputHandlerPrompt is not null)
+			yield return ("OutputHandlerPrompt", step.OutputHandlerPrompt);
 		foreach (var (i, dir) in step.SkillDirectories.Select((d, i) => (i, d)))
 			yield return ($"SkillDirectories[{i}]", dir);
 	}
