@@ -143,6 +143,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		// Suppress Kestrel and hosting logs for the internal proxy
 		builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
+		// Clear default URLs so Kestrel only uses our explicit endpoint binding
+		// (avoids "Overriding address(es)" warning)
+		builder.WebHost.UseUrls();
 		builder.WebHost.ConfigureKestrel(k =>
 		{
 			k.Listen(IPAddress.Loopback, _proxyPort);
