@@ -583,15 +583,13 @@ public class McpUsageCollectionTests
 		string id,
 		string name,
 		Mcp[]? orchestrationMcps = null,
-		PromptOrchestrationStep[]? steps = null,
-		string? mcpPath = null)
+		PromptOrchestrationStep[]? steps = null)
 	{
 		var allSteps = steps?.Cast<OrchestrationStep>().ToArray() ?? [];
 		return new OrchestrationEntry
 		{
 			Id = id,
 			Path = $"/fake/{id}.json",
-			McpPath = mcpPath,
 			Orchestration = new Orchestration
 			{
 				Name = name,
@@ -782,73 +780,6 @@ public class McpUsageCollectionTests
 		var remote = result[0].Mcp.Should().BeOfType<RemoteMcp>().Subject;
 		remote.Endpoint.Should().Be("https://mcp.context7.com/mcp");
 		remote.Headers.Should().ContainKey("Authorization");
-	}
-
-	[Fact]
-	public void CollectMcpUsage_ExternalLoader_Called_For_McpPath()
-	{
-		var externalMcp = CreateLocalMcp("external-server");
-		var entry = CreateEntry("orch1", "With External", mcpPath: "/fake/mcp.json");
-
-		var loaderCalled = false;
-		var result = TerminalUI.CollectMcpUsage([entry], path =>
-		{
-			loaderCalled = true;
-			path.Should().Be("/fake/mcp.json");
-			return [externalMcp];
-		});
-
-		loaderCalled.Should().BeTrue();
-		result.Should().HaveCount(1);
-		result[0].Mcp.Name.Should().Be("external-server");
-		result[0].UsedByOrchestrationIds.Should().Contain("orch1");
-	}
-
-	[Fact]
-	public void CollectMcpUsage_ExternalLoader_Deduplicates_Same_McpPath()
-	{
-		var externalMcp = CreateLocalMcp("shared-server");
-		var entry1 = CreateEntry("orch1", "First", mcpPath: "/fake/mcp.json");
-		var entry2 = CreateEntry("orch2", "Second", mcpPath: "/fake/mcp.json");
-
-		var callCount = 0;
-		var result = TerminalUI.CollectMcpUsage([entry1, entry2], path =>
-		{
-			callCount++;
-			return [externalMcp];
-		});
-
-		// External loader should only be called once for the same path
-		callCount.Should().Be(1);
-		result.Should().HaveCount(1);
-		// But both orchestrations should be listed as users (since they share the path)
-		result[0].UsedByOrchestrationIds.Should().Contain("orch1");
-	}
-
-	[Fact]
-	public void CollectMcpUsage_ExternalLoader_Error_Is_Ignored()
-	{
-		var entry = CreateEntry("orch1", "Error Test", mcpPath: "/fake/bad.json");
-
-		var result = TerminalUI.CollectMcpUsage([entry], _ => throw new InvalidOperationException("bad file"));
-
-		result.Should().BeEmpty();
-	}
-
-	[Fact]
-	public void CollectMcpUsage_No_McpPath_Skips_ExternalLoader()
-	{
-		var entry = CreateEntry("orch1", "No MCP Path");
-
-		var loaderCalled = false;
-		var result = TerminalUI.CollectMcpUsage([entry], _ =>
-		{
-			loaderCalled = true;
-			return [];
-		});
-
-		loaderCalled.Should().BeFalse();
-		result.Should().BeEmpty();
 	}
 
 	[Fact]

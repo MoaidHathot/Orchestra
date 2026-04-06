@@ -158,13 +158,14 @@ public static class OrchestrationParser
 
 	private static void ResolveStepMcps(Orchestration orchestration, Mcp[] availableMcps)
 	{
-		// Merge inline MCPs from orchestration with externally provided MCPs.
-		// External MCPs take priority on name conflicts (override inline definitions).
+		// Merge global MCPs with inline MCPs from the orchestration.
+		// Inline MCPs take priority on name conflicts (override global definitions).
+		// This allows orchestrations to shadow a global MCP with a custom inline version.
 		var lookup = new Dictionary<string, Mcp>(StringComparer.OrdinalIgnoreCase);
-		foreach (var mcp in orchestration.Mcps)
-			lookup[mcp.Name] = mcp;
 		foreach (var mcp in availableMcps)
-			lookup[mcp.Name] = mcp; // external overrides inline
+			lookup[mcp.Name] = mcp; // global MCPs first
+		foreach (var mcp in orchestration.Mcps)
+			lookup[mcp.Name] = mcp; // inline overrides global
 
 		foreach (var step in orchestration.Steps)
 		{

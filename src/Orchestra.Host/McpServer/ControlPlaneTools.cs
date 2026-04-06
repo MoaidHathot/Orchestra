@@ -39,7 +39,6 @@ public sealed class ControlPlaneTools
 		{
 			id = entry.Id,
 			path = entry.Path,
-			mcpPath = entry.McpPath,
 			name = o.Name,
 			description = o.Description,
 			version = o.Version,
@@ -80,21 +79,20 @@ public sealed class ControlPlaneTools
 	public static string RegisterOrchestration(
 		OrchestrationRegistry registry,
 		TriggerManager triggerManager,
-		[Description("Absolute path to the orchestration JSON file.")] string path,
-		[Description("Optional path to an MCP configuration JSON file.")] string? mcpPath = null)
+		[Description("Absolute path to the orchestration JSON file.")] string path)
 	{
 		if (!File.Exists(path))
 			return Error($"File not found: {path}");
 
 		try
 		{
-			var entry = registry.Register(path, mcpPath);
+			var entry = registry.Register(path);
 
 			// Register trigger if enabled
 			if (entry.Orchestration.Trigger.Enabled)
 			{
 				triggerManager.RegisterTrigger(
-					entry.Path, entry.McpPath, entry.Orchestration.Trigger,
+					entry.Path, entry.Orchestration.Trigger,
 					null, TriggerSource.Json, entry.Id, entry.Orchestration);
 			}
 

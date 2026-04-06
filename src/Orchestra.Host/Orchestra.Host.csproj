@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <PackageReference Include="Cronos" />
+    <PackageReference Include="McpProxy.Sdk" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
   </ItemGroup>
 

@@ -111,7 +111,6 @@ public partial class TriggerManager : BackgroundService
 	/// </summary>
 	public TriggerRegistration RegisterTrigger(
 		string orchestrationPath,
-		string? mcpPath,
 		TriggerConfig config,
 		Dictionary<string, string>? parameters = null,
 		TriggerSource source = TriggerSource.User,
@@ -142,7 +141,6 @@ public partial class TriggerManager : BackgroundService
 		{
 			Id = id,
 			OrchestrationPath = orchestrationPath,
-			McpPath = mcpPath,
 			Config = config,
 			Parameters = parameters,
 			Source = source,
@@ -326,7 +324,6 @@ public partial class TriggerManager : BackgroundService
 	/// </summary>
 	public async Task<string?> RunOrchestrationAsync(
 		string orchestrationPath,
-		string? mcpPath = null,
 		Dictionary<string, string>? parameters = null,
 		string? orchestrationId = null)
 	{
@@ -349,7 +346,6 @@ public partial class TriggerManager : BackgroundService
 		{
 			Id = orchestrationId ?? GenerateTriggerId(orchestrationPath, orchName),
 			OrchestrationPath = orchestrationPath,
-			McpPath = mcpPath,
 			Config = triggerConfig,
 			Parameters = parameters,
 			Source = TriggerSource.User,
@@ -518,7 +514,7 @@ public partial class TriggerManager : BackgroundService
 
 				if (config != null)
 				{
-					RegisterTrigger(data.OrchestrationPath, data.McpPath, config, data.Parameters, TriggerSource.User);
+					RegisterTrigger(data.OrchestrationPath, config, data.Parameters, TriggerSource.User);
 				}
 			}
 			catch (Exception ex)
@@ -551,7 +547,7 @@ public partial class TriggerManager : BackgroundService
 				if (_triggers.TryGetValue(id, out var existing) && existing.Source == TriggerSource.User)
 					continue;
 
-				RegisterTrigger(file, null, orchestration.Trigger, null, TriggerSource.Json, preloadedOrchestration: orchestration);
+				RegisterTrigger(file, orchestration.Trigger, null, TriggerSource.Json, preloadedOrchestration: orchestration);
 			}
 			catch (Exception ex)
 			{
@@ -747,14 +743,8 @@ public partial class TriggerManager : BackgroundService
 
 		try
 		{
-			// Parse orchestration
-			Mcp[] mcps = [];
-			if (!string.IsNullOrWhiteSpace(reg.McpPath) && File.Exists(reg.McpPath))
-			{
-				mcps = OrchestrationParser.ParseMcpFile(reg.McpPath);
-			}
-
-			var orchestration = OrchestrationParser.ParseOrchestrationFile(reg.OrchestrationPath, mcps);
+			// Parse orchestration (global MCPs are resolved by McpManager at step execution time)
+			var orchestration = OrchestrationParser.ParseOrchestrationFile(reg.OrchestrationPath, []);
 			var schedule = _scheduler.Schedule(orchestration);
 
 			// ── Input Handler Prompt: transform raw parameters via LLM ──
@@ -973,7 +963,6 @@ public partial class TriggerManager : BackgroundService
 			var data = new PersistedTrigger
 			{
 				OrchestrationPath = reg.OrchestrationPath,
-				McpPath = reg.McpPath,
 				Trigger = reg.Config,
 				Parameters = reg.Parameters,
 			};
@@ -1210,7 +1199,6 @@ public partial class TriggerManager : BackgroundService
 	private class PersistedTrigger
 	{
 		public required string OrchestrationPath { get; init; }
-		public string? McpPath { get; init; }
 		public required TriggerConfig Trigger { get; init; }
 		public Dictionary<string, string>? Parameters { get; init; }
 	}

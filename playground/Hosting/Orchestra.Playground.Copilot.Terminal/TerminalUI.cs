@@ -1119,7 +1119,6 @@ public class TerminalUI
 			// No registered trigger, run orchestration directly
 			executionId = await _triggerManager.RunOrchestrationAsync(
 				entry.Path,
-				entry.McpPath,
 				parameters,
 				entry.Id);
 		}
@@ -1158,23 +1157,13 @@ public class TerminalUI
 
 		try
 		{
-			// Auto-detect mcp.json in same directory
-			string? mcpPath = null;
-			var dir = Path.GetDirectoryName(path)!;
-			var candidateMcp = Path.Combine(dir, "mcp.json");
-			if (File.Exists(candidateMcp))
-			{
-				mcpPath = candidateMcp;
-			}
-
-			var entry = _registry.Register(path, mcpPath);
+			var entry = _registry.Register(path);
 
 			// Register trigger if orchestration has one
 			if (entry.Orchestration.Trigger is { } trigger && trigger.Enabled)
 			{
 				_triggerManager.RegisterTrigger(
 					entry.Path,
-					entry.McpPath,
 					trigger,
 					null,
 					TriggerSource.Json,
@@ -1216,16 +1205,8 @@ public class TerminalUI
 
 		try
 		{
-			// Look for mcp.json in directory
-			string? mcpPath = null;
-			var candidateMcp = Path.Combine(dirPath, "mcp.json");
-			if (File.Exists(candidateMcp))
-			{
-				mcpPath = candidateMcp;
-			}
-
 			var countBefore = _registry.Count;
-			_registry.ScanDirectory(dirPath, mcpPath);
+			_registry.ScanDirectory(dirPath);
 			var added = _registry.Count - countBefore;
 
 			// Register triggers for newly added orchestrations
@@ -1238,7 +1219,6 @@ public class TerminalUI
 					{
 						_triggerManager.RegisterTrigger(
 							entry.Path,
-							entry.McpPath,
 							trigger,
 							null,
 							TriggerSource.Json,
@@ -1968,11 +1948,6 @@ public class TerminalUI
 			new Markup($"[bold]Path:[/]        [dim]{Markup.Escape(entry.Path)}[/]"),
 		};
 
-		if (entry.McpPath != null)
-		{
-			infoRows.Add(new Markup($"[bold]MCP Config:[/]  [dim]{Markup.Escape(entry.McpPath)}[/]"));
-		}
-
 		infoRows.Add(new Markup($"[bold]Trigger:[/]     {o.Trigger.Type} [dim](enabled: {o.Trigger.Enabled})[/]"));
 
 		var parameters = GetOrchestrationParameters(entry);
@@ -2010,19 +1985,6 @@ public class TerminalUI
 						orchMcps.Add(m);
 				}
 			}
-		}
-		if (entry.McpPath != null)
-		{
-			try
-			{
-				var externalMcps = OrchestrationParser.ParseMcpFile(entry.McpPath);
-				foreach (var m in externalMcps)
-				{
-					if (!orchMcps.Any(existing => string.Equals(existing.Name, m.Name, StringComparison.OrdinalIgnoreCase)))
-						orchMcps.Add(m);
-				}
-			}
-			catch { /* ignore parse errors */ }
 		}
 
 		if (orchMcps.Count > 0)
@@ -3194,38 +3156,17 @@ public class TerminalUI
 	/// </summary>
 	internal McpUsageInfo[] GetAllMcps()
 	{
-		return CollectMcpUsage(_registry.GetAll(), (string name) =>
-		{
-			// Try to load external MCPs from mcp.json files
-			foreach (var entry in _registry.GetAll())
-			{
-				if (entry.McpPath != null && File.Exists(entry.McpPath))
-				{
-					try
-					{
-						return OrchestrationParser.ParseMcpFile(entry.McpPath);
-					}
-					catch
-					{
-						// Ignore parse errors
-					}
-				}
-			}
-			return Array.Empty<Mcp>();
-		});
+		return CollectMcpUsage(_registry.GetAll());
 	}
 
 	/// <summary>
 	/// Core MCP collection logic, extracted for testability.
-	/// Collects all unique MCPs from orchestration entries, optionally loading
-	/// additional MCPs from external config files.
+	/// Collects all unique MCPs from orchestration entries.
 	/// </summary>
 	internal static McpUsageInfo[] CollectMcpUsage(
-		IEnumerable<OrchestrationEntry> entries,
-		Func<string, Mcp[]>? externalMcpLoader = null)
+		IEnumerable<OrchestrationEntry> entries)
 	{
 		var mcpUsage = new Dictionary<string, (Mcp Mcp, List<string> Ids, List<string> Names)>(StringComparer.OrdinalIgnoreCase);
-		var processedMcpPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 		foreach (var entry in entries)
 		{
@@ -3241,24 +3182,6 @@ public class TerminalUI
 				foreach (var mcp in step.Mcps)
 				{
 					AddMcpUsage(mcpUsage, mcp, entry);
-				}
-			}
-
-			// Also load MCPs from external mcp.json files
-			if (externalMcpLoader != null && entry.McpPath != null && !processedMcpPaths.Contains(entry.McpPath))
-			{
-				processedMcpPaths.Add(entry.McpPath);
-				try
-				{
-					var externalMcps = externalMcpLoader(entry.McpPath);
-					foreach (var mcp in externalMcps)
-					{
-						AddMcpUsage(mcpUsage, mcp, entry);
-					}
-				}
-				catch
-				{
-					// Ignore parse errors for external MCP files
 				}
 			}
 		}
@@ -3384,7 +3307,7 @@ public class TerminalUI
 		if (items.Length == 0)
 		{
 			var msg = string.IsNullOrEmpty(_searchQuery)
-				? "[dim]No MCP servers configured. MCPs are defined in orchestration JSON or mcp.json files.[/]"
+				? "[dim]No MCP servers configured. MCPs are defined inline in orchestration JSON or in a global mcp.json.[/]"
 				: $"[dim]No MCPs matching [yellow]{Markup.Escape(_searchQuery)}[/][/]";
 			table.AddRow(new Markup(msg));
 		}
@@ -3492,33 +3415,6 @@ public class TerminalUI
 					{
 						rows.Add(new Markup("    [dim]Defined at orchestration level[/]"));
 					}
-				}
-			}
-		}
-
-		// Show MCP config files that reference this MCP
-		var mcpPaths = _registry.GetAll()
-			.Where(e => e.McpPath != null)
-			.Select(e => e.McpPath!)
-			.Distinct()
-			.ToArray();
-
-		if (mcpPaths.Length > 0)
-		{
-			rows.Add(new Rule("[dim]Config Files[/]") { Style = Style.Parse("dim") });
-			foreach (var path in mcpPaths)
-			{
-				try
-				{
-					var externalMcps = OrchestrationParser.ParseMcpFile(path);
-					if (externalMcps.Any(m => string.Equals(m.Name, mcp.Name, StringComparison.OrdinalIgnoreCase)))
-					{
-						rows.Add(new Markup($"  [dim]{Markup.Escape(path)}[/]"));
-					}
-				}
-				catch
-				{
-					// Skip unparseable files
 				}
 			}
 		}
@@ -4875,7 +4771,6 @@ public class TerminalUI
 				var config = BuildTriggerConfig();
 				_triggerManager.RegisterTrigger(
 					entry.Path,
-					entry.McpPath,
 					config,
 					null,
 					TriggerSource.User,

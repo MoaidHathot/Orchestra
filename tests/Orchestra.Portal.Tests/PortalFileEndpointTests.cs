@@ -201,7 +201,6 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 		result.GetProperty("directory").GetString().Should().Be(_tempDir);
 		result.GetProperty("count").GetInt32().Should().Be(2);
-		result.GetProperty("mcpPath").ValueKind.Should().Be(JsonValueKind.Null);
 
 		var orchestrations = result.GetProperty("orchestrations").EnumerateArray().ToList();
 		orchestrations.Should().HaveCount(2);
@@ -217,7 +216,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	}
 
 	[Fact]
-	public async Task FolderScan_WithMcpJson_DetectsMcpPath()
+	public async Task FolderScan_WithMcpJson_ExcludesMcpJsonFromOrchestrations()
 	{
 		// Arrange
 		WriteFile("workflow.json", CreateValidOrchestrationJson("Test Workflow"));
@@ -241,9 +240,6 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-		var expectedMcpPath = Path.Combine(_tempDir, "mcp.json");
-		result.GetProperty("mcpPath").GetString().Should().Be(expectedMcpPath);
 
 		// mcp.json should NOT appear in the orchestrations list
 		var orchestrations = result.GetProperty("orchestrations").EnumerateArray().ToList();
@@ -336,42 +332,6 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		result.GetProperty("count").GetInt32().Should().Be(1);
 		var orchestrations = result.GetProperty("orchestrations").EnumerateArray().ToList();
 		orchestrations[0].GetProperty("fileName").GetString().Should().Be("top-level.json");
-	}
-
-	[Fact]
-	public async Task FolderScan_DetectsPerFileMcpJson()
-	{
-		// Arrange - Create orchestration with a matching per-file mcp.json
-		WriteFile("my-workflow.json", CreateValidOrchestrationJson("My Workflow"));
-		var perFileMcpContent = """
-		{
-			"mcps": [
-				{
-					"name": "test-mcp",
-					"type": "local",
-					"command": "echo",
-					"arguments": ["hello"]
-				}
-			]
-		}
-		""";
-		WriteFile("my-workflow.mcp.json", perFileMcpContent);
-
-		// Act
-		var response = await _client.PostAsJsonAsync("/api/folder/scan",
-			new { Directory = _tempDir }, _jsonOptions);
-
-		// Assert
-		response.StatusCode.Should().Be(HttpStatusCode.OK);
-		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
-
-		var orchestrations = result.GetProperty("orchestrations").EnumerateArray().ToList();
-		// my-workflow.mcp.json will also be parsed (and likely fail/be invalid as an orchestration),
-		// but the important thing is that my-workflow.json gets the per-file mcpPath
-		var workflow = orchestrations.First(o => o.GetProperty("fileName").GetString() == "my-workflow.json");
-		var mcpPath = workflow.GetProperty("mcpPath").GetString();
-		mcpPath.Should().NotBeNull();
-		mcpPath.Should().Contain("my-workflow.mcp.json");
 	}
 
 	#endregion
@@ -490,9 +450,10 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	}
 
 	[Fact]
-	public async Task OrchestrationsAdd_AutoDetectsMcpJson()
+	public async Task OrchestrationsAdd_RegistersOrchestrationIgnoringMcpJson()
 	{
 		// Arrange - Create orchestration and mcp.json in same directory
+		// mcp.json should be ignored (global MCPs are managed by McpManager)
 		var json = CreateValidOrchestrationJson("MCP Auto Detect Test");
 		var filePath = Path.Combine(_tempDir, "mcp-auto.json");
 		File.WriteAllText(filePath, json);
@@ -506,7 +467,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		var response = await _client.PostAsJsonAsync("/api/orchestrations",
 			new { paths = new[] { filePath } }, _jsonOptions);
 
-		// Assert
+		// Assert - orchestration should still be registered successfully
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
 		result.GetProperty("addedCount").GetInt32().Should().Be(1);
@@ -1089,7 +1050,6 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 		triggerManager.RegisterTrigger(
 			Path.Combine(_tempDir, "fallback-test.json"),
-			null,
 			new SchedulerTriggerConfig { Type = TriggerType.Scheduler, Enabled = true, IntervalSeconds = 9999 },
 			null,
 			TriggerSource.Json,
@@ -1137,7 +1097,6 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 		triggerManager.RegisterTrigger(
 			fakePath,
-			null,
 			new SchedulerTriggerConfig { Type = TriggerType.Scheduler, Enabled = true, IntervalSeconds = 9999 },
 			null,
 			TriggerSource.Json,

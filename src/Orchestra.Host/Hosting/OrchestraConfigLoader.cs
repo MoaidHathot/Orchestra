@@ -67,6 +67,35 @@ public static class OrchestraConfigLoader
 	}
 
 	/// <summary>
+	/// The global MCP configuration file name, co-located with orchestra.json.
+	/// </summary>
+	public const string McpConfigFileName = "mcp.json";
+
+	/// <summary>
+	/// Resolves the path to the global mcp.json file.
+	/// It lives in the same directory as orchestra.json.
+	/// Returns null if no mcp.json exists.
+	/// </summary>
+	public static string? ResolveGlobalMcpPath()
+	{
+		// First try to find the config directory from the resolved config path
+		var configPath = ResolveConfigPath();
+		if (configPath is not null)
+		{
+			var dir = Path.GetDirectoryName(configPath)!;
+			var mcpPath = Path.Combine(dir, McpConfigFileName);
+			if (File.Exists(mcpPath))
+				return mcpPath;
+		}
+
+		// Fall back to the default config directory
+		var defaultConfigPath = GetDefaultConfigPath();
+		var defaultDir = Path.GetDirectoryName(defaultConfigPath)!;
+		var defaultMcpPath = Path.Combine(defaultDir, McpConfigFileName);
+		return File.Exists(defaultMcpPath) ? defaultMcpPath : null;
+	}
+
+	/// <summary>
 	/// Gets the default config file path for the current platform.
 	/// This is where the config file would be created if one doesn't exist.
 	/// </summary>

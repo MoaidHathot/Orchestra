@@ -59,18 +59,14 @@ public partial class OrchestrationRegistry
 	/// If a managed orchestrations directory is configured, the file is copied there
 	/// and the managed path is stored instead of the original.
 	/// </summary>
-	public OrchestrationEntry Register(string path, string? mcpPath, Orchestration? preloaded = null, bool persist = true, string? originalSourcePath = null)
+	public OrchestrationEntry Register(string path, Orchestration? preloaded = null, bool persist = true, string? originalSourcePath = null)
 	{
 		// Read the raw JSON content for hashing and snapshots
 		string? rawJson = null;
 		if (File.Exists(path))
 			rawJson = File.ReadAllText(path);
 
-		Mcp[] mcps = [];
-		if (!string.IsNullOrWhiteSpace(mcpPath) && File.Exists(mcpPath))
-			mcps = OrchestrationParser.ParseMcpFile(mcpPath);
-
-		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, mcps);
+		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, []);
 
 		// Use the original source path for ID generation when available.
 		// This ensures a stable ID when the orchestration file has been copied
@@ -98,7 +94,6 @@ public partial class OrchestrationRegistry
 			Id = id,
 			Path = effectivePath,
 			SourcePath = sourcePath,
-			McpPath = mcpPath,
 			Orchestration = orchestration,
 			RegisteredAt = DateTimeOffset.UtcNow,
 			ContentHash = contentHash
@@ -122,14 +117,9 @@ public partial class OrchestrationRegistry
 	/// Registers an orchestration directly from JSON content (no source file needed).
 	/// The content is written to the managed location if configured, or a temp directory otherwise.
 	/// </summary>
-	public OrchestrationEntry RegisterFromJson(string json, string? mcpJson, Orchestration? preloaded = null, bool persist = true)
+	public OrchestrationEntry RegisterFromJson(string json, Orchestration? preloaded = null, bool persist = true)
 	{
-		// Parse MCPs if provided
-		Mcp[] mcps = [];
-		if (!string.IsNullOrWhiteSpace(mcpJson))
-			mcps = OrchestrationParser.ParseMcps(mcpJson);
-
-		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestration(json, mcps);
+		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestration(json, []);
 
 		// Write to managed location or temp
 		string filePath;
@@ -149,7 +139,7 @@ public partial class OrchestrationRegistry
 			File.WriteAllText(filePath, json);
 		}
 
-		return Register(filePath, mcpPath: null, preloaded: orchestration, persist: persist);
+		return Register(filePath, preloaded: orchestration, persist: persist);
 	}
 
 	private async Task SnapshotVersionAsync(string orchestrationId, OrchestrationEntry entry, string rawJson, string contentHash)
@@ -228,7 +218,6 @@ public partial class OrchestrationRegistry
 			var data = _entries.Values.Select(e => new PersistedOrchestration
 			{
 				Path = e.Path,
-				McpPath = e.McpPath,
 				SourcePath = e.SourcePath
 			}).ToList();
 
@@ -272,7 +261,7 @@ public partial class OrchestrationRegistry
 
 				try
 				{
-					Register(item.Path, item.McpPath, persist: false, originalSourcePath: item.SourcePath);
+					Register(item.Path, persist: false, originalSourcePath: item.SourcePath);
 					loaded++;
 				}
 				catch (Exception ex)
@@ -294,7 +283,7 @@ public partial class OrchestrationRegistry
 	/// <summary>
 	/// Scans a directory for orchestration files and registers them.
 	/// </summary>
-	public int ScanDirectory(string directory, string? mcpPath = null)
+	public int ScanDirectory(string directory)
 	{
 		if (!Directory.Exists(directory))
 			return 0;
@@ -304,7 +293,7 @@ public partial class OrchestrationRegistry
 		{
 			try
 			{
-				Register(file, mcpPath, persist: false);
+				Register(file, persist: false);
 				loaded++;
 			}
 			catch (Exception ex)
@@ -399,7 +388,6 @@ public partial class OrchestrationRegistry
 public class PersistedOrchestration
 {
 	public string Path { get; set; } = "";
-	public string? McpPath { get; set; }
 
 	/// <summary>
 	/// The original source path used when first registering the orchestration.
@@ -423,7 +411,6 @@ public class OrchestrationEntry
 	/// </summary>
 	public string? SourcePath { get; init; }
 
-	public string? McpPath { get; init; }
 	public required Orchestration Orchestration { get; init; }
 	public DateTimeOffset RegisteredAt { get; init; }
 

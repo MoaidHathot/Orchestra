@@ -39,7 +39,6 @@ public static class OrchestrationsApi
 				{
 					id = o.Id,
 					path = o.Path,
-					mcpPath = o.McpPath,
 					name = o.Orchestration.Name,
 					description = o.Orchestration.Description,
 					version = o.Orchestration.Version,
@@ -238,7 +237,6 @@ public static class OrchestrationsApi
 			{
 				id = entry.Id,
 				path = entry.Path,
-				mcpPath = entry.McpPath,
 				name = o.Name,
 				description = o.Description,
 				version = o.Version,
@@ -290,17 +288,7 @@ public static class OrchestrationsApi
 						continue;
 					}
 
-					// Auto-detect mcp.json in same directory
-					var mcpPath = request.McpPath;
-					if (string.IsNullOrWhiteSpace(mcpPath))
-					{
-						var dir = Path.GetDirectoryName(path)!;
-						var candidate = Path.Combine(dir, "mcp.json");
-						if (File.Exists(candidate))
-							mcpPath = candidate;
-					}
-
-					var entry = registry.Register(path, mcpPath);
+					var entry = registry.Register(path);
 					added.Add(new
 					{
 						id = entry.Id,
@@ -313,7 +301,6 @@ public static class OrchestrationsApi
 				{
 					triggerManager.RegisterTrigger(
 						entry.Path,
-						entry.McpPath,
 						entry.Orchestration.Trigger,
 						null,
 						TriggerSource.Json,
@@ -338,14 +325,13 @@ public static class OrchestrationsApi
 				if (string.IsNullOrWhiteSpace(request.Json))
 					return ProblemDetailsHelpers.BadRequest("JSON content is required.");
 
-				var entry = registry.RegisterFromJson(request.Json, request.McpJson);
+				var entry = registry.RegisterFromJson(request.Json);
 
 			// Register trigger for this orchestration
 			if (entry.Orchestration.Trigger.Enabled)
 			{
 				triggerManager.RegisterTrigger(
 					entry.Path,
-					entry.McpPath,
 					entry.Orchestration.Trigger,
 					null,
 					TriggerSource.Json,
@@ -392,7 +378,6 @@ public static class OrchestrationsApi
 				var enabledTrigger = TriggerManager.CloneTriggerConfigWithEnabled(entry.Orchestration.Trigger, true);
 				triggerManager.RegisterTrigger(
 					entry.Path,
-					entry.McpPath,
 					enabledTrigger,
 					null,
 					TriggerSource.Json,
@@ -431,25 +416,11 @@ public static class OrchestrationsApi
 				var files = Directory.GetFiles(request.Directory, "*.json", SearchOption.TopDirectoryOnly);
 				var orchestrations = new List<object>();
 
-				// Auto-detect mcp.json in the scanned directory
-				string? detectedMcpPath = null;
-				var mcpCandidate = Path.Combine(request.Directory, "mcp.json");
-				if (File.Exists(mcpCandidate))
-					detectedMcpPath = mcpCandidate;
-
 				foreach (var file in files.OrderBy(f => f))
 				{
-					if (Path.GetFileName(file).Equals("mcp.json", StringComparison.OrdinalIgnoreCase))
-						continue;
-
 					try
 					{
 						var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(file);
-
-						var perFileMcp = Path.Combine(
-							Path.GetDirectoryName(file)!,
-							Path.GetFileNameWithoutExtension(file) + ".mcp.json");
-						var orchMcpPath = File.Exists(perFileMcp) ? perFileMcp : detectedMcpPath;
 
 						orchestrations.Add(new
 						{
@@ -460,7 +431,6 @@ public static class OrchestrationsApi
 							version = orchestration.Version,
 							stepCount = orchestration.Steps.Length,
 							trigger = FormatTriggerInfo(orchestration.Trigger),
-							mcpPath = orchMcpPath,
 							valid = true,
 							error = (string?)null
 						});
@@ -476,7 +446,6 @@ public static class OrchestrationsApi
 							version = (string?)null,
 							stepCount = 0,
 							trigger = (object?)null,
-							mcpPath = (string?)null,
 							valid = false,
 							error = ex.Message
 						});
@@ -487,7 +456,6 @@ public static class OrchestrationsApi
 				{
 					directory = request.Directory,
 					count = orchestrations.Count,
-					mcpPath = detectedMcpPath,
 					orchestrations
 				}, jsonOptions);
 			}
@@ -729,7 +697,7 @@ public static class OrchestrationsApi
 }
 
 // Request DTOs
-public record AddOrchestrationsRequest(string[]? Paths, string? McpPath);
-public record AddJsonRequest(string Json, string? McpJson);
+public record AddOrchestrationsRequest(string[]? Paths);
+public record AddJsonRequest(string Json);
 public record FolderScanRequest(string? Directory);
 public record ExportOrchestrationsRequest(string? Directory, string[]? OrchestrationIds, bool OverwriteExisting = false);

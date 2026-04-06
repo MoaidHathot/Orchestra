@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
+using Orchestra.Host.Mcp;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
@@ -73,57 +74,25 @@ public static class UtilityApi
 			});
 		});
 
-		// GET /api/mcps - List all MCPs used across orchestrations
-		endpoints.MapGet("/api/mcps", (OrchestrationRegistry registry) =>
+		// GET /api/mcps - List all globally managed MCPs
+		endpoints.MapGet("/api/mcps", (Mcp.McpManager mcpManager) =>
 		{
-			// Collect all unique MCPs from all orchestrations
-			var mcpUsage = new Dictionary<string, (Mcp Mcp, List<string> UsedBy)>(StringComparer.OrdinalIgnoreCase);
-
-			foreach (var entry in registry.GetAll())
+			var mcps = mcpManager.GlobalMcps.Select(m => new
 			{
-				var orchestrationId = entry.Id;
-
-				// Collect orchestration-level MCPs
-				foreach (var mcp in entry.Orchestration.Mcps)
-				{
-					if (!mcpUsage.TryGetValue(mcp.Name, out var usage))
-					{
-						usage = (mcp, new List<string>());
-						mcpUsage[mcp.Name] = usage;
-					}
-					if (!usage.UsedBy.Contains(orchestrationId))
-						usage.UsedBy.Add(orchestrationId);
-				}
-
-				// Collect step-level MCPs
-				foreach (var step in entry.Orchestration.Steps.OfType<PromptOrchestrationStep>())
-				{
-					foreach (var mcp in step.Mcps)
-					{
-						if (!mcpUsage.TryGetValue(mcp.Name, out var usage))
-						{
-							usage = (mcp, new List<string>());
-							mcpUsage[mcp.Name] = usage;
-						}
-						if (!usage.UsedBy.Contains(orchestrationId))
-							usage.UsedBy.Add(orchestrationId);
-					}
-				}
-			}
-
-			var mcps = mcpUsage.Values.Select(u => new
-			{
-				name = u.Mcp.Name,
-				type = u.Mcp.Type.ToString(),
-				endpoint = (u.Mcp as RemoteMcp)?.Endpoint,
-				command = (u.Mcp as LocalMcp)?.Command,
-				arguments = (u.Mcp as LocalMcp)?.Arguments,
-				workingDirectory = (u.Mcp as LocalMcp)?.WorkingDirectory,
-				usedByCount = u.UsedBy.Count,
-				usedBy = u.UsedBy.ToArray()
+				name = m.Name,
+				type = m.Type.ToString(),
+				endpoint = (m as RemoteMcp)?.Endpoint,
+				command = (m as LocalMcp)?.Command,
+				arguments = (m as LocalMcp)?.Arguments,
+				workingDirectory = (m as LocalMcp)?.WorkingDirectory,
 			}).OrderBy(m => m.name).ToArray();
 
-			return Results.Json(new { count = mcps.Length, mcps }, jsonOptions);
+			return Results.Json(new
+			{
+				count = mcps.Length,
+				proxyRunning = mcpManager.IsRunning,
+				mcps
+			}, jsonOptions);
 		});
 
 		// GET /api/config - Client-facing configuration (polling intervals, etc.)

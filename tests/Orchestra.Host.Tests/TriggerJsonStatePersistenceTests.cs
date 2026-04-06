@@ -96,7 +96,7 @@ public class TriggerJsonStatePersistenceTests : IDisposable
 			Enabled = true,
 			IntervalSeconds = 60,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		// Act
 		var result = _triggerManager.SetTriggerEnabled(reg.Id, false);
@@ -116,7 +116,7 @@ public class TriggerJsonStatePersistenceTests : IDisposable
 			Type = TriggerType.Webhook,
 			Enabled = true,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		// Disable then re-enable
 		_triggerManager.SetTriggerEnabled(reg.Id, false);
@@ -137,7 +137,7 @@ public class TriggerJsonStatePersistenceTests : IDisposable
 			Enabled = true,
 			IntervalSeconds = 30,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.User);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.User);
 
 		// Act
 		_triggerManager.SetTriggerEnabled(reg.Id, false);
@@ -166,7 +166,7 @@ public class TriggerJsonStatePersistenceTests : IDisposable
 			Type = TriggerType.Webhook,
 			Enabled = true,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		// Disable it (creates override file)
 		_triggerManager.SetTriggerEnabled(reg.Id, false);
@@ -191,7 +191,7 @@ public class TriggerJsonStatePersistenceTests : IDisposable
 			Enabled = true,
 			MaxIterations = 5,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 		_triggerManager.SetTriggerEnabled(reg.Id, false);
 
 		// Act — create a new TriggerManager instance (simulates restart)
@@ -212,7 +212,7 @@ public class TriggerJsonStatePersistenceTests : IDisposable
 			Enabled = true,
 			IntervalSeconds = 60,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 		reg.Status.Should().Be(TriggerStatus.Waiting);
 
 		// Act
@@ -235,7 +235,7 @@ public class TriggerJsonStatePersistenceTests : IDisposable
 			Type = TriggerType.Webhook,
 			Enabled = false,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 		reg.Status.Should().Be(TriggerStatus.Paused);
 
 		// Act

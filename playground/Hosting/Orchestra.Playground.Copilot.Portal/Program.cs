@@ -194,12 +194,6 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 		var files = Directory.GetFiles(request.Directory, "*.json", SearchOption.TopDirectoryOnly);
 		var orchestrations = new List<object>();
 
-		// Auto-detect mcp.json in the scanned directory
-		string? detectedMcpPath = null;
-		var mcpCandidate = Path.Combine(request.Directory, "mcp.json");
-		if (File.Exists(mcpCandidate))
-			detectedMcpPath = mcpCandidate;
-
 		foreach (var file in files.OrderBy(f => f))
 		{
 			if (Path.GetFileName(file).Equals("mcp.json", StringComparison.OrdinalIgnoreCase))
@@ -208,11 +202,6 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 			try
 			{
 				var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(file);
-
-				var perFileMcp = Path.Combine(
-					Path.GetDirectoryName(file)!,
-					Path.GetFileNameWithoutExtension(file) + ".mcp.json");
-				var orchMcpPath = File.Exists(perFileMcp) ? perFileMcp : detectedMcpPath;
 
 				orchestrations.Add(new
 				{
@@ -223,7 +212,6 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 					stepCount = orchestration.Steps.Length,
 					steps = orchestration.Steps.Select(s => s.Name).ToArray(),
 					parameters = orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray(),
-					mcpPath = orchMcpPath,
 					hasInlineMcps = orchestration.Mcps.Length > 0,
 					inlineMcpNames = orchestration.Mcps.Select(m => m.Name).ToArray(),
 					valid = true,
@@ -241,7 +229,6 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 					stepCount = 0,
 					steps = Array.Empty<string>(),
 					parameters = Array.Empty<string>(),
-					mcpPath = (string?)null,
 					hasInlineMcps = false,
 					inlineMcpNames = Array.Empty<string>(),
 					valid = false,
@@ -254,7 +241,6 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 		{
 			directory = request.Directory,
 			count = orchestrations.Count,
-			mcpPath = detectedMcpPath,
 			orchestrations,
 		});
 	}

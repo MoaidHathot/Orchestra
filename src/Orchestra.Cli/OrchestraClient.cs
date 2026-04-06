@@ -30,8 +30,8 @@ public class OrchestraClient : IDisposable
 	public async Task<JsonElement> GetOrchestrationAsync(string id)
 		=> await GetAsync($"api/orchestrations/{Uri.EscapeDataString(id)}");
 
-	public async Task<JsonElement> RegisterOrchestrationAsync(string path, string? mcpPath = null)
-		=> await PostAsync("api/orchestrations", new { paths = new[] { path }, mcpPath });
+	public async Task<JsonElement> RegisterOrchestrationAsync(string path)
+		=> await PostAsync("api/orchestrations", new { paths = new[] { path } });
 
 	public async Task<JsonElement> RemoveOrchestrationAsync(string id)
 		=> await DeleteAsync($"api/orchestrations/{Uri.EscapeDataString(id)}");

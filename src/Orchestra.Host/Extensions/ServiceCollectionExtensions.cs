@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Hosting;
+using Orchestra.Host.Mcp;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
@@ -83,6 +84,9 @@ public static class ServiceCollectionExtensions
 			var versionStore = sp.GetRequiredService<IOrchestrationVersionStore>();
 			return new OrchestrationRegistry(persistPath: registryPersistPath, logger: logger, versionStore: versionStore, dataPath: options.DataPath);
 		});
+
+		// McpManager: manages globally shared MCP servers from mcp.json
+		services.AddSingleton<McpManager>();
 
 		// ── Profiles & Tags ──
 
@@ -210,6 +214,16 @@ public static class ServiceProviderExtensions
 		var registry = services.GetRequiredService<OrchestrationRegistry>();
 		var triggerManager = services.GetRequiredService<TriggerManager>();
 		var profileManager = services.GetRequiredService<ProfileManager>();
+		var mcpManager = services.GetRequiredService<McpManager>();
+
+		// Initialize McpManager: load global mcp.json and start proxy
+		var globalMcpPath = OrchestraConfigLoader.ResolveGlobalMcpPath();
+		Engine.Mcp[] globalMcps = [];
+		if (globalMcpPath is not null)
+		{
+			globalMcps = OrchestrationParser.ParseMcpFile(globalMcpPath);
+		}
+		mcpManager.InitializeAsync(globalMcps).GetAwaiter().GetResult();
 
 		// Load persisted orchestrations
 		if (options.LoadPersistedOrchestrations)
@@ -243,13 +257,12 @@ public static class ServiceProviderExtensions
 					? TriggerManager.CloneTriggerConfigWithEnabled(trigger, effectiveEnabled)
 					: trigger;
 
-				triggerManager.RegisterTrigger(
+			triggerManager.RegisterTrigger(
 					entry.Path,
-					entry.McpPath,
 					effectiveTrigger,
 					null,
 					TriggerSource.Json,
-					triggerId,
+					entry.Id,
 					entry.Orchestration);
 			}
 		}

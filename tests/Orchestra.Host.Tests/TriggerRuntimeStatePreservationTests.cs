@@ -96,7 +96,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			Enabled = true,
 			IntervalSeconds = 60,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		// Simulate some runs
 		var trigger = _triggerManager.GetTrigger(reg.Id)!;
@@ -110,7 +110,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			Enabled = true,
 			IntervalSeconds = 120, // changed interval
 		};
-		var newReg = _triggerManager.RegisterTrigger(orchPath, null, newConfig, source: TriggerSource.Json);
+		var newReg = _triggerManager.RegisterTrigger(orchPath, newConfig, source: TriggerSource.Json);
 
 		// Assert
 		newReg.RunCount.Should().Be(5);
@@ -123,13 +123,13 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 		// Arrange
 		var orchPath = CreateTestOrchestrationFile("preserve-lastexec");
 		var config = new WebhookTriggerConfig { Type = TriggerType.Webhook, Enabled = true };
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		var trigger = _triggerManager.GetTrigger(reg.Id)!;
 		trigger.LastExecutionId = "exec-abc123";
 
 		// Act
-		var newReg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var newReg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		// Assert
 		newReg.LastExecutionId.Should().Be("exec-abc123");
@@ -146,7 +146,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			Enabled = true,
 			MaxIterations = 10,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		var trigger = _triggerManager.GetTrigger(reg.Id)!;
 		trigger.ActiveExecutionId = "exec-running-456";
@@ -160,7 +160,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			Enabled = true,
 			MaxIterations = 20,
 		};
-		var newReg = _triggerManager.RegisterTrigger(orchPath, null, newConfig, source: TriggerSource.Json);
+		var newReg = _triggerManager.RegisterTrigger(orchPath, newConfig, source: TriggerSource.Json);
 
 		// Assert — active execution state should be preserved
 		newReg.ActiveExecutionId.Should().Be("exec-running-456");
@@ -179,13 +179,13 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			Enabled = true,
 			IntervalSeconds = 60,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		var trigger = _triggerManager.GetTrigger(reg.Id)!;
 		trigger.LastError = "Previous execution failed: timeout";
 
 		// Act
-		var newReg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var newReg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		// Assert
 		newReg.LastError.Should().Be("Previous execution failed: timeout");
@@ -202,7 +202,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			Enabled = true,
 			IntervalSeconds = 60,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		var trigger = _triggerManager.GetTrigger(reg.Id)!;
 		trigger.RunCount = 2;
@@ -216,7 +216,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			Enabled = false,
 			IntervalSeconds = 60,
 		};
-		var newReg = _triggerManager.RegisterTrigger(orchPath, null, disabledConfig, source: TriggerSource.Json);
+		var newReg = _triggerManager.RegisterTrigger(orchPath, disabledConfig, source: TriggerSource.Json);
 
 		// Assert — status comes from new config (Paused), runtime state preserved
 		newReg.Status.Should().Be(TriggerStatus.Paused);
@@ -234,7 +234,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			Enabled = true,
 			IntervalSeconds = 60,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, config, source: TriggerSource.Json);
 
 		// Assert — first registration should have clean runtime state
 		reg.RunCount.Should().Be(0);
@@ -256,7 +256,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			IntervalSeconds = 30,
 			MaxRuns = 100,
 		};
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, oldConfig, source: TriggerSource.Json);
+		var reg = _triggerManager.RegisterTrigger(orchPath, oldConfig, source: TriggerSource.Json);
 
 		var trigger = _triggerManager.GetTrigger(reg.Id)!;
 		trigger.RunCount = 10;
@@ -269,7 +269,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			IntervalSeconds = 120,
 			MaxRuns = 200,
 		};
-		var newReg = _triggerManager.RegisterTrigger(orchPath, null, newConfig, source: TriggerSource.Json);
+		var newReg = _triggerManager.RegisterTrigger(orchPath, newConfig, source: TriggerSource.Json);
 
 		// Assert — config is updated but runtime state preserved
 		newReg.Config.Should().BeOfType<SchedulerTriggerConfig>();
@@ -287,7 +287,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 		var config = new WebhookTriggerConfig { Type = TriggerType.Webhook, Enabled = true };
 		var explicitId = "my-custom-trigger-id";
 
-		var reg = _triggerManager.RegisterTrigger(orchPath, null, config,
+		var reg = _triggerManager.RegisterTrigger(orchPath, config,
 			source: TriggerSource.Json, orchestrationId: explicitId);
 
 		var trigger = _triggerManager.GetTrigger(explicitId)!;
@@ -295,7 +295,7 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 		trigger.LastFireTime = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
 		// Act
-		var newReg = _triggerManager.RegisterTrigger(orchPath, null, config,
+		var newReg = _triggerManager.RegisterTrigger(orchPath, config,
 			source: TriggerSource.Json, orchestrationId: explicitId);
 
 		// Assert

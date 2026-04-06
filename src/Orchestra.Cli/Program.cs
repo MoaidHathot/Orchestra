@@ -46,8 +46,7 @@ public class Program
 				"get" => await RunWithArg(args, 1, "orchestration ID", id => client.GetOrchestrationAsync(id)),
 				"register" => await RunWithArg(args, 1, "file path", path =>
 				{
-					var mcpPath = GetFlag(args, "--mcp");
-					return client.RegisterOrchestrationAsync(path, mcpPath);
+					return client.RegisterOrchestrationAsync(path);
 				}),
 				"remove" => await RunWithArg(args, 1, "orchestration ID", id => client.RemoveOrchestrationAsync(id)),
 				"scan" => await RunWithArg(args, 1, "directory", dir => client.ScanDirectoryAsync(dir)),
@@ -288,7 +287,7 @@ public class Program
 		Console.WriteLine("Orchestrations:");
 		Console.WriteLine("  list                          List all orchestrations");
 		Console.WriteLine("  get <id>                      Get orchestration details");
-		Console.WriteLine("  register <path> [--mcp path]  Register from file");
+		Console.WriteLine("  register <path>               Register from file");
 		Console.WriteLine("  remove <id>                   Remove an orchestration");
 		Console.WriteLine("  scan <directory>              Scan directory for orchestrations");
 		Console.WriteLine("  enable <id>                   Enable orchestration trigger");

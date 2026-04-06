@@ -89,7 +89,7 @@ public class OrchestrationRegistryTests : IDisposable
 		var orchPath = CreateTestOrchestrationFile("test-orch-1");
 
 		// Act
-		var entry = registry.Register(orchPath, mcpPath: null, persist: false);
+		var entry = registry.Register(orchPath, persist: false);
 
 		// Assert
 		registry.Count.Should().Be(1);
@@ -106,7 +106,7 @@ public class OrchestrationRegistryTests : IDisposable
 		var orchPath = CreateTestOrchestrationFile("persist-test");
 
 		// Act
-		registry.Register(orchPath, mcpPath: null, persist: true);
+		registry.Register(orchPath, persist: true);
 
 		// Assert
 		File.Exists(_persistPath).Should().BeTrue();
@@ -120,7 +120,7 @@ public class OrchestrationRegistryTests : IDisposable
 		// Arrange
 		var registry = new OrchestrationRegistry(_persistPath);
 		var orchPath = CreateTestOrchestrationFile("get-test");
-		var entry = registry.Register(orchPath, mcpPath: null, persist: false);
+		var entry = registry.Register(orchPath, persist: false);
 
 		// Act
 		var retrieved = registry.Get(entry.Id);
@@ -153,9 +153,9 @@ public class OrchestrationRegistryTests : IDisposable
 		var path2 = CreateTestOrchestrationFile("orch-2");
 		var path3 = CreateTestOrchestrationFile("orch-3");
 
-		registry.Register(path1, mcpPath: null, persist: false);
-		registry.Register(path2, mcpPath: null, persist: false);
-		registry.Register(path3, mcpPath: null, persist: false);
+		registry.Register(path1, persist: false);
+		registry.Register(path2, persist: false);
+		registry.Register(path3, persist: false);
 
 		// Act
 		var all = registry.GetAll().ToList();
@@ -171,7 +171,7 @@ public class OrchestrationRegistryTests : IDisposable
 		// Arrange
 		var registry = new OrchestrationRegistry(_persistPath);
 		var orchPath = CreateTestOrchestrationFile("remove-test");
-		var entry = registry.Register(orchPath, mcpPath: null, persist: false);
+		var entry = registry.Register(orchPath, persist: false);
 
 		// Act
 		var result = registry.Remove(entry.Id);
@@ -203,8 +203,8 @@ public class OrchestrationRegistryTests : IDisposable
 		var path1 = CreateTestOrchestrationFile("clear-1");
 		var path2 = CreateTestOrchestrationFile("clear-2");
 
-		registry.Register(path1, mcpPath: null, persist: false);
-		registry.Register(path2, mcpPath: null, persist: false);
+		registry.Register(path1, persist: false);
+		registry.Register(path2, persist: false);
 
 		// Act
 		registry.Clear();
@@ -221,7 +221,7 @@ public class OrchestrationRegistryTests : IDisposable
 
 		// First registry - save
 		var registry1 = new OrchestrationRegistry(_persistPath);
-		registry1.Register(orchPath, mcpPath: null, persist: true);
+		registry1.Register(orchPath, persist: true);
 
 		// Second registry - load
 		var registry2 = new OrchestrationRegistry(_persistPath);
@@ -255,7 +255,7 @@ public class OrchestrationRegistryTests : IDisposable
 		// Arrange
 		var orchPath = CreateTestOrchestrationFile("will-delete");
 		var registry1 = new OrchestrationRegistry(_persistPath);
-		registry1.Register(orchPath, mcpPath: null, persist: true);
+		registry1.Register(orchPath, persist: true);
 
 		// Delete the orchestration file
 		File.Delete(orchPath);
@@ -394,7 +394,7 @@ public class OrchestrationRegistryTests : IDisposable
 			""");
 
 		// Act
-		var entry = registry.Register(sourcePath, mcpPath: null, persist: false);
+		var entry = registry.Register(sourcePath, persist: false);
 
 		// Assert
 		entry.SourcePath.Should().Be(sourcePath, "original source path should be tracked");
@@ -420,14 +420,14 @@ public class OrchestrationRegistryTests : IDisposable
 			""");
 
 		// Register from source — this is what the user does
-		var originalEntry = registry.Register(sourcePath, mcpPath: null, persist: false);
+		var originalEntry = registry.Register(sourcePath, persist: false);
 		var managedPath = originalEntry.Path;
 
 		// Clear registry to simulate restart
 		registry.Clear();
 
 		// Act — reload from managed path, passing the persisted SourcePath
-		var reloadedEntry = registry.Register(managedPath, mcpPath: null, persist: false, originalSourcePath: sourcePath);
+		var reloadedEntry = registry.Register(managedPath, persist: false, originalSourcePath: sourcePath);
 
 		// Assert — ID should be the same despite loading from a different path
 		reloadedEntry.Id.Should().Be(originalEntry.Id, "ID must be stable across restarts when SourcePath is provided");
@@ -449,7 +449,7 @@ public class OrchestrationRegistryTests : IDisposable
 			}
 			""");
 
-		var originalEntry = registry1.Register(sourcePath, mcpPath: null, persist: true);
+		var originalEntry = registry1.Register(sourcePath, persist: true);
 		var originalId = originalEntry.Id;
 
 		// Act — create a new registry and load from disk (simulating restart)
@@ -481,7 +481,7 @@ public class OrchestrationRegistryTests : IDisposable
 		File.WriteAllText(sourcePath, jsonV1);
 
 		// Register from source
-		var entry1 = registry1.Register(sourcePath, mcpPath: null, persist: true);
+		var entry1 = registry1.Register(sourcePath, persist: true);
 
 		// Simulate restart — create a new registry and reload from disk
 		var registry2 = new OrchestrationRegistry(_persistPath, dataPath: _tempDir);
@@ -491,7 +491,7 @@ public class OrchestrationRegistryTests : IDisposable
 		// User updates the source file and re-registers
 		var jsonV2 = jsonV1.Replace("Version 1", "Version 2");
 		File.WriteAllText(sourcePath, jsonV2);
-		var entry2 = registry2.Register(sourcePath, mcpPath: null, persist: true);
+		var entry2 = registry2.Register(sourcePath, persist: true);
 
 		// Assert — same ID, updated content, no duplicates
 		entry2.Id.Should().Be(entry1.Id, "re-registration from same source should produce same ID");
@@ -524,8 +524,8 @@ public class OrchestrationRegistryTests : IDisposable
 			""");
 
 		// Act
-		registry.Register(path1, mcpPath: null, persist: false);
-		registry.Register(path2, mcpPath: null, persist: false);
+		registry.Register(path1, persist: false);
+		registry.Register(path2, persist: false);
 
 		// Assert — both should coexist
 		registry.Count.Should().Be(2);
@@ -546,7 +546,7 @@ public class OrchestrationRegistryTests : IDisposable
 			}
 			""");
 
-		registry.Register(orchPath, mcpPath: null, persist: false);
+		registry.Register(orchPath, persist: false);
 
 		// Update the file content
 		File.WriteAllText(orchPath, """
@@ -558,7 +558,7 @@ public class OrchestrationRegistryTests : IDisposable
 			""");
 
 		// Act
-		registry.Register(orchPath, mcpPath: null, persist: false);
+		registry.Register(orchPath, persist: false);
 
 		// Assert
 		registry.Count.Should().Be(1);

@@ -10,7 +10,6 @@ public class TriggerRegistration
 {
 	public required string Id { get; init; }
 	public required string OrchestrationPath { get; init; }
-	public string? McpPath { get; init; }
 	public required TriggerConfig Config { get; set; }
 	public Dictionary<string, string>? Parameters { get; set; }
 

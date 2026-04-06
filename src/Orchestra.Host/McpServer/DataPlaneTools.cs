@@ -135,25 +135,11 @@ public sealed class DataPlaneTools
 			}
 		}
 
-		// Parse MCP config
-		Engine.Mcp[] mcps = [];
-		if (!string.IsNullOrWhiteSpace(entry.McpPath) && File.Exists(entry.McpPath))
-		{
-			try
-			{
-				mcps = OrchestrationParser.ParseMcpFile(entry.McpPath);
-			}
-			catch
-			{
-				// MCP parse failure is non-fatal for the invocation itself
-			}
-		}
-
-		// Parse the orchestration
+		// Parse the orchestration (global MCPs are resolved by McpManager at step execution time)
 		Orchestration orchestration;
 		try
 		{
-			orchestration = OrchestrationParser.ParseOrchestrationFile(entry.Path, mcps);
+			orchestration = OrchestrationParser.ParseOrchestrationFile(entry.Path, []);
 		}
 		catch (Exception ex)
 		{

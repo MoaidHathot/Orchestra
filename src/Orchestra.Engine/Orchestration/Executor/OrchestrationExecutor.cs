@@ -27,6 +27,7 @@ public partial class OrchestrationExecutor
 		ICheckpointStore? checkpointStore = null,
 		StepExecutorRegistry? stepExecutorRegistry = null,
 		EngineToolRegistry? engineToolRegistry = null,
+		IMcpResolver? mcpResolver = null,
 		string? dataPath = null,
 		string? serverUrl = null)
 	{
@@ -48,7 +49,7 @@ public partial class OrchestrationExecutor
 		}
 		else
 		{
-			var promptExecutor = new PromptExecutor(agentBuilder, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>(), engineToolRegistry);
+			var promptExecutor = new PromptExecutor(agentBuilder, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>(), engineToolRegistry, mcpResolver);
 			_stepExecutorRegistry = new StepExecutorRegistry()
 				.Register(new PromptStepExecutor(promptExecutor))
 				.Register(new HttpStepExecutor(new System.Net.Http.HttpClient(), reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))

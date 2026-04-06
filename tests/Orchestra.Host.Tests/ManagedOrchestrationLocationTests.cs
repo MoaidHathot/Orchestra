@@ -106,7 +106,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var orchPath = CreateTestOrchestrationFile("copy-test");
 
 		// Act
-		var entry = registry.Register(orchPath, mcpPath: null, persist: false);
+		var entry = registry.Register(orchPath, persist: false);
 
 		// Assert — entry path should point to managed location
 		var managedDir = Path.Combine(_dataPath, "orchestrations");
@@ -124,7 +124,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var originalContent = File.ReadAllText(orchPath);
 
 		// Act
-		var entry = registry.Register(orchPath, mcpPath: null, persist: false);
+		var entry = registry.Register(orchPath, persist: false);
 
 		// Assert
 		var managedContent = File.ReadAllText(entry.Path);
@@ -139,7 +139,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var orchPath = CreateTestOrchestrationFile("no-managed");
 
 		// Act
-		var entry = registry.Register(orchPath, mcpPath: null, persist: false);
+		var entry = registry.Register(orchPath, persist: false);
 
 		// Assert — should keep the original path since there's no managed dir
 		entry.Path.Should().Be(orchPath);
@@ -166,7 +166,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var registry = CreateRegistry();
 		var orchPath = CreateTestOrchestrationFile("delete-source");
 
-		var entry = registry.Register(orchPath, mcpPath: null, persist: false);
+		var entry = registry.Register(orchPath, persist: false);
 
 		// Act — delete the original source file
 		File.Delete(orchPath);
@@ -186,7 +186,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var json = GetTestOrchestrationJson("json-import");
 
 		// Act
-		var entry = registry.RegisterFromJson(json, mcpJson: null, persist: false);
+		var entry = registry.RegisterFromJson(json, persist: false);
 
 		// Assert
 		var managedDir = Path.Combine(_dataPath, "orchestrations");
@@ -203,7 +203,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var json = GetTestOrchestrationJson("json-temp");
 
 		// Act
-		var entry = registry.RegisterFromJson(json, mcpJson: null, persist: false);
+		var entry = registry.RegisterFromJson(json, persist: false);
 
 		// Assert — should use temp directory as fallback
 		entry.Path.Should().Contain("orchestra-host");
@@ -219,7 +219,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var json = GetTestOrchestrationJson("preserve-content");
 
 		// Act
-		var entry = registry.RegisterFromJson(json, mcpJson: null, persist: false);
+		var entry = registry.RegisterFromJson(json, persist: false);
 
 		// Assert
 		var savedContent = File.ReadAllText(entry.Path);
@@ -235,7 +235,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		// Arrange — register an orchestration
 		var registry1 = CreateRegistry();
 		var orchPath = CreateTestOrchestrationFile("reload-test");
-		registry1.Register(orchPath, mcpPath: null, persist: true);
+		registry1.Register(orchPath, persist: true);
 
 		// Act — create a new registry and reload from disk
 		var registry2 = CreateRegistry();
@@ -254,7 +254,7 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		// Arrange
 		var registry1 = CreateRegistry();
 		var json = GetTestOrchestrationJson("json-reload");
-		registry1.RegisterFromJson(json, mcpJson: null, persist: true);
+		registry1.RegisterFromJson(json, persist: true);
 
 		// Act
 		var registry2 = CreateRegistry();
@@ -276,9 +276,9 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var path3 = CreateTestOrchestrationFile("orch-gamma");
 
 		// Act
-		var entry1 = registry.Register(path1, mcpPath: null, persist: false);
-		var entry2 = registry.Register(path2, mcpPath: null, persist: false);
-		var entry3 = registry.Register(path3, mcpPath: null, persist: false);
+		var entry1 = registry.Register(path1, persist: false);
+		var entry2 = registry.Register(path2, persist: false);
+		var entry3 = registry.Register(path3, persist: false);
 
 		// Assert — all should be in managed dir, all different paths
 		var managedDir = Path.Combine(_dataPath, "orchestrations");

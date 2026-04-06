@@ -5,7 +5,7 @@ export interface Orchestration {
   description?: string;
   version?: string;
   path?: string;
-  mcpPath?: string;
+
   enabled?: boolean;
   steps?: Step[];
   parameters?: string[];

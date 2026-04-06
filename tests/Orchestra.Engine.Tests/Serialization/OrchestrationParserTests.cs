@@ -346,7 +346,7 @@ public class OrchestrationParserTests
 	}
 
 	[Fact]
-	public void ParseOrchestration_ExternalMcpsOverrideInline()
+	public void ParseOrchestration_InlineMcpsOverrideExternal()
 	{
 		// Arrange
 		var json = """
@@ -388,10 +388,10 @@ public class OrchestrationParserTests
 		// Act
 		var orchestration = OrchestrationParser.ParseOrchestration(json, externalMcps);
 
-		// Assert
+		// Assert — inline MCPs should override external MCPs with the same name
 		var step = orchestration.Steps[0] as PromptOrchestrationStep;
 		var localMcp = step!.Mcps[0] as LocalMcp;
-		localMcp!.Command.Should().Be("external-command");
+		localMcp!.Command.Should().Be("inline-command");
 	}
 
 	[Fact]

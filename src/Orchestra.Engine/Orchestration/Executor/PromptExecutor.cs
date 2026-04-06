@@ -8,6 +8,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private readonly IOrchestrationReporter _reporter;
 	private readonly IPromptFormatter _formatter;
 	private readonly EngineToolRegistry _engineToolRegistry;
+	private readonly IMcpResolver? _mcpResolver;
 	private readonly ILogger<PromptExecutor> _logger;
 
 	public PromptExecutor(
@@ -15,12 +16,14 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		IOrchestrationReporter reporter,
 		IPromptFormatter formatter,
 		ILogger<PromptExecutor> logger,
-		EngineToolRegistry? engineToolRegistry = null)
+		EngineToolRegistry? engineToolRegistry = null,
+		IMcpResolver? mcpResolver = null)
 	{
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
 		_formatter = formatter;
 		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
+		_mcpResolver = mcpResolver;
 		_logger = logger;
 	}
 
@@ -44,6 +47,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		var resolvedMcps = step.Mcps
 			.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context))
 			.ToArray();
+
+		// Replace globally shared MCPs with remote proxy endpoints
+		if (_mcpResolver is not null)
+			resolvedMcps = _mcpResolver.Resolve(resolvedMcps);
 
 		var resolvedSubagents = ResolveSubagentMcps(step.Subagents, context);
 
