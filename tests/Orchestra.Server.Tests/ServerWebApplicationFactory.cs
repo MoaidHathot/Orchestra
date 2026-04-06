@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 
 namespace Orchestra.Server.Tests;
 
@@ -7,6 +8,8 @@ namespace Orchestra.Server.Tests;
 /// Custom WebApplicationFactory for Orchestra.Server integration tests.
 /// Creates an isolated test environment with its own data directory
 /// so tests don't interfere with each other or with real data.
+/// Each instance injects its unique data path via IConfiguration, avoiding
+/// process-global environment variables that cause race conditions in parallel test runs.
 /// </summary>
 public class ServerWebApplicationFactory : WebApplicationFactory<Program>
 {
@@ -16,14 +19,22 @@ public class ServerWebApplicationFactory : WebApplicationFactory<Program>
 	{
 		_testDataPath = Path.Combine(Path.GetTempPath(), "Orchestra.Server.Tests", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(_testDataPath);
-
-		// Set environment variable for test isolation before application starts
-		Environment.SetEnvironmentVariable("ORCHESTRA_DATA_PATH", _testDataPath);
 	}
 
 	protected override void ConfigureWebHost(IWebHostBuilder builder)
 	{
 		builder.UseEnvironment("Testing");
+
+		// Inject the unique test data path via configuration instead of
+		// a process-global environment variable. Program.cs reads this via
+		// builder.Configuration["data-path"].
+		builder.ConfigureAppConfiguration((_, config) =>
+		{
+			config.AddInMemoryCollection(new Dictionary<string, string?>
+			{
+				["data-path"] = _testDataPath,
+			});
+		});
 	}
 
 	public string TestDataPath => _testDataPath;
@@ -44,7 +55,5 @@ public class ServerWebApplicationFactory : WebApplicationFactory<Program>
 				// Ignore cleanup errors in tests
 			}
 		}
-
-		Environment.SetEnvironmentVariable("ORCHESTRA_DATA_PATH", null);
 	}
 }

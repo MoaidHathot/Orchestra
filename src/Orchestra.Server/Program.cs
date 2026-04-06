@@ -18,11 +18,14 @@ builder.Logging.AddSimpleConsole(options =>
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 
 // Configuration: data path and orchestrations scan path from CLI args, env vars, or config
-var dataPath = Environment.GetEnvironmentVariable("ORCHESTRA_DATA_PATH")
-	?? builder.Configuration["data-path"];
+// Priority: configuration "data-path" > env var ORCHESTRA_DATA_PATH > default
+// Configuration takes priority so that test factories can inject isolated paths
+// via IConfiguration without process-global environment variable races.
+var dataPath = builder.Configuration["data-path"]
+	?? Environment.GetEnvironmentVariable("ORCHESTRA_DATA_PATH");
 
-var orchestrationsScanPath = Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH")
-	?? builder.Configuration["orchestrations-path"];
+var orchestrationsScanPath = builder.Configuration["orchestrations-path"]
+	?? Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH");
 
 // Add Orchestra Host services
 builder.Services.AddOrchestraHost(options =>
