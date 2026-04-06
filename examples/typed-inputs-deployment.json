@@ -38,7 +38,7 @@
       "systemPrompt": "You are a deployment configuration validator. Check that the deployment parameters are sensible and flag any concerns.",
       "userPrompt": "Validate the following deployment configuration:\n- Service: {{param.serviceName}}\n- Environment: {{param.environment}}\n- Replicas: {{param.replicas}}\n- Dry Run: {{param.dryRun}}\n- Deploy Tag: {{vars.deployTag}}\n\nList any warnings or concerns. If everything looks good, respond with VALIDATED.",
       "parameters": ["serviceName", "environment", "replicas", "dryRun"],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.6"
     },
     {
       "name": "generate-manifest",
@@ -54,7 +54,7 @@
       "systemPrompt": "You are a deployment automation assistant. Generate the deployment commands based on the manifest. If dry run is true, prefix each command with '# DRY RUN: '.",
       "userPrompt": "Based on the following deployment manifest, generate the deployment commands:\n\n{{generate-manifest.output}}",
       "parameters": ["serviceName", "environment", "dryRun"],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.6"
     }
   ]
 }
