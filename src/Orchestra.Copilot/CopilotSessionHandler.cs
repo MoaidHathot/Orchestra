@@ -16,6 +16,7 @@ internal sealed class CopilotSessionHandler
 	private readonly string _requestedModel;
 	private readonly TaskCompletionSource _done;
 	private readonly Dictionary<string, string> _toolCallNames = [];
+	private readonly System.Text.StringBuilder _accumulatedContent = new();
 
 	private string? _finalContent;
 	private string? _selectedModel;
@@ -34,7 +35,20 @@ internal sealed class CopilotSessionHandler
 		_done = done;
 	}
 
-	public string? FinalContent => _finalContent;
+	/// <summary>
+	/// The final text content from the session.
+	/// Uses the SDK's AssistantMessageEvent content when available and non-empty.
+	/// Falls back to accumulated MessageDelta content when the SDK reports empty content
+	/// (which can happen in multi-turn conversations with tool calls where the SDK's
+	/// AssistantMessageEvent only captures the last turn's direct text output, potentially
+	/// missing content emitted after tool results are processed).
+	/// </summary>
+	public string? FinalContent =>
+		!string.IsNullOrEmpty(_finalContent)
+			? _finalContent
+			: _accumulatedContent.Length > 0
+				? _accumulatedContent.ToString()
+				: _finalContent;
 	public string? SelectedModel => _selectedModel;
 	public string? ActualModel => _actualModel;
 	public AgentUsage? Usage => _usage;
@@ -172,6 +186,7 @@ internal sealed class CopilotSessionHandler
 
 	private void HandleMessageDelta(AssistantMessageDeltaEvent delta)
 	{
+		_accumulatedContent.Append(delta.Data.DeltaContent);
 		_writer.TryWrite(new AgentEvent
 		{
 			Type = AgentEventType.MessageDelta,

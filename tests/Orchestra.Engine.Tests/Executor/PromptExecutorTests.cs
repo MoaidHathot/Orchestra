@@ -1330,4 +1330,148 @@ public class PromptExecutorTests
 	}
 
 	#endregion
+
+	#region IMcpResolver Integration
+
+	[Fact]
+	public async Task ExecuteAsync_WithMcpResolver_CallsResolveOnStepMcps()
+	{
+		// Arrange
+		var globalMcp = new LocalMcp { Name = "global-server", Type = McpType.Local, Command = "test", Arguments = [] };
+		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:9999/mcp", Headers = [] };
+
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(new Mcp[] { proxyMcp });
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		step.Mcps = [globalMcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert — resolver was called
+		resolver.Received(1).Resolve(Arg.Any<Mcp[]>());
+
+		// Assert — the resolved proxy MCP was passed to the agent builder, not the original
+		agentBuilder.CapturedMcps.Should().HaveCount(1);
+		agentBuilder.CapturedMcps[0].Should().BeOfType<RemoteMcp>();
+		agentBuilder.CapturedMcps[0].Name.Should().Be("orchestra-mcp-proxy");
+		((RemoteMcp)agentBuilder.CapturedMcps[0]).Endpoint.Should().Be("http://localhost:9999/mcp");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithMcpResolver_GlobalMcpsReplacedInlineMcpsPreserved()
+	{
+		// Arrange
+		var globalMcp = new LocalMcp { Name = "global", Type = McpType.Local, Command = "cmd", Arguments = [] };
+		var inlineMcp = new LocalMcp { Name = "inline", Type = McpType.Local, Command = "inline-cmd", Arguments = [] };
+		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:8888/mcp", Headers = [] };
+
+		var resolver = Substitute.For<IMcpResolver>();
+		// Resolver should return inline + proxy (globals collapsed, inline preserved)
+		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(callInfo =>
+		{
+			// Simulate McpManager behavior: remove global, add proxy, keep inline
+			return new Mcp[] { inlineMcp, proxyMcp };
+		});
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		step.Mcps = [globalMcp, inlineMcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert — two MCPs: inline preserved + proxy replacing global
+		agentBuilder.CapturedMcps.Should().HaveCount(2);
+		agentBuilder.CapturedMcps[0].Name.Should().Be("inline");
+		agentBuilder.CapturedMcps[0].Should().BeOfType<LocalMcp>();
+		agentBuilder.CapturedMcps[1].Name.Should().Be("orchestra-mcp-proxy");
+		agentBuilder.CapturedMcps[1].Should().BeOfType<RemoteMcp>();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithoutMcpResolver_McpsPassedUnchanged()
+	{
+		// Arrange — no resolver injected (null)
+		var mcp = new LocalMcp { Name = "my-server", Type = McpType.Local, Command = "cmd", Arguments = [] };
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger); // no mcpResolver
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		step.Mcps = [mcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert — MCP passed through unchanged (no resolver to replace it)
+		agentBuilder.CapturedMcps.Should().HaveCount(1);
+		agentBuilder.CapturedMcps[0].Name.Should().Be("my-server");
+		agentBuilder.CapturedMcps[0].Should().BeOfType<LocalMcp>();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithMcpResolver_NoMcpsOnStep_ResolverNotCalled()
+	{
+		// Arrange — step has no MCPs, so resolver should still be called but with empty array
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		// step.Mcps is default empty
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert — resolver still called (with empty array), MCPs are empty
+		resolver.Received(1).Resolve(Arg.Any<Mcp[]>());
+		agentBuilder.CapturedMcps.Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithMcpResolver_MultipleGlobalMcps_CollapsedIntoSingleProxy()
+	{
+		// Arrange — simulates what McpManager.Resolve does: multiple globals → one proxy
+		var global1 = new LocalMcp { Name = "azdo", Type = McpType.Local, Command = "azdo-mcp", Arguments = [] };
+		var global2 = new LocalMcp { Name = "icm", Type = McpType.Local, Command = "icm-mcp", Arguments = [] };
+		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:7777/mcp", Headers = [] };
+
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(new Mcp[] { proxyMcp });
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		step.Mcps = [global1, global2];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert — two globals collapsed into one proxy
+		agentBuilder.CapturedMcps.Should().HaveCount(1);
+		agentBuilder.CapturedMcps[0].Name.Should().Be("orchestra-mcp-proxy");
+		((RemoteMcp)agentBuilder.CapturedMcps[0]).Endpoint.Should().Be("http://localhost:7777/mcp");
+	}
+
+	#endregion
 }

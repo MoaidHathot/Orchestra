@@ -172,6 +172,7 @@ public static class ServiceCollectionExtensions
 				sp.GetRequiredService<ICheckpointStore>(),
 				sp.GetRequiredService<ITriggerExecutionCallback>(),
 				sp.GetRequiredService<EngineToolRegistry>(),
+				mcpResolver: sp.GetRequiredService<McpManager>(),
 				dataPath: opts.DataPath,
 				serverUrl: opts.HostBaseUrl);
 

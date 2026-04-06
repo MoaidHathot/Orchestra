@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
+using Orchestra.Host.Mcp;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
@@ -93,6 +94,7 @@ public sealed class DataPlaneTools
 		OrchestrationHostOptions hostOptions,
 		EngineToolRegistry engineToolRegistry,
 		McpServerOptions mcpOptions,
+		McpManager mcpManager,
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 		[Description("The orchestration ID to invoke.")] string orchestrationId,
@@ -206,6 +208,7 @@ public sealed class DataPlaneTools
 			scheduler, agentBuilder, reporter, loggerFactory,
 			runStore: runStore,
 			engineToolRegistry: engineToolRegistry,
+			mcpResolver: mcpManager,
 			dataPath: hostOptions.DataPath,
 			serverUrl: hostOptions.HostBaseUrl);
 

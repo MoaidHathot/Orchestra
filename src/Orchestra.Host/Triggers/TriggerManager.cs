@@ -28,6 +28,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly ICheckpointStore _checkpointStore;
 	private readonly ITriggerExecutionCallback? _executionCallback;
 	private readonly EngineToolRegistry _engineToolRegistry;
+	private readonly IMcpResolver? _mcpResolver;
 	private readonly string? _dataPath;
 	private readonly string? _serverUrl;
 	private readonly JsonSerializerOptions _jsonOptions;
@@ -61,6 +62,7 @@ public partial class TriggerManager : BackgroundService
 		ICheckpointStore checkpointStore,
 		ITriggerExecutionCallback? executionCallback = null,
 		EngineToolRegistry? engineToolRegistry = null,
+		IMcpResolver? mcpResolver = null,
 		string? dataPath = null,
 		string? serverUrl = null)
 	{
@@ -76,6 +78,7 @@ public partial class TriggerManager : BackgroundService
 		_checkpointStore = checkpointStore;
 		_executionCallback = executionCallback;
 		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
+		_mcpResolver = mcpResolver;
 		_dataPath = dataPath;
 		_serverUrl = serverUrl;
 		Directory.CreateDirectory(_triggersDir);
@@ -372,7 +375,7 @@ public partial class TriggerManager : BackgroundService
 		var executionId = checkpoint.RunId;
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, dataPath: _dataPath, serverUrl: _serverUrl);
+		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, dataPath: _dataPath, serverUrl: _serverUrl);
 
 		using var cts = new CancellationTokenSource();
 		_activeExecutions[executionId] = cts;
@@ -795,7 +798,7 @@ public partial class TriggerManager : BackgroundService
 
 			// Create executor with reporter
 			var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, engineToolRegistry: _engineToolRegistry, dataPath: _dataPath, serverUrl: _serverUrl);
+			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, dataPath: _dataPath, serverUrl: _serverUrl);
 
 			using var cts = new CancellationTokenSource();
 			_activeExecutions[executionId] = cts;

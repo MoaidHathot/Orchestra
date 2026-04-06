@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
+using Orchestra.Host.Mcp;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
@@ -35,6 +36,7 @@ public static partial class ExecutionApi
 			FileSystemRunStore runStore,
 			OrchestrationHostOptions hostOptions,
 			EngineToolRegistry engineToolRegistry,
+			McpManager mcpManager,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
 		{
@@ -114,7 +116,7 @@ public static partial class ExecutionApi
 			await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { executionId }, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, engineToolRegistry: engineToolRegistry, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl);
+			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl);
 			var cancellationToken = cts.Token;
 			var runId = executionId;
 			var runStartedAt = DateTimeOffset.UtcNow;

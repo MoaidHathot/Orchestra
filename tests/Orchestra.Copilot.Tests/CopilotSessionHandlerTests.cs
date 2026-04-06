@@ -1212,4 +1212,105 @@ public class CopilotSessionHandlerTests
 	}
 
 	#endregion
+
+	#region FinalContent Fallback (Tool Call Scenarios)
+
+	[Fact]
+	public void FinalContent_WhenMessageEventHasContent_ReturnsMessageEventContent()
+	{
+		// Arrange: Normal case - AssistantMessageEvent has content
+		_handler.HandleEvent(CreateMessageDeltaEvent("streaming content"));
+		_handler.HandleEvent(CreateMessageEvent("Final complete message"));
+
+		// Assert
+		_handler.FinalContent.Should().Be("Final complete message");
+	}
+
+	[Fact]
+	public void FinalContent_WhenMessageEventIsEmpty_FallsBackToAccumulatedDeltas()
+	{
+		// Arrange: Multi-turn tool call scenario - the model calls a tool, then emits text,
+		// but the SDK's AssistantMessageEvent has empty content.
+		// This reproduces the exact bug observed in icm-tracker runs.
+		_handler.HandleEvent(CreateToolStartEvent("call-1", "orchestra_set_status"));
+		_handler.HandleEvent(CreateToolCompleteEvent("call-1", true));
+		_handler.HandleEvent(CreateMessageDeltaEvent("[\"770343639\", \"760607426\"]"));
+		_handler.HandleEvent(CreateMessageEvent("")); // SDK reports empty content
+
+		// Assert - Should fall back to accumulated delta content
+		_handler.FinalContent.Should().Be("[\"770343639\", \"760607426\"]");
+	}
+
+	[Fact]
+	public void FinalContent_WhenNoMessageEventAndDeltasExist_ReturnsAccumulatedDeltas()
+	{
+		// Arrange: No AssistantMessageEvent fired at all, only deltas
+		_handler.HandleEvent(CreateMessageDeltaEvent("Hello "));
+		_handler.HandleEvent(CreateMessageDeltaEvent("world"));
+
+		// Assert
+		_handler.FinalContent.Should().Be("Hello world");
+	}
+
+	[Fact]
+	public void FinalContent_WhenNoMessageEventAndNoDeltas_ReturnsNull()
+	{
+		// Arrange: No message events at all (e.g., only tool calls)
+		_handler.HandleEvent(CreateToolStartEvent("call-1", "some_tool"));
+		_handler.HandleEvent(CreateToolCompleteEvent("call-1", true));
+
+		// Assert
+		_handler.FinalContent.Should().BeNull();
+	}
+
+	[Fact]
+	public void FinalContent_ToolCallThenText_AccumulatesAllDeltaContent()
+	{
+		// Arrange: Simulate the exact icm-tracker check-watchlist flow:
+		// 1. Reasoning (thinking about the watchlist)
+		// 2. Tool call: orchestra_set_status(success)
+		// 3. Tool result returned
+		// 4. Model emits text content as deltas
+		// 5. SDK fires AssistantMessageEvent with empty content
+		_handler.HandleEvent(CreateReasoningDeltaEvent("The watchlist has 2 incidents..."));
+		_handler.HandleEvent(CreateToolStartEvent("call-1", "orchestra_set_status"));
+		_handler.HandleEvent(CreateToolCompleteEvent("call-1", true));
+		_handler.HandleEvent(CreateMessageDeltaEvent("\n\n"));
+		_handler.HandleEvent(CreateMessageDeltaEvent("[\"770343639\""));
+		_handler.HandleEvent(CreateMessageDeltaEvent(", \"760607426\"]"));
+		_handler.HandleEvent(CreateMessageEvent("")); // Empty content from SDK
+
+		// Assert - Accumulated deltas should be used as fallback
+		_handler.FinalContent.Should().Be("\n\n[\"770343639\", \"760607426\"]");
+	}
+
+	[Fact]
+	public void FinalContent_MultipleToolCallsThenText_AccumulatesCorrectly()
+	{
+		// Arrange: Model calls multiple tools then emits text
+		_handler.HandleEvent(CreateToolStartEvent("call-1", "tool_a"));
+		_handler.HandleEvent(CreateToolCompleteEvent("call-1", true));
+		_handler.HandleEvent(CreateToolStartEvent("call-2", "tool_b"));
+		_handler.HandleEvent(CreateToolCompleteEvent("call-2", true));
+		_handler.HandleEvent(CreateMessageDeltaEvent("Result after tools: "));
+		_handler.HandleEvent(CreateMessageDeltaEvent("all done"));
+		_handler.HandleEvent(CreateMessageEvent("")); // Empty
+
+		// Assert
+		_handler.FinalContent.Should().Be("Result after tools: all done");
+	}
+
+	[Fact]
+	public void FinalContent_MessageEventWithContent_TakesPrecedenceOverDeltas()
+	{
+		// Arrange: When AssistantMessageEvent has non-empty content, use it
+		// (this is the normal case where the SDK correctly provides the content)
+		_handler.HandleEvent(CreateMessageDeltaEvent("streaming..."));
+		_handler.HandleEvent(CreateMessageEvent("The authoritative final content"));
+
+		// Assert - MessageEvent content takes precedence
+		_handler.FinalContent.Should().Be("The authoritative final content");
+	}
+
+	#endregion
 }
