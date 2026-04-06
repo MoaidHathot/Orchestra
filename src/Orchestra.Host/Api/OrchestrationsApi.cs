@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Orchestra.Engine;
+using Orchestra.Host.Hosting;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
@@ -418,6 +419,10 @@ public static class OrchestrationsApi
 
 				foreach (var file in files.OrderBy(f => f))
 				{
+					// Skip the global MCP config file — it's not an orchestration
+					if (Path.GetFileName(file).Equals(OrchestraConfigLoader.McpConfigFileName, StringComparison.OrdinalIgnoreCase))
+						continue;
+
 					try
 					{
 						var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(file);

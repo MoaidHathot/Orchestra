@@ -196,7 +196,7 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 
 		foreach (var file in files.OrderBy(f => f))
 		{
-			if (Path.GetFileName(file).Equals("mcp.json", StringComparison.OrdinalIgnoreCase))
+			if (Path.GetFileName(file).Equals("orchestra.mcp.json", StringComparison.OrdinalIgnoreCase))
 				continue;
 
 			try

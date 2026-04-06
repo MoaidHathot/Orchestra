@@ -1347,8 +1347,8 @@ public class OrchestrationParserTests
 		{
 			foreach (var file in Directory.GetFiles(examplesDir, "*.json"))
 			{
-				// Skip mcp.json — it's not an orchestration file
-				if (Path.GetFileName(file).Equals("mcp.json", StringComparison.OrdinalIgnoreCase))
+				// Skip orchestra.mcp.json — it's not an orchestration file
+				if (Path.GetFileName(file).Equals("orchestra.mcp.json", StringComparison.OrdinalIgnoreCase))
 					continue;
 
 				data.Add(file);

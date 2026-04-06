@@ -3307,7 +3307,7 @@ public class TerminalUI
 		if (items.Length == 0)
 		{
 			var msg = string.IsNullOrEmpty(_searchQuery)
-				? "[dim]No MCP servers configured. MCPs are defined inline in orchestration JSON or in a global mcp.json.[/]"
+				? "[dim]No MCP servers configured. MCPs are defined inline in orchestration JSON or in a global orchestra.mcp.json.[/]"
 				: $"[dim]No MCPs matching [yellow]{Markup.Escape(_searchQuery)}[/][/]";
 			table.AddRow(new Markup(msg));
 		}

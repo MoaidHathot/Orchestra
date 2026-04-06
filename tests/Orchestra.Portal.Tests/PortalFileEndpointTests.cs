@@ -220,7 +220,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	{
 		// Arrange
 		WriteFile("workflow.json", CreateValidOrchestrationJson("Test Workflow"));
-		WriteFile("mcp.json", """
+		WriteFile("orchestra.mcp.json", """
 		{
 			"mcps": [
 				{
@@ -241,7 +241,7 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
 
-		// mcp.json should NOT appear in the orchestrations list
+		// orchestra.mcp.json should NOT appear in the orchestrations list
 		var orchestrations = result.GetProperty("orchestrations").EnumerateArray().ToList();
 		orchestrations.Should().HaveCount(1);
 		orchestrations[0].GetProperty("fileName").GetString().Should().Be("workflow.json");
@@ -452,12 +452,12 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	[Fact]
 	public async Task OrchestrationsAdd_RegistersOrchestrationIgnoringMcpJson()
 	{
-		// Arrange - Create orchestration and mcp.json in same directory
-		// mcp.json should be ignored (global MCPs are managed by McpManager)
+		// Arrange - Create orchestration and orchestra.mcp.json in same directory
+		// orchestra.mcp.json should be ignored (global MCPs are managed by McpManager)
 		var json = CreateValidOrchestrationJson("MCP Auto Detect Test");
 		var filePath = Path.Combine(_tempDir, "mcp-auto.json");
 		File.WriteAllText(filePath, json);
-		File.WriteAllText(Path.Combine(_tempDir, "mcp.json"), """
+		File.WriteAllText(Path.Combine(_tempDir, "orchestra.mcp.json"), """
 		{
 			"mcps": [{ "name": "test", "type": "local", "command": "echo", "arguments": ["hi"] }]
 		}

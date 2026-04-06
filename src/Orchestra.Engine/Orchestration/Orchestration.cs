@@ -21,8 +21,8 @@ public class Orchestration
 
 	/// <summary>
 	/// Optional inline MCP server definitions in the orchestration JSON.
-	/// At runtime, these are merged with any external mcp.json definitions
-	/// (external definitions take priority on name conflicts).
+	/// At runtime, these are merged with any global orchestra.mcp.json definitions
+	/// (inline definitions take priority on name conflicts).
 	/// </summary>
 	public Mcp[] Mcps { get; init; } = [];
 

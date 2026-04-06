@@ -85,7 +85,7 @@ public static class ServiceCollectionExtensions
 			return new OrchestrationRegistry(persistPath: registryPersistPath, logger: logger, versionStore: versionStore, dataPath: options.DataPath);
 		});
 
-		// McpManager: manages globally shared MCP servers from mcp.json
+		// McpManager: manages globally shared MCP servers from orchestra.mcp.json
 		services.AddSingleton<McpManager>();
 
 		// ── Profiles & Tags ──
@@ -216,7 +216,7 @@ public static class ServiceProviderExtensions
 		var profileManager = services.GetRequiredService<ProfileManager>();
 		var mcpManager = services.GetRequiredService<McpManager>();
 
-		// Initialize McpManager: load global mcp.json and start proxy
+		// Initialize McpManager: load global orchestra.mcp.json and start proxy
 		var globalMcpPath = OrchestraConfigLoader.ResolveGlobalMcpPath();
 		Engine.Mcp[] globalMcps = [];
 		if (globalMcpPath is not null)
@@ -224,6 +224,10 @@ public static class ServiceProviderExtensions
 			globalMcps = OrchestrationParser.ParseMcpFile(globalMcpPath);
 		}
 		mcpManager.InitializeAsync(globalMcps).GetAwaiter().GetResult();
+
+		// Make global MCPs available to the registry for parsing orchestration files
+		registry.GlobalMcps = globalMcps;
+		triggerManager.GlobalMcps = globalMcps;
 
 		// Load persisted orchestrations
 		if (options.LoadPersistedOrchestrations)

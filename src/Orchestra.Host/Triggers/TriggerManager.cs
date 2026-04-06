@@ -43,6 +43,12 @@ public partial class TriggerManager : BackgroundService
 	/// </summary>
 	public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
+	/// <summary>
+	/// Global MCPs (from orchestra.mcp.json) used when parsing orchestration files at trigger fire time.
+	/// Set by the host during initialization.
+	/// </summary>
+	public Engine.Mcp[] GlobalMcps { get; set; } = [];
+
 	public TriggerManager(
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
@@ -743,8 +749,8 @@ public partial class TriggerManager : BackgroundService
 
 		try
 		{
-			// Parse orchestration (global MCPs are resolved by McpManager at step execution time)
-			var orchestration = OrchestrationParser.ParseOrchestrationFile(reg.OrchestrationPath, []);
+			// Parse orchestration (global MCPs available via GlobalMcps property)
+			var orchestration = OrchestrationParser.ParseOrchestrationFile(reg.OrchestrationPath, GlobalMcps);
 			var schedule = _scheduler.Schedule(orchestration);
 
 			// ── Input Handler Prompt: transform raw parameters via LLM ──

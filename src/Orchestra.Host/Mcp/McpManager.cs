@@ -10,7 +10,7 @@ using Orchestra.Engine;
 namespace Orchestra.Host.Mcp;
 
 /// <summary>
-/// Manages globally shared MCP servers defined in the global mcp.json file.
+/// Manages globally shared MCP servers defined in the global orchestra.mcp.json file.
 /// Uses the McpProxy SDK to host an in-process proxy that aggregates all global
 /// MCP servers into a single Streamable HTTP endpoint. Steps that reference global
 /// MCPs have their configurations transparently replaced with a single
@@ -52,7 +52,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Gets all globally managed MCPs (the original config objects from mcp.json).
+	/// Gets all globally managed MCPs (the original config objects from orchestra.mcp.json).
 	/// </summary>
 	public IReadOnlyCollection<Engine.Mcp> GlobalMcps => _globalMcpInstances;
 
@@ -62,7 +62,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	public bool IsRunning => _proxyApp is not null;
 
 	/// <summary>
-	/// Initializes the MCP proxy with the given global MCPs from mcp.json.
+	/// Initializes the MCP proxy with the given global MCPs from orchestra.mcp.json.
 	/// Starts an in-process proxy using the McpProxy SDK.
 	/// </summary>
 	public async Task InitializeAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken = default)

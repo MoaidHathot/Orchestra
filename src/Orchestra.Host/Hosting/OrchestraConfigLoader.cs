@@ -69,12 +69,12 @@ public static class OrchestraConfigLoader
 	/// <summary>
 	/// The global MCP configuration file name, co-located with orchestra.json.
 	/// </summary>
-	public const string McpConfigFileName = "mcp.json";
+	public const string McpConfigFileName = "orchestra.mcp.json";
 
 	/// <summary>
-	/// Resolves the path to the global mcp.json file.
+	/// Resolves the path to the global orchestra.mcp.json file.
 	/// It lives in the same directory as orchestra.json.
-	/// Returns null if no mcp.json exists.
+	/// Returns null if no orchestra.mcp.json exists.
 	/// </summary>
 	public static string? ResolveGlobalMcpPath()
 	{

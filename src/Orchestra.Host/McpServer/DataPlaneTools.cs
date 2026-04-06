@@ -135,11 +135,11 @@ public sealed class DataPlaneTools
 			}
 		}
 
-		// Parse the orchestration (global MCPs are resolved by McpManager at step execution time)
+		// Parse the orchestration (global MCPs are available via registry.GlobalMcps)
 		Orchestration orchestration;
 		try
 		{
-			orchestration = OrchestrationParser.ParseOrchestrationFile(entry.Path, []);
+			orchestration = OrchestrationParser.ParseOrchestrationFile(entry.Path, registry.GlobalMcps);
 		}
 		catch (Exception ex)
 		{

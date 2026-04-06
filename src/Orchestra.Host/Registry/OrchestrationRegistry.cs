@@ -49,6 +49,13 @@ public partial class OrchestrationRegistry
 	public int Count => _entries.Count;
 
 	/// <summary>
+	/// Gets or sets the global MCPs (from orchestra.mcp.json) that are available
+	/// when parsing orchestration files. Set by the host during initialization
+	/// so that orchestrations referencing global MCP names can resolve them.
+	/// </summary>
+	public Engine.Mcp[] GlobalMcps { get; set; } = [];
+
+	/// <summary>
 	/// Gets the version store used for tracking orchestration version history.
 	/// May be null if no version store was configured.
 	/// </summary>
@@ -66,7 +73,7 @@ public partial class OrchestrationRegistry
 		if (File.Exists(path))
 			rawJson = File.ReadAllText(path);
 
-		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, []);
+		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, GlobalMcps);
 
 		// Use the original source path for ID generation when available.
 		// This ensures a stable ID when the orchestration file has been copied
@@ -119,7 +126,7 @@ public partial class OrchestrationRegistry
 	/// </summary>
 	public OrchestrationEntry RegisterFromJson(string json, Orchestration? preloaded = null, bool persist = true)
 	{
-		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestration(json, []);
+		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestration(json, GlobalMcps);
 
 		// Write to managed location or temp
 		string filePath;
