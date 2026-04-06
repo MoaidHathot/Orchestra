@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Orchestration, Step, McpConfig, TagCount } from '../../types';
+import type { Orchestration, Step, McpConfig, TagCount, InputDefinition } from '../../types';
 import { api } from '../../api';
 import { Icons } from '../../icons';
 import StepDetailsPanel from '../StepDetailsPanel';
@@ -359,6 +359,65 @@ function ViewerModal({ open, orchestration, onClose, onRun, onTagsChanged }: Pro
                           }}>
                             {paramName}
                           </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Variables */}
+                  {displayOrch.variables && Object.keys(displayOrch.variables).length > 0 && (
+                    <div className="form-group">
+                      <label className="form-label">Variables ({Object.keys(displayOrch.variables).length})</label>
+                      <div style={{
+                        padding: '8px 12px',
+                        background: 'var(--surface)',
+                        borderRadius: '6px',
+                        fontFamily: 'monospace',
+                        fontSize: '13px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                      }}>
+                        {Object.entries(displayOrch.variables).map(([key, value]) => (
+                          <div key={key} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <span style={{ color: '#ff7b72' }}>{key}:</span>{' '}
+                            <span className="text-muted">{value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Inputs */}
+                  {displayOrch.inputs && Object.keys(displayOrch.inputs).length > 0 && (
+                    <div className="form-group">
+                      <label className="form-label">Inputs ({Object.keys(displayOrch.inputs).length})</label>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {Object.entries(displayOrch.inputs).map(([name, def]: [string, InputDefinition]) => (
+                          <div key={name} style={{
+                            padding: '8px 12px',
+                            background: 'var(--surface)',
+                            borderRadius: '6px',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}>
+                            <div>
+                              <span style={{ color: '#79c0ff', fontWeight: 500 }}>{name}</span>
+                              <span className="text-muted" style={{ marginLeft: '8px' }}>({def.type || 'string'})</span>
+                              {def.required === false && (
+                                <span className="text-muted" style={{ marginLeft: '6px', fontSize: '12px' }}>optional</span>
+                              )}
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                              {def.default && (
+                                <span className="text-muted" style={{ fontSize: '12px' }}>default: {def.default}</span>
+                              )}
+                              {def.enum && def.enum.length > 0 && (
+                                <span className="text-muted" style={{ fontSize: '12px' }}>[{def.enum.join(', ')}]</span>
+                              )}
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>

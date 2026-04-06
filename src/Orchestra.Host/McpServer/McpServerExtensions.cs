@@ -115,13 +115,22 @@ public static class McpServerExtensions
 	/// <summary>
 	/// Removes all tools from the collection that were NOT defined in the specified type.
 	/// Uses reflection to match tool names against methods with <see cref="McpServerToolAttribute"/>.
+	/// When the attribute specifies a custom <c>Name</c>, that name is used; otherwise the method name.
 	/// </summary>
 	private static void RemoveToolsNotOfType<T>(McpServerPrimitiveCollection<McpServerTool> tools)
 	{
 		var keepNames = new HashSet<string>(
 			typeof(T).GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
-				.Where(m => m.GetCustomAttributes(typeof(McpServerToolAttribute), false).Length > 0)
-				.Select(m => m.Name),
+				.Select(m =>
+				{
+					var attr = m.GetCustomAttributes(typeof(McpServerToolAttribute), false)
+						.OfType<McpServerToolAttribute>()
+						.FirstOrDefault();
+					if (attr is null) return null;
+					// Use the explicit Name from the attribute if set, otherwise fall back to the method name
+					return !string.IsNullOrEmpty(attr.Name) ? attr.Name : m.Name;
+				})
+				.Where(name => name is not null)!,
 			StringComparer.OrdinalIgnoreCase);
 
 		var toRemove = tools.Where(t => !keepNames.Contains(t.ProtocolTool.Name)).ToList();

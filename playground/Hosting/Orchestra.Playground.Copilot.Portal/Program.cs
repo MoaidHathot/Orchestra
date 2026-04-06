@@ -19,26 +19,28 @@ builder.Logging.AddSimpleConsole(options =>
 // Register engine services (required by Orchestra Host)
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 
-// Determine data path - supports test isolation via configuration or environment variable
-// Priority: configuration "data-path" > env var ORCHESTRA_PORTAL_DATA_PATH > default
-// Default: %LOCALAPPDATA%/OrchestraHost (from OrchestrationHostOptions)
-var dataPath = builder.Configuration["data-path"]
-	?? Environment.GetEnvironmentVariable("ORCHESTRA_PORTAL_DATA_PATH")
-	?? builder.Configuration["executions-path"];
-
-// Determine orchestrations scan path
-var orchestrationsScanPath = Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH")
-	?? builder.Configuration["orchestrations-path"];
-
 // Add Orchestra Host services - this registers all core services including:
 // - OrchestrationRegistry, TriggerManager, FileSystemRunStore
 // - Active execution tracking
 // - Default execution callback (SseReporter-based)
-builder.Services.AddOrchestraHost(options =>
+//
+// Data-path resolution uses the IConfiguration-aware overload of AddOrchestraHost.
+// The configure callback receives IConfiguration from the service provider (resolved
+// after Build()), so values injected by WebApplicationFactory.ConfigureAppConfiguration
+// (e.g. "data-path" for test isolation) are guaranteed to be visible.
+builder.Services.AddOrchestraHost((options, configuration) =>
 {
+	var dataPath = configuration["data-path"]
+		?? Environment.GetEnvironmentVariable("ORCHESTRA_PORTAL_DATA_PATH")
+		?? configuration["executions-path"];
+
 	if (dataPath is not null)
 		options.DataPath = dataPath;
-	options.OrchestrationsScanPath = orchestrationsScanPath;
+
+	options.OrchestrationsScanPath =
+		Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH")
+		?? configuration["orchestrations-path"];
+
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
 });
@@ -55,7 +57,7 @@ var app = builder.Build();
 app.Services.InitializeOrchestraHost();
 
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
-var resolvedDataPath = dataPath ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrchestraHost");
+var resolvedDataPath = app.Services.GetRequiredService<OrchestrationHostOptions>().DataPath;
 startupLogger.LogInformation("Orchestra Portal started with data path: {DataPath}", resolvedDataPath);
 
 app.UseStaticFiles();

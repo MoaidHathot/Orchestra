@@ -19,7 +19,7 @@ namespace Orchestra.Host.McpServer;
 [McpServerToolType]
 public sealed class DataPlaneTools
 {
-	[McpServerTool, Description(
+	[McpServerTool(Name = "list_orchestrations"), Description(
 		"Lists orchestrations registered in Orchestra. " +
 		"Returns orchestration IDs, names, descriptions, parameters, and input schemas. " +
 		"Use the returned information to understand what orchestrations are available and what inputs they require before invoking them.")]
@@ -79,7 +79,7 @@ public sealed class DataPlaneTools
 		return JsonSerializer.Serialize(new { count = result.Length, orchestrations = result }, s_jsonOptions);
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "invoke_orchestration"), Description(
 		"Invokes an orchestration by its ID with the specified parameters. " +
 		"By default, returns immediately with an execution ID (async mode). " +
 		"Use mode='sync' to block until the orchestration completes (with optional timeout). " +
@@ -318,7 +318,7 @@ public sealed class DataPlaneTools
 		}
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "get_orchestration_status"), Description(
 		"Gets the status and result of an orchestration execution by its execution ID. " +
 		"Use this to check the progress of async invocations or to retrieve results after completion.")]
 	public static async Task<string> GetOrchestrationStatus(
@@ -398,7 +398,7 @@ public sealed class DataPlaneTools
 		}, s_jsonOptions);
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "cancel_orchestration"), Description(
 		"Cancels a running orchestration execution. " +
 		"Only active (in-progress) executions can be cancelled.")]
 	public static string CancelOrchestration(

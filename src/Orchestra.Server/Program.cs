@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging.Console;
 using Orchestra.Copilot;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
+using Orchestra.Host.Hosting;
 using Orchestra.Host.McpServer;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,19 +18,18 @@ builder.Logging.AddSimpleConsole(options =>
 // Register the Copilot agent builder (required for prompt step execution)
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 
-// Configuration: data path and orchestrations scan path from CLI args, env vars, or config
-// Priority: configuration "data-path" > env var ORCHESTRA_DATA_PATH > default
-// Configuration takes priority so that test factories can inject isolated paths
-// via IConfiguration without process-global environment variable races.
-var dataPath = builder.Configuration["data-path"]
-	?? Environment.GetEnvironmentVariable("ORCHESTRA_DATA_PATH");
-
-var orchestrationsScanPath = builder.Configuration["orchestrations-path"]
-	?? Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH");
-
-// Add Orchestra Host services
-builder.Services.AddOrchestraHost(options =>
+// Add Orchestra Host services.  The IConfiguration-aware overload ensures that
+// data-path and orchestrations-path are read from the host's IConfiguration
+// (resolved after Build()), so WebApplicationFactory.ConfigureAppConfiguration
+// overrides are visible for test isolation.
+builder.Services.AddOrchestraHost((options, configuration) =>
 {
+	var dataPath = configuration["data-path"]
+		?? Environment.GetEnvironmentVariable("ORCHESTRA_DATA_PATH");
+
+	var orchestrationsScanPath = configuration["orchestrations-path"]
+		?? Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH");
+
 	if (dataPath is not null)
 		options.DataPath = dataPath;
 	options.OrchestrationsScanPath = orchestrationsScanPath;
@@ -65,8 +65,7 @@ var app = builder.Build();
 app.Services.InitializeOrchestraHost();
 
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
-var resolvedDataPath = dataPath ?? Path.Combine(
-	Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "OrchestraHost");
+var resolvedDataPath = app.Services.GetRequiredService<OrchestrationHostOptions>().DataPath;
 startupLogger.LogInformation("Orchestra Server started with data path: {DataPath}", resolvedDataPath);
 
 // Middleware pipeline

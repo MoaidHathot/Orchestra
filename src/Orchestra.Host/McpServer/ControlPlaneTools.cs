@@ -20,7 +20,7 @@ public sealed class ControlPlaneTools
 {
 	// ── Orchestration Management ──
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "get_orchestration_details"), Description(
 		"Gets the full details of a registered orchestration by its ID. " +
 		"Returns name, description, version, steps, parameters, inputs, tags, and trigger configuration.")]
 	public static string GetOrchestrationDetails(
@@ -73,7 +73,7 @@ public sealed class ControlPlaneTools
 		});
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "register_orchestration"), Description(
 		"Registers an orchestration from a file path. " +
 		"The file must be a valid orchestration JSON file.")]
 	public static string RegisterOrchestration(
@@ -110,7 +110,7 @@ public sealed class ControlPlaneTools
 		}
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "remove_orchestration"), Description(
 		"Removes a registered orchestration by its ID. " +
 		"Also removes any associated triggers.")]
 	public static string RemoveOrchestration(
@@ -133,7 +133,7 @@ public sealed class ControlPlaneTools
 		});
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "scan_directory"), Description(
 		"Scans a directory for orchestration JSON files and returns metadata. " +
 		"Does not register them — use register_orchestration for that.")]
 	public static string ScanDirectory(
@@ -170,7 +170,7 @@ public sealed class ControlPlaneTools
 
 	// ── Tag Management ──
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "list_tags"), Description(
 		"Lists all tags in use across all orchestrations with their counts.")]
 	public static string ListTags(
 		OrchestrationTagStore tagStore,
@@ -183,7 +183,7 @@ public sealed class ControlPlaneTools
 		return Json(new { count = tagCounts.Count, tags = tagCounts });
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "add_tags"), Description(
 		"Adds tags to an orchestration. Merges with existing tags.")]
 	public static string AddTags(
 		OrchestrationTagStore tagStore,
@@ -207,7 +207,7 @@ public sealed class ControlPlaneTools
 		});
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "remove_tag"), Description(
 		"Removes a tag from an orchestration.")]
 	public static string RemoveTag(
 		OrchestrationTagStore tagStore,
@@ -236,7 +236,7 @@ public sealed class ControlPlaneTools
 
 	// ── Profile Management ──
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "list_profiles"), Description(
 		"Lists all profiles with their activation status.")]
 	public static string ListProfiles(
 		ProfileManager profileManager)
@@ -258,7 +258,7 @@ public sealed class ControlPlaneTools
 		});
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "create_profile"), Description(
 		"Creates a new profile with tag-based filtering. " +
 		"Profiles define which orchestrations are active based on their tags.")]
 	public static string CreateProfile(
@@ -288,7 +288,7 @@ public sealed class ControlPlaneTools
 		});
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "delete_profile"), Description(
 		"Deletes a profile by its ID.")]
 	public static string DeleteProfile(
 		ProfileManager profileManager,
@@ -301,7 +301,7 @@ public sealed class ControlPlaneTools
 		return Json(new { profileId, status = "deleted" });
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "activate_profile"), Description(
 		"Activates a profile, making its matched orchestrations available.")]
 	public static string ActivateProfile(
 		ProfileManager profileManager,
@@ -314,7 +314,7 @@ public sealed class ControlPlaneTools
 		return Json(new { profileId, status = "activated" });
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "deactivate_profile"), Description(
 		"Deactivates a profile.")]
 	public static string DeactivateProfile(
 		ProfileManager profileManager,
@@ -329,7 +329,7 @@ public sealed class ControlPlaneTools
 
 	// ── Trigger Management ──
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "list_triggers"), Description(
 		"Lists all registered triggers with their status and configuration.")]
 	public static string ListTriggers(
 		TriggerManager triggerManager)
@@ -352,7 +352,7 @@ public sealed class ControlPlaneTools
 		});
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "enable_trigger"), Description(
 		"Enables a trigger by its ID.")]
 	public static string EnableTrigger(
 		TriggerManager triggerManager,
@@ -365,7 +365,7 @@ public sealed class ControlPlaneTools
 		return Json(new { triggerId, status = "enabled" });
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "disable_trigger"), Description(
 		"Disables a trigger by its ID.")]
 	public static string DisableTrigger(
 		TriggerManager triggerManager,
@@ -380,7 +380,7 @@ public sealed class ControlPlaneTools
 
 	// ── Run History ──
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "list_runs"), Description(
 		"Lists recent orchestration runs from history. " +
 		"Returns run summaries with status, duration, and error information.")]
 	public static async Task<string> ListRuns(
@@ -416,7 +416,7 @@ public sealed class ControlPlaneTools
 		});
 	}
 
-	[McpServerTool, Description(
+	[McpServerTool(Name = "get_run"), Description(
 		"Gets the full details of a specific run including all step results.")]
 	public static async Task<string> GetRun(
 		FileSystemRunStore runStore,

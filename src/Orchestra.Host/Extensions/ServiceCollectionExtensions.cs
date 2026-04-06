@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
@@ -27,17 +28,46 @@ public static class ServiceCollectionExtensions
 		this IServiceCollection services,
 		Action<OrchestrationHostOptions>? configure = null)
 	{
-		var options = new OrchestrationHostOptions();
+		return services.AddOrchestraHost((options, _) => configure?.Invoke(options));
+	}
 
-		// Load config file first (orchestra.json), then let programmatic overrides win
-		OrchestraConfigLoader.LoadAndApply(options);
-		configure?.Invoke(options);
+	/// <summary>
+	/// Adds Orchestra Host services to the service collection with access to <see cref="IConfiguration"/>.
+	/// The configure callback receives the host's <see cref="IConfiguration"/> resolved from the
+	/// service provider, which includes values injected by <c>WebApplicationFactory.ConfigureAppConfiguration</c>.
+	/// This overload is the recommended way to wire data-path and other settings in ASP.NET Core apps
+	/// because it guarantees test overrides are visible.
+	/// </summary>
+	/// <param name="services">The service collection.</param>
+	/// <param name="configure">Configuration action receiving options and the host's IConfiguration.</param>
+	/// <returns>The service collection for chaining.</returns>
+	public static IServiceCollection AddOrchestraHost(
+		this IServiceCollection services,
+		Action<OrchestrationHostOptions, IConfiguration> configure)
+	{
+		// Register OrchestrationHostOptions via a factory delegate so creation is
+		// deferred until first resolution.  This is critical for
+		// WebApplicationFactory-based tests: their ConfigureAppConfiguration
+		// callbacks run during Build(), which is *after* AddOrchestraHost() but
+		// *before* service resolution.  By deferring options creation we allow
+		// test overrides (e.g. data-path) to take effect.
+		//
+		// We resolve IConfiguration from the service provider — this is the
+		// *host's* configuration which includes all sources added by the factory.
+		services.AddSingleton(sp =>
+		{
+			var options = new OrchestrationHostOptions();
+			var configuration = sp.GetRequiredService<IConfiguration>();
 
-		// Ensure data path exists
-		Directory.CreateDirectory(options.DataPath);
+			// Load config file first (orchestra.json), then let programmatic overrides win
+			OrchestraConfigLoader.LoadAndApply(options);
+			configure.Invoke(options, configuration);
 
-		// Register options
-		services.AddSingleton(options);
+			// Ensure data path exists
+			Directory.CreateDirectory(options.DataPath);
+
+			return options;
+		});
 
 		// Register engine services (if not already registered by the consumer)
 		services.TryAddSingleton<IScheduler, OrchestrationScheduler>();
@@ -54,12 +84,18 @@ public static class ServiceCollectionExtensions
 
 		// File-based run store
 		services.AddSingleton<FileSystemRunStore>(sp =>
-			new FileSystemRunStore(options.DataPath, sp.GetRequiredService<ILogger<FileSystemRunStore>>()));
+		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			return new FileSystemRunStore(opts.DataPath, sp.GetRequiredService<ILogger<FileSystemRunStore>>());
+		});
 		services.AddSingleton<IRunStore>(sp => sp.GetRequiredService<FileSystemRunStore>());
 
 		// File-based checkpoint store
 		services.AddSingleton<FileSystemCheckpointStore>(sp =>
-			new FileSystemCheckpointStore(options.DataPath, sp.GetRequiredService<ILogger<FileSystemCheckpointStore>>()));
+		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			return new FileSystemCheckpointStore(opts.DataPath, sp.GetRequiredService<ILogger<FileSystemCheckpointStore>>());
+		});
 		services.AddSingleton<ICheckpointStore>(sp => sp.GetRequiredService<FileSystemCheckpointStore>());
 
 		// Step type parser registry with built-in parsers (stateless, safe as singleton)
@@ -73,16 +109,20 @@ public static class ServiceCollectionExtensions
 
 		// Version store for tracking orchestration version history
 		services.AddSingleton<FileSystemOrchestrationVersionStore>(sp =>
-			new FileSystemOrchestrationVersionStore(options.DataPath, sp.GetRequiredService<ILogger<FileSystemOrchestrationVersionStore>>()));
+		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			return new FileSystemOrchestrationVersionStore(opts.DataPath, sp.GetRequiredService<ILogger<FileSystemOrchestrationVersionStore>>());
+		});
 		services.AddSingleton<IOrchestrationVersionStore>(sp => sp.GetRequiredService<FileSystemOrchestrationVersionStore>());
 
 		// Orchestration registry (with version store wired up)
-		var registryPersistPath = Path.Combine(options.DataPath, "registered-orchestrations.json");
 		services.AddSingleton<OrchestrationRegistry>(sp =>
 		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			var registryPersistPath = Path.Combine(opts.DataPath, "registered-orchestrations.json");
 			var logger = sp.GetService<ILogger<OrchestrationRegistry>>();
 			var versionStore = sp.GetRequiredService<IOrchestrationVersionStore>();
-			return new OrchestrationRegistry(persistPath: registryPersistPath, logger: logger, versionStore: versionStore, dataPath: options.DataPath);
+			return new OrchestrationRegistry(persistPath: registryPersistPath, logger: logger, versionStore: versionStore, dataPath: opts.DataPath);
 		});
 
 		// McpManager: manages globally shared MCP servers from orchestra.mcp.json
@@ -92,11 +132,17 @@ public static class ServiceCollectionExtensions
 
 		// Tag store for host-managed orchestration tags
 		services.AddSingleton<OrchestrationTagStore>(sp =>
-			new OrchestrationTagStore(options.DataPath, sp.GetRequiredService<ILogger<OrchestrationTagStore>>()));
+		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			return new OrchestrationTagStore(opts.DataPath, sp.GetRequiredService<ILogger<OrchestrationTagStore>>());
+		});
 
 		// Profile store for file-system profile persistence
 		services.AddSingleton<ProfileStore>(sp =>
-			new ProfileStore(options.DataPath, sp.GetRequiredService<ILogger<ProfileStore>>()));
+		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			return new ProfileStore(opts.DataPath, sp.GetRequiredService<ILogger<ProfileStore>>());
+		});
 
 		// Profile manager as a hosted background service (schedule evaluation loop)
 		services.AddSingleton<ProfileManager>(sp =>
@@ -110,7 +156,8 @@ public static class ServiceCollectionExtensions
 		// TriggerManager as a hosted background service
 		services.AddSingleton<TriggerManager>(sp =>
 		{
-			var runsPath = Path.Combine(options.DataPath, "runs");
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			var runsPath = Path.Combine(opts.DataPath, "runs");
 			Directory.CreateDirectory(runsPath);
 
 			var triggerManager = new TriggerManager(
@@ -125,22 +172,20 @@ public static class ServiceCollectionExtensions
 				sp.GetRequiredService<ICheckpointStore>(),
 				sp.GetRequiredService<ITriggerExecutionCallback>(),
 				sp.GetRequiredService<EngineToolRegistry>(),
-				dataPath: options.DataPath,
-				serverUrl: options.HostBaseUrl);
+				dataPath: opts.DataPath,
+				serverUrl: opts.HostBaseUrl);
 
 			// Apply shutdown timeout from configuration
-			triggerManager.ShutdownTimeout = TimeSpan.FromSeconds(options.ShutdownTimeoutSeconds);
+			triggerManager.ShutdownTimeout = TimeSpan.FromSeconds(opts.ShutdownTimeoutSeconds);
 
 			return triggerManager;
 		});
 		services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
 
-		// Run retention background service (only when retention limits are configured)
-		if (!options.Retention.IsForever)
-		{
-			services.AddSingleton(options.Retention);
-			services.AddHostedService<RunRetentionService>();
-		}
+		// Run retention background service — registered unconditionally; the service
+		// itself checks at resolution time whether retention is configured.
+		services.AddSingleton(sp => sp.GetRequiredService<OrchestrationHostOptions>().Retention);
+		services.AddHostedService<RunRetentionService>();
 
 		return services;
 	}

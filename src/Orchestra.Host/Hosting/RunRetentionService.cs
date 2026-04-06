@@ -42,6 +42,12 @@ public partial class RunRetentionService : BackgroundService
 
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 	{
+		// When no retention limits are configured, exit immediately instead of
+		// running periodic no-op sweeps.  This allows unconditional DI registration
+		// (needed because options are resolved lazily) while avoiding wasted work.
+		if (_retentionPolicy.IsForever)
+			return;
+
 		LogRetentionServiceStarted(_retentionPolicy.MaxRunsPerOrchestration, _retentionPolicy.MaxRunAgeDays);
 
 		// Run an initial sweep shortly after startup (5 seconds delay to let things settle)
