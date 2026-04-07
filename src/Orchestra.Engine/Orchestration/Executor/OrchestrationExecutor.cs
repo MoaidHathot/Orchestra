@@ -328,6 +328,7 @@ public partial class OrchestrationExecutor
 					var record = BuildStepRecord(step, failed, effectiveParams, stepStartedAt);
 					stepRecords[step.Name] = record;
 					allStepRecords[step.Name] = record;
+					_reporter.ReportStepError(step.Name, ex.Message);
 					completionSources[step.Name].TrySetResult(failed);
 				}
 

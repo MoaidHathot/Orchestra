@@ -412,6 +412,24 @@ public partial class TriggerManager : BackgroundService
 					_ => HostExecutionStatus.Failed
 				};
 
+				// Send terminal SSE events so attached clients see real-time completion.
+				if (reporter is SseReporter sseReporter)
+				{
+					if (result.Status == ExecutionStatus.Cancelled)
+					{
+						sseReporter.ReportOrchestrationCancelled();
+					}
+					else
+					{
+						foreach (var (stepName, stepResult) in result.StepResults)
+						{
+							if (stepResult.Status == ExecutionStatus.Succeeded)
+								sseReporter.ReportStepOutput(stepName, stepResult.Content);
+						}
+						sseReporter.ReportOrchestrationDone(result);
+					}
+				}
+
 				// Persist history
 				try
 				{
@@ -445,14 +463,25 @@ public partial class TriggerManager : BackgroundService
 			catch (OperationCanceledException)
 			{
 				executionInfo.Status = HostExecutionStatus.Cancelled;
+				if (reporter is SseReporter cancelSseReporter)
+					cancelSseReporter.ReportOrchestrationCancelled();
 			}
 			catch (Exception ex)
 			{
 				executionInfo.Status = HostExecutionStatus.Failed;
+				if (reporter is SseReporter errorSseReporter)
+				{
+					errorSseReporter.ReportStepError("orchestration", ex.Message);
+					errorSseReporter.ReportOrchestrationError(ex.Message);
+				}
 				LogOrchestrationResumeFailed(entry.Id, executionId, ex);
 			}
 			finally
 			{
+				// Complete the SSE reporter so attached clients' streams terminate.
+				if (reporter is SseReporter completeSseReporter)
+					completeSseReporter.Complete();
+
 				_activeExecutions.TryRemove(executionId, out _);
 				_backgroundTasks.TryRemove(taskId, out _);
 
@@ -827,6 +856,25 @@ public partial class TriggerManager : BackgroundService
 				var orchResult = await executor.ExecuteAsync(orchestration, parameters, triggerId: reg.Id, cancellationToken: cts.Token);
 				executionResult = orchResult;
 
+				// Send terminal SSE events so attached clients see real-time completion.
+				// This mirrors what ExecutionApi does for manual SSE-based executions.
+				if (reporter is SseReporter sseReporter)
+				{
+					if (orchResult.Status == ExecutionStatus.Cancelled)
+					{
+						sseReporter.ReportOrchestrationCancelled();
+					}
+					else
+					{
+						foreach (var (stepName, stepResult) in orchResult.StepResults)
+						{
+							if (stepResult.Status == ExecutionStatus.Succeeded)
+								sseReporter.ReportStepOutput(stepName, stepResult.Content);
+						}
+						sseReporter.ReportOrchestrationDone(orchResult);
+					}
+				}
+
 				// Persist history
 				try
 				{
@@ -859,8 +907,27 @@ public partial class TriggerManager : BackgroundService
 
 				return (executionId, orchResult);
 			}
+			catch (OperationCanceledException)
+			{
+				if (reporter is SseReporter cancelSseReporter)
+					cancelSseReporter.ReportOrchestrationCancelled();
+				throw;
+			}
+			catch (Exception ex)
+			{
+				if (reporter is SseReporter errorSseReporter)
+				{
+					errorSseReporter.ReportStepError("orchestration", ex.Message);
+					errorSseReporter.ReportOrchestrationError(ex.Message);
+				}
+				throw;
+			}
 			finally
 			{
+				// Complete the SSE reporter so attached clients' streams terminate.
+				if (reporter is SseReporter completeSseReporter)
+					completeSseReporter.Complete();
+
 				_activeExecutions.TryRemove(executionId, out _);
 				// Update status and notify callback
 				if (_activeExecutionInfos.TryGetValue(executionId, out var info))

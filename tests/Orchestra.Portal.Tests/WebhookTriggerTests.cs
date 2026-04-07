@@ -308,4 +308,71 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 		}
 		""";
 	}
+
+	[Fact]
+	public async Task WebhookTrigger_Execution_EmitsTerminalSseEvents()
+	{
+		// Arrange - Register and enable a webhook orchestration
+		var testName = $"Test Webhook SSE {Guid.NewGuid():N}";
+		var orchestrationJson = CreateWebhookOrchestrationJson("test-webhook-sse", enabled: true, name: testName);
+		await RegisterOrchestrationAsync(orchestrationJson);
+
+		await Task.Delay(500);
+
+		// Get the trigger ID
+		var triggersResponse = await _client.GetFromJsonAsync<JsonElement>("/api/triggers");
+		var triggersArray = triggersResponse.GetProperty("triggers");
+		var webhookTrigger = triggersArray.EnumerateArray()
+			.FirstOrDefault(t => t.GetProperty("orchestrationName").GetString() == testName);
+		webhookTrigger.ValueKind.Should().NotBe(JsonValueKind.Undefined, "Webhook trigger should be registered");
+		var triggerId = webhookTrigger.GetProperty("id").GetString()!;
+
+		// Act - Fire the webhook
+		var fireResponse = await _client.PostAsJsonAsync($"/api/webhooks/{triggerId}", new { data = "test" }, _jsonOptions);
+		fireResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+		var fireResult = await fireResponse.Content.ReadFromJsonAsync<JsonElement>();
+		var executionId = fireResult.GetProperty("executionId").GetString()!;
+
+		// Attach to the SSE stream to receive events
+		var attachRequest = new HttpRequestMessage(HttpMethod.Get, $"/api/execution/{executionId}/attach");
+		var response = await _client.SendAsync(attachRequest, HttpCompletionOption.ResponseHeadersRead);
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		// Read the SSE stream and look for terminal events
+		var stream = await response.Content.ReadAsStreamAsync();
+		using var reader = new StreamReader(stream);
+
+		var events = new List<string>();
+		var hasOrchestrationDone = false;
+		var hasStepCompleted = false;
+
+		using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+		try
+		{
+			while (!timeoutCts.Token.IsCancellationRequested)
+			{
+				var line = await reader.ReadLineAsync(timeoutCts.Token);
+				if (line is null) break; // Stream closed
+				if (line.StartsWith("event: "))
+				{
+					var eventType = line["event: ".Length..];
+					events.Add(eventType);
+					if (eventType == "orchestration-done") hasOrchestrationDone = true;
+					if (eventType == "step-completed") hasStepCompleted = true;
+				}
+				if (hasOrchestrationDone) break; // Done, no need to read more
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			// Timeout - the test will fail on the assertion below
+		}
+
+		// Assert - The SSE stream should contain terminal events
+		hasOrchestrationDone.Should().BeTrue("Trigger-based executions must emit orchestration-done so the UI updates in real-time");
+		hasStepCompleted.Should().BeTrue("Step completion events should be emitted during execution");
+
+		// Verify the stream also included step-started (not a regression)
+		events.Should().Contain("step-started");
+	}
 }

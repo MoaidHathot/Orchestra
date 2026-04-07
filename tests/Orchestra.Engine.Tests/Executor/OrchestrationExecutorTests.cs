@@ -237,6 +237,39 @@ public class OrchestrationExecutorTests
 		_reporter.Received().ReportStepSkipped("C", Arg.Any<string>());
 	}
 
+	[Fact]
+	public async Task ExecuteAsync_StepFails_ReportsStepErrorForFailedStep()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithException(new Exception("Something broke"));
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.SingleStep();
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — Failed steps should emit a step-error event so the UI
+		// can update the step status immediately (not only at orchestration-done).
+		_reporter.Received().ReportStepError("step1", "Something broke");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_StepFails_InChain_ReportsStepErrorForFailedAndSkippedForDownstream()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithException(new Exception("Boom"));
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.LinearChain(); // A -> B -> C
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — step-error for the failed step, step-skipped for downstream
+		_reporter.Received().ReportStepError("A", "Boom");
+		_reporter.Received().ReportStepSkipped("B", Arg.Any<string>());
+		_reporter.Received().ReportStepSkipped("C", Arg.Any<string>());
+	}
+
 	#endregion
 
 	#region Parameter Validation

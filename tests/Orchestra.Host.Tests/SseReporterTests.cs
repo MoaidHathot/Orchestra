@@ -464,6 +464,94 @@ public class SseReporterTests : IDisposable
 		replay[0].Data.Should().Contain("Cancelling");
 		replay[1].Type.Should().Be("orchestration-cancelled");
 	}
+
+	[Fact]
+	public async Task FullLifecycle_StepEventsAndOrchestrationDone_AllReceivedBySubscriber()
+	{
+		// Arrange — subscribe before execution starts
+		var (_, future) = _reporter.Subscribe();
+		future.Should().NotBeNull();
+
+		// Act — simulate a full execution lifecycle (what TriggerManager now does)
+		_reporter.ReportStepStarted("analyze");
+		_reporter.ReportStepCompleted("analyze", new AgentResult { Content = "result" });
+		_reporter.ReportStepStarted("summarize");
+		_reporter.ReportStepCompleted("summarize", new AgentResult { Content = "summary" });
+		_reporter.ReportStepOutput("analyze", "result content");
+		_reporter.ReportStepOutput("summarize", "summary content");
+
+		var orchestrationResult = new OrchestrationResult
+		{
+			Status = ExecutionStatus.Succeeded,
+			Results = new Dictionary<string, ExecutionResult>
+			{
+				["summarize"] = ExecutionResult.Succeeded("summary"),
+			},
+			StepResults = new Dictionary<string, ExecutionResult>
+			{
+				["analyze"] = ExecutionResult.Succeeded("result"),
+				["summarize"] = ExecutionResult.Succeeded("summary"),
+			}
+		};
+		_reporter.ReportOrchestrationDone(orchestrationResult);
+		_reporter.Complete();
+
+		// Assert — subscriber should receive all events in order
+		var receivedEvents = new List<SseEvent>();
+		await foreach (var evt in future!.ReadAllAsync())
+		{
+			receivedEvents.Add(evt);
+		}
+
+		receivedEvents.Should().HaveCount(7);
+		receivedEvents[0].Type.Should().Be("step-started");
+		receivedEvents[1].Type.Should().Be("step-completed");
+		receivedEvents[2].Type.Should().Be("step-started");
+		receivedEvents[3].Type.Should().Be("step-completed");
+		receivedEvents[4].Type.Should().Be("step-output");
+		receivedEvents[5].Type.Should().Be("step-output");
+		receivedEvents[6].Type.Should().Be("orchestration-done");
+		receivedEvents[6].Data.Should().Contain("Succeeded");
+	}
+
+	[Fact]
+	public async Task FullLifecycle_LateAttach_ReceivesReplayIncludingTerminalEvents()
+	{
+		// Act — simulate a completed execution (no subscriber at start)
+		_reporter.ReportStepStarted("step1");
+		_reporter.ReportStepCompleted("step1", new AgentResult { Content = "output" });
+		_reporter.ReportStepOutput("step1", "output");
+
+		var orchestrationResult = new OrchestrationResult
+		{
+			Status = ExecutionStatus.Succeeded,
+			Results = new Dictionary<string, ExecutionResult>
+			{
+				["step1"] = ExecutionResult.Succeeded("output"),
+			},
+			StepResults = new Dictionary<string, ExecutionResult>
+			{
+				["step1"] = ExecutionResult.Succeeded("output"),
+			}
+		};
+		_reporter.ReportOrchestrationDone(orchestrationResult);
+		_reporter.Complete();
+
+		// Arrange — subscribe AFTER completion (late attach)
+		var (replay, future) = _reporter.Subscribe();
+
+		// Assert — replay should contain all events including terminal ones
+		replay.Should().HaveCount(4);
+		replay[0].Type.Should().Be("step-started");
+		replay[1].Type.Should().Be("step-completed");
+		replay[2].Type.Should().Be("step-output");
+		replay[3].Type.Should().Be("orchestration-done");
+		replay[3].Data.Should().Contain("Succeeded");
+
+		// Future channel should be completed immediately
+		future.Should().NotBeNull();
+		future!.Completion.IsCompleted.Should().BeTrue();
+	}
 }
 
 /// <summary>
