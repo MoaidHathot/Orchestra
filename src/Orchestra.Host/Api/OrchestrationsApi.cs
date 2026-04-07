@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Persistence;
@@ -26,102 +27,111 @@ public static class OrchestrationsApi
 		var group = endpoints.MapGroup("/api/orchestrations");
 
 		// GET /api/orchestrations - List all registered orchestrations
-		group.MapGet("", (OrchestrationRegistry registry, TriggerManager triggerManager, OrchestrationTagStore tagStore) =>
+		group.MapGet("", (OrchestrationRegistry registry, TriggerManager triggerManager, OrchestrationTagStore tagStore, ILoggerFactory loggerFactory) =>
 		{
-			var orchestrations = registry.GetAll().Select(o =>
+			var logger = loggerFactory.CreateLogger(typeof(OrchestrationsApi));
+			var result = new List<object>();
+			foreach (var o in registry.GetAll())
 			{
-				var trigger = triggerManager.GetTrigger(o.Id);
-				var lastRun = trigger?.LastFireTime;
-				var nextRun = trigger?.NextFireTime;
-				var parameterNames = o.Orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray();
-				var effectiveTags = tagStore.GetEffectiveTags(o.Id, o.Orchestration.Tags);
-
-				return new
+				try
 				{
-					id = o.Id,
-					path = o.Path,
-					name = o.Orchestration.Name,
-					description = o.Orchestration.Description,
-					version = o.Orchestration.Version,
-					contentHash = o.ContentHash,
-					tags = effectiveTags,
-					stepCount = o.Orchestration.Steps.Length,
-					steps = o.Orchestration.Steps.Select(s =>
-					{
-						var ps = s as PromptOrchestrationStep;
-						var hs = s as HttpOrchestrationStep;
-						var cs = s as CommandOrchestrationStep;
-						var ts = s as TransformOrchestrationStep;
-					return new
-					{
-						name = s.Name,
-						type = s.Type.ToString(),
-						dependsOn = s.DependsOn,
-						parameters = s.Parameters,
-						enabled = s.Enabled,
-						model = ps?.Model,
-						mcps = ps?.Mcps.Select(m => new
-						{
-							name = m.Name,
-							type = m.Type
-						}).ToArray() ?? Array.Empty<object>(),
-						loopConfig = ps?.Loop is not null ? new
-						{
-							target = ps.Loop.Target,
-							maxIterations = ps.Loop.MaxIterations,
-							exitPattern = ps.Loop.ExitPattern
-						} : null,
-						subagents = ps?.Subagents.Length > 0 ? ps.Subagents.Select(sa => new
-						{
-							name = sa.Name,
-							displayName = sa.DisplayName,
-							description = sa.Description
-						}).ToArray() : null,
-						// Http step fields
-						method = hs?.Method,
-						url = hs?.Url,
-						// Command step fields
-						command = cs?.Command,
-						arguments = cs?.Arguments,
-						// Transform step fields
-						template = ts?.Template
-					};
-					}).ToArray(),
-					parameters = parameterNames,
-					hasParameters = parameterNames.Length > 0,
-					inputs = o.Orchestration.Inputs?.ToDictionary(
-						kvp => kvp.Key,
-						kvp => new
-						{
-							type = kvp.Value.Type.ToString().ToLowerInvariant(),
-							description = kvp.Value.Description,
-							required = kvp.Value.Required,
-							@default = kvp.Value.Default,
-							@enum = kvp.Value.Enum.Length > 0 ? kvp.Value.Enum : null,
-						}),
-					variables = o.Orchestration.Variables.Count > 0 ? o.Orchestration.Variables : null,
-					referencedEnvVars = ExtractReferencedEnvVars(o.Orchestration),
-				trigger = FormatTriggerInfoWithWebhook(o.Orchestration.Trigger, trigger, parameterNames),
-				triggerType = o.Orchestration.Trigger.Type.ToString(),
-				enabled = trigger?.Config.Enabled ?? o.Orchestration.Trigger.Enabled,
-					isActive = trigger?.Status.ToString() == "Running",
-					lastExecutionTime = lastRun?.ToString("o"),
-					lastExecutionStatus = trigger?.LastError is null ? "Success" : "Failed",
-					nextExecutionTime = nextRun?.ToString("o"),
-					runCount = trigger?.RunCount ?? 0,
-					lastExecutionId = trigger?.LastExecutionId,
-					hasInlineMcps = o.Orchestration.Mcps.Length > 0,
-					mcps = o.Orchestration.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray(),
-				models = o.Orchestration.Steps
-						.OfType<PromptOrchestrationStep>()
-						.Select(s => s.Model)
-						.Where(m => !string.IsNullOrEmpty(m))
-						.Distinct()
-						.ToArray()
-				};
-			}).ToArray();
+					var trigger = triggerManager.GetTrigger(o.Id);
+					var lastRun = trigger?.LastFireTime;
+					var nextRun = trigger?.NextFireTime;
+					var parameterNames = o.Orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray();
+					var effectiveTags = tagStore.GetEffectiveTags(o.Id, o.Orchestration.Tags);
 
-			return Results.Json(new { count = orchestrations.Length, orchestrations }, jsonOptions);
+					result.Add(new
+					{
+						id = o.Id,
+						path = o.Path,
+						name = o.Orchestration.Name,
+						description = o.Orchestration.Description,
+						version = o.Orchestration.Version,
+						contentHash = o.ContentHash,
+						tags = effectiveTags,
+						stepCount = o.Orchestration.Steps.Length,
+						steps = o.Orchestration.Steps.Select(s =>
+						{
+							var ps = s as PromptOrchestrationStep;
+							var hs = s as HttpOrchestrationStep;
+							var cs = s as CommandOrchestrationStep;
+							var ts = s as TransformOrchestrationStep;
+							return new
+							{
+								name = s.Name,
+								type = s.Type.ToString(),
+								dependsOn = s.DependsOn,
+								parameters = s.Parameters,
+								enabled = s.Enabled,
+								model = ps?.Model,
+								mcps = ps?.Mcps.Select(m => new
+								{
+									name = m.Name,
+									type = m.Type
+								}).ToArray() ?? Array.Empty<object>(),
+								loopConfig = ps?.Loop is not null ? new
+								{
+									target = ps.Loop.Target,
+									maxIterations = ps.Loop.MaxIterations,
+									exitPattern = ps.Loop.ExitPattern
+								} : null,
+								subagents = ps?.Subagents.Length > 0 ? ps.Subagents.Select(sa => new
+								{
+									name = sa.Name,
+									displayName = sa.DisplayName,
+									description = sa.Description
+								}).ToArray() : null,
+								// Http step fields
+								method = hs?.Method,
+								url = hs?.Url,
+								// Command step fields
+								command = cs?.Command,
+								arguments = cs?.Arguments,
+								// Transform step fields
+								template = ts?.Template
+							};
+						}).ToArray(),
+						parameters = parameterNames,
+						hasParameters = parameterNames.Length > 0,
+						inputs = o.Orchestration.Inputs?.ToDictionary(
+							kvp => kvp.Key,
+							kvp => new
+							{
+								type = kvp.Value.Type.ToString().ToLowerInvariant(),
+								description = kvp.Value.Description,
+								required = kvp.Value.Required,
+								@default = kvp.Value.Default,
+								@enum = kvp.Value.Enum.Length > 0 ? kvp.Value.Enum : null,
+							}),
+						variables = o.Orchestration.Variables.Count > 0 ? o.Orchestration.Variables : null,
+						referencedEnvVars = ExtractReferencedEnvVars(o.Orchestration),
+						trigger = FormatTriggerInfoWithWebhook(o.Orchestration.Trigger, trigger, parameterNames),
+						triggerType = o.Orchestration.Trigger.Type.ToString(),
+						enabled = trigger?.Config.Enabled ?? o.Orchestration.Trigger.Enabled,
+						isActive = trigger?.Status.ToString() == "Running",
+						lastExecutionTime = lastRun?.ToString("o"),
+						lastExecutionStatus = trigger?.LastError is null ? "Success" : "Failed",
+						nextExecutionTime = nextRun?.ToString("o"),
+						runCount = trigger?.RunCount ?? 0,
+						lastExecutionId = trigger?.LastExecutionId,
+						hasInlineMcps = o.Orchestration.Mcps.Length > 0,
+						mcps = o.Orchestration.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray(),
+						models = o.Orchestration.Steps
+							.OfType<PromptOrchestrationStep>()
+							.Select(s => s.Model)
+							.Where(m => !string.IsNullOrEmpty(m))
+							.Distinct()
+							.ToArray()
+					});
+				}
+				catch (Exception ex)
+				{
+					logger.LogWarning(ex, "Failed to build orchestration data for {Id}, skipping", o.Id);
+				}
+			}
+
+			return Results.Json(new { count = result.Count, orchestrations = result }, jsonOptions);
 		});
 
 		// GET /api/orchestrations/{id} - Get a specific orchestration

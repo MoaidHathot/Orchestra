@@ -236,6 +236,10 @@ function App(): React.JSX.Element {
   // Online/offline tracking
   const onlineStatus = useOnlineStatus();
 
+  // Ref so setInterval callbacks always see the latest reachability
+  const serverReachableRef = useRef(true);
+  useEffect(() => { serverReachableRef.current = onlineStatus.isServerReachable; }, [onlineStatus.isServerReachable]);
+
   // ── Load data ─────────────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
@@ -312,6 +316,7 @@ function App(): React.JSX.Element {
 
     if (hasActiveOrPending || hasEnabledTriggers) {
       const interval = setInterval(async () => {
+        if (!serverReachableRef.current) return; // Skip when server is down
         try {
           const data = await api.get<ActiveData>('/api/active');
           const newRunning = data?.running || [];
@@ -366,6 +371,7 @@ function App(): React.JSX.Element {
   // Auto-refresh orchestrations list for external changes
   useEffect(() => {
     const interval = setInterval(async () => {
+      if (!serverReachableRef.current) return; // Skip when server is down
       try {
         const data = await api.get<OrchestrationsResponse>('/api/orchestrations');
         setOrchestrations(data.orchestrations || []);
@@ -383,6 +389,7 @@ function App(): React.JSX.Element {
     const hasRunning = activeData.running.length > 0;
     if (hasEnabledTriggers || hasActiveInHistory || hasRunning) {
       const interval = setInterval(async () => {
+        if (!serverReachableRef.current) return; // Skip when server is down
         try {
           const histData = await api.get<HistoryResponse>('/api/history?limit=15');
           setHistory(histData.runs || []);
@@ -397,6 +404,7 @@ function App(): React.JSX.Element {
   // Poll server status (including Outlook connection status) every 5 seconds
   useEffect(() => {
     const fetchStatus = async () => {
+      if (!serverReachableRef.current) return; // Skip when server is down
       try {
         const status = await api.get<ServerStatus>('/api/status');
         setServerStatus({
