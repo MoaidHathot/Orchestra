@@ -397,8 +397,12 @@ public static class RunsApi
 
 			foreach (var trigger in runningTriggers)
 			{
+				// Capture into local to avoid race with concurrent null-assignment
+				var activeExecId = trigger.ActiveExecutionId;
+				if (activeExecId is null) continue;
+
 				// Avoid duplicates if somehow tracked in both
-				if (!activeExecutionInfos.ContainsKey(trigger.ActiveExecutionId!))
+				if (!activeExecutionInfos.ContainsKey(activeExecId))
 				{
 				var triggerType = trigger.Config switch
 				{
@@ -416,7 +420,7 @@ public static class RunsApi
 
 					activeList.Add(new
 					{
-						executionId = trigger.ActiveExecutionId,
+						executionId = activeExecId,
 						orchestrationId = trigger.Id,
 						orchestrationName = orchName,
 						startedAt = trigger.LastFireTime,

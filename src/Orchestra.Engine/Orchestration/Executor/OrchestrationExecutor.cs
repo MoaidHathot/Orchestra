@@ -224,11 +224,19 @@ public partial class OrchestrationExecutor
 
 		var totalSteps = orchestration.Steps.Length;
 
+		// Guards against launching the same step twice when multiple
+		// dependencies complete simultaneously and both try to launch it.
+		var launchedSteps = new ConcurrentDictionary<string, byte>();
+
 		// Launch a step when all its dependencies are complete
 		void TryLaunchStep(string stepName)
 		{
 			// Skip steps that were already completed from checkpoint
 			if (stepResults.ContainsKey(stepName))
+				return;
+
+			// Atomically claim the launch — only the first caller proceeds
+			if (!launchedSteps.TryAdd(stepName, 0))
 				return;
 
 			_ = Task.Factory.StartNew(async () =>

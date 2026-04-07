@@ -8,6 +8,12 @@ namespace Orchestra.Copilot;
 /// <summary>
 /// Handles Copilot SDK session events and translates them to engine-agnostic AgentEvents.
 /// Extracted from CopilotAgent to reduce complexity and improve testability.
+///
+/// Threading assumption: the Copilot SDK invokes <see cref="HandleEvent"/> callbacks
+/// sequentially (single-threaded). The internal state (<see cref="_accumulatedContent"/>,
+/// <see cref="_toolCallNames"/>, etc.) is NOT thread-safe. If the SDK's threading model
+/// changes to allow concurrent callback dispatch, this class must be updated to use
+/// ConcurrentDictionary and thread-safe string accumulation.
 /// </summary>
 internal sealed class CopilotSessionHandler
 {
@@ -375,6 +381,9 @@ internal sealed class CopilotSessionHandler
 			Type = AgentEventType.Error,
 			ErrorMessage = err.Data.Message,
 		});
+		// Complete the TCS so RunSessionAsync does not hang indefinitely
+		// waiting for SessionIdleEvent that may never arrive after a fatal error.
+		_done.TrySetResult();
 	}
 
 	private void HandleIdle()

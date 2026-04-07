@@ -36,7 +36,7 @@ public class DefaultExecutionCallback : ITriggerExecutionCallback
 			};
 			sseReporter.OnStepCompleted = stepName =>
 			{
-				info.CompletedSteps++;
+				info.IncrementCompletedSteps();
 				info.CurrentStep = null;
 			};
 		}
@@ -64,7 +64,7 @@ public class DefaultExecutionCallback : ITriggerExecutionCallback
 	/// </summary>
 	public void OnStepCompleted(ActiveExecutionInfo info, string stepName)
 	{
-		info.CompletedSteps++;
+		info.IncrementCompletedSteps();
 		info.CurrentStep = null;
 		info.OnStepCompleted?.Invoke(stepName);
 	}

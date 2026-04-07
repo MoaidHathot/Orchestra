@@ -14,7 +14,7 @@ public partial class OrchestrationTagStore
 	private readonly ConcurrentDictionary<string, HashSet<string>> _tags = new();
 	private readonly string _persistPath;
 	private readonly ILogger<OrchestrationTagStore> _logger;
-	private readonly object _saveLock = new();
+	private readonly Lock _saveLock = new();
 
 	private static readonly JsonSerializerOptions s_jsonOptions = new()
 	{

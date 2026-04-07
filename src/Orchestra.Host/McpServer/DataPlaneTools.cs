@@ -165,7 +165,7 @@ public sealed class DataPlaneTools
 		{
 			if (activeExecutionInfos.TryGetValue(executionId, out var info))
 			{
-				info.CompletedSteps++;
+				info.IncrementCompletedSteps();
 				info.CurrentStep = null;
 			}
 		};

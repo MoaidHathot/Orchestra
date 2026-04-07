@@ -176,7 +176,7 @@ public static class CheckpointApi
 			};
 			reporter.OnStepCompleted = (stepName) =>
 			{
-				executionInfo.CompletedSteps++;
+				executionInfo.IncrementCompletedSteps();
 				executionInfo.CurrentStep = null;
 			};
 

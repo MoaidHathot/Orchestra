@@ -516,7 +516,8 @@ public partial class TriggerManager : BackgroundService
 				if (info.Reporter is SseReporter sseReporter)
 					sseReporter.ReportStatusChange(HostExecutionStatus.Cancelling);
 			}
-			cts.Cancel();
+			try { cts.Cancel(); }
+			catch (ObjectDisposedException) { /* CTS was disposed by a completing execution */ }
 			return true;
 		}
 		return false;
@@ -633,7 +634,10 @@ public partial class TriggerManager : BackgroundService
 	{
 		LogGracefulShutdownStarting(_activeExecutions.Count, _backgroundTasks.Count);
 
-		// 1. Cancel all active orchestration executions
+		// 1. Stop the polling loop first so no new triggers fire during drain
+		await base.StopAsync(cancellationToken);
+
+		// 2. Cancel all active orchestration executions
 		foreach (var kvp in _activeExecutions)
 		{
 			try
@@ -646,7 +650,7 @@ public partial class TriggerManager : BackgroundService
 			}
 		}
 
-		// 2. Await all tracked background tasks with timeout
+		// 3. Await all tracked background tasks with timeout
 		var allTasks = _backgroundTasks.Values.ToArray();
 		if (allTasks.Length > 0)
 		{
@@ -669,9 +673,6 @@ public partial class TriggerManager : BackgroundService
 		}
 
 		LogGracefulShutdownComplete();
-
-		// 3. Let the base class stop the ExecuteAsync loop
-		await base.StopAsync(cancellationToken);
 	}
 
 	private async Task CheckSchedulerTriggersAsync(CancellationToken stoppingToken)
@@ -696,6 +697,11 @@ public partial class TriggerManager : BackgroundService
 						reg.NextFireTime = null;
 						continue;
 					}
+
+					// Atomically transition to Running to prevent the next poll
+					// cycle from seeing Waiting and double-firing the same trigger.
+					if (!reg.TryTransitionStatus(TriggerStatus.Waiting, TriggerStatus.Running))
+						continue;
 
 					TrackBackgroundTask(ExecuteAndHandleCompletionAsync(reg, schedulerConfig));
 				}
@@ -771,7 +777,7 @@ public partial class TriggerManager : BackgroundService
 	{
 		reg.Status = TriggerStatus.Running;
 		reg.LastFireTime = DateTime.UtcNow;
-		reg.RunCount++;
+		reg.IncrementRunCount();
 		reg.LastError = null;
 
 		var executionId = Guid.NewGuid().ToString("N")[..12];

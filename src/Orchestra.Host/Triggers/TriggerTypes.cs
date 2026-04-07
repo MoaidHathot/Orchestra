@@ -13,13 +13,31 @@ public class TriggerRegistration
 	public required TriggerConfig Config { get; set; }
 	public Dictionary<string, string>? Parameters { get; set; }
 
-	// Runtime state
-	public TriggerStatus Status { get; set; } = TriggerStatus.Idle;
+	// Runtime state (volatile/interlocked for lock-free thread safety)
+	private int _status = (int)TriggerStatus.Idle;
+	public TriggerStatus Status
+	{
+		get => (TriggerStatus)Volatile.Read(ref _status);
+		set => Volatile.Write(ref _status, (int)value);
+	}
+	/// <summary>
+	/// Atomically transitions Status from <paramref name="expected"/> to <paramref name="desired"/>.
+	/// Returns true if the transition succeeded (i.e., the current value was <paramref name="expected"/>).
+	/// </summary>
+	public bool TryTransitionStatus(TriggerStatus expected, TriggerStatus desired)
+		=> Interlocked.CompareExchange(ref _status, (int)desired, (int)expected) == (int)expected;
+
 	public DateTime? NextFireTime { get; set; }
 	public DateTime? LastFireTime { get; set; }
-	public int RunCount { get; set; }
+	private int _runCount;
+	public int RunCount
+	{
+		get => Volatile.Read(ref _runCount);
+		set => Volatile.Write(ref _runCount, value);
+	}
+	public int IncrementRunCount() => Interlocked.Increment(ref _runCount);
 	public string? LastError { get; set; }
-	public string? ActiveExecutionId { get; set; }
+	public volatile string? ActiveExecutionId;
 	public string? LastExecutionId { get; set; }
 	public string? OrchestrationName { get; set; }
 	public string? OrchestrationDescription { get; set; }
@@ -96,9 +114,15 @@ public class ActiveExecutionInfo
 	public int TotalSteps { get; set; }
 
 	/// <summary>
-	/// Number of steps that have completed.
+	/// Number of steps that have completed (atomically incremented from reporter callbacks).
 	/// </summary>
-	public int CompletedSteps { get; set; }
+	private int _completedSteps;
+	public int CompletedSteps
+	{
+		get => Volatile.Read(ref _completedSteps);
+		set => Volatile.Write(ref _completedSteps, value);
+	}
+	public int IncrementCompletedSteps() => Interlocked.Increment(ref _completedSteps);
 
 	/// <summary>
 	/// Name of the currently executing step.

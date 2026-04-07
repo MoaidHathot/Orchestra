@@ -31,7 +31,7 @@ public partial class FileSystemRunStore : IRunStore
 	private readonly ConcurrentDictionary<string, List<RunIndex>> _indexByOrchestration = new();
 	private readonly ConcurrentDictionary<string, List<RunIndex>> _indexByTrigger = new();
 	private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileWriteLocks = new();
-	private readonly object _indexWriteLock = new();
+	private readonly Lock _indexWriteLock = new();
 	private volatile bool _indexLoaded;
 	private readonly SemaphoreSlim _indexLoadLock = new(1, 1);
 

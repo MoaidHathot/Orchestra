@@ -42,7 +42,7 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	/// </summary>
 	public const int MaxSubscribers = 50;
 
-	private readonly object _lock = new();
+	private readonly Lock _lock = new();
 	private readonly SseEvent[] _eventBuffer = new SseEvent[MaxAccumulatedEvents];
 	private int _eventCount;
 	private int _eventHead; // Index of the oldest event in the circular buffer

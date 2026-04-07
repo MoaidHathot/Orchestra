@@ -9,7 +9,7 @@ public class FileLoggerProvider : ILoggerProvider
 {
 	private readonly string _path;
 	private readonly LogLevel _minimumLevel;
-	private readonly object _lock = new();
+	private readonly Lock _lock = new();
 
 	public FileLoggerProvider(string path, LogLevel minimumLevel = LogLevel.Information)
 	{
@@ -34,10 +34,10 @@ public class FileLogger : ILogger
 {
 	private readonly string _path;
 	private readonly string _category;
-	private readonly object _lock;
+	private readonly Lock _lock;
 	private readonly LogLevel _minimumLevel;
 
-	public FileLogger(string path, string category, object lockObj, LogLevel minimumLevel = LogLevel.Information)
+	public FileLogger(string path, string category, Lock lockObj, LogLevel minimumLevel = LogLevel.Information)
 	{
 		_path = path;
 		_category = category;

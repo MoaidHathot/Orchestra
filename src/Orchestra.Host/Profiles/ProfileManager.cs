@@ -25,13 +25,13 @@ public partial class ProfileManager : BackgroundService
 	/// (matched by at least one active profile).
 	/// </summary>
 	private HashSet<string> _currentActiveSet = new(StringComparer.OrdinalIgnoreCase);
-	private readonly object _activeSetLock = new();
+	private readonly Lock _activeSetLock = new();
 
 	/// <summary>
 	/// CancellationTokenSource used to interrupt the schedule delay when profiles change.
 	/// </summary>
 	private CancellationTokenSource? _scheduleInterruptCts;
-	private readonly object _scheduleInterruptLock = new();
+	private readonly Lock _scheduleInterruptLock = new();
 
 	/// <summary>
 	/// Name used for the auto-created default profile.

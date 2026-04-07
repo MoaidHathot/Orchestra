@@ -108,7 +108,7 @@ public static partial class ExecutionApi
 			};
 			reporter.OnStepCompleted = (stepName) =>
 			{
-				executionInfo.CompletedSteps++;
+				executionInfo.IncrementCompletedSteps();
 				executionInfo.CurrentStep = null;
 			};
 
