@@ -109,7 +109,7 @@ builder.Services.AddSingleton<TerminalUI>();
 var host = builder.Build();
 
 // Initialize Orchestra Host - loads persisted orchestrations and registers triggers
-host.Services.InitializeOrchestraHost();
+await host.Services.InitializeOrchestraHostAsync();
 
 // Start the host in the background
 var hostCts = new CancellationTokenSource();

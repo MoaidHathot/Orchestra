@@ -4,15 +4,22 @@ using Orchestra.Host.Triggers;
 namespace Orchestra.Host.Api;
 
 /// <summary>
-/// Default implementation of ITriggerExecutionCallback that creates SseReporter instances.
+/// Default implementation of ITriggerExecutionCallback that creates reporters via the DI-registered factory.
 /// This is automatically registered by AddOrchestraHost when no custom callback is provided.
 /// </summary>
 public class DefaultExecutionCallback : ITriggerExecutionCallback
 {
+	private readonly IOrchestrationReporterFactory _reporterFactory;
+
+	public DefaultExecutionCallback(IOrchestrationReporterFactory reporterFactory)
+	{
+		_reporterFactory = reporterFactory;
+	}
+
 	/// <summary>
-	/// Creates an SseReporter for streaming events to clients.
+	/// Creates a reporter for streaming events to clients.
 	/// </summary>
-	public IOrchestrationReporter CreateReporter() => new SseReporter();
+	public IOrchestrationReporter CreateReporter() => _reporterFactory.Create();
 
 	/// <summary>
 	/// Called when an execution starts. Wires reporter callbacks for step progress tracking.

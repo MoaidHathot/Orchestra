@@ -37,6 +37,7 @@ public static partial class ExecutionApi
 			OrchestrationHostOptions hostOptions,
 			EngineToolRegistry engineToolRegistry,
 			McpManager mcpManager,
+			IOrchestrationReporterFactory reporterFactory,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
 		{
@@ -82,7 +83,7 @@ public static partial class ExecutionApi
 
 			// Generate execution ID and create reporter
 			var executionId = Guid.NewGuid().ToString("N")[..12];
-			var reporter = new SseReporter();
+			var reporter = (SseReporter)reporterFactory.Create();
 			var cts = new CancellationTokenSource();
 
 			activeExecutions[executionId] = cts;

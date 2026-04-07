@@ -60,7 +60,7 @@ public class TerminalUI
 	// Inline confirmation state
 	private bool _pendingConfirmation;
 	private string _confirmationMessage = "";
-	private Action? _confirmationAction;
+	private Func<Task>? _confirmationAction;
 
 	// Version history view state
 	private IReadOnlyList<OrchestrationVersionEntry>? _cachedVersions;
@@ -71,6 +71,12 @@ public class TerminalUI
 
 	// Checkpoint view state
 	private IReadOnlyList<CheckpointData>? _cachedCheckpoints;
+
+	// Async data caches — populated by RefreshAsyncCachesAsync(), consumed by sync Render methods.
+	private IReadOnlyList<RunIndex>? _cachedRunSummaries;
+	private IReadOnlyList<RunIndex>? _cachedRecentRuns;
+	private string? _cachedDiffOldSnapshot;
+	private string? _cachedDiffNewSnapshot;
 
 	// Trigger creation wizard state
 	private TriggerCreateStep _triggerCreateStep;
@@ -150,6 +156,9 @@ public class TerminalUI
 
 		try
 		{
+			// Pre-fetch async data before first render
+			await RefreshAsyncCachesAsync();
+
 			// Initial render
 			Render();
 
@@ -159,7 +168,8 @@ public class TerminalUI
 				if (Console.KeyAvailable)
 				{
 					var key = Console.ReadKey(intercept: true);
-					HandleKeyPress(key);
+					await HandleKeyPressAsync(key);
+					await RefreshAsyncCachesAsync();
 					Render();
 				}
 				else
@@ -167,6 +177,7 @@ public class TerminalUI
 					// Auto-refresh periodically if there are active executions
 					if (_activeExecutionInfos.Count > 0 && (DateTime.Now - _lastRender).TotalMilliseconds > 500)
 					{
+						await RefreshAsyncCachesAsync();
 						Render();
 					}
 					// Clear transient messages after expiry
@@ -314,19 +325,24 @@ public class TerminalUI
 	/// <summary>
 	/// Shows an inline confirmation prompt. The action executes on 'y', cancelled on any other key.
 	/// </summary>
-	private void RequestConfirmation(string message, Action onConfirm)
+	private void RequestConfirmation(string message, Func<Task> onConfirm)
 	{
 		_pendingConfirmation = true;
 		_confirmationMessage = message;
 		_confirmationAction = onConfirm;
 	}
 
-	private void HandleConfirmationInput(ConsoleKeyInfo key)
+	private void RequestConfirmation(string message, Action onConfirm)
+	{
+		RequestConfirmation(message, () => { onConfirm(); return Task.CompletedTask; });
+	}
+
+	private async Task HandleConfirmationInputAsync(ConsoleKeyInfo key)
 	{
 		_pendingConfirmation = false;
 		if (key.Key == ConsoleKey.Y)
 		{
-			_confirmationAction?.Invoke();
+			if (_confirmationAction != null) await _confirmationAction();
 		}
 		_confirmationAction = null;
 		_confirmationMessage = "";
@@ -347,12 +363,12 @@ public class TerminalUI
 
 	#endregion
 
-	private void HandleKeyPress(ConsoleKeyInfo key)
+	private async Task HandleKeyPressAsync(ConsoleKeyInfo key)
 	{
 		// Handle confirmation prompts first
 		if (_pendingConfirmation)
 		{
-			HandleConfirmationInput(key);
+			await HandleConfirmationInputAsync(key);
 			return;
 		}
 
@@ -999,8 +1015,8 @@ public class TerminalUI
 
 	private IReadOnlyList<RunIndex> GetFilteredHistory()
 	{
-		// Fetch a larger set for filtering, then apply offset/limit
-		var allRuns = _runStore.GetRunSummariesAsync(200).GetAwaiter().GetResult();
+		// Use cached data (populated by RefreshAsyncCachesAsync)
+		var allRuns = _cachedRunSummaries ?? [];
 
 		IEnumerable<RunIndex> filtered = allRuns;
 		if (!string.IsNullOrEmpty(_searchQuery))
@@ -1017,7 +1033,7 @@ public class TerminalUI
 
 	private int GetTotalHistoryCount()
 	{
-		var allRuns = _runStore.GetRunSummariesAsync(1000).GetAwaiter().GetResult();
+		var allRuns = _cachedRunSummaries ?? [];
 		if (!string.IsNullOrEmpty(_searchQuery))
 		{
 			return allRuns.Count(r =>
@@ -1428,6 +1444,36 @@ public class TerminalUI
 
 	#endregion
 
+	/// <summary>
+	/// Pre-fetches async data (run history, checkpoints, etc.) into caches.
+	/// Called from the async main loop before each render so that sync Render
+	/// methods can use cached data without blocking the thread pool.
+	/// </summary>
+	private async Task RefreshAsyncCachesAsync()
+	{
+		_cachedRunSummaries = await _runStore.GetRunSummariesAsync(1000);
+		_cachedRecentRuns = await _runStore.GetRunSummariesAsync(5);
+		_cachedCheckpoints = await _checkpointStore.ListCheckpointsAsync();
+
+		// Refresh version cache when viewing versions
+		var versionStore = _registry.VersionStore;
+		if (_currentView == TuiView.VersionHistory && _selectedOrchestrationId != null)
+		{
+			if (versionStore != null)
+				_cachedVersions = await versionStore.ListVersionsAsync(_selectedOrchestrationId);
+		}
+
+		// Pre-load diff snapshots when viewing version diff
+		if (_currentView == TuiView.VersionDiff && versionStore != null
+			&& _selectedOrchestrationId != null
+			&& _versionDiffOldHash != null && _versionDiffNewHash != null
+			&& _cachedDiffLines == null)
+		{
+			_cachedDiffOldSnapshot = await versionStore.GetSnapshotAsync(_selectedOrchestrationId, _versionDiffOldHash);
+			_cachedDiffNewSnapshot = await versionStore.GetSnapshotAsync(_selectedOrchestrationId, _versionDiffNewHash);
+		}
+	}
+
 	private void Render()
 	{
 		lock (_renderLock)
@@ -1614,7 +1660,7 @@ public class TerminalUI
 
 		// Show recent runs summary
 		summaryRows.Add(new Rule("[dim]Recent Activity[/]") { Style = Style.Parse("dim") });
-		var recentRuns = _runStore.GetRunSummariesAsync(5).GetAwaiter().GetResult();
+		var recentRuns = _cachedRecentRuns ?? [];
 		if (recentRuns.Count > 0)
 		{
 			foreach (var run in recentRuns)
@@ -2047,11 +2093,16 @@ public class TerminalUI
 		// Try to load full run record (cached for performance)
 		if (_cachedRunRecord == null || _cachedRunRecord.RunId != _selectedExecutionId)
 		{
-			var runs = _runStore.GetRunSummariesAsync(100).GetAwaiter().GetResult();
+			var runs = _cachedRunSummaries ?? [];
 			var runIndex = runs.FirstOrDefault(r => r.RunId == _selectedExecutionId);
 			if (runIndex != null)
 			{
-				_cachedRunRecord = _runStore.GetRunAsync(runIndex.OrchestrationName, runIndex.RunId).GetAwaiter().GetResult();
+				// Kick off async load — will be available on next render cycle
+				_ = Task.Run(async () =>
+				{
+					_cachedRunRecord = await _runStore.GetRunAsync(runIndex.OrchestrationName, runIndex.RunId);
+					RequestRedraw();
+				});
 			}
 		}
 
@@ -2707,12 +2758,12 @@ public class TerminalUI
 					var name = entry?.Orchestration.Name ?? _selectedOrchestrationId;
 					RequestConfirmation(
 						$"Delete all version history for [cyan]{Markup.Escape(name)}[/]? [dim](y/n)[/]",
-						() =>
+						async () =>
 						{
 							var versionStore = _registry.VersionStore;
 							if (versionStore != null && _selectedOrchestrationId != null)
 							{
-								versionStore.DeleteAllVersionsAsync(_selectedOrchestrationId).GetAwaiter().GetResult();
+								await versionStore.DeleteAllVersionsAsync(_selectedOrchestrationId);
 								_cachedVersions = null; // Force reload
 								ShowTransientMessage("[green]Version history deleted[/]");
 							}
@@ -2757,7 +2808,7 @@ public class TerminalUI
 		if (versionStore is null || _selectedOrchestrationId is null)
 			return Array.Empty<OrchestrationVersionEntry>();
 
-		_cachedVersions = versionStore.ListVersionsAsync(_selectedOrchestrationId).GetAwaiter().GetResult();
+		_cachedVersions = _cachedVersions ?? [];
 		return _cachedVersions;
 	}
 
@@ -2846,8 +2897,8 @@ public class TerminalUI
 		// Load diff lines (cached)
 		if (_cachedDiffLines == null)
 		{
-			var oldSnapshot = versionStore.GetSnapshotAsync(_selectedOrchestrationId!, _versionDiffOldHash).GetAwaiter().GetResult();
-			var newSnapshot = versionStore.GetSnapshotAsync(_selectedOrchestrationId!, _versionDiffNewHash).GetAwaiter().GetResult();
+			var oldSnapshot = _cachedDiffOldSnapshot;
+			var newSnapshot = _cachedDiffNewSnapshot;
 
 			if (oldSnapshot == null || newSnapshot == null)
 			{
@@ -3898,7 +3949,7 @@ public class TerminalUI
 
 	private void HandleCheckpointsInput(ConsoleKeyInfo key)
 	{
-		var checkpoints = _cachedCheckpoints ??= _checkpointStore.ListCheckpointsAsync().GetAwaiter().GetResult();
+		var checkpoints = _cachedCheckpoints ?? [];
 		switch (key.Key)
 		{
 			case ConsoleKey.UpArrow or ConsoleKey.K:
@@ -3945,9 +3996,9 @@ public class TerminalUI
 					var cp = checkpoints[_selectedIndex];
 					RequestConfirmation(
 						$"Delete checkpoint for [cyan]{Markup.Escape(cp.OrchestrationName)}[/] run [dim]{cp.RunId[..Math.Min(8, cp.RunId.Length)]}[/]? [dim](y/n)[/]",
-						() =>
+						async () =>
 						{
-							_checkpointStore.DeleteCheckpointAsync(cp.OrchestrationName, cp.RunId).GetAwaiter().GetResult();
+							await _checkpointStore.DeleteCheckpointAsync(cp.OrchestrationName, cp.RunId);
 							_cachedCheckpoints = null; // Refresh
 							_selectedIndex = Math.Max(0, _selectedIndex - 1);
 							ShowTransientMessage($"[green]Deleted checkpoint[/] for {Markup.Escape(cp.OrchestrationName)}");
@@ -3960,10 +4011,10 @@ public class TerminalUI
 				{
 					RequestConfirmation(
 						$"Delete [red]ALL {checkpoints.Count}[/] checkpoints? [dim](y/n)[/]",
-						() =>
+						async () =>
 						{
 							foreach (var cp in checkpoints)
-								_checkpointStore.DeleteCheckpointAsync(cp.OrchestrationName, cp.RunId).GetAwaiter().GetResult();
+								await _checkpointStore.DeleteCheckpointAsync(cp.OrchestrationName, cp.RunId);
 							_cachedCheckpoints = null;
 							_selectedIndex = 0;
 							ShowTransientMessage("[green]All checkpoints deleted[/]");
@@ -3980,7 +4031,7 @@ public class TerminalUI
 
 	private Panel RenderCheckpoints()
 	{
-		var checkpoints = _cachedCheckpoints ??= _checkpointStore.ListCheckpointsAsync().GetAwaiter().GetResult();
+		var checkpoints = _cachedCheckpoints ?? [];
 
 		if (checkpoints.Count == 0)
 		{

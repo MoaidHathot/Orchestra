@@ -63,6 +63,22 @@ public static class ServiceCollectionExtensions
 			OrchestraConfigLoader.LoadAndApply(options);
 			configure.Invoke(options, configuration);
 
+			// Resolve HostBaseUrl: prefer the application's own listening address over
+			// the value from orchestra.json.  The config file value may target a different
+			// host (e.g. the Server on :5200 while the Portal runs on :5100).  Using the
+			// current process's address ensures {{server.url}} resolves correctly for
+			// self-referential MCP data-plane connections.
+			var appUrl = configuration["Urls"]
+				?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS")
+				?? Environment.GetEnvironmentVariable("DOTNET_URLS");
+			if (appUrl is not null)
+			{
+				options.HostBaseUrl = appUrl
+					.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+					.FirstOrDefault()
+					?? options.HostBaseUrl;
+			}
+
 			// Ensure data path exists
 			Directory.CreateDirectory(options.DataPath);
 
@@ -81,6 +97,10 @@ public static class ServiceCollectionExtensions
 		// Register default execution callback if none provided
 		// This must be done before TriggerManager is created
 		services.TryAddSingleton<ITriggerExecutionCallback, DefaultExecutionCallback>();
+
+		// Reporter factory: creates SseReporter instances for all execution paths.
+		// Tests can override this with NullOrchestrationReporterFactory via DI.
+		services.TryAddSingleton<IOrchestrationReporterFactory, SseReporterFactory>();
 
 		// File-based run store
 		services.AddSingleton<FileSystemRunStore>(sp =>
@@ -254,7 +274,7 @@ public static class ServiceProviderExtensions
 	/// Initializes Orchestra Host by loading persisted orchestrations and registering triggers.
 	/// Call this after the host is built but before it starts.
 	/// </summary>
-	public static IServiceProvider InitializeOrchestraHost(this IServiceProvider services)
+	public static async Task InitializeOrchestraHostAsync(this IServiceProvider services)
 	{
 		var options = services.GetRequiredService<OrchestrationHostOptions>();
 		var registry = services.GetRequiredService<OrchestrationRegistry>();
@@ -269,7 +289,7 @@ public static class ServiceProviderExtensions
 		{
 			globalMcps = OrchestrationParser.ParseMcpFile(globalMcpPath);
 		}
-		mcpManager.InitializeAsync(globalMcps).GetAwaiter().GetResult();
+		await mcpManager.InitializeAsync(globalMcps);
 
 		// Make global MCPs available to the registry for parsing orchestration files
 		registry.GlobalMcps = globalMcps;
@@ -348,7 +368,5 @@ public static class ServiceProviderExtensions
 		// /api/history request doesn't pay the cold-load penalty.
 		var runStore = services.GetRequiredService<FileSystemRunStore>();
 		_ = Task.Run(() => runStore.PreloadIndexAsync());
-
-		return services;
 	}
 }

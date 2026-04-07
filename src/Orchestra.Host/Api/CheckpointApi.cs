@@ -107,6 +107,7 @@ public static class CheckpointApi
 			OrchestrationHostOptions hostOptions,
 			EngineToolRegistry engineToolRegistry,
 			McpManager mcpManager,
+			IOrchestrationReporterFactory reporterFactory,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
 		{
@@ -149,7 +150,7 @@ public static class CheckpointApi
 			await httpContext.Response.Body.FlushAsync();
 
 			var executionId = runId; // Reuse the original run ID for resume
-			var reporter = new SseReporter();
+			var reporter = (SseReporter)reporterFactory.Create();
 			var cts = new CancellationTokenSource();
 
 			activeExecutions[executionId] = cts;

@@ -407,6 +407,128 @@ public class ServerIntegrationTests : IClassFixture<ServerWebApplicationFactory>
 	}
 
 	[Fact]
+	public async Task McpDataPlane_Initialize_ReturnsSuccessWithSessionId()
+	{
+		// A proper MCP initialize handshake should return 200 OK with a session ID
+		// and a valid JSON-RPC response containing server capabilities.
+		// MCP Streamable HTTP requires Accept: application/json, text/event-stream
+		var request = new HttpRequestMessage(HttpMethod.Post, "/mcp/data")
+		{
+			Content = new StringContent(
+				"""{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}""",
+				Encoding.UTF8,
+				"application/json")
+		};
+		request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+		request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+		var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+		response.StatusCode.Should().Be(HttpStatusCode.OK,
+			"MCP initialize should return 200 OK");
+
+		// Should return a session ID header for stateful sessions
+		response.Headers.Should().ContainKey("Mcp-Session-Id",
+			"MCP response should include a session ID for stateful transport");
+
+		// Response may be SSE (text/event-stream) or JSON depending on server.
+		// Parse SSE to extract the JSON-RPC message.
+		var body = await response.Content.ReadAsStringAsync();
+		var jsonBody = ExtractJsonFromSseOrPlain(body);
+
+		var json = JsonDocument.Parse(jsonBody);
+		json.RootElement.GetProperty("jsonrpc").GetString().Should().Be("2.0");
+		json.RootElement.GetProperty("id").GetInt32().Should().Be(1);
+		json.RootElement.TryGetProperty("result", out var result).Should().BeTrue(
+			"Initialize response should have a 'result' field, not an error");
+		result.TryGetProperty("serverInfo", out _).Should().BeTrue(
+			"Initialize result should include serverInfo");
+	}
+
+	[Fact]
+	public async Task McpDataPlane_ListTools_ReturnsDataPlaneTools()
+	{
+		// First, initialize a session (MCP requires Accept: application/json, text/event-stream)
+		var initRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp/data")
+		{
+			Content = new StringContent(
+				"""{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}""",
+				Encoding.UTF8,
+				"application/json")
+		};
+		initRequest.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+		initRequest.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
+		var initResponse = await _client.SendAsync(initRequest, HttpCompletionOption.ResponseHeadersRead);
+		initResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var sessionId = initResponse.Headers.GetValues("Mcp-Session-Id").First();
+
+		// Send initialized notification (required by MCP protocol before tool calls)
+		var initializedRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp/data")
+		{
+			Content = new StringContent(
+				"""{"jsonrpc":"2.0","method":"notifications/initialized"}""",
+				Encoding.UTF8,
+				"application/json")
+		};
+		initializedRequest.Headers.Add("Mcp-Session-Id", sessionId);
+		initializedRequest.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+		initializedRequest.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
+		await _client.SendAsync(initializedRequest);
+
+		// Now list tools
+		var listRequest = new HttpRequestMessage(HttpMethod.Post, "/mcp/data")
+		{
+			Content = new StringContent(
+				"""{"jsonrpc":"2.0","method":"tools/list","id":2}""",
+				Encoding.UTF8,
+				"application/json")
+		};
+		listRequest.Headers.Add("Mcp-Session-Id", sessionId);
+		listRequest.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+		listRequest.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
+		var listResponse = await _client.SendAsync(listRequest, HttpCompletionOption.ResponseHeadersRead);
+
+		listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var body = await listResponse.Content.ReadAsStringAsync();
+		var jsonBody = ExtractJsonFromSseOrPlain(body);
+		var json = JsonDocument.Parse(jsonBody);
+		var tools = json.RootElement.GetProperty("result").GetProperty("tools");
+		tools.GetArrayLength().Should().BeGreaterThan(0,
+			"Data plane should expose at least one tool (list_orchestrations, invoke_orchestration, etc.)");
+
+		// Verify data-plane tools are present (not control-plane tools)
+		var toolNames = tools.EnumerateArray()
+			.Select(t => t.GetProperty("name").GetString())
+			.ToList();
+		toolNames.Should().Contain("list_orchestrations",
+			"Data plane should expose the list_orchestrations tool");
+		toolNames.Should().Contain("invoke_orchestration",
+			"Data plane should expose the invoke_orchestration tool");
+	}
+
+	/// <summary>
+	/// Extracts JSON from an SSE response body or returns plain JSON as-is.
+	/// SSE responses have lines like "event: message\ndata: {json}\n\n".
+	/// </summary>
+	private static string ExtractJsonFromSseOrPlain(string body)
+	{
+		if (body.TrimStart().StartsWith('{'))
+			return body;
+
+		// Parse SSE: look for "data: " lines and concatenate their content
+		var dataLines = body.Split('\n')
+			.Where(line => line.StartsWith("data: "))
+			.Select(line => line["data: ".Length..])
+			.ToList();
+
+		return dataLines.Count > 0
+			? string.Join("", dataLines)
+			: body;
+	}
+
+	[Fact]
 	public async Task McpControlPlane_PostEndpoint_Returns404_WhenDisabled()
 	{
 		// Control plane is disabled by default, so it should return 404

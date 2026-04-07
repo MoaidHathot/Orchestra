@@ -6,6 +6,15 @@ using Orchestra.Host.Hosting;
 using Orchestra.Host.McpServer;
 using Orchestra.Playground.Copilot.Portal;
 
+// Ensure the thread pool has enough minimum threads to prevent starvation.
+// See Orchestra.Server/Program.cs for the detailed rationale.
+{
+	ThreadPool.GetMinThreads(out var workerMin, out var ioMin);
+	var targetMin = Math.Max(workerMin, 64);
+	var targetIoMin = Math.Max(ioMin, 64);
+	ThreadPool.SetMinThreads(targetMin, targetIoMin);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.AddSimpleConsole(options =>
@@ -54,7 +63,7 @@ builder.Services.AddSingleton<PortalStatusService>();
 var app = builder.Build();
 
 // Initialize Orchestra Host - loads persisted orchestrations and registers triggers
-app.Services.InitializeOrchestraHost();
+await app.Services.InitializeOrchestraHostAsync();
 
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
 var resolvedDataPath = app.Services.GetRequiredService<OrchestrationHostOptions>().DataPath;

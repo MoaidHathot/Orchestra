@@ -576,7 +576,7 @@ public class DefaultExecutionCallbackTests
 			Reporter = reporter,
 			TotalSteps = 3
 		};
-		var callback = new DefaultExecutionCallback();
+		var callback = new DefaultExecutionCallback(new SseReporterFactory());
 
 		// Act
 		callback.OnExecutionStarted(info);
@@ -615,7 +615,7 @@ public class DefaultExecutionCallbackTests
 			CancellationTokenSource = cts,
 			Reporter = new SseReporter()
 		};
-		var callback = new DefaultExecutionCallback();
+		var callback = new DefaultExecutionCallback(new SseReporterFactory());
 
 		// Act
 		callback.OnStepStarted(info, "MyStep");
@@ -641,7 +641,7 @@ public class DefaultExecutionCallbackTests
 			CancellationTokenSource = cts,
 			Reporter = new SseReporter()
 		};
-		var callback = new DefaultExecutionCallback();
+		var callback = new DefaultExecutionCallback(new SseReporterFactory());
 
 		info.CurrentStep = "StepA";
 
@@ -670,7 +670,7 @@ public class DefaultExecutionCallbackTests
 			CancellationTokenSource = cts,
 			Reporter = new NullReporter()
 		};
-		var callback = new DefaultExecutionCallback();
+		var callback = new DefaultExecutionCallback(new SseReporterFactory());
 
 		// Act - should not throw, but callbacks won't be wired
 		callback.OnExecutionStarted(info);
@@ -697,7 +697,7 @@ public class DefaultExecutionCallbackTests
 			Reporter = reporter,
 			TotalSteps = 4
 		};
-		var callback = new DefaultExecutionCallback();
+		var callback = new DefaultExecutionCallback(new SseReporterFactory());
 
 		// Act
 		callback.OnExecutionStarted(info);
@@ -773,7 +773,7 @@ public class DefaultExecutionCallbackTests
 			Reporter = reporter,
 			TotalSteps = 2
 		};
-		var callback = new DefaultExecutionCallback();
+		var callback = new DefaultExecutionCallback(new SseReporterFactory());
 
 		// Act - wire to info1, then rewire to info2
 		callback.OnExecutionStarted(info1);

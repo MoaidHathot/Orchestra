@@ -231,7 +231,7 @@ public partial class OrchestrationExecutor
 			if (stepResults.ContainsKey(stepName))
 				return;
 
-			_ = Task.Run(async () =>
+			_ = Task.Factory.StartNew(async () =>
 			{
 				var step = allSteps[stepName];
 				var stepExecutor = _stepExecutorRegistry.Resolve(step.Type);
@@ -365,12 +365,15 @@ public partial class OrchestrationExecutor
 							stepRecords[name] = cancelRecord;
 							allStepRecords[name] = cancelRecord;
 
-							_reporter.ReportStepCancelled(name);
-							tcs.TrySetResult(cancelledResult);
-						}
+						_reporter.ReportStepCancelled(name);
+						tcs.TrySetResult(cancelledResult);
 					}
 				}
-			}); // Don't pass cancellationToken to Task.Run - let step handle cancellation internally
+			}
+			// Use LongRunning so step threads don't compete with the thread pool
+			// that ASP.NET Core needs for incoming HTTP requests (e.g., self-referential
+			// MCP data-plane calls). Unwrap() converts Task<Task> to Task.
+			}, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 		}
 
 		// Start all steps that have zero dependencies (or whose deps are all already complete from checkpoint)

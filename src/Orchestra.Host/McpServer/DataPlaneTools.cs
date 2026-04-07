@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
+using Orchestra.Host.Api;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Mcp;
@@ -94,6 +95,7 @@ public sealed class DataPlaneTools
 		OrchestrationHostOptions hostOptions,
 		EngineToolRegistry engineToolRegistry,
 		McpServerOptions mcpOptions,
+		IOrchestrationReporterFactory reporterFactory,
 		McpManager mcpManager,
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
@@ -150,7 +152,23 @@ public sealed class DataPlaneTools
 
 		// Create execution infrastructure
 		var executionId = Guid.NewGuid().ToString("N")[..12];
-		var reporter = NullOrchestrationReporter.Instance;
+		var reporter = (SseReporter)reporterFactory.Create();
+
+		// Wire up progress callbacks so ActiveExecutionInfo stays current
+		// (the Portal UI polls this for step progress and current-step display).
+		reporter.OnStepStarted = stepName =>
+		{
+			if (activeExecutionInfos.TryGetValue(executionId, out var info))
+				info.CurrentStep = stepName;
+		};
+		reporter.OnStepCompleted = stepName =>
+		{
+			if (activeExecutionInfos.TryGetValue(executionId, out var info))
+			{
+				info.CompletedSteps++;
+				info.CurrentStep = null;
+			}
+		};
 
 		// ── Nesting: compute depth and enforce limit ──
 		var parentDepth = 0;
@@ -228,6 +246,21 @@ public sealed class DataPlaneTools
 					? HostExecutionStatus.Completed
 					: HostExecutionStatus.Failed;
 
+				// Emit terminal SSE events so attached UI clients see completion
+				if (result.Status == ExecutionStatus.Cancelled)
+				{
+					reporter.ReportOrchestrationCancelled();
+				}
+				else
+				{
+					foreach (var (stepName, stepResult) in result.StepResults)
+					{
+						if (stepResult.Status == ExecutionStatus.Succeeded)
+							reporter.ReportStepOutput(stepName, stepResult.Content);
+					}
+					reporter.ReportOrchestrationDone(result);
+				}
+
 				// Build a summary from terminal step results
 				var terminalContent = string.Join("\n---\n",
 					result.Results
@@ -256,6 +289,7 @@ public sealed class DataPlaneTools
 			catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 			{
 				executionInfo.Status = HostExecutionStatus.Failed;
+				reporter.ReportOrchestrationError($"Orchestration timed out after {timeoutSeconds} seconds.");
 				return JsonSerializer.Serialize(new
 				{
 					executionId,
@@ -268,6 +302,7 @@ public sealed class DataPlaneTools
 			catch (Exception ex)
 			{
 				executionInfo.Status = HostExecutionStatus.Failed;
+				reporter.ReportOrchestrationError(ex.Message);
 				return JsonSerializer.Serialize(new
 				{
 					executionId,
@@ -279,6 +314,7 @@ public sealed class DataPlaneTools
 			}
 			finally
 			{
+				reporter.Complete();
 				CleanupExecution(executionId, activeExecutions, activeExecutionInfos, cts);
 			}
 		}
@@ -293,10 +329,26 @@ public sealed class DataPlaneTools
 					executionInfo.Status = result.Status == ExecutionStatus.Succeeded
 						? HostExecutionStatus.Completed
 						: HostExecutionStatus.Failed;
+
+					// Emit terminal SSE events
+					if (result.Status == ExecutionStatus.Cancelled)
+					{
+						reporter.ReportOrchestrationCancelled();
+					}
+					else
+					{
+						foreach (var (stepName, stepResult) in result.StepResults)
+						{
+							if (stepResult.Status == ExecutionStatus.Succeeded)
+								reporter.ReportStepOutput(stepName, stepResult.Content);
+						}
+						reporter.ReportOrchestrationDone(result);
+					}
 				}
 				catch (OperationCanceledException)
 				{
 					executionInfo.Status = HostExecutionStatus.Cancelled;
+					reporter.ReportOrchestrationCancelled();
 				}
 				catch
 				{
@@ -304,6 +356,7 @@ public sealed class DataPlaneTools
 				}
 				finally
 				{
+					reporter.Complete();
 					CleanupExecution(executionId, activeExecutions, activeExecutionInfos, cts);
 				}
 			}, CancellationToken.None);

@@ -5,6 +5,22 @@ using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.McpServer;
 
+// Ensure the thread pool has enough minimum threads to prevent starvation.
+// The Orchestra server runs orchestration steps via Task.Run (for DAG parallelism)
+// while also serving HTTP requests on the same server (e.g., the MCP data plane
+// at /mcp/data). Under default .NET settings, the thread pool starts with a
+// minimum of Environment.ProcessorCount threads and grows slowly (~1-2 threads/sec).
+// When orchestration steps await Copilot SDK responses (which may call back to
+// the server's own MCP endpoint), thread pool starvation can cause deadlocks.
+// Setting a higher minimum prevents this by pre-allocating enough threads for
+// concurrent orchestration execution and incoming HTTP request handling.
+{
+	ThreadPool.GetMinThreads(out var workerMin, out var ioMin);
+	var targetMin = Math.Max(workerMin, 64);
+	var targetIoMin = Math.Max(ioMin, 64);
+	ThreadPool.SetMinThreads(targetMin, targetIoMin);
+}
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.AddSimpleConsole(options =>
@@ -62,7 +78,7 @@ builder.Services.AddOpenApi();
 var app = builder.Build();
 
 // Initialize Orchestra Host - loads persisted orchestrations and registers triggers
-app.Services.InitializeOrchestraHost();
+await app.Services.InitializeOrchestraHostAsync();
 
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
 var resolvedDataPath = app.Services.GetRequiredService<OrchestrationHostOptions>().DataPath;
