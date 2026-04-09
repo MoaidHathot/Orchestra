@@ -1,21 +1,93 @@
 # Orchestra
 
-A declarative orchestration engine for LLM (Large Language Model) workflows. Define multi-step AI pipelines in JSON with dependency-based execution, MCP tool integration, quality control loops, and automatic triggers.
+A declarative orchestration engine for LLM workflows built on .NET. Define multi-step AI pipelines in JSON with DAG-based execution, multiple step types, MCP tool integration, quality control loops, subagent delegation, checkpointing, and automatic triggers. Includes a full-featured web portal, CLI client, and REST API.
 
 ## Features
 
-- **Declarative JSON Pipelines** - Define complex LLM workflows as simple JSON files
-- **DAG-Based Execution** - Automatic parallel execution of independent steps
-- **Typed Input Schema** - Define strongly-typed parameters with types, descriptions, defaults, and enum constraints
+- **Declarative JSON Pipelines** - Define complex LLM workflows as JSON files with a comprehensive schema
+- **DAG-Based Execution** - Automatic parallel execution of independent steps with cycle detection
+- **Four Step Types** - Prompt (LLM), Command (shell), Http (REST calls), and Transform (string interpolation)
+- **Typed Input Schema** - Strongly-typed parameters with types, descriptions, defaults, and enum constraints
 - **Variables & Metadata** - Reusable variables with recursive expansion, plus built-in orchestration and step metadata
-- **Template Expressions** - Rich expression syntax for parameters, variables, metadata, and step outputs
-- **MCP Integration** - Extend LLM capabilities with Model Context Protocol servers
-- **MCP Server** - Expose orchestrations to external AI agents via a data-plane MCP endpoint
+- **Template Expressions** - Rich `{{expression}}` syntax for parameters, variables, metadata, environment variables, step outputs, and file references
+- **MCP Integration** - Extend LLM capabilities with Model Context Protocol servers (local stdio and remote HTTP)
+- **MCP Server** - Expose orchestrations to external AI agents via data-plane and control-plane MCP endpoints
 - **Quality Control Loops** - Retry steps with feedback until criteria are met
-- **Handler Transformations** - Transform inputs and outputs between steps
-- **Multiple Triggers** - Scheduler, webhook, email, and loop-based automation
+- **Subagent Delegation** - Multi-agent orchestration where steps delegate work to specialized subagents
+- **Handler Transformations** - Transform inputs and outputs between steps with LLM-powered handlers
+- **Multiple Triggers** - Manual, scheduler (cron/interval), webhook (with sync response), and loop-based automation
+- **Checkpointing & Resume** - Persist execution state after each step and resume failed runs from the last checkpoint
+- **Retry Policies** - Per-step and orchestration-level retry with exponential backoff
+- **Step Timeouts** - Per-step and orchestration-level timeout configuration
+- **Engine Tools** - Built-in tools for file save/read, status control, and orchestration completion
+- **Skill Directories** - Attach specialized knowledge to steps via SKILL.md files
+- **Prompt File References** - Load system/user/handler prompts from external files
+- **Web Portal** - React + TypeScript SPA with DAG visualization, execution streaming, profile management, and import/export
+- **CLI Client** - Full command-line interface for managing orchestrations, triggers, profiles, tags, and runs
+- **REST API** - Complete HTTP API with SSE streaming for real-time execution monitoring
+- **Profiles & Tags** - Organize orchestrations with tags and activate sets of orchestrations via named profiles
+- **Version History** - Content-hash-based version tracking with diff comparison
+- **Run Retention** - Automatic cleanup of old execution records
 - **Customizable Formatting** - Inject custom prompt formatting via `IPromptFormatter`
-- **System Prompt Control** - Fine-grained control over SDK system prompts
+- **System Prompt Control** - Fine-grained control over SDK system prompts (append or replace)
+
+## Architecture
+
+Orchestra is built as a layered .NET architecture:
+
+| Layer | Project | Description |
+|-------|---------|-------------|
+| **Engine** | `Orchestra.Engine` | Core orchestration runtime: step executors, DAG scheduler, template resolution, MCP, triggers, storage abstractions |
+| **Host** | `Orchestra.Host` | ASP.NET Core hosting: REST API, SSE streaming, trigger management, MCP server, profiles, tags, versioning, retention |
+| **Copilot** | `Orchestra.Copilot` | GitHub Copilot SDK adapter implementing the `AgentBuilder`/`IAgent` abstractions |
+| **Server** | `Orchestra.Server` | Standalone ASP.NET Core server composing Engine + Host + Copilot with CORS and OpenAPI |
+| **CLI** | `Orchestra.Cli` | Command-line client for managing orchestrations via the REST API |
+| **Portal** | `Orchestra.Playground.Copilot.Portal` | React + TypeScript web portal with DAG visualization and execution streaming |
+
+```
++----------------------------------------------------------+
+|                   Orchestration JSON                      |
+|  (name, description, steps[], mcps[], trigger, inputs)   |
++----------------------------------------------------------+
+                            |
+                            v
++----------------------------------------------------------+
+|                  OrchestrationParser                      |
+|  - Parses JSON into Orchestration objects                |
+|  - Resolves MCP references and prompt files              |
++----------------------------------------------------------+
+                            |
+                            v
++----------------------------------------------------------+
+|                 OrchestrationScheduler                    |
+|  - Validates DAG (detects cycles, missing deps)          |
+|  - Groups steps into parallel execution layers           |
++----------------------------------------------------------+
+                            |
+                            v
++----------------------------------------------------------+
+|                 OrchestrationExecutor                     |
+|  - Executes steps based on dependency graph              |
+|  - Parallel execution of independent steps               |
+|  - Handles loops, retries, timeouts, checkpointing       |
++----------------------------------------------------------+
+                            |
+                            v
++----------------------------------------------------------+
+|               Step Executors (per type)                   |
+|  - PromptStepExecutor   (LLM calls via AgentBuilder)     |
+|  - CommandStepExecutor  (shell commands)                  |
+|  - HttpStepExecutor     (REST requests)                  |
+|  - TransformStepExecutor (string interpolation)          |
++----------------------------------------------------------+
+                            |
+                            v
++----------------------------------------------------------+
+|                     AgentBuilder                          |
+|  - Abstract builder for LLM agents                       |
+|  - Implementation: CopilotAgentBuilder (GitHub Copilot)  |
++----------------------------------------------------------+
+```
 
 ## Quick Start
 
@@ -31,7 +103,7 @@ A declarative orchestration engine for LLM (Large Language Model) workflows. Def
       "type": "Prompt",
       "dependsOn": [],
       "systemPrompt": "You are a research assistant.",
-      "userPrompt": "Research the topic: {{topic}}",
+      "userPrompt": "Research the topic: {{param.topic}}",
       "parameters": ["topic"],
       "model": "claude-opus-4.5"
     },
@@ -59,163 +131,153 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
 
 ## Table of Contents
 
+- [Step Types](#step-types)
 - [Orchestration Schema](#orchestration-schema)
-- [Step Configuration](#step-configuration)
 - [Typed Inputs](#typed-inputs)
 - [Template Expressions](#template-expressions)
 - [Variables](#variables)
+- [Subagents](#subagents)
+- [Retry Policy](#retry-policy)
+- [Engine Tools](#engine-tools)
 - [MCP Integration](#mcp-integration)
 - [MCP Server](#mcp-server)
 - [Triggers](#triggers)
+- [Checkpointing & Resume](#checkpointing--resume)
+- [Profiles & Tags](#profiles--tags)
+- [Version History](#version-history)
 - [System Prompt Modes](#system-prompt-modes)
 - [IPromptFormatter](#ipromptformatter)
+- [Web Portal](#web-portal)
+- [CLI Client](#cli-client)
+- [REST API](#rest-api)
 - [Programmatic Usage](#programmatic-usage)
-- [Architecture](#architecture)
+- [Examples](#examples)
+- [License](#license)
+
+## Step Types
+
+Orchestra supports four step types, each with a dedicated executor:
+
+### Prompt Step
+
+Sends prompts to an LLM. Supports system/user prompts (inline or from files), dependency context injection, input/output handler transformations, MCP tool access, quality control loops, subagent delegation, skill directories, and reasoning levels.
+
+```json
+{
+  "name": "analyzer",
+  "type": "Prompt",
+  "dependsOn": ["data-fetcher"],
+  "systemPrompt": "You are a data analyst.",
+  "userPrompt": "Analyze the data and provide insights.",
+  "model": "claude-opus-4.5",
+  "mcps": ["filesystem"],
+  "reasoningLevel": "high",
+  "inputHandlerPrompt": "Extract only the numerical data.",
+  "outputHandlerPrompt": "Format as a bullet-point summary."
+}
+```
+
+### Command Step
+
+Executes shell commands. Supports custom working directories, environment variables, stdin piping, and stderr capture. All string fields support template expressions.
+
+```json
+{
+  "name": "build",
+  "type": "Command",
+  "dependsOn": [],
+  "command": "dotnet",
+  "arguments": ["build", "--configuration", "Release"],
+  "workingDirectory": "{{vars.projectDir}}",
+  "environment": {
+    "BUILD_NUMBER": "{{orchestration.runId}}"
+  },
+  "includeStdErr": true
+}
+```
+
+### Http Step
+
+Makes HTTP requests. Supports all standard methods, custom headers, request bodies, and content types. All string fields support template expressions. No LLM involved.
+
+```json
+{
+  "name": "fetch-status",
+  "type": "Http",
+  "dependsOn": [],
+  "url": "{{vars.apiEndpoint}}/status",
+  "method": "GET",
+  "headers": {
+    "Authorization": "Bearer {{env.API_TOKEN}}"
+  }
+}
+```
+
+### Transform Step
+
+Pure string interpolation using template expressions. No LLM call, no external I/O. Useful for composing outputs from previous steps.
+
+```json
+{
+  "name": "build-report",
+  "type": "Transform",
+  "dependsOn": ["research", "analysis"],
+  "template": "# Report\n\n## Research\n{{research.output}}\n\n## Analysis\n{{analysis.output}}",
+  "contentType": "text/markdown"
+}
+```
 
 ## Orchestration Schema
 
 ### Top-Level Properties
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `name` | string | Yes | Unique name for the orchestration |
-| `description` | string | Yes | Human-readable description |
-| `version` | string | No | Version string (default: `"1.0.0"`) |
-| `inputs` | object | No | Typed input schema with types, descriptions, defaults, and enum constraints |
-| `variables` | object | No | User-defined variables accessible via `{{vars.name}}` |
-| `defaultSystemPromptMode` | enum | No | Default mode for all steps: `append` or `replace` |
-| `mcps` | array | No | Inline MCP server definitions |
-| `steps` | array | Yes | Array of step configurations |
-| `trigger` | object | No | Automatic trigger configuration |
+| Property | Type | Required | Default | Description |
+|----------|------|----------|---------|-------------|
+| `name` | string | Yes | -- | Unique name for the orchestration |
+| `description` | string | Yes | -- | Human-readable description |
+| `steps` | array | Yes | -- | Array of step configurations forming the execution DAG |
+| `version` | string | No | `"1.0.0"` | Version string, accessible via `{{orchestration.version}}` |
+| `inputs` | object | No | `null` | Typed input schema with types, descriptions, defaults, and enum constraints |
+| `variables` | object | No | `{}` | User-defined variables accessible via `{{vars.name}}` |
+| `tags` | array | No | `[]` | Tags for categorizing and filtering orchestrations |
+| `defaultSystemPromptMode` | enum | No | `null` | Default mode for all Prompt steps: `append` or `replace` |
+| `defaultRetryPolicy` | object | No | `null` | Default retry policy for all steps |
+| `defaultStepTimeoutSeconds` | int | No | `null` | Default per-step timeout in seconds |
+| `timeoutSeconds` | int | No | `3600` | Maximum time for the entire orchestration run |
+| `mcps` | array | No | `[]` | Inline MCP server definitions |
+| `trigger` | object | No | Manual | Automatic trigger configuration |
 
-### Example
-
-```json
-{
-  "name": "my-orchestration",
-  "description": "A multi-step AI workflow",
-  "version": "1.0.0",
-  "variables": {
-    "baseUrl": "https://api.example.com",
-    "outputDir": "/reports/{{param.project}}"
-  },
-  "defaultSystemPromptMode": "replace",
-  "mcps": [],
-  "steps": [],
-  "trigger": null
-}
-```
-
-## Step Configuration
-
-### Prompt Step Properties
+### Base Step Properties (All Step Types)
 
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `name` | string | Yes | Unique step identifier |
-| `type` | enum | Yes | Step type (currently only `Prompt`) |
+| `type` | enum | Yes | `Prompt`, `Command`, `Http`, or `Transform` |
 | `dependsOn` | array | Yes | Step names this step depends on (empty `[]` for root steps) |
-| `systemPrompt` | string | Yes | System prompt for the LLM |
-| `userPrompt` | string | Yes | User prompt with `{{paramName}}` placeholders |
-| `model` | string | Yes | LLM model identifier |
 | `parameters` | array | No | Parameter names required by this step |
-| `mcps` | array | No | MCP server names this step can use |
-| `inputHandlerPrompt` | string | No | Transform dependency outputs before use |
-| `outputHandlerPrompt` | string | No | Transform step output |
-| `systemPromptMode` | enum | No | `replace` or `append` (overrides orchestration default) |
-| `reasoningLevel` | enum | No | `low`, `medium`, or `high` |
-| `loop` | object | No | Retry/check loop configuration |
+| `enabled` | bool | No | Whether the step is enabled (default: `true`) |
+| `timeoutSeconds` | int | No | Per-step timeout override |
+| `retry` | object | No | Per-step retry policy override |
 
-### Parameters
+### Prompt Step Additional Properties
 
-Use `{{param.name}}` syntax in prompts to inject parameters:
-
-```json
-{
-  "name": "translator",
-  "userPrompt": "Translate '{{param.text}}' to {{param.targetLanguage}}.",
-  "parameters": ["text", "targetLanguage"]
-}
-```
-
-Pass parameters via CLI:
-
-```bash
--param text="Hello world" -param targetLanguage=French
-```
-
-### Dependencies
-
-Steps automatically receive outputs from their dependencies:
-
-```json
-{
-  "name": "step-a",
-  "dependsOn": [],
-  "userPrompt": "Generate a list of topics."
-},
-{
-  "name": "step-b",
-  "dependsOn": ["step-a"],
-  "userPrompt": "Expand on: {{step-a.output}}"
-}
-```
-
-When `step-b` runs, it receives `step-a`'s output as context.
-
-### Handler Prompts
-
-Transform data between steps using handler prompts:
-
-```json
-{
-  "name": "analyzer",
-  "dependsOn": ["data-fetcher"],
-  "inputHandlerPrompt": "Extract only the numerical data from the input.",
-  "outputHandlerPrompt": "Format the analysis as a bullet-point summary.",
-  "userPrompt": "Analyze the data."
-}
-```
-
-### Loop Configuration
-
-Implement quality control by retrying steps until criteria are met:
-
-```json
-{
-  "name": "quality-checker",
-  "dependsOn": ["writer"],
-  "systemPrompt": "Review the content. If it meets all criteria, respond with APPROVED.",
-  "userPrompt": "Check the content for accuracy and completeness.",
-  "loop": {
-    "target": "writer",
-    "maxIterations": 3,
-    "exitPattern": "APPROVED"
-  }
-}
-```
-
-The `quality-checker` step will re-run `writer` with feedback until `APPROVED` appears in the response or `maxIterations` is reached.
+| Property | Type | Description |
+|----------|------|-------------|
+| `systemPrompt` / `systemPromptFile` | string | System prompt (inline or file path) |
+| `userPrompt` / `userPromptFile` | string | User prompt (inline or file path) |
+| `model` | string | LLM model identifier |
+| `mcps` | array | MCP server names this step can use |
+| `inputHandlerPrompt` / `inputHandlerPromptFile` | string | Transform dependency outputs before use |
+| `outputHandlerPrompt` / `outputHandlerPromptFile` | string | Transform step output |
+| `systemPromptMode` | enum | `replace` or `append` (overrides orchestration default) |
+| `reasoningLevel` | enum | `low`, `medium`, or `high` |
+| `loop` | object | Retry/check loop configuration |
+| `subagents` | array | Subagent definitions for multi-agent delegation |
+| `skillDirectories` | array | Directories containing SKILL.md files |
 
 ## Typed Inputs
 
-Define a strongly-typed input schema at the orchestration level using the `inputs` property. This provides type validation, descriptions, default values, and enum constraints for parameters.
-
-When `inputs` is defined, it is the authoritative source of truth for parameter definitions. Step-level `parameters` arrays still declare which inputs each step needs, but validation uses the orchestration-level schema.
-
-When `inputs` is not defined, the orchestration falls back to legacy behavior: parameter names are collected from step-level `parameters` arrays and treated as required strings.
-
-### Input Definition Properties
-
-| Property | Type | Required | Default | Description |
-|----------|------|----------|---------|-------------|
-| `type` | enum | No | `"string"` | Data type: `"string"`, `"boolean"`, or `"number"` |
-| `description` | string | No | `null` | Human-readable description of the input |
-| `required` | bool | No | `true` | Whether the input must be provided at runtime |
-| `default` | string | No | `null` | Default value for optional inputs (ignored when `required` is `true`) |
-| `enum` | string[] | No | `[]` | Allowed values. When non-empty, the input value must be one of these |
-
-### Example
+Define a strongly-typed input schema at the orchestration level. Provides type validation, descriptions, default values, and enum constraints.
 
 ```json
 {
@@ -234,46 +296,32 @@ When `inputs` is not defined, the orchestration falls back to legacy behavior: p
     },
     "dryRun": {
       "type": "boolean",
-      "description": "Simulate the deployment without making changes",
+      "description": "Simulate without making changes",
       "required": false,
       "default": "false"
     },
     "replicas": {
       "type": "number",
-      "description": "Number of replicas to deploy",
+      "description": "Number of replicas",
       "required": false,
       "default": "3"
     }
-  },
-  "steps": [
-    {
-      "name": "deploy",
-      "type": "Prompt",
-      "systemPrompt": "You are a deployment assistant.",
-      "userPrompt": "Deploy {{param.serviceName}} to {{param.environment}} with {{param.replicas}} replicas. Dry run: {{param.dryRun}}.",
-      "parameters": ["serviceName", "environment", "dryRun", "replicas"],
-      "model": "claude-opus-4.5"
-    }
-  ]
+  }
 }
 ```
 
-### Validation
-
-When `inputs` is defined, the engine validates parameters before execution:
+### Validation Rules
 
 - **Required inputs**: Missing required inputs throw an error with their description
-- **Type validation**: Boolean inputs must be `"true"` or `"false"`, number inputs must be parseable as a number
-- **Enum constraints**: Values must match one of the allowed enum values (case-insensitive)
+- **Type validation**: Boolean inputs must be `"true"` or `"false"`, number inputs must be parseable
+- **Enum constraints**: Values must match one of the allowed values (case-insensitive)
 - **Defaults**: Optional inputs that are not provided receive their default value automatically
 
-### Backward Compatibility
-
-Orchestrations without an `inputs` property continue to work as before. Parameter names are collected from step-level `parameters` arrays and all are treated as required strings with no type checking.
+Orchestrations without `inputs` fall back to legacy behavior: parameter names are collected from step-level `parameters` arrays and treated as required strings.
 
 ## Template Expressions
 
-Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, headers, templates, and command arguments. All expressions are case-insensitive and whitespace-tolerant (e.g., `{{ orchestration.NAME }}` works).
+Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, headers, templates, and command arguments. All expressions are case-insensitive and whitespace-tolerant.
 
 ### Expression Namespaces
 
@@ -284,62 +332,32 @@ Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, head
 | Orchestration | `{{orchestration.property}}` | Built-in orchestration metadata |
 | Step | `{{step.property}}` | Current step metadata |
 | Environment | `{{env.VAR_NAME}}` | OS environment variable value |
-| Server | `{{server.url}}` | Orchestra server base URL (from `HostBaseUrl` or `ORCHESTRA_SERVER_URL` env var) |
+| Server | `{{server.url}}` | Orchestra server base URL |
+| Working Directory | `{{workingDirectory}}` | Current working directory |
 | Step Output | `{{stepName.output}}` | Output content from a completed step |
 | Step Raw Output | `{{stepName.rawOutput}}` | Raw (unprocessed) output from a completed step |
-| Step Files | `{{stepName.files}}` | JSON array of all file paths saved by a step via `orchestra_save_file` |
-| Step File (indexed) | `{{stepName.files[N]}}` | Path of the Nth file (0-based) saved by a step via `orchestra_save_file` |
+| Step Files | `{{stepName.files}}` | JSON array of all file paths saved by a step |
+| Step File (indexed) | `{{stepName.files[N]}}` | Path of the Nth file (0-based) saved by a step |
 
-### Orchestration Metadata Properties
+### Orchestration Metadata
 
-| Property | Description | Example Value |
-|----------|-------------|---------------|
+| Property | Description | Example |
+|----------|-------------|---------|
 | `{{orchestration.name}}` | Orchestration name | `"deployment-pipeline"` |
-| `{{orchestration.version}}` | Orchestration version | `"2.1.0"` |
-| `{{orchestration.runId}}` | Unique run identifier | `"abc123-def456"` |
-| `{{orchestration.startedAt}}` | Run start time (ISO 8601) | `"2025-06-15T10:30:00+00:00"` |
+| `{{orchestration.version}}` | Version | `"2.1.0"` |
+| `{{orchestration.runId}}` | Unique run ID | `"abc123-def456"` |
+| `{{orchestration.startedAt}}` | Start time (ISO 8601) | `"2025-06-15T10:30:00+00:00"` |
 
-### Step Metadata Properties
+### Step Metadata
 
-| Property | Description | Example Value |
-|----------|-------------|---------------|
+| Property | Description | Example |
+|----------|-------------|---------|
 | `{{step.name}}` | Current step's name | `"security-scan"` |
 | `{{step.type}}` | Current step's type | `"Prompt"`, `"Command"`, `"Transform"`, `"Http"` |
 
-### Example
-
-```json
-{
-  "userPrompt": "{{orchestration.name}} v{{orchestration.version}} [Run: {{orchestration.runId}}]\nStep: {{step.name}} ({{step.type}})\nAPI Key: {{env.API_KEY}}\nTopic: {{param.topic}}\nPrevious result: {{research.output}}"
-}
-```
-
 ## Variables
 
-Variables let you define reusable values at the orchestration level. They are declared in the top-level `variables` object and referenced via `{{vars.name}}` in any step.
-
-### Basic Usage
-
-```json
-{
-  "name": "my-pipeline",
-  "variables": {
-    "appName": "customer-portal",
-    "apiEndpoint": "https://api.example.com/v2"
-  },
-  "steps": [
-    {
-      "name": "fetch-data",
-      "type": "Http",
-      "url": "{{vars.apiEndpoint}}/projects/{{param.project}}/summary"
-    }
-  ]
-}
-```
-
-### Recursive Expansion
-
-Variable values can contain other template expressions, which are resolved when the variable is used:
+Variables let you define reusable values at the orchestration level, referenced via `{{vars.name}}`. Variable values can contain other template expressions, which are resolved recursively when used.
 
 ```json
 {
@@ -351,54 +369,74 @@ Variable values can contain other template expressions, which are resolved when 
 }
 ```
 
-In this example:
-- `{{vars.outputDir}}` resolves to `{{vars.baseDir}}/reports`, then `baseDir` resolves to `/data/prod/reports` (if `env=prod`)
-- `{{vars.logPrefix}}` resolves to `[my-pipeline:abc123]` using live orchestration metadata
-- Variables can reference `{{param.*}}`, `{{orchestration.*}}`, `{{step.*}}`, `{{env.*}}`, `{{stepName.output}}`, `{{stepName.files}}`, `{{stepName.files[N]}}`, and other `{{vars.*}}`
+Circular references are detected and left unresolved. Unknown variables remain as-is in the output.
 
-### Circular Reference Protection
+## Subagents
 
-Circular variable references (e.g., `a` references `b` which references `a`) are detected and left unresolved to prevent infinite loops:
+Prompt steps can delegate work to specialized subagents for multi-agent orchestration:
 
 ```json
 {
-  "variables": {
-    "a": "{{vars.b}}",
-    "b": "{{vars.a}}"
-  }
-}
-```
-
-Using `{{vars.a}}` will resolve to `{{vars.a}}` (left as-is) rather than causing an error.
-
-### Unknown Variables
-
-References to undefined variables are left as-is in the output (e.g., `{{vars.nonexistent}}` remains `{{vars.nonexistent}}`).
-
-## Environment Variables
-
-Access OS environment variables directly in templates using the `{{env.VAR_NAME}}` syntax:
-
-```json
-{
-  "variables": {
-    "connectionString": "Server={{env.DB_HOST}};Database={{env.DB_NAME}}"
-  },
-  "steps": [
+  "name": "research-team",
+  "type": "Prompt",
+  "systemPrompt": "You are a research coordinator. Delegate tasks to your team.",
+  "userPrompt": "Research {{param.topic}} thoroughly.",
+  "model": "claude-opus-4.5",
+  "subagents": [
     {
-      "name": "deploy",
-      "type": "Command",
-      "command": "docker",
-      "arguments": ["push", "{{env.CONTAINER_REGISTRY}}/{{vars.appName}}:latest"]
+      "prompt": "You are a data researcher. Find quantitative data.",
+      "displayName": "Data Researcher",
+      "description": "Finds quantitative data and statistics",
+      "mcps": ["web-fetch"]
+    },
+    {
+      "prompt": "You are a domain expert. Provide deep analysis.",
+      "displayName": "Domain Expert",
+      "description": "Provides domain-specific analysis"
     }
   ]
 }
 ```
 
-Key behaviors:
-- References to undefined environment variables are left as-is (e.g., `{{env.MISSING}}` remains `{{env.MISSING}}`)
-- Environment variable names are passed through as-is (case-sensitive on Linux, case-insensitive on Windows)
-- Can be used inside variable values for recursive expansion (e.g., a `vars` value containing `{{env.DB_HOST}}`)
+Each subagent can have its own prompt (inline or file), display name, description, tools, and MCP server access.
+
+## Retry Policy
+
+Configure retry behavior per-step or as an orchestration-level default:
+
+```json
+{
+  "defaultRetryPolicy": {
+    "maxRetries": 3,
+    "backoffSeconds": 2,
+    "backoffMultiplier": 2.0,
+    "retryOnTimeout": true
+  },
+  "steps": [
+    {
+      "name": "critical-step",
+      "retry": {
+        "maxRetries": 5,
+        "backoffSeconds": 5,
+        "backoffMultiplier": 1.5
+      }
+    }
+  ]
+}
+```
+
+Uses exponential backoff: delay = `backoffSeconds * (backoffMultiplier ^ attemptIndex)`.
+
+## Engine Tools
+
+Built-in tools available to the LLM during Prompt step execution:
+
+| Tool | Description |
+|------|-------------|
+| `orchestra_save_file` | Save content to a temp file. Saved file paths are accessible via `{{stepName.files}}` and `{{stepName.files[N]}}` expressions. |
+| `orchestra_read_file` | Read a previously saved file |
+| `orchestra_set_status` | Set step status: `success`, `failed`, or `no_action` (skips downstream steps) |
+| `orchestra_complete` | Halt the entire orchestration immediately |
 
 ## MCP Integration
 
@@ -406,8 +444,8 @@ Orchestra supports [Model Context Protocol](https://modelcontextprotocol.io/) se
 
 ### MCP Types
 
-- **Local**: Local process communicating via stdio
-- **Remote**: Remote HTTP endpoint
+- **Local**: Process communicating via stdio
+- **Remote**: HTTP endpoint
 
 ### External MCP Configuration (mcp.json)
 
@@ -421,10 +459,9 @@ Orchestra supports [Model Context Protocol](https://modelcontextprotocol.io/) se
       "arguments": ["-y", "@anthropic/mcp-server-filesystem", "{{workingDirectory}}"]
     },
     {
-      "name": "fetch",
-      "type": "local",
-      "command": "uvx",
-      "arguments": ["mcp-server-fetch"]
+      "name": "remote-api",
+      "type": "remote",
+      "endpoint": "https://api.example.com/mcp"
     }
   ]
 }
@@ -432,79 +469,38 @@ Orchestra supports [Model Context Protocol](https://modelcontextprotocol.io/) se
 
 ### Inline MCP Definitions
 
-Define MCPs directly in the orchestration:
+MCPs can also be defined directly in the orchestration file under the top-level `mcps` array, then referenced by name in step-level `mcps` arrays.
 
-```json
-{
-  "name": "my-orchestration",
-  "mcps": [
-    {
-      "name": "web-fetch",
-      "type": "local",
-      "command": "npx",
-      "arguments": ["-y", "@anthropic/mcp-fetch"]
-    }
-  ],
-  "steps": [
-    {
-      "name": "researcher",
-      "mcps": ["web-fetch"],
-      "userPrompt": "Fetch and summarize https://example.com"
-    }
-  ]
-}
-```
+## MCP Server
 
-## Triggers
+Orchestra exposes orchestrations to external AI agents via MCP endpoints.
 
-Automate orchestration execution with triggers.
-
-### MCP Server
-
-Orchestra can expose orchestrations to external AI agents via a data-plane MCP (Model Context Protocol) server. This allows any MCP-compatible client to discover and invoke orchestrations.
-
-### Setup
-
-The MCP server is enabled by default when using `Orchestra.Host`:
-
-```csharp
-builder.Services.AddOrchestraMcpServer();
-
-var app = builder.Build();
-app.MapOrchestraMcpEndpoints(); // Maps /mcp/data
-```
-
-### Available Tools
-
-The data-plane MCP server exposes four tools:
+### Data Plane (default: enabled)
 
 | Tool | Description |
 |------|-------------|
-| `ListOrchestrations` | List and filter orchestrations by tags or name pattern. Returns IDs, names, descriptions, parameters, and input schemas. |
-| `InvokeOrchestration` | Invoke an orchestration by ID. Supports async (default) and sync modes. Parameters are validated against the input schema. |
-| `GetOrchestrationStatus` | Check the status and result of a running or completed execution by execution ID. |
-| `CancelOrchestration` | Cancel a running execution. |
+| `ListOrchestrations` | List and filter orchestrations by tags or name pattern |
+| `InvokeOrchestration` | Invoke an orchestration (async or sync mode) |
+| `GetOrchestrationStatus` | Check status/result of a running or completed execution |
+| `CancelOrchestration` | Cancel a running execution |
 
-### Invocation Modes
+### Control Plane (opt-in)
 
-- **Async** (default): Returns immediately with an execution ID. Use `GetOrchestrationStatus` to poll for results.
-- **Sync**: Blocks until the orchestration completes (with configurable timeout). Returns the full result.
+Full management capabilities: orchestration CRUD, tag management, profile management, trigger management, and run history.
 
 ### Configuration
 
 ```csharp
 builder.Services.AddOrchestraMcpServer(options =>
 {
-    options.DataPlaneEnabled = true;          // default: true
-    options.DataPlaneRoute = "/mcp/data";     // default
-    options.ControlPlaneEnabled = false;      // default: false (opt-in)
-    options.ControlPlaneRoute = "/mcp/control"; // default
+    options.DataPlaneEnabled = true;
+    options.DataPlaneRoute = "/mcp/data";
+    options.ControlPlaneEnabled = false;
+    options.ControlPlaneRoute = "/mcp/control";
 });
 ```
 
 ### Connecting from an MCP Client
-
-Any MCP-compatible client can connect to the data-plane endpoint. For example, to use it from another orchestration's prompt step, define it as a remote MCP:
 
 ```json
 {
@@ -518,13 +514,15 @@ Any MCP-compatible client can connect to the data-plane endpoint. For example, t
 }
 ```
 
-The `{{server.url}}` expression resolves to the running Orchestra server's base URL at runtime. It uses the configured `HostBaseUrl` and falls back to the `ORCHESTRA_SERVER_URL` environment variable.
-
 ## Triggers
+
+### Manual Trigger (default)
+
+On-demand execution only. No additional configuration needed.
 
 ### Scheduler Trigger
 
-Run on a schedule using cron expressions or intervals:
+Run on a cron schedule or at fixed intervals:
 
 ```json
 {
@@ -537,21 +535,9 @@ Run on a schedule using cron expressions or intervals:
 }
 ```
 
-Or with a simple interval:
-
-```json
-{
-  "trigger": {
-    "type": "scheduler",
-    "enabled": true,
-    "intervalSeconds": 3600
-  }
-}
-```
-
 ### Webhook Trigger
 
-Execute via HTTP POST:
+Execute via HTTP POST with optional HMAC secret validation and synchronous response:
 
 ```json
 {
@@ -560,25 +546,12 @@ Execute via HTTP POST:
     "enabled": true,
     "secret": "your-hmac-secret",
     "maxConcurrent": 5,
-    "inputHandlerPrompt": "Extract 'topic' and 'audience' from the JSON payload."
-  }
-}
-```
-
-### Email Trigger
-
-Poll an Outlook folder for new emails:
-
-```json
-{
-  "trigger": {
-    "type": "Email",
-    "enabled": true,
-    "folderPath": "Inbox/ActionItems",
-    "pollIntervalSeconds": 60,
-    "subjectContains": "Action Required",
-    "senderContains": "@company.com",
-    "inputHandlerPrompt": "Extract the action item from the email body."
+    "inputHandlerPrompt": "Extract 'topic' and 'audience' from the JSON payload.",
+    "response": {
+      "waitForResult": true,
+      "responseTemplate": "Orchestration completed: {{result}}",
+      "timeoutSeconds": 120
+    }
   }
 }
 ```
@@ -599,110 +572,119 @@ Re-run on completion:
 }
 ```
 
+## Checkpointing & Resume
+
+Orchestra can checkpoint execution state after each step completes, allowing failed runs to be resumed from the last successful checkpoint rather than restarting from scratch.
+
+- Full checkpoint storage abstraction (`ICheckpointStore`) with a file system implementation
+- Resume via REST API: `GET /api/orchestrations/{id}/resume/{runId}` (SSE)
+- List, get, and delete checkpoints via `/api/checkpoints`
+
+## Profiles & Tags
+
+### Tags
+
+Categorize orchestrations with author-defined tags (in the JSON) and host-managed tags. Effective tags are the union of both. Tags are used for filtering and profile-based activation.
+
+### Profiles
+
+Named collections of orchestration filters that determine which orchestrations are active:
+
+- Tag-based and ID-based filtering
+- Time-window scheduling for automatic profile activation/deactivation
+- Import/export profiles
+- Activation history tracking
+- Manual activation overrides scheduled activation
+- Full REST API under `/api/profiles`
+
+## Version History
+
+Orchestra tracks orchestration versions using content hashing:
+
+- Automatic version snapshots stored on disk
+- Diff comparison between any two versions
+- API: `/api/orchestrations/{id}/versions` and `/api/orchestrations/{id}/versions/{hash1}/diff/{hash2}`
+
 ## System Prompt Modes
 
-Control how system prompts interact with the SDK's built-in prompts.
+Control how system prompts interact with the SDK's built-in prompts:
 
-### Modes
-
-- **`append`** (default): Your system prompt is added to the SDK's default system prompt
+- **`append`** (default): Your system prompt is added to the SDK's default
 - **`replace`**: Your system prompt completely replaces the SDK's default
 
-### Orchestration-Level Default
-
-Set a default for all steps:
-
-```json
-{
-  "name": "my-orchestration",
-  "defaultSystemPromptMode": "replace",
-  "steps": [...]
-}
-```
-
-### Step-Level Override
-
-Override the default for specific steps:
-
-```json
-{
-  "defaultSystemPromptMode": "replace",
-  "steps": [
-    {
-      "name": "strict-translator",
-      "systemPrompt": "You are a translator. Only output the translation.",
-      "userPrompt": "Translate: {{text}}"
-    },
-    {
-      "name": "helpful-assistant",
-      "systemPrompt": "Focus on being helpful.",
-      "systemPromptMode": "append",
-      "userPrompt": "Help me with: {{task}}"
-    }
-  ]
-}
-```
-
-In this example:
-- `strict-translator` uses `replace` (from orchestration default)
-- `helpful-assistant` uses `append` (step-level override)
+Set at orchestration level with `defaultSystemPromptMode`, override per step with `systemPromptMode`.
 
 ## IPromptFormatter
 
-Customize how prompts and context are formatted by implementing `IPromptFormatter`.
-
-### Interface
+Customize how prompts and context are formatted by implementing `IPromptFormatter`:
 
 ```csharp
 public interface IPromptFormatter
 {
     string FormatDependencyOutputs(IReadOnlyDictionary<string, string> dependencyOutputs);
-    
-    string BuildUserPrompt(
-        string userPrompt,
-        string dependencyOutputs,
-        string? loopFeedback = null,
-        string? inputHandlerPrompt = null);
-    
+    string BuildUserPrompt(string userPrompt, string dependencyOutputs,
+        string? loopFeedback = null, string? inputHandlerPrompt = null);
     string BuildTransformationSystemPrompt(string handlerInstructions);
-    
     string WrapContentForTransformation(string content);
 }
 ```
 
-### Default Behavior
+The `DefaultPromptFormatter` formats dependency outputs with markdown headers, includes loop feedback when retrying, and wraps content in `<INPUT_CONTENT>` tags for transformations. Register a custom implementation via DI.
 
-The `DefaultPromptFormatter`:
-- Formats multiple dependency outputs with markdown headers and separators
-- Includes loop feedback when retrying steps
-- Wraps content in `<INPUT_CONTENT>` tags for transformations
+## Web Portal
 
-### Custom Implementation
+The Portal (`Orchestra.Playground.Copilot.Portal`) is a full React 18 + TypeScript SPA (built with Vite) served by an ASP.NET Core backend. Features include:
 
-```csharp
-public class XmlPromptFormatter : IPromptFormatter
-{
-    public string FormatDependencyOutputs(IReadOnlyDictionary<string, string> deps)
-    {
-        var sb = new StringBuilder("<dependencies>");
-        foreach (var (name, output) in deps)
-        {
-            sb.Append($"<step name=\"{name}\">{output}</step>");
-        }
-        sb.Append("</dependencies>");
-        return sb.ToString();
-    }
-    
-    // Implement other methods...
-}
+- **DAG Visualization** - Interactive Mermaid-based diagrams of orchestration step graphs
+- **Execution Streaming** - Real-time SSE streaming of orchestration execution progress
+- **Orchestration Management** - Register, enable/disable, and browse orchestrations
+- **Run History** - View past execution runs with step-level details
+- **Profile Selector** - Switch between named profiles to control active orchestrations
+- **MCP Viewer** - Inspect MCP server configurations
+- **Import/Export** - Import and export orchestrations and profiles
+- **Step Details** - Drill into individual step results and outputs
 
-// Register in DI
-services.AddSingleton<IPromptFormatter, XmlPromptFormatter>();
+## CLI Client
+
+The CLI (`Orchestra.Cli`) provides a command-line interface for managing orchestrations via the REST API, built with Spectre.Console for rich terminal output:
+
+```bash
+# List orchestrations
+orchestra list
+
+# Register an orchestration
+orchestra register path/to/orchestration.json
+
+# Run an orchestration
+orchestra run <id> --param key=value
+
+# Manage triggers, profiles, tags, runs
+orchestra triggers list
+orchestra profiles list
+orchestra tags list <id>
+orchestra runs list <id>
 ```
 
-## Programmatic Usage
+Commands: `list`, `get`, `register`, `remove`, `scan`, `enable`, `disable`, `run`, `active`, `cancel`, `runs`, `triggers`, `profiles`, `tags`, `server-status`.
 
-### Basic Setup
+## REST API
+
+Orchestra.Host exposes a complete REST API. Key endpoint groups:
+
+| Group | Prefix | Description |
+|-------|--------|-------------|
+| Orchestrations | `/api/orchestrations` | CRUD, browse, execute (SSE), resume |
+| Runs | `/api/orchestrations/{id}/runs` | Run history, status, cancellation |
+| Triggers | `/api/triggers` | Trigger management, state, history |
+| Profiles | `/api/profiles` | Profile CRUD, activation, scheduling |
+| Tags | `/api/tags` | Tag management |
+| Versions | `/api/orchestrations/{id}/versions` | Version history and diffs |
+| Checkpoints | `/api/checkpoints` | Checkpoint management |
+| MCP | `/mcp/data`, `/mcp/control` | MCP server endpoints |
+
+See `docs/api-reference.md` for the complete API specification with request/response examples.
+
+## Programmatic Usage
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -710,11 +692,9 @@ using Microsoft.Extensions.Hosting;
 using Orchestra.Engine;
 using Orchestra.Copilot;
 
-// Parse configuration
 var mcps = OrchestrationParser.ParseMcpFile("mcp.json");
 var orchestration = OrchestrationParser.ParseOrchestrationFile("orchestration.json", mcps);
 
-// Configure services
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 builder.Services.AddSingleton<IOrchestrationReporter, NullOrchestrationReporter>();
@@ -722,8 +702,6 @@ builder.Services.AddSingleton<IScheduler, OrchestrationScheduler>();
 builder.Services.AddSingleton<OrchestrationExecutor>();
 
 var host = builder.Build();
-
-// Execute
 var executor = host.Services.GetRequiredService<OrchestrationExecutor>();
 var result = await executor.ExecuteAsync(orchestration, new Dictionary<string, string>
 {
@@ -740,117 +718,37 @@ if (result.Status == ExecutionStatus.Succeeded)
 }
 ```
 
-### Custom Reporter
-
-Implement `IOrchestrationReporter` for custom progress reporting:
-
-```csharp
-public class MyReporter : IOrchestrationReporter
-{
-    public void ReportStepStarted(string stepName) 
-        => Console.WriteLine($"Starting: {stepName}");
-    
-    public void ReportStepCompleted(string stepName, AgentResult result)
-        => Console.WriteLine($"Completed: {stepName}");
-    
-    // Implement other methods...
-}
-```
-
-### Custom Run Store
-
-Implement `IRunStore` to persist orchestration runs:
-
-```csharp
-public class DatabaseRunStore : IRunStore
-{
-    public Task SaveRunAsync(OrchestrationRunRecord record, CancellationToken ct)
-    {
-        // Save to database
-    }
-    
-    public Task<IReadOnlyList<OrchestrationRunRecord>> ListRunsAsync(
-        string orchestrationName, int? limit, CancellationToken ct)
-    {
-        // Query database
-    }
-    
-    // Implement other methods...
-}
-```
-
-## Architecture
-
-```
-+----------------------------------------------------------+
-|                   Orchestration JSON                      |
-|  (name, description, steps[], mcps[], trigger)           |
-+----------------------------------------------------------+
-                            |
-                            v
-+----------------------------------------------------------+
-|                  OrchestrationParser                      |
-|  - Parses JSON into Orchestration objects                |
-|  - Resolves MCP references                               |
-+----------------------------------------------------------+
-                            |
-                            v
-+----------------------------------------------------------+
-|                 OrchestrationScheduler                    |
-|  - Validates DAG (detects cycles, missing deps)          |
-|  - Groups steps into parallel execution layers           |
-+----------------------------------------------------------+
-                            |
-                            v
-+----------------------------------------------------------+
-|                 OrchestrationExecutor                     |
-|  - Executes steps based on dependency graph              |
-|  - Parallel execution of independent steps               |
-|  - Handles loops (retry with feedback)                   |
-+----------------------------------------------------------+
-                            |
-                            v
-+----------------------------------------------------------+
-|                    PromptExecutor                         |
-|  - Builds prompts with dependency context                |
-|  - Applies input/output transformations                  |
-|  - Uses IPromptFormatter for formatting                  |
-+----------------------------------------------------------+
-                            |
-                            v
-+----------------------------------------------------------+
-|                     AgentBuilder                          |
-|  - Abstract builder for LLM agents                       |
-|  - Implementation: CopilotAgentBuilder (GitHub Copilot)  |
-+----------------------------------------------------------+
-```
-
 ## Examples
 
-See the `examples/` folder for complete orchestration examples:
+See the `examples/` folder for 20 complete orchestration examples:
 
 | Example | Description |
 |---------|-------------|
-| `deployment-pipeline.json` | Deployment pipeline with variables, metadata, and mixed step types |
+| `deployment-pipeline.json` | All 4 step types with variables, metadata, and environment variables |
 | `typed-inputs-deployment.json` | Typed input schema with type validation, enum constraints, and defaults |
-| `mcp-orchestration-coordinator.json` | Coordinator that invokes other orchestrations via the data-plane MCP |
-| `variables-and-metadata.json` | Variables, orchestration metadata, and step metadata expressions |
-| `weather-roads-seattle.json` | Parallel weather monitoring |
+| `subagents-research-team.json` | Multi-agent orchestration with subagent delegation |
+| `mcp-orchestration-coordinator.json` | Cross-orchestration invocation via the data-plane MCP |
+| `step-files-cross-reference.json` | File save/read and cross-referencing between steps |
+| `skill-directories-example.json` | Agent skill directories with SKILL.md |
 | `command-build-and-analyze.json` | Command steps with build and git analysis |
+| `variables-and-metadata.json` | Variables with recursive expansion and metadata expressions |
 | `system-prompt-mode-example.json` | System prompt mode demonstration |
 | `advanced-combined-features.json` | Full pipeline with loops and MCPs |
-| `webhook-triggered-notification.json` | Webhook event handling |
-| `subagents-research-team.json` | Multi-agent orchestration with subagents |
+| `webhook-triggered-notification.json` | Webhook trigger with input handler and sync response |
+| `code-review-azure-devops.json` | Code review workflow |
+| `weather-roads-seattle.json` | Parallel prompt execution |
 
-## CLI Reference
+See `orchestration-composing.md` for the complete orchestration schema reference.
 
-```bash
-dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
-  -orchestration <path>     # Path to orchestration JSON (required)
-  -mcp <path>               # Path to MCP configuration JSON (required)
-  -param key=value          # Parameters (repeatable)
-  -print                    # Print final output
-```
+## Documentation
+
+Full documentation is available in the `docs/` folder and deployed via GitHub Pages:
+
+- **Getting Started** - Installation, setup, and first orchestration
+- **Engine Reference** - Core engine concepts, step types, and execution model
+- **Host Reference** - REST API, SSE events, trigger management, MCP server
+- **Copilot Integration** - GitHub Copilot SDK adapter, streaming events, subagents
+- **API Reference** - Complete HTTP API specification
 
 ## License
 
