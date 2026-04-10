@@ -236,34 +236,33 @@ describe('generateDefinitionDagCode', () => {
     expect(mermaidCode).toContain('analyze');
   });
 
-  it('generates valid Mermaid for all step types', async () => {
+  it('generates valid Mermaid for all step types with uniform rounded rects', async () => {
     const { mermaidCode } = generateDefinitionDagCode(makeAllStepTypes());
     await assertMermaidParses(mermaidCode);
 
-    // Http step uses hexagon shape
-    expect(mermaidCode).toContain('fetch_data{{');
-    // Command step uses stadium shape
-    expect(mermaidCode).toContain('run_script(["');
-    // Transform step uses rhombus shape
-    expect(mermaidCode).toContain('transform_data{"');
-    // Prompt step uses rectangle
+    // All step types now use rounded rectangle ["..."]
+    expect(mermaidCode).toContain('fetch_data["');
+    expect(mermaidCode).toContain('run_script["');
+    expect(mermaidCode).toContain('transform_data["');
     expect(mermaidCode).toContain('analyze["');
 
-    // Type badges
-    expect(mermaidCode).toContain('[HTTP]');
-    expect(mermaidCode).toContain('[COMMAND]');
-    expect(mermaidCode).toContain('[TRANSFORM]');
+    // Type badges as inline text (not emojis)
+    expect(mermaidCode).toContain('HTTP');
+    expect(mermaidCode).toContain('CMD');
+    expect(mermaidCode).toContain('FN');
   });
 
-  it('generates valid Mermaid with subagents', async () => {
+  it('generates valid Mermaid with subagents rendered inline', async () => {
     const { mermaidCode } = generateDefinitionDagCode(makeStepsWithSubagents());
     await assertMermaidParses(mermaidCode);
 
-    // Compact subagent node
-    expect(mermaidCode).toContain('Subagents');
-    expect(mermaidCode).toContain('Research Agent');
-    expect(mermaidCode).toContain('Writer Agent');
-    expect(mermaidCode).toContain('2 subagents');
+    // Subagent names rendered inline within parent node (truncated to 10 chars)
+    expect(mermaidCode).toContain('Research \u2026'); // "Research Agent" truncated
+    expect(mermaidCode).toContain('Writer Ag\u2026'); // "Writer Agent" truncated
+
+    // No separate subagent node or dotted edge — all inline
+    expect(mermaidCode).not.toContain('-.-o');
+    expect(mermaidCode).not.toContain('_sa_group');
   });
 
   it('generates valid Mermaid with loops', async () => {
@@ -298,9 +297,10 @@ describe('generateDefinitionDagCode', () => {
     const { mermaidCode } = generateDefinitionDagCode(makeComplexOrchestration());
     await assertMermaidParses(mermaidCode);
 
-    // Should have compact subagent node
-    expect(mermaidCode).toContain('Subagents');
-    expect(mermaidCode).toContain('3 subagents');
+    // Subagents rendered inline
+    expect(mermaidCode).toContain('Helper 1');
+    expect(mermaidCode).toContain('Helper 2');
+    expect(mermaidCode).toContain('Helper 3');
 
     // Should have dependency edges
     expect(mermaidCode).toContain('-->');
@@ -312,6 +312,34 @@ describe('generateDefinitionDagCode', () => {
     expect(stepNameToId.get('transform_data')).toBe('transform-data');
     expect(stepNameToId.get('analyze')).toBe('analyze');
     expect(stepNameToId.get('run_script')).toBe('run-script');
+  });
+
+  it('builds correct stepTypeMap', () => {
+    const { stepTypeMap } = generateDefinitionDagCode(makeAllStepTypes());
+    expect(stepTypeMap.get('fetch_data')).toBe('http');
+    expect(stepTypeMap.get('transform_data')).toBe('transform');
+    expect(stepTypeMap.get('analyze')).toBe('prompt');
+    expect(stepTypeMap.get('run_script')).toBe('command');
+  });
+
+  it('truncates long step names with ellipsis', async () => {
+    const steps: Step[] = [
+      { name: 'orcas-island-tomorrow-forecast', type: 'Prompt' },
+    ];
+    const { mermaidCode } = generateDefinitionDagCode(steps);
+    await assertMermaidParses(mermaidCode);
+    // 30 chars should be truncated
+    expect(mermaidCode).toContain('\u2026'); // ellipsis character
+    expect(mermaidCode).not.toContain('orcas-island-tomorrow-forecast');
+  });
+
+  it('does not truncate short step names', async () => {
+    const steps: Step[] = [
+      { name: 'fetch-data', type: 'Prompt' },
+    ];
+    const { mermaidCode } = generateDefinitionDagCode(steps);
+    await assertMermaidParses(mermaidCode);
+    expect(mermaidCode).toContain('fetch-data');
   });
 });
 
@@ -338,7 +366,7 @@ describe('generateExecutionDagCode', () => {
     expect(mermaidCode).toContain('classDef failed');
   });
 
-  it('generates valid Mermaid for execution with subagents', async () => {
+  it('generates valid Mermaid for execution with subagents inline', async () => {
     const steps = makeStepsWithSubagents();
     const statuses: Record<string, string> = {
       orchestrator: 'running',
@@ -347,7 +375,8 @@ describe('generateExecutionDagCode', () => {
 
     const { mermaidCode } = generateExecutionDagCode(steps, statuses);
     await assertMermaidParses(mermaidCode);
-    expect(mermaidCode).toContain('Subagents');
+    // Subagents inline, no separate node
+    expect(mermaidCode).not.toContain('_sa_group');
   });
 
   it('generates valid Mermaid for execution with failed/cancelled/skipped', async () => {
@@ -403,6 +432,15 @@ describe('generateExecutionDagCode', () => {
     // Should NOT apply disabledStep class to enabled steps
     expect(mermaidCode).not.toContain('class fetch_data disabledStep');
     expect(mermaidCode).not.toContain('class final_step disabledStep');
+  });
+
+  it('returns stepTypeMap for post-render accent bars', () => {
+    const steps = makeAllStepTypes();
+    const { stepTypeMap } = generateExecutionDagCode(steps, {});
+    expect(stepTypeMap.get('fetch_data')).toBe('http');
+    expect(stepTypeMap.get('transform_data')).toBe('transform');
+    expect(stepTypeMap.get('analyze')).toBe('prompt');
+    expect(stepTypeMap.get('run_script')).toBe('command');
   });
 });
 
@@ -533,7 +571,7 @@ describe('edge cases', () => {
     await assertMermaidParses(mermaidCode);
   });
 
-  it('handles many subagents', async () => {
+  it('handles many subagents with count display', async () => {
     const subagents = Array.from({ length: 10 }, (_, i) => ({
       name: `agent-${i}`,
       displayName: `Agent ${i}`,
@@ -549,6 +587,7 @@ describe('edge cases', () => {
     ];
     const { mermaidCode } = generateDefinitionDagCode(steps);
     await assertMermaidParses(mermaidCode);
+    // >3 subagents shows count instead of individual names
     expect(mermaidCode).toContain('10 subagents');
   });
 

@@ -34,59 +34,57 @@ function getStepType(step: LooseStep | Step | string): string {
 }
 
 /**
- * Get a type icon prefix for the step label.
+ * Get a short text badge for the step type.
+ * Prompt steps get no badge (they're the default/most common).
  */
-function getTypeIcon(stepType: string): string {
+function getTypeBadge(stepType: string): string {
   switch (stepType) {
     case 'http':
-      return '\u{1F310} '; // globe
+      return 'HTTP';
     case 'command':
-      return '\u{1F4BB} '; // terminal/laptop
+      return 'CMD';
     case 'transform':
-      return '\u{1F504} '; // transform arrows
+      return 'FN';
     default:
       return '';
   }
 }
 
 /**
- * Build the metadata line for a step based on its type.
+ * Truncate a step name for display inside a node.
+ * - 0-22 chars: full name
+ * - 23+ chars: truncate with ellipsis
  */
-function buildMetadataLines(step: LooseStep | Step | string): string[] {
-  if (typeof step === 'string') return [];
+function truncateName(name: string, maxLen = 22): string {
+  if (name.length <= maxLen) return name;
+  return name.substring(0, maxLen - 1) + '\u2026'; // …
+}
+
+/**
+ * Build a single compact metadata line for a step based on its type.
+ * Returns at most one line to keep nodes compact.
+ */
+function buildMetadataLine(step: LooseStep | Step | string): string | null {
+  if (typeof step === 'string') return null;
   const s = step as LooseStep;
-  const lines: string[] = [];
   const stepType = getStepType(step);
 
   switch (stepType) {
     case 'prompt': {
-      // Model info
       const model = s.model as string | undefined;
       if (model) {
-        const shortModel = model.split('/').pop() || model;
-        lines.push(`<small>${escLabel(shortModel)}</small>`);
+        let shortModel = model.split('/').pop() || model;
+        if (shortModel.length > 24) shortModel = shortModel.substring(0, 21) + '...';
+        return shortModel;
       }
-
-      // MCPs info
-      const mcps = (s.mcps || s.mcp) as unknown;
-      if (mcps && Array.isArray(mcps) && mcps.length > 0) {
-        const mcpNames = mcps
-          .map((m: unknown) => (typeof m === 'string' ? m : (m as Record<string, unknown>).name))
-          .join(', ');
-        lines.push(`<small>MCPs: ${escLabel(mcpNames)}</small>`);
-      } else if (mcps && typeof mcps === 'string') {
-        lines.push(`<small>MCP: ${escLabel(mcps)}</small>`);
-      }
-      break;
+      return null;
     }
     case 'http': {
       const method = (s.method as string) || 'GET';
       const url = s.url as string | undefined;
       if (url) {
-        // Show just the host/path, truncated
         let shortUrl = url;
         try {
-          // Handle template URLs gracefully
           if (!url.includes('{{')) {
             const parsed = new URL(url);
             shortUrl = parsed.host + (parsed.pathname !== '/' ? parsed.pathname : '');
@@ -94,12 +92,10 @@ function buildMetadataLines(step: LooseStep | Step | string): string[] {
         } catch {
           /* keep original */
         }
-        if (shortUrl.length > 35) shortUrl = shortUrl.substring(0, 32) + '...';
-        lines.push(`<small>${escLabel(method)} ${escLabel(shortUrl)}</small>`);
-      } else {
-        lines.push(`<small>${escLabel(method)}</small>`);
+        if (shortUrl.length > 28) shortUrl = shortUrl.substring(0, 25) + '...';
+        return `${method} ${shortUrl}`;
       }
-      break;
+      return method;
     }
     case 'command': {
       const cmd = s.command as string | undefined;
@@ -110,68 +106,51 @@ function buildMetadataLines(step: LooseStep | Step | string): string[] {
           cmdLine += ' ' + args.slice(0, 2).join(' ');
           if (args.length > 2) cmdLine += ' ...';
         }
-        if (cmdLine.length > 35) cmdLine = cmdLine.substring(0, 32) + '...';
-        lines.push(`<small>${escLabel(cmdLine)}</small>`);
+        if (cmdLine.length > 28) cmdLine = cmdLine.substring(0, 25) + '...';
+        return cmdLine;
       }
-      break;
+      return null;
     }
     case 'transform': {
       const template = s.template as string | undefined;
       if (template) {
         let preview = template.replace(/\n/g, ' ').trim();
-        if (preview.length > 35) preview = preview.substring(0, 32) + '...';
-        lines.push(`<small>${escLabel(preview)}</small>`);
+        if (preview.length > 28) preview = preview.substring(0, 25) + '...';
+        return preview;
       }
-      break;
+      return null;
     }
   }
 
-  return lines;
+  return null;
 }
 
 /**
- * Build the Mermaid node declaration with the appropriate shape for its type.
- * - Prompt:    rounded rectangle  ("...")
- * - Http:      hexagon            {{"..."}}
- * - Command:   stadium/pill       (["..."])
- * - Transform: rhombus/diamond    {"..."}
+ * Build the Mermaid node declaration.
+ * All step types use rounded rectangle for uniform width and compactness.
  */
-function buildNodeDeclaration(safeId: string, label: string, stepType: string): string {
-  switch (stepType) {
-    case 'http':
-      return `  ${safeId}{{"${label}"}}\n`;
-    case 'command':
-      return `  ${safeId}(["${label}"])\n`;
-    case 'transform':
-      return `  ${safeId}{"${label}"}\n`;
-    default:
-      // Prompt / unknown = rounded rectangle
-      return `  ${safeId}["${label}"]\n`;
-  }
+function buildNodeDeclaration(safeId: string, label: string): string {
+  return `  ${safeId}["${label}"]\n`;
 }
 
 /**
- * Build subagent section for a step. Returns mermaid code for a single compact
- * node listing all subagents, connected to the parent step via a dotted edge.
- * This avoids the wide horizontal layout that individual subagent nodes create.
+ * Build subagent inline label content for a step.
+ * Renders as a compact list of subagent names within the parent node label.
  */
-function buildSubagentSection(
-  safeId: string,
+function buildSubagentInlineLabel(
   subagents: Array<{ name: string; displayName?: string; description?: string }>,
-): { subgraphCode: string; subagentIds: string[] } {
-  const compactId = `${safeId}_sa_group`;
-  let code = '';
-
-  // Build a compact label listing subagent names vertically
-  const lines = subagents.map(sa => {
-    const displayName = sa.displayName || sa.name;
-    return escLabel(displayName);
-  });
-  const label = `<small>\u{1F916} Subagents</small><br/><small>${lines.join('<br/>')}</small>`;
-
-  code += `  ${compactId}[/"${label}"/]\n`;
-
-  return { subgraphCode: code, subagentIds: [compactId] };
+): string {
+  if (subagents.length <= 3) {
+    // Show individual names as small dots
+    const names = subagents.map(sa => {
+      const displayName = sa.displayName || sa.name;
+      const short = displayName.length > 10 ? displayName.substring(0, 9) + '\u2026' : displayName;
+      return escLabel(short);
+    });
+    return `<small>\u25CB ${names.join(' \u25CB ')}</small>`;
+  }
+  // Too many — just show count
+  return `<small>\u25CB ${subagents.length} subagents</small>`;
 }
 
 /**
@@ -213,6 +192,67 @@ export function getMermaidConfig() {
       tertiaryColor: '#0d1117',
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Color mapping for step types (used by post-render SVG styling)
+// ---------------------------------------------------------------------------
+const TYPE_COLORS: Record<string, string> = {
+  prompt: '#58a6ff',   // blue
+  http: '#3fb950',     // green
+  command: '#a371f7',  // purple
+  transform: '#d29922', // yellow
+};
+
+/**
+ * Post-render: apply a left-side accent border to each node based on step type.
+ * This provides clear type differentiation without relying on different shapes.
+ */
+function applyTypeAccentBorders(
+  svgElement: SVGElement,
+  stepTypeMap: Map<string, string>, // safeId -> stepType
+  stepNameToId: Map<string, string>, // safeId -> stepName
+): void {
+  const nodes = svgElement.querySelectorAll('.node');
+  nodes.forEach((node) => {
+    const nodeId = node.id?.replace('flowchart-', '').replace(/-\d+$/, '');
+    if (!nodeId) return;
+
+    const stepName = stepNameToId.get(nodeId);
+    if (!stepName) return;
+
+    // Find the type for this node
+    let stepType: string | undefined;
+    for (const [sid, stype] of stepTypeMap.entries()) {
+      if (sid === nodeId) {
+        stepType = stype;
+        break;
+      }
+    }
+    if (!stepType) return;
+
+    const color = TYPE_COLORS[stepType] || TYPE_COLORS.prompt;
+    const rect = node.querySelector('rect') as SVGRectElement | null;
+    if (!rect) return;
+
+    // Create a left accent bar by overlaying a narrow rect
+    const x = parseFloat(rect.getAttribute('x') || '0');
+    const y = parseFloat(rect.getAttribute('y') || '0');
+    const height = parseFloat(rect.getAttribute('height') || '0');
+    const rx = parseFloat(rect.getAttribute('rx') || '0');
+
+    const accent = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    accent.setAttribute('x', String(x));
+    accent.setAttribute('y', String(y));
+    accent.setAttribute('width', '4');
+    accent.setAttribute('height', String(height));
+    accent.setAttribute('rx', String(Math.min(rx, 2)));
+    accent.setAttribute('fill', color);
+    accent.setAttribute('class', 'dag-type-accent');
+
+    // Insert the accent bar before the label text (after the background rect)
+    rect.parentNode?.insertBefore(accent, rect.nextSibling);
+  });
 }
 
 /**
@@ -259,7 +299,7 @@ function attachSvgHandlers(
 
       // Highlight selected step
       if (selectedStep === stepName) {
-        const rect = node.querySelector('rect, polygon, circle, ellipse, path') as HTMLElement | null;
+        const rect = node.querySelector('rect:not(.dag-type-accent)') as HTMLElement | null;
         if (rect) {
           rect.style.strokeWidth = '3px';
         }
@@ -272,7 +312,7 @@ function attachSvgHandlers(
       });
 
       node.addEventListener('mouseenter', () => {
-        const rect = node.querySelector('rect, polygon, circle, ellipse, path') as HTMLElement | null;
+        const rect = node.querySelector('rect:not(.dag-type-accent)') as HTMLElement | null;
         if (rect) {
           rect.style.filter = 'brightness(1.2)';
           rect.style.stroke = '#58a6ff';
@@ -280,7 +320,7 @@ function attachSvgHandlers(
         }
       });
       node.addEventListener('mouseleave', () => {
-        const rect = node.querySelector('rect, polygon, circle, ellipse, path') as HTMLElement | null;
+        const rect = node.querySelector('rect:not(.dag-type-accent)') as HTMLElement | null;
         if (rect) {
           rect.style.filter = 'none';
           rect.style.stroke = '';
@@ -296,7 +336,7 @@ function attachSvgHandlers(
 // ---------------------------------------------------------------------------
 function getDefinitionClassDefs(): string {
   let code = '\n';
-  // Step type styles (cursor is applied post-render via JS to avoid Mermaid parser issues)
+  // Step type styles — all use rounded rectangle, differentiated by fill/stroke color
   code += '  classDef promptStep fill:#1a2332,stroke:#58a6ff,color:#e6edf3\n';
   code += '  classDef httpStep fill:#1a2a1a,stroke:#3fb950,color:#e6edf3\n';
   code += '  classDef commandStep fill:#2a1a2a,stroke:#a371f7,color:#e6edf3\n';
@@ -306,8 +346,6 @@ function getDefinitionClassDefs(): string {
   code += '  classDef hasOutputHandler fill:#1f2a3f,stroke:#58a6ff,color:#e6edf3\n';
   code += '  classDef hasBothHandlers fill:#2d2a1f,stroke:#d29922,color:#e6edf3\n';
   code += '  classDef hasLoop fill:#2d1f2d,stroke:#a371f7,color:#e6edf3\n';
-  // Subagent node style (font-size applied via <small> tags in labels)
-  code += '  classDef subagentNode fill:#161b22,stroke:#8b949e,color:#8b949e\n';
   // Disabled step style (muted colors, dashed border)
   code += '  classDef disabledStep fill:#161b22,stroke:#484f58,color:#6e7681,stroke-dasharray:5 5\n';
   return code;
@@ -319,9 +357,10 @@ function getDefinitionClassDefs(): string {
 // ---------------------------------------------------------------------------
 export function generateDefinitionDagCode(
   steps: Step[],
-): { mermaidCode: string; stepNameToId: Map<string, string> } {
+): { mermaidCode: string; stepNameToId: Map<string, string>; stepTypeMap: Map<string, string> } {
   let mermaidCode = 'graph TD\n';
   const stepNameToId = new Map<string, string>();
+  const stepTypeMap = new Map<string, string>(); // safeId -> stepType
 
   // Collect steps by type for class application
   const typeGroups: Record<string, string[]> = {
@@ -336,11 +375,8 @@ export function generateDefinitionDagCode(
   const stepsWithBothHandlers: string[] = [];
   const stepsWithLoop: string[] = [];
   const disabledSteps: string[] = [];
-  const subagentNodeIds: string[] = [];
 
   const loopEdges: string[] = [];
-  const subgraphSections: string[] = [];
-  const subagentEdges: string[] = [];
 
   steps.forEach((step) => {
     const s = step as unknown as LooseStep;
@@ -348,33 +384,38 @@ export function generateDefinitionDagCode(
     stepNameToId.set(safeId, step.name);
 
     const stepType = getStepType(step);
-    const typeIcon = getTypeIcon(stepType);
+    stepTypeMap.set(safeId, stepType);
 
-    // Build label
-    let labelLine1 = typeIcon + step.name;
+    const typeBadge = getTypeBadge(stepType);
     const hasInput = s.inputHandlerPrompt;
     const hasOutput = s.outputHandlerPrompt;
     const hasLoop = s.loopConfig || s.loop;
 
+    // Build line 1: [BADGE] step-name [indicators]
+    let line1 = '';
+    if (typeBadge) {
+      line1 += `<small><b>${typeBadge}</b></small> `;
+    }
+    line1 += truncateName(step.name);
+
+    // Handler/loop indicators as compact symbols
+    const indicators: string[] = [];
     if (hasInput && hasOutput) {
-      labelLine1 += ' \u21C4'; // ⇄
+      indicators.push('\u21C4'); // ⇄
       stepsWithBothHandlers.push(safeId);
     } else if (hasInput) {
-      labelLine1 += ' \u21E2'; // ⇢
+      indicators.push('\u21E2'); // ⇢
       stepsWithInputHandler.push(safeId);
     } else if (hasOutput) {
-      labelLine1 += ' \u21E0'; // ⇠
+      indicators.push('\u21E0'); // ⇠
       stepsWithOutputHandler.push(safeId);
     }
-
     if (hasLoop) {
-      labelLine1 += ' \u21BB'; // ↻
+      indicators.push('\u21BB'); // ↻
       stepsWithLoop.push(safeId);
     }
-
-    // Add type badge
-    if (stepType !== 'prompt') {
-      labelLine1 += ` <small>[${stepType.toUpperCase()}]</small>`;
+    if (indicators.length > 0) {
+      line1 += ` ${indicators.join(' ')}`;
     }
 
     // Disabled indicator
@@ -383,27 +424,27 @@ export function generateDefinitionDagCode(
       disabledSteps.push(safeId);
     }
 
-    const labelParts = [escLabel(labelLine1)];
+    const labelParts = [escLabel(line1)];
 
-    // Add type-specific metadata
-    const metaLines = buildMetadataLines(step);
-    labelParts.push(...metaLines);
-
-    // Subagent count indicator in the label
-    const subagents = (s.subagents as Array<{ name: string; displayName?: string; description?: string }>) || [];
-    if (subagents.length > 0) {
-      labelParts.push(`<small>\u{1F916} ${subagents.length} subagent${subagents.length > 1 ? 's' : ''}</small>`);
+    // Line 2: single metadata line
+    const metaLine = buildMetadataLine(step);
+    if (metaLine) {
+      labelParts.push(`<small>${escLabel(metaLine)}</small>`);
     }
 
-    // Disabled badge (shown after metadata so it appears at the bottom)
+    // Subagents inline (line 3, only if subagents exist)
+    const subagents = (s.subagents as Array<{ name: string; displayName?: string; description?: string }>) || [];
+    if (subagents.length > 0) {
+      labelParts.push(buildSubagentInlineLabel(subagents));
+    }
+
+    // Disabled badge
     if (isDisabled) {
-      labelParts.push(`<small>\u{1F6AB} DISABLED</small>`);
+      labelParts.push(`<small>DISABLED</small>`);
     }
 
     const label = labelParts.join('<br/>');
-
-    // Build the node with shape based on type
-    mermaidCode += buildNodeDeclaration(safeId, label, stepType);
+    mermaidCode += buildNodeDeclaration(safeId, label);
 
     // Track type for class assignment
     if (typeGroups[stepType]) {
@@ -430,29 +471,10 @@ export function generateDefinitionDagCode(
         loopEdges.push(`  ${safeId} -.->|"loop (max ${maxIter})"| ${safeTarget}\n`);
       }
     }
-
-    // Subagent subgraph
-    if (subagents.length > 0) {
-      const { subgraphCode, subagentIds } = buildSubagentSection(safeId, subagents);
-      subgraphSections.push(subgraphCode);
-      subagentNodeIds.push(...subagentIds);
-      // Connect the parent step to the subagent subgraph with a dotted edge
-      subagentEdges.push(`  ${safeId} -.-o ${subagentIds[0]}\n`);
-    }
   });
 
   // Add loop edges
   loopEdges.forEach((edge) => {
-    mermaidCode += edge;
-  });
-
-  // Add subagent subgraphs
-  subgraphSections.forEach((section) => {
-    mermaidCode += section;
-  });
-
-  // Add subagent edges
-  subagentEdges.forEach((edge) => {
     mermaidCode += edge;
   });
 
@@ -479,16 +501,13 @@ export function generateDefinitionDagCode(
   if (stepsWithLoop.length > 0) {
     mermaidCode += `  class ${stepsWithLoop.join(',')} hasLoop\n`;
   }
-  if (subagentNodeIds.length > 0) {
-    mermaidCode += `  class ${subagentNodeIds.join(',')} subagentNode\n`;
-  }
 
   // Apply disabled class last so it overrides type/handler styles
   if (disabledSteps.length > 0) {
     mermaidCode += `  class ${disabledSteps.join(',')} disabledStep\n`;
   }
 
-  return { mermaidCode, stepNameToId };
+  return { mermaidCode, stepNameToId, stepTypeMap };
 }
 
 // ---------------------------------------------------------------------------
@@ -509,7 +528,7 @@ export async function renderMermaidDag(
   // Show loading spinner while rendering
   container.innerHTML = '<div class="empty-state"><div class="spinner"></div></div>';
 
-  const { mermaidCode, stepNameToId } = generateDefinitionDagCode(steps);
+  const { mermaidCode, stepNameToId, stepTypeMap } = generateDefinitionDagCode(steps);
 
   try {
     mermaid.initialize(getMermaidConfig());
@@ -517,17 +536,10 @@ export async function renderMermaidDag(
     const { svg } = await mermaid.render('dag-' + Date.now(), mermaidCode);
     container.innerHTML = svg;
 
-    // Style subagent subgraphs with a subtle border
-    const svgEl = container.querySelector('svg');
+    // Apply type accent borders post-render
+    const svgEl = container.querySelector('svg') as SVGElement | null;
     if (svgEl) {
-      const subgraphs = svgEl.querySelectorAll('.cluster rect');
-      subgraphs.forEach((rect) => {
-        (rect as HTMLElement).style.fill = 'rgba(139, 148, 158, 0.05)';
-        (rect as HTMLElement).style.stroke = 'rgba(139, 148, 158, 0.3)';
-        (rect as HTMLElement).style.strokeWidth = '1px';
-        (rect as HTMLElement).style.strokeDasharray = '5,5';
-        (rect as HTMLElement).style.rx = '8';
-      });
+      applyTypeAccentBorders(svgEl, stepTypeMap, stepNameToId);
     }
 
     attachSvgHandlers(container, stepNameToId, onNodeClick);
@@ -544,9 +556,10 @@ export async function renderMermaidDag(
 export function generateExecutionDagCode(
   steps: Step[],
   stepStatuses: Record<string, string>,
-): { mermaidCode: string; stepNameToId: Map<string, string> } {
+): { mermaidCode: string; stepNameToId: Map<string, string>; stepTypeMap: Map<string, string> } {
   let mermaidCode = 'graph TD\n';
   const stepNameToId = new Map<string, string>();
+  const stepTypeMap = new Map<string, string>(); // safeId -> stepType
   const statusGroups: Record<string, string[]> = {
     pending: [],
     running: [],
@@ -558,9 +571,6 @@ export function generateExecutionDagCode(
   };
 
   const loopEdges: string[] = [];
-  const subgraphSections: string[] = [];
-  const subagentEdges: string[] = [];
-  const subagentNodeIds: string[] = [];
   const disabledSteps: string[] = [];
 
   steps.forEach((step) => {
@@ -572,7 +582,9 @@ export function generateExecutionDagCode(
 
     const s = step as unknown as LooseStep;
     const stepType = getStepType(step as unknown as LooseStep | string);
-    const typeIcon = getTypeIcon(stepType);
+    stepTypeMap.set(safeId, stepType);
+
+    const typeBadge = getTypeBadge(stepType);
 
     // Status icon
     const status = stepStatuses[stepName] || 'pending';
@@ -605,9 +617,6 @@ export function generateExecutionDagCode(
     const hasLoop = typeof step === 'object' && (s.loopConfig || s.loop);
     const loopIndicator = hasLoop ? ' \u21BB' : '';
 
-    // Type badge
-    const typeBadge = stepType !== 'prompt' ? ` <small>[${stepType.toUpperCase()}]</small>` : '';
-
     // Disabled indicator
     const isDisabled = (typeof step === 'object') &&
       ((step as Step).enabled === false || s.enabled === false);
@@ -615,32 +624,38 @@ export function generateExecutionDagCode(
       disabledSteps.push(safeId);
     }
 
-    // Build label
-    const labelParts = [escLabel(`${typeIcon}${stepName}${statusIcon}${loopIndicator}${typeBadge}`)];
+    // Build line 1: [BADGE] step-name [status] [loop]
+    let line1 = '';
+    if (typeBadge) {
+      line1 += `<small><b>${typeBadge}</b></small> `;
+    }
+    line1 += `${truncateName(stepName)}${statusIcon}${loopIndicator}`;
 
-    // Add type-specific metadata
+    const labelParts = [escLabel(line1)];
+
+    // Line 2: single metadata line
     if (typeof step === 'object') {
-      const metaLines = buildMetadataLines(step as unknown as LooseStep);
-      labelParts.push(...metaLines);
+      const metaLine = buildMetadataLine(step as unknown as LooseStep);
+      if (metaLine) {
+        labelParts.push(`<small>${escLabel(metaLine)}</small>`);
+      }
     }
 
-    // Subagent indicator
+    // Subagents inline
     const subagents = typeof step === 'object'
       ? (s.subagents as Array<{ name: string; displayName?: string; description?: string }>) || []
       : [];
     if (subagents.length > 0) {
-      labelParts.push(`<small>\u{1F916} ${subagents.length} subagent${subagents.length > 1 ? 's' : ''}</small>`);
+      labelParts.push(buildSubagentInlineLabel(subagents));
     }
 
-    // Disabled badge (shown after metadata so it appears at the bottom)
+    // Disabled badge
     if (isDisabled) {
-      labelParts.push(`<small>\u{1F6AB} DISABLED</small>`);
+      labelParts.push(`<small>DISABLED</small>`);
     }
 
     const label = labelParts.join('<br/>');
-
-    // Build node with shape based on type
-    mermaidCode += buildNodeDeclaration(safeId, label, stepType);
+    mermaidCode += buildNodeDeclaration(safeId, label);
 
     // Categorize by status
     const mappedStatus = status === 'completed_early' ? 'completedEarly' : status;
@@ -666,14 +681,6 @@ export function generateExecutionDagCode(
         loopEdges.push(`  ${safeId} -.->|"loop (max ${maxIter})"| ${safeTarget}\n`);
       }
     }
-
-    // Subagent subgraph
-    if (subagents.length > 0) {
-      const { subgraphCode, subagentIds } = buildSubagentSection(safeId, subagents);
-      subgraphSections.push(subgraphCode);
-      subagentNodeIds.push(...subagentIds);
-      subagentEdges.push(`  ${safeId} -.-o ${subagentIds[0]}\n`);
-    }
   });
 
   // Add loop edges
@@ -681,17 +688,7 @@ export function generateExecutionDagCode(
     mermaidCode += edge;
   });
 
-  // Add subagent subgraphs
-  subgraphSections.forEach((section) => {
-    mermaidCode += section;
-  });
-
-  // Add subagent edges
-  subagentEdges.forEach((edge) => {
-    mermaidCode += edge;
-  });
-
-  // Status-based styling (cursor is applied post-render via JS to avoid Mermaid parser issues)
+  // Status-based styling
   mermaidCode += '\n  classDef pending fill:#21262d,stroke:#484f58,color:#8b949e\n';
   mermaidCode += '  classDef running fill:#0d2847,stroke:#58a6ff,color:#58a6ff\n';
   mermaidCode += '  classDef completed fill:#0d331a,stroke:#3fb950,color:#3fb950\n';
@@ -700,7 +697,6 @@ export function generateExecutionDagCode(
   mermaidCode += '  classDef skipped fill:#21262d,stroke:#484f58,color:#6e7681\n';
   mermaidCode += '  classDef noaction fill:#21262d,stroke:#8b949e,color:#8b949e\n';
   mermaidCode += '  classDef completedEarly fill:#0c2a3d,stroke:#38bdf8,color:#38bdf8\n';
-  mermaidCode += '  classDef subagentNode fill:#161b22,stroke:#8b949e,color:#8b949e\n';
   // Disabled step style (muted colors, dashed border) - applied last to override status styles
   mermaidCode += '  classDef disabledStep fill:#161b22,stroke:#484f58,color:#6e7681,stroke-dasharray:5 5\n';
 
@@ -711,17 +707,12 @@ export function generateExecutionDagCode(
     }
   }
 
-  // Apply subagent node class
-  if (subagentNodeIds.length > 0) {
-    mermaidCode += `  class ${subagentNodeIds.join(',')} subagentNode\n`;
-  }
-
   // Apply disabled class last so it overrides status styles
   if (disabledSteps.length > 0) {
     mermaidCode += `  class ${disabledSteps.join(',')} disabledStep\n`;
   }
 
-  return { mermaidCode, stepNameToId };
+  return { mermaidCode, stepNameToId, stepTypeMap };
 }
 
 // ---------------------------------------------------------------------------
@@ -741,7 +732,7 @@ export async function renderExecutionDag(
     return;
   }
 
-  const { mermaidCode, stepNameToId } = generateExecutionDagCode(steps, stepStatuses);
+  const { mermaidCode, stepNameToId, stepTypeMap } = generateExecutionDagCode(steps, stepStatuses);
 
   try {
     mermaid.initialize(getMermaidConfig());
@@ -749,17 +740,10 @@ export async function renderExecutionDag(
     const { svg } = await mermaid.render('exec-dag-' + Date.now(), mermaidCode);
     container.innerHTML = svg;
 
-    // Style subagent subgraphs
-    const svgEl = container.querySelector('svg');
+    // Apply type accent borders post-render
+    const svgEl = container.querySelector('svg') as SVGElement | null;
     if (svgEl) {
-      const subgraphs = svgEl.querySelectorAll('.cluster rect');
-      subgraphs.forEach((rect) => {
-        (rect as HTMLElement).style.fill = 'rgba(139, 148, 158, 0.05)';
-        (rect as HTMLElement).style.stroke = 'rgba(139, 148, 158, 0.3)';
-        (rect as HTMLElement).style.strokeWidth = '1px';
-        (rect as HTMLElement).style.strokeDasharray = '5,5';
-        (rect as HTMLElement).style.rx = '8';
-      });
+      applyTypeAccentBorders(svgEl, stepTypeMap, stepNameToId);
     }
 
     attachSvgHandlers(container, stepNameToId, onNodeClick, selectedStep);
