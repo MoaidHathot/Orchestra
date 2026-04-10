@@ -208,27 +208,106 @@ public class McpManagerTests : IAsyncLifetime
 		result[1].Should().BeOfType<RemoteMcp>().Which.Name.Should().Be("orchestra-mcp-proxy");
 	}
 
+	/// <summary>
+	/// Regression test: TemplateResolver.ResolveStaticMcp creates new MCP object instances
+	/// even when no templates are present. The cloned objects must still be recognized as
+	/// global MCPs and routed through the proxy. This was the root cause of global MCPs
+	/// being spawned as separate processes per orchestration run instead of being shared.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_ClonedGlobalMcp_StillRecognizedAsGlobal()
+	{
+		// Arrange — initialize with the original global MCP
+		var globalMcp = CreateLocalMcp("shared-server");
+		await _manager.InitializeAsync([globalMcp]);
+
+		// Simulate what TemplateResolver.ResolveStaticMcp does:
+		// creates a new LocalMcp object with the same name but different reference
+		var clonedMcp = CreateLocalMcp("shared-server");
+
+		// Act
+		var result = _manager.Resolve([clonedMcp]);
+
+		// Assert — the cloned object should be recognized as global by name and replaced
+		result.Should().HaveCount(1);
+		result[0].Should().BeOfType<RemoteMcp>()
+			.Which.Name.Should().Be("orchestra-mcp-proxy");
+	}
+
+	/// <summary>
+	/// Verifies that name matching is case-insensitive, consistent with how
+	/// MCP names are resolved elsewhere in the system.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_GlobalMcpName_IsCaseInsensitive()
+	{
+		// Arrange
+		var globalMcp = CreateLocalMcp("My-Server");
+		await _manager.InitializeAsync([globalMcp]);
+
+		var differentCase = CreateLocalMcp("my-server");
+
+		// Act
+		var result = _manager.Resolve([differentCase]);
+
+		// Assert — should match regardless of case
+		result.Should().HaveCount(1);
+		result[0].Should().BeOfType<RemoteMcp>();
+	}
+
+	/// <summary>
+	/// Simulates the full PromptExecutor pipeline: global MCPs are cloned by
+	/// TemplateResolver, then mixed with inline MCPs, then resolved. The proxy
+	/// should replace only the global ones.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_ClonedGlobalsWithInlineMcps_OnlyGlobalsReplaced()
+	{
+		// Arrange
+		var global1 = CreateLocalMcp("global-a");
+		var global2 = CreateLocalMcp("global-b");
+		await _manager.InitializeAsync([global1, global2]);
+
+		// Simulate TemplateResolver cloning + an unrelated inline MCP
+		var clonedGlobal1 = CreateLocalMcp("global-a");
+		var clonedGlobal2 = CreateLocalMcp("global-b");
+		var inlineMcp = CreateLocalMcp("inline-only");
+
+		// Act
+		var result = _manager.Resolve([clonedGlobal1, inlineMcp, clonedGlobal2]);
+
+		// Assert — two globals replaced with one proxy, inline preserved
+		result.Should().HaveCount(2);
+		result[0].Should().BeSameAs(inlineMcp);
+		result[1].Should().BeOfType<RemoteMcp>()
+			.Which.Name.Should().Be("orchestra-mcp-proxy");
+	}
+
 	#endregion
 
-	#region Resolve — Inline Override (Different Object, Same Name)
+	#region Resolve — Name-Based Matching (Inline Override Handled at Parse Layer)
 
 	[Fact]
-	public async Task Resolve_InlineMcpWithSameNameAsGlobal_PassesThroughUnchanged()
+	public async Task Resolve_McpWithSameNameAsGlobal_IsReplacedByProxy()
 	{
 		// Arrange
 		var globalMcp = CreateLocalMcp("shared-server");
 		await _manager.InitializeAsync([globalMcp]);
 
-		// Create a different object with the same name (inline override)
-		var inlineOverride = CreateLocalMcp("shared-server");
+		// A different object with the same name — Resolve matches by name,
+		// so this IS treated as a global MCP. Inline overrides (where a step
+		// wants a different config for the same name) are handled upstream
+		// by OrchestrationParser.ResolveStepMcps, which removes the global
+		// MCP from the step's list before Resolve is ever called.
+		var sameName = CreateLocalMcp("shared-server");
 
 		// Act
-		var result = _manager.Resolve([inlineOverride]);
+		var result = _manager.Resolve([sameName]);
 
-		// Assert — different reference, so it should NOT be replaced
+		// Assert — matched by name, replaced with proxy
 		result.Should().HaveCount(1);
-		result[0].Should().BeSameAs(inlineOverride, "inline override with same name should not be replaced");
-		result[0].Should().BeOfType<LocalMcp>();
+		result[0].Should().BeOfType<RemoteMcp>()
+			.Which.Name.Should().Be("orchestra-mcp-proxy");
 	}
 
 	[Fact]
@@ -245,7 +324,7 @@ public class McpManagerTests : IAsyncLifetime
 		// Act
 		var result = _manager.Resolve(input);
 
-		// Assert — no global refs found, same array reference returned
+		// Assert — no global names found, same array reference returned
 		result.Should().BeSameAs(input);
 	}
 
@@ -285,6 +364,79 @@ public class McpManagerTests : IAsyncLifetime
 		var proxy1 = result1[0].Should().BeOfType<RemoteMcp>().Subject;
 		var proxy2 = result2[0].Should().BeOfType<RemoteMcp>().Subject;
 		proxy1.Endpoint.Should().Be(proxy2.Endpoint);
+	}
+
+	#endregion
+
+	#region Resolve — Integration with TemplateResolver
+
+	/// <summary>
+	/// Integration test that reproduces the exact bug scenario: TemplateResolver.ResolveStaticMcp
+	/// creates new MCP objects (breaking reference equality), then McpManager.Resolve must still
+	/// recognize them as global MCPs by name and route them through the proxy.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_AfterTemplateResolverClone_GlobalMcpsStillRoutedThroughProxy()
+	{
+		// Arrange — register a global MCP
+		var globalMcp = new LocalMcp
+		{
+			Name = "debug-mcp",
+			Type = McpType.Local,
+			Command = "dotnet",
+			Arguments = ["run", "--file", "McpDebug.cs"],
+		};
+		await _manager.InitializeAsync([globalMcp]);
+
+		// Simulate what PromptExecutor does: TemplateResolver.ResolveStaticMcp clones the MCP
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = new OrchestrationInfo("test", "1.0", "run-1", DateTimeOffset.UtcNow),
+		};
+		var cloned = TemplateResolver.ResolveStaticMcp(globalMcp, [], context);
+
+		// Verify that TemplateResolver actually produced a different object
+		cloned.Should().NotBeSameAs(globalMcp, "TemplateResolver must clone — if this fails, the resolver changed behavior");
+		cloned.Name.Should().Be(globalMcp.Name);
+
+		// Act — pass the cloned object to Resolve (exactly what PromptExecutor does)
+		var result = _manager.Resolve([cloned]);
+
+		// Assert — must be recognized as global and replaced with proxy
+		result.Should().HaveCount(1);
+		result[0].Should().BeOfType<RemoteMcp>()
+			.Which.Name.Should().Be("orchestra-mcp-proxy");
+	}
+
+	/// <summary>
+	/// Same as above but with multiple global MCPs and an inline MCP mixed in.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_AfterTemplateResolverClone_MixedGlobalsAndInlines()
+	{
+		// Arrange
+		var global1 = CreateLocalMcp("server-a");
+		var global2 = CreateRemoteMcp("server-b", "http://example.com/mcp");
+		await _manager.InitializeAsync([global1, global2]);
+
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = new OrchestrationInfo("test", "1.0", "run-1", DateTimeOffset.UtcNow),
+		};
+
+		// Clone globals via TemplateResolver
+		var clonedGlobal1 = TemplateResolver.ResolveStaticMcp(global1, [], context);
+		var clonedGlobal2 = TemplateResolver.ResolveStaticMcp(global2, [], context);
+		var inlineMcp = CreateLocalMcp("inline-tool");
+
+		// Act
+		var result = _manager.Resolve([clonedGlobal1, inlineMcp, clonedGlobal2]);
+
+		// Assert — inline preserved, both globals replaced with single proxy
+		result.Should().HaveCount(2);
+		result[0].Should().BeSameAs(inlineMcp);
+		result[1].Should().BeOfType<RemoteMcp>()
+			.Which.Name.Should().Be("orchestra-mcp-proxy");
 	}
 
 	#endregion

@@ -21,10 +21,17 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	private readonly ILogger<McpManager> _logger;
 
 	/// <summary>
-	/// The set of global <see cref="Engine.Mcp"/> object references managed by this instance.
-	/// Used for reference-equality checks in <see cref="Resolve"/>.
+	/// The names of global MCP servers managed by this instance.
+	/// Used for name-based matching in <see cref="Resolve"/> so that cloned/template-resolved
+	/// copies of global MCPs are still correctly identified and routed through the proxy.
 	/// </summary>
-	private readonly HashSet<Engine.Mcp> _globalMcpInstances = new(ReferenceEqualityComparer.Instance);
+	private readonly HashSet<string> _globalMcpNames = new(StringComparer.OrdinalIgnoreCase);
+
+	/// <summary>
+	/// The original global <see cref="Engine.Mcp"/> objects from orchestra.mcp.json,
+	/// exposed via <see cref="GlobalMcps"/> for other components to inspect.
+	/// </summary>
+	private readonly List<Engine.Mcp> _globalMcpList = [];
 
 	/// <summary>
 	/// The in-process WebApplication hosting the MCP proxy.
@@ -54,7 +61,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	/// <summary>
 	/// Gets all globally managed MCPs (the original config objects from orchestra.mcp.json).
 	/// </summary>
-	public IReadOnlyCollection<Engine.Mcp> GlobalMcps => _globalMcpInstances;
+	public IReadOnlyCollection<Engine.Mcp> GlobalMcps => _globalMcpList;
 
 	/// <summary>
 	/// Gets whether the proxy is running and managing global MCPs.
@@ -78,10 +85,11 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 			return;
 		}
 
-		// Track the global MCP instances for reference-equality checks
+		// Track the global MCP names for name-based matching in Resolve
 		foreach (var mcp in globalMcps)
 		{
-			_globalMcpInstances.Add(mcp);
+			_globalMcpNames.Add(mcp.Name);
+			_globalMcpList.Add(mcp);
 		}
 
 		// Find an available port
@@ -97,13 +105,18 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Resolves MCPs for a step. All global MCPs (identified by reference equality)
-	/// are replaced with a single <see cref="RemoteMcp"/> pointing to the unified
-	/// proxy endpoint. Inline MCPs are returned unchanged.
+	/// Resolves MCPs for a step. All global MCPs (identified by name) are replaced
+	/// with a single <see cref="RemoteMcp"/> pointing to the unified proxy endpoint.
+	/// Inline MCPs are returned unchanged.
 	/// </summary>
+	/// <remarks>
+	/// Name-based matching is used instead of reference equality because upstream
+	/// template resolution (<see cref="TemplateResolver.ResolveStaticMcp"/>) creates
+	/// new MCP object instances, which would break reference-equality checks.
+	/// </remarks>
 	public Engine.Mcp[] Resolve(Engine.Mcp[] mcps)
 	{
-		if (_globalMcpInstances.Count == 0 || mcps.Length == 0 || _proxyEndpoint is null)
+		if (_globalMcpNames.Count == 0 || mcps.Length == 0 || _proxyEndpoint is null)
 			return mcps;
 
 		var nonGlobals = new List<Engine.Mcp>();
@@ -111,7 +124,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 		foreach (var mcp in mcps)
 		{
-			if (_globalMcpInstances.Contains(mcp))
+			if (_globalMcpNames.Contains(mcp.Name))
 			{
 				hasAnyGlobal = true;
 			}
