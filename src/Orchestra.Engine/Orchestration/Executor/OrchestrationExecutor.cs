@@ -448,6 +448,7 @@ public partial class OrchestrationExecutor
 			CompletionReason = orchestrationResult.CompletionReason,
 			CompletedByStep = orchestrationResult.CompletedByStep,
 			IsIncomplete = orchestrationResult.IsIncomplete,
+			TotalUsage = AggregateTokenUsage(stepRecords.Values),
 			Context = new RunContext
 			{
 				RunId = runId,
@@ -746,6 +747,9 @@ public partial class OrchestrationExecutor
 		if (isTimeout && !retryPolicy.RetryOnTimeout)
 			return result;
 
+		// Collect retry history
+		var retryHistory = new List<RetryAttemptRecord>();
+
 		// Retry loop
 		for (var attempt = 1; attempt <= retryPolicy.MaxRetries; attempt++)
 		{
@@ -755,24 +759,69 @@ public partial class OrchestrationExecutor
 			LogStepRetry(step.Name, attempt, retryPolicy.MaxRetries, result.ErrorMessage ?? "Unknown error", delay.TotalSeconds);
 			_reporter.ReportStepRetry(step.Name, attempt, retryPolicy.MaxRetries, result.ErrorMessage ?? "Unknown error", delay);
 
+			// Record this retry attempt
+			retryHistory.Add(new RetryAttemptRecord
+			{
+				Attempt = attempt,
+				Error = result.ErrorMessage ?? "Unknown error",
+				AttemptedAt = DateTimeOffset.UtcNow,
+				DelaySeconds = delay.TotalSeconds,
+				ErrorCategory = result.ErrorCategory,
+			});
+
 			await Task.Delay(delay, cancellationToken);
 
 			result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, cancellationToken);
 
 			if (result.Status != ExecutionStatus.Failed)
-				return result;
+			{
+				// Succeeded after retries — attach retry history to the result
+				return new ExecutionResult
+				{
+					Content = result.Content,
+					Status = result.Status,
+					ErrorMessage = result.ErrorMessage,
+					RawContent = result.RawContent,
+					RawDependencyOutputs = result.RawDependencyOutputs,
+					PromptSent = result.PromptSent,
+					ActualModel = result.ActualModel,
+					Usage = result.Usage,
+					Trace = result.Trace,
+					RetryHistory = retryHistory,
+					ErrorCategory = result.ErrorCategory,
+					OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
+					OrchestrationCompleteStatus = result.OrchestrationCompleteStatus,
+					OrchestrationCompleteReason = result.OrchestrationCompleteReason,
+					OrchestrationCompleteStepName = result.OrchestrationCompleteStepName,
+				};
+			}
 
 			// Check timeout condition for subsequent retries
 			isTimeout = result.ErrorMessage?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true;
 			if (isTimeout && !retryPolicy.RetryOnTimeout)
 			{
 				LogStepRetryAbortedTimeout(step.Name, attempt);
-				return result;
+				break;
 			}
 		}
 
 		LogStepRetryExhausted(step.Name, retryPolicy.MaxRetries);
-		return result;
+
+		// Attach retry history to the final failed result
+		return new ExecutionResult
+		{
+			Content = result.Content,
+			Status = result.Status,
+			ErrorMessage = result.ErrorMessage,
+			RawContent = result.RawContent,
+			RawDependencyOutputs = result.RawDependencyOutputs,
+			PromptSent = result.PromptSent,
+			ActualModel = result.ActualModel,
+			Usage = result.Usage,
+			Trace = result.Trace,
+			RetryHistory = retryHistory,
+			ErrorCategory = result.ErrorCategory,
+		};
 	}
 
 	private async Task<ExecutionResult> ExecuteOrSkipStepAsync(
@@ -1007,6 +1056,8 @@ public partial class OrchestrationExecutor
 			ActualModel = result.ActualModel,
 			Usage = result.Usage,
 			Trace = result.Trace,
+			RetryHistory = result.RetryHistory,
+			ErrorCategory = result.ErrorCategory,
 		};
 	}
 
@@ -1080,6 +1131,49 @@ public partial class OrchestrationExecutor
 			orchestrationResult.Results
 				.Where(kv => kv.Value.Status == ExecutionStatus.Succeeded)
 				.Select(kv => $"## {kv.Key}\n{kv.Value.Content}"));
+	}
+
+	/// <summary>
+	/// Aggregates token usage across all step records that have usage data.
+	/// Returns null if no steps have token usage.
+	/// </summary>
+	private static TokenUsage? AggregateTokenUsage(IEnumerable<StepRunRecord> stepRecords)
+	{
+		var totalInput = 0;
+		var totalOutput = 0;
+		var totalCacheRead = 0;
+		var totalCacheWrite = 0;
+		double? totalCost = null;
+		double? totalDuration = null;
+		var hasUsage = false;
+
+		foreach (var record in stepRecords)
+		{
+			if (record.Usage is null) continue;
+			hasUsage = true;
+
+			totalInput += record.Usage.InputTokens;
+			totalOutput += record.Usage.OutputTokens;
+			totalCacheRead += record.Usage.CacheReadTokens;
+			totalCacheWrite += record.Usage.CacheWriteTokens;
+
+			if (record.Usage.Cost is not null)
+				totalCost = (totalCost ?? 0) + record.Usage.Cost.Value;
+			if (record.Usage.Duration is not null)
+				totalDuration = (totalDuration ?? 0) + record.Usage.Duration.Value;
+		}
+
+		if (!hasUsage) return null;
+
+		return new TokenUsage
+		{
+			InputTokens = totalInput,
+			OutputTokens = totalOutput,
+			CacheReadTokens = totalCacheRead,
+			CacheWriteTokens = totalCacheWrite,
+			Cost = totalCost,
+			Duration = totalDuration,
+		};
 	}
 
 	#region Source-Generated Logging

@@ -128,6 +128,8 @@ export interface HistoryRun {
   stepResults?: Record<string, StepResultData>;
   result?: Record<string, StepResultData>;
   parameters?: Record<string, unknown>;
+  totalUsage?: UsageData;
+  allStepRecords?: Record<string, StepResultData[]>;
 }
 
 export interface StepResultData {
@@ -137,12 +139,34 @@ export interface StepResultData {
   actualModel?: string;
   usage?: UsageData;
   trace?: TraceData;
+  errorCategory?: string;
+  retryHistory?: RetryAttemptRecord[];
 }
 
 export interface UsageData {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  cost?: number;
+  duration?: number;
+}
+
+export interface RetryAttemptRecord {
+  attempt: number;
+  error: string;
+  attemptedAt: string;
+  delaySeconds: number;
+  errorCategory?: string;
+}
+
+export interface ConversationMessage {
+  role: string;
+  content?: string;
+  toolCallId?: string;
+  toolName?: string;
+  timestamp: string;
 }
 
 export interface TraceData {
@@ -156,12 +180,16 @@ export interface TraceData {
   outputHandlerResult?: string;
   mcpServers?: string[];
   warnings?: string[];
+  conversationHistory?: ConversationMessage[];
 }
 
 export interface ToolCallData {
   name: string;
   arguments?: string;
   result?: string;
+  durationMs?: number;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 export interface ResponseSegment {

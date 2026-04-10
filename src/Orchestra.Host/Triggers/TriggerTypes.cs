@@ -27,8 +27,29 @@ public class TriggerRegistration
 	public bool TryTransitionStatus(TriggerStatus expected, TriggerStatus desired)
 		=> Interlocked.CompareExchange(ref _status, (int)desired, (int)expected) == (int)expected;
 
-	public DateTime? NextFireTime { get; set; }
-	public DateTime? LastFireTime { get; set; }
+	// DateTime? cannot be volatile, so we use Interlocked on tick representations.
+	private long _nextFireTimeTicks;
+	public DateTime? NextFireTime
+	{
+		get
+		{
+			var ticks = Interlocked.Read(ref _nextFireTimeTicks);
+			return ticks == 0 ? null : new DateTime(ticks, DateTimeKind.Utc);
+		}
+		set => Interlocked.Exchange(ref _nextFireTimeTicks, value?.Ticks ?? 0);
+	}
+
+	private long _lastFireTimeTicks;
+	public DateTime? LastFireTime
+	{
+		get
+		{
+			var ticks = Interlocked.Read(ref _lastFireTimeTicks);
+			return ticks == 0 ? null : new DateTime(ticks, DateTimeKind.Utc);
+		}
+		set => Interlocked.Exchange(ref _lastFireTimeTicks, value?.Ticks ?? 0);
+	}
+
 	private int _runCount;
 	public int RunCount
 	{
@@ -36,9 +57,9 @@ public class TriggerRegistration
 		set => Volatile.Write(ref _runCount, value);
 	}
 	public int IncrementRunCount() => Interlocked.Increment(ref _runCount);
-	public string? LastError { get; set; }
+	public volatile string? LastError;
 	public volatile string? ActiveExecutionId;
-	public string? LastExecutionId { get; set; }
+	public volatile string? LastExecutionId;
 	public string? OrchestrationName { get; set; }
 	public string? OrchestrationDescription { get; set; }
 	public string? OrchestrationVersion { get; set; }
@@ -106,7 +127,12 @@ public class ActiveExecutionInfo
 	/// <summary>
 	/// Current execution status.
 	/// </summary>
-	public HostExecutionStatus Status { get; set; } = HostExecutionStatus.Running;
+	private int _status = (int)HostExecutionStatus.Running;
+	public HostExecutionStatus Status
+	{
+		get => (HostExecutionStatus)Volatile.Read(ref _status);
+		set => Volatile.Write(ref _status, (int)value);
+	}
 
 	/// <summary>
 	/// Total number of steps in the orchestration.
@@ -127,7 +153,7 @@ public class ActiveExecutionInfo
 	/// <summary>
 	/// Name of the currently executing step.
 	/// </summary>
-	public string? CurrentStep { get; set; }
+	public volatile string? CurrentStep;
 
 	/// <summary>
 	/// Callback invoked when a step starts.

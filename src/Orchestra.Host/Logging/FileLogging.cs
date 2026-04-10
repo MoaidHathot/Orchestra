@@ -1,15 +1,19 @@
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
 namespace Orchestra.Host.Logging;
 
 /// <summary>
-/// Simple file-based logging provider for Orchestra hosting applications.
+/// Buffered file-based logging provider for Orchestra hosting applications.
+/// Uses a Channel for lock-free, non-blocking log writes with background flushing.
 /// </summary>
-public class FileLoggerProvider : ILoggerProvider
+public sealed class FileLoggerProvider : ILoggerProvider, IAsyncDisposable
 {
 	private readonly string _path;
 	private readonly LogLevel _minimumLevel;
-	private readonly Lock _lock = new();
+	private readonly Channel<string> _channel;
+	private readonly Task _writeTask;
+	private readonly CancellationTokenSource _cts = new();
 
 	public FileLoggerProvider(string path, LogLevel minimumLevel = LogLevel.Information)
 	{
@@ -20,28 +24,95 @@ public class FileLoggerProvider : ILoggerProvider
 		var dir = Path.GetDirectoryName(path);
 		if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
 			Directory.CreateDirectory(dir);
+
+		// Unbounded channel — producers never block.
+		// BoundedChannel with DropOldest could be used to cap memory in extreme scenarios.
+		_channel = Channel.CreateUnbounded<string>(new UnboundedChannelOptions
+		{
+			SingleReader = true,
+			AllowSynchronousContinuations = false,
+		});
+
+		_writeTask = Task.Run(WriteLoopAsync);
 	}
 
-	public ILogger CreateLogger(string categoryName) => new FileLogger(_path, categoryName, _lock, _minimumLevel);
+	public ILogger CreateLogger(string categoryName) => new FileLogger(_path, categoryName, _channel.Writer, _minimumLevel);
 
-	public void Dispose() { }
+	private async Task WriteLoopAsync()
+	{
+		try
+		{
+			await using var writer = new StreamWriter(_path, append: true) { AutoFlush = false };
+			var reader = _channel.Reader;
+
+			// WaitToReadAsync returns false when the channel is completed and drained
+			while (await reader.WaitToReadAsync(_cts.Token))
+			{
+				while (reader.TryRead(out var message))
+				{
+					await writer.WriteLineAsync(message);
+				}
+				await writer.FlushAsync();
+			}
+
+			// Drain any remaining items after channel completion signal
+			while (reader.TryRead(out var remaining))
+			{
+				await writer.WriteLineAsync(remaining);
+			}
+			await writer.FlushAsync();
+		}
+		catch (OperationCanceledException) { }
+		catch (ChannelClosedException) { }
+	}
+
+	public void Dispose()
+	{
+		// Complete the channel — no new writes accepted
+		_channel.Writer.TryComplete();
+
+		// Wait for the write loop to drain all pending items
+		try { _writeTask.Wait(TimeSpan.FromSeconds(5)); } catch { }
+
+		// Cancel and dispose as final cleanup
+		_cts.Cancel();
+		_cts.Dispose();
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+		// Complete the channel — no new writes accepted
+		_channel.Writer.TryComplete();
+
+		// Wait for the write loop to drain all pending items
+		try
+		{
+			await _writeTask.WaitAsync(TimeSpan.FromSeconds(5));
+		}
+		catch (TimeoutException) { }
+		catch (OperationCanceledException) { }
+
+		// Cancel and dispose as final cleanup
+		_cts.Cancel();
+		_cts.Dispose();
+	}
 }
 
 /// <summary>
-/// File-based logger implementation.
+/// File-based logger that writes to a Channel for lock-free, non-blocking operation.
 /// </summary>
-public class FileLogger : ILogger
+public sealed class FileLogger : ILogger
 {
 	private readonly string _path;
 	private readonly string _category;
-	private readonly Lock _lock;
+	private readonly ChannelWriter<string> _writer;
 	private readonly LogLevel _minimumLevel;
 
-	public FileLogger(string path, string category, Lock lockObj, LogLevel minimumLevel = LogLevel.Information)
+	public FileLogger(string path, string category, ChannelWriter<string> writer, LogLevel minimumLevel = LogLevel.Information)
 	{
 		_path = path;
 		_category = category;
-		_lock = lockObj;
+		_writer = writer;
 		_minimumLevel = minimumLevel;
 	}
 
@@ -62,10 +133,8 @@ public class FileLogger : ILogger
 		if (exception != null)
 			message += $"\n{exception}";
 
-		lock (_lock)
-		{
-			File.AppendAllText(_path, message + "\n");
-		}
+		// Non-blocking write — TryWrite returns false only if the channel is completed
+		_writer.TryWrite(message);
 	}
 }
 

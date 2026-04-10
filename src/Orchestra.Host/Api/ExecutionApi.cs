@@ -72,7 +72,20 @@ public static partial class ExecutionApi
 							parameters[prop.Name] = prop.Value.GetString() ?? "";
 					}
 				}
-				catch (JsonException) { /* Invalid parameters JSON */ }
+				catch (JsonException)
+				{
+					httpContext.Response.StatusCode = 400;
+					httpContext.Response.ContentType = "application/problem+json";
+					await httpContext.Response.WriteAsJsonAsync(new
+					{
+						type = "https://tools.ietf.org/html/rfc7807",
+						title = "Bad Request",
+						status = 400,
+						detail = "Invalid JSON in 'params' query parameter.",
+						instance = httpContext.Request.Path.Value,
+					});
+					return;
+				}
 			}
 
 			// Set up SSE response
@@ -170,10 +183,17 @@ public static partial class ExecutionApi
 					reporter.Complete();
 					_ = Task.Run(async () =>
 					{
-						await Task.Delay(TimeSpan.FromSeconds(5));
-						activeExecutions.TryRemove(executionId, out _);
-						activeExecutionInfos.TryRemove(executionId, out _);
-						cts.Dispose();
+						try
+						{
+							await Task.Delay(TimeSpan.FromSeconds(5));
+						}
+						catch (ObjectDisposedException) { }
+						finally
+						{
+							activeExecutions.TryRemove(executionId, out _);
+							activeExecutionInfos.TryRemove(executionId, out _);
+							try { cts.Dispose(); } catch (ObjectDisposedException) { }
+						}
 					});
 				}
 			}, CancellationToken.None);

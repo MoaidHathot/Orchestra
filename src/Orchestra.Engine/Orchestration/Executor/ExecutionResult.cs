@@ -39,6 +39,16 @@ public class ExecutionResult
 	public StepExecutionTrace? Trace { get; init; }
 
 	/// <summary>
+	/// History of retry attempts for this step, if retries occurred.
+	/// </summary>
+	public List<RetryAttemptRecord>? RetryHistory { get; init; }
+
+	/// <summary>
+	/// Structured error category for failures.
+	/// </summary>
+	public StepErrorCategory? ErrorCategory { get; init; }
+
+	/// <summary>
 	/// When true, signals that the entire orchestration should complete immediately.
 	/// Set by the orchestra_complete engine tool.
 	/// </summary>
@@ -66,7 +76,8 @@ public class ExecutionResult
 		string? promptSent = null,
 		string? actualModel = null,
 		TokenUsage? usage = null,
-		StepExecutionTrace? trace = null) => new()
+		StepExecutionTrace? trace = null,
+		List<RetryAttemptRecord>? retryHistory = null) => new()
 	{
 		Content = content,
 		Status = ExecutionStatus.Succeeded,
@@ -76,6 +87,7 @@ public class ExecutionResult
 		ActualModel = actualModel,
 		Usage = usage,
 		Trace = trace,
+		RetryHistory = retryHistory,
 	};
 
 	public static ExecutionResult Failed(
@@ -83,7 +95,9 @@ public class ExecutionResult
 		Dictionary<string, string>? rawDependencyOutputs = null,
 		string? promptSent = null,
 		string? actualModel = null,
-		StepExecutionTrace? trace = null) => new()
+		StepExecutionTrace? trace = null,
+		StepErrorCategory errorCategory = StepErrorCategory.Unknown,
+		List<RetryAttemptRecord>? retryHistory = null) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Failed,
@@ -92,6 +106,8 @@ public class ExecutionResult
 		PromptSent = promptSent,
 		ActualModel = actualModel,
 		Trace = trace,
+		ErrorCategory = errorCategory,
+		RetryHistory = retryHistory,
 	};
 
 	public static ExecutionResult Skipped(string reason) => new()

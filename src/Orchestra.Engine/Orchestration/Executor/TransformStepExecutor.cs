@@ -43,9 +43,21 @@ public sealed partial class TransformStepExecutor : IStepExecutor
 
 			LogTransformSuccess(step.Name, output.Length);
 
+			// Build trace for the Transform step
+			var trace = new StepExecutionTrace
+			{
+				// Use SystemPrompt to store the template expression
+				SystemPrompt = transformStep.Template,
+				// Use FinalResponse to store the resolved output
+				FinalResponse = output,
+				// Store dependency inputs in McpServers for metadata
+				McpServers = rawDependencyOutputs.Select(kv => $"Dependency '{kv.Key}': {kv.Value.Length} chars").ToList(),
+			};
+
 			return Task.FromResult(ExecutionResult.Succeeded(
 				output,
-				rawDependencyOutputs: rawDependencyOutputs));
+				rawDependencyOutputs: rawDependencyOutputs,
+				trace: trace));
 		}
 		catch (OperationCanceledException)
 		{
@@ -55,7 +67,7 @@ public sealed partial class TransformStepExecutor : IStepExecutor
 		{
 			var errorMessage = $"Transform failed: {ex.Message}";
 			LogTransformFailure(step.Name, ex);
-			return Task.FromResult(ExecutionResult.Failed(errorMessage, rawDependencyOutputs));
+			return Task.FromResult(ExecutionResult.Failed(errorMessage, rawDependencyOutputs, errorCategory: StepErrorCategory.TransformError));
 		}
 	}
 

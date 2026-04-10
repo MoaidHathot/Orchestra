@@ -86,6 +86,26 @@ public class CheckpointStepResult
 	public string? ActualModel { get; init; }
 
 	/// <summary>
+	/// Token usage statistics for this step.
+	/// </summary>
+	public TokenUsage? Usage { get; init; }
+
+	/// <summary>
+	/// Detailed execution trace for debugging and inspection.
+	/// </summary>
+	public StepExecutionTrace? Trace { get; init; }
+
+	/// <summary>
+	/// Retry history for this step.
+	/// </summary>
+	public List<RetryAttemptRecord>? RetryHistory { get; init; }
+
+	/// <summary>
+	/// Structured error category for failures.
+	/// </summary>
+	public StepErrorCategory? ErrorCategory { get; init; }
+
+	/// <summary>
 	/// Converts this checkpoint step result to an <see cref="ExecutionResult"/>.
 	/// </summary>
 	public ExecutionResult ToExecutionResult() => new()
@@ -97,6 +117,10 @@ public class CheckpointStepResult
 		RawDependencyOutputs = RawDependencyOutputs,
 		PromptSent = PromptSent,
 		ActualModel = ActualModel,
+		Usage = Usage,
+		Trace = Trace,
+		RetryHistory = RetryHistory,
+		ErrorCategory = ErrorCategory,
 	};
 
 	/// <summary>
@@ -113,5 +137,9 @@ public class CheckpointStepResult
 			: new Dictionary<string, string>(result.RawDependencyOutputs),
 		PromptSent = result.PromptSent,
 		ActualModel = result.ActualModel,
+		Usage = result.Usage,
+		Trace = result.Trace,
+		RetryHistory = result.RetryHistory,
+		ErrorCategory = result.ErrorCategory,
 	};
 }

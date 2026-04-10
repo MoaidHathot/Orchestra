@@ -2662,3 +2662,218 @@
       width: 12px;
       height: 12px;
     }
+
+    /* ============================================================
+       Gantt chart styles
+       ============================================================ */
+    .gantt-container {
+      padding: 16px;
+      overflow-x: auto;
+    }
+    .gantt-chart {
+      min-width: 100%;
+    }
+    .gantt-row {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+      height: 28px;
+    }
+    .gantt-label {
+      width: 140px;
+      min-width: 140px;
+      font-size: 12px;
+      color: var(--text-secondary, #8b949e);
+      text-align: right;
+      padding-right: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .gantt-track {
+      flex: 1;
+      position: relative;
+      height: 20px;
+      background: var(--surface, #21262d);
+      border-radius: 3px;
+    }
+    .gantt-bar {
+      position: absolute;
+      height: 100%;
+      border-radius: 3px;
+      min-width: 2px;
+      display: flex;
+      align-items: center;
+      padding: 0 6px;
+      font-size: 11px;
+      color: #fff;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .gantt-bar.succeeded { background: var(--success, #238636); }
+    .gantt-bar.failed { background: var(--error, #da3633); }
+    .gantt-bar.running { background: var(--accent, #58a6ff); }
+    .gantt-bar.cancelled { background: var(--warning, #d29922); }
+    .gantt-bar.skipped { background: #484f58; }
+    .gantt-bar.noaction { background: #484f58; }
+
+    /* ============================================================
+       Log search styles
+       ============================================================ */
+    .log-search-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border, #30363d);
+      background: var(--surface, #21262d);
+    }
+    .log-search-input {
+      flex: 1;
+      background: var(--bg, #0d1117);
+      border: 1px solid var(--border, #30363d);
+      color: var(--text, #e6edf3);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .log-search-input:focus {
+      outline: none;
+      border-color: var(--accent, #58a6ff);
+    }
+    .log-search-clear {
+      background: none;
+      border: none;
+      color: var(--text-secondary, #8b949e);
+      cursor: pointer;
+      padding: 2px 6px;
+      font-size: 14px;
+    }
+    .log-search-count {
+      font-size: 12px;
+      color: var(--text-secondary, #8b949e);
+    }
+
+    /* ============================================================
+       Tool call duration styles
+       ============================================================ */
+    .tool-call-duration {
+      font-size: 11px;
+      color: var(--text-secondary, #8b949e);
+      margin-left: 6px;
+    }
+
+    /* ============================================================
+       Retry history styles
+       ============================================================ */
+    .retry-history {
+      margin-top: 8px;
+      padding: 8px;
+      background: var(--surface, #21262d);
+      border-radius: 4px;
+      border: 1px solid var(--border, #30363d);
+    }
+    .retry-history-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--warning, #d29922);
+      margin-bottom: 6px;
+    }
+    .retry-attempt {
+      font-size: 12px;
+      color: var(--text-secondary, #8b949e);
+      padding: 2px 0;
+      border-bottom: 1px solid var(--border, #30363d);
+    }
+    .retry-attempt:last-child {
+      border-bottom: none;
+    }
+
+    /* ============================================================
+       Loop iteration styles
+       ============================================================ */
+    .loop-iterations {
+      margin-top: 8px;
+    }
+    .loop-iteration-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      background: var(--surface, #21262d);
+      border: 1px solid var(--border, #30363d);
+      border-radius: 12px;
+      font-size: 11px;
+      color: var(--text-secondary, #8b949e);
+      cursor: pointer;
+    }
+    .loop-iteration-badge:hover {
+      border-color: var(--accent, #58a6ff);
+      color: var(--text, #e6edf3);
+    }
+    .loop-iteration-list {
+      margin-top: 6px;
+      padding: 8px;
+      background: var(--bg, #0d1117);
+      border: 1px solid var(--border, #30363d);
+      border-radius: 4px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .loop-iteration-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 0;
+      font-size: 12px;
+      border-bottom: 1px solid var(--border, #30363d);
+      cursor: pointer;
+    }
+    .loop-iteration-item:last-child {
+      border-bottom: none;
+    }
+    .loop-iteration-item:hover {
+      color: var(--accent, #58a6ff);
+    }
+
+    /* ============================================================
+       Error category badge
+       ============================================================ */
+    .error-category-badge {
+      display: inline-block;
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-size: 11px;
+      font-weight: 500;
+      background: rgba(218, 54, 51, 0.15);
+      color: var(--error, #ff7b72);
+      margin-left: 6px;
+    }
+
+    /* ============================================================
+       Token usage summary
+       ============================================================ */
+    .token-usage-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 8px;
+      padding: 12px;
+      background: var(--surface, #21262d);
+      border-radius: 6px;
+      margin-bottom: 12px;
+    }
+    .token-usage-item {
+      text-align: center;
+    }
+    .token-usage-value {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text, #e6edf3);
+    }
+    .token-usage-label {
+      font-size: 11px;
+      color: var(--text-secondary, #8b949e);
+      margin-top: 2px;
+    }

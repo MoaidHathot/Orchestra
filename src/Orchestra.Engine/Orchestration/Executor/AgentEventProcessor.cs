@@ -19,6 +19,7 @@ public class AgentEventProcessor
 	private readonly Dictionary<string, PendingToolCall> _pendingToolCalls = [];
 	private readonly List<string> _warnings = [];
 	private readonly List<McpServerStatusInfo> _mcpServerStatuses = [];
+	private readonly List<ConversationMessage> _conversationHistory = [];
 
 	public AgentEventProcessor(IOrchestrationReporter reporter, string stepName)
 	{
@@ -141,9 +142,26 @@ public class AgentEventProcessor
 		// Save current response segment before tool call (if any content)
 		if (_currentResponseBuilder.Length > 0)
 		{
-			_responseSegments.Add(_currentResponseBuilder.ToString());
+			var segment = _currentResponseBuilder.ToString();
+			_responseSegments.Add(segment);
+			_conversationHistory.Add(new ConversationMessage
+			{
+				Role = "assistant",
+				Content = segment,
+				Timestamp = DateTimeOffset.UtcNow,
+			});
 			_currentResponseBuilder.Clear();
 		}
+
+		// Record tool call start in conversation history
+		_conversationHistory.Add(new ConversationMessage
+		{
+			Role = "assistant",
+			Content = $"[tool_call] {evt.ToolName ?? "unknown"}({evt.ToolArguments ?? ""})",
+			ToolCallId = evt.ToolCallId,
+			ToolName = evt.ToolName,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
 
 		// Track pending tool call
 		if (evt.ToolCallId is not null)
@@ -171,6 +189,16 @@ public class AgentEventProcessor
 	private void HandleToolExecutionComplete(AgentEvent evt)
 	{
 		_reporter.ReportToolExecutionCompleted(_stepName, evt.ToolName ?? "unknown", evt.ToolSuccess ?? false, evt.ToolResult, evt.ToolError);
+
+		// Record tool result in conversation history
+		_conversationHistory.Add(new ConversationMessage
+		{
+			Role = "tool",
+			Content = evt.ToolSuccess == true ? evt.ToolResult : $"[error] {evt.ToolError}",
+			ToolCallId = evt.ToolCallId,
+			ToolName = evt.ToolName,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
 
 		// Complete the pending tool call record
 		if (evt.ToolCallId is not null && _pendingToolCalls.TryGetValue(evt.ToolCallId, out var pending))
@@ -295,7 +323,14 @@ public class AgentEventProcessor
 	{
 		if (_currentResponseBuilder.Length > 0)
 		{
-			_responseSegments.Add(_currentResponseBuilder.ToString());
+			var segment = _currentResponseBuilder.ToString();
+			_responseSegments.Add(segment);
+			_conversationHistory.Add(new ConversationMessage
+			{
+				Role = "assistant",
+				Content = segment,
+				Timestamp = DateTimeOffset.UtcNow,
+			});
 			_currentResponseBuilder.Clear();
 		}
 	}
@@ -328,6 +363,13 @@ public class AgentEventProcessor
 		string? outputHandlerResult = null,
 		List<string>? mcpServers = null)
 	{
+		// Add final response to conversation history if available
+		var history = new List<ConversationMessage>(_conversationHistory);
+		if (systemPrompt is not null)
+			history.Insert(0, new ConversationMessage { Role = "system", Content = systemPrompt, Timestamp = DateTimeOffset.UtcNow });
+		if (userPromptProcessed is not null)
+			history.Insert(systemPrompt is not null ? 1 : 0, new ConversationMessage { Role = "user", Content = userPromptProcessed, Timestamp = DateTimeOffset.UtcNow });
+
 		return new StepExecutionTrace
 		{
 			SystemPrompt = systemPrompt,
@@ -340,6 +382,7 @@ public class AgentEventProcessor
 			OutputHandlerResult = outputHandlerResult,
 			McpServers = BuildMcpServerList(mcpServers),
 			Warnings = _warnings.ToList(),
+			ConversationHistory = history,
 		};
 	}
 
@@ -357,6 +400,7 @@ public class AgentEventProcessor
 			ResponseSegments = _responseSegments.ToList(),
 			McpServers = BuildMcpServerList(mcpServers),
 			Warnings = _warnings.ToList(),
+			ConversationHistory = new List<ConversationMessage>(_conversationHistory),
 		};
 	}
 

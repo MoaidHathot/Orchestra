@@ -367,6 +367,17 @@ public static class ServiceProviderExtensions
 		// Fire-and-forget preload of the run-history index so the first
 		// /api/history request doesn't pay the cold-load penalty.
 		var runStore = services.GetRequiredService<FileSystemRunStore>();
-		_ = Task.Run(() => runStore.PreloadIndexAsync());
+		_ = Task.Run(async () =>
+		{
+			try
+			{
+				await runStore.PreloadIndexAsync();
+			}
+			catch (Exception ex)
+			{
+				var preloadLogger = services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(ServiceProviderExtensions));
+				preloadLogger.LogError(ex, "Failed to preload run-history index");
+			}
+		});
 	}
 }

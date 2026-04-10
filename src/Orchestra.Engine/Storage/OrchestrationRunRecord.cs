@@ -71,4 +71,9 @@ public class OrchestrationRunRecord
 	/// orchestration metadata, and data directory path.
 	/// </summary>
 	public RunContext? Context { get; init; }
+
+	/// <summary>
+	/// Aggregate token usage across all steps in this run.
+	/// </summary>
+	public TokenUsage? TotalUsage { get; init; }
 }

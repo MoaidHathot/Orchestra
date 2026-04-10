@@ -54,11 +54,13 @@ public sealed partial class HttpStepExecutor : IStepExecutor
 			var method = new HttpMethod(httpStep.Method.ToUpperInvariant());
 			using var request = new HttpRequestMessage(method, url);
 
-			// Resolve template expressions in headers
+			// Resolve and collect headers for trace
+			var resolvedHeaders = new Dictionary<string, string>();
 			foreach (var (key, value) in httpStep.Headers)
 			{
 				var resolvedValue = TemplateResolver.Resolve(value, context.Parameters, context, step.DependsOn, step);
 				request.Headers.TryAddWithoutValidation(key, resolvedValue);
+				resolvedHeaders[key] = resolvedValue;
 			}
 
 			// Set body if present
@@ -74,31 +76,67 @@ public sealed partial class HttpStepExecutor : IStepExecutor
 
 			var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
 
+			// Build trace for the HTTP step
+			var responseHeaders = response.Headers
+				.Concat(response.Content.Headers)
+				.ToDictionary(h => h.Key, h => string.Join(", ", h.Value));
+
+			var trace = new StepExecutionTrace
+			{
+				// Use SystemPrompt to store the request summary
+				SystemPrompt = $"HTTP {httpStep.Method.ToUpperInvariant()} {url}",
+				// Use UserPromptRaw to store request body
+				UserPromptRaw = body,
+				// Use FinalResponse to store the response body
+				FinalResponse = responseBody,
+				// Use McpServers to store request/response metadata
+				McpServers =
+				[
+					$"Method: {httpStep.Method.ToUpperInvariant()}",
+					$"URL: {url}",
+					$"Status: {(int)response.StatusCode} {response.ReasonPhrase}",
+					$"ContentType: {httpStep.ContentType}",
+					..resolvedHeaders.Select(h => $"Request-Header: {h.Key}: {h.Value}"),
+					..responseHeaders.Select(h => $"Response-Header: {h.Key}: {h.Value}"),
+				],
+			};
+
+			// Report the step trace for live trace viewing
+			_reporter.ReportStepTrace(step.Name, trace);
+
 			if (response.IsSuccessStatusCode)
 			{
 				LogHttpSuccess(step.Name, (int)response.StatusCode);
 				return ExecutionResult.Succeeded(
 					responseBody,
-					rawDependencyOutputs: rawDependencyOutputs);
+					rawDependencyOutputs: rawDependencyOutputs,
+					trace: trace);
 			}
 			else
 			{
 				var errorMessage = $"HTTP {httpStep.Method} {url} returned {(int)response.StatusCode} {response.ReasonPhrase}";
 				LogHttpFailure(step.Name, (int)response.StatusCode, errorMessage);
 				_reporter.ReportStepError(step.Name, errorMessage);
-				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs);
+				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: trace, errorCategory: StepErrorCategory.HttpError);
 			}
 		}
 		catch (OperationCanceledException)
 		{
 			throw; // Let cancellation propagate for timeout handling
 		}
+		catch (HttpRequestException ex)
+		{
+			var errorMessage = $"HTTP request failed: {ex.Message}";
+			LogHttpException(step.Name, ex);
+			_reporter.ReportStepError(step.Name, errorMessage);
+			return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, errorCategory: StepErrorCategory.NetworkError);
+		}
 		catch (Exception ex)
 		{
 			var errorMessage = $"HTTP request failed: {ex.Message}";
 			LogHttpException(step.Name, ex);
 			_reporter.ReportStepError(step.Name, errorMessage);
-			return ExecutionResult.Failed(errorMessage, rawDependencyOutputs);
+			return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, errorCategory: StepErrorCategory.HttpError);
 		}
 	}
 

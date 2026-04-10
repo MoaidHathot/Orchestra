@@ -63,6 +63,19 @@ public class StepRunRecord
 	/// Contains reasoning, tool calls, and response segments in execution order.
 	/// </summary>
 	public StepExecutionTrace? Trace { get; init; }
+
+	/// <summary>
+	/// History of retry attempts for this step, if retries occurred.
+	/// Each entry records the error, timestamp, and delay for that attempt.
+	/// Only the final (successful or exhausted) attempt is in the main record fields.
+	/// </summary>
+	public List<RetryAttemptRecord>? RetryHistory { get; init; }
+
+	/// <summary>
+	/// Structured error category for the step failure (if any).
+	/// Enables filtering and aggregation by error type.
+	/// </summary>
+	public StepErrorCategory? ErrorCategory { get; init; }
 }
 
 /// <summary>
@@ -73,6 +86,93 @@ public class TokenUsage
 	public int InputTokens { get; init; }
 	public int OutputTokens { get; init; }
 	public int TotalTokens => InputTokens + OutputTokens;
+
+	/// <summary>
+	/// Tokens read from the prompt cache (reduces cost).
+	/// </summary>
+	public int CacheReadTokens { get; init; }
+
+	/// <summary>
+	/// Tokens written to the prompt cache for future use.
+	/// </summary>
+	public int CacheWriteTokens { get; init; }
+
+	/// <summary>
+	/// Estimated cost of this LLM call (provider-specific units).
+	/// </summary>
+	public double? Cost { get; init; }
+
+	/// <summary>
+	/// Duration of the LLM call in seconds (as reported by the provider).
+	/// </summary>
+	public double? Duration { get; init; }
+}
+
+/// <summary>
+/// Record of a single retry attempt for a step.
+/// </summary>
+public class RetryAttemptRecord
+{
+	/// <summary>
+	/// The attempt number (1-based).
+	/// </summary>
+	public required int Attempt { get; init; }
+
+	/// <summary>
+	/// The error that caused the retry.
+	/// </summary>
+	public required string Error { get; init; }
+
+	/// <summary>
+	/// When this attempt was made.
+	/// </summary>
+	public required DateTimeOffset AttemptedAt { get; init; }
+
+	/// <summary>
+	/// The delay before the next retry in seconds.
+	/// </summary>
+	public required double DelaySeconds { get; init; }
+
+	/// <summary>
+	/// The error category for this attempt.
+	/// </summary>
+	public StepErrorCategory? ErrorCategory { get; init; }
+}
+
+/// <summary>
+/// Structured error category for step failures.
+/// </summary>
+public enum StepErrorCategory
+{
+	/// <summary>Unknown or uncategorized error.</summary>
+	Unknown,
+
+	/// <summary>Step exceeded its timeout.</summary>
+	Timeout,
+
+	/// <summary>An MCP server failed to start or connect.</summary>
+	McpFailure,
+
+	/// <summary>The LLM model returned an error or was unavailable.</summary>
+	ModelError,
+
+	/// <summary>A tool call failed.</summary>
+	ToolError,
+
+	/// <summary>A network error occurred (HTTP step, MCP connection, etc.).</summary>
+	NetworkError,
+
+	/// <summary>Template resolution or parameter validation failed.</summary>
+	ValidationError,
+
+	/// <summary>A command execution failed.</summary>
+	CommandError,
+
+	/// <summary>An HTTP request returned a non-success status code.</summary>
+	HttpError,
+
+	/// <summary>Template transform evaluation failed.</summary>
+	TransformError,
 }
 
 /// <summary>
@@ -131,6 +231,43 @@ public class StepExecutionTrace
 	/// Session warnings received from the SDK during execution (e.g., MCP server startup failures).
 	/// </summary>
 	public List<string> Warnings { get; init; } = [];
+
+	/// <summary>
+	/// Full conversation history in message order (system, user, assistant, tool results).
+	/// Captures the complete multi-turn exchange for debugging multi-turn prompt steps.
+	/// </summary>
+	public List<ConversationMessage> ConversationHistory { get; init; } = [];
+}
+
+/// <summary>
+/// A single message in the conversation history.
+/// </summary>
+public class ConversationMessage
+{
+	/// <summary>
+	/// The role of the message sender (system, user, assistant, tool).
+	/// </summary>
+	public required string Role { get; init; }
+
+	/// <summary>
+	/// The content of the message.
+	/// </summary>
+	public string? Content { get; init; }
+
+	/// <summary>
+	/// Tool call ID if this is a tool result message.
+	/// </summary>
+	public string? ToolCallId { get; init; }
+
+	/// <summary>
+	/// Tool name if this is a tool call or tool result.
+	/// </summary>
+	public string? ToolName { get; init; }
+
+	/// <summary>
+	/// Timestamp when this message was recorded.
+	/// </summary>
+	public DateTimeOffset Timestamp { get; init; }
 }
 
 /// <summary>

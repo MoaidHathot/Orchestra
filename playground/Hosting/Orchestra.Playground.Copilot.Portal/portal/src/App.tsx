@@ -566,6 +566,8 @@ function App(): React.JSX.Element {
     let finalResult = '';
     // Mutable tracker for execution ID (may be set later by execution-started event)
     let trackedExecutionId = knownExecutionId;
+    // Accumulate reasoning content per step
+    const reasoningAccumulators: Record<string, string> = {};
 
     // ---- local helpers ----
 
@@ -576,6 +578,7 @@ function App(): React.JSX.Element {
       }
       stepEvents[stepName].push({
         time: new Date().toLocaleTimeString(),
+        timestamp: new Date().toISOString(),
         type,
         ...data,
       } as StepEvent);
@@ -745,6 +748,62 @@ function App(): React.JSX.Element {
           addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
         } catch { /* ignore */ }
       });
+    });
+
+    // step-retry
+    eventSource.addEventListener('step-retry', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as SSEEventData & {
+          attempt?: number;
+          maxRetries?: number;
+          delaySeconds?: number;
+        };
+        const attempt = data.attempt ?? '?';
+        const maxRetries = data.maxRetries ?? '?';
+        const error = data.error || data.message || 'Unknown error';
+        const delaySeconds = data.delaySeconds ?? 0;
+        const message = `[Retry] Attempt ${attempt}/${maxRetries}: ${error} (waiting ${delaySeconds}s)`;
+        addStepEvent(data.stepName, 'step-retry', {
+          ...data as Record<string, unknown>,
+          content: message,
+        });
+      } catch { /* ignore */ }
+    });
+
+    // checkpoint-saved
+    eventSource.addEventListener('checkpoint-saved', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as SSEEventData & {
+          completedSteps?: number;
+          totalSteps?: number;
+        };
+        const stepName = data.stepName || 'unknown';
+        const completedSteps = data.completedSteps ?? '?';
+        const totalSteps = data.totalSteps ?? '?';
+        const message = `[Checkpoint] Step '${stepName}' saved (${completedSteps}/${totalSteps})`;
+        addStepEvent(data.stepName, 'checkpoint-saved', {
+          ...data as Record<string, unknown>,
+          content: message,
+        });
+      } catch { /* ignore */ }
+    });
+
+    // reasoning-delta — accumulate silently, don't flood the event list.
+    // The full reasoning is available in the step trace after completion.
+    eventSource.addEventListener('reasoning-delta', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as SSEEventData & { chunk?: string };
+        const step = data.stepName;
+        if (step && data.chunk) {
+          if (!reasoningAccumulators[step]) {
+            reasoningAccumulators[step] = '';
+          }
+          reasoningAccumulators[step] += data.chunk;
+          // Don't call addStepEvent per delta — reasoning arrives at ~30ms intervals
+          // and would produce hundreds of near-identical events.  The accumulated
+          // reasoning is surfaced in the step trace panel instead.
+        }
+      } catch { /* ignore */ }
     });
 
     // step-output

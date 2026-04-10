@@ -125,7 +125,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					_reporter.ReportStepTrace(step.Name, mcpFailTrace);
 					_reporter.ReportStepError(step.Name, errorMessage);
 					LogMcpServersFailed(step.Name, serverList);
-					return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: mcpFailTrace);
+					return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: mcpFailTrace, errorCategory: StepErrorCategory.McpFailure);
 				}
 			}
 
@@ -156,7 +156,11 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				tokenUsage = new TokenUsage
 				{
 					InputTokens = (int)(result.Usage.InputTokens ?? 0),
-					OutputTokens = (int)(result.Usage.OutputTokens ?? 0)
+					OutputTokens = (int)(result.Usage.OutputTokens ?? 0),
+					CacheReadTokens = (int)(result.Usage.CacheReadTokens ?? 0),
+					CacheWriteTokens = (int)(result.Usage.CacheWriteTokens ?? 0),
+					Cost = result.Usage.Cost,
+					Duration = result.Usage.Duration,
 				};
 			}
 
@@ -227,7 +231,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			_reporter.ReportStepTrace(step.Name, trace);
 
 			_reporter.ReportStepError(step.Name, ex.Message);
-			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace);
+			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace, errorCategory: StepErrorCategory.ModelError);
 		}
 	}
 
@@ -324,26 +328,40 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		string model,
 		CancellationToken cancellationToken)
 	{
-		var systemPrompt = _formatter.BuildTransformationSystemPrompt(handlerPrompt);
-
-		var config = new AgentBuildConfig
+		try
 		{
-			Model = model,
-			SystemPrompt = systemPrompt,
-			SystemPromptMode = SystemPromptMode.Replace,
-			Mcps = [],
-			Reporter = _reporter,
-		};
+			var systemPrompt = _formatter.BuildTransformationSystemPrompt(handlerPrompt);
 
-		var agent = await _agentBuilder
-			.BuildAgentAsync(config, cancellationToken);
+			var config = new AgentBuildConfig
+			{
+				Model = model,
+				SystemPrompt = systemPrompt,
+				SystemPromptMode = SystemPromptMode.Replace,
+				Mcps = [],
+				Reporter = _reporter,
+			};
 
-		var wrappedContent = _formatter.WrapContentForTransformation(content);
+			var agent = await _agentBuilder
+				.BuildAgentAsync(config, cancellationToken);
 
-		var task = agent.SendAsync(wrappedContent, cancellationToken);
-		var result = await task.GetResultAsync();
+			var wrappedContent = _formatter.WrapContentForTransformation(content);
 
-		return result.Content;
+			var task = agent.SendAsync(wrappedContent, cancellationToken);
+			var result = await task.GetResultAsync();
+
+			return result.Content;
+		}
+		catch (OperationCanceledException)
+		{
+			throw; // Propagate cancellation
+		}
+		catch (Exception ex)
+		{
+			// Output handler failure should not lose the primary step output.
+			// Log the error and fall back to the raw (unprocessed) content.
+			LogOutputHandlerFailed(ex);
+			return content;
+		}
 	}
 
 	/// <summary>
@@ -367,6 +385,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			ActualModel = result.ActualModel,
 			Usage = result.Usage,
 			Trace = result.Trace,
+			RetryHistory = result.RetryHistory,
+			ErrorCategory = result.ErrorCategory,
 			OrchestrationCompleteRequested = true,
 			OrchestrationCompleteStatus = ctx.OrchestrationCompleteStatus,
 			OrchestrationCompleteReason = ctx.OrchestrationCompleteReason,
@@ -411,6 +431,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Error,
 		Message = "Step '{StepName}' failed because required MCP server(s) did not start: {Servers}")]
 	private partial void LogMcpServersFailed(string stepName, string servers);
+
+	[LoggerMessage(
+		EventId = 7,
+		Level = LogLevel.Warning,
+		Message = "Output handler failed, falling back to raw content")]
+	private partial void LogOutputHandlerFailed(Exception ex);
 
 	#endregion
 }

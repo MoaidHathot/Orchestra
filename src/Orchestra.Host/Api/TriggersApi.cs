@@ -101,7 +101,10 @@ public static class TriggersApi
 					}
 				}
 			}
-			catch (JsonException) { }
+			catch (JsonException)
+			{
+				return ProblemDetailsHelpers.BadRequest("Invalid JSON in request body. Expected { \"parameters\": { ... } }.");
+			}
 
 			var (found, executionId) = await triggerManager.FireTriggerAsync(id, parameters);
 			if (!found)

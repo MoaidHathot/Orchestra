@@ -23,6 +23,9 @@ interface TraceToolCall {
   arguments?: string;
   result?: string;
   error?: string;
+  durationMs?: number;
+  startedAt?: string;
+  completedAt?: string;
 }
 
 /**
@@ -96,12 +99,20 @@ export default function ExecutionModal({
   const [expandedTraceSections, setExpandedTraceSections] = useState<
     Record<TraceSectionKey, boolean>
   >({} as Record<TraceSectionKey, boolean>);
+  const [eventSearchQuery, setEventSearchQuery] = useState('');
+  const [inlineError, setInlineError] = useState<string | null>(null);
+  const [showGantt, setShowGantt] = useState(false);
+  const [expandedLoopSteps, setExpandedLoopSteps] = useState<Record<string, boolean>>({});
 
   // Reset local state when switching to a different execution
   useEffect(() => {
     setSelectedStep(null);
     setShowRunContext(false);
     setExpandedTraceSections({} as Record<TraceSectionKey, boolean>);
+    setEventSearchQuery('');
+    setInlineError(null);
+    setShowGantt(false);
+    setExpandedLoopSteps({});
   }, [executionId]);
 
   // Toggle trace section
@@ -137,25 +148,31 @@ export default function ExecutionModal({
   // Copy content to clipboard
   const copyContent = useCallback(() => {
     if (displayContent.content) {
-      navigator.clipboard.writeText(displayContent.content);
+      navigator.clipboard.writeText(displayContent.content).catch((err) => {
+        setInlineError(`Failed to copy to clipboard: ${err instanceof Error ? err.message : String(err)}`);
+      });
     }
   }, [displayContent.content]);
 
   // Download content as file
   const downloadContent = useCallback(() => {
     if (displayContent.content) {
-      const blob = new Blob([displayContent.content], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      const filename = selectedStep
-        ? `${orchestration?.name || 'orchestration'}_${selectedStep}_output.txt`
-        : `${orchestration?.name || 'orchestration'}_result.txt`;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      try {
+        const blob = new Blob([displayContent.content], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const filename = selectedStep
+          ? `${orchestration?.name || 'orchestration'}_${selectedStep}_output.txt`
+          : `${orchestration?.name || 'orchestration'}_result.txt`;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        setInlineError(`Failed to download: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   }, [displayContent.content, selectedStep, orchestration?.name]);
 
@@ -164,8 +181,10 @@ export default function ExecutionModal({
   // caused a full SVG re-render on every click, which destroyed event
   // listeners mid-propagation and could trigger unwanted navigation.
   // Selected-step highlighting is handled via direct DOM manipulation below.
+  // `showGantt` IS included: when the user switches from Timeline back to DAG,
+  // the ZoomableDag remounts and the ref becomes a fresh empty div.
   useEffect(() => {
-    if (open && dagRef.current && orchestration) {
+    if (open && dagRef.current && orchestration && !showGantt) {
       renderExecutionDag(
         orchestration,
         stepStatuses || {},
@@ -174,7 +193,7 @@ export default function ExecutionModal({
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, orchestration, stepStatuses]);
+  }, [open, orchestration, stepStatuses, showGantt]);
 
   // Highlight the selected step via direct DOM manipulation instead of
   // re-rendering the entire DAG (which would destroy click handlers).
@@ -230,6 +249,132 @@ export default function ExecutionModal({
       onCancel(executionId);
     }
   }, [executionId, onCancel]);
+
+  /** Format a duration in ms to a human-readable string like "1.2s" or "350ms". */
+  const formatDuration = useCallback((ms: number): string => {
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${(ms / 60000).toFixed(1)}m`;
+  }, []);
+
+  /** Compute tool call duration from durationMs or startedAt/completedAt. */
+  const getToolCallDuration = useCallback(
+    (tc: TraceToolCall): string | null => {
+      if (tc.durationMs != null && tc.durationMs > 0) {
+        return formatDuration(tc.durationMs);
+      }
+      if (tc.startedAt && tc.completedAt) {
+        const ms =
+          new Date(tc.completedAt).getTime() - new Date(tc.startedAt).getTime();
+        if (ms >= 0) return formatDuration(ms);
+      }
+      return null;
+    },
+    [formatDuration],
+  );
+
+  /** Filtered step events based on search query. */
+  const filteredStepEvents = useMemo<StepEvent[]>(() => {
+    if (!eventSearchQuery.trim()) return selectedStepEvents;
+    const q = eventSearchQuery.toLowerCase();
+    return selectedStepEvents.filter((event) => {
+      const text = [
+        event.type,
+        event.content,
+        event.toolName,
+        event.error,
+        event.timestamp,
+        formatLogContent(event),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+      return text.includes(q);
+    });
+  }, [selectedStepEvents, eventSearchQuery]);
+
+  /** Detect loop iterations from stepStatuses keys (pattern: "stepName:iteration-N"). */
+  const loopIterations = useMemo<Record<string, { iteration: number; status: string; key: string }[]>>(() => {
+    const result: Record<string, { iteration: number; status: string; key: string }[]> = {};
+    if (!stepStatuses) return result;
+    for (const key of Object.keys(stepStatuses)) {
+      const match = key.match(/^(.+):iteration-(\d+)$/);
+      if (match) {
+        const baseName = match[1];
+        const iterNum = parseInt(match[2], 10);
+        if (!result[baseName]) result[baseName] = [];
+        result[baseName].push({
+          iteration: iterNum,
+          status: stepStatuses[key],
+          key,
+        });
+      }
+    }
+    // Sort iterations by number
+    for (const baseName of Object.keys(result)) {
+      result[baseName].sort((a, b) => a.iteration - b.iteration);
+    }
+    return result;
+  }, [stepStatuses]);
+
+  /** Gantt chart data: steps with startedAt/completedAt from events. */
+  const ganttData = useMemo(() => {
+    if (!orchestration?.steps) return [];
+    const items: {
+      name: string;
+      startMs: number;
+      endMs: number;
+      status: string;
+    }[] = [];
+    for (const step of orchestration.steps) {
+      const stepName = typeof step === 'string' ? step : step?.name;
+      if (!stepName) continue;
+
+      let startTime: number | null = null;
+      let endTime: number | null = null;
+      const stepStatus = stepStatuses[stepName] || 'pending';
+
+      // Source 1: SSE events with ISO timestamp
+      const events = stepEvents?.[stepName];
+      if (events && events.length > 0) {
+        for (const ev of events) {
+          const ts = ev.timestamp;
+          if (!ts) continue;
+          const parsed = new Date(ts).getTime();
+          if (isNaN(parsed)) continue;
+          if (ev.type === 'step-started') {
+            startTime = parsed;
+          }
+          if (
+            ev.type === 'step-completed' ||
+            ev.type === 'step-error' ||
+            ev.type === 'step-cancelled' ||
+            ev.type === 'step-skipped'
+          ) {
+            endTime = parsed;
+          }
+        }
+      }
+
+      // Source 2: Step trace data (available from API for historical runs)
+      // The trace may not carry exact timestamps but the step result data
+      // from the execution context does (provided via runContext or step metadata).
+      // We skip steps with no timing data entirely.
+
+      if (startTime && !isNaN(startTime)) {
+        items.push({
+          name: stepName,
+          startMs: startTime,
+          endMs: endTime && !isNaN(endTime) ? endTime : Date.now(),
+          status: stepStatus,
+        });
+      }
+    }
+    return items;
+  }, [stepEvents, orchestration, stepStatuses]);
+
+  /** Inline error dismiss handler */
+  const dismissInlineError = useCallback(() => setInlineError(null), []);
 
   return (
     <div
@@ -304,6 +449,38 @@ export default function ExecutionModal({
                   {errorMessage}
                 </div>
               </div>
+            </div>
+          )}
+          {/* Inline Error Banner (replacement for window.alert) */}
+          {inlineError && (
+            <div
+              style={{
+                padding: '10px 16px',
+                background: 'rgba(248, 81, 73, 0.1)',
+                borderBottom: '1px solid var(--error)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+              }}
+            >
+              <Icons.X />
+              <div style={{ flex: 1, color: 'var(--error)', fontSize: '13px' }}>
+                {inlineError}
+              </div>
+              <button
+                onClick={dismissInlineError}
+                style={{
+                  background: 'none',
+                  border: '1px solid var(--error)',
+                  borderRadius: '4px',
+                  color: 'var(--error)',
+                  cursor: 'pointer',
+                  padding: '2px 8px',
+                  fontSize: '11px',
+                }}
+              >
+                Dismiss
+              </button>
             </div>
           )}
           {/* Run Context Panel */}
@@ -457,7 +634,144 @@ export default function ExecutionModal({
                   </div>
                 </div>
               ) : (
-                <ZoomableDag dagRef={dagRef} style={{ height: '100%' }} />
+                <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+                  {/* DAG / Gantt toggle */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: '4px',
+                      padding: '4px 8px',
+                      borderBottom: '1px solid var(--border-subtle)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <button
+                      className={`btn btn-sm${!showGantt ? ' btn-primary' : ''}`}
+                      onClick={() => setShowGantt(false)}
+                      style={{ padding: '3px 10px', fontSize: '11px' }}
+                    >
+                      DAG
+                    </button>
+                    <button
+                      className={`btn btn-sm${showGantt ? ' btn-primary' : ''}`}
+                      onClick={() => setShowGantt(true)}
+                      style={{ padding: '3px 10px', fontSize: '11px' }}
+                    >
+                      Timeline
+                    </button>
+                  </div>
+                  {showGantt ? (
+                    /* Gantt Chart Timeline View */
+                    <div
+                      style={{
+                        flex: 1,
+                        overflow: 'auto',
+                        padding: '12px',
+                      }}
+                    >
+                      {ganttData.length === 0 ? (
+                        <div className="empty-state">
+                          <div className="empty-text">
+                            No timing data available.
+                            {status === 'running' || status === 'loading'
+                              ? ' Timeline will populate as steps start executing.'
+                              : ' Timeline data is only available for live or recently viewed executions.'}
+                          </div>
+                        </div>
+                      ) : (
+                        (() => {
+                          const minStart = Math.min(...ganttData.map((d) => d.startMs));
+                          const maxEnd = Math.max(...ganttData.map((d) => d.endMs));
+                          const totalSpan = maxEnd - minStart || 1;
+                          const barHeight = 24;
+                          const labelWidth = 120;
+                          const chartWidth = 400;
+                          const svgWidth = labelWidth + chartWidth + 80;
+                          const svgHeight = ganttData.length * (barHeight + 8) + 30;
+                          const statusColor: Record<string, string> = {
+                            completed: '#3fb950',
+                            success: '#3fb950',
+                            completed_early: '#3fb950',
+                            failed: '#f85149',
+                            running: '#d29922',
+                            pending: '#8b949e',
+                            skipped: '#8b949e',
+                            cancelled: '#8b949e',
+                            noaction: '#8b949e',
+                          };
+
+                          return (
+                            <svg
+                              width={svgWidth}
+                              height={svgHeight}
+                              style={{ fontFamily: 'monospace', fontSize: '11px' }}
+                            >
+                              {ganttData.map((item, idx) => {
+                                const y = idx * (barHeight + 8) + 4;
+                                const barStart =
+                                  labelWidth +
+                                  ((item.startMs - minStart) / totalSpan) * chartWidth;
+                                const barW = Math.max(
+                                  2,
+                                  ((item.endMs - item.startMs) / totalSpan) * chartWidth,
+                                );
+                                const color =
+                                  statusColor[item.status] || statusColor.pending;
+                                const durationMs = item.endMs - item.startMs;
+                                const durLabel =
+                                  durationMs < 1000
+                                    ? `${Math.round(durationMs)}ms`
+                                    : durationMs < 60000
+                                      ? `${(durationMs / 1000).toFixed(1)}s`
+                                      : `${(durationMs / 60000).toFixed(1)}m`;
+                                return (
+                                  <g key={item.name}>
+                                    {/* Step name label */}
+                                    <text
+                                      x={labelWidth - 6}
+                                      y={y + barHeight / 2 + 4}
+                                      textAnchor="end"
+                                      fill="var(--text-muted)"
+                                    >
+                                      {item.name.length > 16
+                                        ? item.name.substring(0, 15) + '\u2026'
+                                        : item.name}
+                                    </text>
+                                    {/* Bar */}
+                                    <rect
+                                      x={barStart}
+                                      y={y}
+                                      width={barW}
+                                      height={barHeight}
+                                      rx={3}
+                                      fill={color}
+                                      opacity={0.85}
+                                    >
+                                      <title>
+                                        {item.name}: {durLabel} ({item.status})
+                                      </title>
+                                    </rect>
+                                    {/* Duration label */}
+                                    <text
+                                      x={barStart + barW + 4}
+                                      y={y + barHeight / 2 + 4}
+                                      fill="var(--text-dim)"
+                                      style={{ fontSize: '10px' }}
+                                    >
+                                      {durLabel}
+                                    </text>
+                                  </g>
+                                );
+                              })}
+                            </svg>
+                          );
+                        })()
+                      )}
+                    </div>
+                  ) : (
+                    <ZoomableDag dagRef={dagRef} style={{ flex: 1 }} />
+                  )}
+                </div>
               )}
             </div>
 
@@ -485,17 +799,121 @@ export default function ExecutionModal({
                             {selectedStepStatus}
                           </span>
                         )}
+                        {/* Loop Iteration Pill */}
+                        {selectedStep && loopIterations[selectedStep] && (
+                          <span
+                            style={{
+                              marginLeft: '8px',
+                              position: 'relative',
+                              display: 'inline-block',
+                            }}
+                          >
+                            <button
+                              onClick={() =>
+                                setExpandedLoopSteps((prev) => ({
+                                  ...prev,
+                                  [selectedStep]: !prev[selectedStep],
+                                }))
+                              }
+                              style={{
+                                background: 'var(--surface)',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: '12px',
+                                padding: '2px 10px',
+                                fontSize: '11px',
+                                color: 'var(--accent)',
+                                cursor: 'pointer',
+                                fontWeight: 500,
+                              }}
+                            >
+                              {loopIterations[selectedStep].length} iteration
+                              {loopIterations[selectedStep].length !== 1 ? 's' : ''}
+                            </button>
+                            {expandedLoopSteps[selectedStep] && (
+                              <div
+                                style={{
+                                  position: 'absolute',
+                                  top: '100%',
+                                  left: 0,
+                                  zIndex: 50,
+                                  marginTop: '4px',
+                                  background: 'var(--bg-secondary)',
+                                  border: '1px solid var(--border-subtle)',
+                                  borderRadius: '6px',
+                                  boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                                  minWidth: '200px',
+                                  maxHeight: '200px',
+                                  overflow: 'auto',
+                                }}
+                              >
+                                {loopIterations[selectedStep].map((iter) => {
+                                  const iterStatus = iter.status;
+                                  const statusColor =
+                                    iterStatus === 'completed'
+                                      ? 'var(--success)'
+                                      : iterStatus === 'failed'
+                                        ? 'var(--error)'
+                                        : iterStatus === 'running'
+                                          ? 'var(--warning)'
+                                          : 'var(--text-dim)';
+                                  return (
+                                    <div
+                                      key={iter.key}
+                                      onClick={() => {
+                                        setSelectedStep(iter.key);
+                                        setExpandedLoopSteps((prev) => ({
+                                          ...prev,
+                                          [selectedStep]: false,
+                                        }));
+                                      }}
+                                      style={{
+                                        padding: '6px 12px',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '8px',
+                                        borderBottom:
+                                          '1px solid var(--border-subtle)',
+                                        fontSize: '12px',
+                                      }}
+                                      onMouseEnter={(e) =>
+                                        (e.currentTarget.style.background =
+                                          'var(--surface)')
+                                      }
+                                      onMouseLeave={(e) =>
+                                        (e.currentTarget.style.background =
+                                          'transparent')
+                                      }
+                                    >
+                                      <span
+                                        style={{
+                                          width: '8px',
+                                          height: '8px',
+                                          borderRadius: '50%',
+                                          background: statusColor,
+                                          flexShrink: 0,
+                                        }}
+                                      />
+                                      <span style={{ color: 'var(--text)' }}>
+                                        Iteration {iter.iteration}
+                                      </span>
+                                      <span
+                                        style={{
+                                          marginLeft: 'auto',
+                                          fontSize: '10px',
+                                          color: statusColor,
+                                        }}
+                                      >
+                                        {iterStatus}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </span>
+                        )}
                       </div>
-                      {/* DEBUG: Show trace availability */}
-                      <span
-                        style={{ fontSize: '10px', color: 'var(--text-dim)' }}
-                      >
-                        [trace: {selectedStepTrace ? 'YES' : 'NO'}, keys:{' '}
-                        {stepTraces
-                          ? Object.keys(stepTraces).join(',')
-                          : 'null'}
-                        ]
-                      </span>
                       {selectedStepTrace && (
                         <button
                           className="btn btn-sm"
@@ -933,6 +1351,20 @@ export default function ExecutionModal({
                                         >
                                           {tc.toolName}
                                         </span>
+                                        {(() => {
+                                          const dur = getToolCallDuration(tc);
+                                          return dur ? (
+                                            <span
+                                              style={{
+                                                fontSize: '10px',
+                                                color: 'var(--text-dim)',
+                                                fontWeight: 400,
+                                              }}
+                                            >
+                                              ({dur})
+                                            </span>
+                                          ) : null;
+                                        })()}
                                         {tc.mcpServer && (
                                           <span
                                             style={{
@@ -1377,12 +1809,59 @@ export default function ExecutionModal({
                     ) : (
                       /* Events Panel (default view) */
                       <>
-                        {selectedStepEvents.length === 0 ? (
+                        {/* Search input for events */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '6px 8px',
+                            marginBottom: '8px',
+                            background: 'var(--surface)',
+                            borderRadius: '4px',
+                          }}
+                        >
+                          <Icons.Search />
+                          <input
+                            type="text"
+                            value={eventSearchQuery}
+                            onChange={(e) => setEventSearchQuery(e.target.value)}
+                            placeholder="Filter events..."
+                            style={{
+                              flex: 1,
+                              background: 'transparent',
+                              border: 'none',
+                              outline: 'none',
+                              color: 'var(--text)',
+                              fontSize: '12px',
+                            }}
+                          />
+                          {eventSearchQuery && (
+                            <button
+                              onClick={() => setEventSearchQuery('')}
+                              style={{
+                                background: 'none',
+                                border: 'none',
+                                cursor: 'pointer',
+                                color: 'var(--text-dim)',
+                                padding: '2px',
+                                display: 'flex',
+                                alignItems: 'center',
+                              }}
+                              title="Clear search"
+                            >
+                              <Icons.X />
+                            </button>
+                          )}
+                        </div>
+                        {filteredStepEvents.length === 0 ? (
                           <div className="no-step-selected">
-                            No events yet for this step
+                            {eventSearchQuery
+                              ? 'No events match the search'
+                              : 'No events yet for this step'}
                           </div>
                         ) : (
-                          selectedStepEvents.map((event, i) => (
+                          filteredStepEvents.map((event, i) => (
                             <div
                               className={`step-event-item ${event.type}`}
                               key={i}

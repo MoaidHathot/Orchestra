@@ -287,6 +287,16 @@ public static class RunsApi
 				isIncomplete = record.IsIncomplete,
 				parameters = record.Parameters,
 				finalContent = record.FinalContent,
+				totalUsage = record.TotalUsage is { } tu ? new
+				{
+					inputTokens = tu.InputTokens,
+					outputTokens = tu.OutputTokens,
+					totalTokens = tu.TotalTokens,
+					cacheReadTokens = tu.CacheReadTokens,
+					cacheWriteTokens = tu.CacheWriteTokens,
+					cost = tu.Cost,
+					duration = tu.Duration,
+				} : null,
 				context = record.Context is { } ctx ? new
 				{
 					runId = ctx.RunId,
@@ -316,9 +326,22 @@ public static class RunsApi
 					{
 						inputTokens = u.InputTokens,
 						outputTokens = u.OutputTokens,
-						totalTokens = u.TotalTokens
+						totalTokens = u.TotalTokens,
+						cacheReadTokens = u.CacheReadTokens,
+						cacheWriteTokens = u.CacheWriteTokens,
+						cost = u.Cost,
+						duration = u.Duration,
 					} : null,
 					errorMessage = kv.Value.ErrorMessage,
+					errorCategory = kv.Value.ErrorCategory?.ToString(),
+					retryHistory = kv.Value.RetryHistory is { Count: > 0 } rh ? rh.Select(r => new
+					{
+						attempt = r.Attempt,
+						error = r.Error,
+						attemptedAt = r.AttemptedAt.ToString("o"),
+						delaySeconds = r.DelaySeconds,
+						errorCategory = r.ErrorCategory?.ToString(),
+					}).ToArray() : null,
 					trace = kv.Value.Trace is { } t ? new
 					{
 						systemPrompt = t.SystemPrompt,
@@ -335,15 +358,42 @@ public static class RunsApi
 							result = tc.Result,
 							error = tc.Error,
 							startedAt = tc.StartedAt?.ToString("o"),
-							completedAt = tc.CompletedAt?.ToString("o")
+							completedAt = tc.CompletedAt?.ToString("o"),
+							durationMs = tc.StartedAt.HasValue && tc.CompletedAt.HasValue
+								? Math.Round((tc.CompletedAt.Value - tc.StartedAt.Value).TotalMilliseconds, 1)
+								: (double?)null,
 						}).ToArray(),
 						responseSegments = t.ResponseSegments,
 						finalResponse = t.FinalResponse,
 						outputHandlerResult = t.OutputHandlerResult,
 						mcpServers = t.McpServers.Count > 0 ? t.McpServers : null,
 						warnings = t.Warnings.Count > 0 ? t.Warnings : null,
+						conversationHistory = t.ConversationHistory.Count > 0 ? t.ConversationHistory.Select(m => new
+						{
+							role = m.Role,
+							content = m.Content,
+							toolCallId = m.ToolCallId,
+							toolName = m.ToolName,
+							timestamp = m.Timestamp.ToString("o"),
+						}).ToArray() : null,
 					} : null
-				}).ToArray()
+				}).ToArray(),
+				allStepRecords = record.AllStepRecords.Count != record.StepRecords.Count
+					? record.AllStepRecords
+						.Where(kv => !record.StepRecords.ContainsKey(kv.Key))
+						.Select(kv => new
+						{
+							key = kv.Key,
+							name = kv.Value.StepName,
+							status = kv.Value.Status.ToString(),
+							startedAt = kv.Value.StartedAt.ToString("o"),
+							completedAt = kv.Value.CompletedAt.ToString("o"),
+							durationSeconds = Math.Round(kv.Value.Duration.TotalSeconds, 2),
+							content = kv.Value.Content,
+							loopIteration = kv.Value.LoopIteration,
+							errorMessage = kv.Value.ErrorMessage,
+						}).ToArray()
+					: null,
 			}, jsonOptions);
 		});
 

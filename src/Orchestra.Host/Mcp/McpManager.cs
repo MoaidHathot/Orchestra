@@ -151,6 +151,8 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 	protected virtual async Task StartProxyAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken)
 	{
+		try
+		{
 		var builder = WebApplication.CreateSlimBuilder();
 
 		// Suppress Kestrel and hosting logs for the internal proxy
@@ -207,6 +209,12 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		await _proxyApp.StartAsync(cancellationToken);
 
 		LogProxyReady(_proxyPort);
+		}
+		catch (Exception ex)
+		{
+			LogProxyStartFailed(ex);
+			_proxyApp = null;
+		}
 	}
 
 	private static int GetAvailablePort()
@@ -259,6 +267,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		Level = LogLevel.Information,
 		Message = "MCP proxy is ready on port {Port}.")]
 	private partial void LogProxyReady(int port);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "MCP proxy failed to start. Global MCPs will be unavailable.")]
+	private partial void LogProxyStartFailed(Exception ex);
 
 	[LoggerMessage(
 		EventId = 6,

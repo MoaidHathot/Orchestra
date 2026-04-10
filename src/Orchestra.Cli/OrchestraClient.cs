@@ -158,19 +158,51 @@ public class OrchestraClient : IDisposable
 		var content = await response.Content.ReadAsStringAsync();
 		if (string.IsNullOrWhiteSpace(content))
 		{
+			if (!response.IsSuccessStatusCode)
+			{
+				throw new HttpRequestException(
+					$"Server returned {(int)response.StatusCode} {response.ReasonPhrase} with no body.",
+					null,
+					response.StatusCode);
+			}
 			return JsonSerializer.SerializeToElement(new
 			{
 				statusCode = (int)response.StatusCode,
-				success = response.IsSuccessStatusCode,
+				success = true,
 			}, s_jsonOptions);
 		}
 
 		try
 		{
-			return JsonSerializer.Deserialize<JsonElement>(content, s_jsonOptions);
+			var result = JsonSerializer.Deserialize<JsonElement>(content, s_jsonOptions);
+
+			// Check for error responses that contain problem details
+			if (!response.IsSuccessStatusCode)
+			{
+				var detail = result.TryGetProperty("detail", out var detailProp)
+					? detailProp.GetString()
+					: content;
+				throw new HttpRequestException(
+					$"Server returned {(int)response.StatusCode}: {detail}",
+					null,
+					response.StatusCode);
+			}
+
+			return result;
 		}
-		catch
+		catch (HttpRequestException)
 		{
+			throw; // Re-throw HTTP errors from above
+		}
+		catch (JsonException)
+		{
+			if (!response.IsSuccessStatusCode)
+			{
+				throw new HttpRequestException(
+					$"Server returned {(int)response.StatusCode}: {content}",
+					null,
+					response.StatusCode);
+			}
 			return JsonSerializer.SerializeToElement(new
 			{
 				statusCode = (int)response.StatusCode,

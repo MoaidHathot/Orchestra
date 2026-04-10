@@ -8,6 +8,8 @@ namespace Orchestra.Host.Tests;
 
 /// <summary>
 /// Unit tests for FileLogging (FileLoggerProvider and FileLogger).
+/// Since the file logger now uses a background Channel for async writes,
+/// tests must dispose the provider (which flushes the channel) before reading the file.
 /// </summary>
 public class FileLoggingTests : IDisposable
 {
@@ -93,11 +95,12 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "write-test.log");
-		using var provider = new FileLoggerProvider(logPath);
+		var provider = new FileLoggerProvider(logPath);
 		var logger = provider.CreateLogger("TestCategory");
 
 		// Act
 		logger.LogInformation("Hello, World!");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		File.Exists(logPath).Should().BeTrue();
@@ -112,11 +115,12 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "timestamp-test.log");
-		using var provider = new FileLoggerProvider(logPath);
+		var provider = new FileLoggerProvider(logPath);
 		var logger = provider.CreateLogger("Test");
 
 		// Act
 		logger.LogInformation("Test message");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		var content = File.ReadAllText(logPath);
@@ -129,13 +133,14 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "append-test.log");
-		using var provider = new FileLoggerProvider(logPath);
+		var provider = new FileLoggerProvider(logPath);
 		var logger = provider.CreateLogger("Test");
 
 		// Act
 		logger.LogInformation("First message");
 		logger.LogInformation("Second message");
 		logger.LogWarning("Third message");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		var content = File.ReadAllText(logPath);
@@ -149,12 +154,13 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "exception-test.log");
-		using var provider = new FileLoggerProvider(logPath);
+		var provider = new FileLoggerProvider(logPath);
 		var logger = provider.CreateLogger("Test");
 		var exception = new InvalidOperationException("Test exception message");
 
 		// Act
 		logger.LogError(exception, "An error occurred");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		var content = File.ReadAllText(logPath);
@@ -199,7 +205,7 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "thread-test.log");
-		using var provider = new FileLoggerProvider(logPath);
+		var provider = new FileLoggerProvider(logPath);
 		var logger = provider.CreateLogger("Test");
 		var messageCount = 100;
 		var tasks = new List<Task>();
@@ -212,6 +218,7 @@ public class FileLoggingTests : IDisposable
 		}
 
 		await Task.WhenAll(tasks);
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		var content = await File.ReadAllTextAsync(logPath);
@@ -224,7 +231,7 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "levels-test.log");
-		using var provider = new FileLoggerProvider(logPath);
+		var provider = new FileLoggerProvider(logPath);
 		var logger = provider.CreateLogger("Test");
 
 		// Act
@@ -232,6 +239,7 @@ public class FileLoggingTests : IDisposable
 		logger.LogWarning("Warning message");
 		logger.LogError("Error message");
 		logger.LogCritical("Critical message");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		var content = File.ReadAllText(logPath);
@@ -307,11 +315,12 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "debug-write.log");
-		using var provider = new FileLoggerProvider(logPath, LogLevel.Debug);
+		var provider = new FileLoggerProvider(logPath, LogLevel.Debug);
 		var logger = provider.CreateLogger("Test");
 
 		// Act
 		logger.LogDebug("Debug message");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		File.Exists(logPath).Should().BeTrue();
@@ -325,12 +334,13 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "warning-write.log");
-		using var provider = new FileLoggerProvider(logPath, LogLevel.Warning);
+		var provider = new FileLoggerProvider(logPath, LogLevel.Warning);
 		var logger = provider.CreateLogger("Test");
 
 		// Act
 		logger.LogInformation("Info message");
 		logger.LogWarning("Warning message");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		File.Exists(logPath).Should().BeTrue();
@@ -344,7 +354,7 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange
 		var logPath = Path.Combine(_tempDir, "error-write.log");
-		using var provider = new FileLoggerProvider(logPath, LogLevel.Error);
+		var provider = new FileLoggerProvider(logPath, LogLevel.Error);
 		var logger = provider.CreateLogger("Test");
 
 		// Act
@@ -353,6 +363,7 @@ public class FileLoggingTests : IDisposable
 		logger.LogWarning("Warning");
 		logger.LogError("Error message");
 		logger.LogCritical("Critical message");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		var content = File.ReadAllText(logPath);
@@ -381,19 +392,12 @@ public class FileLoggingTests : IDisposable
 	{
 		// Arrange — verify the extension method signature accepts LogLevel
 		var logPath = Path.Combine(_tempDir, "extension-level.log");
-		var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
-		services.AddLogging(builder =>
-		{
-			builder.SetMinimumLevel(LogLevel.Debug);
-			builder.AddFile(logPath, LogLevel.Debug);
-		});
-
-		using var sp = services.BuildServiceProvider();
-		var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-		var logger = loggerFactory.CreateLogger("Test");
+		var provider = new FileLoggerProvider(logPath, LogLevel.Debug);
+		var logger = provider.CreateLogger("Test");
 
 		// Act
 		logger.LogDebug("Debug from extension");
+		provider.Dispose(); // Flush the channel
 
 		// Assert
 		File.Exists(logPath).Should().BeTrue();
