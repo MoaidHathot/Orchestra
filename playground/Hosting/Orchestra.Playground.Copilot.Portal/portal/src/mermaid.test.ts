@@ -246,10 +246,10 @@ describe('generateDefinitionDagCode', () => {
     expect(mermaidCode).toContain('transform_data["');
     expect(mermaidCode).toContain('analyze["');
 
-    // Type badges as inline text (not emojis)
-    expect(mermaidCode).toContain('HTTP');
-    expect(mermaidCode).toContain('CMD');
-    expect(mermaidCode).toContain('FN');
+    // Type symbols as compact unicode (not text badges)
+    expect(mermaidCode).toContain('\u2197');  // ↗ for HTTP
+    expect(mermaidCode).toContain('>_');      // >_ for Command
+    expect(mermaidCode).toContain('\u27F9');  // ⟹ for Transform
   });
 
   it('generates valid Mermaid with subagents rendered inline', async () => {

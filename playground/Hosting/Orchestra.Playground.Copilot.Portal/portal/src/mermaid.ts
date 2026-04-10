@@ -34,17 +34,18 @@ function getStepType(step: LooseStep | Step | string): string {
 }
 
 /**
- * Get a short text badge for the step type.
- * Prompt steps get no badge (they're the default/most common).
+ * Get a compact symbol for the step type.
+ * Prompt steps get no symbol (they're the default/most common).
+ * Symbols are small, monochrome-friendly, and universally readable.
  */
 function getTypeBadge(stepType: string): string {
   switch (stepType) {
     case 'http':
-      return 'HTTP';
+      return '\u2197'; // ↗  — request going out
     case 'command':
-      return 'CMD';
+      return '>_';     // >_ — terminal prompt
     case 'transform':
-      return 'FN';
+      return '\u27F9'; // ⟹  — input transforms to output
     default:
       return '';
   }
@@ -136,21 +137,22 @@ function buildNodeDeclaration(safeId: string, label: string): string {
 /**
  * Build subagent inline label content for a step.
  * Renders as a compact list of subagent names within the parent node label.
+ * Uses ▸ triangles to visually communicate "child agents branching off".
  */
 function buildSubagentInlineLabel(
   subagents: Array<{ name: string; displayName?: string; description?: string }>,
 ): string {
   if (subagents.length <= 3) {
-    // Show individual names as small dots
+    // Show individual names as small triangles
     const names = subagents.map(sa => {
       const displayName = sa.displayName || sa.name;
       const short = displayName.length > 10 ? displayName.substring(0, 9) + '\u2026' : displayName;
       return escLabel(short);
     });
-    return `<small>\u25CB ${names.join(' \u25CB ')}</small>`;
+    return `<small>\u25B8 ${names.join(' \u25B8 ')}</small>`;
   }
   // Too many — just show count
-  return `<small>\u25CB ${subagents.length} subagents</small>`;
+  return `<small>\u25B8 ${subagents.length} subagents</small>`;
 }
 
 /**
