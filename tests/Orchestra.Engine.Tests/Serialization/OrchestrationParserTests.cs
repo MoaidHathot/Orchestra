@@ -1548,4 +1548,130 @@ public class OrchestrationParserTests
 	}
 
 	#endregion
+
+	#region Meta-Orchestration Parsing
+
+	[Fact]
+	public void ParseOrchestration_GenerateOrchestration_ParsesWithCorrectStructure()
+	{
+		// Arrange
+		var examplesDir = Path.GetFullPath(
+			Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"));
+		var filePath = Path.Combine(examplesDir, "generate-orchestration.json");
+		var json = File.ReadAllText(filePath);
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Name.Should().Be("generate-orchestration");
+		orchestration.Tags.Should().Contain("meta");
+		orchestration.Tags.Should().Contain("generator");
+
+		// Typed inputs
+		orchestration.Inputs.Should().NotBeNull();
+		orchestration.Inputs.Should().ContainKey("description");
+		orchestration.Inputs!["description"].Type.Should().Be(InputType.String);
+		orchestration.Inputs["description"].Required.Should().BeTrue();
+
+		orchestration.Inputs.Should().ContainKey("register");
+		orchestration.Inputs["register"].Type.Should().Be(InputType.Boolean);
+		orchestration.Inputs["register"].Required.Should().BeFalse();
+		orchestration.Inputs["register"].Default.Should().Be("false");
+
+		orchestration.Inputs.Should().ContainKey("outputPath");
+		orchestration.Inputs["outputPath"].Type.Should().Be(InputType.String);
+		orchestration.Inputs["outputPath"].Required.Should().BeFalse();
+
+		// Steps
+		orchestration.Steps.Should().HaveCount(2);
+
+		// Generate step
+		var generateStep = orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>().Subject;
+		generateStep.Name.Should().Be("generate");
+		generateStep.Model.Should().Be("claude-opus-4.6");
+		generateStep.SkillDirectories.Should().Contain("./skills/orchestration-authoring");
+		generateStep.Mcps.Should().HaveCount(1);
+		generateStep.OutputHandlerPrompt.Should().NotBeNullOrWhiteSpace();
+
+		// Validate step (checker/loop)
+		var validateStep = orchestration.Steps[1].Should().BeOfType<PromptOrchestrationStep>().Subject;
+		validateStep.Name.Should().Be("validate");
+		validateStep.DependsOn.Should().Contain("generate");
+		validateStep.Loop.Should().NotBeNull();
+		validateStep.Loop!.Target.Should().Be("generate");
+		validateStep.Loop.MaxIterations.Should().Be(2);
+		validateStep.Loop.ExitPattern.Should().Be("VALID");
+		validateStep.SkillDirectories.Should().Contain("./skills/orchestration-authoring");
+
+		// MCP definitions
+		orchestration.Mcps.Should().HaveCountGreaterThan(0);
+		var controlMcp = orchestration.Mcps.FirstOrDefault(m => m.Name == "orchestra-control");
+		controlMcp.Should().NotBeNull();
+		controlMcp.Should().BeOfType<RemoteMcp>();
+	}
+
+	[Fact]
+	public void ParseOrchestration_UpdateOrchestrationDigest_ParsesWithCorrectStructure()
+	{
+		// Arrange
+		var examplesDir = Path.GetFullPath(
+			Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"));
+		var filePath = Path.Combine(examplesDir, "update-orchestration-digest.json");
+		var json = File.ReadAllText(filePath);
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Name.Should().Be("update-orchestration-digest");
+		orchestration.Tags.Should().Contain("meta");
+		orchestration.Tags.Should().Contain("maintenance");
+
+		// Variables
+		orchestration.Variables.Should().ContainKey("repoPath");
+		orchestration.Variables.Should().ContainKey("skillPath");
+
+		// Trigger (scheduler)
+		orchestration.Trigger.Type.Should().Be(TriggerType.Scheduler);
+		orchestration.Trigger.Enabled.Should().BeFalse();
+		var schedulerTrigger = orchestration.Trigger.Should().BeOfType<SchedulerTriggerConfig>().Subject;
+		schedulerTrigger.IntervalSeconds.Should().Be(86400);
+
+		// Steps — check count and key step names
+		orchestration.Steps.Should().HaveCountGreaterThanOrEqualTo(7);
+		orchestration.Steps.Select(s => s.Name).Should().Contain("check-changes");
+		orchestration.Steps.Select(s => s.Name).Should().Contain("gate");
+		orchestration.Steps.Select(s => s.Name).Should().Contain("regenerate-digest");
+		orchestration.Steps.Select(s => s.Name).Should().Contain("write-digest");
+
+		// Gate step is a prompt step
+		var gateStep = orchestration.Steps.First(s => s.Name == "gate")
+			.Should().BeOfType<PromptOrchestrationStep>().Subject;
+		gateStep.DependsOn.Should().Contain("check-changes");
+
+		// Regenerate step depends on all read steps
+		var regenerateStep = orchestration.Steps.First(s => s.Name == "regenerate-digest")
+			.Should().BeOfType<PromptOrchestrationStep>().Subject;
+		regenerateStep.DependsOn.Should().Contain("read-schema-doc");
+		regenerateStep.DependsOn.Should().Contain("read-models");
+		regenerateStep.DependsOn.Should().Contain("read-examples");
+		regenerateStep.DependsOn.Should().Contain("read-current-digest");
+		regenerateStep.ReasoningLevel.Should().Be(ReasoningLevel.High);
+
+		// Write step depends on regenerate
+		var writeStep = orchestration.Steps.First(s => s.Name == "write-digest")
+			.Should().BeOfType<CommandOrchestrationStep>().Subject;
+		writeStep.DependsOn.Should().Contain("regenerate-digest");
+		writeStep.Stdin.Should().NotBeNullOrWhiteSpace();
+
+		// Read steps should run in parallel (all depend only on gate)
+		var readSteps = orchestration.Steps
+			.Where(s => s.Name.StartsWith("read-"))
+			.ToList();
+		readSteps.Should().HaveCount(4);
+		readSteps.Should().AllSatisfy(s => s.DependsOn.Should().Contain("gate"));
+	}
+
+	#endregion
 }

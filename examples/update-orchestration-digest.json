@@ -1,0 +1,146 @@
+{
+  "name": "update-orchestration-digest",
+  "description": "Auto-updater that checks for changes to Orchestra's schema, documentation, and examples, then regenerates the orchestration authoring SKILL.md digest. Runs daily on a schedule and gates on whether relevant files have changed in the last day.",
+  "version": "1.0.0",
+  "tags": ["meta", "maintenance", "tooling"],
+  "variables": {
+    "repoPath": "{{env.ORCHESTRA_REPO_PATH}}",
+    "skillPath": "{{vars.repoPath}}/skills/orchestration-authoring/SKILL.md"
+  },
+  "trigger": {
+    "type": "scheduler",
+    "intervalSeconds": 86400,
+    "enabled": false
+  },
+  "steps": [
+    {
+      "name": "check-changes",
+      "type": "Command",
+      "command": "git",
+      "arguments": [
+        "log",
+        "--since=1 day ago",
+        "--name-only",
+        "--pretty=format:",
+        "--",
+        "orchestration-composing.md",
+        "src/Orchestra.Engine/Orchestration/",
+        "src/Orchestra.Engine/Serialization/",
+        "src/Orchestra.Engine/Agent/",
+        "src/Orchestra.Engine/Mcp/",
+        "src/Orchestra.Engine/Triggers/",
+        "src/Orchestra.Engine/EngineTools/",
+        "src/Orchestra.Engine/Formatting/",
+        "examples/"
+      ],
+      "workingDirectory": "{{vars.repoPath}}",
+      "timeoutSeconds": 30
+    },
+    {
+      "name": "gate",
+      "type": "Prompt",
+      "dependsOn": ["check-changes"],
+      "systemPrompt": "You are a simple gate checker. If the input is empty or contains only whitespace, it means no relevant files have changed. In that case, call the orchestra_complete tool to halt the orchestration with status 'success' and reason 'No changes detected in the last 24 hours. Digest is up to date.'\n\nIf the input contains file paths, output a summary of what changed (e.g., 'Schema files changed: X, Y. Examples changed: Z.').",
+      "userPrompt": "Git changes in the last 24 hours:\n\n{{check-changes.output}}",
+      "model": "claude-opus-4.6",
+      "timeoutSeconds": 30
+    },
+    {
+      "name": "read-schema-doc",
+      "type": "Command",
+      "dependsOn": ["gate"],
+      "command": "cat",
+      "arguments": ["orchestration-composing.md"],
+      "workingDirectory": "{{vars.repoPath}}",
+      "timeoutSeconds": 15
+    },
+    {
+      "name": "read-models",
+      "type": "Command",
+      "dependsOn": ["gate"],
+      "command": "cat",
+      "arguments": [
+        "src/Orchestra.Engine/Orchestration/Orchestration.cs",
+        "src/Orchestra.Engine/Orchestration/InputDefinition.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/OrchestrationStep.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/PromptOrchestrationStep.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/HttpOrchestrationStep.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/CommandOrchestrationStep.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/TransformOrchestrationStep.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/LoopConfig.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/OrchestrationStepType.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/SystemPromptMode.cs",
+        "src/Orchestra.Engine/Orchestration/Steps/ReasoningLevel.cs",
+        "src/Orchestra.Engine/Orchestration/RetryPolicy.cs",
+        "src/Orchestra.Engine/Agent/Subagent.cs",
+        "src/Orchestra.Engine/Triggers/TriggerConfig.cs",
+        "src/Orchestra.Engine/Triggers/TriggerType.cs",
+        "src/Orchestra.Engine/Triggers/SchedulerTriggerConfig.cs",
+        "src/Orchestra.Engine/Triggers/LoopTriggerConfig.cs",
+        "src/Orchestra.Engine/Triggers/WebhookTriggerConfig.cs",
+        "src/Orchestra.Engine/Mcp/Mcp.cs",
+        "src/Orchestra.Engine/Mcp/LocalMcp.cs",
+        "src/Orchestra.Engine/Mcp/RemoteMcp.cs",
+        "src/Orchestra.Engine/EngineTools/SaveToFileTool.cs",
+        "src/Orchestra.Engine/EngineTools/ReadFromFileTool.cs",
+        "src/Orchestra.Engine/EngineTools/SetStatusTool.cs",
+        "src/Orchestra.Engine/EngineTools/CompleteTool.cs"
+      ],
+      "workingDirectory": "{{vars.repoPath}}",
+      "timeoutSeconds": 30
+    },
+    {
+      "name": "read-examples",
+      "type": "Command",
+      "dependsOn": ["gate"],
+      "command": "cat",
+      "arguments": [
+        "examples/deployment-pipeline.json",
+        "examples/typed-inputs-deployment.json",
+        "examples/subagents-research-team.json",
+        "examples/advanced-combined-features.json",
+        "examples/code-review-azure-devops.json",
+        "examples/webhook-triggered-notification.json",
+        "examples/step-files-cross-reference.json",
+        "examples/mcp-orchestration-coordinator.json",
+        "examples/variables-and-metadata.json",
+        "examples/skill-directories-example.json"
+      ],
+      "workingDirectory": "{{vars.repoPath}}",
+      "timeoutSeconds": 30
+    },
+    {
+      "name": "read-current-digest",
+      "type": "Command",
+      "dependsOn": ["gate"],
+      "command": "cat",
+      "arguments": ["skills/orchestration-authoring/SKILL.md"],
+      "workingDirectory": "{{vars.repoPath}}",
+      "timeoutSeconds": 15
+    },
+    {
+      "name": "regenerate-digest",
+      "type": "Prompt",
+      "dependsOn": ["read-schema-doc", "read-models", "read-examples", "read-current-digest"],
+      "systemPrompt": "You are a technical documentation condenser specializing in creating LLM-optimized reference documents.\n\nYour task is to regenerate the Orchestra orchestration authoring SKILL.md file. This file is used by an LLM (via the skill directories feature) to generate valid Orchestra orchestration JSON files.\n\nThe SKILL.md must be:\n1. COMPREHENSIVE: Cover every property, type, enum, pattern, and capability\n2. CONCISE: Use tables, not prose. Minimal examples (5-10 lines each)\n3. ACCURATE: Only document what exists in the C# models and schema reference\n4. PRACTICAL: Include a 'Common Patterns' section with the ~10 most important patterns\n5. DEFENSIVE: Include a 'Common Mistakes to Avoid' section\n\nStructure:\n- Top-Level Properties table\n- Typed Inputs table\n- Steps (base + each type) tables\n- Loop Configuration table\n- Subagents table\n- Retry Policy table\n- Triggers (each type) tables\n- MCP Definitions (local/remote) with examples\n- Template Expressions table\n- Engine Tools table\n- Common Patterns (numbered, with minimal JSON examples)\n- Registering Orchestrations section\n- Common Mistakes to Avoid (numbered list)\n- Naming Conventions\n\nCompare the current digest with the source material. Preserve the structure but update any properties, types, patterns, or capabilities that have changed. Add any new features, remove any deprecated ones.\n\nSave the regenerated SKILL.md using the orchestra_save_file tool with filename 'SKILL.md'.",
+      "userPrompt": "Source material for regeneration:\n\n## Changes Detected\n{{gate.output}}\n\n## Current SKILL.md (to compare against)\n{{read-current-digest.output}}\n\n## Schema Reference Document (orchestration-composing.md)\n{{read-schema-doc.output}}\n\n## C# Model Definitions\n{{read-models.output}}\n\n## Example Orchestration Files\n{{read-examples.output}}",
+      "model": "claude-opus-4.6",
+      "reasoningLevel": "High",
+      "timeoutSeconds": 300,
+      "outputHandlerPrompt": "Extract only the markdown content of the SKILL.md file from the input. Remove any surrounding explanations, code fences, or commentary. Return the raw markdown content that should be written to the SKILL.md file."
+    },
+    {
+      "name": "write-digest",
+      "type": "Command",
+      "dependsOn": ["regenerate-digest"],
+      "command": "pwsh",
+      "arguments": [
+        "-Command",
+        "Set-Content -Path 'skills/orchestration-authoring/SKILL.md' -Value $input -NoNewline"
+      ],
+      "workingDirectory": "{{vars.repoPath}}",
+      "stdin": "{{regenerate-digest.output}}",
+      "timeoutSeconds": 15
+    }
+  ]
+}

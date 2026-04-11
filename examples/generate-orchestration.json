@@ -1,0 +1,59 @@
+{
+  "name": "generate-orchestration",
+  "description": "Meta-orchestration that generates Orchestra orchestration files from natural language descriptions. Uses a pre-computed knowledge base (SKILL.md) for fast, accurate generation. Optionally registers the generated orchestration in Orchestra.",
+  "version": "1.0.0",
+  "tags": ["meta", "generator", "tooling"],
+  "inputs": {
+    "description": {
+      "type": "string",
+      "description": "Natural language description of what the orchestration should do. Be specific about: what steps are needed, what triggers to use, what tools/MCPs are required, and what the expected inputs/outputs are.",
+      "required": true
+    },
+    "register": {
+      "type": "boolean",
+      "description": "Whether to register the generated orchestration in Orchestra after creation. When true, the orchestration file is saved and registered via the Orchestra control plane.",
+      "required": false,
+      "default": "false"
+    },
+    "outputPath": {
+      "type": "string",
+      "description": "File path where the generated orchestration JSON should be saved. If not provided, saves to the orchestration's temp directory.",
+      "required": false
+    }
+  },
+  "mcps": [
+    {
+      "name": "orchestra-control",
+      "type": "remote",
+      "endpoint": "{{server.url}}/mcp/control"
+    }
+  ],
+  "steps": [
+    {
+      "name": "generate",
+      "type": "Prompt",
+      "systemPrompt": "You are an expert Orchestra orchestration author. Your job is to generate valid, production-quality Orchestra orchestration JSON files based on user descriptions.\n\nIMPORTANT RULES:\n1. Output ONLY valid JSON. Do not include markdown fences, explanations, or commentary in your final output.\n2. Use the knowledge from your loaded skills to ensure correctness. Only use documented properties — never invent fields.\n3. Use 'claude-opus-4.6' as the default model unless the user specifies otherwise.\n4. Use kebab-case for orchestration and step names, camelCase for variables and inputs.\n5. Design efficient DAGs: parallelize independent steps, use fan-out/fan-in where appropriate.\n6. Include meaningful system prompts and user prompts that give the LLM clear instructions.\n7. Use typed `inputs` (not legacy `parameters` arrays) for orchestration-level inputs.\n8. Add appropriate `description` fields to inputs for documentation.\n\nAfter generating the JSON:\n- Save the orchestration to a file using `orchestra_save_file`. Use the orchestration name with '.json' extension as the filename.\n- If the user wants registration (register = true), use the `register_orchestration` MCP tool to register it. You must first save it to a file, then register from that file path.\n- If an outputPath is provided, also save a copy there using `orchestra_save_file`.\n\nThink carefully about which patterns best fit the user's needs: fan-out/fan-in for parallel work, loop/checker for iterative refinement, subagents for multi-expert delegation, gates for conditional early exit, etc.",
+      "userPrompt": "Generate an Orchestra orchestration based on this description:\n\n{{param.description}}\n\nRegistration requested: {{param.register}}",
+      "model": "claude-opus-4.6",
+      "parameters": ["description", "register", "outputPath"],
+      "mcps": ["orchestra-control"],
+      "skillDirectories": ["./skills/orchestration-authoring"],
+      "outputHandlerPrompt": "Extract ONLY the raw JSON orchestration content from the input. Remove any markdown formatting, code fences, explanations, or surrounding text. Return the pure JSON object and nothing else."
+    },
+    {
+      "name": "validate",
+      "type": "Prompt",
+      "dependsOn": ["generate"],
+      "systemPrompt": "You are an Orchestra orchestration validator. Review the generated orchestration JSON for correctness. Check:\n\n1. All required fields are present (name, description, steps, and for Prompt steps: systemPrompt/systemPromptFile, userPrompt/userPromptFile, model)\n2. Step names are unique and in kebab-case\n3. dependsOn references exist as step names\n4. No circular dependencies\n5. Template expressions use correct syntax: {{expression}}\n6. mcps on steps are string arrays referencing defined MCP names\n7. Loop targets are dependencies of the checker step\n8. Mutual exclusion rules respected (systemPrompt vs systemPromptFile, etc.)\n9. Input types are valid (string, boolean, number)\n10. No invented/undocumented properties\n\nIf valid, respond with: VALID\nFollowed by the orchestration JSON unchanged.\n\nIf invalid, respond with: INVALID\nFollowed by the specific issues found and a corrected version of the JSON.",
+      "userPrompt": "Validate this orchestration:\n\n{{generate.output}}",
+      "model": "claude-opus-4.6",
+      "skillDirectories": ["./skills/orchestration-authoring"],
+      "outputHandlerPrompt": "Extract ONLY the raw JSON orchestration content from the input. If the input contains VALID or INVALID markers, skip them and return only the JSON object. Remove any markdown formatting, code fences, explanations, or surrounding text. Return the pure JSON object and nothing else.",
+      "loop": {
+        "target": "generate",
+        "maxIterations": 2,
+        "exitPattern": "VALID"
+      }
+    }
+  ]
+}
