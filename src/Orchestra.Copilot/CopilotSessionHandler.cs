@@ -139,8 +139,8 @@ internal sealed class CopilotSessionHandler
 			break;
 
 		case SessionErrorEvent err:
-				HandleError(err);
-				break;
+			HandleError(err);
+			break;
 
 			case SessionIdleEvent:
 				HandleIdle();
@@ -256,7 +256,9 @@ internal sealed class CopilotSessionHandler
 		// Correlate tool name from start event via ToolCallId
 		string? toolName = null;
 		if (toolComplete.Data.ToolCallId is not null)
-			_toolCallNames.TryGetValue(toolComplete.Data.ToolCallId, out toolName);
+		{
+			_toolCallNames.Remove(toolComplete.Data.ToolCallId, out toolName);
+		}
 
 		_writer.TryWrite(new AgentEvent
 		{

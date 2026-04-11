@@ -1,6 +1,7 @@
 export interface LogEvent {
   type: string;
   actualModel?: string;
+  stepType?: string;
   error?: string;
   toolName?: string;
   success?: boolean;
@@ -18,7 +19,11 @@ export interface LogEvent {
 
 export function formatLogContent(log: LogEvent): string {
   if (log.type === 'step-started') return 'Step started';
-  if (log.type === 'step-completed') return `Completed (${log.actualModel || 'unknown model'})`;
+  if (log.type === 'step-completed') {
+    if (log.actualModel) return `Completed (${log.actualModel})`;
+    if (log.stepType) return `Completed (${log.stepType})`;
+    return 'Completed';
+  }
   if (log.type === 'step-error') return log.error || '';
   if (log.type === 'tool-started') return `Tool: ${log.toolName}`;
   if (log.type === 'tool-completed') return `Tool ${log.toolName}: ${log.success ? 'success' : 'failed'}`;

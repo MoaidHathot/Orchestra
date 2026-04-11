@@ -302,11 +302,12 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("step-cancelled", new { stepName });
 	}
 
-	public void ReportStepCompleted(string stepName, AgentResult result)
+	public void ReportStepCompleted(string stepName, AgentResult result, OrchestrationStepType stepType)
 	{
 		Write("step-completed", new
 		{
 			stepName,
+			stepType = stepType.ToString().ToLowerInvariant(),
 			actualModel = result.ActualModel,
 			selectedModel = result.SelectedModel,
 			contentPreview = result.Content.Length > 500

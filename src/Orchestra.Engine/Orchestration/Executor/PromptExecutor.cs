@@ -79,25 +79,25 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore, StepName = step.Name };
 			var engineTools = _engineToolRegistry.GetAll();
 
-		// Build and run the agent using an immutable config snapshot (thread-safe)
-		var config = new AgentBuildConfig
-		{
-			Model = resolvedModel,
-			SystemPrompt = resolvedSystemPrompt,
-			Mcps = resolvedMcps,
-			Subagents = resolvedSubagents,
-			ReasoningLevel = step.ReasoningLevel,
-			SystemPromptMode = step.SystemPromptMode ?? context.DefaultSystemPromptMode,
-			Reporter = _reporter,
-			EngineTools = engineTools,
-			EngineToolCtx = engineToolCtx,
-			SkillDirectories = step.SkillDirectories
-				.Select(dir => TemplateResolver.Resolve(dir, context.Parameters, context, step.DependsOn, step))
-				.ToArray(),
-		};
+			// Build and run the agent using an immutable config snapshot (thread-safe)
+			var config = new AgentBuildConfig
+			{
+				Model = resolvedModel,
+				SystemPrompt = resolvedSystemPrompt,
+				Mcps = resolvedMcps,
+				Subagents = resolvedSubagents,
+				ReasoningLevel = step.ReasoningLevel,
+				SystemPromptMode = step.SystemPromptMode ?? context.DefaultSystemPromptMode,
+				Reporter = _reporter,
+				EngineTools = engineTools,
+				EngineToolCtx = engineToolCtx,
+				SkillDirectories = step.SkillDirectories
+					.Select(dir => TemplateResolver.Resolve(dir, context.Parameters, context, step.DependsOn, step))
+					.ToArray(),
+			};
 
-		var agent = await _agentBuilder
-			.BuildAgentAsync(config, cancellationToken);
+			var agent = await _agentBuilder
+				.BuildAgentAsync(config, cancellationToken);
 
 			var task = agent.SendAsync(userPrompt, cancellationToken);
 
@@ -145,8 +145,11 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			if (resolvedOutputHandlerPrompt is not null)
 			{
 				rawContent = content;
-				content = await RunHandlerAsync(resolvedOutputHandlerPrompt, content, resolvedModel, cancellationToken);
-				outputHandlerResult = content;
+				var handlerResult = await RunHandlerAsync(resolvedOutputHandlerPrompt, content, resolvedModel, step.Name, cancellationToken);
+				content = handlerResult.Content;
+				outputHandlerResult = handlerResult.FellBackToOriginal
+					? $"[OUTPUT HANDLER FALLBACK] Original content used — handler returned empty/whitespace. Original: {rawContent}"
+					: content;
 			}
 
 			// Convert usage to our TokenUsage type
@@ -176,38 +179,38 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			// Report the step trace for live trace viewing
 			_reporter.ReportStepTrace(step.Name, trace);
 
-		// Check if an engine tool overrode the status (e.g., LLM called orchestra_set_status)
-		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Failed)
-		{
-			var reason = engineToolCtx.StatusReason ?? "Step marked as failed by LLM";
-			LogEngineToolStatusOverride(step.Name, reason);
-			_reporter.ReportStepError(step.Name, reason);
-			return WithOrchestrationComplete(ExecutionResult.Failed(
-				reason,
-				rawDependencyOutputs,
-				userPrompt,
-				result.ActualModel,
-				trace), engineToolCtx, step.Name);
-		}
+			// Check if an engine tool overrode the status (e.g., LLM called orchestra_set_status)
+			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Failed)
+			{
+				var reason = engineToolCtx.StatusReason ?? "Step marked as failed by LLM";
+				LogEngineToolStatusOverride(step.Name, reason);
+				_reporter.ReportStepError(step.Name, reason);
+				return WithOrchestrationComplete(ExecutionResult.Failed(
+					reason,
+					rawDependencyOutputs,
+					userPrompt,
+					result.ActualModel,
+					trace), engineToolCtx, step.Name);
+			}
 
-		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
-		{
-			var reason = engineToolCtx.StatusReason ?? "No action needed";
-			LogEngineToolNoActionOverride(step.Name, reason);
-			return WithOrchestrationComplete(ExecutionResult.NoAction(
-				reason,
-				rawDependencyOutputs,
-				userPrompt,
-				result.ActualModel,
-				tokenUsage,
-				trace), engineToolCtx, step.Name);
-		}
+			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
+			{
+				var reason = engineToolCtx.StatusReason ?? "No action needed";
+				LogEngineToolNoActionOverride(step.Name, reason);
+				return WithOrchestrationComplete(ExecutionResult.NoAction(
+					reason,
+					rawDependencyOutputs,
+					userPrompt,
+					result.ActualModel,
+					tokenUsage,
+					trace), engineToolCtx, step.Name);
+			}
 
-		if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
-		{
-			var reason = engineToolCtx.StatusReason ?? "Step marked as succeeded by LLM";
-			LogEngineToolSuccessOverride(step.Name, reason);
-		}
+			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
+			{
+				var reason = engineToolCtx.StatusReason ?? "Step marked as succeeded by LLM";
+				LogEngineToolSuccessOverride(step.Name, reason);
+			}
 
 			return WithOrchestrationComplete(ExecutionResult.Succeeded(
 				content,
@@ -322,10 +325,11 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		}).ToArray();
 	}
 
-	private async Task<string> RunHandlerAsync(
+	private async Task<OutputHandlerResult> RunHandlerAsync(
 		string handlerPrompt,
 		string content,
 		string model,
+		string stepName,
 		CancellationToken cancellationToken)
 	{
 		try
@@ -347,9 +351,27 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			var wrappedContent = _formatter.WrapContentForTransformation(content);
 
 			var task = agent.SendAsync(wrappedContent, cancellationToken);
+
+			// Process output handler events so usage/trace data is captured
+			var handlerEventProcessor = new AgentEventProcessor(_reporter, $"{stepName}:output-handler");
+			await handlerEventProcessor.ProcessEventsAsync(task, cancellationToken);
+
 			var result = await task.GetResultAsync();
 
-			return result.Content;
+			// Report usage for the output handler call separately
+			if (result.Usage is not null && result.ActualModel is not null)
+			{
+				_reporter.ReportUsage($"{stepName}:output-handler", result.ActualModel, result.Usage);
+			}
+
+			// Guard against empty output handler response — fall back to original content
+			if (string.IsNullOrWhiteSpace(result.Content))
+			{
+				LogOutputHandlerEmptyResponse(stepName);
+				return new OutputHandlerResult(content, FellBackToOriginal: true);
+			}
+
+			return new OutputHandlerResult(result.Content, FellBackToOriginal: false);
 		}
 		catch (OperationCanceledException)
 		{
@@ -360,9 +382,14 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			// Output handler failure should not lose the primary step output.
 			// Log the error and fall back to the raw (unprocessed) content.
 			LogOutputHandlerFailed(ex);
-			return content;
+			return new OutputHandlerResult(content, FellBackToOriginal: true);
 		}
 	}
+
+	/// <summary>
+	/// Result from the output handler, including whether a fallback to the original content was used.
+	/// </summary>
+	private sealed record OutputHandlerResult(string Content, bool FellBackToOriginal);
 
 	/// <summary>
 	/// Copies orchestration-complete flags from the engine tool context onto the execution result.
@@ -437,6 +464,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Warning,
 		Message = "Output handler failed, falling back to raw content")]
 	private partial void LogOutputHandlerFailed(Exception ex);
+
+	[LoggerMessage(
+		EventId = 8,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' output handler returned empty/whitespace response, falling back to original content")]
+	private partial void LogOutputHandlerEmptyResponse(string stepName);
 
 	#endregion
 }

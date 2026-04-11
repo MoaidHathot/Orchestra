@@ -258,16 +258,15 @@ public partial class OrchestrationExecutor
 
 				// Report step completed/failed/no-action to the reporter so the UI
 				// can update step status immediately (not just at orchestration-done).
-				// PromptExecutor already reports ReportStepCompleted for model metadata;
-				// this centralised call ensures all step types (Command, HTTP, Transform)
-				// also emit step-completed events.
+				// This centralised call ensures all step types (Prompt, Command, HTTP, Transform)
+				// emit step-completed events with their step type for correct UI display.
 				if (result.Status == ExecutionStatus.Succeeded || result.Status == ExecutionStatus.NoAction)
 				{
 					_reporter.ReportStepCompleted(step.Name, new AgentResult
 					{
 						Content = result.Content,
 						ActualModel = result.ActualModel,
-					});
+					}, step.Type);
 				}
 
 					// Handle loop if configured (loop is a Prompt-only feature)

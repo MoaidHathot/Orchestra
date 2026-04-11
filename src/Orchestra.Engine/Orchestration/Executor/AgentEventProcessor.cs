@@ -107,20 +107,20 @@ public class AgentEventProcessor
 
 			case AgentEventType.Warning:
 				HandleWarning(evt);
+			break;
+
+			case AgentEventType.Info:
+				HandleInfo(evt);
 				break;
 
-		case AgentEventType.Info:
-			HandleInfo(evt);
-			break;
+			case AgentEventType.McpServersLoaded:
+				HandleMcpServersLoaded(evt);
+				break;
 
-		case AgentEventType.McpServersLoaded:
-			HandleMcpServersLoaded(evt);
-			break;
-
-		case AgentEventType.McpServerStatusChanged:
-			HandleMcpServerStatusChanged(evt);
-			break;
-	}
+			case AgentEventType.McpServerStatusChanged:
+				HandleMcpServerStatusChanged(evt);
+				break;
+		}
 	}
 
 	private void HandleMessageDelta(AgentEvent evt)

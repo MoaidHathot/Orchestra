@@ -98,7 +98,7 @@ public class TerminalOrchestrationReporterTests
 		reporter.OnStepCompleted = s => completedStep = s;
 
 		var result = new AgentResult { Content = "test content", ActualModel = "gpt-4o", Usage = new AgentUsage { InputTokens = 100, OutputTokens = 50 } };
-		reporter.ReportStepCompleted("step1", result);
+		reporter.ReportStepCompleted("step1", result, OrchestrationStepType.Prompt);
 
 		reporter.GetEvents().Should().HaveCount(1);
 		completedStep.Should().Be("step1");
@@ -421,7 +421,7 @@ public class StreamingReporterTests
 			ActualModel = "gpt-4o",
 			Usage = new AgentUsage { InputTokens = 100, OutputTokens = 50 }
 		};
-		reporter.ReportStepCompleted("step1", result);
+		reporter.ReportStepCompleted("step1", result, OrchestrationStepType.Prompt);
 
 		reporter.CurrentStreamingStep.Should().BeNull();
 	}
@@ -441,7 +441,7 @@ public class StreamingReporterTests
 			ActualModel = "gpt-4o",
 			Usage = new AgentUsage { InputTokens = 10, OutputTokens = 5 }
 		};
-		reporter.ReportStepCompleted("step1", result);
+		reporter.ReportStepCompleted("step1", result, OrchestrationStepType.Prompt);
 
 		reporter.CurrentStreamingStep.Should().Be("step2");
 	}

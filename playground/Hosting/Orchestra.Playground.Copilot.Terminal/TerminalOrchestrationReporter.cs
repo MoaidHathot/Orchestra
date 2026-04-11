@@ -203,7 +203,7 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 		AddEvent(new ReporterEvent("step-cancelled", $"[{stepName}] Cancelled"));
 	}
 
-	public void ReportStepCompleted(string stepName, AgentResult result)
+	public void ReportStepCompleted(string stepName, AgentResult result, OrchestrationStepType stepType)
 	{
 		lock (_lock)
 		{
@@ -213,7 +213,10 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 				_currentStreamingStep = null;
 			}
 		}
-		AddEvent(new ReporterEvent("step-completed", $"[{stepName}] Completed (model: {result.ActualModel})"));
+		var modelInfo = result.ActualModel is not null
+			? $"model: {result.ActualModel}"
+			: stepType.ToString().ToLowerInvariant();
+		AddEvent(new ReporterEvent("step-completed", $"[{stepName}] Completed ({modelInfo})"));
 		OnStepCompleted?.Invoke(stepName);
 	}
 

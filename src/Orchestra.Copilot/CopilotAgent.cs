@@ -20,6 +20,8 @@ public partial class CopilotAgent : IAgent
 	private readonly EngineToolContext? _engineToolContext;
 	private readonly string[] _skillDirectories;
 	private readonly ILogger<CopilotAgent> _logger;
+	private readonly IReadOnlyList<AvailableModelInfo>? _cachedAvailableModels;
+	private readonly Action<IReadOnlyList<AvailableModelInfo>>? _onAvailableModelsListed;
 
 	internal CopilotAgent(
 			CopilotClient client,
@@ -33,7 +35,9 @@ public partial class CopilotAgent : IAgent
 			IReadOnlyCollection<IEngineTool> engineTools,
 			EngineToolContext? engineToolContext,
 			string[] skillDirectories,
-			ILogger<CopilotAgent> logger)
+			ILogger<CopilotAgent> logger,
+			IReadOnlyList<AvailableModelInfo>? cachedAvailableModels = null,
+			Action<IReadOnlyList<AvailableModelInfo>>? onAvailableModelsListed = null)
 	{
 		_client = client;
 		_model = model;
@@ -47,6 +51,8 @@ public partial class CopilotAgent : IAgent
 		_engineToolContext = engineToolContext;
 		_skillDirectories = skillDirectories;
 		_logger = logger;
+		_cachedAvailableModels = cachedAvailableModels;
+		_onAvailableModelsListed = onAvailableModelsListed;
 	}
 
 	public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
@@ -66,20 +72,25 @@ public partial class CopilotAgent : IAgent
 			var config = BuildSessionConfig();
 			LogMcpConfiguration();
 
-			await using var session = await _client.CreateSessionAsync(config, cancellationToken);
+			await using var session = await _client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
 
-			var done = new TaskCompletionSource();
+			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 			var handler = new CopilotSessionHandler(writer, _reporter, _model, done);
 
 			session.On(handler.HandleEvent);
 
-			await session.SendAsync(new MessageOptions { Prompt = prompt }, cancellationToken);
+			await session.SendAsync(new MessageOptions { Prompt = prompt }, cancellationToken).ConfigureAwait(false);
 
-			using var registration = cancellationToken.Register(() => done.TrySetCanceled(cancellationToken));
-			await done.Task;
+			using var registration = cancellationToken.Register(() =>
+			{
+				// Abort the in-flight message so the CLI stops processing
+				_ = session.AbortAsync();
+				done.TrySetCanceled(cancellationToken);
+			});
+			await done.Task.ConfigureAwait(false);
 
 			// Handle model mismatch detection and reporting
-			var availableModels = await CheckModelMismatchAsync(handler.ActualModel, cancellationToken);
+			var availableModels = await CheckModelMismatchAsync(handler.ActualModel, cancellationToken).ConfigureAwait(false);
 
 			return new AgentResult
 			{
@@ -181,27 +192,36 @@ public partial class CopilotAgent : IAgent
 		if (actualModel is null || string.Equals(actualModel, _model, StringComparison.OrdinalIgnoreCase))
 			return null;
 
-		IReadOnlyList<AvailableModelInfo>? availableModels = null;
+		// Use cached models if available to avoid repeated network calls
+		// across parallel steps in the same orchestration run.
+		var availableModels = _cachedAvailableModels;
 
-		try
+		if (availableModels is null)
 		{
-			var models = await _client.ListModelsAsync(cancellationToken);
-			availableModels = models
-				.OrderBy(m => m.Id)
-				.Select(m => new AvailableModelInfo
-				{
-					Id = m.Id,
-					Name = m.Name,
-					BillingMultiplier = m.Billing?.Multiplier,
-					ReasoningEfforts = m.SupportedReasoningEfforts is { Count: > 0 }
-						? [.. m.SupportedReasoningEfforts]
-						: null,
-				})
-				.ToList();
-		}
-		catch
-		{
-			// Unable to list models - continue without them
+			try
+			{
+				var models = await _client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+				availableModels = models
+					.OrderBy(m => m.Id)
+					.Select(m => new AvailableModelInfo
+					{
+						Id = m.Id,
+						Name = m.Name,
+						BillingMultiplier = m.Billing?.Multiplier,
+						ReasoningEfforts = m.SupportedReasoningEfforts is { Count: > 0 }
+							? [.. m.SupportedReasoningEfforts]
+							: null,
+					})
+					.ToList();
+
+				// Cache for other agents in this run
+				_onAvailableModelsListed?.Invoke(availableModels);
+			}
+			catch (Exception ex)
+			{
+				// Unable to list models - log and continue without them
+				LogListModelsFailed(ex);
+			}
 		}
 
 		_reporter.ReportModelMismatch(new ModelMismatchInfo
@@ -222,37 +242,7 @@ public partial class CopilotAgent : IAgent
 		return availableModels;
 	}
 
-	private Dictionary<string, object> BuildMcpServers()
-	{
-		var servers = new Dictionary<string, object>();
-
-		foreach (var mcp in _mcps)
-		{
-			switch (mcp)
-			{
-				case LocalMcp local:
-					servers[mcp.Name] = new McpLocalServerConfig
-					{
-						Command = local.Command,
-						Args = [.. local.Arguments],
-						Cwd = local.WorkingDirectory,
-						Tools = ["*"],
-					};
-					break;
-
-				case RemoteMcp remote:
-					servers[mcp.Name] = new McpRemoteServerConfig
-					{
-						Url = remote.Endpoint,
-						Headers = remote.Headers,
-						Tools = ["*"],
-					};
-					break;
-			}
-		}
-
-		return servers;
-	}
+	private Dictionary<string, object> BuildMcpServers() => BuildMcpServerDictionary(_mcps);
 
 	private List<CustomAgentConfig> BuildCustomAgents()
 	{
@@ -291,7 +281,9 @@ public partial class CopilotAgent : IAgent
 		return customAgents;
 	}
 
-	private Dictionary<string, object> BuildMcpServersFor(Mcp[] mcps)
+	private Dictionary<string, object> BuildMcpServersFor(Mcp[] mcps) => BuildMcpServerDictionary(mcps);
+
+	private static Dictionary<string, object> BuildMcpServerDictionary(Mcp[] mcps)
 	{
 		var servers = new Dictionary<string, object>();
 
@@ -392,6 +384,12 @@ public partial class CopilotAgent : IAgent
 			Level = LogLevel.Debug,
 			Message = "Configuring subagent '{Name}': DisplayName={DisplayName}, Tools=[{Tools}], McpCount={McpCount}, Infer={Infer}")]
 	private partial void LogSubagentDetails(string name, string displayName, string tools, int mcpCount, bool infer);
+
+	[LoggerMessage(
+			EventId = 7,
+			Level = LogLevel.Warning,
+			Message = "Failed to list available models for model mismatch report")]
+	private partial void LogListModelsFailed(Exception ex);
 
 	#endregion
 }

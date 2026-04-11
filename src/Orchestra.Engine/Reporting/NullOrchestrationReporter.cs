@@ -13,7 +13,7 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	public void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error) { }
 	public void ReportStepError(string stepName, string errorMessage) { }
 	public void ReportStepCancelled(string stepName) { }
-	public void ReportStepCompleted(string stepName, AgentResult result) { }
+	public void ReportStepCompleted(string stepName, AgentResult result, OrchestrationStepType stepType) { }
 	public void ReportStepTrace(string stepName, StepExecutionTrace trace) { }
 	public void ReportModelMismatch(ModelMismatchInfo mismatch) { }
 	public void ReportStepOutput(string stepName, string content) { }

@@ -70,11 +70,15 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		Console.WriteLine($"  [{stepName}] Cancelled");
 	}
 
-	public void ReportStepCompleted(string stepName, AgentResult result)
+	public void ReportStepCompleted(string stepName, AgentResult result, OrchestrationStepType stepType)
 	{
 		if (result.ActualModel is not null)
 		{
 			Console.WriteLine($"  [{stepName}] Model used: {result.ActualModel}");
+		}
+		else
+		{
+			Console.WriteLine($"  [{stepName}] Completed ({stepType.ToString().ToLowerInvariant()})");
 		}
 	}
 

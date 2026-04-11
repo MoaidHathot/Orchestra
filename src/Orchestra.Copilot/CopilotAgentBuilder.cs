@@ -9,10 +9,37 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 {
 	private CopilotClient _client = new ();
 	private readonly ILoggerFactory _loggerFactory;
+	private volatile bool _clientStarted;
+	private readonly SemaphoreSlim _startLock = new(1, 1);
+
+	/// <summary>
+	/// Cached available model info from the last ListModelsAsync call.
+	/// Avoids repeated network calls when multiple steps hit model mismatch in the same run.
+	/// </summary>
+	internal IReadOnlyList<AvailableModelInfo>? CachedAvailableModels { get; set; }
 
 	public CopilotAgentBuilder(ILoggerFactory? loggerFactory = null)
 	{
 		_loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+	}
+
+	private async Task EnsureClientStartedAsync(CancellationToken cancellationToken)
+	{
+		if (_clientStarted) return;
+
+		await _startLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			if (!_clientStarted)
+			{
+				await _client.StartAsync(cancellationToken).ConfigureAwait(false);
+				_clientStarted = true;
+			}
+		}
+		finally
+		{
+			_startLock.Release();
+		}
 	}
 
 	public override async Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)
@@ -31,7 +58,7 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		var engineToolCtx = EngineToolCtx;
 		var skillDirectories = SkillDirectories;
 
-		await _client.StartAsync(cancellationToken);
+		await EnsureClientStartedAsync(cancellationToken).ConfigureAwait(false);
 
 		return new CopilotAgent(
 			client: _client,
@@ -45,13 +72,15 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			engineTools: engineTools,
 			engineToolContext: engineToolCtx,
 			skillDirectories: skillDirectories,
+			cachedAvailableModels: CachedAvailableModels,
+			onAvailableModelsListed: models => CachedAvailableModels = models,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()
 		);
 	}
 
 	public override async Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 	{
-		await _client.StartAsync(cancellationToken);
+		await EnsureClientStartedAsync(cancellationToken).ConfigureAwait(false);
 
 		return new CopilotAgent(
 			client: _client,
@@ -65,14 +94,17 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			engineTools: config.EngineTools,
 			engineToolContext: config.EngineToolCtx,
 			skillDirectories: config.SkillDirectories,
+			cachedAvailableModels: CachedAvailableModels,
+			onAvailableModelsListed: models => CachedAvailableModels = models,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()
 		);
 	}
 
 	public async ValueTask DisposeAsync()
 	{
-		await _client.StopAsync();
-		await _client.DisposeAsync();
+		await _client.StopAsync().ConfigureAwait(false);
+		await _client.DisposeAsync().ConfigureAwait(false);
+		_startLock.Dispose();
 
 		GC.SuppressFinalize(this);
 	}

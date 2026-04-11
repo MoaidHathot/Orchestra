@@ -1313,4 +1313,120 @@ public class CopilotSessionHandlerTests
 	}
 
 	#endregion
+
+	#region Tool Call Name Cleanup
+
+	[Fact]
+	public void HandleEvent_ToolExecutionComplete_RemovesToolCallIdFromDictionary()
+	{
+		// Arrange — After correlating a tool name, the entry should be removed
+		// from the internal dictionary to avoid unbounded growth in long sessions.
+		var startEvent = CreateToolStartEvent(toolCallId: "cleanup-test", toolName: "my_tool");
+		var completeEvent = CreateToolCompleteEvent(toolCallId: "cleanup-test", success: true);
+
+		// Act — Start and complete the tool
+		_handler.HandleEvent(startEvent);
+		_handler.HandleEvent(completeEvent);
+
+		// Now try to complete the same tool call ID again
+		var duplicateCompleteEvent = CreateToolCompleteEvent(toolCallId: "cleanup-test", success: true);
+		_handler.HandleEvent(duplicateCompleteEvent);
+
+		// Assert — The second completion should NOT have a tool name
+		// because the first completion removed it from the dictionary
+		_channel.Reader.TryRead(out _); // start event
+		_channel.Reader.TryRead(out var firstComplete); // first complete — has tool name
+		_channel.Reader.TryRead(out var secondComplete); // second complete — no tool name
+
+		firstComplete!.ToolName.Should().Be("my_tool");
+		secondComplete!.ToolName.Should().BeNull("tool call ID should be removed after first correlation");
+	}
+
+	[Fact]
+	public void HandleEvent_MultipleToolCalls_EachCleanedUpIndependently()
+	{
+		// Arrange
+		_handler.HandleEvent(CreateToolStartEvent(toolCallId: "call-a", toolName: "tool_a"));
+		_handler.HandleEvent(CreateToolStartEvent(toolCallId: "call-b", toolName: "tool_b"));
+
+		// Complete call-a first
+		_handler.HandleEvent(CreateToolCompleteEvent(toolCallId: "call-a", success: true));
+
+		// call-b should still be tracked
+		_handler.HandleEvent(CreateToolCompleteEvent(toolCallId: "call-b", success: true));
+
+		// Assert
+		_channel.Reader.TryRead(out _); // start a
+		_channel.Reader.TryRead(out _); // start b
+		_channel.Reader.TryRead(out var completeA);
+		_channel.Reader.TryRead(out var completeB);
+
+		completeA!.ToolName.Should().Be("tool_a");
+		completeB!.ToolName.Should().Be("tool_b");
+	}
+
+	#endregion
+
+	#region Error Event Completes TCS
+
+	[Fact]
+	public void HandleEvent_Error_CompletesTaskCompletionSource()
+	{
+		// Arrange — Error events should complete the TCS so RunSessionAsync
+		// doesn't hang forever waiting for an idle event that may never come.
+		var errorEvent = CreateErrorEvent("Fatal session error");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		_done.Task.IsCompleted.Should().BeTrue();
+		_done.Task.IsCompletedSuccessfully.Should().BeTrue(
+			"error should set result (not fault) — the error is reported via the event, not the TCS");
+	}
+
+	[Fact]
+	public void HandleEvent_Error_ThenIdle_DoesNotThrow()
+	{
+		// Arrange — If both error and idle arrive (e.g., SDK cleanup), the second
+		// TrySetResult should be a no-op, not throw.
+		_handler.HandleEvent(CreateErrorEvent("Error first"));
+
+		// Act — Should not throw on second completion
+		var act = () => _handler.HandleEvent(CreateIdleEvent());
+
+		// Assert
+		act.Should().NotThrow();
+		_done.Task.IsCompleted.Should().BeTrue();
+	}
+
+	#endregion
+
+	#region Tool Execution Complete With Null ToolCallId
+
+	[Fact]
+	public void HandleEvent_ToolExecutionComplete_WithNullToolCallId_DoesNotThrow()
+	{
+		// Arrange — The SDK can send a completion without a tool call ID
+		var completeEvent = new ToolExecutionCompleteEvent
+		{
+			Data = new ToolExecutionCompleteData
+			{
+				ToolCallId = null!,
+				Success = true,
+				Result = null,
+				Error = null
+			}
+		};
+
+		// Act
+		var act = () => _handler.HandleEvent(completeEvent);
+
+		// Assert
+		act.Should().NotThrow();
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.ToolName.Should().BeNull();
+	}
+
+	#endregion
 }

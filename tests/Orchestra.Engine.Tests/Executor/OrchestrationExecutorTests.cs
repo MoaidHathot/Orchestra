@@ -1274,7 +1274,7 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — ReportStepCompleted should be called centrally after execution
-		_reporter.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == "Step output"));
+		_reporter.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == "Step output"), Arg.Any<OrchestrationStepType>());
 	}
 
 	[Fact]
@@ -1289,9 +1289,9 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — All three steps should get step-completed events
-		_reporter.Received().ReportStepCompleted("A", Arg.Any<AgentResult>());
-		_reporter.Received().ReportStepCompleted("B", Arg.Any<AgentResult>());
-		_reporter.Received().ReportStepCompleted("C", Arg.Any<AgentResult>());
+		_reporter.Received().ReportStepCompleted("A", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporter.Received().ReportStepCompleted("B", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporter.Received().ReportStepCompleted("C", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
 	}
 
 	[Fact]
@@ -1306,9 +1306,9 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — All three parallel steps should get step-completed events
-		_reporter.Received().ReportStepCompleted("A", Arg.Any<AgentResult>());
-		_reporter.Received().ReportStepCompleted("B", Arg.Any<AgentResult>());
-		_reporter.Received().ReportStepCompleted("C", Arg.Any<AgentResult>());
+		_reporter.Received().ReportStepCompleted("A", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporter.Received().ReportStepCompleted("B", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporter.Received().ReportStepCompleted("C", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
 	}
 
 	[Fact]
@@ -1323,7 +1323,7 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — Failed steps should NOT get step-completed events
-		_reporter.DidNotReceive().ReportStepCompleted(Arg.Any<string>(), Arg.Any<AgentResult>());
+		_reporter.DidNotReceive().ReportStepCompleted(Arg.Any<string>(), Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
 	}
 
 	[Fact]
@@ -1339,7 +1339,7 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — Disabled steps return Succeeded status, so they DO get step-completed
-		_reporter.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == string.Empty));
+		_reporter.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == string.Empty), Arg.Any<OrchestrationStepType>());
 	}
 
 	#endregion

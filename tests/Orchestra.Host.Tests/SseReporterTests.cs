@@ -57,7 +57,7 @@ public class SseReporterTests : IDisposable
 	[Fact]
 	public void ReportStepCompleted_AddsEvent()
 	{
-		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" });
+		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" }, OrchestrationStepType.Prompt);
 
 		_reporter.AccumulatedEventCount.Should().Be(1);
 		_reporter.AccumulatedEvents[0].Type.Should().Be("step-completed");
@@ -111,7 +111,7 @@ public class SseReporterTests : IDisposable
 	public void Subscribe_ReturnsReplayOfAccumulatedEvents()
 	{
 		_reporter.ReportStepStarted("step-1");
-		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" });
+		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" }, OrchestrationStepType.Prompt);
 		_reporter.ReportStepStarted("step-2");
 
 		var (replay, _) = _reporter.Subscribe();
@@ -221,7 +221,7 @@ public class SseReporterTests : IDisposable
 		_reporter.ReportStepStarted("step-1");
 		_reporter.SendHeartbeat();
 		_reporter.SendHeartbeat();
-		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" });
+		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" }, OrchestrationStepType.Prompt);
 
 		// Heartbeats should NOT be in accumulated events
 		_reporter.AccumulatedEventCount.Should().Be(2);
@@ -291,7 +291,7 @@ public class SseReporterTests : IDisposable
 		string? calledWith = null;
 		_reporter.OnStepCompleted = name => calledWith = name;
 
-		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" });
+		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" }, OrchestrationStepType.Prompt);
 
 		calledWith.Should().Be("step-1");
 	}
@@ -474,9 +474,9 @@ public class SseReporterTests : IDisposable
 
 		// Act — simulate a full execution lifecycle (what TriggerManager now does)
 		_reporter.ReportStepStarted("analyze");
-		_reporter.ReportStepCompleted("analyze", new AgentResult { Content = "result" });
+		_reporter.ReportStepCompleted("analyze", new AgentResult { Content = "result" }, OrchestrationStepType.Prompt);
 		_reporter.ReportStepStarted("summarize");
-		_reporter.ReportStepCompleted("summarize", new AgentResult { Content = "summary" });
+		_reporter.ReportStepCompleted("summarize", new AgentResult { Content = "summary" }, OrchestrationStepType.Prompt);
 		_reporter.ReportStepOutput("analyze", "result content");
 		_reporter.ReportStepOutput("summarize", "summary content");
 
@@ -519,7 +519,7 @@ public class SseReporterTests : IDisposable
 	{
 		// Act — simulate a completed execution (no subscriber at start)
 		_reporter.ReportStepStarted("step1");
-		_reporter.ReportStepCompleted("step1", new AgentResult { Content = "output" });
+		_reporter.ReportStepCompleted("step1", new AgentResult { Content = "output" }, OrchestrationStepType.Prompt);
 		_reporter.ReportStepOutput("step1", "output");
 
 		var orchestrationResult = new OrchestrationResult
@@ -586,14 +586,14 @@ public class DefaultExecutionCallbackTests
 		info.CurrentStep.Should().Be("Step1");
 		info.CompletedSteps.Should().Be(0);
 
-		reporter.ReportStepCompleted("Step1", new AgentResult { Content = "done" });
+		reporter.ReportStepCompleted("Step1", new AgentResult { Content = "done" }, OrchestrationStepType.Prompt);
 		info.CurrentStep.Should().BeNull();
 		info.CompletedSteps.Should().Be(1);
 
 		reporter.ReportStepStarted("Step2");
 		info.CurrentStep.Should().Be("Step2");
 
-		reporter.ReportStepCompleted("Step2", new AgentResult { Content = "done" });
+		reporter.ReportStepCompleted("Step2", new AgentResult { Content = "done" }, OrchestrationStepType.Prompt);
 		info.CompletedSteps.Should().Be(2);
 		info.CurrentStep.Should().BeNull();
 
@@ -711,7 +711,7 @@ public class DefaultExecutionCallbackTests
 		info.CurrentStep.Should().Be("Gather");
 		info.CompletedSteps.Should().Be(0);
 
-		reporter.ReportStepCompleted("Gather", new AgentResult { Content = "gathered" });
+		reporter.ReportStepCompleted("Gather", new AgentResult { Content = "gathered" }, OrchestrationStepType.Prompt);
 		info.CurrentStep.Should().BeNull();
 		info.CompletedSteps.Should().Be(1);
 
@@ -720,7 +720,7 @@ public class DefaultExecutionCallbackTests
 		info.CurrentStep.Should().Be("Analyze");
 		info.CompletedSteps.Should().Be(1);
 
-		reporter.ReportStepCompleted("Analyze", new AgentResult { Content = "analyzed" });
+		reporter.ReportStepCompleted("Analyze", new AgentResult { Content = "analyzed" }, OrchestrationStepType.Prompt);
 		info.CurrentStep.Should().BeNull();
 		info.CompletedSteps.Should().Be(2);
 
@@ -728,14 +728,14 @@ public class DefaultExecutionCallbackTests
 		reporter.ReportStepStarted("Transform");
 		info.CurrentStep.Should().Be("Transform");
 
-		reporter.ReportStepCompleted("Transform", new AgentResult { Content = "transformed" });
+		reporter.ReportStepCompleted("Transform", new AgentResult { Content = "transformed" }, OrchestrationStepType.Transform);
 		info.CompletedSteps.Should().Be(3);
 
 		// Step 4
 		reporter.ReportStepStarted("Report");
 		info.CurrentStep.Should().Be("Report");
 
-		reporter.ReportStepCompleted("Report", new AgentResult { Content = "reported" });
+		reporter.ReportStepCompleted("Report", new AgentResult { Content = "reported" }, OrchestrationStepType.Prompt);
 		info.CompletedSteps.Should().Be(4);
 		info.CurrentStep.Should().BeNull();
 
@@ -784,7 +784,7 @@ public class DefaultExecutionCallbackTests
 		info1.CurrentStep.Should().BeNull("info1 callbacks were overwritten");
 		info2.CurrentStep.Should().Be("StepA");
 
-		reporter.ReportStepCompleted("StepA", new AgentResult { Content = "done" });
+		reporter.ReportStepCompleted("StepA", new AgentResult { Content = "done" }, OrchestrationStepType.Prompt);
 		info1.CompletedSteps.Should().Be(0, "info1 callbacks were overwritten");
 		info2.CompletedSteps.Should().Be(1);
 
@@ -803,7 +803,7 @@ public class DefaultExecutionCallbackTests
 		public void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error) { }
 		public void ReportStepError(string stepName, string errorMessage) { }
 		public void ReportStepCancelled(string stepName) { }
-		public void ReportStepCompleted(string stepName, AgentResult result) { }
+		public void ReportStepCompleted(string stepName, AgentResult result, OrchestrationStepType stepType) { }
 		public void ReportStepTrace(string stepName, StepExecutionTrace trace) { }
 		public void ReportModelMismatch(ModelMismatchInfo mismatch) { }
 		public void ReportStepOutput(string stepName, string content) { }

@@ -18,7 +18,11 @@ internal sealed class EngineToolAIFunction : AIFunction
 	{
 		_tool = tool;
 		_context = context;
-		_jsonSchema = JsonDocument.Parse(tool.ParametersSchema).RootElement;
+
+		// Parse and clone the schema so the intermediate JsonDocument can be disposed.
+		// Without Clone(), the JsonElement holds a reference to the document's pooled memory.
+		using var doc = JsonDocument.Parse(tool.ParametersSchema);
+		_jsonSchema = doc.RootElement.Clone();
 	}
 
 	public override string Name => _tool.Name;
@@ -31,6 +35,8 @@ internal sealed class EngineToolAIFunction : AIFunction
 		AIFunctionArguments arguments,
 		CancellationToken cancellationToken)
 	{
+		cancellationToken.ThrowIfCancellationRequested();
+
 		// Serialize arguments back to JSON string for the engine tool
 		var argsJson = JsonSerializer.Serialize(
 			arguments.ToDictionary(kv => kv.Key, kv => kv.Value));

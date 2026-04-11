@@ -94,7 +94,7 @@ public abstract class AgentBuilder
 
 	/// <summary>
 	/// Builds an agent from the current mutable builder state.
-	/// WARNING: Not safe for concurrent use — if multiple threads call With*() + BuildAgentAsync()
+	/// Not safe for concurrent use — if multiple threads call With*() + BuildAgentAsync()
 	/// on the same builder instance, state can be overwritten between calls.
 	/// Prefer <see cref="BuildAgentAsync(AgentBuildConfig, CancellationToken)"/> for concurrent scenarios.
 	/// </summary>
