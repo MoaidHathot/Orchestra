@@ -244,7 +244,6 @@ curl -X POST http://localhost:5000/api/webhooks/{id} \
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/models` | List available AI models |
 | `GET` | `/api/mcps` | List MCPs used across orchestrations |
 | `GET` | `/api/status` | Get server status |
 
@@ -376,7 +375,7 @@ app.MapTriggersEndpoints();         // /api/triggers
 app.MapWebhooksEndpoints();         // /api/webhooks
 app.MapRunsEndpoints();             // /api/history, /api/active
 app.MapExecutionEndpoints();        // /api/orchestrations/{id}/run, /api/execution/{id}/attach
-app.MapUtilityEndpoints();          // /api/models, /api/mcps, /api/status
+app.MapUtilityEndpoints();          // /api/mcps, /api/status, /api/health
 ```
 
 ## Architecture

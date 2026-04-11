@@ -294,7 +294,7 @@ public class WebhookSyncResponseTests
 					"type": "prompt",
 					"systemPrompt": "You are helpful",
 					"userPrompt": "Hello",
-					"model": "gpt-4o-mini"
+					"model": "claude-opus-4.6"
 				}
 			],
 			"trigger": {
@@ -339,7 +339,7 @@ public class WebhookSyncResponseTests
 					"type": "prompt",
 					"systemPrompt": "You are helpful",
 					"userPrompt": "Hello",
-					"model": "gpt-4o-mini"
+					"model": "claude-opus-4.6"
 				}
 			],
 			"trigger": {
@@ -375,7 +375,7 @@ public class WebhookSyncResponseTests
 					"type": "prompt",
 					"systemPrompt": "You are helpful",
 					"userPrompt": "Hello",
-					"model": "gpt-4o-mini"
+					"model": "claude-opus-4.6"
 				}
 			],
 			"trigger": {
@@ -412,7 +412,7 @@ public class WebhookSyncResponseTests
 					"type": "prompt",
 					"systemPrompt": "You are helpful",
 					"userPrompt": "Hello",
-					"model": "gpt-4o-mini"
+					"model": "claude-opus-4.6"
 				}
 			],
 			"trigger": {

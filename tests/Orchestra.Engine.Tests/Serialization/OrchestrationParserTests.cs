@@ -511,6 +511,58 @@ public class OrchestrationParserTests
 		trigger.ContinueOnFailure.Should().BeTrue();
 	}
 
+	[Fact]
+	public void ParseOrchestration_TriggerWithInputHandlerModel_ParsesCorrectly()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "handler-model-test",
+				"description": "Test",
+				"trigger": {
+					"type": "webhook",
+					"enabled": true,
+					"inputHandlerPrompt": "Extract the fields",
+					"inputHandlerModel": "claude-sonnet-4"
+				},
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Trigger.Should().BeOfType<WebhookTriggerConfig>();
+		var trigger = orchestration.Trigger as WebhookTriggerConfig;
+		trigger!.InputHandlerPrompt.Should().Be("Extract the fields");
+		trigger.InputHandlerModel.Should().Be("claude-sonnet-4");
+	}
+
+	[Fact]
+	public void ParseOrchestration_TriggerWithoutInputHandlerModel_DefaultsToNull()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "no-handler-model-test",
+				"description": "Test",
+				"trigger": {
+					"type": "manual",
+					"inputHandlerPrompt": "Transform params"
+				},
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Trigger!.InputHandlerPrompt.Should().Be("Transform params");
+		orchestration.Trigger.InputHandlerModel.Should().BeNull();
+	}
+
 	#endregion
 
 	#region MCP Parsing

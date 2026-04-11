@@ -20,4 +20,10 @@ public abstract class TriggerConfig
 	/// The raw input is appended to this prompt, and the LLM's JSON response becomes the parameters.
 	/// </summary>
 	public string? InputHandlerPrompt { get; init; }
+
+	/// <summary>
+	/// The model to use for the input handler LLM call. If null, falls back to the
+	/// global default model configured in orchestra.json.
+	/// </summary>
+	public string? InputHandlerModel { get; init; }
 }

@@ -136,6 +136,8 @@ public class TriggerTypesTests
 		{
 			Type = TriggerType.Scheduler,
 			Enabled = true,
+			InputHandlerPrompt = "Transform the input",
+			InputHandlerModel = "claude-sonnet-4",
 			Cron = "*/5 * * * *",
 			IntervalSeconds = 300,
 			MaxRuns = 10
@@ -148,6 +150,8 @@ public class TriggerTypesTests
 		cloned.Should().BeOfType<SchedulerTriggerConfig>();
 		var schedulerClone = (SchedulerTriggerConfig)cloned;
 		schedulerClone.Enabled.Should().BeFalse();
+		schedulerClone.InputHandlerPrompt.Should().Be("Transform the input");
+		schedulerClone.InputHandlerModel.Should().Be("claude-sonnet-4");
 		schedulerClone.Cron.Should().Be("*/5 * * * *");
 		schedulerClone.IntervalSeconds.Should().Be(300);
 		schedulerClone.MaxRuns.Should().Be(10);
@@ -161,6 +165,8 @@ public class TriggerTypesTests
 		{
 			Type = TriggerType.Loop,
 			Enabled = false,
+			InputHandlerPrompt = "Parse the loop input",
+			InputHandlerModel = "gpt-4.1-mini",
 			DelaySeconds = 60,
 			MaxIterations = 5,
 			ContinueOnFailure = true
@@ -173,6 +179,8 @@ public class TriggerTypesTests
 		cloned.Should().BeOfType<LoopTriggerConfig>();
 		var loopClone = (LoopTriggerConfig)cloned;
 		loopClone.Enabled.Should().BeTrue();
+		loopClone.InputHandlerPrompt.Should().Be("Parse the loop input");
+		loopClone.InputHandlerModel.Should().Be("gpt-4.1-mini");
 		loopClone.DelaySeconds.Should().Be(60);
 		loopClone.MaxIterations.Should().Be(5);
 		loopClone.ContinueOnFailure.Should().BeTrue();
@@ -186,6 +194,8 @@ public class TriggerTypesTests
 		{
 			Type = TriggerType.Webhook,
 			Enabled = true,
+			InputHandlerPrompt = "Extract webhook fields",
+			InputHandlerModel = "claude-opus-4.6",
 			Secret = "my-secret",
 			MaxConcurrent = 3,
 			Response = new WebhookResponseConfig
@@ -203,6 +213,8 @@ public class TriggerTypesTests
 		cloned.Should().BeOfType<WebhookTriggerConfig>();
 		var webhookClone = (WebhookTriggerConfig)cloned;
 		webhookClone.Enabled.Should().BeFalse();
+		webhookClone.InputHandlerPrompt.Should().Be("Extract webhook fields");
+		webhookClone.InputHandlerModel.Should().Be("claude-opus-4.6");
 		webhookClone.Secret.Should().Be("my-secret");
 		webhookClone.MaxConcurrent.Should().Be(3);
 		webhookClone.Response.Should().NotBeNull();

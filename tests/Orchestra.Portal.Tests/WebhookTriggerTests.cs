@@ -302,7 +302,7 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 					"dependsOn": [],
 					"systemPrompt": "You are a test assistant.",
 					"userPrompt": "Simply respond with: OK - {{uniqueSuffix}}",
-					"model": "gpt-4o-mini"
+					"model": "claude-opus-4.6"
 				}
 			]
 		}

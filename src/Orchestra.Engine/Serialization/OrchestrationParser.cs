@@ -302,6 +302,10 @@ public static class OrchestrationParser
 				? ihpProp.GetString()
 				: null;
 
+			var inputHandlerModel = root.TryGetProperty("inputHandlerModel", out var ihmProp)
+				? ihmProp.GetString()
+				: null;
+
 			return type switch
 			{
 				TriggerType.Scheduler => new SchedulerTriggerConfig
@@ -309,6 +313,7 @@ public static class OrchestrationParser
 					Type = TriggerType.Scheduler,
 					Enabled = enabled,
 					InputHandlerPrompt = inputHandlerPrompt,
+					InputHandlerModel = inputHandlerModel,
 					Cron = root.TryGetProperty("cron", out var cron) ? cron.GetString() : null,
 					IntervalSeconds = root.TryGetProperty("intervalSeconds", out var interval) ? interval.GetInt32() : null,
 					MaxRuns = root.TryGetProperty("maxRuns", out var maxRuns) ? maxRuns.GetInt32() : null,
@@ -318,6 +323,7 @@ public static class OrchestrationParser
 					Type = TriggerType.Loop,
 					Enabled = enabled,
 					InputHandlerPrompt = inputHandlerPrompt,
+					InputHandlerModel = inputHandlerModel,
 					DelaySeconds = root.TryGetProperty("delaySeconds", out var delay) ? delay.GetInt32() : 0,
 					MaxIterations = root.TryGetProperty("maxIterations", out var maxIter) ? maxIter.GetInt32() : null,
 					ContinueOnFailure = root.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
@@ -327,6 +333,7 @@ public static class OrchestrationParser
 			Type = TriggerType.Webhook,
 			Enabled = enabled,
 			InputHandlerPrompt = inputHandlerPrompt,
+			InputHandlerModel = inputHandlerModel,
 			Secret = root.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
 			MaxConcurrent = root.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
 			Response = root.TryGetProperty("response", out var responseProp)
@@ -338,6 +345,7 @@ public static class OrchestrationParser
 				Type = TriggerType.Manual,
 				Enabled = enabled,
 				InputHandlerPrompt = inputHandlerPrompt,
+				InputHandlerModel = inputHandlerModel,
 			},
 			_ => throw new JsonException($"Unknown trigger type: '{type}'."),
 			};

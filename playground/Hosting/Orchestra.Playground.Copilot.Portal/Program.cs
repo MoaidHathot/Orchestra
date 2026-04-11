@@ -73,7 +73,7 @@ app.UseStaticFiles();
 
 // Map all Orchestra Host API endpoints
 // This includes: /api/orchestrations, /api/triggers, /api/webhooks, 
-// /api/history, /api/active, /api/models, /api/mcps, /api/status,
+// /api/history, /api/active, /api/mcps, /api/status,
 // and SSE streaming endpoints
 app.MapOrchestraHostEndpoints();
 

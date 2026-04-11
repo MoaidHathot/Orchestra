@@ -68,6 +68,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.ShutdownTimeoutSeconds.Should().Be(30);
 		options.LogLevel.Should().Be("Information");
 		options.Retention.IsForever.Should().BeTrue();
+		options.DefaultModel.Should().BeNull();
 	}
 
 	[Fact]
@@ -82,6 +83,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 			OrchestrationsScanPath = "/custom/orchestrations",
 			ShutdownTimeoutSeconds = 120,
 			LogLevel = "Debug",
+			DefaultModel = "claude-sonnet-4",
 			Retention = new RetentionPolicyConfig
 			{
 				MaxRunsPerOrchestration = 50,
@@ -98,6 +100,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.OrchestrationsScanPath.Should().Be("/custom/orchestrations");
 		options.ShutdownTimeoutSeconds.Should().Be(120);
 		options.LogLevel.Should().Be("Debug");
+		options.DefaultModel.Should().Be("claude-sonnet-4");
 		options.Retention.MaxRunsPerOrchestration.Should().Be(50);
 		options.Retention.MaxRunAgeDays.Should().Be(7);
 		options.Retention.IsForever.Should().BeFalse();
@@ -442,6 +445,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 			"orchestrationsScanPath": "/round-trip/orchestrations",
 			"shutdownTimeoutSeconds": 180,
 			"logLevel": "Trace",
+			"defaultModel": "claude-sonnet-4",
 			"retention": {
 				"maxRunsPerOrchestration": 25,
 				"maxRunAgeDays": 14
@@ -461,6 +465,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.OrchestrationsScanPath.Should().Be("/round-trip/orchestrations");
 		options.ShutdownTimeoutSeconds.Should().Be(180);
 		options.LogLevel.Should().Be("Trace");
+		options.DefaultModel.Should().Be("claude-sonnet-4");
 		options.Retention.MaxRunsPerOrchestration.Should().Be(25);
 		options.Retention.MaxRunAgeDays.Should().Be(14);
 		options.Retention.IsForever.Should().BeFalse();

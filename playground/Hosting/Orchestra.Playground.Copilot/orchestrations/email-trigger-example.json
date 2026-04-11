@@ -39,7 +39,7 @@
       "dependsOn": [],
       "systemPrompt": "You are an assistant that parses Microsoft Teams email notifications. Extract the key information from the notification.",
       "userPrompt": "Parse this Teams notification email and extract: 1) The type of notification (mention, message, meeting, etc.), 2) Who sent/triggered it, 3) The channel/chat name, 4) The actual message content, 5) Any action items or requests.\n\nSubject: {{emailSubject}}\n\nBody:\n{{emailBody}}",
-      "model": "gpt-4o-mini"
+      "model": "claude-opus-4.6"
     },
     {
       "name": "categorize-and-prioritize",
@@ -48,7 +48,7 @@
       "systemPrompt": "You are an assistant that categorizes and prioritizes notifications. Based on the parsed notification, determine its urgency and category.",
       "userPrompt": "Based on the parsed notification, determine:\n1) Category: [urgent-action | meeting-reminder | information | social | other]\n2) Priority: [high | medium | low]\n3) Requires response: [yes | no]\n4) Brief reason for categorization\n\nOutput as JSON with keys: category, priority, requiresResponse, reason",
       "inputHandlerPrompt": "Take the parsed notification details from the previous step.",
-      "model": "gpt-4o-mini"
+      "model": "claude-opus-4.6"
     },
     {
       "name": "generate-summary",
@@ -58,7 +58,7 @@
       "userPrompt": "Create a brief, actionable summary of this Teams notification. Include:\n- One-line summary\n- Key person(s) involved\n- Required action (if any)\n- Deadline (if mentioned)\n\nFormat as a clean, readable summary.",
       "inputHandlerPrompt": "Combine the parsed notification content with the categorization from the previous steps.",
       "outputHandlerPrompt": "Ensure the summary is concise (under 100 words) and actionable.",
-      "model": "gpt-4o-mini"
+      "model": "claude-opus-4.6"
     }
   ]
 }

@@ -31,6 +31,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly IMcpResolver? _mcpResolver;
 	private readonly string? _dataPath;
 	private readonly string? _serverUrl;
+	private readonly string? _defaultModel;
 	private readonly JsonSerializerOptions _jsonOptions;
 
 	/// <summary>
@@ -64,7 +65,8 @@ public partial class TriggerManager : BackgroundService
 		EngineToolRegistry? engineToolRegistry = null,
 		IMcpResolver? mcpResolver = null,
 		string? dataPath = null,
-		string? serverUrl = null)
+		string? serverUrl = null,
+		string? defaultModel = null)
 	{
 		_activeExecutions = activeExecutions;
 		_activeExecutionInfos = activeExecutionInfos;
@@ -81,6 +83,7 @@ public partial class TriggerManager : BackgroundService
 		_mcpResolver = mcpResolver;
 		_dataPath = dataPath;
 		_serverUrl = serverUrl;
+		_defaultModel = defaultModel;
 		Directory.CreateDirectory(_triggersDir);
 
 		_jsonOptions = new JsonSerializerOptions
@@ -799,13 +802,13 @@ public partial class TriggerManager : BackgroundService
 					var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
 					var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
-					var agent = await _agentBuilder
-						.BuildAgentAsync(new AgentBuildConfig
-						{
-							Model = "gpt-4o-mini",
-							SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
-							Mcps = [],
-						});
+				var agent = await _agentBuilder
+					.BuildAgentAsync(new AgentBuildConfig
+					{
+						Model = reg.Config.InputHandlerModel ?? _defaultModel ?? "claude-opus-4.6",
+						SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
+						Mcps = [],
+					});
 
 					var task = agent.SendAsync(fullPrompt);
 					var result = await task.GetResultAsync();
@@ -1190,6 +1193,8 @@ public partial class TriggerManager : BackgroundService
 			{
 				Type = s.Type,
 				Enabled = enabled,
+				InputHandlerPrompt = s.InputHandlerPrompt,
+				InputHandlerModel = s.InputHandlerModel,
 				Cron = s.Cron,
 				IntervalSeconds = s.IntervalSeconds,
 				MaxRuns = s.MaxRuns,
@@ -1198,6 +1203,8 @@ public partial class TriggerManager : BackgroundService
 			{
 				Type = l.Type,
 				Enabled = enabled,
+				InputHandlerPrompt = l.InputHandlerPrompt,
+				InputHandlerModel = l.InputHandlerModel,
 				DelaySeconds = l.DelaySeconds,
 				MaxIterations = l.MaxIterations,
 				ContinueOnFailure = l.ContinueOnFailure,
@@ -1206,6 +1213,8 @@ public partial class TriggerManager : BackgroundService
 		{
 			Type = w.Type,
 			Enabled = enabled,
+			InputHandlerPrompt = w.InputHandlerPrompt,
+			InputHandlerModel = w.InputHandlerModel,
 			Secret = w.Secret,
 			MaxConcurrent = w.MaxConcurrent,
 			Response = w.Response,
@@ -1215,6 +1224,7 @@ public partial class TriggerManager : BackgroundService
 				Type = m.Type,
 				Enabled = enabled,
 				InputHandlerPrompt = m.InputHandlerPrompt,
+				InputHandlerModel = m.InputHandlerModel,
 			},
 			_ => config,
 		};
@@ -1230,6 +1240,8 @@ public partial class TriggerManager : BackgroundService
 			return null;
 
 		var enabled = element.TryGetProperty("enabled", out var enabledProp) ? enabledProp.GetBoolean() : true;
+		var inputHandlerPrompt = element.TryGetProperty("inputHandlerPrompt", out var ihpProp) ? ihpProp.GetString() : null;
+		var inputHandlerModel = element.TryGetProperty("inputHandlerModel", out var ihmProp) ? ihmProp.GetString() : null;
 
 		return type switch
 		{
@@ -1237,6 +1249,8 @@ public partial class TriggerManager : BackgroundService
 			{
 				Type = TriggerType.Scheduler,
 				Enabled = enabled,
+				InputHandlerPrompt = inputHandlerPrompt,
+				InputHandlerModel = inputHandlerModel,
 				Cron = element.TryGetProperty("cron", out var cron) ? cron.GetString() : null,
 				IntervalSeconds = element.TryGetProperty("intervalSeconds", out var interval) ? interval.GetInt32() : null,
 				MaxRuns = element.TryGetProperty("maxRuns", out var maxRuns) ? maxRuns.GetInt32() : null,
@@ -1245,6 +1259,8 @@ public partial class TriggerManager : BackgroundService
 			{
 				Type = TriggerType.Loop,
 				Enabled = enabled,
+				InputHandlerPrompt = inputHandlerPrompt,
+				InputHandlerModel = inputHandlerModel,
 				DelaySeconds = element.TryGetProperty("delaySeconds", out var delay) ? delay.GetInt32() : 0,
 				MaxIterations = element.TryGetProperty("maxIterations", out var maxIter) ? maxIter.GetInt32() : null,
 				ContinueOnFailure = element.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
@@ -1253,6 +1269,8 @@ public partial class TriggerManager : BackgroundService
 		{
 			Type = TriggerType.Webhook,
 			Enabled = enabled,
+			InputHandlerPrompt = inputHandlerPrompt,
+			InputHandlerModel = inputHandlerModel,
 			Secret = element.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
 			MaxConcurrent = element.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
 			Response = element.TryGetProperty("response", out var responseProp)
@@ -1263,6 +1281,8 @@ public partial class TriggerManager : BackgroundService
 			{
 				Type = TriggerType.Manual,
 				Enabled = enabled,
+				InputHandlerPrompt = inputHandlerPrompt,
+				InputHandlerModel = inputHandlerModel,
 			},
 			_ => null,
 		};

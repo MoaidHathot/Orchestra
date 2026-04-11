@@ -1207,15 +1207,6 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 		await AssertIsApiResponse(response, "GET /api/health");
 	}
 
-	[Fact]
-	public async Task Contract_HostCanonical_GetModels_ReturnsJson()
-	{
-		var response = await _client.GetAsync("/api/models");
-
-		response.StatusCode.Should().Be(HttpStatusCode.OK);
-		await AssertIsJsonResponse(response, "GET /api/models");
-	}
-
 	#endregion
 
 	#region Comprehensive: Every frontend URL returns API response, not SPA fallback

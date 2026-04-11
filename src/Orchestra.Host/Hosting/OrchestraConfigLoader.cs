@@ -222,6 +222,9 @@ public static class OrchestraConfigLoader
 			if (config.Polling.ServerStatusMs.HasValue)
 				options.Polling.ServerStatusMs = config.Polling.ServerStatusMs.Value;
 		}
+
+		if (config.DefaultModel is not null)
+			options.DefaultModel = config.DefaultModel;
 	}
 
 	private static string? GetPlatformConfigPath()
@@ -284,6 +287,11 @@ public class OrchestraConfigFile
 	/// Polling intervals for the web UI, in milliseconds.
 	/// </summary>
 	public PollingConfig? Polling { get; set; }
+
+	/// <summary>
+	/// Default AI model to use for internal LLM calls (e.g., trigger input handlers).
+	/// </summary>
+	public string? DefaultModel { get; set; }
 
 	/// <summary>
 	/// MCP server endpoint configuration.

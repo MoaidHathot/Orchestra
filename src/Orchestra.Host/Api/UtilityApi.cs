@@ -13,7 +13,7 @@ using Orchestra.Host.Triggers;
 namespace Orchestra.Host.Api;
 
 /// <summary>
-/// API endpoints for utility operations (models, MCPs, status).
+/// API endpoints for utility operations (MCPs, status).
 /// </summary>
 public static class UtilityApi
 {
@@ -24,27 +24,6 @@ public static class UtilityApi
 		this IEndpointRouteBuilder endpoints,
 		JsonSerializerOptions jsonOptions)
 	{
-		// GET /api/models - List available AI models
-		endpoints.MapGet("/api/models", () =>
-		{
-			var models = new[]
-			{
-				new { id = "gpt-4.1", name = "GPT-4.1", provider = "OpenAI" },
-				new { id = "gpt-4.1-mini", name = "GPT-4.1 Mini", provider = "OpenAI" },
-				new { id = "gpt-4.1-nano", name = "GPT-4.1 Nano", provider = "OpenAI" },
-				new { id = "gpt-4o", name = "GPT-4o", provider = "OpenAI" },
-				new { id = "gpt-4o-mini", name = "GPT-4o Mini", provider = "OpenAI" },
-				new { id = "o3-mini", name = "o3-mini", provider = "OpenAI" },
-				new { id = "o4-mini", name = "o4-mini", provider = "OpenAI" },
-				new { id = "claude-sonnet-4", name = "Claude Sonnet 4", provider = "Anthropic" },
-				new { id = "claude-opus-4", name = "Claude Opus 4", provider = "Anthropic" },
-				new { id = "claude-3.5-sonnet", name = "Claude 3.5 Sonnet", provider = "Anthropic" },
-				new { id = "claude-opus-4.5", name = "Claude Opus 4.5", provider = "Anthropic" },
-				new { id = "gemini-2.0-flash", name = "Gemini 2.0 Flash", provider = "Google" }
-			};
-			return Results.Json(new { models }, jsonOptions);
-		});
-
 		// GET /api/status - Server status
 		endpoints.MapGet("/api/status", (
 			OrchestrationRegistry registry,

@@ -42,7 +42,6 @@ public static class EndpointRouteBuilderExtensions
 	///   <item><description>/api/orchestrations/{id}/versions - Version history, snapshots, diffs</description></item>
 	///   <item><description>/api/profiles - Profile CRUD, activate/deactivate, effective set</description></item>
 	///   <item><description>/api/tags - Tag management, orchestration browse/search</description></item>
-	///   <item><description>/api/models - Available AI models</description></item>
 	///   <item><description>/api/mcps - MCP servers used by orchestrations</description></item>
 	///   <item><description>/api/status - Server status</description></item>
 	/// </list>
@@ -120,7 +119,7 @@ public static class EndpointRouteBuilderExtensions
 	}
 
 	/// <summary>
-	/// Maps only the utility endpoints (models, mcps, status).
+	/// Maps only the utility endpoints (mcps, status, health, config).
 	/// </summary>
 	public static IEndpointRouteBuilder MapUtilityEndpoints(
 		this IEndpointRouteBuilder endpoints,

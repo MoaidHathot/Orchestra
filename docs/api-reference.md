@@ -508,30 +508,6 @@ POST /api/active/{executionId}/cancel
 
 ## Utility
 
-### List Available Models
-
-```http
-GET /api/models
-```
-
-**Response:**
-```json
-{
-  "models": [
-    {
-      "id": "claude-opus-4.5",
-      "name": "Claude Opus 4.5",
-      "provider": "Anthropic"
-    },
-    {
-      "id": "gpt-4o",
-      "name": "GPT-4o",
-      "provider": "OpenAI"
-    }
-  ]
-}
-```
-
 ### List MCPs
 
 ```http

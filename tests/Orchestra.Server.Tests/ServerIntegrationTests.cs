@@ -94,16 +94,6 @@ public class ServerIntegrationTests : IClassFixture<ServerWebApplicationFactory>
 	}
 
 	[Fact]
-	public async Task Server_ModelsEndpoint_ReturnsJson()
-	{
-		var response = await _client.GetAsync("/api/models");
-
-		response.StatusCode.Should().Be(HttpStatusCode.OK);
-		var contentType = response.Content.Headers.ContentType?.MediaType;
-		contentType.Should().Be("application/json");
-	}
-
-	[Fact]
 	public async Task Server_TriggersEndpoint_ReturnsJson()
 	{
 		var response = await _client.GetAsync("/api/triggers");
@@ -353,7 +343,6 @@ public class ServerIntegrationTests : IClassFixture<ServerWebApplicationFactory>
 	[InlineData("GET", "/api/active")]
 	[InlineData("GET", "/api/status")]
 	[InlineData("GET", "/api/health")]
-	[InlineData("GET", "/api/models")]
 	[InlineData("GET", "/api/triggers")]
 	[InlineData("GET", "/api/mcps")]
 	[InlineData("GET", "/openapi/v1.json")]

@@ -66,6 +66,13 @@ public class OrchestrationHostOptions
 	/// These control how frequently the portal refreshes data from the server.
 	/// </summary>
 	public PollingOptions Polling { get; set; } = new();
+
+	/// <summary>
+	/// Default AI model to use for internal LLM calls (e.g., trigger input handlers)
+	/// when no model is explicitly specified.
+	/// If null, defaults to "claude-opus-4.6".
+	/// </summary>
+	public string? DefaultModel { get; set; }
 }
 
 /// <summary>
