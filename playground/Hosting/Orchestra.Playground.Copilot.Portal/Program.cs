@@ -126,8 +126,8 @@ app.MapGet("/api/browse", ([AsParameters] BrowseRequest request) =>
 			});
 		}
 
-		// Add JSON files
-		foreach (var file in Directory.GetFiles(directory, "*.json").OrderBy(f => f))
+		// Add orchestration files (JSON and YAML)
+		foreach (var file in OrchestrationParser.GetOrchestrationFiles(directory).OrderBy(f => f))
 		{
 			var fileInfo = new FileInfo(file);
 			entries.Add(new
@@ -202,7 +202,7 @@ app.MapPost("/api/folder/scan", (FolderScanRequest request) =>
 		if (!Directory.Exists(request.Directory))
 			return Results.BadRequest(new { error = $"Directory not found: {request.Directory}" });
 
-		var files = Directory.GetFiles(request.Directory, "*.json", SearchOption.TopDirectoryOnly);
+		var files = OrchestrationParser.GetOrchestrationFiles(request.Directory);
 		var orchestrations = new List<object>();
 
 		foreach (var file in files.OrderBy(f => f))

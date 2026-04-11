@@ -75,11 +75,11 @@ public sealed class ControlPlaneTools
 
 	[McpServerTool(Name = "register_orchestration"), Description(
 		"Registers an orchestration from a file path. " +
-		"The file must be a valid orchestration JSON file.")]
+		"The file must be a valid orchestration JSON or YAML file.")]
 	public static string RegisterOrchestration(
 		OrchestrationRegistry registry,
 		TriggerManager triggerManager,
-		[Description("Absolute path to the orchestration JSON file.")] string path)
+		[Description("Absolute path to the orchestration file (JSON or YAML).")] string path)
 	{
 		if (!File.Exists(path))
 			return Error($"File not found: {path}");
@@ -134,7 +134,7 @@ public sealed class ControlPlaneTools
 	}
 
 	[McpServerTool(Name = "scan_directory"), Description(
-		"Scans a directory for orchestration JSON files and returns metadata. " +
+		"Scans a directory for orchestration files (JSON and YAML) and returns metadata. " +
 		"Does not register them — use register_orchestration for that.")]
 	public static string ScanDirectory(
 		[Description("Absolute path to the directory to scan.")] string directory)
@@ -142,7 +142,7 @@ public sealed class ControlPlaneTools
 		if (!Directory.Exists(directory))
 			return Error($"Directory not found: {directory}");
 
-		var files = Directory.GetFiles(directory, "*.json");
+		var files = OrchestrationParser.GetOrchestrationFiles(directory);
 		var results = new List<object>();
 
 		foreach (var file in files)

@@ -567,7 +567,7 @@ public partial class TriggerManager : BackgroundService
 	}
 
 	/// <summary>
-	/// Scans orchestration files and registers any JSON-defined triggers that aren't
+	/// Scans orchestration files and registers any file-defined triggers that aren't
 	/// already overridden by user triggers. This includes ManualTriggerConfig for
 	/// orchestrations with no explicit trigger, ensuring every orchestration has
 	/// a trigger registration.
@@ -577,7 +577,7 @@ public partial class TriggerManager : BackgroundService
 		if (!Directory.Exists(directory))
 			return;
 
-		foreach (var file in Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly))
+		foreach (var file in OrchestrationParser.GetOrchestrationFiles(directory))
 		{
 			try
 			{

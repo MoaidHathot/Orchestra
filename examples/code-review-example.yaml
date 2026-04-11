@@ -1,0 +1,48 @@
+name: code-review
+description: Multi-step code review pipeline demonstrating YAML multiline prompts
+version: "1.0.0"
+
+steps:
+  - name: analyze-code
+    type: Prompt
+    model: claude-opus-4.6
+    dependsOn: []
+    parameters:
+      - code
+    systemPrompt: |
+      You are a senior software engineer performing a thorough code review.
+      Focus on:
+      - Code correctness and potential bugs
+      - Performance implications
+      - Security vulnerabilities
+      - Adherence to best practices and coding standards
+      - Code readability and maintainability
+
+      Provide specific, actionable feedback with code examples where helpful.
+    userPrompt: |
+      Review the following code and provide detailed feedback:
+
+      {{param.code}}
+
+  - name: summarize-review
+    type: Prompt
+    model: claude-opus-4.6
+    dependsOn:
+      - analyze-code
+    systemPrompt: |
+      You are a technical writer. Summarize code review feedback into
+      a concise, well-organized report with severity ratings for each
+      finding (Critical, Warning, Suggestion).
+    userPrompt: |
+      Summarize the following code review into a brief report:
+
+      {{analyze-code.output}}
+
+  - name: format-output
+    type: Transform
+    dependsOn:
+      - summarize-review
+    template: |
+      # Code Review Report
+
+      {{summarize-review.output}}

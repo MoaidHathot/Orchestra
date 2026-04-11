@@ -1,0 +1,171 @@
+name: inline-mcps-example
+description: >
+  Demonstrates inline MCP configuration in YAML. Shows both local and remote
+  MCP types, step-level MCP references, and subagent MCP bindings. A research
+  coordinator uses a web-fetch MCP for gathering information and a remote
+  Orchestra MCP for cross-orchestration coordination.
+version: "1.0.0"
+
+inputs:
+  topic:
+    type: string
+    description: The topic to research and coordinate on
+    required: true
+
+# Inline MCP definitions — available to any step or subagent by name reference.
+# Local MCPs run a command as a child process.
+# Remote MCPs connect to an existing MCP server endpoint.
+mcps:
+  - name: web-fetch
+    type: local
+    command: npx
+    arguments:
+      - "-y"
+      - "@anthropic/mcp-fetch"
+
+  - name: filesystem
+    type: local
+    command: npx
+    arguments:
+      - "-y"
+      - "@anthropic/mcp-server-filesystem"
+      - "{{workingDirectory}}"
+
+  - name: orchestra
+    type: remote
+    endpoint: "{{server.url}}/mcp/data"
+
+steps:
+  - name: gather-sources
+    type: Prompt
+    dependsOn: []
+    parameters:
+      - topic
+    # Bind the web-fetch MCP to this step — the model can use its tools.
+    mcps:
+      - web-fetch
+    model: claude-opus-4.6
+    systemPrompt: |
+      You are a research assistant with web access via the fetch tool.
+      Your job is to find authoritative sources on a given topic.
+
+      For each source you find:
+      - Provide the URL
+      - Summarize the key information (2-3 sentences)
+      - Rate the source reliability (high, medium, low)
+
+      Find at least 3 diverse sources. Prefer official documentation,
+      academic papers, and reputable news outlets.
+    userPrompt: |
+      Research the following topic and gather sources:
+
+      {{param.topic}}
+
+  - name: check-existing-work
+    type: Prompt
+    dependsOn: []
+    parameters:
+      - topic
+    # Bind the Orchestra remote MCP to discover related orchestrations.
+    mcps:
+      - orchestra
+    model: claude-opus-4.6
+    systemPrompt: |
+      You are a coordination assistant. Use the Orchestra MCP tools to check
+      if there are any existing orchestrations that have already produced
+      research or analysis on the given topic. List any relevant prior runs.
+    userPrompt: |
+      Check if any existing orchestrations have prior work related to:
+
+      {{param.topic}}
+
+      Use ListOrchestrations to find relevant orchestrations, then check
+      recent runs with GetOrchestrationStatus if any match.
+
+  - name: analyze-and-write
+    type: Prompt
+    dependsOn:
+      - gather-sources
+      - check-existing-work
+    # A step can reference multiple MCPs. The model gets tools from all of them.
+    mcps:
+      - web-fetch
+      - filesystem
+    model: claude-opus-4.6
+    reasoningLevel: high
+    systemPrompt: |
+      You are a senior research coordinator managing a team of specialists.
+      You have access to web fetching and filesystem tools. Delegate specific
+      tasks to your subagents based on their expertise.
+
+      Synthesize all inputs — web sources, prior work, and subagent analyses —
+      into a comprehensive research report.
+    userPrompt: |
+      Produce a research report on: {{param.topic}}
+
+      ## Web Sources
+      {{gather-sources.output}}
+
+      ## Prior Orchestration Work
+      {{check-existing-work.output}}
+
+      Delegate deep analysis to the analyst subagent, and have the writer
+      subagent produce the final polished report. Save the report using
+      the filesystem tools.
+    # Subagents inherit nothing by default — each declares its own MCP bindings.
+    subagents:
+      - name: analyst
+        displayName: Research Analyst
+        description: >
+          Performs deep analysis of research data. Delegate to this agent
+          when you need statistical analysis, trend identification, or
+          comparative evaluation of sources.
+        prompt: |
+          You are a research analyst. Your role is to:
+
+          1. Evaluate the credibility and relevance of provided sources
+          2. Identify key themes, patterns, and contradictions
+          3. Perform comparative analysis across sources
+          4. Highlight gaps in the available information
+          5. Provide evidence-based conclusions
+
+          Be rigorous and cite your reasoning. Flag any claims that lack
+          sufficient supporting evidence.
+        # This subagent gets web-fetch so it can verify claims.
+        mcps:
+          - web-fetch
+        infer: true
+
+      - name: writer
+        displayName: Technical Writer
+        description: >
+          Creates polished, well-structured research reports. Delegate to
+          this agent when you need to produce the final written output.
+        prompt: |
+          You are a technical writer specializing in research reports.
+          Transform analysis and raw findings into clear, well-organized
+          documents with:
+
+          - An executive summary (3-5 sentences)
+          - Organized sections with descriptive headings
+          - Inline citations referencing source URLs
+          - A conclusions section with key takeaways
+          - A references list at the end
+
+          Write for a technical audience. Be concise but thorough.
+        # This subagent has no MCPs — it works purely with provided text.
+        infer: true
+
+  - name: format-output
+    type: Transform
+    dependsOn:
+      - analyze-and-write
+    template: |
+      # Research Report: {{param.topic}}
+
+      **Run ID:** {{orchestration.runId}}
+      **Generated:** {{orchestration.startedAt}}
+
+      {{analyze-and-write.output}}
+    parameters:
+      - topic

@@ -424,7 +424,7 @@ public static class OrchestrationsApi
 				if (!Directory.Exists(request.Directory))
 					return ProblemDetailsHelpers.BadRequest($"Directory not found: {request.Directory}");
 
-				var files = Directory.GetFiles(request.Directory, "*.json", SearchOption.TopDirectoryOnly);
+				var files = OrchestrationParser.GetOrchestrationFiles(request.Directory);
 				var orchestrations = new List<object>();
 
 				foreach (var file in files.OrderBy(f => f))

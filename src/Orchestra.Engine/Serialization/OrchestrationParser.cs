@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using YamlDotNet.Serialization;
 
 namespace Orchestra.Engine;
 
@@ -78,7 +79,7 @@ public static class OrchestrationParser
 
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps)
 	{
-		var json = File.ReadAllText(path);
+		var json = ReadAsJson(path);
 		var variables = ExtractVariables(json);
 		var context = new StepParseContext(
 			BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)),
@@ -97,7 +98,7 @@ public static class OrchestrationParser
 	/// </summary>
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
 	{
-		var json = File.ReadAllText(path);
+		var json = ReadAsJson(path);
 		var variables = ExtractVariables(json);
 		var context = new StepParseContext(
 			BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)),
@@ -129,7 +130,7 @@ public static class OrchestrationParser
 	/// </summary>
 	public static Orchestration ParseOrchestrationFileMetadataOnly(string path)
 	{
-		var json = File.ReadAllText(path);
+		var json = ReadAsJson(path);
 		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)), MetadataOnly: true);
 		var options = CreateOptions(s_defaultParserRegistry, context);
 
@@ -365,6 +366,70 @@ public static class OrchestrationParser
 		{
 			JsonSerializer.Serialize(writer, value, value.GetType(), options);
 		}
+	}
+
+	// ── YAML Support ──
+
+	/// <summary>
+	/// File extensions recognized as YAML orchestration files.
+	/// </summary>
+	private static readonly string[] s_yamlExtensions = [".yaml", ".yml"];
+
+	/// <summary>
+	/// The set of file extensions recognized as orchestration files (JSON and YAML).
+	/// </summary>
+	public static readonly string[] OrchestrationFileExtensions = [".json", ".yaml", ".yml"];
+
+	/// <summary>
+	/// Returns true if the file extension indicates a YAML file.
+	/// </summary>
+	public static bool IsYamlFile(string path)
+	{
+		var ext = Path.GetExtension(path);
+		return s_yamlExtensions.Any(e => ext.Equals(e, StringComparison.OrdinalIgnoreCase));
+	}
+
+	/// <summary>
+	/// Reads an orchestration file and returns its content as a JSON string.
+	/// YAML files (.yaml, .yml) are converted to JSON; JSON files are returned as-is.
+	/// </summary>
+	private static string ReadAsJson(string path)
+	{
+		var content = File.ReadAllText(path);
+		return IsYamlFile(path) ? ConvertYamlToJson(content) : content;
+	}
+
+	/// <summary>
+	/// Converts a YAML string to a JSON string.
+	/// Uses YamlDotNet's JSON-compatible serializer to ensure output is valid JSON
+	/// that can be parsed by System.Text.Json.
+	/// </summary>
+	public static string ConvertYamlToJson(string yaml)
+	{
+		var deserializer = new DeserializerBuilder()
+			.WithAttemptingUnquotedStringTypeDeserialization()
+			.Build();
+		var yamlObject = deserializer.Deserialize(new StringReader(yaml));
+
+		if (yamlObject is null)
+			throw new InvalidOperationException("YAML content is empty or null.");
+
+		var serializer = new SerializerBuilder()
+			.JsonCompatible()
+			.Build();
+
+		return serializer.Serialize(yamlObject);
+	}
+
+	/// <summary>
+	/// Gets all orchestration files (JSON and YAML) from a directory.
+	/// </summary>
+	public static string[] GetOrchestrationFiles(string directory, SearchOption searchOption = SearchOption.TopDirectoryOnly)
+	{
+		return Directory.GetFiles(directory, "*.*", searchOption)
+			.Where(f => OrchestrationFileExtensions.Any(ext =>
+				f.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
+			.ToArray();
 	}
 
 	/// <summary>

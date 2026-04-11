@@ -1152,7 +1152,7 @@ public class TerminalUI
 	{
 		Console.Clear();
 		AnsiConsole.MarkupLine("[bold cyan]Add Orchestration[/]");
-		AnsiConsole.MarkupLine("[dim]Enter the path to an orchestration JSON file (or press Esc to cancel)[/]\n");
+		AnsiConsole.MarkupLine("[dim]Enter the path to an orchestration file (.json, .yaml, .yml) (or press Esc to cancel)[/]\n");
 
 		var path = PromptForPath("Orchestration file path");
 		if (string.IsNullOrWhiteSpace(path))
@@ -1200,7 +1200,7 @@ public class TerminalUI
 	{
 		Console.Clear();
 		AnsiConsole.MarkupLine("[bold cyan]Scan Directory for Orchestrations[/]");
-		AnsiConsole.MarkupLine("[dim]Enter a directory path to scan for .json orchestration files (or press Esc to cancel)[/]\n");
+		AnsiConsole.MarkupLine("[dim]Enter a directory path to scan for orchestration files (.json, .yaml, .yml) (or press Esc to cancel)[/]\n");
 
 		var dirPath = PromptForPath("Directory path");
 		if (string.IsNullOrWhiteSpace(dirPath))

@@ -68,10 +68,13 @@ public partial class OrchestrationRegistry
 	/// </summary>
 	public OrchestrationEntry Register(string path, Orchestration? preloaded = null, bool persist = true, string? originalSourcePath = null)
 	{
-		// Read the raw JSON content for hashing and snapshots
+		// Read the raw content for hashing and snapshots (always as JSON for internal storage)
 		string? rawJson = null;
 		if (File.Exists(path))
-			rawJson = File.ReadAllText(path);
+		{
+			var rawContent = File.ReadAllText(path);
+			rawJson = OrchestrationParser.IsYamlFile(path) ? OrchestrationParser.ConvertYamlToJson(rawContent) : rawContent;
+		}
 
 		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, GlobalMcps);
 
@@ -296,7 +299,7 @@ public partial class OrchestrationRegistry
 			return 0;
 
 		var loaded = 0;
-		foreach (var file in Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly))
+		foreach (var file in OrchestrationParser.GetOrchestrationFiles(directory))
 		{
 			try
 			{

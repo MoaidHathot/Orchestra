@@ -1376,11 +1376,8 @@ public class OrchestrationParserTests
 	[MemberData(nameof(GetExampleFiles))]
 	public void ParseOrchestration_ExampleFile_ParsesSuccessfully(string filePath)
 	{
-		// Arrange
-		var json = File.ReadAllText(filePath);
-
-		// Act
-		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+		// Act — use ParseOrchestrationFile to support both JSON and YAML example files
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(filePath, []);
 
 		// Assert
 		orchestration.Should().NotBeNull();
@@ -1397,7 +1394,7 @@ public class OrchestrationParserTests
 
 		if (Directory.Exists(examplesDir))
 		{
-			foreach (var file in Directory.GetFiles(examplesDir, "*.json"))
+			foreach (var file in OrchestrationParser.GetOrchestrationFiles(examplesDir))
 			{
 				// Skip orchestra.mcp.json — it's not an orchestration file
 				if (Path.GetFileName(file).Equals("orchestra.mcp.json", StringComparison.OrdinalIgnoreCase))
@@ -1671,6 +1668,385 @@ public class OrchestrationParserTests
 			.ToList();
 		readSteps.Should().HaveCount(4);
 		readSteps.Should().AllSatisfy(s => s.DependsOn.Should().Contain("gate"));
+	}
+
+	#endregion
+
+	#region YAML Parsing
+
+	[Fact]
+	public void ConvertYamlToJson_ValidYaml_ReturnsValidJson()
+	{
+		var yaml = """
+			name: test-orchestration
+			description: Test description
+			steps:
+			  - name: step1
+			    type: prompt
+			    dependsOn: []
+			    systemPrompt: You are a test assistant.
+			    userPrompt: Test prompt
+			    model: claude-opus-4.6
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Name.Should().Be("test-orchestration");
+		orchestration.Description.Should().Be("Test description");
+		orchestration.Steps.Should().HaveCount(1);
+		orchestration.Steps[0].Name.Should().Be("step1");
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_MultilinePrompts_PreservesContent()
+	{
+		var yaml = """
+			name: multiline-test
+			description: Test multiline prompts
+			steps:
+			  - name: step1
+			    type: prompt
+			    dependsOn: []
+			    systemPrompt: |
+			      You are a helpful assistant.
+			      You should be thorough and precise.
+			      Always provide examples.
+			    userPrompt: |
+			      Analyze the following:
+			      {{param.input}}
+			    model: claude-opus-4.6
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		var step = orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>().Subject;
+		step.SystemPrompt.Should().Contain("You are a helpful assistant.");
+		step.SystemPrompt.Should().Contain("Always provide examples.");
+		step.UserPrompt.Should().Contain("{{param.input}}");
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_WithVariables_ExtractsVariables()
+	{
+		var yaml = """
+			name: vars-test
+			description: Test variables
+			variables:
+			  greeting: hello
+			  target: world
+			steps:
+			  - name: step1
+			    type: prompt
+			    dependsOn: []
+			    systemPrompt: "{{vars.greeting}} {{vars.target}}"
+			    userPrompt: test
+			    model: claude-opus-4.6
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Variables.Should().ContainKey("greeting");
+		orchestration.Variables["greeting"].Should().Be("hello");
+		orchestration.Variables.Should().ContainKey("target");
+		orchestration.Variables["target"].Should().Be("world");
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_WithSchedulerTrigger_ParsesTriggerConfig()
+	{
+		var yaml = """
+			name: trigger-test
+			description: Test trigger
+			trigger:
+			  type: scheduler
+			  cron: "0 */5 * * *"
+			  enabled: true
+			steps:
+			  - name: step1
+			    type: prompt
+			    dependsOn: []
+			    systemPrompt: test
+			    userPrompt: test
+			    model: claude-opus-4.6
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Trigger.Should().BeOfType<SchedulerTriggerConfig>();
+		var trigger = (SchedulerTriggerConfig)orchestration.Trigger;
+		trigger.Cron.Should().Be("0 */5 * * *");
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_AllStepTypes_ParsesCorrectly()
+	{
+		var yaml = """
+			name: complex-test
+			description: Test all step types
+			steps:
+			  - name: prompt-step
+			    type: Prompt
+			    dependsOn: []
+			    systemPrompt: test system
+			    userPrompt: test user
+			    model: claude-opus-4.6
+			  - name: http-step
+			    type: Http
+			    dependsOn:
+			      - prompt-step
+			    method: POST
+			    url: https://api.example.com/data
+			    headers:
+			      Authorization: Bearer token
+			    body: "{{prompt-step.output}}"
+			  - name: transform-step
+			    type: Transform
+			    dependsOn:
+			      - http-step
+			    template: "Result: {{http-step.output}}"
+			  - name: command-step
+			    type: Command
+			    dependsOn: []
+			    command: echo
+			    arguments:
+			      - hello
+			      - world
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Steps.Should().HaveCount(4);
+		orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>();
+		orchestration.Steps[1].Should().BeOfType<HttpOrchestrationStep>();
+		orchestration.Steps[2].Should().BeOfType<TransformOrchestrationStep>();
+		orchestration.Steps[3].Should().BeOfType<CommandOrchestrationStep>();
+
+		var httpStep = (HttpOrchestrationStep)orchestration.Steps[1];
+		httpStep.Method.Should().Be("POST");
+		httpStep.Url.Should().Be("https://api.example.com/data");
+
+		var cmdStep = (CommandOrchestrationStep)orchestration.Steps[3];
+		cmdStep.Command.Should().Be("echo");
+		cmdStep.Arguments.Should().BeEquivalentTo(["hello", "world"]);
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_EmptyContent_ThrowsInvalidOperationException()
+	{
+		var act = () => OrchestrationParser.ConvertYamlToJson("");
+
+		act.Should().Throw<InvalidOperationException>()
+			.WithMessage("*empty*");
+	}
+
+	[Fact]
+	public void IsYamlFile_DetectsYamlExtensions()
+	{
+		OrchestrationParser.IsYamlFile("test.yaml").Should().BeTrue();
+		OrchestrationParser.IsYamlFile("test.yml").Should().BeTrue();
+		OrchestrationParser.IsYamlFile("test.YAML").Should().BeTrue();
+		OrchestrationParser.IsYamlFile("test.YML").Should().BeTrue();
+		OrchestrationParser.IsYamlFile("test.json").Should().BeFalse();
+		OrchestrationParser.IsYamlFile("test.txt").Should().BeFalse();
+		OrchestrationParser.IsYamlFile("yaml.json").Should().BeFalse();
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_WithInputs_ParsesTypedInputs()
+	{
+		var yaml = """
+			name: inputs-test
+			description: Test inputs
+			inputs:
+			  ticker:
+			    type: string
+			    description: Stock ticker symbol
+			    required: true
+			  includeHistory:
+			    type: boolean
+			    default: "true"
+			steps:
+			  - name: step1
+			    type: prompt
+			    dependsOn: []
+			    parameters:
+			      - ticker
+			    systemPrompt: test
+			    userPrompt: "Analyze {{param.ticker}}"
+			    model: claude-opus-4.6
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Inputs.Should().NotBeNull();
+		orchestration.Inputs.Should().ContainKey("ticker");
+		orchestration.Inputs!["ticker"].Type.Should().Be(InputType.String);
+		orchestration.Inputs["ticker"].Required.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ParseOrchestrationFile_YamlFile_ParsesSuccessfully()
+	{
+		var yaml = """
+			name: file-test
+			description: Test YAML file parsing
+			steps:
+			  - name: step1
+			    type: prompt
+			    dependsOn: []
+			    systemPrompt: |
+			      You are helpful.
+			    userPrompt: Hello
+			    model: claude-opus-4.6
+			""";
+
+		var tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-yaml-test-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempDir);
+		var filePath = Path.Combine(tempDir, "test.yaml");
+
+		try
+		{
+			File.WriteAllText(filePath, yaml);
+			var orchestration = OrchestrationParser.ParseOrchestrationFile(filePath, []);
+
+			orchestration.Name.Should().Be("file-test");
+			orchestration.Steps.Should().HaveCount(1);
+
+			var step = orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>().Subject;
+			step.SystemPrompt.Should().Contain("You are helpful.");
+		}
+		finally
+		{
+			Directory.Delete(tempDir, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ParseOrchestrationFileMetadataOnly_YamlFile_ParsesSuccessfully()
+	{
+		var yaml = """
+			name: metadata-test
+			description: Test YAML metadata-only parsing
+			version: "2.0.0"
+			steps:
+			  - name: step1
+			    type: prompt
+			    dependsOn: []
+			    systemPrompt: test
+			    userPrompt: test
+			    model: claude-opus-4.6
+			""";
+
+		var tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-yaml-test-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempDir);
+		var filePath = Path.Combine(tempDir, "test.yml");
+
+		try
+		{
+			File.WriteAllText(filePath, yaml);
+			var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(filePath);
+
+			orchestration.Name.Should().Be("metadata-test");
+			orchestration.Version.Should().Be("2.0.0");
+			orchestration.Steps.Should().HaveCount(1);
+		}
+		finally
+		{
+			Directory.Delete(tempDir, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void GetOrchestrationFiles_FindsJsonAndYamlFiles()
+	{
+		var tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-scan-test-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempDir);
+
+		try
+		{
+			File.WriteAllText(Path.Combine(tempDir, "test1.json"), "{}");
+			File.WriteAllText(Path.Combine(tempDir, "test2.yaml"), "name: test");
+			File.WriteAllText(Path.Combine(tempDir, "test3.yml"), "name: test");
+			File.WriteAllText(Path.Combine(tempDir, "readme.txt"), "ignore");
+			File.WriteAllText(Path.Combine(tempDir, "data.xml"), "ignore");
+
+			var files = OrchestrationParser.GetOrchestrationFiles(tempDir);
+
+			files.Should().HaveCount(3);
+			files.Should().Contain(f => f.EndsWith(".json"));
+			files.Should().Contain(f => f.EndsWith(".yaml"));
+			files.Should().Contain(f => f.EndsWith(".yml"));
+		}
+		finally
+		{
+			Directory.Delete(tempDir, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_WithSubagents_ParsesCorrectly()
+	{
+		var yaml = """
+			name: subagent-test
+			description: Test subagents in YAML
+			steps:
+			  - name: main-step
+			    type: Prompt
+			    dependsOn: []
+			    systemPrompt: You are an orchestrator.
+			    userPrompt: Coordinate the work.
+			    model: claude-opus-4.6
+			    subagents:
+			      - name: researcher
+			        description: Research agent
+			        prompt: |
+			          You are a research specialist.
+			          Find relevant information on the topic.
+			        infer: true
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		var step = orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>().Subject;
+		step.Subagents.Should().HaveCount(1);
+		step.Subagents[0].Name.Should().Be("researcher");
+		step.Subagents[0].Prompt.Should().Contain("You are a research specialist.");
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_WithLoop_ParsesCorrectly()
+	{
+		var yaml = """
+			name: loop-test
+			description: Test loop config in YAML
+			steps:
+			  - name: iterative-step
+			    type: Prompt
+			    dependsOn: []
+			    systemPrompt: Generate code.
+			    userPrompt: Write a function.
+			    model: claude-opus-4.6
+			    loop:
+			      target: iterative-step
+			      maxIterations: 3
+			      exitPattern: APPROVED
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		var step = orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>().Subject;
+		step.Loop.Should().NotBeNull();
+		step.Loop!.Target.Should().Be("iterative-step");
+		step.Loop.MaxIterations.Should().Be(3);
+		step.Loop.ExitPattern.Should().Be("APPROVED");
 	}
 
 	#endregion
