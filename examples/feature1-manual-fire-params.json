@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "travel-planner",
   "description": "Demonstrates Feature 1: Manual Fire with Parameters. When fired via a trigger, the UI prompts for 'destination' and 'duration' parameters. Two parallel research steps fan out, then a final step synthesizes the itinerary.",
   "steps": [

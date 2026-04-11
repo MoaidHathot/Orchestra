@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestra.mcp.schema.json",
   "mcps": [
     {
       "name": "filesystem",

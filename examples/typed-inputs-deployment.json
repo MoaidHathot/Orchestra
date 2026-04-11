@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "typed-inputs-deployment",
   "description": "Demonstrates typed input schema with type validation, enum constraints, and default values. The orchestration validates that 'serviceName' and 'environment' are provided, enforces that 'environment' is one of the allowed values, and applies defaults for optional inputs like 'dryRun' and 'replicas'.",
   "version": "1.0.0",

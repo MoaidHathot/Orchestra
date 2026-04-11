@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "update-orchestration-digest",
   "description": "Auto-updater that checks for changes to Orchestra's schema, documentation, and examples, then regenerates the orchestration authoring SKILL.md digest. Runs daily on a schedule and gates on whether relevant files have changed in the last day.",
   "version": "1.0.0",

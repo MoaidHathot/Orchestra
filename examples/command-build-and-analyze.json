@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "build-and-analyze",
   "description": "An orchestration that demonstrates the Command step type. It runs 'dotnet build' to compile a project, uses a Command step to run 'git log' for recent changes, then uses an LLM to analyze the build output and git history together to produce a developer summary.",
   "steps": [

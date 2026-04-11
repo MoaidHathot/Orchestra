@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "azure-devops-code-review",
   "description": "Automated code review orchestration for Azure DevOps PRs. Demonstrates mixed step types (Prompt, Http, Transform), subagents, scheduler trigger, retry policies, and loop/checker patterns. Scans for pull requests assigned to a specific reviewer every 10 minutes, fetches the PR diff and linked Work Items, performs a multi-faceted code review (security, quality, architecture), and produces a structured JSON verdict. The DAG: 1) fetch-open-prs finds PRs via Azure DevOps MCP, 2) filter-reviewer-prs uses Transform to keep only PRs awaiting review, 3) fetch-pr-changes gets the diff, 4) fetch-work-item retrieves linked WI context via subagent, 5) read-source-context reads local repo files for deeper understanding, 6) review-code runs a multi-subagent review, 7) quality-check loops to ensure thoroughness, 8) format-result uses Transform to build the final JSON, 9) post-review-status uses Http to post the verdict.",
   "version": "1.0.0",

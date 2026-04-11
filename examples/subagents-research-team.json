@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "research-team-orchestration",
   "description": "Demonstrates multi-agent orchestration using subagents. A coordinator delegates research tasks to specialized subagents (researcher, analyst, writer) based on user intent.",
   "mcps": [

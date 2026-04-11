@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anomalyco/orchestra/schemas/orchestra.mcp.schema.json",
+  "title": "Orchestra MCP Configuration",
+  "description": "Schema for orchestra.mcp.json files. Defines MCP (Model Context Protocol) servers available to all orchestrations in a directory.",
+  "type": "object",
+  "required": ["mcps"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (ignored at runtime)."
+    },
+    "mcps": {
+      "type": "array",
+      "description": "Array of MCP server definitions available to orchestrations.",
+      "items": {
+        "$ref": "#/$defs/mcp"
+      }
+    }
+  },
+  "$defs": {
+    "mcp": {
+      "type": "object",
+      "description": "MCP (Model Context Protocol) server definition. Provides tools to LLM steps.",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name for this MCP server. Referenced by steps via their 'mcps' array.",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "description": "MCP server type.",
+          "enum": ["local", "remote", "Local", "Remote"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["local", "Local"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "name": true,
+              "type": true,
+              "command": {
+                "type": "string",
+                "description": "Executable to run for the local MCP server (e.g., 'npx', 'node', 'python').",
+                "minLength": 1
+              },
+              "arguments": {
+                "type": "array",
+                "description": "Command-line arguments for the MCP server process.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "workingDirectory": {
+                "type": "string",
+                "description": "Working directory for the MCP server process."
+              }
+            },
+            "required": ["command", "arguments"],
+            "unevaluatedProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["remote", "Remote"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "name": true,
+              "type": true,
+              "endpoint": {
+                "type": "string",
+                "description": "Remote MCP server endpoint URL.",
+                "minLength": 1
+              },
+              "headers": {
+                "type": "object",
+                "description": "HTTP headers to include when connecting to the remote MCP server.",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["endpoint"],
+            "unevaluatedProperties": false
+          }
+        }
+      ]
+    }
+  }
+}

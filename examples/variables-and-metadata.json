@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "variables-and-metadata",
   "description": "Demonstrates orchestration-level variables, environment variables, and built-in metadata template expressions. Variables let you define reusable values (with recursive expansion) that any step can reference via {{vars.name}}. Environment variables are accessed via {{env.VAR_NAME}}. Steps can also access orchestration metadata ({{orchestration.name}}, {{orchestration.runId}}, etc.) and their own step metadata ({{step.name}}, {{step.type}}).",
   "version": "1.0.0",

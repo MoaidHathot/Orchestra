@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "codebase-explorer",
   "description": "Demonstrates inline MCP definitions and folder-level MCP detection. The 'filesystem' MCP is defined inline in this orchestration, so it works standalone without an external mcp.json. When the folder also contains mcp.json, those external definitions are merged (and override inline ones on name conflicts).",
   "mcps": [

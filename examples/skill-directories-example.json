@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "skill-directories-orchestration",
   "description": "Demonstrates using Agent Skills (SKILL.md directories) to provide specialized knowledge and workflows to agents. Skills are loaded from filesystem directories and are session-level only.",
   "steps": [

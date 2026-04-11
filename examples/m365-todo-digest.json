@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "m365-todo-digest",
   "description": "Monitors Microsoft 365 activity every 10 minutes and extracts action items from recent meetings, emails, Teams messages, and mentions. Creates a consolidated todo list from all sources.",
   "mcps": [

@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "step-files-cross-reference",
   "description": "Demonstrates the {{stepName.files}} and {{stepName.files[N]}} template syntax for cross-referencing files saved by one step in downstream steps. The first step generates analysis code and saves it using orchestra_save_file. The second step references that specific file via {{generate-code.files[0]}} to review it. The final step uses {{generate-code.files}} (JSON array of all file paths) to produce a summary report. This pattern eliminates the need to parse free-text LLM output for file paths.",
   "version": "1.0.0",

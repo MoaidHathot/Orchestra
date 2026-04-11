@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "webhook-triggered-notification",
   "description": "An orchestration triggered by a webhook that processes incoming events, analyzes them, and generates a formatted notification response. Demonstrates webhook trigger with input handler prompt for payload parsing.",
   "version": "1.0.0",

@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "intelligent-content-pipeline",
   "description": "Advanced orchestration combining all 4 features. (F1) Parameters: accepts 'topic' and 'audience' via manual fire dialog. (F2) Input Handler Prompt: webhook trigger with LLM-powered input normalization that extracts topic/audience from arbitrary payloads. (F3) View State: scheduler trigger enables periodic execution whose results are viewable via the trigger dashboard's View Run button. (F4) MCP Detection: the 'publish' step uses the filesystem MCP defined inline below to save the final output. When the folder also contains mcp.json, external definitions are merged (and override inline ones on name conflicts). This is a 7-step DAG: 3 parallel research steps fan out, 2 analysis steps synthesize, a quality checker iterates with the draft, and a final publisher step writes the result to disk.",
   "mcps": [

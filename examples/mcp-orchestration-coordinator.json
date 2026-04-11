@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "mcp-orchestration-coordinator",
   "description": "Demonstrates using Orchestra's data-plane MCP server to invoke other orchestrations from within a prompt step. A coordinator step uses the Orchestra MCP to list available orchestrations, then invokes them as needed. This pattern enables orchestration-to-orchestration communication without hardcoding webhook URLs.",
   "inputs": {

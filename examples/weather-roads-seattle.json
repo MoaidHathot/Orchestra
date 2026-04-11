@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "seattle-weather-roads-monitor",
   "description": "Multi-step orchestration that checks current weather in Seattle, tomorrow's forecast for Seattle and Orcas Island, and road conditions in Washington State. Triggered every 60 seconds.",
   "mcps": [

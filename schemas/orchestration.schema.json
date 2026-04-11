@@ -1,0 +1,817 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/anomalyco/orchestra/schemas/orchestration.schema.json",
+  "title": "Orchestra Orchestration",
+  "description": "Schema for Orchestra orchestration definition files (.json and .yaml). Defines a DAG of steps (Prompt, Http, Transform, Command) with triggers, MCP servers, subagents, retry policies, and template expressions.",
+  "type": "object",
+  "required": ["name", "description", "steps"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference (ignored at runtime)."
+    },
+    "name": {
+      "type": "string",
+      "description": "Unique name/identifier for the orchestration.",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this orchestration does."
+    },
+    "version": {
+      "type": "string",
+      "description": "Semantic version for tracking orchestration changes.",
+      "default": "1.0.0"
+    },
+    "steps": {
+      "type": "array",
+      "description": "Array of step definitions forming a directed acyclic graph (DAG). Steps execute in dependency order.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    },
+    "trigger": {
+      "$ref": "#/$defs/trigger",
+      "description": "Trigger configuration. Defaults to manual (no automated trigger)."
+    },
+    "mcps": {
+      "type": "array",
+      "description": "Inline MCP (Model Context Protocol) server definitions. Merged with global orchestra.mcp.json definitions at runtime (inline takes priority on name conflicts).",
+      "items": {
+        "$ref": "#/$defs/mcp"
+      },
+      "default": []
+    },
+    "defaultSystemPromptMode": {
+      "$ref": "#/$defs/systemPromptMode",
+      "description": "Default system prompt mode for all Prompt steps. Individual steps can override. When null, the SDK's default behavior is used."
+    },
+    "defaultRetryPolicy": {
+      "$ref": "#/$defs/retryPolicy",
+      "description": "Default retry policy applied to all steps that don't define their own. When absent, no retries are performed."
+    },
+    "defaultStepTimeoutSeconds": {
+      "type": "integer",
+      "description": "Default timeout in seconds applied to all steps that don't define their own timeoutSeconds. When absent, steps without an explicit timeout run with no per-step timeout (only the orchestration-level timeout applies).",
+      "minimum": 0
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "description": "Maximum time in seconds for the entire orchestration to complete. When elapsed, all running steps are cancelled. Set to 0 to disable.",
+      "default": 3600,
+      "minimum": 0
+    },
+    "variables": {
+      "type": "object",
+      "description": "User-defined variables available to all steps via {{vars.name}} template expressions. Values may contain template expressions (e.g., {{param.project}}) which are resolved lazily.",
+      "additionalProperties": {
+        "type": "string"
+      },
+      "default": {}
+    },
+    "tags": {
+      "type": "array",
+      "description": "Author-defined tags for categorizing the orchestration. Used by profiles to filter and group orchestrations.",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "inputs": {
+      "type": "object",
+      "description": "Typed input schema for the orchestration. When defined, this is the authoritative source of truth for parameter definitions, providing types, descriptions, required flags, defaults, and enum constraints. When absent, the orchestration falls back to legacy behavior: parameter names collected from step-level 'parameters' arrays, treated as required strings.",
+      "additionalProperties": {
+        "$ref": "#/$defs/inputDefinition"
+      }
+    }
+  },
+  "$defs": {
+    "step": {
+      "type": "object",
+      "description": "A single step in the orchestration DAG.",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique step name used for dependency references and template expressions (e.g., {{stepName.output}}).",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "description": "Step type determining execution behavior.",
+          "enum": ["Prompt", "Http", "Transform", "Command", "prompt", "http", "transform", "command"]
+        },
+        "dependsOn": {
+          "type": "array",
+          "description": "Names of upstream steps that must complete before this step runs.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "parameters": {
+          "type": "array",
+          "description": "Parameter names this step requires. Used for legacy parameter collection when 'inputs' is not defined at the orchestration level.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "When false, the step is skipped during execution.",
+          "default": true
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "description": "Per-step timeout in seconds. Overrides defaultStepTimeoutSeconds. Set to 0 to disable even when a default is set.",
+          "minimum": 0
+        },
+        "retry": {
+          "$ref": "#/$defs/retryPolicy",
+          "description": "Step-level retry policy. Overrides defaultRetryPolicy."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["Prompt", "prompt"] }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/promptStepProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["Http", "http"] }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/httpStepProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["Transform", "transform"] }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/transformStepProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["Command", "command"] }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/commandStepProperties"
+          }
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+
+    "promptStepProperties": {
+      "type": "object",
+      "description": "Properties specific to Prompt steps. Sends prompts to an LLM model, optionally with MCP tools, subagents, and loop/checker patterns.",
+      "properties": {
+        "name": true,
+        "type": true,
+        "dependsOn": true,
+        "parameters": true,
+        "enabled": true,
+        "timeoutSeconds": true,
+        "retry": true,
+        "systemPrompt": {
+          "type": "string",
+          "description": "System prompt text sent to the LLM. Mutually exclusive with systemPromptFile."
+        },
+        "systemPromptFile": {
+          "type": "string",
+          "description": "Path to a file containing the system prompt. Relative paths are resolved from the orchestration file directory. Supports {{vars.*}} expressions. Mutually exclusive with systemPrompt."
+        },
+        "userPrompt": {
+          "type": "string",
+          "description": "User prompt text sent to the LLM. Supports template expressions like {{stepName.output}} and {{param.name}}. Mutually exclusive with userPromptFile."
+        },
+        "userPromptFile": {
+          "type": "string",
+          "description": "Path to a file containing the user prompt. Relative paths are resolved from the orchestration file directory. Supports {{vars.*}} expressions. Mutually exclusive with userPrompt."
+        },
+        "model": {
+          "type": "string",
+          "description": "LLM model identifier (e.g., 'claude-opus-4.6', 'claude-sonnet-4', 'gpt-4o').",
+          "minLength": 1
+        },
+        "inputHandlerPrompt": {
+          "type": "string",
+          "description": "Optional LLM prompt to preprocess/transform input before the main prompt. Mutually exclusive with inputHandlerPromptFile."
+        },
+        "inputHandlerPromptFile": {
+          "type": "string",
+          "description": "Path to a file containing the input handler prompt. Mutually exclusive with inputHandlerPrompt."
+        },
+        "outputHandlerPrompt": {
+          "type": "string",
+          "description": "Optional LLM prompt to postprocess/transform the model's raw output. Mutually exclusive with outputHandlerPromptFile."
+        },
+        "outputHandlerPromptFile": {
+          "type": "string",
+          "description": "Path to a file containing the output handler prompt. Mutually exclusive with outputHandlerPrompt."
+        },
+        "reasoningLevel": {
+          "$ref": "#/$defs/reasoningLevel",
+          "description": "Reasoning/thinking level for the model. Controls depth of chain-of-thought."
+        },
+        "systemPromptMode": {
+          "$ref": "#/$defs/systemPromptMode",
+          "description": "How the system prompt interacts with the SDK's default system prompt. Overrides defaultSystemPromptMode."
+        },
+        "mcps": {
+          "type": "array",
+          "description": "Names of MCP servers this step can use. Must match names defined in the orchestration-level or global MCP definitions.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "loop": {
+          "$ref": "#/$defs/loopConfig",
+          "description": "Loop/checker configuration. After this step runs, checks output against exitPattern. If not matched, re-runs the target step with feedback, up to maxIterations times."
+        },
+        "subagents": {
+          "type": "array",
+          "description": "Subagents that the main step orchestrator can delegate to. The runtime auto-selects based on user intent when 'infer' is true.",
+          "items": {
+            "$ref": "#/$defs/subagent"
+          }
+        },
+        "skillDirectories": {
+          "type": "array",
+          "description": "Paths to directories containing Agent Skills (SKILL.md files). Skills provide specialized knowledge and workflows the agent can discover and activate on demand.",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": ["model"],
+      "oneOf": [
+        {
+          "required": ["systemPrompt"],
+          "not": { "required": ["systemPromptFile"] }
+        },
+        {
+          "required": ["systemPromptFile"],
+          "not": { "required": ["systemPrompt"] }
+        }
+      ],
+      "dependentSchemas": {
+        "userPromptFile": {
+          "not": { "required": ["userPrompt"] }
+        },
+        "userPrompt": {
+          "not": { "required": ["userPromptFile"] }
+        },
+        "inputHandlerPromptFile": {
+          "not": { "required": ["inputHandlerPrompt"] }
+        },
+        "inputHandlerPrompt": {
+          "not": { "required": ["inputHandlerPromptFile"] }
+        },
+        "outputHandlerPromptFile": {
+          "not": { "required": ["outputHandlerPrompt"] }
+        },
+        "outputHandlerPrompt": {
+          "not": { "required": ["outputHandlerPromptFile"] }
+        }
+      },
+      "anyOf": [
+        { "required": ["userPrompt"] },
+        { "required": ["userPromptFile"] }
+      ]
+    },
+
+    "httpStepProperties": {
+      "type": "object",
+      "description": "Properties specific to Http steps. Makes HTTP requests to external services.",
+      "required": ["url"],
+      "properties": {
+        "name": true,
+        "type": true,
+        "dependsOn": true,
+        "parameters": true,
+        "enabled": true,
+        "timeoutSeconds": true,
+        "retry": true,
+        "method": {
+          "type": "string",
+          "description": "HTTP method.",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "get", "post", "put", "patch", "delete"],
+          "default": "GET"
+        },
+        "url": {
+          "type": "string",
+          "description": "Request URL. Supports template expressions (e.g., {{stepName.output}}, {{vars.baseUrl}}).",
+          "minLength": 1
+        },
+        "headers": {
+          "type": "object",
+          "description": "HTTP request headers. Values support template expressions.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "body": {
+          "type": "string",
+          "description": "Request body content. Supports template expressions."
+        },
+        "contentType": {
+          "type": "string",
+          "description": "Body content type.",
+          "default": "application/json"
+        }
+      }
+    },
+
+    "transformStepProperties": {
+      "type": "object",
+      "description": "Properties specific to Transform steps. Performs template-based text transformation without calling an LLM.",
+      "required": ["template"],
+      "properties": {
+        "name": true,
+        "type": true,
+        "dependsOn": true,
+        "parameters": true,
+        "enabled": true,
+        "timeoutSeconds": true,
+        "retry": true,
+        "template": {
+          "type": "string",
+          "description": "Template string with {{...}} expressions that are replaced at runtime. Supports {{stepName.output}}, {{param.name}}, {{vars.name}}, etc.",
+          "minLength": 1
+        },
+        "contentType": {
+          "type": "string",
+          "description": "Output content type hint.",
+          "default": "text/plain"
+        }
+      }
+    },
+
+    "commandStepProperties": {
+      "type": "object",
+      "description": "Properties specific to Command steps. Executes a local process/command.",
+      "required": ["command"],
+      "properties": {
+        "name": true,
+        "type": true,
+        "dependsOn": true,
+        "parameters": true,
+        "enabled": true,
+        "timeoutSeconds": true,
+        "retry": true,
+        "command": {
+          "type": "string",
+          "description": "Executable or command to run.",
+          "minLength": 1
+        },
+        "arguments": {
+          "type": "array",
+          "description": "Command arguments. Each argument supports template expressions.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "Working directory for the command. Supports template expressions."
+        },
+        "environment": {
+          "type": "object",
+          "description": "Environment variables to set for the command process.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "includeStdErr": {
+          "type": "boolean",
+          "description": "When true, stderr output is included in the step's output alongside stdout.",
+          "default": false
+        },
+        "stdin": {
+          "type": "string",
+          "description": "Content to pipe to the command's standard input. Supports template expressions."
+        }
+      }
+    },
+
+    "trigger": {
+      "type": "object",
+      "description": "Trigger configuration determining how the orchestration is started.",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Trigger type.",
+          "enum": ["manual", "scheduler", "loop", "webhook", "Manual", "Scheduler", "Loop", "Webhook"]
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the trigger is active.",
+          "default": true
+        },
+        "inputHandlerPrompt": {
+          "type": "string",
+          "description": "Optional LLM prompt to transform trigger input (e.g., webhook payload) into orchestration parameters."
+        },
+        "inputHandlerModel": {
+          "type": "string",
+          "description": "Model to use for the input handler prompt."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["scheduler", "Scheduler"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": true,
+              "enabled": true,
+              "inputHandlerPrompt": true,
+              "inputHandlerModel": true,
+              "cron": {
+                "type": "string",
+                "description": "Cron expression for scheduling (e.g., '0 */5 * * *'). Takes precedence over intervalSeconds if both are set."
+              },
+              "intervalSeconds": {
+                "type": "integer",
+                "description": "Simple interval in seconds between runs. Used when cron is not set.",
+                "minimum": 1
+              },
+              "maxRuns": {
+                "type": "integer",
+                "description": "Maximum number of scheduled runs. When absent, runs indefinitely.",
+                "minimum": 1
+              }
+            },
+            "unevaluatedProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["loop", "Loop"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": true,
+              "enabled": true,
+              "inputHandlerPrompt": true,
+              "inputHandlerModel": true,
+              "delaySeconds": {
+                "type": "integer",
+                "description": "Delay in seconds before re-running the orchestration after completion.",
+                "default": 0,
+                "minimum": 0
+              },
+              "maxIterations": {
+                "type": "integer",
+                "description": "Maximum number of loop iterations. When absent, loops indefinitely.",
+                "minimum": 1
+              },
+              "continueOnFailure": {
+                "type": "boolean",
+                "description": "Whether to continue looping after a failed run.",
+                "default": false
+              }
+            },
+            "unevaluatedProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["webhook", "Webhook"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": true,
+              "enabled": true,
+              "inputHandlerPrompt": true,
+              "inputHandlerModel": true,
+              "secret": {
+                "type": "string",
+                "description": "Optional secret for HMAC signature validation of incoming webhook requests. If set, requests must include a valid X-Webhook-Signature header."
+              },
+              "maxConcurrent": {
+                "type": "integer",
+                "description": "Maximum number of concurrent executions triggered by webhooks.",
+                "default": 1,
+                "minimum": 1
+              },
+              "response": {
+                "$ref": "#/$defs/webhookResponseConfig",
+                "description": "Configuration for synchronous webhook responses."
+              }
+            },
+            "unevaluatedProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["manual", "Manual"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": true,
+              "enabled": true,
+              "inputHandlerPrompt": true,
+              "inputHandlerModel": true
+            },
+            "unevaluatedProperties": false
+          }
+        }
+      ]
+    },
+
+    "webhookResponseConfig": {
+      "type": "object",
+      "description": "Controls whether a webhook trigger returns the orchestration result synchronously in the HTTP response.",
+      "properties": {
+        "waitForResult": {
+          "type": "boolean",
+          "description": "If true, the webhook HTTP handler awaits the orchestration result and returns it in the response body. If false, fires and forgets.",
+          "default": false
+        },
+        "responseTemplate": {
+          "type": "string",
+          "description": "Optional Handlebars-style template for formatting the response body. Supports {{stepName.Content}} placeholders. If absent, the raw OrchestrationResult is serialized as JSON."
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "description": "Maximum seconds to wait for the orchestration to complete before returning HTTP 504. Only used when waitForResult is true.",
+          "default": 120,
+          "minimum": 1
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "mcp": {
+      "type": "object",
+      "description": "MCP (Model Context Protocol) server definition. Provides tools to LLM steps.",
+      "required": ["name", "type"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name for this MCP server. Referenced by steps via their 'mcps' array.",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "description": "MCP server type.",
+          "enum": ["local", "remote", "Local", "Remote"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["local", "Local"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "name": true,
+              "type": true,
+              "command": {
+                "type": "string",
+                "description": "Executable to run for the local MCP server (e.g., 'npx', 'node', 'python').",
+                "minLength": 1
+              },
+              "arguments": {
+                "type": "array",
+                "description": "Command-line arguments for the MCP server process.",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "workingDirectory": {
+                "type": "string",
+                "description": "Working directory for the MCP server process."
+              }
+            },
+            "required": ["command", "arguments"],
+            "unevaluatedProperties": false
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["remote", "Remote"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "name": true,
+              "type": true,
+              "endpoint": {
+                "type": "string",
+                "description": "Remote MCP server endpoint URL.",
+                "minLength": 1
+              },
+              "headers": {
+                "type": "object",
+                "description": "HTTP headers to include when connecting to the remote MCP server.",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": ["endpoint"],
+            "unevaluatedProperties": false
+          }
+        }
+      ]
+    },
+
+    "retryPolicy": {
+      "type": "object",
+      "description": "Retry policy with exponential backoff.",
+      "properties": {
+        "maxRetries": {
+          "type": "integer",
+          "description": "Maximum number of retry attempts after the initial failure.",
+          "default": 3,
+          "minimum": 0
+        },
+        "backoffSeconds": {
+          "type": "number",
+          "description": "Initial backoff delay in seconds before the first retry.",
+          "default": 1.0,
+          "minimum": 0
+        },
+        "backoffMultiplier": {
+          "type": "number",
+          "description": "Multiplier applied to the backoff delay after each retry (exponential backoff).",
+          "default": 2.0,
+          "minimum": 1
+        },
+        "retryOnTimeout": {
+          "type": "boolean",
+          "description": "Whether to retry when a timeout error occurs.",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "loopConfig": {
+      "type": "object",
+      "description": "Loop/checker configuration for iterative refinement patterns. The checker step evaluates output and can send the target step back for revision.",
+      "required": ["target", "maxIterations", "exitPattern"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "description": "Name of the step to re-run if the exit pattern is not matched. Must be one of the step's dependsOn entries.",
+          "minLength": 1
+        },
+        "maxIterations": {
+          "type": "integer",
+          "description": "Maximum number of loop iterations before giving up.",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "exitPattern": {
+          "type": "string",
+          "description": "String to search for in the checker step's output (case-insensitive). If found, the loop exits successfully.",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "subagent": {
+      "type": "object",
+      "description": "A subagent that the main step orchestrator can delegate to. Subagents have their own system prompt, tool restrictions, and optional MCP servers.",
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique subagent identifier within the step.",
+          "minLength": 1
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Human-readable display name shown in events and UI."
+        },
+        "description": {
+          "type": "string",
+          "description": "Description of what the subagent does. Helps the runtime select the right subagent based on user intent."
+        },
+        "prompt": {
+          "type": "string",
+          "description": "System prompt defining the subagent's behavior. Mutually exclusive with promptFile."
+        },
+        "promptFile": {
+          "type": "string",
+          "description": "Path to a file containing the subagent's system prompt. Mutually exclusive with prompt."
+        },
+        "tools": {
+          "type": "array",
+          "description": "Tool name restrictions. When null/absent, all available tools are accessible. Use to restrict subagent capabilities (e.g., read-only tools).",
+          "items": {
+            "type": "string"
+          }
+        },
+        "mcps": {
+          "type": "array",
+          "description": "Names of MCP servers this subagent can use. Must match names defined in orchestration-level or global MCP definitions.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "infer": {
+          "type": "boolean",
+          "description": "Whether the subagent should be available for automatic selection based on model inference. When true, the runtime can auto-select based on user intent.",
+          "default": true
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["prompt"],
+          "not": { "required": ["promptFile"] }
+        },
+        {
+          "required": ["promptFile"],
+          "not": { "required": ["prompt"] }
+        }
+      ],
+      "additionalProperties": false
+    },
+
+    "inputDefinition": {
+      "type": "object",
+      "description": "Typed input parameter definition with validation constraints.",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Parameter data type.",
+          "enum": ["string", "boolean", "number"],
+          "default": "string"
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the input parameter."
+        },
+        "required": {
+          "type": "boolean",
+          "description": "Whether this input must be provided. When false and no value is given, 'default' is used.",
+          "default": true
+        },
+        "default": {
+          "type": "string",
+          "description": "Default value for optional inputs (stored as string, parsed according to 'type' at runtime)."
+        },
+        "enum": {
+          "type": "array",
+          "description": "Allowed values constraint. Input value must match one of these (case-insensitive).",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "systemPromptMode": {
+      "type": "string",
+      "description": "How the custom system prompt interacts with the SDK's default system prompt. 'replace' completely replaces the SDK's built-in prompt. 'append' adds your prompt to the SDK's default, preserving built-in capabilities.",
+      "enum": ["append", "replace", "Append", "Replace"]
+    },
+
+    "reasoningLevel": {
+      "type": "string",
+      "description": "Reasoning/thinking level for the LLM model. Controls depth of chain-of-thought reasoning.",
+      "enum": ["low", "medium", "high", "Low", "Medium", "High"]
+    }
+  }
+}

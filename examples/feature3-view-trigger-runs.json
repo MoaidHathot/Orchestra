@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "periodic-health-check",
   "description": "Demonstrates Feature 3: View Orchestration State. This orchestration runs on a scheduler trigger (every 5 minutes). Since trigger-fired executions use NullOrchestrationReporter and are normally invisible, the 'View Run' button on the trigger dashboard lets you inspect the results of each execution. Try it: create this trigger, let it fire, then click the eye icon to see the full run history with step outputs.",
   "steps": [

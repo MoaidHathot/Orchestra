@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "generate-orchestration",
   "description": "Meta-orchestration that generates Orchestra orchestration files from natural language descriptions. Uses a pre-computed knowledge base (SKILL.md) for fast, accurate generation. Optionally registers the generated orchestration in Orchestra.",
   "version": "1.0.0",

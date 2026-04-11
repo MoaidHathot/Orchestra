@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "smart-webhook-processor",
   "description": "Demonstrates Feature 2: Input Handler Prompt on triggers. The webhook trigger has an inputHandlerPrompt that uses an LLM to extract structured parameters from arbitrary incoming webhook payloads (e.g., GitHub issue events, Slack messages, or free-form JSON). The LLM intelligently maps messy external data to the orchestration's expected 'title' and 'body' parameters.",
   "steps": [

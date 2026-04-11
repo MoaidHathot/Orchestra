@@ -1,4 +1,5 @@
 {
+  "$schema": "../schemas/orchestration.schema.json",
   "name": "deployment-pipeline",
   "description": "A multi-environment deployment pipeline that demonstrates orchestration variables, metadata expressions, environment variables, and step metadata. Uses variables for environment-specific configuration, env vars for secrets and infrastructure config, orchestration metadata for traceability in logs and reports, and step metadata for self-describing audit trails.",
   "version": "2.1.0",
