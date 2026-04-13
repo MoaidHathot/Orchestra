@@ -169,7 +169,8 @@ public static class OrchestraConfigLoader
 				return;
 			}
 
-			ApplyConfig(options, config);
+			var configDirectory = Path.GetDirectoryName(Path.GetFullPath(configPath));
+			ApplyConfig(options, config, configDirectory);
 			logger.LogInformation("Orchestra configuration loaded successfully from {ConfigPath}", configPath);
 		}
 		catch (Exception ex)
@@ -181,20 +182,23 @@ public static class OrchestraConfigLoader
 	/// <summary>
 	/// Applies a deserialized config file to the options.
 	/// Only non-null values in the config file override the defaults.
+	/// Relative paths for <c>dataPath</c> and <c>orchestrationsScan.directory</c>
+	/// are resolved against the config file's directory.
 	/// </summary>
-	internal static void ApplyConfig(OrchestrationHostOptions options, OrchestraConfigFile config)
+	internal static void ApplyConfig(OrchestrationHostOptions options, OrchestraConfigFile config, string? configDirectory = null)
 	{
 		if (config.DataPath is not null)
-			options.DataPath = config.DataPath;
+			options.DataPath = ResolvePath(config.DataPath, configDirectory);
 
 		if (config.HostBaseUrl is not null)
 			options.HostBaseUrl = config.HostBaseUrl;
 
 		if (config.OrchestrationsScan is not null && config.OrchestrationsScan.Directory is not null)
 		{
-			options.OrchestrationsScan ??= new OrchestrationsScanConfig { Directory = config.OrchestrationsScan.Directory };
+			var resolvedDirectory = ResolvePath(config.OrchestrationsScan.Directory, configDirectory);
+			options.OrchestrationsScan ??= new OrchestrationsScanConfig { Directory = resolvedDirectory };
 
-			options.OrchestrationsScan.Directory = config.OrchestrationsScan.Directory;
+			options.OrchestrationsScan.Directory = resolvedDirectory;
 
 			if (config.OrchestrationsScan.Watch.HasValue)
 				options.OrchestrationsScan.Watch = config.OrchestrationsScan.Watch.Value;
@@ -235,6 +239,19 @@ public static class OrchestraConfigLoader
 
 		if (config.DefaultModel is not null)
 			options.DefaultModel = config.DefaultModel;
+	}
+
+	/// <summary>
+	/// Resolves a path from the config file. If the path is relative and a config directory
+	/// is known, it is resolved against the config file's directory. Otherwise, it is returned as-is
+	/// (which means it will resolve against the process working directory at point of use).
+	/// </summary>
+	private static string ResolvePath(string path, string? configDirectory)
+	{
+		if (configDirectory is not null && !Path.IsPathRooted(path))
+			return Path.GetFullPath(Path.Combine(configDirectory, path));
+
+		return path;
 	}
 
 	private static string? GetPlatformConfigPath()
