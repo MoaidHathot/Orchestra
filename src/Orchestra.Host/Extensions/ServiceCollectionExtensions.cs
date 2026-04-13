@@ -209,6 +209,10 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton(sp => sp.GetRequiredService<OrchestrationHostOptions>().Retention);
 		services.AddHostedService<RunRetentionService>();
 
+		// Orchestration sync service — watches the scan directory for file changes.
+		// Registered unconditionally; the service exits immediately if watch is disabled.
+		services.AddHostedService<OrchestrationSyncService>();
+
 		return services;
 	}
 
@@ -302,10 +306,11 @@ public static class ServiceProviderExtensions
 			registry.LoadFromDisk();
 		}
 
-		// Scan for orchestrations in the specified directory
-		if (!string.IsNullOrEmpty(options.OrchestrationsScanPath) && Directory.Exists(options.OrchestrationsScanPath))
+		// Sync orchestrations from the configured scan directory (registers new, updates changed, removes deleted)
+		var scanConfig = options.OrchestrationsScan;
+		if (scanConfig is not null && Directory.Exists(scanConfig.Directory))
 		{
-			registry.ScanDirectory(options.OrchestrationsScanPath);
+			registry.SyncDirectory(scanConfig.Directory, scanConfig.Recursive);
 		}
 
 		// Register triggers for loaded orchestrations

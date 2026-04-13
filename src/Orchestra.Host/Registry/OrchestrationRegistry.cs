@@ -319,6 +319,94 @@ public partial class OrchestrationRegistry
 	}
 
 	/// <summary>
+	/// Synchronizes the registry with a directory of orchestration files.
+	/// Registers new files, updates changed files (by content hash), and removes
+	/// entries whose source files no longer exist in the directory.
+	/// </summary>
+	/// <returns>A <see cref="SyncResult"/> describing what changed.</returns>
+	public SyncResult SyncDirectory(string directory, bool recursive = false)
+	{
+		if (!Directory.Exists(directory))
+			return new SyncResult();
+
+		var searchOption = recursive
+			? SearchOption.AllDirectories
+			: SearchOption.TopDirectoryOnly;
+
+		var files = OrchestrationParser.GetOrchestrationFiles(directory, searchOption);
+		var fullDirPath = Path.GetFullPath(directory)
+			.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
+			+ Path.DirectorySeparatorChar;
+
+		int added = 0, updated = 0, unchanged = 0, failed = 0;
+		var processedIds = new HashSet<string>();
+
+		foreach (var file in files)
+		{
+			try
+			{
+				// Read content and compute hash
+				var rawContent = File.ReadAllText(file);
+				var rawJson = OrchestrationParser.IsYamlFile(file)
+					? OrchestrationParser.ConvertYamlToJson(rawContent)
+					: rawContent;
+				var contentHash = FileSystemOrchestrationVersionStore.ComputeContentHash(rawJson);
+
+				// Parse metadata to get the name for ID generation
+				var orchestration = OrchestrationParser.ParseOrchestrationFileMetadataOnly(file);
+				var id = GenerateId(orchestration.Name, file);
+				processedIds.Add(id);
+
+				// Check if already registered with the same content
+				var existing = Get(id);
+				if (existing is not null && existing.ContentHash == contentHash)
+				{
+					unchanged++;
+					continue;
+				}
+
+				Register(file, persist: false);
+
+				if (existing is not null)
+					updated++;
+				else
+					added++;
+			}
+			catch (Exception ex)
+			{
+				_logger.LogDebug(ex, "Skipping invalid orchestration file '{File}'", file);
+				failed++;
+			}
+		}
+
+		// Remove entries whose source files were in this directory but no longer exist
+		var removed = 0;
+		foreach (var entry in GetAll().ToList())
+		{
+			var entrySourcePath = Path.GetFullPath(entry.SourcePath ?? entry.Path);
+			if (entrySourcePath.StartsWith(fullDirPath, StringComparison.OrdinalIgnoreCase)
+				&& !processedIds.Contains(entry.Id))
+			{
+				Remove(entry.Id);
+				removed++;
+			}
+		}
+
+		if (added > 0 || updated > 0 || removed > 0)
+			SaveToDisk();
+
+		LogSyncCompleted(directory, added, updated, removed, unchanged, failed);
+		return new SyncResult
+		{
+			Added = added,
+			Updated = updated,
+			Removed = removed,
+			Unchanged = unchanged,
+			Failed = failed
+		};
+	}
+
+	/// <summary>
 	/// Generates a unique ID for an orchestration.
 	/// </summary>
 	public static string GenerateId(string name, string path)
@@ -390,6 +478,9 @@ public partial class OrchestrationRegistry
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Orchestration '{Name}' copied to managed location: {ManagedPath}")]
 	private partial void LogOrchestrationCopiedToManaged(string name, string managedPath);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Directory sync completed for '{Directory}': {Added} added, {Updated} updated, {Removed} removed, {Unchanged} unchanged, {Failed} failed")]
+	private partial void LogSyncCompleted(string directory, int added, int updated, int removed, int unchanged, int failed);
 }
 
 /// <summary>
@@ -429,4 +520,25 @@ public class OrchestrationEntry
 	/// Used to detect content changes and deduplicate version snapshots.
 	/// </summary>
 	public string? ContentHash { get; init; }
+}
+
+/// <summary>
+/// Result of a directory synchronization operation.
+/// </summary>
+public record SyncResult
+{
+	/// <summary>Number of new orchestrations registered.</summary>
+	public int Added { get; init; }
+
+	/// <summary>Number of existing orchestrations updated due to content changes.</summary>
+	public int Updated { get; init; }
+
+	/// <summary>Number of orchestrations removed because their source file was deleted.</summary>
+	public int Removed { get; init; }
+
+	/// <summary>Number of orchestrations that were already up-to-date.</summary>
+	public int Unchanged { get; init; }
+
+	/// <summary>Number of files that failed to parse and were skipped.</summary>
+	public int Failed { get; init; }
 }

@@ -190,8 +190,18 @@ public static class OrchestraConfigLoader
 		if (config.HostBaseUrl is not null)
 			options.HostBaseUrl = config.HostBaseUrl;
 
-		if (config.OrchestrationsScanPath is not null)
-			options.OrchestrationsScanPath = config.OrchestrationsScanPath;
+		if (config.OrchestrationsScan is not null && config.OrchestrationsScan.Directory is not null)
+		{
+			options.OrchestrationsScan ??= new OrchestrationsScanConfig { Directory = config.OrchestrationsScan.Directory };
+
+			options.OrchestrationsScan.Directory = config.OrchestrationsScan.Directory;
+
+			if (config.OrchestrationsScan.Watch.HasValue)
+				options.OrchestrationsScan.Watch = config.OrchestrationsScan.Watch.Value;
+
+			if (config.OrchestrationsScan.Recursive.HasValue)
+				options.OrchestrationsScan.Recursive = config.OrchestrationsScan.Recursive.Value;
+		}
 
 		if (config.ShutdownTimeoutSeconds.HasValue)
 			options.ShutdownTimeoutSeconds = config.ShutdownTimeoutSeconds.Value;
@@ -264,9 +274,9 @@ public class OrchestraConfigFile
 	public string? HostBaseUrl { get; set; }
 
 	/// <summary>
-	/// Path to auto-scan for orchestration files on startup.
+	/// Configuration for automatic orchestration directory scanning and watching.
 	/// </summary>
-	public string? OrchestrationsScanPath { get; set; }
+	public OrchestrationsScanConfigFile? OrchestrationsScan { get; set; }
 
 	/// <summary>
 	/// Retention policy for automatic cleanup of old run records.
@@ -378,4 +388,27 @@ public class McpServerConfig
 	/// 0 = top-level only (no nesting). Default: 5.
 	/// </summary>
 	public int? MaxNestingDepth { get; set; }
+}
+
+/// <summary>
+/// Orchestration scan configuration section of the config file.
+/// All fields are nullable — only non-null values override defaults.
+/// </summary>
+public class OrchestrationsScanConfigFile
+{
+	/// <summary>
+	/// Directory path to scan for orchestration files (.json, .yaml, .yml).
+	/// </summary>
+	public string? Directory { get; set; }
+
+	/// <summary>
+	/// If true, watch the directory for file changes at runtime and
+	/// automatically register, update, or remove orchestrations.
+	/// </summary>
+	public bool? Watch { get; set; }
+
+	/// <summary>
+	/// If true, scan subdirectories recursively.
+	/// </summary>
+	public bool? Recursive { get; set; }
 }

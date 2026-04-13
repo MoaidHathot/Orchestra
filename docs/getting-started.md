@@ -54,7 +54,10 @@ builder.Services.AddOrchestraHost(options =>
     options.DataPath = Path.Combine(builder.Environment.ContentRootPath, "data");
     
     // Optional: Auto-scan this directory for orchestration files on startup
-    options.OrchestrationsScanPath = Path.Combine(builder.Environment.ContentRootPath, "orchestrations");
+    options.OrchestrationsScan = new OrchestrationsScanConfig
+    {
+        Directory = Path.Combine(builder.Environment.ContentRootPath, "orchestrations"),
+    };
     
     // Load previously registered orchestrations on startup
     options.LoadPersistedOrchestrations = true;

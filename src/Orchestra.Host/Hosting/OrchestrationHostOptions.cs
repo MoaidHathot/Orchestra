@@ -21,9 +21,12 @@ public class OrchestrationHostOptions
 	public string? HostBaseUrl { get; set; }
 
 	/// <summary>
-	/// Optional path to auto-scan for orchestration files on startup.
+	/// Configuration for automatic orchestration directory scanning and watching.
+	/// When set, Orchestra scans the directory on startup (registering new orchestrations,
+	/// updating changed ones, and removing deleted ones). If <see cref="OrchestrationsScanConfig.Watch"/>
+	/// is enabled, a file watcher monitors the directory for live changes at runtime.
 	/// </summary>
-	public string? OrchestrationsScanPath { get; set; }
+	public OrchestrationsScanConfig? OrchestrationsScan { get; set; }
 
 	/// <summary>
 	/// Whether to automatically load persisted orchestrations on startup.
@@ -104,4 +107,28 @@ public class PollingOptions
 	/// Default: 5000ms (5 seconds).
 	/// </summary>
 	public int ServerStatusMs { get; set; } = 5000;
+}
+
+/// <summary>
+/// Configuration for automatic orchestration directory scanning and watching.
+/// </summary>
+public class OrchestrationsScanConfig
+{
+	/// <summary>
+	/// Directory path to scan for orchestration files (.json, .yaml, .yml).
+	/// </summary>
+	public required string Directory { get; set; }
+
+	/// <summary>
+	/// If true, watch the directory for file changes at runtime and
+	/// automatically register, update, or remove orchestrations.
+	/// Default: false.
+	/// </summary>
+	public bool Watch { get; set; }
+
+	/// <summary>
+	/// If true, scan subdirectories recursively.
+	/// Default: false.
+	/// </summary>
+	public bool Recursive { get; set; }
 }

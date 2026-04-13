@@ -80,7 +80,10 @@ public class OrchestraConfigLoaderTests : IDisposable
 		{
 			DataPath = "/custom/data",
 			HostBaseUrl = "http://localhost:9999",
-			OrchestrationsScanPath = "/custom/orchestrations",
+			OrchestrationsScan = new OrchestrationsScanConfigFile
+			{
+				Directory = "/custom/orchestrations",
+			},
 			ShutdownTimeoutSeconds = 120,
 			LogLevel = "Debug",
 			DefaultModel = "claude-sonnet-4",
@@ -97,7 +100,10 @@ public class OrchestraConfigLoaderTests : IDisposable
 		// Assert
 		options.DataPath.Should().Be("/custom/data");
 		options.HostBaseUrl.Should().Be("http://localhost:9999");
-		options.OrchestrationsScanPath.Should().Be("/custom/orchestrations");
+		options.OrchestrationsScan.Should().NotBeNull();
+		options.OrchestrationsScan!.Directory.Should().Be("/custom/orchestrations");
+		options.OrchestrationsScan.Watch.Should().BeFalse();
+		options.OrchestrationsScan.Recursive.Should().BeFalse();
 		options.ShutdownTimeoutSeconds.Should().Be(120);
 		options.LogLevel.Should().Be("Debug");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
@@ -442,7 +448,11 @@ public class OrchestraConfigLoaderTests : IDisposable
 		{
 			"dataPath": "/round-trip/data",
 			"hostBaseUrl": "http://my-host:8080",
-			"orchestrationsScanPath": "/round-trip/orchestrations",
+			"orchestrationsScan": {
+				"directory": "/round-trip/orchestrations",
+				"watch": true,
+				"recursive": true
+			},
 			"shutdownTimeoutSeconds": 180,
 			"logLevel": "Trace",
 			"defaultModel": "claude-sonnet-4",
@@ -462,7 +472,10 @@ public class OrchestraConfigLoaderTests : IDisposable
 		// Assert
 		options.DataPath.Should().Be("/round-trip/data");
 		options.HostBaseUrl.Should().Be("http://my-host:8080");
-		options.OrchestrationsScanPath.Should().Be("/round-trip/orchestrations");
+		options.OrchestrationsScan.Should().NotBeNull();
+		options.OrchestrationsScan!.Directory.Should().Be("/round-trip/orchestrations");
+		options.OrchestrationsScan.Watch.Should().BeTrue();
+		options.OrchestrationsScan.Recursive.Should().BeTrue();
 		options.ShutdownTimeoutSeconds.Should().Be(180);
 		options.LogLevel.Should().Be("Trace");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
@@ -570,5 +583,161 @@ public class OrchestraConfigLoaderTests : IDisposable
 		result.Retention.Should().NotBeNull();
 		result.Retention!.MaxRunsPerOrchestration.Should().Be(10);
 		result.Retention.MaxRunAgeDays.Should().Be(7);
+	}
+
+	// ── OrchestrationsScan config tests ──
+
+	[Fact]
+	public void ApplyConfig_OrchestrationsScan_DirectoryOnly_SetsDefaults()
+	{
+		// Arrange
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile
+		{
+			OrchestrationsScan = new OrchestrationsScanConfigFile
+			{
+				Directory = "/my/orchestrations",
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.OrchestrationsScan.Should().NotBeNull();
+		options.OrchestrationsScan!.Directory.Should().Be("/my/orchestrations");
+		options.OrchestrationsScan.Watch.Should().BeFalse();
+		options.OrchestrationsScan.Recursive.Should().BeFalse();
+	}
+
+	[Fact]
+	public void ApplyConfig_OrchestrationsScan_AllFields_Applied()
+	{
+		// Arrange
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile
+		{
+			OrchestrationsScan = new OrchestrationsScanConfigFile
+			{
+				Directory = "/scan/dir",
+				Watch = true,
+				Recursive = true,
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.OrchestrationsScan.Should().NotBeNull();
+		options.OrchestrationsScan!.Directory.Should().Be("/scan/dir");
+		options.OrchestrationsScan.Watch.Should().BeTrue();
+		options.OrchestrationsScan.Recursive.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ApplyConfig_OrchestrationsScan_PartialOverride_PreservesExisting()
+	{
+		// Arrange — pre-configure some values
+		var options = new OrchestrationHostOptions
+		{
+			OrchestrationsScan = new OrchestrationsScanConfig
+			{
+				Directory = "/original/dir",
+				Watch = true,
+				Recursive = true,
+			},
+		};
+
+		// Config only overrides directory, watch/recursive are null (no override)
+		var config = new OrchestraConfigFile
+		{
+			OrchestrationsScan = new OrchestrationsScanConfigFile
+			{
+				Directory = "/new/dir",
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert — directory changed, watch and recursive preserved
+		options.OrchestrationsScan.Should().NotBeNull();
+		options.OrchestrationsScan!.Directory.Should().Be("/new/dir");
+		options.OrchestrationsScan.Watch.Should().BeTrue();
+		options.OrchestrationsScan.Recursive.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ApplyConfig_OrchestrationsScan_NullDirectory_DoesNotApply()
+	{
+		// Arrange
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile
+		{
+			OrchestrationsScan = new OrchestrationsScanConfigFile
+			{
+				// Directory is null — should not create OrchestrationsScan
+				Watch = true,
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert — OrchestrationsScan should remain null
+		options.OrchestrationsScan.Should().BeNull();
+	}
+
+	[Fact]
+	public void ApplyConfig_OrchestrationsScan_Null_DoesNotOverride()
+	{
+		// Arrange — pre-configure
+		var options = new OrchestrationHostOptions
+		{
+			OrchestrationsScan = new OrchestrationsScanConfig
+			{
+				Directory = "/existing/dir",
+			},
+		};
+
+		var config = new OrchestraConfigFile
+		{
+			// OrchestrationsScan is null in config file — should not clear existing
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert — existing config preserved
+		options.OrchestrationsScan.Should().NotBeNull();
+		options.OrchestrationsScan!.Directory.Should().Be("/existing/dir");
+	}
+
+	[Fact]
+	public void LoadAndApply_OrchestrationsScan_FromJsonFile()
+	{
+		// Arrange
+		var configPath = Path.Combine(_tempDir, "scan-config.json");
+		File.WriteAllText(configPath, """
+		{
+			"orchestrationsScan": {
+				"directory": "/file/based/scan",
+				"watch": true
+			}
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert
+		options.OrchestrationsScan.Should().NotBeNull();
+		options.OrchestrationsScan!.Directory.Should().Be("/file/based/scan");
+		options.OrchestrationsScan.Watch.Should().BeTrue();
+		options.OrchestrationsScan.Recursive.Should().BeFalse();
 	}
 }

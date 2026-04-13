@@ -566,4 +566,261 @@ public class OrchestrationRegistryTests : IDisposable
 	}
 
 	#endregion
+
+	#region SyncDirectory tests
+
+	private string CreateTestOrchestrationFileInDir(string directory, string name, string? description = null)
+	{
+		Directory.CreateDirectory(directory);
+		var orchestration = new
+		{
+			name,
+			description = description ?? $"Test orchestration: {name}",
+			version = "1.0.0",
+			model = "claude-opus-4.5",
+			steps = new[]
+			{
+				new
+				{
+					name = "step1",
+					type = "prompt",
+					systemPrompt = "You are a test assistant.",
+					userPrompt = "Test prompt",
+					model = "claude-opus-4.5"
+				}
+			}
+		};
+
+		var path = Path.Combine(directory, $"{name}.json");
+		var json = System.Text.Json.JsonSerializer.Serialize(orchestration, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+		File.WriteAllText(path, json);
+		return path;
+	}
+
+	[Fact]
+	public void SyncDirectory_NewFiles_RegistersThem()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-new");
+		var registry = new OrchestrationRegistry(_persistPath);
+		CreateTestOrchestrationFileInDir(syncDir, "sync-new-1");
+		CreateTestOrchestrationFileInDir(syncDir, "sync-new-2");
+
+		// Act
+		var result = registry.SyncDirectory(syncDir);
+
+		// Assert
+		result.Added.Should().Be(2);
+		result.Updated.Should().Be(0);
+		result.Removed.Should().Be(0);
+		result.Unchanged.Should().Be(0);
+		registry.Count.Should().Be(2);
+	}
+
+	[Fact]
+	public void SyncDirectory_UnchangedFiles_SkipsThem()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-unchanged");
+		var registry = new OrchestrationRegistry(_persistPath);
+		CreateTestOrchestrationFileInDir(syncDir, "sync-unchanged-1");
+
+		// First sync — registers the file
+		registry.SyncDirectory(syncDir);
+
+		// Act — second sync — file hasn't changed
+		var result = registry.SyncDirectory(syncDir);
+
+		// Assert
+		result.Added.Should().Be(0);
+		result.Updated.Should().Be(0);
+		result.Unchanged.Should().Be(1);
+		registry.Count.Should().Be(1);
+	}
+
+	[Fact]
+	public void SyncDirectory_ChangedFile_UpdatesIt()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-changed");
+		var registry = new OrchestrationRegistry(_persistPath);
+		var filePath = CreateTestOrchestrationFileInDir(syncDir, "sync-changed-1", "Version 1");
+
+		// First sync
+		registry.SyncDirectory(syncDir);
+		registry.Count.Should().Be(1);
+		registry.GetAll().First().Orchestration.Description.Should().Be("Version 1");
+
+		// Modify the file
+		CreateTestOrchestrationFileInDir(syncDir, "sync-changed-1", "Version 2");
+
+		// Act
+		var result = registry.SyncDirectory(syncDir);
+
+		// Assert
+		result.Updated.Should().Be(1);
+		result.Added.Should().Be(0);
+		result.Unchanged.Should().Be(0);
+		registry.Count.Should().Be(1);
+		registry.GetAll().First().Orchestration.Description.Should().Be("Version 2");
+	}
+
+	[Fact]
+	public void SyncDirectory_DeletedFile_RemovesIt()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-deleted");
+		var registry = new OrchestrationRegistry(_persistPath);
+		var filePath = CreateTestOrchestrationFileInDir(syncDir, "sync-deleted-1");
+
+		// First sync
+		registry.SyncDirectory(syncDir);
+		registry.Count.Should().Be(1);
+
+		// Delete the file
+		File.Delete(filePath);
+
+		// Act
+		var result = registry.SyncDirectory(syncDir);
+
+		// Assert
+		result.Removed.Should().Be(1);
+		result.Added.Should().Be(0);
+		result.Updated.Should().Be(0);
+		result.Unchanged.Should().Be(0);
+		registry.Count.Should().Be(0);
+	}
+
+	[Fact]
+	public void SyncDirectory_MixedChanges_HandlesAll()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-mixed");
+		var registry = new OrchestrationRegistry(_persistPath);
+		var fileToDelete = CreateTestOrchestrationFileInDir(syncDir, "will-be-deleted");
+		var fileUnchanged = CreateTestOrchestrationFileInDir(syncDir, "stays-unchanged");
+		var fileToChange = CreateTestOrchestrationFileInDir(syncDir, "will-be-changed", "Original");
+
+		// First sync
+		registry.SyncDirectory(syncDir);
+		registry.Count.Should().Be(3);
+
+		// Delete one, change one, add a new one
+		File.Delete(fileToDelete);
+		CreateTestOrchestrationFileInDir(syncDir, "will-be-changed", "Modified");
+		CreateTestOrchestrationFileInDir(syncDir, "brand-new");
+
+		// Act
+		var result = registry.SyncDirectory(syncDir);
+
+		// Assert
+		result.Added.Should().Be(1);
+		result.Updated.Should().Be(1);
+		result.Removed.Should().Be(1);
+		result.Unchanged.Should().Be(1);
+		registry.Count.Should().Be(3);
+		registry.GetAll().Select(e => e.Orchestration.Name).Should()
+			.Contain(["stays-unchanged", "will-be-changed", "brand-new"])
+			.And.NotContain("will-be-deleted");
+	}
+
+	[Fact]
+	public void SyncDirectory_NonExistentDirectory_ReturnsEmptyResult()
+	{
+		// Arrange
+		var registry = new OrchestrationRegistry(_persistPath);
+
+		// Act
+		var result = registry.SyncDirectory(Path.Combine(_tempDir, "does-not-exist"));
+
+		// Assert
+		result.Added.Should().Be(0);
+		result.Updated.Should().Be(0);
+		result.Removed.Should().Be(0);
+		result.Unchanged.Should().Be(0);
+		result.Failed.Should().Be(0);
+	}
+
+	[Fact]
+	public void SyncDirectory_Recursive_IncludesSubdirectories()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-recursive");
+		var subDir = Path.Combine(syncDir, "sub");
+		var registry = new OrchestrationRegistry(_persistPath);
+		CreateTestOrchestrationFileInDir(syncDir, "root-orch");
+		CreateTestOrchestrationFileInDir(subDir, "sub-orch");
+
+		// Act
+		var result = registry.SyncDirectory(syncDir, recursive: true);
+
+		// Assert
+		result.Added.Should().Be(2);
+		registry.Count.Should().Be(2);
+	}
+
+	[Fact]
+	public void SyncDirectory_NonRecursive_IgnoresSubdirectories()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-nonrecursive");
+		var subDir = Path.Combine(syncDir, "sub");
+		var registry = new OrchestrationRegistry(_persistPath);
+		CreateTestOrchestrationFileInDir(syncDir, "root-orch");
+		CreateTestOrchestrationFileInDir(subDir, "sub-orch");
+
+		// Act
+		var result = registry.SyncDirectory(syncDir, recursive: false);
+
+		// Assert
+		result.Added.Should().Be(1);
+		registry.Count.Should().Be(1);
+		registry.GetAll().First().Orchestration.Name.Should().Be("root-orch");
+	}
+
+	[Fact]
+	public void SyncDirectory_DoesNotRemoveOrchestrations_RegisteredFromOtherPaths()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-isolated");
+		var otherDir = Path.Combine(_tempDir, "other-dir");
+		var registry = new OrchestrationRegistry(_persistPath);
+
+		// Register from a different directory first
+		var otherPath = CreateTestOrchestrationFileInDir(otherDir, "other-orch");
+		registry.Register(otherPath, persist: false);
+		registry.Count.Should().Be(1);
+
+		// Sync the scan directory (which has no files)
+		Directory.CreateDirectory(syncDir);
+
+		// Act
+		var result = registry.SyncDirectory(syncDir);
+
+		// Assert — the orchestration from the other directory should NOT be removed
+		result.Removed.Should().Be(0);
+		registry.Count.Should().Be(1);
+		registry.GetAll().First().Orchestration.Name.Should().Be("other-orch");
+	}
+
+	[Fact]
+	public void SyncDirectory_InvalidFile_SkipsAndCountsFailure()
+	{
+		// Arrange
+		var syncDir = Path.Combine(_tempDir, "sync-invalid");
+		Directory.CreateDirectory(syncDir);
+		var registry = new OrchestrationRegistry(_persistPath);
+		CreateTestOrchestrationFileInDir(syncDir, "valid-orch");
+		File.WriteAllText(Path.Combine(syncDir, "broken.json"), "this is not valid json {{{");
+
+		// Act
+		var result = registry.SyncDirectory(syncDir);
+
+		// Assert
+		result.Added.Should().Be(1);
+		result.Failed.Should().Be(1);
+		registry.Count.Should().Be(1);
+	}
+
+	#endregion
 }

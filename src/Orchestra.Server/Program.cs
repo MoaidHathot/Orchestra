@@ -48,7 +48,8 @@ builder.Services.AddOrchestraHost((options, configuration) =>
 
 	if (dataPath is not null)
 		options.DataPath = dataPath;
-	options.OrchestrationsScanPath = orchestrationsScanPath;
+	if (orchestrationsScanPath is not null)
+		options.OrchestrationsScan = new OrchestrationsScanConfig { Directory = orchestrationsScanPath };
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
 });

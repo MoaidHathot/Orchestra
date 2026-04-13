@@ -82,7 +82,10 @@ builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 builder.Services.AddOrchestraHost(options =>
 {
     options.DataPath = "./data";
-    options.OrchestrationsScanPath = "./orchestrations";
+    options.OrchestrationsScan = new OrchestrationsScanConfig
+    {
+        Directory = "./orchestrations",
+    };
 });
 
 var app = builder.Build();

@@ -93,7 +93,8 @@ builder.Services.AddTriggerExecutionCallback<TerminalExecutionCallback>();
 builder.Services.AddOrchestraHost(options =>
 {
 	options.DataPath = dataPath;
-	options.OrchestrationsScanPath = orchestrationPath;
+	if (orchestrationPath is not null)
+		options.OrchestrationsScan = new OrchestrationsScanConfig { Directory = orchestrationPath };
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
 
