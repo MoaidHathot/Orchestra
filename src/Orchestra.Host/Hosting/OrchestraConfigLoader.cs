@@ -193,18 +193,18 @@ public static class OrchestraConfigLoader
 		if (config.HostBaseUrl is not null)
 			options.HostBaseUrl = config.HostBaseUrl;
 
-		if (config.OrchestrationsScan is not null && config.OrchestrationsScan.Directory is not null)
+		if (config.Scan is not null && config.Scan.Directory is not null)
 		{
-			var resolvedDirectory = ResolvePath(config.OrchestrationsScan.Directory, configDirectory);
-			options.OrchestrationsScan ??= new OrchestrationsScanConfig { Directory = resolvedDirectory };
+			var resolvedDirectory = ResolvePath(config.Scan.Directory, configDirectory);
+			options.Scan ??= new ScanConfig { Directory = resolvedDirectory };
 
-			options.OrchestrationsScan.Directory = resolvedDirectory;
+			options.Scan.Directory = resolvedDirectory;
 
-			if (config.OrchestrationsScan.Watch.HasValue)
-				options.OrchestrationsScan.Watch = config.OrchestrationsScan.Watch.Value;
+			if (config.Scan.Watch.HasValue)
+				options.Scan.Watch = config.Scan.Watch.Value;
 
-			if (config.OrchestrationsScan.Recursive.HasValue)
-				options.OrchestrationsScan.Recursive = config.OrchestrationsScan.Recursive.Value;
+			if (config.Scan.Recursive.HasValue)
+				options.Scan.Recursive = config.Scan.Recursive.Value;
 		}
 
 		if (config.ShutdownTimeoutSeconds.HasValue)
@@ -291,9 +291,9 @@ public class OrchestraConfigFile
 	public string? HostBaseUrl { get; set; }
 
 	/// <summary>
-	/// Configuration for automatic orchestration directory scanning and watching.
+	/// Configuration for automatic directory scanning and watching.
 	/// </summary>
-	public OrchestrationsScanConfigFile? OrchestrationsScan { get; set; }
+	public ScanConfigFile? Scan { get; set; }
 
 	/// <summary>
 	/// Retention policy for automatic cleanup of old run records.
@@ -408,24 +408,24 @@ public class McpServerConfig
 }
 
 /// <summary>
-/// Orchestration scan configuration section of the config file.
+/// Scan configuration section of the config file.
 /// All fields are nullable — only non-null values override defaults.
 /// </summary>
-public class OrchestrationsScanConfigFile
+public class ScanConfigFile
 {
 	/// <summary>
-	/// Directory path to scan for orchestration files (.json, .yaml, .yml).
+	/// Root directory path to scan. Expected to contain <c>orchestrations/</c> and/or <c>profiles/</c> subdirectories.
 	/// </summary>
 	public string? Directory { get; set; }
 
 	/// <summary>
 	/// If true, watch the directory for file changes at runtime and
-	/// automatically register, update, or remove orchestrations.
+	/// automatically register, update, or remove orchestrations and profiles.
 	/// </summary>
 	public bool? Watch { get; set; }
 
 	/// <summary>
-	/// If true, scan subdirectories recursively.
+	/// If true, scan subdirectories recursively within <c>orchestrations/</c> and <c>profiles/</c>.
 	/// </summary>
 	public bool? Recursive { get; set; }
 }

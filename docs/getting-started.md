@@ -53,8 +53,8 @@ builder.Services.AddOrchestraHost(options =>
     // Where to store run history, triggers, and registry
     options.DataPath = Path.Combine(builder.Environment.ContentRootPath, "data");
     
-    // Optional: Auto-scan this directory for orchestration files on startup
-    options.OrchestrationsScan = new OrchestrationsScanConfig
+    // Optional: Auto-scan this directory for orchestration and profile files on startup
+    options.Scan = new ScanConfig
     {
         Directory = Path.Combine(builder.Environment.ContentRootPath, "orchestrations"),
     };

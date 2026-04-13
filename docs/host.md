@@ -40,7 +40,7 @@ builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
 builder.Services.AddOrchestraHost(options =>
 {
     options.DataPath = "./data";
-    options.OrchestrationsScan = new OrchestrationsScanConfig
+    options.Scan = new ScanConfig
     {
         Directory = "./orchestrations",
         Watch = true,
@@ -63,7 +63,7 @@ app.Run();
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `DataPath` | `string` | `%LOCALAPPDATA%/OrchestraHost` | Root path for all Orchestra data |
-| `OrchestrationsScan` | `OrchestrationsScanConfig?` | `null` | Configuration for auto-scanning and watching a directory for orchestration files |
+| `Scan` | `ScanConfig?` | `null` | Configuration for auto-scanning and watching a directory for orchestration and profile files |
 | `HostBaseUrl` | `string?` | `null` | Base URL for generating run detail links |
 | `LoadPersistedOrchestrations` | `bool` | `true` | Load saved orchestrations on startup |
 | `LoadPersistedTriggers` | `bool` | `true` | Load saved trigger states on startup |

@@ -306,11 +306,24 @@ public static class ServiceProviderExtensions
 			registry.LoadFromDisk();
 		}
 
-		// Sync orchestrations from the configured scan directory (registers new, updates changed, removes deleted)
-		var scanConfig = options.OrchestrationsScan;
+		// Sync orchestrations and profiles from the configured scan directory
+		var scanConfig = options.Scan;
 		if (scanConfig is not null && Directory.Exists(scanConfig.Directory))
 		{
-			registry.SyncDirectory(scanConfig.Directory, scanConfig.Recursive);
+			// Sync orchestrations from the orchestrations/ subdirectory
+			var orchestrationsDir = Path.Combine(scanConfig.Directory, OrchestrationSyncService.OrchestrationsDirName);
+			if (Directory.Exists(orchestrationsDir))
+			{
+				registry.SyncDirectory(orchestrationsDir, scanConfig.Recursive);
+			}
+
+			// Sync profiles from the profiles/ subdirectory
+			var profileStore = services.GetRequiredService<ProfileStore>();
+			var profilesDir = Path.Combine(scanConfig.Directory, OrchestrationSyncService.ProfilesDirName);
+			if (Directory.Exists(profilesDir))
+			{
+				profileStore.SyncDirectory(profilesDir);
+			}
 		}
 
 		// Register triggers for loaded orchestrations

@@ -111,6 +111,130 @@ public partial class ProfileStore
 	public int Count => _profiles.Count;
 
 	/// <summary>
+	/// Syncs profiles from an external directory. Imports new profiles (as inactive),
+	/// updates changed profiles (preserving activation state), and removes profiles
+	/// whose source files no longer exist. Uses content hashing to detect changes.
+	/// </summary>
+	/// <returns>A summary of what was added, updated, removed, unchanged, and failed.</returns>
+	public ProfileSyncResult SyncDirectory(string directory)
+	{
+		int added = 0, updated = 0, removed = 0, unchanged = 0, failed = 0;
+		var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		if (!Directory.Exists(directory))
+		{
+			LogProfileSyncDirectoryNotFound(directory);
+			return new ProfileSyncResult(0, 0, 0, 0, 0);
+		}
+
+		foreach (var file in Directory.GetFiles(directory, "*.json", SearchOption.TopDirectoryOnly))
+		{
+			try
+			{
+				var rawContent = File.ReadAllText(file);
+				var contentHash = ComputeContentHash(rawContent);
+				var profile = JsonSerializer.Deserialize<Profile>(rawContent, JsonOptions);
+
+				if (profile is null)
+				{
+					failed++;
+					continue;
+				}
+
+				// Regenerate ID from name to ensure consistency
+				var id = GenerateId(profile.Name);
+				seenIds.Add(id);
+
+				// Check if this profile already exists
+				var existing = Get(id);
+				if (existing is not null)
+				{
+					// If content hash matches, skip (unchanged)
+					if (existing.ContentHash == contentHash)
+					{
+						unchanged++;
+						continue;
+					}
+
+					// Content changed — update the profile but preserve activation state
+					profile = profile with
+					{
+						Id = id,
+						IsActive = existing.IsActive,
+						ActivatedAt = existing.ActivatedAt,
+						DeactivatedAt = existing.DeactivatedAt,
+						ActivationTrigger = existing.ActivationTrigger,
+						SourcePath = Path.GetFullPath(file),
+						ContentHash = contentHash,
+						UpdatedAt = DateTimeOffset.UtcNow,
+					};
+
+					Save(profile);
+					updated++;
+					LogProfileSynced(profile.Name, file, "updated");
+				}
+				else
+				{
+					// New profile — import as inactive
+					profile = profile with
+					{
+						Id = id,
+						IsActive = false,
+						ActivatedAt = null,
+						DeactivatedAt = null,
+						ActivationTrigger = null,
+						SourcePath = Path.GetFullPath(file),
+						ContentHash = contentHash,
+						CreatedAt = DateTimeOffset.UtcNow,
+						UpdatedAt = DateTimeOffset.UtcNow,
+					};
+
+					Save(profile);
+					added++;
+					LogProfileSynced(profile.Name, file, "added");
+				}
+			}
+			catch (Exception ex)
+			{
+				LogProfileSyncFailed(file, ex);
+				failed++;
+			}
+		}
+
+		// Remove profiles whose source file no longer exists
+		// (only remove profiles that were synced from this directory)
+		var normalizedDir = Path.GetFullPath(directory);
+		foreach (var profile in GetAll())
+		{
+			if (profile.SourcePath is null)
+				continue;
+
+			var normalizedSource = Path.GetFullPath(profile.SourcePath);
+			if (!normalizedSource.StartsWith(normalizedDir, StringComparison.OrdinalIgnoreCase))
+				continue;
+
+			if (!seenIds.Contains(profile.Id))
+			{
+				LogProfileRemoved(profile.Name, profile.SourcePath);
+				Remove(profile.Id);
+				removed++;
+			}
+		}
+
+		LogProfileSyncCompleted(directory, added, updated, removed, unchanged, failed);
+		return new ProfileSyncResult(added, updated, removed, unchanged, failed);
+	}
+
+	/// <summary>
+	/// Computes a SHA-256 content hash for change detection.
+	/// </summary>
+	internal static string ComputeContentHash(string content)
+	{
+		var hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+		return Convert.ToHexString(hash).ToLowerInvariant();
+	}
+
+	/// <summary>
 	/// Appends a history entry for a profile.
 	/// </summary>
 	public void AppendHistory(string profileId, ProfileHistoryEntry entry)
@@ -219,4 +343,24 @@ public partial class ProfileStore
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to load history for profile '{ProfileId}'")]
 	private partial void LogHistoryLoadFailed(Exception ex, string profileId);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Profile scan directory not found: '{Directory}'")]
+	private partial void LogProfileSyncDirectoryNotFound(string directory);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Profile '{Name}' synced from '{Path}' ({Action})")]
+	private partial void LogProfileSynced(string name, string path, string action);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to sync profile from '{Path}'")]
+	private partial void LogProfileSyncFailed(string path, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Profile '{Name}' removed (source file deleted: '{Path}')")]
+	private partial void LogProfileRemoved(string name, string path);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Profile sync completed for '{Directory}': {Added} added, {Updated} updated, {Removed} removed, {Unchanged} unchanged, {Failed} failed")]
+	private partial void LogProfileSyncCompleted(string directory, int added, int updated, int removed, int unchanged, int failed);
 }
+
+/// <summary>
+/// Result of a profile directory sync operation.
+/// </summary>
+public record ProfileSyncResult(int Added, int Updated, int Removed, int Unchanged, int Failed);

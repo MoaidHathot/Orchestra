@@ -80,7 +80,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		{
 			DataPath = "/custom/data",
 			HostBaseUrl = "http://localhost:9999",
-			OrchestrationsScan = new OrchestrationsScanConfigFile
+			Scan = new ScanConfigFile
 			{
 				Directory = "/custom/orchestrations",
 			},
@@ -100,10 +100,10 @@ public class OrchestraConfigLoaderTests : IDisposable
 		// Assert
 		options.DataPath.Should().Be("/custom/data");
 		options.HostBaseUrl.Should().Be("http://localhost:9999");
-		options.OrchestrationsScan.Should().NotBeNull();
-		options.OrchestrationsScan!.Directory.Should().Be("/custom/orchestrations");
-		options.OrchestrationsScan.Watch.Should().BeFalse();
-		options.OrchestrationsScan.Recursive.Should().BeFalse();
+		options.Scan.Should().NotBeNull();
+		options.Scan!.Directory.Should().Be("/custom/orchestrations");
+		options.Scan.Watch.Should().BeFalse();
+		options.Scan.Recursive.Should().BeFalse();
 		options.ShutdownTimeoutSeconds.Should().Be(120);
 		options.LogLevel.Should().Be("Debug");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
@@ -448,7 +448,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		{
 			"dataPath": "/round-trip/data",
 			"hostBaseUrl": "http://my-host:8080",
-			"orchestrationsScan": {
+			"scan": {
 				"directory": "/round-trip/orchestrations",
 				"watch": true,
 				"recursive": true
@@ -472,10 +472,10 @@ public class OrchestraConfigLoaderTests : IDisposable
 		// Assert
 		options.DataPath.Should().Be("/round-trip/data");
 		options.HostBaseUrl.Should().Be("http://my-host:8080");
-		options.OrchestrationsScan.Should().NotBeNull();
-		options.OrchestrationsScan!.Directory.Should().Be("/round-trip/orchestrations");
-		options.OrchestrationsScan.Watch.Should().BeTrue();
-		options.OrchestrationsScan.Recursive.Should().BeTrue();
+		options.Scan.Should().NotBeNull();
+		options.Scan!.Directory.Should().Be("/round-trip/orchestrations");
+		options.Scan.Watch.Should().BeTrue();
+		options.Scan.Recursive.Should().BeTrue();
 		options.ShutdownTimeoutSeconds.Should().Be(180);
 		options.LogLevel.Should().Be("Trace");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
@@ -585,16 +585,16 @@ public class OrchestraConfigLoaderTests : IDisposable
 		result.Retention.MaxRunAgeDays.Should().Be(7);
 	}
 
-	// ── OrchestrationsScan config tests ──
+	// ── Scan config tests ──
 
 	[Fact]
-	public void ApplyConfig_OrchestrationsScan_DirectoryOnly_SetsDefaults()
+	public void ApplyConfig_Scan_DirectoryOnly_SetsDefaults()
 	{
 		// Arrange
 		var options = new OrchestrationHostOptions();
 		var config = new OrchestraConfigFile
 		{
-			OrchestrationsScan = new OrchestrationsScanConfigFile
+			Scan = new ScanConfigFile
 			{
 				Directory = "/my/orchestrations",
 			},
@@ -604,20 +604,20 @@ public class OrchestraConfigLoaderTests : IDisposable
 		OrchestraConfigLoader.ApplyConfig(options, config);
 
 		// Assert
-		options.OrchestrationsScan.Should().NotBeNull();
-		options.OrchestrationsScan!.Directory.Should().Be("/my/orchestrations");
-		options.OrchestrationsScan.Watch.Should().BeFalse();
-		options.OrchestrationsScan.Recursive.Should().BeFalse();
+		options.Scan.Should().NotBeNull();
+		options.Scan!.Directory.Should().Be("/my/orchestrations");
+		options.Scan.Watch.Should().BeFalse();
+		options.Scan.Recursive.Should().BeFalse();
 	}
 
 	[Fact]
-	public void ApplyConfig_OrchestrationsScan_AllFields_Applied()
+	public void ApplyConfig_Scan_AllFields_Applied()
 	{
 		// Arrange
 		var options = new OrchestrationHostOptions();
 		var config = new OrchestraConfigFile
 		{
-			OrchestrationsScan = new OrchestrationsScanConfigFile
+			Scan = new ScanConfigFile
 			{
 				Directory = "/scan/dir",
 				Watch = true,
@@ -629,19 +629,19 @@ public class OrchestraConfigLoaderTests : IDisposable
 		OrchestraConfigLoader.ApplyConfig(options, config);
 
 		// Assert
-		options.OrchestrationsScan.Should().NotBeNull();
-		options.OrchestrationsScan!.Directory.Should().Be("/scan/dir");
-		options.OrchestrationsScan.Watch.Should().BeTrue();
-		options.OrchestrationsScan.Recursive.Should().BeTrue();
+		options.Scan.Should().NotBeNull();
+		options.Scan!.Directory.Should().Be("/scan/dir");
+		options.Scan.Watch.Should().BeTrue();
+		options.Scan.Recursive.Should().BeTrue();
 	}
 
 	[Fact]
-	public void ApplyConfig_OrchestrationsScan_PartialOverride_PreservesExisting()
+	public void ApplyConfig_Scan_PartialOverride_PreservesExisting()
 	{
 		// Arrange — pre-configure some values
 		var options = new OrchestrationHostOptions
 		{
-			OrchestrationsScan = new OrchestrationsScanConfig
+			Scan = new ScanConfig
 			{
 				Directory = "/original/dir",
 				Watch = true,
@@ -652,7 +652,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		// Config only overrides directory, watch/recursive are null (no override)
 		var config = new OrchestraConfigFile
 		{
-			OrchestrationsScan = new OrchestrationsScanConfigFile
+			Scan = new ScanConfigFile
 			{
 				Directory = "/new/dir",
 			},
@@ -662,22 +662,22 @@ public class OrchestraConfigLoaderTests : IDisposable
 		OrchestraConfigLoader.ApplyConfig(options, config);
 
 		// Assert — directory changed, watch and recursive preserved
-		options.OrchestrationsScan.Should().NotBeNull();
-		options.OrchestrationsScan!.Directory.Should().Be("/new/dir");
-		options.OrchestrationsScan.Watch.Should().BeTrue();
-		options.OrchestrationsScan.Recursive.Should().BeTrue();
+		options.Scan.Should().NotBeNull();
+		options.Scan!.Directory.Should().Be("/new/dir");
+		options.Scan.Watch.Should().BeTrue();
+		options.Scan.Recursive.Should().BeTrue();
 	}
 
 	[Fact]
-	public void ApplyConfig_OrchestrationsScan_NullDirectory_DoesNotApply()
+	public void ApplyConfig_Scan_NullDirectory_DoesNotApply()
 	{
 		// Arrange
 		var options = new OrchestrationHostOptions();
 		var config = new OrchestraConfigFile
 		{
-			OrchestrationsScan = new OrchestrationsScanConfigFile
+			Scan = new ScanConfigFile
 			{
-				// Directory is null — should not create OrchestrationsScan
+				// Directory is null — should not create Scan
 				Watch = true,
 			},
 		};
@@ -685,17 +685,17 @@ public class OrchestraConfigLoaderTests : IDisposable
 		// Act
 		OrchestraConfigLoader.ApplyConfig(options, config);
 
-		// Assert — OrchestrationsScan should remain null
-		options.OrchestrationsScan.Should().BeNull();
+		// Assert — Scan should remain null
+		options.Scan.Should().BeNull();
 	}
 
 	[Fact]
-	public void ApplyConfig_OrchestrationsScan_Null_DoesNotOverride()
+	public void ApplyConfig_Scan_Null_DoesNotOverride()
 	{
 		// Arrange — pre-configure
 		var options = new OrchestrationHostOptions
 		{
-			OrchestrationsScan = new OrchestrationsScanConfig
+			Scan = new ScanConfig
 			{
 				Directory = "/existing/dir",
 			},
@@ -703,25 +703,25 @@ public class OrchestraConfigLoaderTests : IDisposable
 
 		var config = new OrchestraConfigFile
 		{
-			// OrchestrationsScan is null in config file — should not clear existing
+			// Scan is null in config file — should not clear existing
 		};
 
 		// Act
 		OrchestraConfigLoader.ApplyConfig(options, config);
 
 		// Assert — existing config preserved
-		options.OrchestrationsScan.Should().NotBeNull();
-		options.OrchestrationsScan!.Directory.Should().Be("/existing/dir");
+		options.Scan.Should().NotBeNull();
+		options.Scan!.Directory.Should().Be("/existing/dir");
 	}
 
 	[Fact]
-	public void LoadAndApply_OrchestrationsScan_FromJsonFile()
+	public void LoadAndApply_Scan_FromJsonFile()
 	{
 		// Arrange
 		var configPath = Path.Combine(_tempDir, "scan-config.json");
 		File.WriteAllText(configPath, """
 		{
-			"orchestrationsScan": {
+			"scan": {
 				"directory": "/file/based/scan",
 				"watch": true
 			}
@@ -735,9 +735,9 @@ public class OrchestraConfigLoaderTests : IDisposable
 		OrchestraConfigLoader.LoadAndApply(options);
 
 		// Assert
-		options.OrchestrationsScan.Should().NotBeNull();
-		options.OrchestrationsScan!.Directory.Should().Be("/file/based/scan");
-		options.OrchestrationsScan.Watch.Should().BeTrue();
-		options.OrchestrationsScan.Recursive.Should().BeFalse();
+		options.Scan.Should().NotBeNull();
+		options.Scan!.Directory.Should().Be("/file/based/scan");
+		options.Scan.Watch.Should().BeTrue();
+		options.Scan.Recursive.Should().BeFalse();
 	}
 }

@@ -18,14 +18,16 @@ public class OrchestrationSyncIntegrationTests : IDisposable
 	private readonly string _testDir;
 	private readonly string _dataPath;
 	private readonly string _scanDir;
+	private readonly string _orchestrationsDir;
 
 	public OrchestrationSyncIntegrationTests()
 	{
 		_testDir = Path.Combine(Path.GetTempPath(), "Orchestra.SyncTests", Guid.NewGuid().ToString("N"));
 		_dataPath = Path.Combine(_testDir, "data");
-		_scanDir = Path.Combine(_testDir, "orchestrations");
+		_scanDir = Path.Combine(_testDir, "scan");
+		_orchestrationsDir = Path.Combine(_scanDir, "orchestrations");
 		Directory.CreateDirectory(_dataPath);
-		Directory.CreateDirectory(_scanDir);
+		Directory.CreateDirectory(_orchestrationsDir);
 	}
 
 	public void Dispose()
@@ -47,7 +49,7 @@ public class OrchestrationSyncIntegrationTests : IDisposable
 	public async Task Server_WithScanDirectory_AutoRegistersOrchestrations()
 	{
 		// Arrange — write orchestration files to the scan directory before starting the server
-		File.WriteAllText(Path.Combine(_scanDir, "sync-test-1.json"), """
+		File.WriteAllText(Path.Combine(_orchestrationsDir, "sync-test-1.json"), """
 		{
 			"name": "Sync Test Alpha",
 			"description": "Auto-synced orchestration",
@@ -61,7 +63,7 @@ public class OrchestrationSyncIntegrationTests : IDisposable
 		}
 		""");
 
-		File.WriteAllText(Path.Combine(_scanDir, "sync-test-2.json"), """
+		File.WriteAllText(Path.Combine(_orchestrationsDir, "sync-test-2.json"), """
 		{
 			"name": "Sync Test Beta",
 			"description": "Another auto-synced orchestration",
@@ -114,7 +116,7 @@ public class OrchestrationSyncIntegrationTests : IDisposable
 	public async Task Server_WithScanDirectory_DetectsContentChanges()
 	{
 		// Arrange — write an orchestration file
-		var filePath = Path.Combine(_scanDir, "change-detection.json");
+		var filePath = Path.Combine(_orchestrationsDir, "change-detection.json");
 		File.WriteAllText(filePath, """
 		{
 			"name": "Change Detection Test",

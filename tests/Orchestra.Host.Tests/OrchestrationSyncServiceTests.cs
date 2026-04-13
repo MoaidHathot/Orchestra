@@ -17,19 +17,23 @@ public class OrchestrationSyncServiceTests : IDisposable
 {
 	private readonly string _tempDir;
 	private readonly string _watchDir;
+	private readonly string _orchestrationsDir;
 	private readonly string _dataPath;
 	private readonly string _persistPath;
 	private readonly OrchestrationRegistry _registry;
 	private readonly TriggerManager _triggerManager;
 	private readonly ProfileManager _profileManager;
+	private readonly ProfileStore _profileStore;
 
 	public OrchestrationSyncServiceTests()
 	{
 		_tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-sync-tests-{Guid.NewGuid():N}");
 		_watchDir = Path.Combine(_tempDir, "watch");
+		_orchestrationsDir = Path.Combine(_watchDir, OrchestrationSyncService.OrchestrationsDirName);
 		_dataPath = Path.Combine(_tempDir, "data");
 		_persistPath = Path.Combine(_dataPath, "registered-orchestrations.json");
 		Directory.CreateDirectory(_watchDir);
+		Directory.CreateDirectory(_orchestrationsDir);
 		Directory.CreateDirectory(_dataPath);
 
 		_registry = new OrchestrationRegistry(_persistPath, NullLogger<OrchestrationRegistry>.Instance);
@@ -49,9 +53,9 @@ public class OrchestrationSyncServiceTests : IDisposable
 			checkpointStore: null!,
 			dataPath: _dataPath);
 
-		var profileStore = new ProfileStore(_dataPath, NullLogger<ProfileStore>.Instance);
+		_profileStore = new ProfileStore(_dataPath, NullLogger<ProfileStore>.Instance);
 		var tagStore = new OrchestrationTagStore(_dataPath, NullLogger<OrchestrationTagStore>.Instance);
-		_profileManager = new ProfileManager(profileStore, tagStore, _registry, NullLogger<ProfileManager>.Instance);
+		_profileManager = new ProfileManager(_profileStore, tagStore, _registry, NullLogger<ProfileManager>.Instance);
 		_profileManager.Initialize();
 	}
 
@@ -96,7 +100,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var options = new OrchestrationHostOptions
 		{
 			DataPath = _dataPath,
-			OrchestrationsScan = new OrchestrationsScanConfig
+			Scan = new ScanConfig
 			{
 				Directory = _watchDir,
 				Watch = watch,
@@ -108,6 +112,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 			_registry,
 			_triggerManager,
 			_profileManager,
+			_profileStore,
 			options,
 			NullLogger<OrchestrationSyncService>.Instance);
 
@@ -139,9 +144,9 @@ public class OrchestrationSyncServiceTests : IDisposable
 	public async Task ExecuteAsync_NullScanConfig_ExitsImmediately()
 	{
 		// Arrange
-		var options = new OrchestrationHostOptions { OrchestrationsScan = null };
+		var options = new OrchestrationHostOptions { Scan = null };
 		var service = new OrchestrationSyncService(
-			_registry, _triggerManager, _profileManager, options,
+			_registry, _triggerManager, _profileManager, _profileStore, options,
 			NullLogger<OrchestrationSyncService>.Instance);
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
@@ -164,8 +169,8 @@ public class OrchestrationSyncServiceTests : IDisposable
 		await service.StartAsync(cts.Token);
 		await service.WatcherReady.Task;
 
-		// Act — create a new file in the watched directory
-		WriteOrchestrationFile(_watchDir, "watcher-new");
+		// Act — create a new file in the watched orchestrations directory
+		WriteOrchestrationFile(_orchestrationsDir, "watcher-new");
 
 		// Wait for debounce + processing
 		await WaitForConditionAsync(() => _registry.Count == 1, TimeSpan.FromSeconds(5));
@@ -181,7 +186,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 	public async Task FileWatcher_FileModified_UpdatesOrchestration()
 	{
 		// Arrange — pre-register a file
-		var filePath = WriteOrchestrationFile(_watchDir, "watcher-update", "Version 1");
+		var filePath = WriteOrchestrationFile(_orchestrationsDir, "watcher-update", "Version 1");
 		_registry.Register(filePath, persist: false);
 		_registry.Count.Should().Be(1);
 		_registry.GetAll().First().Orchestration.Description.Should().Be("Version 1");
@@ -192,7 +197,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		await service.WatcherReady.Task;
 
 		// Act — modify the file
-		WriteOrchestrationFile(_watchDir, "watcher-update", "Version 2");
+		WriteOrchestrationFile(_orchestrationsDir, "watcher-update", "Version 2");
 
 		// Wait for debounce + processing
 		await WaitForConditionAsync(
@@ -210,7 +215,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 	public async Task FileWatcher_FileDeleted_RemovesOrchestration()
 	{
 		// Arrange — pre-register a file
-		var filePath = WriteOrchestrationFile(_watchDir, "watcher-delete");
+		var filePath = WriteOrchestrationFile(_orchestrationsDir, "watcher-delete");
 		_registry.Register(filePath, persist: false);
 		_registry.Count.Should().Be(1);
 
@@ -241,7 +246,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		await service.WatcherReady.Task;
 
 		// Act — write an invalid JSON file
-		File.WriteAllText(Path.Combine(_watchDir, "broken.json"), "not valid json {{{");
+		File.WriteAllText(Path.Combine(_orchestrationsDir, "broken.json"), "not valid json {{{");
 
 		// Wait for debounce + processing attempt
 		await Task.Delay(500);
@@ -262,7 +267,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		await service.WatcherReady.Task;
 
 		// Act — write a non-orchestration file
-		File.WriteAllText(Path.Combine(_watchDir, "readme.txt"), "This is not an orchestration");
+		File.WriteAllText(Path.Combine(_orchestrationsDir, "readme.txt"), "This is not an orchestration");
 
 		// Wait to confirm no processing
 		await Task.Delay(500);
@@ -277,7 +282,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 	public async Task FileWatcher_FileRenamed_HandlesAsDeleteAndCreate()
 	{
 		// Arrange — pre-register a file
-		var originalPath = WriteOrchestrationFile(_watchDir, "watcher-rename");
+		var originalPath = WriteOrchestrationFile(_orchestrationsDir, "watcher-rename");
 		_registry.Register(originalPath, persist: false);
 		_registry.Count.Should().Be(1);
 
@@ -287,7 +292,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		await service.WatcherReady.Task;
 
 		// Act — rename the file (creates a new file with different name, but same content structure)
-		var newPath = Path.Combine(_watchDir, "renamed-orch.json");
+		var newPath = Path.Combine(_orchestrationsDir, "renamed-orch.json");
 		File.Move(originalPath, newPath);
 
 		// Wait for debounce + processing
@@ -309,7 +314,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 	public async Task FileWatcher_Recursive_WatchesSubdirectories()
 	{
 		// Arrange
-		var subDir = Path.Combine(_watchDir, "sub");
+		var subDir = Path.Combine(_orchestrationsDir, "sub");
 		Directory.CreateDirectory(subDir);
 
 		var service = CreateService(recursive: true);
@@ -342,7 +347,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		// Act — write the same file rapidly multiple times
 		for (int i = 0; i < 5; i++)
 		{
-			WriteOrchestrationFile(_watchDir, "rapid-changes", $"Version {i + 1}");
+			WriteOrchestrationFile(_orchestrationsDir, "rapid-changes", $"Version {i + 1}");
 			await Task.Delay(10); // Much faster than debounce delay
 		}
 
@@ -367,7 +372,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		await service.WatcherReady.Task;
 
 		// Act — create a file (won't process due to long debounce)
-		WriteOrchestrationFile(_watchDir, "shutdown-test");
+		WriteOrchestrationFile(_orchestrationsDir, "shutdown-test");
 
 		// Immediately stop
 		await service.StopAsync(CancellationToken.None);

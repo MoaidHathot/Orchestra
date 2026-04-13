@@ -21,12 +21,14 @@ public class OrchestrationHostOptions
 	public string? HostBaseUrl { get; set; }
 
 	/// <summary>
-	/// Configuration for automatic orchestration directory scanning and watching.
-	/// When set, Orchestra scans the directory on startup (registering new orchestrations,
-	/// updating changed ones, and removing deleted ones). If <see cref="OrchestrationsScanConfig.Watch"/>
-	/// is enabled, a file watcher monitors the directory for live changes at runtime.
+	/// Configuration for automatic directory scanning and watching.
+	/// When set, Orchestra scans the directory on startup for orchestration files
+	/// (in the <c>orchestrations/</c> subdirectory) and profile files
+	/// (in the <c>profiles/</c> subdirectory).
+	/// If <see cref="ScanConfig.Watch"/> is enabled, a file watcher monitors
+	/// the directory for live changes at runtime.
 	/// </summary>
-	public OrchestrationsScanConfig? OrchestrationsScan { get; set; }
+	public ScanConfig? Scan { get; set; }
 
 	/// <summary>
 	/// Whether to automatically load persisted orchestrations on startup.
@@ -110,24 +112,26 @@ public class PollingOptions
 }
 
 /// <summary>
-/// Configuration for automatic orchestration directory scanning and watching.
+/// Configuration for automatic directory scanning and watching.
+/// The <see cref="Directory"/> path should contain <c>orchestrations/</c> and/or <c>profiles/</c>
+/// subdirectories. Orchestra scans these on startup and optionally watches for live changes.
 /// </summary>
-public class OrchestrationsScanConfig
+public class ScanConfig
 {
 	/// <summary>
-	/// Directory path to scan for orchestration files (.json, .yaml, .yml).
+	/// Root directory path to scan. Expected to contain <c>orchestrations/</c> and/or <c>profiles/</c> subdirectories.
 	/// </summary>
 	public required string Directory { get; set; }
 
 	/// <summary>
 	/// If true, watch the directory for file changes at runtime and
-	/// automatically register, update, or remove orchestrations.
+	/// automatically register, update, or remove orchestrations and profiles.
 	/// Default: false.
 	/// </summary>
 	public bool Watch { get; set; }
 
 	/// <summary>
-	/// If true, scan subdirectories recursively.
+	/// If true, scan subdirectories recursively within <c>orchestrations/</c> and <c>profiles/</c>.
 	/// Default: false.
 	/// </summary>
 	public bool Recursive { get; set; }

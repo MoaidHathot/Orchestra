@@ -53,7 +53,7 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 				? subagents.EnumerateArray().Select(e => DeserializeSubagent(e, stepName, context)).ToArray()
 				: [],
 			SkillDirectories = root.TryGetProperty("skillDirectories", out var skillDirs)
-				? skillDirs.EnumerateArray().Select(e => e.GetString()!).ToArray()
+				? skillDirs.EnumerateArray().Select(e => ResolveSkillDirectoryPath(e.GetString()!, context)).ToArray()
 				: [],
 		};
 	}
@@ -157,6 +157,28 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 
 	[System.Text.RegularExpressions.GeneratedRegex(@"\{\{vars\.(?<name>[^}]+)\}\}", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled)]
 	private static partial System.Text.RegularExpressions.Regex VarsPattern();
+
+	/// <summary>
+	/// Resolves a skill directory path relative to the orchestration file's base directory.
+	/// Paths containing template expressions (e.g., <c>{{param.dir}}</c>) are left as-is
+	/// since they will be resolved at execution time by <see cref="TemplateResolver"/>.
+	/// Paths containing <c>{{vars.*}}</c> are expanded first, then resolved relative to the base directory.
+	/// </summary>
+	private static string ResolveSkillDirectoryPath(string path, StepParseContext context)
+	{
+		// Expand {{vars.*}} expressions first (same as prompt file paths)
+		var expanded = ResolveVarsInPath(path, context.Variables);
+
+		// If the path still contains template expressions, leave it for runtime resolution
+		if (expanded.Contains("{{"))
+			return expanded;
+
+		// Resolve relative paths against the orchestration file's directory
+		if (context.BaseDirectory is not null && !Path.IsPathRooted(expanded))
+			return Path.GetFullPath(Path.Combine(context.BaseDirectory, expanded));
+
+		return expanded;
+	}
 
 	private static Subagent DeserializeSubagent(JsonElement element, string stepName, StepParseContext context)
 	{

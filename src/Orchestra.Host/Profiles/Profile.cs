@@ -5,7 +5,7 @@ namespace Orchestra.Host.Profiles;
 /// are active when this profile is activated. Multiple profiles can be active simultaneously,
 /// and an orchestration is active if it matches any active profile (union semantics).
 /// </summary>
-public class Profile
+public record class Profile
 {
 	/// <summary>
 	/// Unique identifier for the profile, derived from the name.
@@ -66,4 +66,17 @@ public class Profile
 	/// When the profile was last updated.
 	/// </summary>
 	public DateTimeOffset UpdatedAt { get; set; }
+
+	/// <summary>
+	/// The original file path this profile was synced from, if it was loaded from an external
+	/// scan directory. Null for profiles created via the API or UI.
+	/// </summary>
+	public string? SourcePath { get; set; }
+
+	/// <summary>
+	/// SHA-256 content hash of the source file at the time of last sync.
+	/// Used to detect changes during directory sync and avoid unnecessary overwrites.
+	/// Null for profiles not loaded from a scan directory.
+	/// </summary>
+	public string? ContentHash { get; set; }
 }
