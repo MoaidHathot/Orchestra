@@ -13,7 +13,8 @@ public static class OrchestrationParser
 		.Register(new PromptStepTypeParser())
 		.Register(new HttpStepTypeParser())
 		.Register(new TransformStepTypeParser())
-		.Register(new CommandStepTypeParser());
+		.Register(new CommandStepTypeParser())
+		.Register(new ScriptStepTypeParser());
 
 	private static readonly StepParseContext s_defaultContext = new(BaseDirectory: null);
 
@@ -29,7 +30,8 @@ public static class OrchestrationParser
 			.Register(new PromptStepTypeParser())
 			.Register(new HttpStepTypeParser())
 			.Register(new TransformStepTypeParser())
-			.Register(new CommandStepTypeParser());
+			.Register(new CommandStepTypeParser())
+			.Register(new ScriptStepTypeParser());
 	}
 
 	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry, StepParseContext context)

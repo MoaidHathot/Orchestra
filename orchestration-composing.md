@@ -1,6 +1,6 @@
 # Composing Orchestration Files
 
-An **orchestration file** is a JSON document that defines a directed acyclic graph (DAG) of steps that execute in dependency order. Each step can call an LLM, make an HTTP request, run a shell command, or perform string interpolation. Steps can run in parallel when they share no dependencies, retry on failure, loop until a condition is met, and delegate work to subagents. Orchestrations can be triggered manually, on a schedule, in a continuous loop, or via webhook.
+An **orchestration file** is a JSON document that defines a directed acyclic graph (DAG) of steps that execute in dependency order. Each step can call an LLM, make an HTTP request, run a shell command, execute a script, or perform string interpolation. Steps can run in parallel when they share no dependencies, retry on failure, loop until a condition is met, and delegate work to subagents. Orchestrations can be triggered manually, on a schedule, in a continuous loop, or via webhook.
 
 This document is the complete reference for every property, step type, trigger type, and supporting object available in an orchestration file.
 
@@ -17,6 +17,7 @@ This document is the complete reference for every property, step type, trigger t
     - [Http Step](#http-step)
     - [Transform Step](#transform-step)
     - [Command Step](#command-step)
+    - [Script Step](#script-step)
 - [Loop Configuration](#loop-configuration)
 - [Subagents](#subagents)
 - [Retry Policy](#retry-policy)
@@ -163,7 +164,7 @@ These properties are shared by **all** step types.
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `name` | `string` | **Yes** | -- | Unique name within the orchestration. Used to reference this step in `dependsOn` and template expressions. |
-| `type` | `string` | **Yes** | -- | Step type. One of: `"Prompt"`, `"Http"`, `"Transform"`, `"Command"` (case-insensitive). |
+| `type` | `string` | **Yes** | -- | Step type. One of: `"Prompt"`, `"Http"`, `"Transform"`, `"Command"`, `"Script"` (case-insensitive). |
 | `dependsOn` | `string[]` | No | `[]` | Names of steps that must complete before this step runs. Defines the DAG edges. |
 | `parameters` | `string[]` | No | `[]` | Parameter names this step expects. Values are provided at runtime and accessed via `{{param.name}}`. |
 | `enabled` | `bool` | No | `true` | When `false`, the step is skipped during execution. |
@@ -307,6 +308,68 @@ Executes a shell command as a child process and captures its stdout (and optiona
   "workingDirectory": "{{param.projectPath}}",
   "includeStdErr": true,
   "timeoutSeconds": 180
+}
+```
+
+---
+
+#### Script Step
+
+**Type value:** `"Script"`
+
+Executes an inline or file-based script using a specified shell interpreter (e.g., `pwsh`, `bash`, `python`, `node`). The script's stdout is captured as output. Unlike the Command step which invokes a single executable with arguments, the Script step is designed for multi-line scripts with first-class support for inline content and external script files. All string properties support template expressions.
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `shell` | `string` | **Yes** | -- | Shell interpreter to use (e.g., `"pwsh"`, `"bash"`, `"python"`, `"node"`). |
+| `script` | `string` | **Yes*** | -- | Inline script content. Supports template expressions. |
+| `scriptFile` | `string` | **Yes*** | -- | Path to an external script file. Relative paths are resolved from the orchestration file's directory. |
+| `arguments` | `string[]` | No | `[]` | Arguments passed to the script. Each element supports template expressions. |
+| `workingDirectory` | `string` | No | Current directory | Working directory for the process. Supports template expressions. |
+| `environment` | `object` | No | `{}` | Environment variables to set. Values support template expressions. |
+| `includeStdErr` | `bool` | No | `false` | Whether to append stderr to the captured output. |
+| `stdin` | `string` | No | `null` | Content to pipe to the process's standard input. Supports template expressions. |
+
+> **\*Mutual exclusion:** Exactly one of `script` or `scriptFile` is required. Specifying both throws a parse error.
+
+**Example (inline script):**
+
+```json
+{
+  "name": "gather-info",
+  "type": "Script",
+  "shell": "pwsh",
+  "script": "$ErrorActionPreference = 'Stop'\n$info = @{ Host = hostname; Time = Get-Date -Format 'o' }\n$info | ConvertTo-Json",
+  "timeoutSeconds": 30
+}
+```
+
+**Example (YAML with multiline script -- the primary ergonomic benefit):**
+
+```yaml
+- name: gather-info
+  type: Script
+  shell: pwsh
+  script: |
+    $ErrorActionPreference = 'Stop'
+    $info = @{
+        Host = hostname
+        Time = Get-Date -Format 'o'
+    }
+    $info | ConvertTo-Json
+  timeoutSeconds: 30
+```
+
+**Example (external script file):**
+
+```json
+{
+  "name": "deploy",
+  "type": "Script",
+  "shell": "pwsh",
+  "scriptFile": "scripts/deploy.ps1",
+  "arguments": ["{{param.environment}}", "--no-prompt"],
+  "workingDirectory": "{{vars.projectRoot}}"
 }
 ```
 
@@ -683,6 +746,7 @@ Variables can reference other variables, parameters, and environment variables. 
 | `Http` | Makes an HTTP request. |
 | `Transform` | Performs string interpolation (no LLM, no I/O). |
 | `Command` | Executes a shell command. |
+| `Script` | Executes an inline or file-based script via a shell interpreter. |
 
 ### System Prompt Mode
 
@@ -753,7 +817,7 @@ A single Prompt step with no dependencies:
 
 ### Multi-Step DAG with All Step Types
 
-Demonstrates all four step types, dependencies, variables, and triggers:
+Demonstrates all five step types, dependencies, variables, and triggers:
 
 ```json
 {

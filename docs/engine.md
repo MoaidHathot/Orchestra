@@ -62,7 +62,7 @@ When `Inputs` is not defined, the engine falls back to legacy behavior: paramete
 
 ### Steps
 
-Steps are the building blocks of orchestrations. Currently, the `PromptOrchestrationStep` is the primary step type:
+Steps are the building blocks of orchestrations. Each step has a type that determines its executor: `PromptOrchestrationStep` for LLM calls, `CommandOrchestrationStep` for shell commands, `ScriptOrchestrationStep` for inline/file scripts, `HttpOrchestrationStep` for REST requests, and `TransformOrchestrationStep` for string interpolation.
 
 ```csharp
 public abstract class OrchestrationStep
@@ -141,7 +141,7 @@ Available via `{{step.property}}`:
 | Property | Type | Description |
 |----------|------|-------------|
 | `name` | string | The current step's name |
-| `type` | string | The current step's type (`Prompt`, `Command`, `Transform`, `Http`) |
+| `type` | string | The current step's type (`Prompt`, `Command`, `Script`, `Transform`, `Http`) |
 
 #### Template Resolution
 

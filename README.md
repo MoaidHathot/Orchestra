@@ -6,7 +6,7 @@ A declarative orchestration engine for LLM workflows built on .NET. Define multi
 
 - **Declarative JSON Pipelines** - Define complex LLM workflows as JSON files with a comprehensive schema
 - **DAG-Based Execution** - Automatic parallel execution of independent steps with cycle detection
-- **Four Step Types** - Prompt (LLM), Command (shell), Http (REST calls), and Transform (string interpolation)
+- **Five Step Types** - Prompt (LLM), Command (shell), Script (inline/file scripts), Http (REST calls), and Transform (string interpolation)
 - **Typed Input Schema** - Strongly-typed parameters with types, descriptions, defaults, and enum constraints
 - **Variables & Metadata** - Reusable variables with recursive expansion, plus built-in orchestration and step metadata
 - **Template Expressions** - Rich `{{expression}}` syntax for parameters, variables, metadata, environment variables, step outputs, and file references
@@ -77,6 +77,7 @@ Orchestra is built as a layered .NET architecture:
 |               Step Executors (per type)                   |
 |  - PromptStepExecutor   (LLM calls via AgentBuilder)     |
 |  - CommandStepExecutor  (shell commands)                  |
+|  - ScriptStepExecutor   (inline/file scripts)             |
 |  - HttpStepExecutor     (REST requests)                  |
 |  - TransformStepExecutor (string interpolation)          |
 +----------------------------------------------------------+
@@ -156,7 +157,7 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
 
 ## Step Types
 
-Orchestra supports four step types, each with a dedicated executor:
+Orchestra supports five step types, each with a dedicated executor:
 
 ### Prompt Step
 
@@ -227,6 +228,48 @@ Pure string interpolation using template expressions. No LLM call, no external I
 }
 ```
 
+### Script Step
+
+Executes an inline or file-based script using a specified shell interpreter (`pwsh`, `bash`, `python`, `node`, etc.). Designed for multi-line scripts with first-class support for inline content -- particularly readable in YAML with `|` blocks. All string fields support template expressions.
+
+```json
+{
+  "name": "gather-system-info",
+  "type": "Script",
+  "shell": "pwsh",
+  "script": "$ErrorActionPreference = 'Stop'\n$info = @{ Host = hostname; OS = [Runtime.InteropServices.RuntimeInformation]::OSDescription }\n$info | ConvertTo-Json",
+  "timeoutSeconds": 30
+}
+```
+
+YAML format (recommended for scripts):
+
+```yaml
+- name: gather-system-info
+  type: Script
+  shell: pwsh
+  script: |
+    $ErrorActionPreference = 'Stop'
+    $info = @{
+        Host = hostname
+        OS   = [Runtime.InteropServices.RuntimeInformation]::OSDescription
+    }
+    $info | ConvertTo-Json
+  timeoutSeconds: 30
+```
+
+Script steps can also reference external files:
+
+```json
+{
+  "name": "deploy",
+  "type": "Script",
+  "shell": "pwsh",
+  "scriptFile": "scripts/deploy.ps1",
+  "arguments": ["{{param.environment}}"]
+}
+```
+
 ## Orchestration Schema
 
 ### Top-Level Properties
@@ -252,7 +295,7 @@ Pure string interpolation using template expressions. No LLM call, no external I
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `name` | string | Yes | Unique step identifier |
-| `type` | enum | Yes | `Prompt`, `Command`, `Http`, or `Transform` |
+| `type` | enum | Yes | `Prompt`, `Command`, `Script`, `Http`, or `Transform` |
 | `dependsOn` | array | Yes | Step names this step depends on (empty `[]` for root steps) |
 | `parameters` | array | No | Parameter names required by this step |
 | `enabled` | bool | No | Whether the step is enabled (default: `true`) |
@@ -353,7 +396,7 @@ Orchestra uses `{{expression}}` syntax for dynamic values in prompts, URLs, head
 | Property | Description | Example |
 |----------|-------------|---------|
 | `{{step.name}}` | Current step's name | `"security-scan"` |
-| `{{step.type}}` | Current step's type | `"Prompt"`, `"Command"`, `"Transform"`, `"Http"` |
+| `{{step.type}}` | Current step's type | `"Prompt"`, `"Command"`, `"Script"`, `"Transform"`, `"Http"` |
 
 ## Variables
 
@@ -724,13 +767,14 @@ See the `examples/` folder for 20 complete orchestration examples:
 
 | Example | Description |
 |---------|-------------|
-| `deployment-pipeline.json` | All 4 step types with variables, metadata, and environment variables |
+| `deployment-pipeline.json` | All 5 step types with variables, metadata, and environment variables |
 | `typed-inputs-deployment.json` | Typed input schema with type validation, enum constraints, and defaults |
 | `subagents-research-team.json` | Multi-agent orchestration with subagent delegation |
 | `mcp-orchestration-coordinator.json` | Cross-orchestration invocation via the data-plane MCP |
 | `step-files-cross-reference.json` | File save/read and cross-referencing between steps |
 | `skill-directories-example.json` | Agent skill directories with SKILL.md |
 | `command-build-and-analyze.json` | Command steps with build and git analysis |
+| `script-step-example.yaml` | Script step with inline PowerShell and mixed step types |
 | `variables-and-metadata.json` | Variables with recursive expansion and metadata expressions |
 | `system-prompt-mode-example.json` | System prompt mode demonstration |
 | `advanced-combined-features.json` | Full pipeline with loops and MCPs |

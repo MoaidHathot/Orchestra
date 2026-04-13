@@ -110,6 +110,23 @@ Executes a shell command, captures stdout.
 | `includeStdErr` | bool | No | false |
 | `stdin` | string | No | null |
 
+### Script Step (type: "Script")
+
+Executes an inline or file-based script via a shell interpreter (e.g., `pwsh`, `bash`, `python`, `node`). Captures stdout. Designed for multi-line scripts -- use YAML `|` blocks for best readability.
+
+| Property | Type | Required | Default |
+|---|---|---|---|
+| `shell` | string | Yes | -- |
+| `script` | string | Yes* | -- |
+| `scriptFile` | string | Yes* | -- |
+| `arguments` | string[] | No | [] |
+| `workingDirectory` | string | No | current dir |
+| `environment` | object | No | {} |
+| `includeStdErr` | bool | No | false |
+| `stdin` | string | No | null |
+
+*Mutual exclusion: use `script` OR `scriptFile`, not both. `scriptFile` paths resolve relative to the orchestration file's directory.
+
 ## Loop Configuration (Checker Pattern)
 
 A Prompt step with `loop` acts as a checker for iterative refinement.
@@ -307,13 +324,14 @@ Pre-process dependency outputs or post-process LLM output.
 }
 ```
 
-### 6. Multi-Step Pipeline (all 4 step types)
-Command -> Prompt -> Transform -> Http
+### 6. Multi-Step Pipeline (all 5 step types)
+Command -> Script -> Prompt -> Transform -> Http
 ```json
 {
   "steps": [
     { "name": "build", "type": "Command", "command": "dotnet", "arguments": ["build"] },
-    { "name": "analyze", "type": "Prompt", "dependsOn": ["build"], "systemPrompt": "Analyze build output.", "userPrompt": "{{build.output}}", "model": "claude-opus-4.6" },
+    { "name": "gather-info", "type": "Script", "dependsOn": ["build"], "shell": "pwsh", "script": "Get-ChildItem bin -Recurse -Filter '*.dll' | Select-Object -ExpandProperty Name | ConvertTo-Json" },
+    { "name": "analyze", "type": "Prompt", "dependsOn": ["build", "gather-info"], "systemPrompt": "Analyze build output.", "userPrompt": "Build: {{build.output}}\nArtifacts: {{gather-info.output}}", "model": "claude-opus-4.6" },
     { "name": "report", "type": "Transform", "dependsOn": ["analyze"], "template": "# Report\n{{analyze.output}}" },
     { "name": "notify", "type": "Http", "dependsOn": ["report"], "method": "POST", "url": "{{vars.webhookUrl}}", "body": "{\"text\": \"{{report.output}}\"}" }
   ]
@@ -376,7 +394,7 @@ Orchestrations can be registered in Orchestra via:
 ## Common Mistakes to Avoid
 
 1. **Do NOT invent properties.** Only use properties documented above. There is no `if`, `condition`, `forEach`, `parallel`, or `output` property.
-2. **Do NOT use `systemPrompt` AND `systemPromptFile` together.** They are mutually exclusive. Same for all `*File` pairs.
+2. **Do NOT use `systemPrompt` AND `systemPromptFile` together.** They are mutually exclusive. Same for all `*File` pairs (including `script`/`scriptFile`).
 3. **Loop target must be a dependency.** The checker step must have the target in its `dependsOn`.
 4. **Step names must be unique** within the orchestration.
 5. **No circular dependencies.** The DAG must be acyclic.
@@ -386,6 +404,7 @@ Orchestrations can be registered in Orchestra via:
 9. **Boolean/Number inputs**: values are always strings in JSON. `"true"`, `"false"`, `"42"`.
 10. **`dependsOn` references step names**, not types or indices.
 11. **`mcps` on steps is an array of strings** (MCP names), not MCP definition objects.
+12. **Script steps require `shell`**. It has no default -- always specify it (e.g., `"pwsh"`, `"bash"`).
 
 ## Naming Conventions
 

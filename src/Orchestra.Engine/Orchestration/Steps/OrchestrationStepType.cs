@@ -6,4 +6,5 @@ public enum OrchestrationStepType
 	Http,
 	Transform,
 	Command,
+	Script,
 }

@@ -1,0 +1,64 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: script-step-example
+description: >
+  Demonstrates the Script step type with inline PowerShell and Bash scripts.
+  Scripts run natively in their shell interpreter without the boilerplate
+  of wrapping everything in Command step arguments.
+version: "1.0.0"
+tags: ["example", "scripting"]
+
+steps:
+  # Inline PowerShell script — multi-line, readable, no escaping needed
+  - name: gather-system-info
+    type: Script
+    shell: pwsh
+    script: |
+      $ErrorActionPreference = 'Stop'
+      $info = [ordered]@{
+          Hostname    = $env:COMPUTERNAME ?? (hostname)
+          OS          = [System.Runtime.InteropServices.RuntimeInformation]::OSDescription
+          DotNetVer   = dotnet --version
+          PowerShell  = $PSVersionTable.PSVersion.ToString()
+          Timestamp   = (Get-Date -Format 'o')
+      }
+      $info | ConvertTo-Json
+    timeoutSeconds: 30
+
+  # Script using an external .ps1 file with arguments
+  # - name: run-deployment
+  #   type: Script
+  #   shell: pwsh
+  #   scriptFile: scripts/deploy.ps1
+  #   arguments: ["{{param.environment}}", "--no-prompt"]
+  #   workingDirectory: "{{vars.projectRoot}}"
+  #   environment:
+  #     DEPLOY_TOKEN: "{{param.token}}"
+  #   timeoutSeconds: 120
+
+  # Analyze the gathered info with an LLM
+  - name: analyze-info
+    type: Prompt
+    dependsOn: [gather-system-info]
+    model: claude-opus-4.6
+    systemPrompt: |
+      You are a systems analyst. Given system information in JSON format,
+      provide a brief health assessment and note any concerns.
+    userPrompt: |
+      System information:
+
+      {{gather-system-info.output}}
+
+  # Format the final report
+  - name: format-report
+    type: Transform
+    dependsOn: [gather-system-info, analyze-info]
+    template: |
+      # System Health Report
+
+      ## Raw Data
+      ```json
+      {{gather-system-info.output}}
+      ```
+
+      ## Analysis
+      {{analyze-info.output}}
