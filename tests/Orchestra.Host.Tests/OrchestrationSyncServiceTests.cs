@@ -82,7 +82,12 @@ public class OrchestrationSyncServiceTests : IDisposable
 		}
 		""";
 		var path = Path.Combine(directory, $"{name}.json");
-		File.WriteAllText(path, json);
+
+		// Write atomically via temp file + move to avoid conflicts with concurrent readers
+		var tempPath = path + $".{Guid.NewGuid():N}.tmp";
+		File.WriteAllText(tempPath, json);
+		File.Move(tempPath, path, overwrite: true);
+
 		return path;
 	}
 
@@ -157,6 +162,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var service = CreateService();
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
 
 		// Act — create a new file in the watched directory
 		WriteOrchestrationFile(_watchDir, "watcher-new");
@@ -183,6 +189,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var service = CreateService();
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
 
 		// Act — modify the file
 		WriteOrchestrationFile(_watchDir, "watcher-update", "Version 2");
@@ -210,9 +217,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var service = CreateService();
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
 		await service.StartAsync(cts.Token);
-
-		// Small delay to ensure FileSystemWatcher is fully initialized
-		await Task.Delay(200);
+		await service.WatcherReady.Task;
 
 		// Act — delete the file
 		File.Delete(filePath);
@@ -233,6 +238,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var service = CreateService();
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
 
 		// Act — write an invalid JSON file
 		File.WriteAllText(Path.Combine(_watchDir, "broken.json"), "not valid json {{{");
@@ -253,6 +259,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var service = CreateService();
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
 
 		// Act — write a non-orchestration file
 		File.WriteAllText(Path.Combine(_watchDir, "readme.txt"), "This is not an orchestration");
@@ -277,6 +284,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var service = CreateService();
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
 
 		// Act — rename the file (creates a new file with different name, but same content structure)
 		var newPath = Path.Combine(_watchDir, "renamed-orch.json");
@@ -307,6 +315,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var service = CreateService(recursive: true);
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
 
 		// Act — create a file in a subdirectory
 		WriteOrchestrationFile(subDir, "sub-orch");
@@ -328,6 +337,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var service = CreateService();
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
 
 		// Act — write the same file rapidly multiple times
 		for (int i = 0; i < 5; i++)
@@ -354,6 +364,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		service.DebounceDelay = TimeSpan.FromSeconds(30); // Very long debounce
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
 
 		// Act — create a file (won't process due to long debounce)
 		WriteOrchestrationFile(_watchDir, "shutdown-test");

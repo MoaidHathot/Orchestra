@@ -38,6 +38,12 @@ public partial class OrchestrationSyncService : BackgroundService
 
 	private readonly ConcurrentDictionary<string, CancellationTokenSource> _debounceTimers = new();
 
+	/// <summary>
+	/// Completes when the file system watcher has been initialized and is raising events.
+	/// Used by tests to avoid race conditions between watcher setup and file operations.
+	/// </summary>
+	internal TaskCompletionSource WatcherReady { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
 	public OrchestrationSyncService(
 		OrchestrationRegistry registry,
 		TriggerManager triggerManager,
@@ -56,11 +62,15 @@ public partial class OrchestrationSyncService : BackgroundService
 	{
 		var scanConfig = _options.OrchestrationsScan;
 		if (scanConfig is null || !scanConfig.Watch)
+		{
+			WatcherReady.TrySetResult();
 			return;
+		}
 
 		if (!Directory.Exists(scanConfig.Directory))
 		{
 			LogWatchDirectoryNotFound(scanConfig.Directory);
+			WatcherReady.TrySetResult();
 			return;
 		}
 
@@ -79,6 +89,7 @@ public partial class OrchestrationSyncService : BackgroundService
 		watcher.Error += (_, e) => OnWatcherError(e.GetException(), scanConfig);
 
 		watcher.EnableRaisingEvents = true;
+		WatcherReady.TrySetResult();
 
 		// Block until cancellation is requested
 		try
