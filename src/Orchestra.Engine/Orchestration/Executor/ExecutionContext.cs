@@ -34,6 +34,13 @@ public class OrchestrationExecutionContext
 	public RetryPolicy? DefaultRetryPolicy { get; init; }
 
 	/// <summary>
+	/// Default model from the orchestration.
+	/// Applied to Prompt steps that don't define their own Model.
+	/// When null, each Prompt step must specify its own model.
+	/// </summary>
+	public string? DefaultModel { get; init; }
+
+	/// <summary>
 	/// Default per-step timeout from the orchestration.
 	/// Applied to steps that don't define their own TimeoutSeconds.
 	/// When null, no default per-step timeout is applied.

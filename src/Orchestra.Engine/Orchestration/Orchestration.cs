@@ -46,6 +46,13 @@ public class Orchestration
 	public RetryPolicy? DefaultRetryPolicy { get; init; }
 
 	/// <summary>
+	/// Default model applied to all Prompt steps that don't define their own
+	/// <see cref="PromptOrchestrationStep.Model"/>.
+	/// When null, each Prompt step must specify its own model.
+	/// </summary>
+	public string? DefaultModel { get; init; }
+
+	/// <summary>
 	/// Default timeout in seconds applied to all steps that don't define their own
 	/// <see cref="OrchestrationStep.TimeoutSeconds"/>.
 	/// When null, steps without an explicit timeout run with no per-step timeout

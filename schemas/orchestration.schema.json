@@ -53,6 +53,11 @@
       "$ref": "#/$defs/retryPolicy",
       "description": "Default retry policy applied to all steps that don't define their own. When absent, no retries are performed."
     },
+    "defaultModel": {
+      "type": "string",
+      "description": "Default model applied to all Prompt steps that don't define their own model. When absent, each Prompt step must specify its own model.",
+      "minLength": 1
+    },
     "defaultStepTimeoutSeconds": {
       "type": "integer",
       "description": "Default timeout in seconds applied to all steps that don't define their own timeoutSeconds. When absent, steps without an explicit timeout run with no per-step timeout (only the orchestration-level timeout applies).",
@@ -272,7 +277,7 @@
           }
         }
       },
-      "required": ["model"],
+      "required": [],
       "oneOf": [
         {
           "required": ["systemPrompt"],

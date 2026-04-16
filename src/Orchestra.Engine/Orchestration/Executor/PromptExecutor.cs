@@ -60,7 +60,11 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Resolve static template expressions in model and prompt fields.
 		// These fields support param, env, vars, orchestration expressions (not step outputs
 		// for model; full resolution including step outputs for prompts).
-		var resolvedModel = TemplateResolver.ResolveStatic(step.Model, context.Parameters, context);
+		var resolvedModel = TemplateResolver.ResolveStatic(
+			step.Model ?? context.DefaultModel ?? throw new InvalidOperationException(
+				$"Step '{step.Name}' has no 'model' and the orchestration has no 'defaultModel'. " +
+				$"Either specify 'model' on the step or set 'defaultModel' at the orchestration level."),
+			context.Parameters, context);
 		var resolvedSystemPrompt = TemplateResolver.Resolve(step.SystemPrompt, context.Parameters, context, step.DependsOn, step);
 		var resolvedOutputHandlerPrompt = step.OutputHandlerPrompt is not null
 			? TemplateResolver.Resolve(step.OutputHandlerPrompt, context.Parameters, context, step.DependsOn, step)

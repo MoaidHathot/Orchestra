@@ -138,6 +138,7 @@ public partial class OrchestrationExecutor
 			Variables = orchestration.Variables,
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
+			DefaultModel = orchestration.DefaultModel,
 			DefaultStepTimeoutSeconds = orchestration.DefaultStepTimeoutSeconds,
 			TempFileStore = tempFileStore,
 			ServerUrl = _serverUrl,

@@ -4,7 +4,7 @@ You are an expert at creating Orchestra orchestration files. This document is th
 
 ## Format
 
-Orchestrations are single JSON objects. Three fields are required: `name`, `description`, `steps`.
+Orchestrations are single JSON or YAML objects. Three fields are required: `name`, `description`, `steps`. YAML is recommended for orchestrations with multi-line prompts (use `|` block scalars).
 
 ## Top-Level Properties
 
@@ -17,6 +17,7 @@ Orchestrations are single JSON objects. Three fields are required: `name`, `desc
 | `inputs` | object | No | null | Typed input schema (keys = names, values = InputDefinition) |
 | `trigger` | TriggerConfig | No | Manual | How the orchestration is triggered |
 | `mcps` | Mcp[] | No | [] | Inline MCP server definitions |
+| `defaultModel` | string | No | null | Default model for all Prompt steps. Steps can override. |
 | `defaultSystemPromptMode` | string | No | null | `"append"` or `"replace"` for all Prompt steps |
 | `defaultRetryPolicy` | RetryPolicy | No | null | Default retry for all steps |
 | `defaultStepTimeoutSeconds` | int | No | null | Default per-step timeout |
@@ -62,7 +63,7 @@ Calls an LLM.
 | `systemPromptFile` | string | Yes* | -- |
 | `userPrompt` | string | Yes* | -- |
 | `userPromptFile` | string | Yes* | -- |
-| `model` | string | Yes | -- |
+| `model` | string | No | from `defaultModel` |
 | `inputHandlerPrompt` | string | No | null |
 | `inputHandlerPromptFile` | string | No | null |
 | `outputHandlerPrompt` | string | No | null |
@@ -168,8 +169,9 @@ Multi-agent delegation within a single Prompt step.
 ## Triggers
 
 ### Manual (default)
-```json
-{ "type": "manual" }
+```yaml
+trigger:
+  type: manual
 ```
 
 ### Scheduler
@@ -200,26 +202,28 @@ All triggers share: `type` (required), `enabled` (bool, default true), `inputHan
 ## MCP Definitions
 
 ### Local MCP (stdio transport)
-```json
-{
-  "name": "filesystem",
-  "type": "local",
-  "command": "npx",
-  "arguments": ["-y", "@anthropic/mcp-server-filesystem", "{{workingDirectory}}"]
-}
+```yaml
+mcps:
+  - name: filesystem
+    type: local
+    command: npx
+    arguments:
+      - "-y"
+      - "@anthropic/mcp-server-filesystem"
+      - "{{workingDirectory}}"
 ```
 
 ### Remote MCP (HTTP transport)
-```json
-{
-  "name": "cloud-tools",
-  "type": "remote",
-  "endpoint": "https://mcp.example.com/tools",
-  "headers": { "Authorization": "Bearer {{env.TOKEN}}" }
-}
+```yaml
+mcps:
+  - name: cloud-tools
+    type: remote
+    endpoint: "https://mcp.example.com/tools"
+    headers:
+      Authorization: "Bearer {{env.TOKEN}}"
 ```
 
-MCPs defined at orchestration level. Steps reference by name: `"mcps": ["filesystem"]`.
+MCPs defined at orchestration level. Steps reference by name: `mcps: [filesystem]`.
 A companion `mcp.json` or `orchestra.mcp.json` file can define MCPs externally.
 
 ## Template Expressions
@@ -258,128 +262,156 @@ Syntax: `{{expression}}` -- supported in prompts, URLs, headers, bodies, templat
 
 ### 1. Fan-Out / Fan-In
 Multiple root steps (no dependsOn) run in parallel; a downstream step depends on all of them to synthesize results.
-```json
-{
-  "steps": [
-    { "name": "research-a", "type": "Prompt", "systemPrompt": "...", "userPrompt": "...", "model": "claude-opus-4.6" },
-    { "name": "research-b", "type": "Prompt", "systemPrompt": "...", "userPrompt": "...", "model": "claude-opus-4.6" },
-    { "name": "synthesize", "type": "Prompt", "dependsOn": ["research-a", "research-b"],
-      "systemPrompt": "Synthesize the research.", "userPrompt": "Combine findings.", "model": "claude-opus-4.6" }
-  ]
-}
+```yaml
+defaultModel: claude-opus-4.6
+steps:
+  - name: research-a
+    type: Prompt
+    systemPrompt: Research topic A.
+    userPrompt: "{{param.topic}}"
+  - name: research-b
+    type: Prompt
+    systemPrompt: Research topic B.
+    userPrompt: "{{param.topic}}"
+  - name: synthesize
+    type: Prompt
+    dependsOn: [research-a, research-b]
+    systemPrompt: Synthesize the research.
+    userPrompt: |
+      Research A: {{research-a.output}}
+      Research B: {{research-b.output}}
 ```
 
 ### 2. Loop/Checker (Iterative Refinement)
 A checker step loops a target step until quality is met.
-```json
-{
-  "name": "review",
-  "type": "Prompt",
-  "dependsOn": ["write-draft"],
-  "systemPrompt": "Review. Say APPROVED if good, REVISE if not.",
-  "userPrompt": "{{write-draft.output}}",
-  "model": "claude-opus-4.6",
-  "loop": { "target": "write-draft", "maxIterations": 3, "exitPattern": "APPROVED" }
-}
+```yaml
+- name: review
+  type: Prompt
+  dependsOn: [write-draft]
+  systemPrompt: Review. Say APPROVED if good, REVISE if not.
+  userPrompt: "{{write-draft.output}}"
+  loop:
+    target: write-draft
+    maxIterations: 3
+    exitPattern: APPROVED
 ```
 
 ### 3. Subagent Delegation
 Coordinator delegates to specialized subagents.
-```json
-{
-  "name": "coordinator",
-  "type": "Prompt",
-  "systemPrompt": "Delegate to your specialists.",
-  "userPrompt": "{{param.task}}",
-  "model": "claude-opus-4.6",
-  "subagents": [
-    { "name": "researcher", "description": "Finds facts from the web.", "prompt": "You are a researcher.", "mcps": ["web-fetch"], "infer": true },
-    { "name": "writer", "description": "Writes polished content.", "prompt": "You are a writer.", "infer": true }
-  ]
-}
+```yaml
+- name: coordinator
+  type: Prompt
+  systemPrompt: Delegate to your specialists.
+  userPrompt: "{{param.task}}"
+  subagents:
+    - name: researcher
+      description: Finds facts from the web.
+      prompt: You are a researcher.
+      mcps: [web-fetch]
+      infer: true
+    - name: writer
+      description: Writes polished content.
+      prompt: You are a writer.
+      infer: true
 ```
 
 ### 4. Gate / Early Exit
 A step checks conditions and halts the orchestration if nothing to do.
-```json
-{
-  "name": "gate",
-  "type": "Prompt",
-  "systemPrompt": "Check if there are incidents. If none, call orchestra_complete. If there are, list them.",
-  "userPrompt": "{{check-incidents.output}}",
-  "model": "claude-opus-4.6"
-}
+```yaml
+- name: gate
+  type: Prompt
+  systemPrompt: |
+    Check if there are incidents.
+    If none, call orchestra_complete.
+    If there are, list them.
+  userPrompt: "{{check-incidents.output}}"
 ```
 
 ### 5. Input/Output Handlers
 Pre-process dependency outputs or post-process LLM output.
-```json
-{
-  "name": "analyze",
-  "type": "Prompt",
-  "dependsOn": ["fetch-data"],
-  "inputHandlerPrompt": "Extract only numeric data points from the input.",
-  "outputHandlerPrompt": "Format as a markdown table.",
-  "systemPrompt": "...", "userPrompt": "...", "model": "claude-opus-4.6"
-}
+```yaml
+- name: analyze
+  type: Prompt
+  dependsOn: [fetch-data]
+  inputHandlerPrompt: Extract only numeric data points from the input.
+  outputHandlerPrompt: Format as a markdown table.
+  systemPrompt: Analyze the data.
+  userPrompt: "{{fetch-data.output}}"
 ```
 
 ### 6. Multi-Step Pipeline (all 5 step types)
 Command -> Script -> Prompt -> Transform -> Http
-```json
-{
-  "steps": [
-    { "name": "build", "type": "Command", "command": "dotnet", "arguments": ["build"] },
-    { "name": "gather-info", "type": "Script", "dependsOn": ["build"], "shell": "pwsh", "script": "Get-ChildItem bin -Recurse -Filter '*.dll' | Select-Object -ExpandProperty Name | ConvertTo-Json" },
-    { "name": "analyze", "type": "Prompt", "dependsOn": ["build", "gather-info"], "systemPrompt": "Analyze build output.", "userPrompt": "Build: {{build.output}}\nArtifacts: {{gather-info.output}}", "model": "claude-opus-4.6" },
-    { "name": "report", "type": "Transform", "dependsOn": ["analyze"], "template": "# Report\n{{analyze.output}}" },
-    { "name": "notify", "type": "Http", "dependsOn": ["report"], "method": "POST", "url": "{{vars.webhookUrl}}", "body": "{\"text\": \"{{report.output}}\"}" }
-  ]
-}
+```yaml
+defaultModel: claude-opus-4.6
+steps:
+  - name: build
+    type: Command
+    command: dotnet
+    arguments: [build]
+  - name: gather-info
+    type: Script
+    dependsOn: [build]
+    shell: pwsh
+    script: |
+      Get-ChildItem bin -Recurse -Filter '*.dll' |
+        Select-Object -ExpandProperty Name |
+        ConvertTo-Json
+  - name: analyze
+    type: Prompt
+    dependsOn: [build, gather-info]
+    systemPrompt: Analyze build output.
+    userPrompt: |
+      Build: {{build.output}}
+      Artifacts: {{gather-info.output}}
+  - name: report
+    type: Transform
+    dependsOn: [analyze]
+    template: |
+      # Report
+      {{analyze.output}}
+  - name: notify
+    type: Http
+    dependsOn: [report]
+    method: POST
+    url: "{{vars.webhookUrl}}"
+    body: '{"text": "{{report.output}}"}'
 ```
 
 ### 7. Webhook with Input Handler
 Normalize arbitrary payloads into expected parameters.
-```json
-{
-  "trigger": {
-    "type": "webhook",
-    "maxConcurrent": 5,
-    "inputHandlerPrompt": "Extract 'eventType' and 'data' from the JSON payload."
-  }
-}
+```yaml
+trigger:
+  type: webhook
+  maxConcurrent: 5
+  inputHandlerPrompt: Extract 'eventType' and 'data' from the JSON payload.
 ```
 
 ### 8. Scheduled Monitoring
 Run on interval, gate on no-action.
-```json
-{
-  "trigger": { "type": "scheduler", "intervalSeconds": 300 }
-}
+```yaml
+trigger:
+  type: scheduler
+  intervalSeconds: 300
 ```
 
 ### 9. Cross-Step File References
 Steps save files, downstream steps reference them.
-```json
-{
-  "name": "consumer",
-  "type": "Prompt",
-  "dependsOn": ["producer"],
-  "systemPrompt": "Read and analyze the saved files.",
-  "userPrompt": "Files: {{producer.files}}\nFirst file: {{producer.files[0]}}",
-  "model": "claude-opus-4.6"
-}
+```yaml
+- name: consumer
+  type: Prompt
+  dependsOn: [producer]
+  systemPrompt: Read and analyze the saved files.
+  userPrompt: |
+    Files: {{producer.files}}
+    First file: {{producer.files[0]}}
 ```
 
 ### 10. Variables with Recursive Expansion
-```json
-{
-  "variables": {
-    "appName": "my-app",
-    "registry": "{{env.CONTAINER_REGISTRY}}/{{vars.appName}}",
-    "artifactPath": "/artifacts/{{vars.appName}}/{{orchestration.runId}}"
-  }
-}
+```yaml
+variables:
+  appName: my-app
+  registry: "{{env.CONTAINER_REGISTRY}}/{{vars.appName}}"
+  artifactPath: "/artifacts/{{vars.appName}}/{{orchestration.runId}}"
 ```
 
 ## Registering Orchestrations
@@ -399,7 +431,7 @@ Orchestrations can be registered in Orchestra via:
 4. **Step names must be unique** within the orchestration.
 5. **No circular dependencies.** The DAG must be acyclic.
 6. **`parameters` is a string array of names**, not key-value pairs. Values come at runtime.
-7. **Model is required** for Prompt steps. Use `"claude-opus-4.6"` as default.
+7. **Model is required** for Prompt steps unless `defaultModel` is set at the orchestration level. Use `"claude-opus-4.6"` as default.
 8. **Template expressions are `{{...}}`**, not `${...}` or `{...}`.
 9. **Boolean/Number inputs**: values are always strings in JSON. `"true"`, `"false"`, `"42"`.
 10. **`dependsOn` references step names**, not types or indices.

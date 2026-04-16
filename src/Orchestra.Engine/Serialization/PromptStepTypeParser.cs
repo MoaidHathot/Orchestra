@@ -27,7 +27,9 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			UserPrompt = ResolveRequiredPrompt(root, "userPrompt", stepName, context),
 			InputHandlerPrompt = ResolveOptionalPrompt(root, "inputHandlerPrompt", stepName, context),
 			OutputHandlerPrompt = ResolveOptionalPrompt(root, "outputHandlerPrompt", stepName, context),
-			Model = root.GetProperty("model").GetString()!,
+			Model = root.TryGetProperty("model", out var model)
+				? model.GetString()!
+				: null!,
 			McpNames = root.TryGetProperty("mcps", out var mcps)
 				? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
