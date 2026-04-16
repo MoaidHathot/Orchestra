@@ -308,7 +308,7 @@ public partial class OrchestrationRegistry
 			}
 			catch (Exception ex)
 			{
-				_logger.LogDebug(ex, "Skipping invalid orchestration file '{File}'", file);
+				LogSkippingInvalidOrchestrationFile(ex, file);
 			}
 		}
 
@@ -374,7 +374,7 @@ public partial class OrchestrationRegistry
 			}
 			catch (Exception ex)
 			{
-				_logger.LogDebug(ex, "Skipping invalid orchestration file '{File}'", file);
+				LogSkippingInvalidOrchestrationFile(ex, file);
 				failed++;
 			}
 		}
@@ -481,6 +481,9 @@ public partial class OrchestrationRegistry
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Directory sync completed for '{Directory}': {Added} added, {Updated} updated, {Removed} removed, {Unchanged} unchanged, {Failed} failed")]
 	private partial void LogSyncCompleted(string directory, int added, int updated, int removed, int unchanged, int failed);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Skipping invalid orchestration file '{File}'")]
+	private partial void LogSkippingInvalidOrchestrationFile(Exception ex, string file);
 }
 
 /// <summary>
