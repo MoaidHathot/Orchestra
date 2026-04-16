@@ -49,7 +49,13 @@ builder.Services.AddOrchestraHost((options, configuration) =>
 	if (dataPath is not null)
 		options.DataPath = dataPath;
 	if (orchestrationsScanPath is not null)
-		options.Scan = new ScanConfig { Directory = orchestrationsScanPath };
+	{
+		// Update just the directory, preserving watch/recursive from orchestra.json
+		if (options.Scan is not null)
+			options.Scan.Directory = orchestrationsScanPath;
+		else
+			options.Scan = new ScanConfig { Directory = orchestrationsScanPath };
+	}
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
 });

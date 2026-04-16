@@ -393,4 +393,169 @@ public class OrchestrationSyncServiceTests : IDisposable
 			await Task.Delay(50);
 		}
 	}
+
+	// ── Profile watcher tests ──
+
+	private string WriteProfileFile(string directory, string name, string[]? tags = null, string? description = null)
+	{
+		Directory.CreateDirectory(directory);
+		var tagsJson = tags is not null
+			? string.Join(", ", tags.Select(t => $"\"{t}\""))
+			: "\"test\"";
+		var json = $$"""
+		{
+			"id": "{{ProfileStore.GenerateId(name)}}",
+			"name": "{{name}}",
+			"description": "{{description ?? $"Profile for {name}"}}",
+			"isActive": false,
+			"filter": {
+				"tags": [{{tagsJson}}],
+				"orchestrationIds": [],
+				"excludeOrchestrationIds": []
+			},
+			"createdAt": "2026-01-01T00:00:00+00:00",
+			"updatedAt": "2026-01-01T00:00:00+00:00"
+		}
+		""";
+		var path = Path.Combine(directory, $"{name}.json");
+
+		// Write atomically via temp file + move to avoid conflicts with concurrent readers
+		var tempPath = path + $".{Guid.NewGuid():N}.tmp";
+		File.WriteAllText(tempPath, json);
+		File.Move(tempPath, path, overwrite: true);
+
+		return path;
+	}
+
+	[Fact]
+	public async Task FileWatcher_NewProfileCreated_SyncsProfile()
+	{
+		// Arrange
+		var profilesDir = Path.Combine(_watchDir, OrchestrationSyncService.ProfilesDirName);
+		Directory.CreateDirectory(profilesDir);
+
+		var service = CreateService();
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
+
+		// Act — create a new profile file
+		WriteProfileFile(profilesDir, "watcher-profile");
+
+		// Wait for debounce + processing
+		await WaitForConditionAsync(() => _profileStore.GetAll().Any(p => p.Name == "watcher-profile"), TimeSpan.FromSeconds(5));
+
+		await service.StopAsync(CancellationToken.None);
+
+		// Assert
+		var profiles = _profileStore.GetAll();
+		profiles.Should().Contain(p => p.Name == "watcher-profile");
+		profiles.First(p => p.Name == "watcher-profile").IsActive.Should().BeFalse();
+		profiles.First(p => p.Name == "watcher-profile").SourcePath.Should().NotBeNullOrEmpty();
+	}
+
+	[Fact]
+	public async Task FileWatcher_ProfileModified_UpdatesProfile()
+	{
+		// Arrange — create profile file and sync it
+		var profilesDir = Path.Combine(_watchDir, OrchestrationSyncService.ProfilesDirName);
+		Directory.CreateDirectory(profilesDir);
+		WriteProfileFile(profilesDir, "watcher-update-profile", tags: ["v1"]);
+		_profileStore.SyncDirectory(profilesDir);
+		_profileStore.GetAll().Should().HaveCount(1);
+
+		var service = CreateService();
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
+
+		// Act — modify the profile
+		WriteProfileFile(profilesDir, "watcher-update-profile", tags: ["v2"]);
+
+		// Wait for debounce + processing
+		await WaitForConditionAsync(
+			() => _profileStore.GetAll().FirstOrDefault()?.Filter.Tags.Contains("v2") == true,
+			TimeSpan.FromSeconds(5));
+
+		await service.StopAsync(CancellationToken.None);
+
+		// Assert
+		_profileStore.GetAll().Should().HaveCount(1);
+		_profileStore.GetAll().First().Filter.Tags.Should().Contain("v2");
+	}
+
+	[Fact]
+	public async Task FileWatcher_ProfileDeleted_RemovesProfile()
+	{
+		// Arrange — create profile file and sync it
+		var profilesDir = Path.Combine(_watchDir, OrchestrationSyncService.ProfilesDirName);
+		Directory.CreateDirectory(profilesDir);
+		var filePath = WriteProfileFile(profilesDir, "watcher-delete-profile");
+		_profileStore.SyncDirectory(profilesDir);
+		_profileStore.GetAll().Should().HaveCount(1);
+
+		var service = CreateService();
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
+
+		// Act — delete the profile file
+		File.Delete(filePath);
+
+		// Wait for debounce + processing
+		await WaitForConditionAsync(() => _profileStore.GetAll().Count == 0, TimeSpan.FromSeconds(10));
+
+		await service.StopAsync(CancellationToken.None);
+
+		// Assert
+		_profileStore.GetAll().Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task FileWatcher_InvalidProfileFile_DoesNotCrash()
+	{
+		// Arrange
+		var profilesDir = Path.Combine(_watchDir, OrchestrationSyncService.ProfilesDirName);
+		Directory.CreateDirectory(profilesDir);
+
+		var service = CreateService();
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
+
+		// Act — write an invalid JSON file to the profiles directory
+		File.WriteAllText(Path.Combine(profilesDir, "broken.json"), "not valid json {{{");
+
+		// Wait for debounce + processing attempt
+		await Task.Delay(500);
+
+		await service.StopAsync(CancellationToken.None);
+
+		// Assert — should not crash, no profile added
+		_profileStore.GetAll().Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task FileWatcher_NonJsonInProfilesDir_Ignored()
+	{
+		// Arrange
+		var profilesDir = Path.Combine(_watchDir, OrchestrationSyncService.ProfilesDirName);
+		Directory.CreateDirectory(profilesDir);
+
+		var service = CreateService();
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
+
+		// Act — write a YAML file to profiles dir (should be ignored)
+		File.WriteAllText(Path.Combine(profilesDir, "readme.yaml"), "name: not-a-profile");
+
+		// Wait to confirm no processing
+		await Task.Delay(500);
+
+		await service.StopAsync(CancellationToken.None);
+
+		// Assert — non-JSON files in profiles/ should be ignored
+		_profileStore.GetAll().Should().BeEmpty();
+	}
 }

@@ -49,7 +49,13 @@ builder.Services.AddOrchestraHost((options, configuration) =>
 	var scanPath = Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH")
 		?? configuration["orchestrations-path"];
 	if (scanPath is not null)
-		options.Scan = new ScanConfig { Directory = scanPath };
+	{
+		// Update just the directory, preserving watch/recursive from orchestra.json
+		if (options.Scan is not null)
+			options.Scan.Directory = scanPath;
+		else
+			options.Scan = new ScanConfig { Directory = scanPath };
+	}
 
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;

@@ -58,9 +58,11 @@ public static class ServiceCollectionExtensions
 		{
 			var options = new OrchestrationHostOptions();
 			var configuration = sp.GetRequiredService<IConfiguration>();
+			var configLogger = sp.GetRequiredService<ILoggerFactory>()
+				.CreateLogger("Orchestra.Host.OrchestraConfigLoader");
 
 			// Load config file first (orchestra.json), then let programmatic overrides win
-			OrchestraConfigLoader.LoadAndApply(options);
+			OrchestraConfigLoader.LoadAndApply(options, configLogger);
 			configure.Invoke(options, configuration);
 
 			// Resolve HostBaseUrl: prefer the application's own listening address over
@@ -286,6 +288,8 @@ public static class ServiceProviderExtensions
 		var triggerManager = services.GetRequiredService<TriggerManager>();
 		var profileManager = services.GetRequiredService<ProfileManager>();
 		var mcpManager = services.GetRequiredService<McpManager>();
+		var initLogger = services.GetRequiredService<ILoggerFactory>()
+			.CreateLogger("Orchestra.Host.Initialization");
 
 		// Initialize McpManager: load global orchestra.mcp.json and start proxy
 		var globalMcpPath = OrchestraConfigLoader.ResolveGlobalMcpPath();
@@ -310,6 +314,10 @@ public static class ServiceProviderExtensions
 		var scanConfig = options.Scan;
 		if (scanConfig is not null && Directory.Exists(scanConfig.Directory))
 		{
+			initLogger.LogInformation(
+				"Scan config active: Directory={Directory}, Watch={Watch}, Recursive={Recursive}",
+				scanConfig.Directory, scanConfig.Watch, scanConfig.Recursive);
+
 			// Sync orchestrations from the orchestrations/ subdirectory
 			var orchestrationsDir = Path.Combine(scanConfig.Directory, OrchestrationSyncService.OrchestrationsDirName);
 			if (Directory.Exists(orchestrationsDir))
@@ -322,8 +330,23 @@ public static class ServiceProviderExtensions
 			var profilesDir = Path.Combine(scanConfig.Directory, OrchestrationSyncService.ProfilesDirName);
 			if (Directory.Exists(profilesDir))
 			{
-				profileStore.SyncDirectory(profilesDir);
+				var syncResult = profileStore.SyncDirectory(profilesDir);
+				initLogger.LogInformation(
+					"Profile sync from {Directory}: {Added} added, {Updated} updated, {Removed} removed, {Unchanged} unchanged, {Failed} failed",
+					profilesDir, syncResult.Added, syncResult.Updated, syncResult.Removed, syncResult.Unchanged, syncResult.Failed);
 			}
+			else
+			{
+				initLogger.LogDebug("No profiles/ subdirectory found in scan directory {Directory}", scanConfig.Directory);
+			}
+		}
+		else if (scanConfig is not null)
+		{
+			initLogger.LogWarning("Scan directory does not exist: {Directory}", scanConfig.Directory);
+		}
+		else
+		{
+			initLogger.LogDebug("No scan config set. Profiles will not be auto-loaded from a workspace directory.");
 		}
 
 		// Register triggers for loaded orchestrations
