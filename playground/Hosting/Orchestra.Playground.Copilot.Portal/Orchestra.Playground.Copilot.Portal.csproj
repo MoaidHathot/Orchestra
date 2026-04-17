@@ -3,6 +3,7 @@
   <PropertyGroup>
     <RootNamespace>Orchestra.Playground.Copilot.Portal</RootNamespace>
     <SpaRoot>portal\</SpaRoot>
+    <PortalBuildStamp>$(SpaRoot).build-stamp</PortalBuildStamp>
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,14 +12,29 @@
     <ProjectReference Include="..\..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
   </ItemGroup>
 
+  <!-- Collect portal source files for incremental build detection -->
+  <ItemGroup>
+    <PortalSourceFiles Include="$(SpaRoot)src\**\*" />
+    <PortalSourceFiles Include="$(SpaRoot)package.json" />
+    <PortalSourceFiles Include="$(SpaRoot)package-lock.json" />
+    <PortalSourceFiles Include="$(SpaRoot)tsconfig.json" />
+    <PortalSourceFiles Include="$(SpaRoot)vite.config.ts" />
+    <PortalSourceFiles Include="$(SpaRoot)index.html" />
+  </ItemGroup>
+
   <!-- Ensure node_modules are installed before build -->
   <Target Name="NpmInstall" BeforeTargets="BuildPortal" Condition="!Exists('$(SpaRoot)node_modules')">
     <Exec Command="npm install" WorkingDirectory="$(SpaRoot)" />
   </Target>
 
-  <!-- Build the Vite frontend before .NET build (output goes to wwwroot/) -->
-  <Target Name="BuildPortal" BeforeTargets="Build" Condition="'$(SKIP_PORTAL_BUILD)' != 'true'">
+  <!-- Build the Vite frontend before .NET build (output goes to wwwroot/).
+       Uses Inputs/Outputs to skip rebuilding when no portal source files changed. -->
+  <Target Name="BuildPortal" BeforeTargets="Build"
+          Condition="'$(SKIP_PORTAL_BUILD)' != 'true'"
+          Inputs="@(PortalSourceFiles)"
+          Outputs="$(PortalBuildStamp)">
     <Exec Command="npm run build" WorkingDirectory="$(SpaRoot)" />
+    <Touch Files="$(PortalBuildStamp)" AlwaysCreate="true" />
   </Target>
 
   <!-- Exclude portal source from .NET content items -->

@@ -7,6 +7,16 @@ export default defineConfig({
   build: {
     outDir: '../wwwroot',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split large vendor libraries into separate cached chunks so that
+          // app code changes don't force Vite to re-process these heavy deps.
+          'vendor-mermaid': ['mermaid'],
+          'vendor-react': ['react', 'react-dom'],
+        },
+      },
+    },
   },
   server: {
     proxy: {
