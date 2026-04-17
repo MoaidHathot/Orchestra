@@ -70,6 +70,8 @@ export interface Step {
   template?: string;
   // Subagents
   subagents?: SubagentInfo[];
+  // Skill directories
+  skillDirectories?: string[];
   handler?: HandlerConfig;
 }
 

@@ -416,6 +416,10 @@ export function generateDefinitionDagCode(
       indicators.push('\u21BB'); // ↻
       stepsWithLoop.push(safeId);
     }
+    const hasSkills = Array.isArray(s.skillDirectories) && (s.skillDirectories as string[]).length > 0;
+    if (hasSkills) {
+      indicators.push('\uD83D\uDCD6'); // 📖
+    }
     if (indicators.length > 0) {
       line1 += ` ${indicators.join(' ')}`;
     }
@@ -619,6 +623,11 @@ export function generateExecutionDagCode(
     const hasLoop = typeof step === 'object' && (s.loopConfig || s.loop);
     const loopIndicator = hasLoop ? ' \u21BB' : '';
 
+    // Skill indicator
+    const hasSkills = typeof step === 'object' &&
+      Array.isArray(s.skillDirectories) && (s.skillDirectories as string[]).length > 0;
+    const skillIndicator = hasSkills ? ' \uD83D\uDCD6' : '';
+
     // Disabled indicator
     const isDisabled = (typeof step === 'object') &&
       ((step as Step).enabled === false || s.enabled === false);
@@ -626,12 +635,12 @@ export function generateExecutionDagCode(
       disabledSteps.push(safeId);
     }
 
-    // Build line 1: [BADGE] step-name [status] [loop]
+    // Build line 1: [BADGE] step-name [status] [loop] [skill]
     let line1 = '';
     if (typeBadge) {
       line1 += `<small><b>${typeBadge}</b></small> `;
     }
-    line1 += `${truncateName(stepName)}${statusIcon}${loopIndicator}`;
+    line1 += `${truncateName(stepName)}${statusIcon}${loopIndicator}${skillIndicator}`;
 
     const labelParts = [escLabel(line1)];
 

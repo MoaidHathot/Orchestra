@@ -159,6 +159,11 @@ public static class ServiceCollectionExtensions
 		// ServiceManager: manages external processes and hooks from orchestra.services.json
 		services.AddSingleton<ServiceManager>();
 
+		// ServiceManager shutdown: registered FIRST so it stops LAST (IHostedService
+		// instances are stopped in reverse registration order). This ensures managed
+		// services outlive MCPs, triggers, and other hosted services that may depend on them.
+		services.AddHostedService<ServiceManagerShutdownService>();
+
 		// ── Profiles & Tags ──
 
 		// Tag store for host-managed orchestration tags
@@ -323,8 +328,13 @@ public static class ServiceProviderExtensions
 		// not load orchestra.mcp.json (which may start real MCP proxy processes).
 		var hostEnv = services.GetService<IHostEnvironment>();
 		var config = services.GetService<IConfiguration>();
+		var lifetime = services.GetService<IHostApplicationLifetime>();
 		var skipExternalServices = hostEnv?.IsEnvironment("Testing") == true
 			|| string.Equals(config?["skip-services"], "true", StringComparison.OrdinalIgnoreCase);
+
+		// Use the ApplicationStopping token so that Ctrl+C immediately cancels any
+		// long-running hooks instead of waiting for the full timeout to expire.
+		var shutdownToken = lifetime?.ApplicationStopping ?? CancellationToken.None;
 
 		// Initialize ServiceManager: load orchestra.services.json and start services/hooks.
 		// This runs BEFORE McpManager because services may be dependencies that MCPs need.
@@ -337,7 +347,7 @@ public static class ServiceProviderExtensions
 				serviceEntries = OrchestraConfigLoader.LoadServiceConfig(serviceConfigPath, initLogger) ?? [];
 				initLogger.LogInformation("Loaded {Count} service(s) from {Path}", serviceEntries.Length, serviceConfigPath);
 			}
-			await serviceManager.InitializeAsync(serviceEntries);
+			await serviceManager.InitializeAsync(serviceEntries, shutdownToken);
 		}
 		else
 		{
@@ -492,15 +502,6 @@ public static class ServiceProviderExtensions
 				var preloadLogger = services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(ServiceProviderExtensions));
 				preloadLogger.LogError(ex, "Failed to preload run-history index");
 			}
-		});
-
-		// Wire up ServiceManager shutdown: stop managed processes and run afterStop hooks.
-		// This runs AFTER the host stops (IHostedService instances are already stopped),
-		// ensuring services outlive MCPs and triggers that may depend on them.
-		var lifetime = services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
-		lifetime.ApplicationStopped.Register(() =>
-		{
-			serviceManager.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
 		});
 	}
 }

@@ -1,6 +1,15 @@
+---
+name: orchestration-authoring
+description: Creates and validates Orchestra orchestration files (JSON/YAML) that define DAGs of steps (Prompt, Command, Script, Http, Transform) with triggers, MCPs, subagents, loops, typed inputs, and template expressions. Use when authoring new orchestrations, generating orchestration files from descriptions, reviewing existing orchestrations for correctness, or debugging orchestration issues.
+---
+
 # Orchestra Orchestration Authoring Reference
 
-You are an expert at creating Orchestra orchestration files. This document is the complete reference for every property, pattern, and capability available. Use it to generate valid, idiomatic orchestration JSON files.
+Complete reference for creating valid, idiomatic Orchestra orchestration files.
+
+**Detailed references** (read on demand):
+- [references/examples.md](references/examples.md) -- Full real-world example orchestrations
+- [references/full-schema-reference.md](references/full-schema-reference.md) -- Complete property-level documentation with all edge cases
 
 ## Format
 

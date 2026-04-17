@@ -83,6 +83,23 @@ export default function ActiveOrchestrationCard({
     return result;
   }, [orch]);
 
+  // Collect all unique skill directories from steps
+  const allSkillDirs = useMemo(() => {
+    if (!orch?.steps) return [];
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const step of orch.steps) {
+      if (typeof step === 'string' || !step?.skillDirectories) continue;
+      for (const dir of step.skillDirectories) {
+        if (!seen.has(dir)) {
+          seen.add(dir);
+          result.push(dir);
+        }
+      }
+    }
+    return result;
+  }, [orch]);
+
   const getDuration = (): string | null => {
     if (!execution.startedAt) return null;
     const start = new Date(execution.startedAt);
@@ -426,6 +443,37 @@ export default function ActiveOrchestrationCard({
                     {mcp.name}
                   </span>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Skill Directories */}
+        {allSkillDirs.length > 0 && (
+          <div style={{ marginBottom: '8px' }}>
+            <div className="card-meta-label">Skills</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '2px' }}>
+              {allSkillDirs.map((dir) => {
+                const dirName = dir.replace(/^\.\//, '').split('/').pop() || dir;
+                return (
+                  <span
+                    key={dir}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      padding: '2px 6px',
+                      fontSize: '10px',
+                      background: 'rgba(240, 136, 62, 0.15)',
+                      border: '1px solid rgba(240, 136, 62, 0.3)',
+                      borderRadius: '4px',
+                      color: '#f0883e',
+                    }}
+                    title={dir}
+                  >
+                    <Icons.Skill />{dirName}
+                  </span>
+                );
+              })}
             </div>
           </div>
         )}

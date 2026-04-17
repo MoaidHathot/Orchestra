@@ -104,17 +104,28 @@ public partial class ServiceManager : IAsyncDisposable
 
 	/// <summary>
 	/// Runs all beforeStart hooks in order. Throws if a required hook fails.
+	/// Links the shutdown token so that <see cref="StopAsync"/> cancels running hooks.
 	/// </summary>
 	private async Task RunBeforeStartHooksAsync(CancellationToken cancellationToken)
 	{
+		// Link the external token with the shutdown token so that either Ctrl+C
+		// (via the external token) or StopAsync (via _shutdownCts) will cancel hooks.
+		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+			cancellationToken, _shutdownCts!.Token);
+
 		foreach (var hook in _beforeStartHooks)
 		{
 			LogRunningBeforeStartHook(hook.Name, hook.Command);
-			var (exitCode, stderr) = await RunCommandAsync(hook, cancellationToken);
+			var (exitCode, stderr) = await RunCommandAsync(hook, linkedCts.Token);
 
 			if (exitCode == 0)
 			{
 				LogBeforeStartHookCompleted(hook.Name, exitCode);
+			}
+			else if (linkedCts.IsCancellationRequested)
+			{
+				// Shutdown was requested — don't throw, just stop processing hooks
+				return;
 			}
 			else if (hook.Required)
 			{
@@ -269,6 +280,7 @@ public partial class ServiceManager : IAsyncDisposable
 
 	/// <summary>
 	/// Runs a one-shot command hook and returns its exit code and stderr output.
+	/// Kills the process tree on timeout or external cancellation (e.g., Ctrl+C shutdown).
 	/// </summary>
 	internal virtual async Task<(int ExitCode, string Stderr)> RunCommandAsync(
 		CommandHook hook, CancellationToken cancellationToken)
@@ -297,11 +309,22 @@ public partial class ServiceManager : IAsyncDisposable
 			await process.WaitForExitAsync(linkedCts.Token);
 			return (process.ExitCode, stderr.ToString().TrimEnd());
 		}
-		catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+		catch (OperationCanceledException)
 		{
-			LogBeforeStartHookTimedOut(hook.Name, hook.TimeoutSeconds);
+			// Kill the entire process tree on any cancellation (timeout or external shutdown).
+			// Without this, the child process (e.g., a server started via cmd.exe /c) would
+			// be orphaned and keep running after Orchestra exits.
 			try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-			return (-1, $"Hook timed out after {hook.TimeoutSeconds}s");
+
+			if (timeoutCts.IsCancellationRequested)
+			{
+				LogBeforeStartHookTimedOut(hook.Name, hook.TimeoutSeconds);
+				return (-1, $"Hook timed out after {hook.TimeoutSeconds}s");
+			}
+
+			// External cancellation (e.g., Ctrl+C / shutdown)
+			LogBeforeStartHookCancelled(hook.Name);
+			return (-1, "Hook cancelled (shutdown requested)");
 		}
 	}
 
@@ -487,6 +510,12 @@ public partial class ServiceManager : IAsyncDisposable
 		Level = LogLevel.Error,
 		Message = "beforeStart hook '{HookName}' timed out after {TimeoutSeconds}s")]
 	private partial void LogBeforeStartHookTimedOut(string hookName, int timeoutSeconds);
+
+	[LoggerMessage(
+		EventId = 121,
+		Level = LogLevel.Warning,
+		Message = "beforeStart hook '{HookName}' cancelled (shutdown requested)")]
+	private partial void LogBeforeStartHookCancelled(string hookName);
 
 	[LoggerMessage(
 		EventId = 108,

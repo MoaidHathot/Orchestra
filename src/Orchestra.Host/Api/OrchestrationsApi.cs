@@ -82,6 +82,7 @@ public static class OrchestrationsApi
 									displayName = sa.DisplayName,
 									description = sa.Description
 								}).ToArray() : null,
+								skillDirectories = ps?.SkillDirectories.Length > 0 ? ps.SkillDirectories : null,
 								// Http step fields
 								method = hs?.Method,
 								url = hs?.Url,
@@ -211,6 +212,7 @@ public static class OrchestrationsApi
 						mcps = sa.Mcps.Select(m => m.Name).ToArray(),
 						infer = sa.Infer
 					}).ToArray() : null,
+					skillDirectories = ps?.SkillDirectories.Length > 0 ? ps.SkillDirectories : null,
 					// Http step fields
 					method = hs?.Method,
 					url = hs?.Url,

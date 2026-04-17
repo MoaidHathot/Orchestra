@@ -107,6 +107,7 @@ const KNOWN_PROPS: ReadonlySet<string> = new Set([
   'template',
   'transform',
   'handler',
+  'skillDirectories',
   'loop',
   'enabled',
 ]);
@@ -403,6 +404,42 @@ export default function StepDetailsPanel({ step }: Props): React.JSX.Element | n
             MCP
           </div>
           <div>{renderValue(ext.mcp as JsonValue)}</div>
+        </div>
+      )}
+
+      {/* Skill Directories */}
+      {step.skillDirectories != null && step.skillDirectories.length > 0 && (
+        <div style={{ marginBottom: '12px' }}>
+          <div
+            className="text-muted"
+            style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}
+          >
+            Skills ({step.skillDirectories.length})
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            {step.skillDirectories.map((dir, i) => (
+              <div
+                key={i}
+                style={{
+                  background: 'var(--bg)',
+                  padding: '6px 8px',
+                  borderRadius: '4px',
+                  fontSize: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  borderLeft: '3px solid #f0883e',
+                }}
+              >
+                <span style={{ color: '#f0883e', fontSize: '14px' }}>
+                  {'\uD83D\uDCD6'}
+                </span>
+                <span style={{ color: '#ffa657', wordBreak: 'break-all' }}>
+                  {dir}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
