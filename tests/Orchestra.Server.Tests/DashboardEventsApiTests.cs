@@ -134,20 +134,38 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 		var broadcaster = _factory.Services.GetRequiredService<DashboardEventBroadcaster>();
 		var profileManager = _factory.Services.GetRequiredService<ProfileManager>();
 
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+
+		// Deactivate every currently-active profile so our test activation produces a real diff.
+		// On CI a Default wildcard profile is auto-created/activated at startup — if we leave it
+		// active and then activate another wildcard profile, RecomputeEffectiveActiveSet returns
+		// early (no diff) and no event is fired.
+		var listResp = await _client.GetAsync("/api/profiles", cts.Token);
+		listResp.IsSuccessStatusCode.Should().BeTrue();
+		var list = await listResp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
+		foreach (var p in list.GetProperty("profiles").EnumerateArray())
+		{
+			if (p.GetProperty("isActive").GetBoolean())
+			{
+				var existingId = p.GetProperty("id").GetString()!;
+				var deactivateResp = await _client.PostAsync($"/api/profiles/{existingId}/deactivate", content: null, cts.Token);
+				deactivateResp.IsSuccessStatusCode.Should().BeTrue();
+			}
+		}
+
 		// Create a profile with a wildcard filter so activation actually changes the
-		// effective set (otherwise RecomputeEffectiveActiveSet returns early with no event).
+		// effective set (from "nothing active" to "everything active").
 		var createResp = await _client.PostAsJsonAsync("/api/profiles", new
 		{
 			name = $"Sse Test Profile {Guid.NewGuid():N}",
 			description = "test",
 			filter = new { tags = new[] { "*" } }
-		});
+		}, cts.Token);
 		createResp.IsSuccessStatusCode.Should().BeTrue();
-		var created = await createResp.Content.ReadFromJsonAsync<JsonElement>();
+		var created = await createResp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
 		var profileId = created.GetProperty("id").GetString()!;
 
-		// Open the SSE stream
-		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		// Open the SSE stream AFTER setup so we don't have to drain pre-test frames from deactivations.
 		using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events");
 		using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
 		using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
@@ -156,20 +174,23 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 		var connected = await ReadSseFrameAsync(reader, cts.Token);
 		connected.Type.Should().Be("connected");
 
-		// Wait for subscription
-		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
-		while (broadcaster.SubscriberCount == 0 && DateTime.UtcNow < deadline)
+		// Wait for subscription to register before broadcasting
+		var subscriberDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+		while (broadcaster.SubscriberCount == 0 && DateTime.UtcNow < subscriberDeadline)
 		{
 			await Task.Delay(25, cts.Token);
 		}
+		broadcaster.SubscriberCount.Should().BeGreaterThan(0);
 
 		// Trigger a real profile activation through the ProfileManager — this should fire
 		// OnEffectiveActiveSetChanged, which our broadcaster is subscribed to.
 		profileManager.ActivateProfile(profileId, trigger: "test");
 
-		// Wait for the matching SSE frame
+		// Read frames until we find the profile-active-set-changed one (skipping heartbeats
+		// and any other event types).
 		SseFrame? match = null;
-		while (DateTime.UtcNow < deadline.AddSeconds(8))
+		var frameDeadline = DateTime.UtcNow + TimeSpan.FromSeconds(8);
+		while (DateTime.UtcNow < frameDeadline)
 		{
 			var frame = await ReadSseFrameAsync(reader, cts.Token);
 			if (frame.Type == "profile-active-set-changed")
