@@ -342,6 +342,11 @@ function App(): React.JSX.Element {
       loadProfiles();
       refreshOrchestrations();
     },
+    onProfilesChanged: () => {
+      // The profile list itself changed (file added, updated, or deleted in the watched
+      // directory). Refresh profiles so the selector shows the new/updated profiles.
+      loadProfiles();
+    },
     onExecutionStarted: () => {
       // A new execution started somewhere (trigger, manual, resume). Refresh the Active
       // list so it appears immediately.

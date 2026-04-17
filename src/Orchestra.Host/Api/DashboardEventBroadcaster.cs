@@ -154,6 +154,18 @@ public sealed partial class DashboardEventBroadcaster : IDisposable
 	}
 
 	/// <summary>
+	/// Broadcasts that the profile list changed (profile created, updated, or deleted).
+	/// The Portal should refresh /api/profiles.
+	/// Unlike <see cref="BroadcastProfileActiveSetChanged"/> which only fires when the effective
+	/// active orchestration set changes, this fires whenever the profile list itself is modified
+	/// (e.g., a new inactive profile was added via file sync).
+	/// </summary>
+	public void BroadcastProfilesChanged(string reason)
+	{
+		Publish("profiles-changed", new { reason });
+	}
+
+	/// <summary>
 	/// Broadcasts a heartbeat to keep SSE connections alive through proxies/load balancers.
 	/// </summary>
 	public void SendHeartbeat()

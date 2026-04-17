@@ -1400,6 +1400,10 @@ public class OrchestrationParserTests
 				if (Path.GetFileName(file).Equals("orchestra.mcp.json", StringComparison.OrdinalIgnoreCase))
 					continue;
 
+				// Skip orchestra.services.json — it's not an orchestration file
+				if (Path.GetFileName(file).Equals("orchestra.services.json", StringComparison.OrdinalIgnoreCase))
+					continue;
+
 				data.Add(file);
 			}
 		}
@@ -1554,11 +1558,10 @@ public class OrchestrationParserTests
 		// Arrange
 		var examplesDir = Path.GetFullPath(
 			Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"));
-		var filePath = Path.Combine(examplesDir, "generate-orchestration.json");
-		var json = File.ReadAllText(filePath);
+		var filePath = Path.Combine(examplesDir, "generate-orchestration.yaml");
 
 		// Act
-		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(filePath, []);
 
 		// Assert
 		orchestration.Name.Should().Be("generate-orchestration");
@@ -1580,16 +1583,19 @@ public class OrchestrationParserTests
 		orchestration.Inputs["outputPath"].Type.Should().Be(InputType.String);
 		orchestration.Inputs["outputPath"].Required.Should().BeFalse();
 
-		// Steps
-		orchestration.Steps.Should().HaveCount(2);
+		// Steps — generate, validate, save-orchestration, register-orchestration, format-output
+		orchestration.Steps.Should().HaveCount(5);
 
-		// Generate step
+		// Generate step with subagents
 		var generateStep = orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>().Subject;
 		generateStep.Name.Should().Be("generate");
 		generateStep.Model.Should().Be("claude-opus-4.6");
-		generateStep.SkillDirectories.Should().Contain("./skills/orchestration-authoring");
+		generateStep.SkillDirectories.Should().ContainMatch("*skills*orchestration-authoring*");
 		generateStep.Mcps.Should().HaveCount(1);
 		generateStep.OutputHandlerPrompt.Should().NotBeNullOrWhiteSpace();
+		generateStep.Subagents.Should().HaveCount(2);
+		generateStep.Subagents[0].Name.Should().Be("intent-validator");
+		generateStep.Subagents[1].Name.Should().Be("best-practices-expert");
 
 		// Validate step (checker/loop)
 		var validateStep = orchestration.Steps[1].Should().BeOfType<PromptOrchestrationStep>().Subject;
@@ -1599,13 +1605,33 @@ public class OrchestrationParserTests
 		validateStep.Loop!.Target.Should().Be("generate");
 		validateStep.Loop.MaxIterations.Should().Be(2);
 		validateStep.Loop.ExitPattern.Should().Be("VALID");
-		validateStep.SkillDirectories.Should().Contain("./skills/orchestration-authoring");
+		validateStep.SkillDirectories.Should().ContainMatch("*skills*orchestration-authoring*");
 
-		// MCP definitions
-		orchestration.Mcps.Should().HaveCountGreaterThan(0);
+		// Save step
+		var saveStep = orchestration.Steps[2].Should().BeOfType<PromptOrchestrationStep>().Subject;
+		saveStep.Name.Should().Be("save-orchestration");
+		saveStep.DependsOn.Should().Contain("validate");
+		saveStep.Mcps.Should().HaveCount(1);
+
+		// Register step
+		var registerStep = orchestration.Steps[3].Should().BeOfType<PromptOrchestrationStep>().Subject;
+		registerStep.Name.Should().Be("register-orchestration");
+		registerStep.DependsOn.Should().Contain("save-orchestration");
+		registerStep.Mcps.Should().HaveCount(1);
+
+		// Format output (Transform step)
+		orchestration.Steps[4].Name.Should().Be("format-output");
+		orchestration.Steps[4].DependsOn.Should().Contain("save-orchestration");
+		orchestration.Steps[4].DependsOn.Should().Contain("register-orchestration");
+
+		// MCP definitions — orchestra-control and filesystem
+		orchestration.Mcps.Should().HaveCount(2);
 		var controlMcp = orchestration.Mcps.FirstOrDefault(m => m.Name == "orchestra-control");
 		controlMcp.Should().NotBeNull();
 		controlMcp.Should().BeOfType<RemoteMcp>();
+		var fsMcp = orchestration.Mcps.FirstOrDefault(m => m.Name == "filesystem");
+		fsMcp.Should().NotBeNull();
+		fsMcp.Should().BeOfType<LocalMcp>();
 	}
 
 	[Fact]

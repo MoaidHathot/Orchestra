@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Icons, getTriggerIcon } from '../icons';
 import { formatTimeAgo, formatTimeUntil, getMatchingProfiles } from '../utils';
 import type { Orchestration, Profile, RunContext } from '../types';
@@ -48,6 +48,40 @@ export default function ActiveOrchestrationCard({
   const isDisabled = type === 'disabled';
   const isCancelling = execution.status === 'Cancelling';
   const orch = orchestrations?.find((o) => o.id === execution.orchestrationId);
+
+  // Collect all unique MCPs from orchestration-level AND step-level (which includes resolved global MCPs)
+  const allMcps = useMemo(() => {
+    if (!orch) return [];
+    const seen = new Set<string>();
+    const result: { name: string; source: 'inline' | 'step' }[] = [];
+
+    // Orchestration-level inline MCPs
+    if (orch.mcps) {
+      for (const mcp of orch.mcps) {
+        const mcpName = typeof mcp === 'string' ? mcp : mcp.name;
+        if (!seen.has(mcpName)) {
+          seen.add(mcpName);
+          result.push({ name: mcpName, source: 'inline' });
+        }
+      }
+    }
+
+    // Step-level MCPs (includes resolved global/shared MCPs)
+    if (orch.steps) {
+      for (const step of orch.steps) {
+        if (typeof step === 'string' || !step?.mcps) continue;
+        for (const mcp of step.mcps) {
+          const mcpName = typeof mcp === 'string' ? mcp : mcp.name;
+          if (!seen.has(mcpName)) {
+            seen.add(mcpName);
+            result.push({ name: mcpName, source: 'step' });
+          }
+        }
+      }
+    }
+
+    return result;
+  }, [orch]);
 
   const getDuration = (): string | null => {
     if (!execution.startedAt) return null;
@@ -365,31 +399,33 @@ export default function ActiveOrchestrationCard({
           )}
         </div>
 
-        {/* MCPs list */}
-        {orch?.mcps && orch.mcps.length > 0 && (
+        {/* MCPs list (includes both inline and step-level/global MCPs) */}
+        {allMcps.length > 0 && (
           <div style={{ marginBottom: '8px' }}>
             <div className="card-meta-label">MCPs</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '2px' }}>
-              {orch.mcps.map((mcp) => {
-                const mcpName = typeof mcp === 'string' ? mcp : mcp.name;
-                return (
+              {allMcps.map((mcp) => (
                   <span
-                    key={mcpName}
+                    key={mcp.name}
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       padding: '2px 6px',
                       fontSize: '10px',
-                      background: 'rgba(139, 92, 246, 0.15)',
-                      border: '1px solid rgba(139, 92, 246, 0.3)',
+                      background: mcp.source === 'step'
+                        ? 'rgba(56, 189, 248, 0.15)'
+                        : 'rgba(139, 92, 246, 0.15)',
+                      border: `1px solid ${mcp.source === 'step'
+                        ? 'rgba(56, 189, 248, 0.3)'
+                        : 'rgba(139, 92, 246, 0.3)'}`,
                       borderRadius: '4px',
-                      color: '#a78bfa',
+                      color: mcp.source === 'step' ? '#38bdf8' : '#a78bfa',
                     }}
+                    title={mcp.source === 'step' ? 'Shared/global MCP (used in steps)' : 'Inline MCP'}
                   >
-                    {mcpName}
+                    {mcp.name}
                   </span>
-                );
-              })}
+              ))}
             </div>
           </div>
         )}

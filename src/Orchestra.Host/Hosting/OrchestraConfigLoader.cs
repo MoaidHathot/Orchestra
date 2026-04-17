@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Orchestra.ProcessHost;
 
 namespace Orchestra.Host.Hosting;
 
@@ -35,7 +36,11 @@ public static class OrchestraConfigLoader
 		AllowTrailingCommas = true,
 		DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
 		WriteIndented = true,
-		Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+		Converters =
+		{
+			new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
+			new ServiceEntryJsonConverter(),
+		}
 	};
 
 	/// <summary>
@@ -72,27 +77,72 @@ public static class OrchestraConfigLoader
 	public const string McpConfigFileName = "orchestra.mcp.json";
 
 	/// <summary>
+	/// The global service configuration file name, co-located with orchestra.json.
+	/// </summary>
+	public const string ServiceConfigFileName = "orchestra.services.json";
+
+	/// <summary>
 	/// Resolves the path to the global orchestra.mcp.json file.
 	/// It lives in the same directory as orchestra.json.
 	/// Returns null if no orchestra.mcp.json exists.
 	/// </summary>
 	public static string? ResolveGlobalMcpPath()
 	{
+		return ResolveColocatedConfigPath(McpConfigFileName);
+	}
+
+	/// <summary>
+	/// Resolves the path to the global orchestra.services.json file.
+	/// It lives in the same directory as orchestra.json.
+	/// Returns null if no orchestra.services.json exists.
+	/// </summary>
+	public static string? ResolveServiceConfigPath()
+	{
+		return ResolveColocatedConfigPath(ServiceConfigFileName);
+	}
+
+	/// <summary>
+	/// Resolves the path to a config file co-located with orchestra.json.
+	/// Returns null if the file does not exist.
+	/// </summary>
+	private static string? ResolveColocatedConfigPath(string fileName)
+	{
 		// First try to find the config directory from the resolved config path
 		var configPath = ResolveConfigPath();
 		if (configPath is not null)
 		{
 			var dir = Path.GetDirectoryName(configPath)!;
-			var mcpPath = Path.Combine(dir, McpConfigFileName);
-			if (File.Exists(mcpPath))
-				return mcpPath;
+			var filePath = Path.Combine(dir, fileName);
+			if (File.Exists(filePath))
+				return filePath;
 		}
 
 		// Fall back to the default config directory
 		var defaultConfigPath = GetDefaultConfigPath();
 		var defaultDir = Path.GetDirectoryName(defaultConfigPath)!;
-		var defaultMcpPath = Path.Combine(defaultDir, McpConfigFileName);
-		return File.Exists(defaultMcpPath) ? defaultMcpPath : null;
+		var defaultFilePath = Path.Combine(defaultDir, fileName);
+		return File.Exists(defaultFilePath) ? defaultFilePath : null;
+	}
+
+	/// <summary>
+	/// Loads and deserializes the orchestra.services.json file into an array of <see cref="ServiceEntry"/>.
+	/// Returns null if the file cannot be parsed.
+	/// </summary>
+	public static ServiceEntry[]? LoadServiceConfig(string path, ILogger? logger = null)
+	{
+		logger ??= NullLogger.Instance;
+
+		try
+		{
+			var json = File.ReadAllText(path);
+			var config = JsonSerializer.Deserialize<ServiceConfigFile>(json, JsonOptions);
+			return config?.Services;
+		}
+		catch (Exception ex)
+		{
+			logger.LogWarning(ex, "Failed to load service configuration from {ConfigPath}.", path);
+			return null;
+		}
 	}
 
 	/// <summary>
@@ -428,4 +478,58 @@ public class ScanConfigFile
 	/// If true, scan subdirectories recursively within <c>orchestrations/</c> and <c>profiles/</c>.
 	/// </summary>
 	public bool? Recursive { get; set; }
+}
+
+/// <summary>
+/// Represents the on-disk orchestra.services.json configuration file structure.
+/// Uses a polymorphic <c>type</c> discriminator to deserialize into
+/// <see cref="ProcessService"/> or <see cref="CommandHook"/> subtypes.
+/// </summary>
+public class ServiceConfigFile
+{
+	/// <summary>
+	/// The list of service entries to manage.
+	/// </summary>
+	public ServiceEntry[]? Services { get; set; }
+}
+
+/// <summary>
+/// Custom JSON converter that deserializes <see cref="ServiceEntry"/> objects based on
+/// the <c>type</c> discriminator property: <c>"process"</c> maps to <see cref="ProcessService"/>
+/// and <c>"command"</c> maps to <see cref="CommandHook"/>.
+/// </summary>
+public class ServiceEntryJsonConverter : JsonConverter<ServiceEntry>
+{
+	public override ServiceEntry? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+	{
+		using var doc = JsonDocument.ParseValue(ref reader);
+		var root = doc.RootElement;
+
+		if (!root.TryGetProperty("type", out var typeProp))
+			throw new JsonException("Service entry missing required 'type' property.");
+
+		var type = typeProp.GetString();
+		var json = root.GetRawText();
+
+		// Create options without this converter to avoid infinite recursion
+		var innerOptions = new JsonSerializerOptions(options);
+		// Remove all ServiceEntryJsonConverter instances
+		for (int i = innerOptions.Converters.Count - 1; i >= 0; i--)
+		{
+			if (innerOptions.Converters[i] is ServiceEntryJsonConverter)
+				innerOptions.Converters.RemoveAt(i);
+		}
+
+		return type switch
+		{
+			"process" => JsonSerializer.Deserialize<ProcessService>(json, innerOptions),
+			"command" => JsonSerializer.Deserialize<CommandHook>(json, innerOptions),
+			_ => throw new JsonException($"Unknown service entry type '{type}'. Expected 'process' or 'command'."),
+		};
+	}
+
+	public override void Write(Utf8JsonWriter writer, ServiceEntry value, JsonSerializerOptions options)
+	{
+		JsonSerializer.Serialize(writer, value, value.GetType(), options);
+	}
 }

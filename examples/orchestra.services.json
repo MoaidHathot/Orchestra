@@ -1,0 +1,54 @@
+{
+  "$schema": "../schemas/orchestra.services.schema.json",
+  "services": [
+    {
+      "name": "migrate-db",
+      "type": "command",
+      "command": "dotnet",
+      "arguments": ["ef", "database", "update"],
+      "workingDirectory": "P:/Github/MyProject",
+      "runAt": "beforeStart",
+      "timeoutSeconds": 120,
+      "required": true
+    },
+    {
+      "name": "redis",
+      "type": "process",
+      "command": "redis-server",
+      "arguments": ["--port", "6379"],
+      "restartPolicy": "onFailure",
+      "readiness": {
+        "stdoutPattern": "Ready to accept connections",
+        "timeoutSeconds": 15
+      },
+      "shutdownTimeoutSeconds": 5,
+      "required": true
+    },
+    {
+      "name": "dev-proxy",
+      "type": "process",
+      "command": "node",
+      "arguments": ["proxy.js"],
+      "workingDirectory": "P:/Github/MyProject/tools",
+      "env": {
+        "PORT": "8080",
+        "UPSTREAM": "http://localhost:5200"
+      },
+      "restartPolicy": "always",
+      "readiness": {
+        "healthCheckUrl": "http://localhost:8080/health",
+        "timeoutSeconds": 10,
+        "intervalMs": 1000
+      },
+      "required": false
+    },
+    {
+      "name": "cleanup-temp",
+      "type": "command",
+      "command": "dotnet",
+      "arguments": ["script", "cleanup.csx"],
+      "runAt": "afterStop",
+      "required": false
+    }
+  ]
+}

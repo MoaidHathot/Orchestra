@@ -1,0 +1,155 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Orchestra Services Configuration",
+  "description": "Configuration for managed processes and lifecycle hooks in Orchestra.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON schema reference."
+    },
+    "services": {
+      "type": "array",
+      "description": "List of service entries to manage.",
+      "items": {
+        "oneOf": [
+          { "$ref": "#/definitions/processService" },
+          { "$ref": "#/definitions/commandHook" }
+        ]
+      }
+    }
+  },
+  "required": ["services"],
+  "additionalProperties": false,
+  "definitions": {
+    "serviceEntryBase": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique name identifying this service."
+        },
+        "command": {
+          "type": "string",
+          "description": "The executable or command to run."
+        },
+        "arguments": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Command-line arguments.",
+          "default": []
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "Working directory for the process."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Additional environment variables."
+        }
+      },
+      "required": ["name", "type", "command"]
+    },
+    "processService": {
+      "allOf": [
+        { "$ref": "#/definitions/serviceEntryBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "process",
+              "description": "Long-running process managed for the lifetime of Orchestra."
+            },
+            "restartPolicy": {
+              "type": "string",
+              "enum": ["never", "onFailure", "always"],
+              "default": "never",
+              "description": "What to do when the process exits unexpectedly."
+            },
+            "readiness": {
+              "$ref": "#/definitions/readinessCheck",
+              "description": "Optional readiness check configuration."
+            },
+            "shutdownTimeoutSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 10,
+              "description": "Grace period in seconds before force-killing the process during shutdown."
+            },
+            "required": {
+              "type": "boolean",
+              "default": false,
+              "description": "If true, a readiness timeout will cause Orchestra startup to fail."
+            }
+          },
+          "required": ["type"]
+        }
+      ]
+    },
+    "commandHook": {
+      "allOf": [
+        { "$ref": "#/definitions/serviceEntryBase" },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "command",
+              "description": "One-shot command that runs at a specific lifecycle point."
+            },
+            "runAt": {
+              "type": "string",
+              "enum": ["beforeStart", "afterStop"],
+              "default": "beforeStart",
+              "description": "When to run this command in the Orchestra lifecycle."
+            },
+            "timeoutSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 60,
+              "description": "Maximum time in seconds to wait for the command to complete."
+            },
+            "required": {
+              "type": "boolean",
+              "default": true,
+              "description": "If true, a non-zero exit code aborts startup (beforeStart only)."
+            }
+          },
+          "required": ["type"]
+        }
+      ]
+    },
+    "readinessCheck": {
+      "type": "object",
+      "description": "Configuration for detecting when a process is ready.",
+      "properties": {
+        "stdoutPattern": {
+          "type": "string",
+          "description": "Regex pattern to match against stdout/stderr lines. A match indicates readiness."
+        },
+        "healthCheckUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "HTTP GET endpoint to poll. A 200 response indicates readiness."
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 30,
+          "description": "Maximum time in seconds to wait for readiness."
+        },
+        "intervalMs": {
+          "type": "integer",
+          "minimum": 100,
+          "default": 500,
+          "description": "Poll interval in milliseconds for HTTP health checks."
+        }
+      },
+      "anyOf": [
+        { "required": ["stdoutPattern"] },
+        { "required": ["healthCheckUrl"] }
+      ],
+      "additionalProperties": false
+    }
+  }
+}

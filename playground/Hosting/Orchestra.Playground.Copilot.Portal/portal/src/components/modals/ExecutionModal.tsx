@@ -244,6 +244,33 @@ export default function ExecutionModal({
     return typeof step === 'object' ? step : null;
   }, [selectedStep, orchestration]);
 
+  // Extract actual model info from step events (from step-completed/usage SSE events)
+  const stepModelInfo = useMemo<{ actualModel?: string; selectedModel?: string } | null>(() => {
+    if (!selectedStep || !stepEvents) return null;
+    const events = stepEvents[selectedStep];
+    if (!events || events.length === 0) return null;
+
+    let actualModel: string | undefined;
+    let selectedModel: string | undefined;
+
+    for (const event of events) {
+      if (event.type === 'step-completed') {
+        // step-completed carries actualModel and selectedModel
+        if (event.actualModel) actualModel = event.actualModel as string;
+        if (event.selectedModel) selectedModel = event.selectedModel as string;
+      } else if (event.type === 'usage' && !actualModel) {
+        // usage carries model (the actual model used)
+        if (event.model) actualModel = event.model as string;
+      } else if (event.type === 'model-mismatch') {
+        // model-mismatch carries configuredModel and actualModel
+        if (event.actualModel) actualModel = event.actualModel as string;
+      }
+    }
+
+    if (!actualModel && !selectedModel) return null;
+    return { actualModel, selectedModel };
+  }, [selectedStep, stepEvents]);
+
   const handleCancel = useCallback(() => {
     if (executionId) {
       onCancel(executionId);
@@ -926,7 +953,7 @@ export default function ExecutionModal({
                     </div>
 
                     {/* Step Info: Type, Model, MCPs */}
-                    {selectedStepData && (
+                    {(selectedStepData || stepModelInfo) && (
                       <div
                         className="step-info-section"
                         style={{
@@ -943,13 +970,13 @@ export default function ExecutionModal({
                             gap: '16px',
                             flexWrap: 'wrap',
                             marginBottom:
-                              selectedStepData.mcps &&
+                              selectedStepData?.mcps &&
                               selectedStepData.mcps.length > 0
                                 ? '8px'
                                 : '0',
                           }}
                         >
-                          {selectedStepData.type && (
+                          {selectedStepData?.type && (
                             <div>
                               <span style={{ color: 'var(--text-dim)' }}>
                                 Type:
@@ -959,7 +986,7 @@ export default function ExecutionModal({
                               </span>
                             </div>
                           )}
-                          {selectedStepData.model && (
+                          {selectedStepData?.model && (
                             <div>
                               <span style={{ color: 'var(--text-dim)' }}>
                                 Model:
@@ -969,8 +996,38 @@ export default function ExecutionModal({
                               </span>
                             </div>
                           )}
+                          {stepModelInfo?.actualModel && (
+                            <div>
+                              <span style={{ color: 'var(--text-dim)' }}>
+                                Actual Model:
+                              </span>{' '}
+                              <span style={{
+                                color: selectedStepData?.model && stepModelInfo.actualModel !== selectedStepData.model
+                                  ? 'var(--warning)'
+                                  : 'var(--text-secondary)',
+                              }}>
+                                {stepModelInfo.actualModel}
+                              </span>
+                              {selectedStepData?.model && stepModelInfo.actualModel !== selectedStepData.model && (
+                                <span
+                                  style={{
+                                    marginLeft: '6px',
+                                    fontSize: '10px',
+                                    padding: '1px 5px',
+                                    borderRadius: '3px',
+                                    background: 'rgba(210, 153, 34, 0.15)',
+                                    border: '1px solid rgba(210, 153, 34, 0.3)',
+                                    color: 'var(--warning)',
+                                  }}
+                                  title={`Requested "${selectedStepData?.model}" but the provider used "${stepModelInfo.actualModel}"`}
+                                >
+                                  differs
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        {selectedStepData.mcps &&
+                        {selectedStepData?.mcps &&
                           selectedStepData.mcps.length > 0 && (
                             <div>
                               <span style={{ color: 'var(--text-dim)' }}>
@@ -984,7 +1041,7 @@ export default function ExecutionModal({
                                   marginTop: '4px',
                                 }}
                               >
-                                {selectedStepData.mcps.map((mcp, i) => (
+                                {selectedStepData?.mcps.map((mcp, i) => (
                                   <span
                                     key={i}
                                     style={{

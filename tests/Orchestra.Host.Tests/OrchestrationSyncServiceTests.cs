@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Orchestra.Host.Api;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
@@ -24,6 +25,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 	private readonly TriggerManager _triggerManager;
 	private readonly ProfileManager _profileManager;
 	private readonly ProfileStore _profileStore;
+	private readonly DashboardEventBroadcaster _dashboardBroadcaster;
 
 	public OrchestrationSyncServiceTests()
 	{
@@ -57,6 +59,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		var tagStore = new OrchestrationTagStore(_dataPath, NullLogger<OrchestrationTagStore>.Instance);
 		_profileManager = new ProfileManager(_profileStore, tagStore, _registry, NullLogger<ProfileManager>.Instance);
 		_profileManager.Initialize();
+		_dashboardBroadcaster = new DashboardEventBroadcaster(NullLogger<DashboardEventBroadcaster>.Instance);
 	}
 
 	public void Dispose()
@@ -113,6 +116,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 			_triggerManager,
 			_profileManager,
 			_profileStore,
+			_dashboardBroadcaster,
 			options,
 			NullLogger<OrchestrationSyncService>.Instance);
 
@@ -146,7 +150,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 		// Arrange
 		var options = new OrchestrationHostOptions { Scan = null };
 		var service = new OrchestrationSyncService(
-			_registry, _triggerManager, _profileManager, _profileStore, options,
+			_registry, _triggerManager, _profileManager, _profileStore, _dashboardBroadcaster, options,
 			NullLogger<OrchestrationSyncService>.Instance);
 		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
 
@@ -557,5 +561,74 @@ public class OrchestrationSyncServiceTests : IDisposable
 
 		// Assert — non-JSON files in profiles/ should be ignored
 		_profileStore.GetAll().Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task FileWatcher_NewProfileCreated_BroadcastsProfilesChanged()
+	{
+		// Arrange — subscribe to the dashboard broadcaster
+		var profilesDir = Path.Combine(_watchDir, OrchestrationSyncService.ProfilesDirName);
+		Directory.CreateDirectory(profilesDir);
+
+		var reader = _dashboardBroadcaster.Subscribe();
+		reader.Should().NotBeNull("subscriber limit should not be reached");
+
+		var service = CreateService();
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
+
+		// Act — create a new profile file
+		WriteProfileFile(profilesDir, "broadcast-profile");
+
+		// Wait for debounce + processing
+		await WaitForConditionAsync(() => _profileStore.GetAll().Any(p => p.Name == "broadcast-profile"), TimeSpan.FromSeconds(5));
+
+		// Assert — broadcaster should have emitted a profiles-changed event
+		var events = new List<SseEvent>();
+		while (reader!.TryRead(out var evt))
+			events.Add(evt);
+
+		events.Should().Contain(e => e.Type == "profiles-changed",
+			"creating a profile file should broadcast a profiles-changed event");
+
+		await service.StopAsync(CancellationToken.None);
+		_dashboardBroadcaster.Unsubscribe(reader);
+	}
+
+	[Fact]
+	public async Task FileWatcher_ProfileDeleted_BroadcastsProfilesChanged()
+	{
+		// Arrange — create profile file and sync it, then subscribe to broadcaster
+		var profilesDir = Path.Combine(_watchDir, OrchestrationSyncService.ProfilesDirName);
+		Directory.CreateDirectory(profilesDir);
+		var filePath = WriteProfileFile(profilesDir, "broadcast-delete-profile");
+		_profileStore.SyncDirectory(profilesDir);
+		_profileStore.GetAll().Should().HaveCount(1);
+
+		var reader = _dashboardBroadcaster.Subscribe();
+		reader.Should().NotBeNull();
+
+		var service = CreateService();
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+		await service.StartAsync(cts.Token);
+		await service.WatcherReady.Task;
+
+		// Act — delete the profile file
+		File.Delete(filePath);
+
+		// Wait for debounce + processing
+		await WaitForConditionAsync(() => _profileStore.GetAll().Count == 0, TimeSpan.FromSeconds(10));
+
+		// Assert — broadcaster should have emitted a profiles-changed event
+		var events = new List<SseEvent>();
+		while (reader!.TryRead(out var evt))
+			events.Add(evt);
+
+		events.Should().Contain(e => e.Type == "profiles-changed",
+			"deleting a profile file should broadcast a profiles-changed event");
+
+		await service.StopAsync(CancellationToken.None);
+		_dashboardBroadcaster.Unsubscribe(reader);
 	}
 }

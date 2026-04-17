@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
@@ -10,6 +11,7 @@ using Orchestra.Host.Persistence;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
+using Orchestra.ProcessHost;
 
 namespace Orchestra.Host.Extensions;
 
@@ -154,6 +156,9 @@ public static class ServiceCollectionExtensions
 		// McpManager: manages globally shared MCP servers from orchestra.mcp.json
 		services.AddSingleton<McpManager>();
 
+		// ServiceManager: manages external processes and hooks from orchestra.services.json
+		services.AddSingleton<ServiceManager>();
+
 		// ── Profiles & Tags ──
 
 		// Tag store for host-managed orchestration tags
@@ -293,6 +298,13 @@ public static class ServiceProviderExtensions
 	/// <summary>
 	/// Initializes Orchestra Host by loading persisted orchestrations and registering triggers.
 	/// Call this after the host is built but before it starts.
+	///
+	/// When running in the "Testing" environment (set by test factories via
+	/// <c>UseEnvironment("Testing")</c>), external configuration files
+	/// (<c>orchestra.services.json</c> and <c>orchestra.mcp.json</c>) are skipped to prevent
+	/// authentication prompts, port conflicts, and other side effects from the developer's
+	/// local service configuration. This can also be controlled explicitly by setting the
+	/// <c>"skip-services"</c> configuration key to <c>"true"</c>.
 	/// </summary>
 	public static async Task InitializeOrchestraHostAsync(this IServiceProvider services)
 	{
@@ -301,15 +313,51 @@ public static class ServiceProviderExtensions
 		var triggerManager = services.GetRequiredService<TriggerManager>();
 		var profileManager = services.GetRequiredService<ProfileManager>();
 		var mcpManager = services.GetRequiredService<McpManager>();
+		var serviceManager = services.GetRequiredService<ServiceManager>();
 		var initLogger = services.GetRequiredService<ILoggerFactory>()
 			.CreateLogger("Orchestra.Host.Initialization");
 
-		// Initialize McpManager: load global orchestra.mcp.json and start proxy
-		var globalMcpPath = OrchestraConfigLoader.ResolveGlobalMcpPath();
-		Engine.Mcp[] globalMcps = [];
-		if (globalMcpPath is not null)
+		// Determine whether to skip external service/MCP config loading.
+		// Tests should not load the developer's local orchestra.services.json (which
+		// may contain hooks that require authentication or bind to ports), and should
+		// not load orchestra.mcp.json (which may start real MCP proxy processes).
+		var hostEnv = services.GetService<IHostEnvironment>();
+		var config = services.GetService<IConfiguration>();
+		var skipExternalServices = hostEnv?.IsEnvironment("Testing") == true
+			|| string.Equals(config?["skip-services"], "true", StringComparison.OrdinalIgnoreCase);
+
+		// Initialize ServiceManager: load orchestra.services.json and start services/hooks.
+		// This runs BEFORE McpManager because services may be dependencies that MCPs need.
+		if (!skipExternalServices)
 		{
-			globalMcps = OrchestrationParser.ParseMcpFile(globalMcpPath);
+			var serviceConfigPath = OrchestraConfigLoader.ResolveServiceConfigPath();
+			ServiceEntry[] serviceEntries = [];
+			if (serviceConfigPath is not null)
+			{
+				serviceEntries = OrchestraConfigLoader.LoadServiceConfig(serviceConfigPath, initLogger) ?? [];
+				initLogger.LogInformation("Loaded {Count} service(s) from {Path}", serviceEntries.Length, serviceConfigPath);
+			}
+			await serviceManager.InitializeAsync(serviceEntries);
+		}
+		else
+		{
+			initLogger.LogInformation("Skipping external service config (orchestra.services.json) in test environment");
+			await serviceManager.InitializeAsync([]);
+		}
+
+		// Initialize McpManager: load global orchestra.mcp.json and start proxy
+		Engine.Mcp[] globalMcps = [];
+		if (!skipExternalServices)
+		{
+			var globalMcpPath = OrchestraConfigLoader.ResolveGlobalMcpPath();
+			if (globalMcpPath is not null)
+			{
+				globalMcps = OrchestrationParser.ParseMcpFile(globalMcpPath);
+			}
+		}
+		else
+		{
+			initLogger.LogInformation("Skipping external MCP config (orchestra.mcp.json) in test environment");
 		}
 		await mcpManager.InitializeAsync(globalMcps);
 
@@ -444,6 +492,15 @@ public static class ServiceProviderExtensions
 				var preloadLogger = services.GetRequiredService<ILoggerFactory>().CreateLogger(typeof(ServiceProviderExtensions));
 				preloadLogger.LogError(ex, "Failed to preload run-history index");
 			}
+		});
+
+		// Wire up ServiceManager shutdown: stop managed processes and run afterStop hooks.
+		// This runs AFTER the host stops (IHostedService instances are already stopped),
+		// ensuring services outlive MCPs and triggers that may depend on them.
+		var lifetime = services.GetRequiredService<Microsoft.Extensions.Hosting.IHostApplicationLifetime>();
+		lifetime.ApplicationStopped.Register(() =>
+		{
+			serviceManager.StopAsync(CancellationToken.None).GetAwaiter().GetResult();
 		});
 	}
 }

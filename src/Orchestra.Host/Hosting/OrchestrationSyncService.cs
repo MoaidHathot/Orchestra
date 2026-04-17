@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.Api;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
@@ -21,6 +22,7 @@ public partial class OrchestrationSyncService : BackgroundService
 	private readonly TriggerManager _triggerManager;
 	private readonly ProfileManager _profileManager;
 	private readonly ProfileStore _profileStore;
+	private readonly DashboardEventBroadcaster _dashboardBroadcaster;
 	private readonly OrchestrationHostOptions _options;
 	private readonly ILogger<OrchestrationSyncService> _logger;
 
@@ -62,6 +64,7 @@ public partial class OrchestrationSyncService : BackgroundService
 		TriggerManager triggerManager,
 		ProfileManager profileManager,
 		ProfileStore profileStore,
+		DashboardEventBroadcaster dashboardBroadcaster,
 		OrchestrationHostOptions options,
 		ILogger<OrchestrationSyncService> logger)
 	{
@@ -69,6 +72,7 @@ public partial class OrchestrationSyncService : BackgroundService
 		_triggerManager = triggerManager;
 		_profileManager = profileManager;
 		_profileStore = profileStore;
+		_dashboardBroadcaster = dashboardBroadcaster;
 		_options = options;
 		_logger = logger;
 	}
@@ -452,6 +456,9 @@ public partial class OrchestrationSyncService : BackgroundService
 
 			// Recompute effective active set in case filter changed
 			_profileManager.RefreshEffectiveActiveSet();
+
+			// Notify the Portal that the profile list has changed
+			_dashboardBroadcaster.BroadcastProfilesChanged(existing is not null ? "file-updated" : "file-created");
 		}
 		catch (Exception ex)
 		{
@@ -477,6 +484,9 @@ public partial class OrchestrationSyncService : BackgroundService
 
 				_profileStore.Remove(profile.Id);
 				_profileManager.RefreshEffectiveActiveSet();
+
+				// Notify the Portal that the profile list has changed
+				_dashboardBroadcaster.BroadcastProfilesChanged("file-deleted");
 				return;
 			}
 		}

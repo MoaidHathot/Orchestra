@@ -12,6 +12,11 @@ export interface DashboardEventHandlers {
     trigger: string;
   }) => void;
 
+  /** Fired when the profile list itself changes (profile created, updated, or deleted via file sync). */
+  onProfilesChanged?: (evt: {
+    reason: string;
+  }) => void;
+
   /** Fired when any orchestration execution starts (manual, schedule, webhook, resume, ...). */
   onExecutionStarted?: (evt: {
     executionId: string;
@@ -73,6 +78,15 @@ export function useDashboardEvents(handlers: DashboardEventHandlers): void {
           handlersRef.current.onProfileActiveSetChanged?.(data);
         } catch (err) {
           console.error('Failed to parse profile-active-set-changed event:', err);
+        }
+      });
+
+      eventSource.addEventListener('profiles-changed', (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          handlersRef.current.onProfilesChanged?.(data);
+        } catch (err) {
+          console.error('Failed to parse profiles-changed event:', err);
         }
       });
 
