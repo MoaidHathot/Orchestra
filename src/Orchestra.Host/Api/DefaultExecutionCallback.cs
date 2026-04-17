@@ -10,10 +10,12 @@ namespace Orchestra.Host.Api;
 public class DefaultExecutionCallback : ITriggerExecutionCallback
 {
 	private readonly IOrchestrationReporterFactory _reporterFactory;
+	private readonly DashboardEventBroadcaster? _dashboardBroadcaster;
 
-	public DefaultExecutionCallback(IOrchestrationReporterFactory reporterFactory)
+	public DefaultExecutionCallback(IOrchestrationReporterFactory reporterFactory, DashboardEventBroadcaster? dashboardBroadcaster = null)
 	{
 		_reporterFactory = reporterFactory;
+		_dashboardBroadcaster = dashboardBroadcaster;
 	}
 
 	/// <summary>
@@ -40,6 +42,14 @@ public class DefaultExecutionCallback : ITriggerExecutionCallback
 				info.CurrentStep = null;
 			};
 		}
+
+		// Notify Portal clients so "Recent Executions" / "Active Orchestrations" update
+		// without polling.
+		_dashboardBroadcaster?.BroadcastExecutionStarted(
+			info.ExecutionId,
+			info.OrchestrationId,
+			info.OrchestrationName,
+			info.TriggeredBy);
 	}
 
 	/// <summary>
@@ -47,7 +57,11 @@ public class DefaultExecutionCallback : ITriggerExecutionCallback
 	/// </summary>
 	public void OnExecutionCompleted(ActiveExecutionInfo info)
 	{
-		// Default implementation - no action needed
+		_dashboardBroadcaster?.BroadcastExecutionCompleted(
+			info.ExecutionId,
+			info.OrchestrationId,
+			info.OrchestrationName,
+			info.Status.ToString());
 	}
 
 	/// <summary>

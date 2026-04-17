@@ -39,7 +39,8 @@ public static partial class ExecutionApi
 			McpManager mcpManager,
 			IOrchestrationReporterFactory reporterFactory,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
-			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
+			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+			DashboardEventBroadcaster dashboardBroadcaster) =>
 		{
 			var entry = registry.Get(id);
 			if (entry is null)
@@ -130,6 +131,14 @@ public static partial class ExecutionApi
 			await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { executionId }, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
+			// Notify dashboard subscribers so the Portal can refresh Active/Recent lists
+			// without polling.
+			dashboardBroadcaster.BroadcastExecutionStarted(
+				executionId,
+				id,
+				entry.Orchestration.Name,
+				"manual");
+
 			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl);
 			var cancellationToken = cts.Token;
 			var runId = executionId;
@@ -181,6 +190,14 @@ public static partial class ExecutionApi
 				finally
 				{
 					reporter.Complete();
+
+					// Notify dashboard subscribers that the execution reached a terminal state.
+					dashboardBroadcaster.BroadcastExecutionCompleted(
+						executionId,
+						id,
+						entry.Orchestration.Name,
+						executionInfo.Status.ToString());
+
 					_ = Task.Run(async () =>
 					{
 						try

@@ -30,6 +30,7 @@ import ProfilesModal from './components/modals/ProfilesModal';
 import ProfileSelector from './components/ProfileSelector';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
+import { useDashboardEvents } from './hooks/useDashboardEvents';
 
 // ── API response types ──────────────────────────────────────────────────────
 
@@ -298,6 +299,60 @@ function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => { loadProfiles(); }, [loadProfiles]);
+
+  // Lightweight single-endpoint reloads used by the SSE dashboard-events stream
+  // to update individual sections in response to backend pushes (no polling needed).
+  const refreshActive = useCallback(async () => {
+    if (!serverReachableRef.current) return;
+    try {
+      const data = await api.get<ActiveData>('/api/active');
+      setActiveData(data || { running: [], pending: [] });
+    } catch (err) {
+      console.error('Failed to refresh active:', err);
+    }
+  }, []);
+
+  const refreshHistory = useCallback(async () => {
+    if (!serverReachableRef.current) return;
+    try {
+      const histData = await api.get<HistoryResponse>('/api/history?limit=15');
+      setHistory(histData.runs || []);
+    } catch (err) {
+      console.error('Failed to refresh history:', err);
+    }
+  }, []);
+
+  const refreshOrchestrations = useCallback(async () => {
+    if (!serverReachableRef.current) return;
+    try {
+      const data = await api.get<OrchestrationsResponse>('/api/orchestrations');
+      setOrchestrations(data.orchestrations || []);
+    } catch (err) {
+      console.error('Failed to refresh orchestrations:', err);
+    }
+  }, []);
+
+  // Subscribe to the backend dashboard-events SSE stream so the UI reflects changes
+  // driven by schedulers / triggers immediately, without waiting for the next poll.
+  useDashboardEvents({
+    onProfileActiveSetChanged: () => {
+      // A profile's active state flipped (scheduled transition, manual toggle from another
+      // tab/client). Refresh profiles (for the "Active Orchestrations" dropdown) and
+      // orchestrations (for the enabled/disabled state shown on cards).
+      loadProfiles();
+      refreshOrchestrations();
+    },
+    onExecutionStarted: () => {
+      // A new execution started somewhere (trigger, manual, resume). Refresh the Active
+      // list so it appears immediately.
+      refreshActive();
+    },
+    onExecutionCompleted: () => {
+      // An execution finished — move it from Active to Recent Executions.
+      refreshActive();
+      refreshHistory();
+    },
+  });
 
   // Reload data when coming back online
   useEffect(() => {

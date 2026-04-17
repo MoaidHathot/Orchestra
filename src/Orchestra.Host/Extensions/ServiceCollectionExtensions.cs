@@ -100,6 +100,10 @@ public static class ServiceCollectionExtensions
 		// This must be done before TriggerManager is created
 		services.TryAddSingleton<ITriggerExecutionCallback, DefaultExecutionCallback>();
 
+		// Dashboard event broadcaster: fans out profile/execution changes to connected Portal
+		// SSE clients so the UI can update in real time instead of polling.
+		services.TryAddSingleton<DashboardEventBroadcaster>();
+
 		// Reporter factory: creates SseReporter instances for all execution paths.
 		// Tests can override this with NullOrchestrationReporterFactory via DI.
 		services.TryAddSingleton<IOrchestrationReporterFactory, SseReporterFactory>();
@@ -270,6 +274,15 @@ public static class ServiceCollectionExtensions
 			services.AddSingleton<TService, TImplementation>();
 		}
 	}
+
+	private static void TryAddSingleton<TService>(this IServiceCollection services)
+		where TService : class
+	{
+		if (!services.Any(d => d.ServiceType == typeof(TService)))
+		{
+			services.AddSingleton<TService>();
+		}
+	}
 }
 
 /// <summary>
@@ -393,6 +406,17 @@ public static class ServiceProviderExtensions
 			{
 				triggerManager.SetTriggerEnabled(id, false);
 			}
+		};
+
+		// Subscribe the dashboard broadcaster to profile changes so the Portal receives a
+		// real-time push when schedules activate/deactivate profiles (no polling needed).
+		var dashboardBroadcaster = services.GetRequiredService<DashboardEventBroadcaster>();
+		profileManager.OnEffectiveActiveSetChanged += evt =>
+		{
+			dashboardBroadcaster.BroadcastProfileActiveSetChanged(
+				evt.ActivatedOrchestrationIds,
+				evt.DeactivatedOrchestrationIds,
+				evt.Trigger);
 		};
 
 		// Apply the initial effective active set to trigger states.
