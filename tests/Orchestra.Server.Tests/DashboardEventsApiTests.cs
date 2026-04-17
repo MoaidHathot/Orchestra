@@ -134,12 +134,34 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 		var broadcaster = _factory.Services.GetRequiredService<DashboardEventBroadcaster>();
 		var profileManager = _factory.Services.GetRequiredService<ProfileManager>();
 
-		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+		// We need at least one registered orchestration so that activating a matching
+		// profile actually changes the effective active set. Without an orchestration,
+		// RecomputeEffectiveActiveSet computes empty→empty, which is no diff and no event.
+		var registerJson = $$"""
+		{
+			"name": "SSE Test Orchestration {{Guid.NewGuid():N}}",
+			"description": "For DashboardEventsApiTests",
+			"steps": [{
+				"name": "test-step",
+				"type": "Prompt",
+				"dependsOn": [],
+				"systemPrompt": "Test",
+				"userPrompt": "Hello",
+				"model": "claude-opus-4.5"
+			}]
+		}
+		""";
+		var registerResp = await _client.PostAsJsonAsync("/api/orchestrations/json", new { json = registerJson }, cts.Token);
+		registerResp.StatusCode.Should().Be(HttpStatusCode.OK);
+		var registered = await registerResp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
+		var orchestrationId = registered.GetProperty("id").GetString()!;
 
 		// Deactivate every currently-active profile so our test activation produces a real diff.
-		// On CI a Default wildcard profile is auto-created/activated at startup — if we leave it
-		// active and then activate another wildcard profile, RecomputeEffectiveActiveSet returns
-		// early (no diff) and no event is fired.
+		// On environments where profiles already exist & are active and match our orchestration
+		// (e.g. the auto-created Default wildcard profile), activating another wildcard profile
+		// produces no diff in RecomputeEffectiveActiveSet, so no event fires.
 		var listResp = await _client.GetAsync("/api/profiles", cts.Token);
 		listResp.IsSuccessStatusCode.Should().BeTrue();
 		var list = await listResp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
@@ -153,19 +175,19 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 			}
 		}
 
-		// Create a profile with a wildcard filter so activation actually changes the
-		// effective set (from "nothing active" to "everything active").
+		// Create an inactive profile that explicitly matches the orchestration we just registered.
+		// Using orchestrationIds is deterministic regardless of tags.
 		var createResp = await _client.PostAsJsonAsync("/api/profiles", new
 		{
 			name = $"Sse Test Profile {Guid.NewGuid():N}",
 			description = "test",
-			filter = new { tags = new[] { "*" } }
+			filter = new { orchestrationIds = new[] { orchestrationId } }
 		}, cts.Token);
 		createResp.IsSuccessStatusCode.Should().BeTrue();
 		var created = await createResp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
 		var profileId = created.GetProperty("id").GetString()!;
 
-		// Open the SSE stream AFTER setup so we don't have to drain pre-test frames from deactivations.
+		// Open the SSE stream AFTER all setup so we don't have to drain prior events.
 		using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events");
 		using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
 		using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
@@ -183,7 +205,8 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 		broadcaster.SubscriberCount.Should().BeGreaterThan(0);
 
 		// Trigger a real profile activation through the ProfileManager — this should fire
-		// OnEffectiveActiveSetChanged, which our broadcaster is subscribed to.
+		// OnEffectiveActiveSetChanged (since the active set goes from empty to containing our
+		// orchestration), which our broadcaster is subscribed to.
 		profileManager.ActivateProfile(profileId, trigger: "test");
 
 		// Read frames until we find the profile-active-set-changed one (skipping heartbeats
@@ -200,9 +223,13 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 			}
 		}
 
-		match.Should().NotBeNull("activating a profile should broadcast a profile-active-set-changed SSE event");
+		match.Should().NotBeNull("activating a profile that matches a registered orchestration should broadcast a profile-active-set-changed SSE event");
 		using var doc = JsonDocument.Parse(match!.Value.Data);
 		doc.RootElement.GetProperty("trigger").GetString().Should().Be("test");
+		doc.RootElement.GetProperty("activatedOrchestrationIds")
+			.EnumerateArray()
+			.Select(e => e.GetString())
+			.Should().Contain(orchestrationId);
 	}
 
 	// ── SSE parsing helper ────────────────────────────────────────────────
