@@ -208,16 +208,8 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 		_proxyApp = builder.Build();
 
-		// Initialize backend connections and hook pipelines.
-		// WORKAROUND: InitializeMcpProxyAsync hangs with PerServer routing in
-		// McpProxy SDK 1.12.0. Use a timeout so Orchestra startup isn't blocked.
-		// See mcpproxy-bug.md for details.
-		var initTask = _proxyApp.InitializeMcpProxyAsync(cancellationToken);
-		var completed = await Task.WhenAny(initTask, Task.Delay(TimeSpan.FromSeconds(30), cancellationToken));
-		if (completed != initTask)
-		{
-			LogProxyInitTimeout();
-		}
+		// Initialize backend connections and configure SingleServerProxy hook pipelines
+		await _proxyApp.InitializeMcpProxyAsync(cancellationToken);
 
 		// Map unified endpoint (all tools) and per-server endpoints (isolated tools).
 		// Per-server endpoints use the SDK's MapPerServerMcpEndpoints() which creates
@@ -290,12 +282,6 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "MCP proxy failed to start. Global MCPs will be unavailable.")]
 	private partial void LogProxyStartFailed(Exception ex);
-
-	[LoggerMessage(
-		EventId = 5,
-		Level = LogLevel.Warning,
-		Message = "MCP proxy initialization timed out after 30s (McpProxy SDK PerServer routing bug). Continuing startup — per-server tool isolation may be degraded.")]
-	private partial void LogProxyInitTimeout();
 
 	[LoggerMessage(
 		EventId = 6,

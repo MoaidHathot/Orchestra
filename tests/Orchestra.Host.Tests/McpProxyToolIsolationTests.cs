@@ -85,7 +85,7 @@ public class McpProxyToolIsolationTests
 
 	// ── Tool isolation tests (require working proxy) ─────────────────────
 
-	[Fact(Skip = "McpProxy SDK 1.12.0: InitializeMcpProxyAsync hangs with PerServer routing")]
+	[Fact]
 	public async Task ServerA_Route_OnlyExposesServerATools()
 	{
 		await using var fixture = await ProxyFixture.CreateAsync(ServerATools, ServerBTools);
@@ -94,7 +94,7 @@ public class McpProxyToolIsolationTests
 		tools.Should().BeEquivalentTo(ServerATools);
 	}
 
-	[Fact(Skip = "McpProxy SDK 1.12.0: InitializeMcpProxyAsync hangs with PerServer routing")]
+	[Fact]
 	public async Task ServerB_Route_OnlyExposesServerBTools()
 	{
 		await using var fixture = await ProxyFixture.CreateAsync(ServerATools, ServerBTools);
@@ -103,7 +103,7 @@ public class McpProxyToolIsolationTests
 		tools.Should().BeEquivalentTo(ServerBTools);
 	}
 
-	[Fact(Skip = "McpProxy SDK 1.12.0: InitializeMcpProxyAsync hangs with PerServer routing")]
+	[Fact]
 	public async Task StepRequestingSingleServer_DoesNotSeeOtherServerTools()
 	{
 		await using var fixture = await ProxyFixture.CreateAsync(ServerATools, ServerBTools);
@@ -116,7 +116,7 @@ public class McpProxyToolIsolationTests
 		tools.Should().NotContain("tool_epsilon", "server-b tools must not leak to server-a");
 	}
 
-	[Fact(Skip = "McpProxy SDK 1.12.0: InitializeMcpProxyAsync hangs with PerServer routing")]
+	[Fact]
 	public async Task StepRequestingBothServers_GetsSeparateRoutes_EachIsolated()
 	{
 		await using var fixture = await ProxyFixture.CreateAsync(ServerATools, ServerBTools);
@@ -228,19 +228,29 @@ public class McpProxyToolIsolationTests
 			return new ProxyFixture(manager, backendA, backendB);
 		}
 
+		/// <summary>
+		/// Lists tools via the per-server REST endpoint.
+		/// MapPerServerMcpEndpoints() creates POST endpoints at {basePath}/{serverName}/tools/list.
+		/// </summary>
 		public async Task<List<string>> ListToolsViaPerServerRoute(string serverName)
 		{
 			var resolved = _manager.Resolve([CreateRemoteMcp(serverName)]);
 			var endpoint = ((RemoteMcp)resolved[0]).Endpoint;
 
-			await using var client = await McpClient.CreateAsync(
-				new HttpClientTransport(new HttpClientTransportOptions
-				{
-					Endpoint = new Uri(endpoint),
-				}));
+			using var http = new HttpClient();
+			var response = await http.PostAsync(
+				$"{endpoint}/tools/list",
+				new StringContent("{}", System.Text.Encoding.UTF8, "application/json"));
 
-			var tools = await client.ListToolsAsync();
-			return [.. tools.Select(t => t.Name)];
+			response.EnsureSuccessStatusCode();
+
+			var body = await response.Content.ReadAsStringAsync();
+			var json = JsonDocument.Parse(body);
+			var tools = json.RootElement.GetProperty("tools");
+
+			return tools.EnumerateArray()
+				.Select(t => t.GetProperty("name").GetString()!)
+				.ToList();
 		}
 
 		public async ValueTask DisposeAsync()
