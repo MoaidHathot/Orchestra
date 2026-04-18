@@ -1565,6 +1565,81 @@ public class CopilotSessionHandlerTests
 
 	#endregion
 
+	#region Turn End Events
+
+	[Fact]
+	public void HandleEvent_TurnEnd_WritesTurnEndEvent()
+	{
+		// Arrange
+		var turnEndEvent = new AssistantTurnEndEvent
+		{
+			Data = new AssistantTurnEndData
+			{
+				TurnId = "1",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(turnEndEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.TurnEnd);
+		agentEvent.TurnId.Should().Be("1");
+	}
+
+	#endregion
+
+	#region External Tool Events
+
+	[Fact]
+	public void HandleEvent_ExternalToolRequested_WritesToolExecutionStartEvent()
+	{
+		// Arrange
+		var externalToolEvent = new ExternalToolRequestedEvent
+		{
+			Data = new ExternalToolRequestedData
+			{
+				RequestId = "req-123",
+				SessionId = "test-session",
+				ToolCallId = "call-456",
+				ToolName = "my_external_tool",
+				Arguments = new Dictionary<string, object> { ["arg1"] = "value1" },
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(externalToolEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.ToolExecutionStart);
+		agentEvent.ToolCallId.Should().Be("call-456");
+		agentEvent.ToolName.Should().Be("my_external_tool");
+		agentEvent.ToolArguments.Should().Contain("arg1");
+	}
+
+	[Fact]
+	public void HandleEvent_ExternalToolCompleted_DoesNotWriteEvent()
+	{
+		// Arrange
+		var externalToolCompletedEvent = new ExternalToolCompletedEvent
+		{
+			Data = new ExternalToolCompletedData
+			{
+				RequestId = "req-123",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(externalToolCompletedEvent);
+
+		// Assert — silently consumed, no event written
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	#endregion
+
 	#region Informational Events (Silently Consumed)
 
 	[Fact]

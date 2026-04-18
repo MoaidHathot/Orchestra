@@ -326,6 +326,11 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 	{
 		// No-op for terminal reporter
 	}
+
+	public void ReportStepStatusSet(string stepName, string status, string reason)
+	{
+		AddEvent(new ReporterEvent("step-status-set", $"[{stepName}] Status set to {status}: {reason}"));
+	}
 }
 
 /// <summary>

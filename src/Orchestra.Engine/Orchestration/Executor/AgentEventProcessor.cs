@@ -152,9 +152,13 @@ public class AgentEventProcessor
 				HandleHookEnd(evt);
 				break;
 
-			case AgentEventType.TurnStart:
-				HandleTurnStart(evt);
-				break;
+		case AgentEventType.TurnStart:
+			HandleTurnStart(evt);
+			break;
+
+		case AgentEventType.TurnEnd:
+			HandleTurnEnd(evt);
+			break;
 
 			case AgentEventType.SessionUsageInfo:
 				HandleSessionUsageInfo(evt);
@@ -367,6 +371,17 @@ public class AgentEventProcessor
 		{
 			Sequence = 0,
 			EventType = AuditEventType.TurnStart,
+			TurnId = evt.TurnId,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
+	}
+
+	private void HandleTurnEnd(AgentEvent evt)
+	{
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.TurnEnd,
 			TurnId = evt.TurnId,
 			Timestamp = DateTimeOffset.UtcNow,
 		});

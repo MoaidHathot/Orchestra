@@ -52,26 +52,26 @@ public sealed class SetStatusTool : IEngineTool
 				? reasonProp.GetString()
 				: null;
 
-			if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
-			{
-				context.SetStatus(ExecutionStatus.Succeeded, reason ?? "Step marked as succeeded by LLM");
-				context.RequestStepCompletion();
-				return "Status set to success. The step is now complete.";
-			}
+		if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
+		{
+			context.SetStatus(ExecutionStatus.Succeeded, reason ?? "Step marked as succeeded by LLM");
+			context.Reporter?.ReportStepStatusSet(context.StepName!, "success", reason ?? "Step marked as succeeded by LLM");
+			return "Status set to success. You may continue with any remaining work.";
+		}
 
-			if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
-			{
-				context.SetStatus(ExecutionStatus.Failed, reason ?? "Step marked as failed by LLM");
-				context.RequestStepCompletion();
-				return "Status set to failed. The step is now complete.";
-			}
+		if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+		{
+			context.SetStatus(ExecutionStatus.Failed, reason ?? "Step marked as failed by LLM");
+			context.Reporter?.ReportStepStatusSet(context.StepName!, "failed", reason ?? "Step marked as failed by LLM");
+			return "Status set to failed. You may continue with any remaining work.";
+		}
 
-			if (string.Equals(status, "no_action", StringComparison.OrdinalIgnoreCase))
-			{
-				context.SetStatus(ExecutionStatus.NoAction, reason ?? "No action needed");
-				context.RequestStepCompletion();
-				return "Status set to no_action. The step is now complete and all downstream dependent steps will be skipped.";
-			}
+		if (string.Equals(status, "no_action", StringComparison.OrdinalIgnoreCase))
+		{
+			context.SetStatus(ExecutionStatus.NoAction, reason ?? "No action needed");
+			context.Reporter?.ReportStepStatusSet(context.StepName!, "no_action", reason ?? "No action needed");
+			return "Status set to no_action. All downstream dependent steps will be skipped. You may continue with any remaining work.";
+		}
 
 			return $"Unknown status '{status}'. Supported values are 'success', 'failed', and 'no_action'.";
 		}

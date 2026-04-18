@@ -388,5 +388,6 @@ public class TriggerTypesTests
 		public void ReportSubagentDeselected(string stepName) { }
 		public void ReportRunContext(RunContext context) { }
 		public void ReportAuditLogEntry(string stepName, AuditLogEntry entry) { }
+		public void ReportStepStatusSet(string stepName, string status, string reason) { }
 	}
 }

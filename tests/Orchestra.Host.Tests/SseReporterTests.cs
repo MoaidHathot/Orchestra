@@ -449,6 +449,17 @@ public class SseReporterTests : IDisposable
 	}
 
 	[Fact]
+	public void ReportStepStatusSet_AddsStepStatusSetEvent()
+	{
+		_reporter.ReportStepStatusSet("my-step", "success", "All tasks completed");
+
+		_reporter.AccumulatedEvents.Should().Contain(e => e.Type == "step-status-set");
+		_reporter.AccumulatedEvents[0].Data.Should().Contain("my-step");
+		_reporter.AccumulatedEvents[0].Data.Should().Contain("success");
+		_reporter.AccumulatedEvents[0].Data.Should().Contain("All tasks completed");
+	}
+
+	[Fact]
 	public async Task ReportStatusChange_LateSubscriber_ReceivesReplayOfCancellingEvent()
 	{
 		// Act — emit status change before subscriber connects
@@ -823,5 +834,6 @@ public class DefaultExecutionCallbackTests
 		public void ReportSubagentDeselected(string stepName) { }
 		public void ReportRunContext(RunContext context) { }
 		public void ReportAuditLogEntry(string stepName, AuditLogEntry entry) { }
+		public void ReportStepStatusSet(string stepName, string status, string reason) { }
 	}
 }

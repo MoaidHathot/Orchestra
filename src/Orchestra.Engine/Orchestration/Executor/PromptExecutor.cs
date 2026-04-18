@@ -71,7 +71,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			: null;
 
 		// Create a fresh engine tool context for this execution
-		var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore, StepName = step.Name };
+		var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore, StepName = step.Name, Reporter = _reporter };
 		var engineTools = _engineToolRegistry.GetAll();
 
 		// Create a CTS that engine tools (e.g., set_status) can cancel to signal

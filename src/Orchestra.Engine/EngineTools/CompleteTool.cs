@@ -54,19 +54,21 @@ public sealed class CompleteTool : IEngineTool
 				? reasonProp.GetString()
 				: null;
 
-			if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
-			{
-				context.CompleteOrchestration(ExecutionStatus.Succeeded, reason ?? "Orchestration completed early by LLM");
-				context.SetStatus(ExecutionStatus.Succeeded, reason ?? "Step completed (orchestration halted)");
-				return "Orchestration will be completed with success status. All remaining steps will be cancelled.";
-			}
+		if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
+		{
+			context.CompleteOrchestration(ExecutionStatus.Succeeded, reason ?? "Orchestration completed early by LLM");
+			context.SetStatus(ExecutionStatus.Succeeded, reason ?? "Step completed (orchestration halted)");
+			context.Reporter?.ReportStepStatusSet(context.StepName!, "success", reason ?? "Orchestration completed early by LLM");
+			return "Orchestration will be completed with success status. All remaining steps will be cancelled.";
+		}
 
-			if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
-			{
-				context.CompleteOrchestration(ExecutionStatus.Failed, reason ?? "Orchestration halted by LLM");
-				context.SetStatus(ExecutionStatus.Failed, reason ?? "Step failed (orchestration halted)");
-				return "Orchestration will be completed with failed status. All remaining steps will be cancelled.";
-			}
+		if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
+		{
+			context.CompleteOrchestration(ExecutionStatus.Failed, reason ?? "Orchestration halted by LLM");
+			context.SetStatus(ExecutionStatus.Failed, reason ?? "Step failed (orchestration halted)");
+			context.Reporter?.ReportStepStatusSet(context.StepName!, "failed", reason ?? "Orchestration halted by LLM");
+			return "Orchestration will be completed with failed status. All remaining steps will be cancelled.";
+		}
 
 			return $"Unknown status '{status}'. Supported values are 'success' and 'failed'.";
 		}

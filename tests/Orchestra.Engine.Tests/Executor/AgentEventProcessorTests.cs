@@ -1603,6 +1603,54 @@ public class AgentEventProcessorTests
 
 	#endregion
 
+	#region Turn End Events
+
+	[Fact]
+	public async Task ProcessEventsAsync_TurnEnd_AddsAuditLogEntry()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.TurnEnd,
+				TurnId = "1",
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Single(processor.AuditLog);
+		Assert.Equal(AuditEventType.TurnEnd, processor.AuditLog[0].EventType);
+		Assert.Equal("1", processor.AuditLog[0].TurnId);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_TurnStartAndEnd_BothRecordedInAuditLog()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent { Type = AgentEventType.TurnStart, TurnId = "1" },
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Hello" },
+			new AgentEvent { Type = AgentEventType.TurnEnd, TurnId = "1" }
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Equal(2, processor.AuditLog.Count);
+		Assert.Equal(AuditEventType.TurnStart, processor.AuditLog[0].EventType);
+		Assert.Equal(AuditEventType.TurnEnd, processor.AuditLog[1].EventType);
+		Assert.Equal("1", processor.AuditLog[0].TurnId);
+		Assert.Equal("1", processor.AuditLog[1].TurnId);
+	}
+
+	#endregion
+
 	#region Session Usage Info Events
 
 	[Fact]

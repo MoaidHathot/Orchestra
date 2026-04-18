@@ -39,6 +39,7 @@ public enum AgentEventType
 
 	// Turn tracking (multi-turn conversations)
 	TurnStart,
+	TurnEnd,
 
 	// Session-level token usage info
 	SessionUsageInfo,

@@ -151,6 +151,9 @@ public enum AuditEventType
 	/// <summary>A new assistant turn started in a multi-turn conversation.</summary>
 	TurnStart,
 
+	/// <summary>An assistant turn ended in a multi-turn conversation.</summary>
+	TurnEnd,
+
 	/// <summary>Session-level token usage information was received.</summary>
 	SessionUsageInfo,
 }

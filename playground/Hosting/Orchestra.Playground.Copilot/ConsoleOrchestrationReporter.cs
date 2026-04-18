@@ -227,4 +227,9 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 	{
 		// No-op for console reporter
 	}
+
+	public void ReportStepStatusSet(string stepName, string status, string reason)
+	{
+		Console.WriteLine($"  [{stepName}] Status set to {status}: {reason}");
+	}
 }

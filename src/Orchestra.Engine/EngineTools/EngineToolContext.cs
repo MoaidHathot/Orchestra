@@ -14,6 +14,12 @@ public sealed class EngineToolContext
 	public OrchestrationTempFileStore? TempFileStore { get; init; }
 
 	/// <summary>
+	/// The reporter for emitting live events (e.g., step-status-set).
+	/// May be null when no reporter is configured.
+	/// </summary>
+	public IOrchestrationReporter? Reporter { get; init; }
+
+	/// <summary>
 	/// The name of the step this context belongs to.
 	/// Used by engine tools to register artifacts (e.g., saved files) against the correct step.
 	/// </summary>

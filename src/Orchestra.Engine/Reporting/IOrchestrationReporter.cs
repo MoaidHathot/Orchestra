@@ -36,6 +36,9 @@ public interface IOrchestrationReporter
 	void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error);
 	void ReportSubagentDeselected(string stepName);
 
+	// Step status indication (step set its status but is still in progress)
+	void ReportStepStatusSet(string stepName, string status, string reason);
+
 	// Run context
 	void ReportRunContext(RunContext context);
 

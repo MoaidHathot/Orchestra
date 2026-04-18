@@ -38,6 +38,9 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error) { }
 	public void ReportSubagentDeselected(string stepName) { }
 
+	// Step status indication
+	public void ReportStepStatusSet(string stepName, string status, string reason) { }
+
 	// Run context
 	public void ReportRunContext(RunContext context) { }
 

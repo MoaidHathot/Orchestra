@@ -160,6 +160,15 @@ internal sealed class CopilotSessionHandler
 			HandleTurnStart(turnStart);
 			break;
 
+		case AssistantTurnEndEvent turnEnd:
+			HandleTurnEnd(turnEnd);
+			break;
+
+		// ── External tool events (host-side tool execution) ──
+		case ExternalToolRequestedEvent externalToolRequested:
+			HandleExternalToolRequested(externalToolRequested);
+			break;
+
 		// ── Session usage info ──
 		case SessionUsageInfoEvent usageInfo:
 			HandleSessionUsageInfo(usageInfo);
@@ -171,6 +180,45 @@ internal sealed class CopilotSessionHandler
 		case SessionToolsUpdatedEvent:
 		case UserMessageEvent:
 		case AssistantStreamingDeltaEvent:
+		case ExternalToolCompletedEvent:     // UI dismissal signal for external tools
+		case AssistantIntentEvent:
+		case CapabilitiesChangedEvent:
+		case CommandCompletedEvent:
+		case CommandExecuteEvent:
+		case CommandQueuedEvent:
+		case CommandsChangedEvent:
+		case ElicitationCompletedEvent:
+		case ElicitationRequestedEvent:
+		case ExitPlanModeCompletedEvent:
+		case ExitPlanModeRequestedEvent:
+		case McpOauthCompletedEvent:
+		case McpOauthRequiredEvent:
+		case PermissionCompletedEvent:
+		case PermissionRequestedEvent:
+		case SamplingCompletedEvent:
+		case SamplingRequestedEvent:
+		case SessionBackgroundTasksChangedEvent:
+		case SessionContextChangedEvent:
+		case SessionExtensionsLoadedEvent:
+		case SessionHandoffEvent:
+		case SessionModeChangedEvent:
+		case SessionPlanChangedEvent:
+		case SessionRemoteSteerableChangedEvent:
+		case SessionResumeEvent:
+		case SessionSkillsLoadedEvent:
+		case SessionSnapshotRewindEvent:
+		case SessionTitleChangedEvent:
+		case SessionTruncationEvent:
+		case SessionWorkspaceFileChangedEvent:
+		case SkillInvokedEvent:
+		case SystemMessageEvent:
+		case SystemNotificationEvent:
+		case ToolExecutionPartialResultEvent:
+		case ToolExecutionProgressEvent:
+		case ToolUserRequestedEvent:
+		case UserInputCompletedEvent:
+		case UserInputRequestedEvent:
+		case AbortEvent:
 			break;
 
 		case SessionErrorEvent err:
@@ -479,6 +527,37 @@ internal sealed class CopilotSessionHandler
 			Type = AgentEventType.SessionUsageInfo,
 			TokenLimit = usageInfo.Data.TokenLimit,
 			CurrentTokens = usageInfo.Data.CurrentTokens,
+		});
+	}
+
+	private void HandleTurnEnd(AssistantTurnEndEvent turnEnd)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.TurnEnd,
+			TurnId = turnEnd.Data.TurnId,
+		});
+	}
+
+	private void HandleExternalToolRequested(ExternalToolRequestedEvent externalTool)
+	{
+		var toolName = externalTool.Data.ToolName;
+		if (externalTool.Data.ToolCallId is not null)
+			_toolCallNames[externalTool.Data.ToolCallId] = toolName;
+
+		string? serializedArgs = null;
+		if (externalTool.Data.Arguments is not null)
+		{
+			try { serializedArgs = JsonSerializer.Serialize(externalTool.Data.Arguments); }
+			catch { /* ignore serialization failures - arguments are optional for trace */ }
+		}
+
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.ToolExecutionStart,
+			ToolCallId = externalTool.Data.ToolCallId,
+			ToolName = toolName,
+			ToolArguments = serializedArgs,
 		});
 	}
 

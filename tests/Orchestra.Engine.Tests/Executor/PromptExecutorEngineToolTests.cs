@@ -182,10 +182,10 @@ public class PromptExecutorEngineToolTests
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
 
-		// Assert - set_status now terminates the agent immediately, so the content
-		// is the status reason (not the LLM's subsequent message)
+		// Assert - set_status no longer terminates the agent; the LLM continues
+		// and the full response is preserved as the step content.
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		result.Content.Should().Be("All tasks completed successfully");
+		result.Content.Should().Be("I have completed the task.");
 	}
 
 	[Fact]
@@ -442,5 +442,74 @@ public class PromptExecutorEngineToolTests
 		// Assert
 		result.OrchestrationCompleteRequested.Should().BeFalse();
 		result.OrchestrationCompleteStepName.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmCallsSetStatus_ReportsStepStatusSet()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder()
+			.WithEngineToolCall(
+				"orchestra_set_status",
+				"""{"status": "success", "reason": "All done"}""",
+				"Finished.");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - The step-status-set event should be reported for visual indication
+		reporter.Received().ReportStepStatusSet("test-step", "success", "All done");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmCallsSetStatusNoAction_ReportsStepStatusSet()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder()
+			.WithEngineToolCall(
+				"orchestra_set_status",
+				"""{"status": "no_action", "reason": "Nothing to do"}""",
+				"No action needed.");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		reporter.Received().ReportStepStatusSet("test-step", "no_action", "Nothing to do");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmCallsOrchestraComplete_ReportsStepStatusSet()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder()
+			.WithEngineToolCall(
+				"orchestra_complete",
+				"""{"status": "success", "reason": "No incidents"}""",
+				"Orchestration halted.");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert - The step-status-set event should be reported for visual indication
+		reporter.Received().ReportStepStatusSet("test-step", "success", "No incidents");
 	}
 }

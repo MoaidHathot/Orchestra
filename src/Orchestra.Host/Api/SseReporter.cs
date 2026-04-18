@@ -465,6 +465,11 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		});
 	}
 
+	public void ReportStepStatusSet(string stepName, string status, string reason)
+	{
+		Write("step-status-set", new { stepName, status, reason });
+	}
+
 	public void ReportRunContext(RunContext context)
 	{
 		Write("run-context", new
