@@ -201,12 +201,8 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		});
 
 		// Register the unified MCP server with SDK proxy handlers.
-		// NOTE: WithSdkProxyHandlers() takes over tools/list and returns ALL tools
-		// from ALL backends regardless of which MapMcp route the client connected to.
-		// ConfigureSessionOptions filtering does not work because the proxy handler
-		// bypasses the session's ToolCollection. Per-server tool isolation only works
-		// on the REST endpoints from MapPerServerMcpEndpoints(). The MCP Streamable
-		// HTTP endpoints at /mcp/{name} currently expose all tools (McpProxy SDK gap).
+		// In SDK 1.14.0+, WithSdkProxyHandlers() is route-aware: on per-server
+		// routes it delegates to SingleServerProxy for tool isolation.
 		builder.Services
 			.AddMcpServer()
 			.WithHttpTransport()
@@ -217,16 +213,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		// Initialize backend connections and configure SingleServerProxy hook pipelines
 		await _proxyApp.InitializeMcpProxyAsync(cancellationToken);
 
-		// Map unified endpoint at /mcp (all tools, no filtering)
+		// Map unified endpoint (all tools aggregated) and per-server endpoints
+		// (isolated tools per backend, both MCP Streamable HTTP and REST sub-routes).
 		_proxyApp.MapMcp("/mcp");
-
-		// Map per-server MCP Streamable HTTP endpoints.
-		// Each /mcp/{name} serves the full MCP protocol with tool filtering
-		// handled by ConfigureSessionOptions above.
-		foreach (var mcp in globalMcps)
-			_proxyApp.MapMcp($"/mcp/{mcp.Name}");
-
-		// Also map per-server REST endpoints for direct tool access
 		_proxyApp.MapPerServerMcpEndpoints();
 
 		// Start the host (non-blocking)

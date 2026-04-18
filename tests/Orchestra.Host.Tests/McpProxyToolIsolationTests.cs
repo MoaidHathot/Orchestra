@@ -130,12 +130,10 @@ public class McpProxyToolIsolationTests
 
 	// ── MCP Streamable HTTP protocol tests ──────────────────────────────
 	// These verify tool isolation when connecting via MCP protocol (the path
-	// the Copilot SDK uses). Currently failing because WithSdkProxyHandlers()
-	// returns ALL tools on every MapMcp route, bypassing the session's
-	// ToolCollection. McpProxy SDK needs to support per-server tool filtering
-	// on MCP Streamable HTTP endpoints, not just REST sub-routes.
+	// the Copilot SDK uses). SDK 1.14.0 makes WithSdkProxyHandlers() route-aware,
+	// delegating to SingleServerProxy on per-server routes.
 
-	[Fact(Skip = "McpProxy SDK gap: WithSdkProxyHandlers bypasses session ToolCollection, no per-server filtering on MapMcp routes")]
+	[Fact]
 	public async Task McpProtocol_ServerA_OnlyExposesServerATools()
 	{
 		await using var fixture = await ProxyFixture.CreateAsync(ServerATools, ServerBTools);
@@ -144,7 +142,7 @@ public class McpProxyToolIsolationTests
 		tools.Should().BeEquivalentTo(ServerATools);
 	}
 
-	[Fact(Skip = "McpProxy SDK gap: WithSdkProxyHandlers bypasses session ToolCollection, no per-server filtering on MapMcp routes")]
+	[Fact]
 	public async Task McpProtocol_ServerB_OnlyExposesServerBTools()
 	{
 		await using var fixture = await ProxyFixture.CreateAsync(ServerATools, ServerBTools);
