@@ -182,9 +182,10 @@ public class PromptExecutorEngineToolTests
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
 
-		// Assert
+		// Assert - set_status now terminates the agent immediately, so the content
+		// is the status reason (not the LLM's subsequent message)
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		result.Content.Should().Be("I have completed the task.");
+		result.Content.Should().Be("All tasks completed successfully");
 	}
 
 	[Fact]

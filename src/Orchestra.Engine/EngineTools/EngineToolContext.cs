@@ -51,6 +51,19 @@ public sealed class EngineToolContext
 	public string? OrchestrationCompleteReason { get; private set; }
 
 	/// <summary>
+	/// Whether an engine tool has signaled that the step should stop immediately
+	/// (e.g., after calling <see cref="SetStatusTool"/> with a terminal status).
+	/// </summary>
+	public bool StepCompletionRequested { get; private set; }
+
+	/// <summary>
+	/// Cancellation token source that the executor sets before running the agent.
+	/// When <see cref="RequestStepCompletion"/> is called, this is cancelled to
+	/// interrupt the agent session so the status override takes effect immediately.
+	/// </summary>
+	internal CancellationTokenSource? StepCompletionCts { get; set; }
+
+	/// <summary>
 	/// Sets the execution status override. Can only transition to a "worse" state
 	/// (e.g., from null to Failed). Once failed, cannot be reset to succeeded.
 	/// NoAction can transition to Failed but not back to Succeeded.
@@ -63,6 +76,24 @@ public sealed class EngineToolContext
 
 		StatusOverride = status;
 		StatusReason = reason;
+	}
+
+	/// <summary>
+	/// Signals that the current step should complete immediately. The agent session
+	/// will be cancelled and the executor will use the <see cref="StatusOverride"/>
+	/// to determine the step result.
+	/// </summary>
+	public void RequestStepCompletion()
+	{
+		StepCompletionRequested = true;
+		try
+		{
+			StepCompletionCts?.Cancel();
+		}
+		catch (ObjectDisposedException)
+		{
+			// CTS may already be disposed if the agent completed naturally
+		}
 	}
 
 	/// <summary>

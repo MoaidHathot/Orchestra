@@ -70,6 +70,16 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			? TemplateResolver.Resolve(step.OutputHandlerPrompt, context.Parameters, context, step.DependsOn, step)
 			: null;
 
+		// Create a fresh engine tool context for this execution
+		var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore, StepName = step.Name };
+		var engineTools = _engineToolRegistry.GetAll();
+
+		// Create a CTS that engine tools (e.g., set_status) can cancel to signal
+		// that the step is done and the agent should stop immediately.
+		using var stepCompletionCts = new CancellationTokenSource();
+		engineToolCtx.StepCompletionCts = stepCompletionCts;
+		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stepCompletionCts.Token);
+
 		try
 		{
 			// Build the user prompt, incorporating dependency outputs and parameters
@@ -78,10 +88,6 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			// Log step MCPs for debugging
 			LogStepMcps(step.Name, step.Mcps.Length, string.Join(", ", step.Mcps.Select(m => m.Name)));
 			LogStepMcpNames(step.Name, string.Join(", ", step.McpNames));
-
-			// Create a fresh engine tool context for this execution
-			var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore, StepName = step.Name };
-			var engineTools = _engineToolRegistry.GetAll();
 
 			// Build and run the agent using an immutable config snapshot (thread-safe)
 			var config = new AgentBuildConfig
@@ -106,10 +112,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			var agent = await _agentBuilder
 				.BuildAgentAsync(config, cancellationToken);
 
-			var task = agent.SendAsync(userPrompt, cancellationToken);
+			var task = agent.SendAsync(userPrompt, linkedCts.Token);
 
 			// Process all agent events, collecting trace data
-			await eventProcessor.ProcessEventsAsync(task, cancellationToken);
+			await eventProcessor.ProcessEventsAsync(task, linkedCts.Token);
 
 			var result = await task.GetResultAsync();
 
@@ -227,6 +233,36 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				result.ActualModel,
 				tokenUsage,
 				trace), engineToolCtx, step.Name);
+		}
+		catch (OperationCanceledException) when (engineToolCtx.StepCompletionRequested && !cancellationToken.IsCancellationRequested)
+		{
+			// The agent was cancelled because an engine tool (e.g., set_status) signaled
+			// that the step is complete. Build a partial trace and use the status override.
+			var trace = eventProcessor.BuildPartialTrace(resolvedSystemPrompt, userPromptRaw, mcpServerDescriptions);
+			_reporter.ReportStepTrace(step.Name, trace);
+
+			if (engineToolCtx.StatusOverride == ExecutionStatus.Failed)
+			{
+				var reason = engineToolCtx.StatusReason ?? "Step marked as failed by LLM";
+				LogEngineToolStatusOverride(step.Name, reason);
+				_reporter.ReportStepError(step.Name, reason);
+				return WithOrchestrationComplete(ExecutionResult.Failed(
+					reason, rawDependencyOutputs, trace: trace), engineToolCtx, step.Name);
+			}
+
+			if (engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
+			{
+				var reason = engineToolCtx.StatusReason ?? "No action needed";
+				LogEngineToolNoActionOverride(step.Name, reason);
+				return WithOrchestrationComplete(ExecutionResult.NoAction(
+					reason, rawDependencyOutputs, trace: trace), engineToolCtx, step.Name);
+			}
+
+			// Default: treat as succeeded
+			var successReason = engineToolCtx.StatusReason ?? "Step completed by LLM";
+			LogEngineToolSuccessOverride(step.Name, successReason);
+			return WithOrchestrationComplete(ExecutionResult.Succeeded(
+				successReason, rawDependencyOutputs: rawDependencyOutputs, trace: trace), engineToolCtx, step.Name);
 		}
 		catch (OperationCanceledException)
 		{

@@ -55,19 +55,22 @@ public sealed class SetStatusTool : IEngineTool
 			if (string.Equals(status, "success", StringComparison.OrdinalIgnoreCase))
 			{
 				context.SetStatus(ExecutionStatus.Succeeded, reason ?? "Step marked as succeeded by LLM");
-				return "Status set to success. The step will be marked as succeeded upon completion.";
+				context.RequestStepCompletion();
+				return "Status set to success. The step is now complete.";
 			}
 
 			if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
 			{
 				context.SetStatus(ExecutionStatus.Failed, reason ?? "Step marked as failed by LLM");
-				return "Status set to failed. The step will be marked as failed upon completion.";
+				context.RequestStepCompletion();
+				return "Status set to failed. The step is now complete.";
 			}
 
 			if (string.Equals(status, "no_action", StringComparison.OrdinalIgnoreCase))
 			{
 				context.SetStatus(ExecutionStatus.NoAction, reason ?? "No action needed");
-				return "Status set to no_action. The step will complete and all downstream dependent steps will be skipped.";
+				context.RequestStepCompletion();
+				return "Status set to no_action. The step is now complete and all downstream dependent steps will be skipped.";
 			}
 
 			return $"Unknown status '{status}'. Supported values are 'success', 'failed', and 'no_action'.";

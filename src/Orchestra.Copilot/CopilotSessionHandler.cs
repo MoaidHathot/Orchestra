@@ -454,11 +454,13 @@ internal sealed class CopilotSessionHandler
 	{
 		// Log unhandled event types so we don't silently drop signals
 		// that might indicate session termination or errors.
+		var message = $"Unhandled SDK event: {evt.GetType().Name}";
 		_writer.TryWrite(new AgentEvent
 		{
 			Type = AgentEventType.Warning,
 			DiagnosticType = "unhandled_sdk_event",
-			Content = $"Unhandled SDK event: {evt.GetType().Name}",
+			ErrorMessage = message,
+			Content = message,
 		});
 	}
 
