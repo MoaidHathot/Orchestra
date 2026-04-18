@@ -29,6 +29,12 @@ public class ExecutionResult
 	public string? ActualModel { get; init; }
 
 	/// <summary>
+	/// The model selected by the server at session start.
+	/// May differ from the configured model if the server substituted.
+	/// </summary>
+	public string? SelectedModel { get; init; }
+
+	/// <summary>
 	/// Token usage statistics for this step.
 	/// </summary>
 	public TokenUsage? Usage { get; init; }
@@ -77,7 +83,8 @@ public class ExecutionResult
 		string? actualModel = null,
 		TokenUsage? usage = null,
 		StepExecutionTrace? trace = null,
-		List<RetryAttemptRecord>? retryHistory = null) => new()
+		List<RetryAttemptRecord>? retryHistory = null,
+		string? selectedModel = null) => new()
 	{
 		Content = content,
 		Status = ExecutionStatus.Succeeded,
@@ -85,6 +92,7 @@ public class ExecutionResult
 		RawDependencyOutputs = rawDependencyOutputs ?? [],
 		PromptSent = promptSent,
 		ActualModel = actualModel,
+		SelectedModel = selectedModel,
 		Usage = usage,
 		Trace = trace,
 		RetryHistory = retryHistory,
@@ -97,7 +105,8 @@ public class ExecutionResult
 		string? actualModel = null,
 		StepExecutionTrace? trace = null,
 		StepErrorCategory errorCategory = StepErrorCategory.Unknown,
-		List<RetryAttemptRecord>? retryHistory = null) => new()
+		List<RetryAttemptRecord>? retryHistory = null,
+		string? selectedModel = null) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Failed,
@@ -105,6 +114,7 @@ public class ExecutionResult
 		RawDependencyOutputs = rawDependencyOutputs ?? [],
 		PromptSent = promptSent,
 		ActualModel = actualModel,
+		SelectedModel = selectedModel,
 		Trace = trace,
 		ErrorCategory = errorCategory,
 		RetryHistory = retryHistory,
@@ -134,13 +144,15 @@ public class ExecutionResult
 		string? promptSent = null,
 		string? actualModel = null,
 		TokenUsage? usage = null,
-		StepExecutionTrace? trace = null) => new()
+		StepExecutionTrace? trace = null,
+		string? selectedModel = null) => new()
 	{
 		Content = reason,
 		Status = ExecutionStatus.NoAction,
 		RawDependencyOutputs = rawDependencyOutputs ?? [],
 		PromptSent = promptSent,
 		ActualModel = actualModel,
+		SelectedModel = selectedModel,
 		Usage = usage,
 		Trace = trace,
 	};

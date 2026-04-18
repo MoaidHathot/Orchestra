@@ -54,6 +54,12 @@ public class StepRunRecord
 	public string? ActualModel { get; init; }
 
 	/// <summary>
+	/// The model selected by the server at session start.
+	/// May differ from the configured model if the server substituted.
+	/// </summary>
+	public string? SelectedModel { get; init; }
+
+	/// <summary>
 	/// Token usage statistics for this step (input tokens, output tokens, total).
 	/// </summary>
 	public TokenUsage? Usage { get; init; }

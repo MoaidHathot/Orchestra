@@ -25,6 +25,7 @@ public partial class CopilotAgent : IAgent
 	private readonly ILogger<CopilotAgent> _logger;
 	private readonly IReadOnlyList<AvailableModelInfo>? _cachedAvailableModels;
 	private readonly Action<IReadOnlyList<AvailableModelInfo>>? _onAvailableModelsListed;
+	private readonly Action? _onClientError;
 
 	internal CopilotAgent(
 			CopilotClient client,
@@ -43,7 +44,8 @@ public partial class CopilotAgent : IAgent
 			ImageAttachment[] attachments,
 			ILogger<CopilotAgent> logger,
 			IReadOnlyList<AvailableModelInfo>? cachedAvailableModels = null,
-			Action<IReadOnlyList<AvailableModelInfo>>? onAvailableModelsListed = null)
+			Action<IReadOnlyList<AvailableModelInfo>>? onAvailableModelsListed = null,
+			Action? onClientError = null)
 	{
 		_client = client;
 		_model = model;
@@ -62,6 +64,7 @@ public partial class CopilotAgent : IAgent
 		_logger = logger;
 		_cachedAvailableModels = cachedAvailableModels;
 		_onAvailableModelsListed = onAvailableModelsListed;
+		_onClientError = onClientError;
 	}
 
 	public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
@@ -117,10 +120,60 @@ public partial class CopilotAgent : IAgent
 				AvailableModels = availableModels,
 			};
 		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		catch (Exception ex) when (IsConnectionError(ex))
+		{
+			// The JSON-RPC pipe or CLI process is dead — mark the client as stale
+			// so the builder recreates it on the next BuildAgentAsync call.
+			_onClientError?.Invoke();
+			throw;
+		}
 		finally
 		{
 			writer.TryComplete();
 		}
+	}
+
+	/// <summary>
+	/// Determines whether an exception indicates that the underlying CLI process
+	/// or JSON-RPC connection is dead and cannot be reused.
+	/// </summary>
+	private static bool IsConnectionError(Exception ex)
+	{
+		// Check the full exception chain (including inner exceptions and AggregateException)
+		return ContainsConnectionIndicator(ex);
+	}
+
+	private static bool ContainsConnectionIndicator(Exception? ex)
+	{
+		while (ex is not null)
+		{
+			// JSON-RPC connection lost, pipe broken, process exited
+			if (ex.Message.Contains("JSON-RPC", StringComparison.OrdinalIgnoreCase) ||
+				ex.Message.Contains("connection", StringComparison.OrdinalIgnoreCase) ||
+				ex.Message.Contains("pipe", StringComparison.OrdinalIgnoreCase) ||
+				ex.Message.Contains("process", StringComparison.OrdinalIgnoreCase) ||
+				ex is System.IO.IOException)
+			{
+				return true;
+			}
+
+			if (ex is AggregateException agg)
+			{
+				foreach (var inner in agg.InnerExceptions)
+				{
+					if (ContainsConnectionIndicator(inner))
+						return true;
+				}
+			}
+
+			ex = ex.InnerException;
+		}
+
+		return false;
 	}
 
 	internal SessionConfig BuildSessionConfig()

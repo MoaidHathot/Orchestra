@@ -7,9 +7,11 @@ namespace Orchestra.Copilot;
 
 public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 {
-	private CopilotClient _client = new ();
+	private CopilotClient _client = new();
 	private readonly ILoggerFactory _loggerFactory;
+	private readonly ILogger<CopilotAgentBuilder> _logger;
 	private volatile bool _clientStarted;
+	private volatile bool _clientInvalidated;
 	private readonly SemaphoreSlim _startLock = new(1, 1);
 
 	/// <summary>
@@ -21,19 +23,47 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	public CopilotAgentBuilder(ILoggerFactory? loggerFactory = null)
 	{
 		_loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+		_logger = _loggerFactory.CreateLogger<CopilotAgentBuilder>();
+	}
+
+	/// <summary>
+	/// Marks the current client connection as invalid so the next
+	/// <see cref="EnsureClientStartedAsync"/> call will dispose and recreate it.
+	/// Thread-safe — can be called from any agent on any thread.
+	/// </summary>
+	internal void InvalidateClient()
+	{
+		_clientInvalidated = true;
+		_logger.LogWarning("Client connection invalidated — will recreate on next use");
 	}
 
 	private async Task EnsureClientStartedAsync(CancellationToken cancellationToken)
 	{
-		if (_clientStarted) return;
+		if (_clientStarted && !_clientInvalidated) return;
 
 		await _startLock.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
+			if (_clientInvalidated && _clientStarted)
+			{
+				_logger.LogInformation("Recreating Copilot CLI client after connection invalidation");
+				_clientStarted = false;
+				_clientInvalidated = false;
+
+				try { await _client.StopAsync().ConfigureAwait(false); }
+				catch (Exception ex) { _logger.LogDebug(ex, "Ignoring error while stopping stale client"); }
+
+				try { await _client.DisposeAsync().ConfigureAwait(false); }
+				catch (Exception ex) { _logger.LogDebug(ex, "Ignoring error while disposing stale client"); }
+
+				_client = new CopilotClient();
+			}
+
 			if (!_clientStarted)
 			{
 				await _client.StartAsync(cancellationToken).ConfigureAwait(false);
 				_clientStarted = true;
+				_clientInvalidated = false;
 			}
 		}
 		finally
@@ -80,6 +110,7 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			attachments: attachments,
 			cachedAvailableModels: CachedAvailableModels,
 			onAvailableModelsListed: models => CachedAvailableModels = models,
+			onClientError: InvalidateClient,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()
 		);
 	}
@@ -105,6 +136,7 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			attachments: config.Attachments,
 			cachedAvailableModels: CachedAvailableModels,
 			onAvailableModelsListed: models => CachedAvailableModels = models,
+			onClientError: InvalidateClient,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()
 		);
 	}

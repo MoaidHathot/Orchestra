@@ -322,6 +322,7 @@ public static class RunsApi
 					rawContent = kv.Value.RawContent,
 					promptSent = kv.Value.PromptSent,
 					actualModel = kv.Value.ActualModel,
+					selectedModel = kv.Value.SelectedModel,
 					usage = kv.Value.Usage is { } u ? new
 					{
 						inputTokens = u.InputTokens,

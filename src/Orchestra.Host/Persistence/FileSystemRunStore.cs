@@ -119,6 +119,7 @@ public partial class FileSystemRunStore : IRunStore
 					RawContent = stepRecord.RawContent,
 					Content = stepRecord.Content,
 					ActualModel = stepRecord.ActualModel,
+					SelectedModel = stepRecord.SelectedModel,
 					Usage = stepRecord.Usage
 				};
 				var outputsJson = JsonSerializer.Serialize(outputs, _jsonOptions);
@@ -694,6 +695,7 @@ public class StepOutputsRecord
 	public string? RawContent { get; init; }
 	public required string Content { get; init; }
 	public string? ActualModel { get; init; }
+	public string? SelectedModel { get; init; }
 	public TokenUsage? Usage { get; init; }
 }
 

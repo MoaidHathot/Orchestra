@@ -51,6 +51,7 @@ interface ExecutionDetailStep {
   startedAt?: string;
   completedAt?: string;
   actualModel?: string;
+  selectedModel?: string;
   errorMessage?: string;
   usage?: {
     inputTokens?: number;
@@ -1264,20 +1265,12 @@ function App(): React.JSX.Element {
             type: 'step-started',
           } as StepEvent);
 
-          // Add model info if available
-          if (step.actualModel) {
-            stepEvents[step.name].push({
-              time: step.startedAt ? new Date(step.startedAt).toLocaleTimeString() : '',
-              type: 'session-started',
-              selectedModel: step.actualModel,
-            } as StepEvent);
-          }
-
           // Add usage info if available
           if (step.usage) {
             stepEvents[step.name].push({
               time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
               type: 'usage',
+              model: step.actualModel,
               inputTokens: step.usage.inputTokens,
               outputTokens: step.usage.outputTokens,
             } as StepEvent);
@@ -1301,9 +1294,18 @@ function App(): React.JSX.Element {
             stepEvents[step.name].push({
               time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
               type: 'step-completed',
+              actualModel: step.actualModel,
+              selectedModel: step.selectedModel,
               contentPreview: step.content
                 ? step.content.substring(0, 200) + (step.content.length > 200 ? '...' : '')
                 : undefined,
+            } as StepEvent);
+          } else if (step.status === 'NoAction') {
+            stepEvents[step.name].push({
+              time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
+              type: 'step-completed',
+              actualModel: step.actualModel,
+              selectedModel: step.selectedModel,
             } as StepEvent);
           } else if (step.errorMessage) {
             stepEvents[step.name].push({

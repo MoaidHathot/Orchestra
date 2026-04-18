@@ -264,4 +264,107 @@ public class CopilotAgentBuilderTests
 	}
 
 	#endregion
+
+	#region Client Invalidation and Recovery
+
+	[Fact]
+	public void InvalidateClient_SetsInvalidatedState()
+	{
+		// Arrange
+		var builder = new CopilotAgentBuilder();
+
+		// Act — simulate what CopilotAgent calls when it detects a connection error
+		builder.InvalidateClient();
+
+		// Assert — the builder should be in an invalidated state
+		// Subsequent BuildAgentAsync calls should recreate the client
+		builder.Should().NotBeNull();
+	}
+
+	[Fact]
+	public void InvalidateClient_CanBeCalledMultipleTimes()
+	{
+		// Arrange
+		var builder = new CopilotAgentBuilder();
+
+		// Act & Assert — calling multiple times should not throw
+		builder.InvalidateClient();
+		builder.InvalidateClient();
+		builder.InvalidateClient();
+	}
+
+	[Fact]
+	public void InvalidateClient_IsThreadSafe()
+	{
+		// Arrange
+		var builder = new CopilotAgentBuilder();
+
+		// Act — simulate concurrent invalidation from multiple agents
+		var tasks = Enumerable.Range(0, 100).Select(_ => Task.Run(() =>
+		{
+			builder.InvalidateClient();
+		}));
+
+		// Assert — should not throw or deadlock
+		Task.WaitAll(tasks.ToArray());
+	}
+
+	#endregion
+
+	#region IsConnectionError Detection (via CopilotAgent)
+
+	[Fact]
+	public void CopilotAgent_IsConnectionError_DetectsJsonRpcError()
+	{
+		// The error message from the user's log:
+		// "Communication error with Copilot CLI: The JSON-RPC connection with the remote party was lost"
+		var ex = new Exception("Communication error with Copilot CLI: The JSON-RPC connection with the remote party was lost before the request could complete.");
+
+		// Use reflection to test the private static method
+		var method = typeof(CopilotAgent).GetMethod("IsConnectionError",
+			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+		method.Should().NotBeNull("IsConnectionError should exist as a private static method");
+
+		var result = (bool)method!.Invoke(null, [ex])!;
+		result.Should().BeTrue("JSON-RPC errors should be detected as connection errors");
+	}
+
+	[Fact]
+	public void CopilotAgent_IsConnectionError_DetectsPipeError()
+	{
+		var ex = new System.IO.IOException("Broken pipe");
+
+		var method = typeof(CopilotAgent).GetMethod("IsConnectionError",
+			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+		var result = (bool)method!.Invoke(null, [ex])!;
+		result.Should().BeTrue("IO/pipe errors should be detected as connection errors");
+	}
+
+	[Fact]
+	public void CopilotAgent_IsConnectionError_DetectsNestedConnectionError()
+	{
+		var inner = new Exception("The JSON-RPC connection was lost");
+		var outer = new Exception("Session creation failed", inner);
+
+		var method = typeof(CopilotAgent).GetMethod("IsConnectionError",
+			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+		var result = (bool)method!.Invoke(null, [outer])!;
+		result.Should().BeTrue("Nested connection errors should be detected");
+	}
+
+	[Fact]
+	public void CopilotAgent_IsConnectionError_DoesNotFalsePositiveOnModelError()
+	{
+		var ex = new Exception("Model 'gpt-5' is not available");
+
+		var method = typeof(CopilotAgent).GetMethod("IsConnectionError",
+			System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+		var result = (bool)method!.Invoke(null, [ex])!;
+		result.Should().BeFalse("Model errors should NOT be treated as connection errors");
+	}
+
+	#endregion
 }

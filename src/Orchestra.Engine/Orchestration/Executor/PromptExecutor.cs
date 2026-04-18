@@ -203,7 +203,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					rawDependencyOutputs,
 					userPrompt,
 					result.ActualModel,
-					trace), engineToolCtx, step.Name);
+					trace,
+					selectedModel: result.SelectedModel), engineToolCtx, step.Name);
 			}
 
 			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
@@ -216,7 +217,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					userPrompt,
 					result.ActualModel,
 					tokenUsage,
-					trace), engineToolCtx, step.Name);
+					trace,
+					selectedModel: result.SelectedModel), engineToolCtx, step.Name);
 			}
 
 			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
@@ -232,7 +234,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				userPrompt,
 				result.ActualModel,
 				tokenUsage,
-				trace), engineToolCtx, step.Name);
+				trace,
+				selectedModel: result.SelectedModel), engineToolCtx, step.Name);
 		}
 		catch (OperationCanceledException) when (engineToolCtx.StepCompletionRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -478,6 +481,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			RawDependencyOutputs = result.RawDependencyOutputs,
 			PromptSent = result.PromptSent,
 			ActualModel = result.ActualModel,
+			SelectedModel = result.SelectedModel,
 			Usage = result.Usage,
 			Trace = result.Trace,
 			RetryHistory = result.RetryHistory,
