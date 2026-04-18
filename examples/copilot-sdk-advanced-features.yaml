@@ -1,0 +1,185 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: copilot-sdk-advanced-features
+description: >
+  Demonstrates advanced Copilot SDK features: infinite sessions with custom
+  compaction thresholds, Customize system prompt mode with section overrides,
+  image attachments (file paths and base64 blobs from prior steps), and
+  structured audit logging via session hooks.
+version: "1.0.0"
+defaultModel: claude-opus-4.6
+tags:
+  - advanced
+  - copilot-sdk
+  - image-analysis
+  - audit-log
+  - infinite-sessions
+
+variables:
+  reportFormat: markdown
+
+steps:
+  # ─────────────────────────────────────────────────────────────
+  # Step 1: Take a screenshot using a script step.
+  # The output is the file path to the saved screenshot.
+  # ─────────────────────────────────────────────────────────────
+  - name: take-screenshot
+    type: Script
+    shell: pwsh
+    script: |
+      $path = Join-Path $env:TEMP "orchestra-screenshot-$(Get-Date -Format 'yyyyMMdd-HHmmss').png"
+      Add-Type -AssemblyName System.Windows.Forms
+      $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+      $bmp = New-Object Drawing.Bitmap($bounds.Width, $bounds.Height)
+      $graphics = [Drawing.Graphics]::FromImage($bmp)
+      $graphics.CopyFromScreen(0, 0, 0, 0, $bmp.Size)
+      $bmp.Save($path, [Drawing.Imaging.ImageFormat]::Png)
+      $graphics.Dispose()
+      $bmp.Dispose()
+      Write-Output $path
+    enabled: false  # Enable when running on a machine with a display
+
+  # ─────────────────────────────────────────────────────────────
+  # Step 2: Analyze a UI mockup image using vision capabilities.
+  # Demonstrates:
+  #   - Image attachments (file path with template expression)
+  #   - Customize system prompt mode with section overrides
+  #   - Infinite sessions with custom thresholds
+  # ─────────────────────────────────────────────────────────────
+  - name: analyze-ui
+    type: Prompt
+    parameters:
+      - mockupPath
+    systemPrompt: |
+      You are a senior UX engineer specializing in accessibility audits.
+      Analyze UI screenshots and mockups for:
+      - WCAG 2.1 AA compliance violations
+      - Color contrast issues
+      - Missing alt text or aria labels
+      - Keyboard navigation gaps
+      - Touch target sizing on mobile
+    systemPromptMode: customize
+    systemPromptSections:
+      tone:
+        action: replace
+        content: >
+          Be direct and structured. Use severity ratings for each finding:
+          [CRITICAL], [WARNING], [SUGGESTION]. Include specific element
+          references and remediation steps.
+      code_change_rules:
+        action: remove  # Read-only analysis, no code modifications
+      guidelines:
+        action: append
+        content: |
+          - Reference WCAG 2.1 success criteria by number (e.g., SC 1.4.3).
+          - Flag contrast ratios below 4.5:1 for normal text, 3:1 for large text.
+          - Note any animations that could trigger vestibular disorders.
+    userPrompt: |
+      Analyze the attached UI mockup for accessibility issues.
+      Provide a structured report with severity ratings and specific remediation steps.
+    attachments:
+      - type: file
+        path: "{{param.mockupPath}}"
+        displayName: "UI Mockup"
+    infiniteSessions:
+      enabled: true
+      backgroundCompactionThreshold: 0.80
+      bufferExhaustionThreshold: 0.95
+
+  # ─────────────────────────────────────────────────────────────
+  # Step 3: Generate accessible React components based on analysis.
+  # Demonstrates:
+  #   - Section overrides to customize coding behavior
+  #   - Higher compaction thresholds for code generation
+  # ─────────────────────────────────────────────────────────────
+  - name: generate-components
+    type: Prompt
+    dependsOn:
+      - analyze-ui
+    systemPrompt: |
+      You are a React/TypeScript developer specializing in accessible
+      component development. Generate production-ready components that
+      address all accessibility findings from the analysis.
+    systemPromptMode: customize
+    systemPromptSections:
+      tone:
+        action: replace
+        content: >
+          Write clean, well-documented code. Include JSDoc comments
+          explaining accessibility decisions. Use semantic HTML elements.
+      guidelines:
+        action: append
+        content: |
+          - Include aria-label, aria-describedby, and role attributes.
+          - Add keyboard event handlers (onKeyDown) for all interactive elements.
+          - Use CSS-in-JS with prefers-reduced-motion media queries.
+          - Include focus trap logic for modal components.
+    userPrompt: |
+      Based on the accessibility analysis below, generate React/TypeScript
+      components that fix all identified issues:
+
+      {{analyze-ui.output}}
+    infiniteSessions:
+      enabled: true
+      backgroundCompactionThreshold: 0.85
+      bufferExhaustionThreshold: 0.97
+
+  # ─────────────────────────────────────────────────────────────
+  # Step 4: Review the generated code (read-only mode).
+  # Demonstrates:
+  #   - Replacing code_change_rules to enforce read-only
+  #   - Disabling infinite sessions for short review tasks
+  # ─────────────────────────────────────────────────────────────
+  - name: code-review
+    type: Prompt
+    dependsOn:
+      - generate-components
+    systemPrompt: |
+      Review the generated React component code for correctness,
+      accessibility compliance, and adherence to React best practices.
+    systemPromptMode: customize
+    systemPromptSections:
+      code_change_rules:
+        action: replace
+        content: >
+          You are in READ-ONLY review mode. Do NOT create, modify, or
+          delete any files. Only analyze code and report findings.
+      guidelines:
+        action: append
+        content: |
+          - Verify all interactive elements have proper aria labels.
+          - Check that focus management handles mount/unmount correctly.
+          - Ensure color contrast values meet WCAG AA (4.5:1 normal, 3:1 large).
+          - Validate keyboard navigation order matches visual layout.
+    userPrompt: |
+      Review this React component code for accessibility and correctness.
+      Rate each component: PASS, NEEDS_WORK, or FAIL.
+
+      {{generate-components.output}}
+    infiniteSessions:
+      enabled: false  # Short task, no compaction needed
+
+  # ─────────────────────────────────────────────────────────────
+  # Step 5: Assemble the final report using a transform step.
+  # ─────────────────────────────────────────────────────────────
+  - name: final-report
+    type: Transform
+    dependsOn:
+      - analyze-ui
+      - generate-components
+      - code-review
+    template: |
+      # Accessibility Audit Report
+
+      ## 1. UI Analysis Findings
+      {{analyze-ui.output}}
+
+      ## 2. Generated Accessible Components
+      ```tsx
+      {{generate-components.output}}
+      ```
+
+      ## 3. Code Review Results
+      {{code-review.output}}
+
+      ---
+      _Report format: {{vars.reportFormat}}_

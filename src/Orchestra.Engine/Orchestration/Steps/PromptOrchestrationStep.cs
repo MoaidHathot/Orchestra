@@ -37,4 +37,22 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// and activate on demand. Paths are passed as-is to the underlying SDK.
 	/// </summary>
 	public string[] SkillDirectories { get; internal set; } = [];
+
+	/// <summary>
+	/// Optional configuration for infinite sessions (automatic context compaction).
+	/// When null, the SDK default is used (infinite sessions enabled).
+	/// </summary>
+	public InfiniteSessionConfig? InfiniteSessions { get; init; }
+
+	/// <summary>
+	/// Section-level overrides for the system prompt when using Customize mode.
+	/// Keys are section identifiers (e.g., "tone", "guidelines").
+	/// </summary>
+	public Dictionary<string, SystemPromptSectionOverride>? SystemPromptSections { get; init; }
+
+	/// <summary>
+	/// Optional image attachments to send with the prompt.
+	/// Supports file paths and base64 blob data.
+	/// </summary>
+	public ImageAttachment[] Attachments { get; internal set; } = [];
 }

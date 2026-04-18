@@ -457,10 +457,13 @@ public class CopilotAgentTests
 			subagents: [],
 			reasoningLevel: null,
 			systemPromptMode: null,
+			systemPromptSections: null,
 			reporter: NullOrchestrationReporter.Instance,
 			engineTools: [],
 			engineToolContext: null,
 			skillDirectories: [],
+			infiniteSessionConfig: null,
+			attachments: [],
 			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
 		);
 	}
@@ -583,10 +586,13 @@ public class CopilotAgentTests
 			subagents: [],
 			reasoningLevel: null,
 			systemPromptMode: null,
+			systemPromptSections: null,
 			reporter: NullOrchestrationReporter.Instance,
 			engineTools: [],
 			engineToolContext: null,
 			skillDirectories: skillDirectories,
+			infiniteSessionConfig: null,
+			attachments: [],
 			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
 		);
 	}
@@ -645,10 +651,13 @@ public class CopilotAgentTests
 			subagents: [],
 			reasoningLevel: null,
 			systemPromptMode: null,
+			systemPromptSections: null,
 			reporter: NullOrchestrationReporter.Instance,
 			engineTools: [],
 			engineToolContext: null,
 			skillDirectories: ["./skills/devops"],
+			infiniteSessionConfig: null,
+			attachments: [],
 			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
 		);
 
@@ -658,6 +667,156 @@ public class CopilotAgentTests
 		// Assert
 		config.McpServers.Should().ContainKey("icm");
 		config.SkillDirectories.Should().ContainSingle().Which.Should().Be("./skills/devops");
+	}
+
+	#endregion
+
+	#region BuildSessionConfig InfiniteSession Tests
+
+	private static CopilotAgent CreateAgentWithInfiniteSession(Engine.InfiniteSessionConfig? infiniteSessionConfig)
+	{
+		return new CopilotAgent(
+			client: new CopilotClient(),
+			model: "test-model",
+			systemPrompt: null,
+			mcps: [],
+			subagents: [],
+			reasoningLevel: null,
+			systemPromptMode: null,
+			systemPromptSections: null,
+			reporter: NullOrchestrationReporter.Instance,
+			engineTools: [],
+			engineToolContext: null,
+			skillDirectories: [],
+			infiniteSessionConfig: infiniteSessionConfig,
+			attachments: [],
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
+		);
+	}
+
+	[Fact]
+	public void BuildSessionConfig_InfiniteSessionsEnabled_ConfiguresInfiniteSessions()
+	{
+		// Arrange
+		var agent = CreateAgentWithInfiniteSession(new Engine.InfiniteSessionConfig
+		{
+			Enabled = true,
+			BackgroundCompactionThreshold = 0.85,
+			BufferExhaustionThreshold = 0.97
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.InfiniteSessions.Should().NotBeNull();
+		config.InfiniteSessions!.Enabled.Should().BeTrue();
+		config.InfiniteSessions.BackgroundCompactionThreshold.Should().Be(0.85);
+		config.InfiniteSessions.BufferExhaustionThreshold.Should().Be(0.97);
+	}
+
+	[Fact]
+	public void BuildSessionConfig_InfiniteSessionsDisabled_ConfiguresInfiniteSessions()
+	{
+		// Arrange
+		var agent = CreateAgentWithInfiniteSession(new Engine.InfiniteSessionConfig
+		{
+			Enabled = false
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.InfiniteSessions.Should().NotBeNull();
+		config.InfiniteSessions!.Enabled.Should().BeFalse();
+	}
+
+	[Fact]
+	public void BuildSessionConfig_InfiniteSessionsNull_NoInfiniteSessionsConfig()
+	{
+		// Arrange
+		var agent = CreateAgentWithInfiniteSession(null);
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.InfiniteSessions.Should().BeNull();
+	}
+
+	#endregion
+
+	#region BuildSessionConfig Customize Mode Tests
+
+	[Fact]
+	public void BuildSessionConfig_CustomizeMode_ConfiguresSections()
+	{
+		// Arrange
+		var sections = new Dictionary<string, SystemPromptSectionOverride>
+		{
+			["tone"] = new SystemPromptSectionOverride
+			{
+				Action = SystemPromptSectionAction.Replace,
+				Content = "Be concise"
+			},
+			["code_change_rules"] = new SystemPromptSectionOverride
+			{
+				Action = SystemPromptSectionAction.Remove
+			}
+		};
+
+		var agent = new CopilotAgent(
+			client: new CopilotClient(),
+			model: "test-model",
+			systemPrompt: "Custom prompt",
+			mcps: [],
+			subagents: [],
+			reasoningLevel: null,
+			systemPromptMode: SystemPromptMode.Customize,
+			systemPromptSections: sections,
+			reporter: NullOrchestrationReporter.Instance,
+			engineTools: [],
+			engineToolContext: null,
+			skillDirectories: [],
+			infiniteSessionConfig: null,
+			attachments: [],
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
+		);
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.SystemMessage.Should().NotBeNull();
+		config.SystemMessage!.Mode.Should().Be(SystemMessageMode.Customize);
+		config.SystemMessage.Sections.Should().HaveCount(2);
+		config.SystemMessage.Sections!["tone"].Action.Should().Be(SectionOverrideAction.Replace);
+		config.SystemMessage.Sections["tone"].Content.Should().Be("Be concise");
+		config.SystemMessage.Sections["code_change_rules"].Action.Should().Be(SectionOverrideAction.Remove);
+	}
+
+	#endregion
+
+	#region BuildSessionConfig Hooks Tests
+
+	[Fact]
+	public void BuildSessionConfig_WithHooks_HooksAreConfigured()
+	{
+		// Arrange
+		var agent = CreateAgentWithMcps();
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.Hooks.Should().NotBeNull();
+		config.Hooks!.OnSessionStart.Should().NotBeNull();
+		config.Hooks.OnPreToolUse.Should().NotBeNull();
+		config.Hooks.OnPostToolUse.Should().NotBeNull();
+		config.Hooks.OnUserPromptSubmitted.Should().NotBeNull();
+		config.Hooks.OnErrorOccurred.Should().NotBeNull();
+		config.Hooks.OnSessionEnd.Should().NotBeNull();
 	}
 
 	#endregion

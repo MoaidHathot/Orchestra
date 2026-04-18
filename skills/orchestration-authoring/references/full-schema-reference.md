@@ -85,6 +85,7 @@ Each key in the `inputs` object is the input name. Each value is an `InputDefini
 | `required` | `bool` | No | `true` | Whether this input must be provided at runtime. |
 | `default` | `string` | No | `null` | Default value for optional inputs. Ignored when `required` is `true`. |
 | `enum` | `string[]` | No | `[]` | Allowed values. When non-empty, the provided value must be one of these (case-insensitive). |
+| `multiline` | `bool` | No | `false` | UI hint: when true, the Portal renders a multiline textarea instead of a single-line input. Only meaningful for `"string"` type inputs. Has no effect on validation or execution. |
 
 ### Validation Rules
 

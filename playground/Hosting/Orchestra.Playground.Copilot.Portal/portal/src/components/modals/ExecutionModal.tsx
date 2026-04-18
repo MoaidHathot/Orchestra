@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext } from '../../types';
+import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry } from '../../types';
 import { Icons } from '../../icons';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
@@ -48,7 +48,8 @@ type TraceSectionKey =
   | 'finalResponse'
   | 'outputHandlerResult'
   | 'mcpServers'
-  | 'warnings';
+  | 'warnings'
+  | 'auditLog';
 
 interface DisplayContent {
   content: string;
@@ -63,6 +64,7 @@ interface Props {
   stepEvents: Record<string, StepEvent[]>;
   stepResults: Record<string, string>;
   stepTraces: Record<string, TraceData>;
+  stepAuditLogs: Record<string, AuditLogEntry[]>;
   streamingContent: string;
   finalResult: string;
   status: string;
@@ -81,6 +83,7 @@ export default function ExecutionModal({
   stepEvents,
   stepResults,
   stepTraces,
+  stepAuditLogs,
   streamingContent,
   finalResult,
   status,
@@ -131,6 +134,16 @@ export default function ExecutionModal({
     selectedStep && stepTraces
       ? ((stepTraces[selectedStep] as unknown as RichTraceData) ?? null)
       : null;
+
+  // Merge audit log entries from SSE events and trace data
+  const selectedStepAuditLog = useMemo<AuditLogEntry[]>(() => {
+    if (!selectedStep) return [];
+    const sseEntries = stepAuditLogs?.[selectedStep] || [];
+    const traceEntries = (selectedStepTrace as unknown as TraceData)?.auditLog || [];
+    // Prefer SSE entries if available, fall back to trace
+    const entries = sseEntries.length > 0 ? sseEntries : traceEntries;
+    return [...entries].sort((a, b) => a.sequence - b.sequence);
+  }, [selectedStep, stepAuditLogs, selectedStepTrace]);
 
   // Determine what content to show in the output panel
   const displayContent = useMemo<DisplayContent>(() => {
@@ -1023,10 +1036,250 @@ export default function ExecutionModal({
                                 >
                                   differs
                                 </span>
+                               )}
+                            </div>
+                          )}
+
+                        {/* Audit Log */}
+                        {selectedStepAuditLog.length > 0 && (
+                            <div
+                              className="trace-section"
+                              style={{ marginBottom: '12px' }}
+                            >
+                              <div
+                                className="trace-section-header"
+                                onClick={() =>
+                                  toggleTraceSection('auditLog')
+                                }
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  cursor: 'pointer',
+                                  padding: '6px 8px',
+                                  background: 'var(--surface)',
+                                  borderRadius: '4px',
+                                  marginBottom:
+                                    expandedTraceSections.auditLog
+                                      ? '4px'
+                                      : '0',
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    transform:
+                                      expandedTraceSections.auditLog
+                                        ? 'rotate(90deg)'
+                                        : 'rotate(0deg)',
+                                    transition: 'transform 0.15s',
+                                  }}
+                                >
+                                  &#9654;
+                                </span>
+                                <span
+                                  style={{
+                                    fontWeight: 500,
+                                    color: 'var(--text)',
+                                  }}
+                                >
+                                  Audit Log ({selectedStepAuditLog.length})
+                                </span>
+                              </div>
+                              {expandedTraceSections.auditLog && (
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '4px',
+                                  }}
+                                >
+                                  {selectedStepAuditLog.map((entry, i) => {
+                                    const colorMap: Record<string, string> = {
+                                      SessionStart: 'var(--accent)',
+                                      PromptSubmitted: 'var(--cyan)',
+                                      PreToolUse: 'var(--warning)',
+                                      PostToolUse: 'var(--success)',
+                                      Error: 'var(--error)',
+                                      SessionEnd: 'var(--purple)',
+                                      CompactionStart: 'var(--text-dim)',
+                                      CompactionComplete: 'var(--text-dim)',
+                                    };
+                                    const badgeColor = colorMap[entry.eventType] || 'var(--text-muted)';
+                                    const ts = entry.timestamp
+                                      ? new Date(entry.timestamp).toLocaleTimeString()
+                                      : '';
+
+                                    return (
+                                      <div
+                                        key={i}
+                                        style={{
+                                          background: 'var(--bg)',
+                                          padding: '6px 8px',
+                                          borderRadius: '4px',
+                                          borderLeft: `3px solid ${badgeColor}`,
+                                          fontSize: '11px',
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '8px',
+                                            marginBottom: '2px',
+                                          }}
+                                        >
+                                          <span
+                                            style={{
+                                              fontSize: '10px',
+                                              padding: '1px 6px',
+                                              borderRadius: '3px',
+                                              background: `color-mix(in srgb, ${badgeColor} 15%, transparent)`,
+                                              border: `1px solid color-mix(in srgb, ${badgeColor} 30%, transparent)`,
+                                              color: badgeColor,
+                                              fontWeight: 500,
+                                            }}
+                                          >
+                                            {entry.eventType}
+                                          </span>
+                                          <span
+                                            style={{
+                                              fontSize: '10px',
+                                              color: 'var(--text-dim)',
+                                            }}
+                                          >
+                                            #{entry.sequence}
+                                          </span>
+                                          {ts && (
+                                            <span
+                                              style={{
+                                                fontSize: '10px',
+                                                color: 'var(--text-dim)',
+                                                marginLeft: 'auto',
+                                              }}
+                                            >
+                                              {ts}
+                                            </span>
+                                          )}
+                                        </div>
+                                        {/* Event-specific details */}
+                                        {entry.eventType === 'PreToolUse' && (
+                                          <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
+                                            {entry.toolName && (
+                                              <div>
+                                                <span style={{ color: 'var(--text-dim)' }}>Tool: </span>
+                                                <span style={{ fontWeight: 500 }}>{entry.toolName}</span>
+                                                {entry.permissionDecision && (
+                                                  <span
+                                                    style={{
+                                                      marginLeft: '8px',
+                                                      fontSize: '10px',
+                                                      padding: '1px 4px',
+                                                      borderRadius: '3px',
+                                                      background: entry.permissionDecision === 'Approved'
+                                                        ? 'rgba(63, 185, 80, 0.15)'
+                                                        : 'rgba(248, 81, 73, 0.15)',
+                                                      color: entry.permissionDecision === 'Approved'
+                                                        ? 'var(--success)'
+                                                        : 'var(--error)',
+                                                    }}
+                                                  >
+                                                    {entry.permissionDecision}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            )}
+                                            {entry.toolArguments && (
+                                              <details style={{ marginTop: '2px' }}>
+                                                <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-dim)' }}>
+                                                  Arguments
+                                                </summary>
+                                                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '10px', marginTop: '2px', background: 'var(--surface)', padding: '4px', borderRadius: '3px', maxHeight: '80px', overflow: 'auto' }}>
+                                                  {entry.toolArguments}
+                                                </pre>
+                                              </details>
+                                            )}
+                                          </div>
+                                        )}
+                                        {entry.eventType === 'PostToolUse' && (
+                                          <div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>
+                                            {entry.toolName && (
+                                              <div>
+                                                <span style={{ color: 'var(--text-dim)' }}>Tool: </span>
+                                                <span style={{ fontWeight: 500 }}>{entry.toolName}</span>
+                                                {entry.toolSuccess !== undefined && (
+                                                  <span
+                                                    style={{
+                                                      marginLeft: '8px',
+                                                      fontSize: '10px',
+                                                      color: entry.toolSuccess ? 'var(--success)' : 'var(--error)',
+                                                    }}
+                                                  >
+                                                    {entry.toolSuccess ? 'OK' : 'FAILED'}
+                                                  </span>
+                                                )}
+                                              </div>
+                                            )}
+                                            {entry.toolResult && (
+                                              <details style={{ marginTop: '2px' }}>
+                                                <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-dim)' }}>
+                                                  Result
+                                                </summary>
+                                                <pre style={{ whiteSpace: 'pre-wrap', fontSize: '10px', marginTop: '2px', background: 'var(--surface)', padding: '4px', borderRadius: '3px', maxHeight: '80px', overflow: 'auto' }}>
+                                                  {entry.toolResult}
+                                                </pre>
+                                              </details>
+                                            )}
+                                          </div>
+                                        )}
+                                        {entry.eventType === 'Error' && (
+                                          <div style={{ color: 'var(--error)', marginTop: '2px' }}>
+                                            {entry.error && <div>{entry.error}</div>}
+                                            {entry.errorContext && (
+                                              <div style={{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '2px' }}>
+                                                Context: {entry.errorContext}
+                                              </div>
+                                            )}
+                                            {entry.errorHandling && (
+                                              <div style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                                                Handling: {entry.errorHandling}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                        {entry.eventType === 'PromptSubmitted' && entry.prompt && (
+                                          <details style={{ marginTop: '2px' }}>
+                                            <summary style={{ cursor: 'pointer', fontSize: '10px', color: 'var(--text-dim)' }}>
+                                              Prompt
+                                            </summary>
+                                            <pre style={{ whiteSpace: 'pre-wrap', fontSize: '10px', marginTop: '2px', color: 'var(--text-muted)', background: 'var(--surface)', padding: '4px', borderRadius: '3px', maxHeight: '80px', overflow: 'auto' }}>
+                                              {entry.prompt}
+                                            </pre>
+                                          </details>
+                                        )}
+                                        {entry.eventType === 'SessionStart' && (
+                                          <div style={{ color: 'var(--text-muted)', marginTop: '2px', fontSize: '10px' }}>
+                                            {entry.sessionSource && <span>Source: {entry.sessionSource}</span>}
+                                            {entry.additionalContext && <span style={{ marginLeft: '8px' }}>{entry.additionalContext}</span>}
+                                          </div>
+                                        )}
+                                        {entry.eventType === 'SessionEnd' && (
+                                          <div style={{ color: 'var(--text-muted)', marginTop: '2px', fontSize: '10px' }}>
+                                            {entry.sessionEndReason && <span>Reason: {entry.sessionEndReason}</span>}
+                                          </div>
+                                        )}
+                                        {(entry.eventType === 'CompactionStart' || entry.eventType === 'CompactionComplete') && entry.additionalContext && (
+                                          <div style={{ color: 'var(--text-muted)', marginTop: '2px', fontSize: '10px' }}>
+                                            {entry.additionalContext}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
                               )}
                             </div>
                           )}
-                        </div>
+                      </div>
                         {selectedStepData?.mcps &&
                           selectedStepData.mcps.length > 0 && (
                             <div>

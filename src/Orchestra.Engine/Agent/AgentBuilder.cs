@@ -27,6 +27,21 @@ public abstract class AgentBuilder
 	/// </summary>
 	protected string[] SkillDirectories { get; private set; } = [];
 
+	/// <summary>
+	/// Section-level overrides for the system prompt when using Customize mode.
+	/// </summary>
+	protected Dictionary<string, SystemPromptSectionOverride>? SystemPromptSectionOverrides { get; private set; }
+
+	/// <summary>
+	/// Configuration for infinite sessions (automatic context compaction).
+	/// </summary>
+	protected InfiniteSessionConfig? InfiniteSession { get; private set; }
+
+	/// <summary>
+	/// Image attachments to send with the prompt.
+	/// </summary>
+	protected ImageAttachment[] Attachments { get; private set; } = [];
+
 	public AgentBuilder WithModel(string model)
 	{
 		Model = model;
@@ -89,6 +104,34 @@ public abstract class AgentBuilder
 	public AgentBuilder WithSkillDirectories(params string[] directories)
 	{
 		SkillDirectories = directories;
+		return this;
+	}
+
+	/// <summary>
+	/// Configures section-level overrides for the system prompt.
+	/// Used with <see cref="Engine.SystemPromptMode.Customize"/>.
+	/// </summary>
+	public AgentBuilder WithSystemPromptSections(Dictionary<string, SystemPromptSectionOverride> sections)
+	{
+		SystemPromptSectionOverrides = sections;
+		return this;
+	}
+
+	/// <summary>
+	/// Configures infinite session behavior (automatic context compaction).
+	/// </summary>
+	public AgentBuilder WithInfiniteSession(InfiniteSessionConfig? config)
+	{
+		InfiniteSession = config;
+		return this;
+	}
+
+	/// <summary>
+	/// Configures image attachments to send with the prompt.
+	/// </summary>
+	public AgentBuilder WithAttachments(params ImageAttachment[] attachments)
+	{
+		Attachments = attachments;
 		return this;
 	}
 

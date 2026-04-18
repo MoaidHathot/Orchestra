@@ -278,55 +278,101 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Builds the <see cref="ProcessStartInfo"/> with shell wrapping,
-	/// matching the pattern used by CommandStepExecutor.
+	/// Builds the <see cref="ProcessStartInfo"/> for the managed process.
+	/// Starts the command directly (no cmd.exe/sh wrapper) so that stdin close
+	/// propagates to the process for graceful shutdown. On Windows, resolves
+	/// shell shims (.cmd/.bat) by finding the actual file on PATH.
 	/// </summary>
 	private ProcessStartInfo BuildProcessStartInfo()
 	{
-		var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
-
-		// Build the full command line
-		var escapedArgs = _config.Arguments.Select(arg =>
-		{
-			if (isWindows)
-				return arg.Contains(' ') ? $"\"{arg}\"" : arg;
-			else
-				return $"'{arg.Replace("'", "'\\''")}'";
-		});
-
-		var fullCommandLine = _config.Arguments.Length > 0
-			? $"{_config.Command} {string.Join(' ', escapedArgs)}"
-			: _config.Command;
+		var resolvedCommand = ResolveCommand(_config.Command);
 
 		var startInfo = new ProcessStartInfo
 		{
-			FileName = isWindows ? "cmd.exe" : "/bin/sh",
+			FileName = resolvedCommand,
 			RedirectStandardOutput = true,
 			RedirectStandardError = true,
+			RedirectStandardInput = true,
 			UseShellExecute = false,
 			CreateNoWindow = true,
 		};
 
-		if (isWindows)
-		{
-			startInfo.Arguments = $"/c {fullCommandLine}";
-		}
-		else
-		{
-			startInfo.ArgumentList.Add("-c");
-			startInfo.ArgumentList.Add(fullCommandLine);
-		}
+		foreach (var arg in _config.Arguments)
+			startInfo.ArgumentList.Add(arg);
 
 		if (_config.WorkingDirectory is not null)
 			startInfo.WorkingDirectory = _config.WorkingDirectory;
 
+		// Remove inherited ASP.NET Core / Kestrel env vars that would cause child
+		// processes to bind to the parent's URLs/ports instead of their own config.
+		foreach (var key in InheritedEnvVarsToRemove)
+		{
+			if (startInfo.Environment.ContainsKey(key))
+				startInfo.Environment.Remove(key);
+		}
+
 		if (_config.Env is not null)
 		{
 			foreach (var (key, value) in _config.Env)
-				startInfo.Environment[key] = value;
+			{
+				if (value.Length > 0)
+					startInfo.Environment[key] = value;
+				else
+					startInfo.Environment.Remove(key);
+			}
 		}
 
 		return startInfo;
+	}
+
+	/// <summary>
+	/// Environment variables inherited from the parent process that should not
+	/// propagate to managed child processes. These are ASP.NET Core host-binding
+	/// variables that would cause a child server to bind to the parent's URLs/ports.
+	/// </summary>
+	private static readonly string[] InheritedEnvVarsToRemove =
+	[
+		"ASPNETCORE_URLS",
+		"DOTNET_URLS",
+	];
+
+	/// <summary>
+	/// Resolves a command name to a full path. On Windows, searches PATH for
+	/// .cmd, .bat, .exe, and .com extensions so that shell shims (e.g. dnx.cmd,
+	/// npx.cmd) can be started directly without a cmd.exe wrapper.
+	/// </summary>
+	private static string ResolveCommand(string command)
+	{
+		// If the command is already a rooted path or contains a path separator, use as-is
+		if (Path.IsPathRooted(command) || command.Contains(Path.DirectorySeparatorChar)
+			|| command.Contains(Path.AltDirectorySeparatorChar))
+			return command;
+
+		if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+			return command;
+
+		// On Windows, search PATH for the command with common executable extensions
+		var pathEnv = Environment.GetEnvironmentVariable("PATH") ?? "";
+		var pathDirs = pathEnv.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries);
+		var extensions = new[] { ".cmd", ".bat", ".exe", ".com" };
+
+		foreach (var dir in pathDirs)
+		{
+			foreach (var ext in extensions)
+			{
+				var candidate = Path.Combine(dir, command + ext);
+				if (File.Exists(candidate))
+					return candidate;
+			}
+
+			// Also check without extension (might already have one)
+			var exact = Path.Combine(dir, command);
+			if (File.Exists(exact))
+				return exact;
+		}
+
+		// Fall back to the original command and let Process.Start handle it
+		return command;
 	}
 
 	private void OnProcessOutputData(object sender, DataReceivedEventArgs e)
@@ -360,14 +406,22 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Sends a graceful termination signal to the process.
-	/// On Windows, sends Ctrl+C via GenerateConsoleCtrlEvent. Falls back to Kill.
-	/// On Unix, sends SIGTERM.
+	/// Attempts graceful shutdown of the process. Closes stdin first (some frameworks
+	/// like Node.js detect stdin EOF), then kills the process directly. Since the
+	/// process is started without a cmd.exe/sh wrapper, the kill signal goes to the
+	/// actual process, not an intermediary shell.
 	/// </summary>
-	private static void KillProcessGracefully(Process process)
+	private void KillProcessGracefully(Process process)
 	{
 		try
 		{
+			// Close stdin first — gives processes that watch for stdin EOF
+			// (e.g. Node.js MCP servers) a chance to begin cleanup.
+			try { process.StandardInput.Close(); }
+			catch { /* stdin may already be closed */ }
+
+			// Kill the process directly. Since we start the command without a
+			// cmd.exe/sh wrapper, this terminates the actual process (not a shell).
 			process.Kill();
 		}
 		catch (InvalidOperationException)
@@ -395,7 +449,7 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 	{
 		if (_process is not null)
 		{
-			if (!_process.HasExited)
+			if (!HasExited)
 			{
 				await StopAsync();
 			}

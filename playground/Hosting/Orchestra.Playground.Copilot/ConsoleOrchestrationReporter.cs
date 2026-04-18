@@ -222,4 +222,9 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		if (context.AccessedEnvironmentVariables.Count > 0)
 			Console.WriteLine($"    Env vars accessed: {string.Join(", ", context.AccessedEnvironmentVariables.Keys)}");
 	}
+
+	public void ReportAuditLogEntry(string stepName, AuditLogEntry entry)
+	{
+		// No-op for console reporter
+	}
 }

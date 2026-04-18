@@ -138,6 +138,14 @@ internal sealed class CopilotSessionHandler
 			HandleMcpServerStatusChanged(mcpStatusChanged);
 			break;
 
+		case SessionCompactionStartEvent:
+			HandleCompactionStart();
+			break;
+
+		case SessionCompactionCompleteEvent compactionComplete:
+			HandleCompactionComplete(compactionComplete);
+			break;
+
 		case SessionErrorEvent err:
 			HandleError(err);
 			break;
@@ -373,6 +381,24 @@ internal sealed class CopilotSessionHandler
 			Type = AgentEventType.McpServerStatusChanged,
 			McpServerName = mcpStatusChanged.Data.ServerName,
 			McpServerStatus = status,
+		});
+	}
+
+	private void HandleCompactionStart()
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.CompactionStart,
+		});
+	}
+
+	private void HandleCompactionComplete(SessionCompactionCompleteEvent compactionComplete)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.CompactionComplete,
+			CompactionTokensBefore = (int?)compactionComplete.Data.PreCompactionTokens,
+			CompactionTokensAfter = (int?)compactionComplete.Data.PostCompactionTokens,
 		});
 	}
 

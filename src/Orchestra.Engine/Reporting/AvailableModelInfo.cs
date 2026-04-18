@@ -6,4 +6,9 @@ public class AvailableModelInfo
 	public string? Name { get; init; }
 	public double? BillingMultiplier { get; init; }
 	public string[]? ReasoningEfforts { get; init; }
+
+	/// <summary>
+	/// Whether the model supports vision (image) input.
+	/// </summary>
+	public bool? SupportsVision { get; init; }
 }

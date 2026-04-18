@@ -152,10 +152,10 @@ public class McpManagerTests : IAsyncLifetime
 
 	#endregion
 
-	#region Resolve — Global MCP Replacement (Unified Proxy)
+	#region Resolve — Per-Server Proxy Routes
 
 	[Fact]
-	public async Task Resolve_SingleGlobalMcp_ReplacedWithUnifiedProxy()
+	public async Task Resolve_SingleGlobalMcp_ReplacedWithPerServerRoute()
 	{
 		// Arrange
 		var globalMcp = CreateLocalMcp("server1");
@@ -164,17 +164,17 @@ public class McpManagerTests : IAsyncLifetime
 		// Act — pass the same object reference
 		var result = _manager.Resolve([globalMcp]);
 
-		// Assert — single global replaced with unified proxy MCP
+		// Assert — single global replaced with its per-server proxy route
 		result.Should().HaveCount(1);
 		var proxy = result[0].Should().BeOfType<RemoteMcp>().Subject;
-		proxy.Name.Should().Be("orchestra-mcp-proxy");
+		proxy.Name.Should().Be("server1");
 		proxy.Type.Should().Be(McpType.Remote);
-		proxy.Endpoint.Should().MatchRegex(@"^http://localhost:\d+/mcp$");
+		proxy.Endpoint.Should().MatchRegex(@"^http://localhost:\d+/mcp/server1$");
 		proxy.Headers.Should().BeEmpty();
 	}
 
 	[Fact]
-	public async Task Resolve_MultipleGlobalMcps_CollapsedIntoSingleProxy()
+	public async Task Resolve_MultipleGlobalMcps_EachGetsOwnRoute()
 	{
 		// Arrange
 		var mcp1 = CreateLocalMcp("server1");
@@ -184,14 +184,16 @@ public class McpManagerTests : IAsyncLifetime
 		// Act
 		var result = _manager.Resolve([mcp1, mcp2]);
 
-		// Assert — two globals collapsed into one unified proxy
-		result.Should().HaveCount(1);
-		var proxy = result[0].Should().BeOfType<RemoteMcp>().Subject;
-		proxy.Name.Should().Be("orchestra-mcp-proxy");
+		// Assert — each global gets its own per-server route (no merging)
+		result.Should().HaveCount(2);
+		result[0].Should().BeOfType<RemoteMcp>()
+			.Which.Endpoint.Should().MatchRegex(@"/mcp/server1$");
+		result[1].Should().BeOfType<RemoteMcp>()
+			.Which.Endpoint.Should().MatchRegex(@"/mcp/server2$");
 	}
 
 	[Fact]
-	public async Task Resolve_MixOfGlobalAndInline_InlinePreservedPlusProxy()
+	public async Task Resolve_MixOfGlobalAndInline_InlinePreservedGlobalsReplaced()
 	{
 		// Arrange
 		var globalMcp = CreateLocalMcp("global-server");
@@ -202,10 +204,11 @@ public class McpManagerTests : IAsyncLifetime
 		// Act
 		var result = _manager.Resolve([globalMcp, inlineMcp]);
 
-		// Assert — inline preserved, global replaced with unified proxy appended at end
+		// Assert — global replaced with per-server route, inline preserved
 		result.Should().HaveCount(2);
-		result[0].Should().BeSameAs(inlineMcp, "inline MCPs should pass through unchanged");
-		result[1].Should().BeOfType<RemoteMcp>().Which.Name.Should().Be("orchestra-mcp-proxy");
+		result[0].Should().BeOfType<RemoteMcp>()
+			.Which.Endpoint.Should().Contain("/mcp/global-server");
+		result[1].Should().BeSameAs(inlineMcp, "inline MCPs should pass through unchanged");
 	}
 
 	/// <summary>
@@ -231,7 +234,7 @@ public class McpManagerTests : IAsyncLifetime
 		// Assert — the cloned object should be recognized as global by name and replaced
 		result.Should().HaveCount(1);
 		result[0].Should().BeOfType<RemoteMcp>()
-			.Which.Name.Should().Be("orchestra-mcp-proxy");
+			.Which.Name.Should().Be("shared-server");
 	}
 
 	/// <summary>
@@ -257,8 +260,8 @@ public class McpManagerTests : IAsyncLifetime
 
 	/// <summary>
 	/// Simulates the full PromptExecutor pipeline: global MCPs are cloned by
-	/// TemplateResolver, then mixed with inline MCPs, then resolved. The proxy
-	/// should replace only the global ones.
+	/// TemplateResolver, then mixed with inline MCPs, then resolved. Each global
+	/// gets its own per-server proxy route.
 	/// </summary>
 	[Fact]
 	public async Task Resolve_ClonedGlobalsWithInlineMcps_OnlyGlobalsReplaced()
@@ -276,11 +279,13 @@ public class McpManagerTests : IAsyncLifetime
 		// Act
 		var result = _manager.Resolve([clonedGlobal1, inlineMcp, clonedGlobal2]);
 
-		// Assert — two globals replaced with one proxy, inline preserved
-		result.Should().HaveCount(2);
-		result[0].Should().BeSameAs(inlineMcp);
-		result[1].Should().BeOfType<RemoteMcp>()
-			.Which.Name.Should().Be("orchestra-mcp-proxy");
+		// Assert — two globals replaced with their own routes, inline preserved
+		result.Should().HaveCount(3);
+		result[0].Should().BeOfType<RemoteMcp>()
+			.Which.Endpoint.Should().Contain("/mcp/global-a");
+		result[1].Should().BeSameAs(inlineMcp);
+		result[2].Should().BeOfType<RemoteMcp>()
+			.Which.Endpoint.Should().Contain("/mcp/global-b");
 	}
 
 	#endregion
@@ -304,10 +309,10 @@ public class McpManagerTests : IAsyncLifetime
 		// Act
 		var result = _manager.Resolve([sameName]);
 
-		// Assert — matched by name, replaced with proxy
+		// Assert — matched by name, replaced with per-server route
 		result.Should().HaveCount(1);
 		result[0].Should().BeOfType<RemoteMcp>()
-			.Which.Name.Should().Be("orchestra-mcp-proxy");
+			.Which.Name.Should().Be("shared-server");
 	}
 
 	[Fact]
@@ -330,10 +335,10 @@ public class McpManagerTests : IAsyncLifetime
 
 	#endregion
 
-	#region Resolve — Unified Endpoint
+	#region Resolve — Per-Server Endpoint Format
 
 	[Fact]
-	public async Task Resolve_ProxyEndpointUsesStreamableHttpFormat()
+	public async Task Resolve_ProxyEndpointUsesPerServerFormat()
 	{
 		// Arrange
 		var globalMcp = CreateLocalMcp("my-tool");
@@ -342,14 +347,14 @@ public class McpManagerTests : IAsyncLifetime
 		// Act
 		var result = _manager.Resolve([globalMcp]);
 
-		// Assert — endpoint is Streamable HTTP (no /sse suffix)
+		// Assert — endpoint includes server name as sub-route
 		var proxy = result[0].Should().BeOfType<RemoteMcp>().Subject;
-		proxy.Endpoint.Should().MatchRegex(@"^http://localhost:\d+/mcp$");
+		proxy.Endpoint.Should().MatchRegex(@"^http://localhost:\d+/mcp/my-tool$");
 		proxy.Endpoint.Should().NotContain("/sse");
 	}
 
 	[Fact]
-	public async Task Resolve_AllGlobalsShareSameProxyEndpoint()
+	public async Task Resolve_EachGlobalGetsDistinctEndpoint()
 	{
 		// Arrange
 		var mcp1 = CreateLocalMcp("server1");
@@ -360,10 +365,32 @@ public class McpManagerTests : IAsyncLifetime
 		var result1 = _manager.Resolve([mcp1]);
 		var result2 = _manager.Resolve([mcp2]);
 
-		// Assert — both resolve to the same endpoint
+		// Assert — each resolves to its own distinct endpoint
 		var proxy1 = result1[0].Should().BeOfType<RemoteMcp>().Subject;
 		var proxy2 = result2[0].Should().BeOfType<RemoteMcp>().Subject;
-		proxy1.Endpoint.Should().Be(proxy2.Endpoint);
+		proxy1.Endpoint.Should().EndWith("/mcp/server1");
+		proxy2.Endpoint.Should().EndWith("/mcp/server2");
+		proxy1.Endpoint.Should().NotBe(proxy2.Endpoint);
+	}
+
+	[Fact]
+	public async Task Resolve_AllGlobalsShareSameBaseUrl()
+	{
+		// Arrange
+		var mcp1 = CreateLocalMcp("server1");
+		var mcp2 = CreateLocalMcp("server2");
+		await _manager.InitializeAsync([mcp1, mcp2]);
+
+		// Act — resolve each separately
+		var result1 = _manager.Resolve([mcp1]);
+		var result2 = _manager.Resolve([mcp2]);
+
+		// Assert — same base URL, different routes
+		var proxy1 = result1[0].Should().BeOfType<RemoteMcp>().Subject;
+		var proxy2 = result2[0].Should().BeOfType<RemoteMcp>().Subject;
+		var base1 = proxy1.Endpoint.Replace("/server1", "");
+		var base2 = proxy2.Endpoint.Replace("/server2", "");
+		base1.Should().Be(base2, "all global MCPs should share the same proxy base URL");
 	}
 
 	#endregion
@@ -402,10 +429,12 @@ public class McpManagerTests : IAsyncLifetime
 		// Act — pass the cloned object to Resolve (exactly what PromptExecutor does)
 		var result = _manager.Resolve([cloned]);
 
-		// Assert — must be recognized as global and replaced with proxy
+		// Assert — must be recognized as global and replaced with per-server route
 		result.Should().HaveCount(1);
 		result[0].Should().BeOfType<RemoteMcp>()
-			.Which.Name.Should().Be("orchestra-mcp-proxy");
+			.Which.Name.Should().Be("debug-mcp");
+		result[0].Should().BeOfType<RemoteMcp>()
+			.Which.Endpoint.Should().Contain("/mcp/debug-mcp");
 	}
 
 	/// <summary>
@@ -432,11 +461,13 @@ public class McpManagerTests : IAsyncLifetime
 		// Act
 		var result = _manager.Resolve([clonedGlobal1, inlineMcp, clonedGlobal2]);
 
-		// Assert — inline preserved, both globals replaced with single proxy
-		result.Should().HaveCount(2);
-		result[0].Should().BeSameAs(inlineMcp);
-		result[1].Should().BeOfType<RemoteMcp>()
-			.Which.Name.Should().Be("orchestra-mcp-proxy");
+		// Assert — inline preserved, each global replaced with its own per-server route
+		result.Should().HaveCount(3);
+		result[0].Should().BeOfType<RemoteMcp>()
+			.Which.Endpoint.Should().Contain("/mcp/server-a");
+		result[1].Should().BeSameAs(inlineMcp);
+		result[2].Should().BeOfType<RemoteMcp>()
+			.Which.Endpoint.Should().Contain("/mcp/server-b");
 	}
 
 	#endregion

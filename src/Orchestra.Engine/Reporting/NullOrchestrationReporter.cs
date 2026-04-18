@@ -40,4 +40,7 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 
 	// Run context
 	public void ReportRunContext(RunContext context) { }
+
+	// Audit log
+	public void ReportAuditLogEntry(string stepName, AuditLogEntry entry) { }
 }

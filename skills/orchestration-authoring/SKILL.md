@@ -45,6 +45,7 @@ Each key in `inputs` is the input name. Values:
 | `required` | bool | true | Must be provided at runtime |
 | `default` | string | null | Default for optional inputs |
 | `enum` | string[] | [] | Allowed values (case-insensitive) |
+| `multiline` | bool | false | UI hint: renders textarea instead of single-line input |
 
 ## Steps
 

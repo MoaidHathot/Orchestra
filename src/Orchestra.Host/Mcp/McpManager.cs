@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using McpProxy.Sdk.Configuration;
 using McpProxy.Sdk.Sdk;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -39,9 +40,10 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	private WebApplication? _proxyApp;
 
 	/// <summary>
-	/// The unified proxy endpoint URL (Streamable HTTP).
+	/// The per-server proxy base URL (e.g. <c>http://localhost:{port}/mcp</c>).
+	/// Individual server routes are at <c>{baseUrl}/{serverName}</c>.
 	/// </summary>
-	private string? _proxyEndpoint;
+	private string? _proxyBaseUrl;
 
 	/// <summary>
 	/// The port the proxy is listening on.
@@ -95,8 +97,8 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		// Find an available port
 		_proxyPort = GetAvailablePort();
 
-		// Build the unified proxy endpoint
-		_proxyEndpoint = $"http://localhost:{_proxyPort}/mcp";
+		// Build the per-server proxy base URL
+		_proxyBaseUrl = $"http://localhost:{_proxyPort}/mcp";
 
 		// Start the in-process proxy
 		await StartProxyAsync(globalMcps, cancellationToken);
@@ -105,8 +107,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Resolves MCPs for a step. All global MCPs (identified by name) are replaced
-	/// with a single <see cref="RemoteMcp"/> pointing to the unified proxy endpoint.
+	/// Resolves MCPs for a step. Each global MCP (identified by name) is replaced
+	/// with a <see cref="RemoteMcp"/> pointing to its per-server proxy route
+	/// (e.g. <c>http://localhost:{port}/mcp/{name}</c>).
 	/// Inline MCPs are returned unchanged.
 	/// </summary>
 	/// <remarks>
@@ -116,10 +119,10 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	/// </remarks>
 	public Engine.Mcp[] Resolve(Engine.Mcp[] mcps)
 	{
-		if (_globalMcpNames.Count == 0 || mcps.Length == 0 || _proxyEndpoint is null)
+		if (_globalMcpNames.Count == 0 || mcps.Length == 0 || _proxyBaseUrl is null)
 			return mcps;
 
-		var nonGlobals = new List<Engine.Mcp>();
+		var result = new List<Engine.Mcp>(mcps.Length);
 		var hasAnyGlobal = false;
 
 		foreach (var mcp in mcps)
@@ -127,26 +130,25 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 			if (_globalMcpNames.Contains(mcp.Name))
 			{
 				hasAnyGlobal = true;
+				// Replace with a RemoteMcp pointing to this server's per-server proxy route
+				result.Add(new RemoteMcp
+				{
+					Name = mcp.Name,
+					Type = McpType.Remote,
+					Endpoint = $"{_proxyBaseUrl}/{mcp.Name}",
+					Headers = [],
+				});
 			}
 			else
 			{
-				nonGlobals.Add(mcp);
+				result.Add(mcp);
 			}
 		}
 
 		if (!hasAnyGlobal)
 			return mcps;
 
-		// Replace all global MCP references with one unified proxy endpoint
-		nonGlobals.Add(new RemoteMcp
-		{
-			Name = "orchestra-mcp-proxy",
-			Type = McpType.Remote,
-			Endpoint = _proxyEndpoint,
-			Headers = [],
-		});
-
-		return [.. nonGlobals];
+		return [.. result];
 	}
 
 	protected virtual async Task StartProxyAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken)
@@ -163,13 +165,16 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		// so Kestrel won't warn about "Overriding address(es)".
 		builder.WebHost.UseUrls($"http://127.0.0.1:{_proxyPort}");
 
-		// Configure the MCP proxy using the SDK
+		// Configure the MCP proxy with per-server routing.
+		// Each global MCP gets its own isolated route: /mcp/{serverName}
 		builder.Services.AddMcpProxy(proxy =>
 		{
 			proxy.WithServerInfo(
 				"Orchestra MCP Proxy",
 				"1.0.0",
 				"Shared MCP proxy managed by Orchestra Host.");
+
+			proxy.WithRouting(RoutingMode.PerServer, "/mcp");
 
 			foreach (var mcp in globalMcps)
 			{
@@ -182,16 +187,20 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 						break;
 
 					case RemoteMcp remote:
-						proxy.AddSseServer(mcp.Name, remote.Endpoint)
-							.WithTitle(mcp.Name)
-							.WithHeaders(remote.Headers)
-							.Build();
+						var serverBuilder = proxy.AddHttpServer(mcp.Name, remote.Endpoint)
+							.WithTitle(mcp.Name);
+						if (remote.Headers.Count > 0)
+						{
+							serverBuilder.WithHeaders(remote.Headers.ToDictionary(
+								h => h.Key, h => h.Value));
+						}
+						serverBuilder.Build();
 						break;
 				}
 			}
 		});
 
-		// Register MCP server with HTTP transport and SDK proxy handlers
+		// Register the unified MCP server with SDK proxy handlers
 		builder.Services
 			.AddMcpServer()
 			.WithHttpTransport()
@@ -199,11 +208,22 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 		_proxyApp = builder.Build();
 
-		// Initialize backend connections
-		await _proxyApp.InitializeMcpProxyAsync(cancellationToken);
+		// Initialize backend connections and hook pipelines.
+		// WORKAROUND: InitializeMcpProxyAsync hangs with PerServer routing in
+		// McpProxy SDK 1.12.0. Use a timeout so Orchestra startup isn't blocked.
+		// See mcpproxy-bug.md for details.
+		var initTask = _proxyApp.InitializeMcpProxyAsync(cancellationToken);
+		var completed = await Task.WhenAny(initTask, Task.Delay(TimeSpan.FromSeconds(30), cancellationToken));
+		if (completed != initTask)
+		{
+			LogProxyInitTimeout();
+		}
 
-		// Map the unified MCP Streamable HTTP endpoint
+		// Map unified endpoint (all tools) and per-server endpoints (isolated tools).
+		// Per-server endpoints use the SDK's MapPerServerMcpEndpoints() which creates
+		// /mcp/{serverName} routes backed by SingleServerProxy instances.
 		_proxyApp.MapMcp("/mcp");
+		_proxyApp.MapPerServerMcpEndpoints();
 
 		// Start the host (non-blocking)
 		await _proxyApp.StartAsync(cancellationToken);
@@ -270,6 +290,12 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "MCP proxy failed to start. Global MCPs will be unavailable.")]
 	private partial void LogProxyStartFailed(Exception ex);
+
+	[LoggerMessage(
+		EventId = 5,
+		Level = LogLevel.Warning,
+		Message = "MCP proxy initialization timed out after 30s (McpProxy SDK PerServer routing bug). Continuing startup — per-server tool isolation may be degraded.")]
+	private partial void LogProxyInitTimeout();
 
 	[LoggerMessage(
 		EventId = 6,

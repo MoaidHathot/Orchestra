@@ -100,6 +100,7 @@ export interface InputDefinition {
   required?: boolean;
   default?: string;
   enum?: string[];
+  multiline?: boolean;
 }
 
 export interface McpConfig {
@@ -171,6 +172,24 @@ export interface ConversationMessage {
   timestamp: string;
 }
 
+export interface AuditLogEntry {
+  sequence: number;
+  timestamp: string;
+  eventType: string; // "SessionStart" | "PromptSubmitted" | "PreToolUse" | "PostToolUse" | "Error" | "SessionEnd" | "CompactionStart" | "CompactionComplete"
+  toolName?: string;
+  toolArguments?: string;
+  permissionDecision?: string;
+  toolResult?: string;
+  toolSuccess?: boolean;
+  prompt?: string;
+  error?: string;
+  errorContext?: string;
+  errorHandling?: string;
+  additionalContext?: string;
+  sessionSource?: string;
+  sessionEndReason?: string;
+}
+
 export interface TraceData {
   systemPrompt?: string;
   userPromptRaw?: string;
@@ -183,6 +202,7 @@ export interface TraceData {
   mcpServers?: string[];
   warnings?: string[];
   conversationHistory?: ConversationMessage[];
+  auditLog?: AuditLogEntry[];
 }
 
 export interface ToolCallData {
@@ -258,6 +278,7 @@ export interface ExecutionModalState {
   stepEvents: Record<string, StepEvent[]>;
   stepResults: Record<string, string>;
   stepTraces: Record<string, TraceData>;
+  stepAuditLogs: Record<string, AuditLogEntry[]>;
   streamingContent: string;
   finalResult: string;
   status: string;

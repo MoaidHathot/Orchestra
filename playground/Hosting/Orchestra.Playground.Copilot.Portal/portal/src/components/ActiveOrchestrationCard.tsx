@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Icons, getTriggerIcon } from '../icons';
 import { formatTimeAgo, formatTimeUntil, getMatchingProfiles } from '../utils';
 import type { Orchestration, Profile, RunContext } from '../types';
@@ -30,6 +30,7 @@ interface Props {
   onView: (execution: CardExecution, orch: Orchestration | undefined) => void;
   onCancel?: (executionId: string) => void;
   onRun?: (orch: Orchestration) => void;
+  onToggleTrigger?: (orchestrationId: string, currentlyEnabled: boolean) => void;
   orchestrations?: Orchestration[];
   profiles?: Profile[];
 }
@@ -40,6 +41,7 @@ export default function ActiveOrchestrationCard({
   onView,
   onCancel,
   onRun,
+  onToggleTrigger,
   orchestrations,
   profiles,
 }: Props): React.JSX.Element {
@@ -178,6 +180,10 @@ export default function ActiveOrchestrationCard({
       </>
     );
   };
+
+  const triggerType = orch?.trigger?.type
+    || (orch as unknown as { triggerType?: string })?.triggerType;
+  const hasTrigger = !!triggerType && triggerType.toLowerCase() !== 'manual';
 
   return (
     <div
@@ -447,35 +453,9 @@ export default function ActiveOrchestrationCard({
           </div>
         )}
 
-        {/* Skill Directories */}
+        {/* Skill Directories — compact badge, click to expand */}
         {allSkillDirs.length > 0 && (
-          <div style={{ marginBottom: '8px' }}>
-            <div className="card-meta-label">Skills</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '2px' }}>
-              {allSkillDirs.map((dir) => {
-                const dirName = dir.replace(/^\.\//, '').split('/').pop() || dir;
-                return (
-                  <span
-                    key={dir}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      padding: '2px 6px',
-                      fontSize: '10px',
-                      background: 'rgba(240, 136, 62, 0.15)',
-                      border: '1px solid rgba(240, 136, 62, 0.3)',
-                      borderRadius: '4px',
-                      color: '#f0883e',
-                    }}
-                    title={dir}
-                  >
-                    <Icons.Skill />{dirName}
-                  </span>
-                );
-              })}
-            </div>
-          </div>
+          <SkillBadge skillDirs={allSkillDirs} />
         )}
 
         {/* Tags */}
@@ -554,8 +534,108 @@ export default function ActiveOrchestrationCard({
               <Icons.X /> Cancel
             </button>
           )}
+          {/* Trigger enable/disable toggle for orchestrations with non-manual triggers */}
+          {!isRunning && hasTrigger && onToggleTrigger && orch && (
+            <TriggerToggle
+              enabled={!isDisabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleTrigger(orch.id, !isDisabled);
+              }}
+            />
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ── Trigger enable/disable toggle ───────────────────────────────────── */
+
+function TriggerToggle({ enabled, onClick }: { enabled: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      className="btn btn-sm"
+      onClick={onClick}
+      title={enabled ? 'Disable trigger' : 'Enable trigger'}
+      style={{
+        marginLeft: 'auto',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: '5px',
+        color: enabled ? 'var(--success, #3fb950)' : 'var(--text-dim)',
+        borderColor: enabled ? 'rgba(63, 185, 80, 0.3)' : undefined,
+      }}
+    >
+      <span
+        style={{
+          width: '8px',
+          height: '8px',
+          borderRadius: '50%',
+          background: enabled ? 'var(--success, #3fb950)' : 'var(--text-dim)',
+          flexShrink: 0,
+          transition: 'background 0.2s',
+        }}
+      />
+      {enabled ? 'Enabled' : 'Disabled'}
+    </button>
+  );
+}
+
+/* ── Skill badge with expand/collapse ────────────────────────────────── */
+
+function SkillBadge({ skillDirs }: { skillDirs: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div style={{ marginBottom: '8px' }}>
+      <span
+        role="button"
+        onClick={(e: React.MouseEvent) => {
+          e.stopPropagation();
+          setExpanded((v) => !v);
+        }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '2px 6px',
+          fontSize: '10px',
+          background: 'rgba(240, 136, 62, 0.15)',
+          border: '1px solid rgba(240, 136, 62, 0.3)',
+          borderRadius: '4px',
+          color: '#f0883e',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+        title={expanded ? 'Click to collapse' : 'Click to show skill directories'}
+      >
+        <Icons.Skill />
+        {skillDirs.length === 1 ? '1 skill' : `${skillDirs.length} skills`}
+        <span style={{ fontSize: '8px', marginLeft: '2px', opacity: 0.7 }}>
+          {expanded ? '\u25B2' : '\u25BC'}
+        </span>
+      </span>
+      {expanded && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginTop: '4px' }}>
+          {skillDirs.map((dir) => (
+            <div
+              key={dir}
+              style={{
+                fontSize: '10px',
+                color: '#ffa657',
+                fontFamily: 'monospace',
+                padding: '2px 6px',
+                background: 'var(--bg)',
+                borderRadius: '3px',
+                wordBreak: 'break-all',
+              }}
+            >
+              {dir}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

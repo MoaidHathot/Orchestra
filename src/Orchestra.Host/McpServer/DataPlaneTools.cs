@@ -73,6 +73,7 @@ public sealed class DataPlaneTools
 						required = kvp.Value.Required,
 						@default = kvp.Value.Default,
 						@enum = kvp.Value.Enum.Length > 0 ? kvp.Value.Enum : null,
+						multiline = kvp.Value.Multiline ? true : (bool?)null,
 					}),
 				stepCount = o.Steps.Length,
 			};

@@ -665,7 +665,7 @@ public partial class OrchestrationExecutor
 
 		foreach (var (name, definition) in inputs)
 		{
-			if (effective.TryGetValue(name, out var value))
+			if (effective.TryGetValue(name, out var value) && value.Length > 0)
 			{
 				// Validate type
 				var typeError = ValidateInputType(name, value, definition.Type);

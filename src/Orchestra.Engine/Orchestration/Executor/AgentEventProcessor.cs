@@ -20,6 +20,7 @@ public class AgentEventProcessor
 	private readonly List<string> _warnings = [];
 	private readonly List<McpServerStatusInfo> _mcpServerStatuses = [];
 	private readonly List<ConversationMessage> _conversationHistory = [];
+	private readonly List<AuditLogEntry> _auditLog = [];
 
 	public AgentEventProcessor(IOrchestrationReporter reporter, string stepName)
 	{
@@ -41,6 +42,20 @@ public class AgentEventProcessor
 	/// Gets the collected response segments.
 	/// </summary>
 	public IReadOnlyList<string> ResponseSegments => _responseSegments;
+
+	/// <summary>
+	/// Gets the collected audit log entries.
+	/// </summary>
+	public IReadOnlyList<AuditLogEntry> AuditLog => _auditLog;
+
+	/// <summary>
+	/// Adds an audit log entry, automatically assigning the sequence number.
+	/// </summary>
+	public void AddAuditLogEntry(AuditLogEntry entry)
+	{
+		entry.Sequence = _auditLog.Count;
+		_auditLog.Add(entry);
+	}
 
 	/// <summary>
 	/// Processes all events from the agent stream, reporting them and collecting trace data.
@@ -119,6 +134,14 @@ public class AgentEventProcessor
 
 			case AgentEventType.McpServerStatusChanged:
 				HandleMcpServerStatusChanged(evt);
+				break;
+
+			case AgentEventType.CompactionStart:
+				HandleCompactionStart(evt);
+				break;
+
+			case AgentEventType.CompactionComplete:
+				HandleCompactionComplete(evt);
 				break;
 		}
 	}
@@ -276,6 +299,20 @@ public class AgentEventProcessor
 			evt.McpServerStatus ?? "unknown");
 	}
 
+	private void HandleCompactionStart(AgentEvent evt)
+	{
+		var warningMessage = "[compaction] Context compaction started";
+		_warnings.Add(warningMessage);
+		_reporter.ReportSessionWarning("compaction", "Context compaction started");
+	}
+
+	private void HandleCompactionComplete(AgentEvent evt)
+	{
+		var message = $"[compaction] Context compaction complete — tokens before: {evt.CompactionTokensBefore}, after: {evt.CompactionTokensAfter}";
+		_warnings.Add(message);
+		_reporter.ReportSessionInfo("compaction", $"Context compaction complete — tokens before: {evt.CompactionTokensBefore}, after: {evt.CompactionTokensAfter}");
+	}
+
 	private void HandleSubagentSelected(AgentEvent evt)
 	{
 		_reporter.ReportSubagentSelected(
@@ -383,6 +420,7 @@ public class AgentEventProcessor
 			McpServers = BuildMcpServerList(mcpServers),
 			Warnings = _warnings.ToList(),
 			ConversationHistory = history,
+			AuditLog = _auditLog.ToList(),
 		};
 	}
 
@@ -401,6 +439,7 @@ public class AgentEventProcessor
 			McpServers = BuildMcpServerList(mcpServers),
 			Warnings = _warnings.ToList(),
 			ConversationHistory = new List<ConversationMessage>(_conversationHistory),
+			AuditLog = _auditLog.ToList(),
 		};
 	}
 

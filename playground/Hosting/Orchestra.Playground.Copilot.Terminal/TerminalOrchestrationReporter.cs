@@ -321,6 +321,11 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 	{
 		AddEvent(new ReporterEvent("run-context", $"Run {context.RunId} — {context.OrchestrationName} v{context.OrchestrationVersion}"));
 	}
+
+	public void ReportAuditLogEntry(string stepName, AuditLogEntry entry)
+	{
+		// No-op for terminal reporter
+	}
 }
 
 /// <summary>

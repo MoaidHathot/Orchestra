@@ -28,4 +28,8 @@ public enum AgentEventType
 	// MCP server lifecycle
 	McpServersLoaded,
 	McpServerStatusChanged,
+
+	// Context compaction (infinite sessions)
+	CompactionStart,
+	CompactionComplete,
 }

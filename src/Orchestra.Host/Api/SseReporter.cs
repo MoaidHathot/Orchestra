@@ -442,6 +442,29 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("subagent-deselected", new { stepName });
 	}
 
+	public void ReportAuditLogEntry(string stepName, AuditLogEntry entry)
+	{
+		Write("audit-log", new
+		{
+			stepName,
+			sequence = entry.Sequence,
+			timestamp = entry.Timestamp.ToString("o"),
+			eventType = entry.EventType.ToString(),
+			toolName = entry.ToolName,
+			toolArguments = entry.ToolArguments,
+			permissionDecision = entry.PermissionDecision,
+			toolResult = entry.ToolResult,
+			toolSuccess = entry.ToolSuccess,
+			prompt = entry.Prompt,
+			error = entry.Error,
+			errorContext = entry.ErrorContext,
+			errorHandling = entry.ErrorHandling,
+			additionalContext = entry.AdditionalContext,
+			sessionSource = entry.SessionSource,
+			sessionEndReason = entry.SessionEndReason,
+		});
+	}
+
 	public void ReportRunContext(RunContext context)
 	{
 		Write("run-context", new

@@ -95,10 +95,13 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				Reporter = _reporter,
 				EngineTools = engineTools,
 				EngineToolCtx = engineToolCtx,
-				SkillDirectories = step.SkillDirectories
-					.Select(dir => TemplateResolver.Resolve(dir, context.Parameters, context, step.DependsOn, step))
-					.ToArray(),
-			};
+			SkillDirectories = step.SkillDirectories
+				.Select(dir => TemplateResolver.Resolve(dir, context.Parameters, context, step.DependsOn, step))
+				.ToArray(),
+			SystemPromptSections = step.SystemPromptSections,
+			InfiniteSessionConfig = step.InfiniteSessions,
+			Attachments = ResolveAttachments(step.Attachments, context, step),
+		};
 
 			var agent = await _agentBuilder
 				.BuildAgentAsync(config, cancellationToken);
@@ -326,6 +329,31 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context))
 				.ToArray();
 			return resolved;
+		}).ToArray();
+	}
+
+	private static ImageAttachment[] ResolveAttachments(
+		ImageAttachment[] attachments,
+		OrchestrationExecutionContext context,
+		PromptOrchestrationStep step)
+	{
+		if (attachments.Length == 0)
+			return attachments;
+
+		return attachments.Select(a => a switch
+		{
+			FileImageAttachment file => new FileImageAttachment
+			{
+				Path = TemplateResolver.Resolve(file.Path, context.Parameters, context, step.DependsOn, step),
+				DisplayName = file.DisplayName,
+			},
+			BlobImageAttachment blob => new BlobImageAttachment
+			{
+				Data = TemplateResolver.Resolve(blob.Data, context.Parameters, context, step.DependsOn, step),
+				MimeType = blob.MimeType,
+				DisplayName = blob.DisplayName,
+			},
+			_ => a,
 		}).ToArray();
 	}
 

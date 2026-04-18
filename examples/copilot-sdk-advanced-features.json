@@ -1,0 +1,97 @@
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "advanced-copilot-sdk-features",
+  "description": "Demonstrates advanced Copilot SDK features: infinite sessions with custom thresholds, Customize system prompt mode with section overrides, and image attachments (file + blob). Session hooks automatically capture structured audit logs for every step.",
+  "version": "1.0.0",
+  "defaultModel": "claude-opus-4.6",
+  "tags": ["advanced", "copilot-sdk", "image-analysis", "audit-log"],
+  "steps": [
+    {
+      "name": "capture-screenshot",
+      "type": "Command",
+      "command": "pwsh",
+      "arguments": ["-Command", "& { Add-Type -AssemblyName System.Windows.Forms; $bmp = New-Object Drawing.Bitmap([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width, [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height); $graphics = [Drawing.Graphics]::FromImage($bmp); $graphics.CopyFromScreen(0, 0, 0, 0, $bmp.Size); $path = Join-Path $env:TEMP 'orchestra-screenshot.png'; $bmp.Save($path, [Drawing.Imaging.ImageFormat]::Png); Write-Output $path }"],
+      "enabled": false
+    },
+    {
+      "name": "analyze-ui-mockup",
+      "type": "Prompt",
+      "model": "claude-opus-4.6",
+      "systemPrompt": "You are a senior UX engineer. Analyze UI screenshots and mockups for accessibility issues, design inconsistencies, and usability concerns.",
+      "systemPromptMode": "customize",
+      "systemPromptSections": {
+        "tone": {
+          "action": "replace",
+          "content": "Be direct and actionable. List findings as bullet points with severity ratings (Critical, Warning, Suggestion). Do not use filler language."
+        },
+        "code_change_rules": {
+          "action": "remove"
+        },
+        "guidelines": {
+          "action": "append",
+          "content": "\n- Follow WCAG 2.1 AA guidelines for accessibility checks.\n- Reference Material Design or Apple HIG standards where applicable.\n- Flag contrast ratio violations explicitly."
+        }
+      },
+      "userPrompt": "Analyze this UI mockup for accessibility and design issues. Provide actionable recommendations.",
+      "attachments": [
+        {
+          "type": "file",
+          "path": "{{param.mockupPath}}",
+          "displayName": "UI Mockup"
+        }
+      ],
+      "parameters": ["mockupPath"],
+      "infiniteSessions": {
+        "enabled": true,
+        "backgroundCompactionThreshold": 0.80,
+        "bufferExhaustionThreshold": 0.95
+      }
+    },
+    {
+      "name": "generate-component-code",
+      "type": "Prompt",
+      "dependsOn": ["analyze-ui-mockup"],
+      "systemPrompt": "You are a React/TypeScript developer. Generate accessible component code based on UI analysis feedback.",
+      "systemPromptMode": "customize",
+      "systemPromptSections": {
+        "tone": {
+          "action": "replace",
+          "content": "Output clean, production-ready code. Include aria attributes and keyboard navigation."
+        },
+        "tool_efficiency": {
+          "action": "remove"
+        }
+      },
+      "userPrompt": "Based on the UI analysis below, generate accessible React components that address all identified issues:\n\n{{analyze-ui-mockup.output}}",
+      "infiniteSessions": {
+        "enabled": true,
+        "backgroundCompactionThreshold": 0.85,
+        "bufferExhaustionThreshold": 0.97
+      }
+    },
+    {
+      "name": "code-review-readonly",
+      "type": "Prompt",
+      "dependsOn": ["generate-component-code"],
+      "systemPrompt": "Review the generated component code for correctness, accessibility compliance, and React best practices.",
+      "systemPromptMode": "customize",
+      "systemPromptSections": {
+        "code_change_rules": {
+          "action": "replace",
+          "content": "You are in read-only review mode. Do NOT write or modify any files. Only analyze and report findings."
+        },
+        "guidelines": {
+          "action": "append",
+          "content": "\n- Verify all interactive elements have proper aria labels.\n- Check that focus management is handled correctly.\n- Ensure color contrast meets WCAG AA minimums."
+        }
+      },
+      "userPrompt": "Review this React component code for accessibility and correctness:\n\n{{generate-component-code.output}}"
+    },
+    {
+      "name": "final-report",
+      "type": "Transform",
+      "dependsOn": ["analyze-ui-mockup", "generate-component-code", "code-review-readonly"],
+      "template": "# UI Accessibility Report\n\n## Mockup Analysis\n{{analyze-ui-mockup.output}}\n\n## Generated Components\n{{generate-component-code.output}}\n\n## Code Review\n{{code-review-readonly.output}}"
+    }
+  ]
+}

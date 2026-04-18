@@ -38,4 +38,7 @@ public interface IOrchestrationReporter
 
 	// Run context
 	void ReportRunContext(RunContext context);
+
+	// Audit log
+	void ReportAuditLogEntry(string stepName, AuditLogEntry entry);
 }

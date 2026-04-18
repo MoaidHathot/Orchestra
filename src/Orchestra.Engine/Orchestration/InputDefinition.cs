@@ -55,4 +55,11 @@ public class InputDefinition
 	/// one of these values. Useful for constraining inputs to a known set of options.
 	/// </summary>
 	public string[] Enum { get; init; } = [];
+
+	/// <summary>
+	/// UI hint indicating this input benefits from a multiline text area
+	/// rather than a single-line input. Only meaningful for <see cref="InputType.String"/> inputs.
+	/// Defaults to false. Has no effect on validation or execution — purely a display hint.
+	/// </summary>
+	public bool Multiline { get; init; }
 }

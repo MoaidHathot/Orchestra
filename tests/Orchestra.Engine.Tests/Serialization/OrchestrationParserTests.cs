@@ -1300,6 +1300,125 @@ public class OrchestrationParserTests
 
 	#endregion
 
+	#region InfiniteSession Parsing
+
+	[Fact]
+	public void ParseOrchestration_WithInfiniteSessions_ParsesConfig()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "test",
+				"description": "Test",
+				"steps": [{
+					"name": "step1",
+					"type": "prompt",
+					"model": "gpt-5",
+					"systemPrompt": "test",
+					"userPrompt": "test",
+					"infiniteSessions": {
+						"enabled": true,
+						"backgroundCompactionThreshold": 0.85,
+						"bufferExhaustionThreshold": 0.97
+					}
+				}]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.InfiniteSessions.Should().NotBeNull();
+		step.InfiniteSessions!.Enabled.Should().BeTrue();
+		step.InfiniteSessions.BackgroundCompactionThreshold.Should().Be(0.85);
+		step.InfiniteSessions.BufferExhaustionThreshold.Should().Be(0.97);
+	}
+
+	#endregion
+
+	#region SystemPromptMode Customize Parsing
+
+	[Fact]
+	public void ParseOrchestration_WithCustomizeModeAndSections_ParsesSections()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "test",
+				"description": "Test",
+				"steps": [{
+					"name": "step1",
+					"type": "prompt",
+					"model": "gpt-5",
+					"systemPrompt": "test",
+					"userPrompt": "test",
+					"systemPromptMode": "customize",
+					"systemPromptSections": {
+						"tone": { "action": "replace", "content": "Be concise" },
+						"code_change_rules": { "action": "remove" }
+					}
+				}]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SystemPromptMode.Should().Be(SystemPromptMode.Customize);
+		step.SystemPromptSections.Should().HaveCount(2);
+		step.SystemPromptSections!["tone"].Action.Should().Be(SystemPromptSectionAction.Replace);
+		step.SystemPromptSections["tone"].Content.Should().Be("Be concise");
+		step.SystemPromptSections["code_change_rules"].Action.Should().Be(SystemPromptSectionAction.Remove);
+	}
+
+	#endregion
+
+	#region Attachments Parsing
+
+	[Fact]
+	public void ParseOrchestration_WithAttachments_ParsesFileAndBlobTypes()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "test",
+				"description": "Test",
+				"steps": [{
+					"name": "step1",
+					"type": "prompt",
+					"model": "gpt-5",
+					"systemPrompt": "test",
+					"userPrompt": "test",
+					"attachments": [
+						{ "type": "file", "path": "/path/to/image.png", "displayName": "screenshot" },
+						{ "type": "blob", "data": "base64data", "mimeType": "image/png" }
+					]
+				}]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.Attachments.Should().HaveCount(2);
+
+		var fileAttachment = step.Attachments[0].Should().BeOfType<FileImageAttachment>().Subject;
+		fileAttachment.Path.Should().Be("/path/to/image.png");
+		fileAttachment.DisplayName.Should().Be("screenshot");
+
+		var blobAttachment = step.Attachments[1].Should().BeOfType<BlobImageAttachment>().Subject;
+		blobAttachment.Data.Should().Be("base64data");
+		blobAttachment.MimeType.Should().Be("image/png");
+	}
+
+	#endregion
+
 	#region Error Handling
 
 	[Fact]
@@ -2073,6 +2192,96 @@ public class OrchestrationParserTests
 		step.Loop!.Target.Should().Be("iterative-step");
 		step.Loop.MaxIterations.Should().Be(3);
 		step.Loop.ExitPattern.Should().Be("APPROVED");
+	}
+
+	#endregion
+
+	#region Advanced Copilot SDK Features Example
+
+	[Fact]
+	public void ParseOrchestration_AdvancedCopilotSdkFeaturesJson_ParsesAllNewFeatures()
+	{
+		// Arrange
+		var examplesDir = Path.GetFullPath(
+			Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"));
+		var filePath = Path.Combine(examplesDir, "copilot-sdk-advanced-features.json");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(filePath, []);
+
+		// Assert
+		orchestration.Name.Should().Be("advanced-copilot-sdk-features");
+		orchestration.Tags.Should().Contain("copilot-sdk");
+		orchestration.Steps.Should().HaveCount(5);
+
+		// Step: analyze-ui-mockup — customize mode + sections + attachments + infinite sessions
+		var analyzeStep = orchestration.Steps.OfType<PromptOrchestrationStep>()
+			.Single(s => s.Name == "analyze-ui-mockup");
+		analyzeStep.SystemPromptMode.Should().Be(SystemPromptMode.Customize);
+		analyzeStep.SystemPromptSections.Should().NotBeNull();
+		analyzeStep.SystemPromptSections.Should().ContainKey("tone");
+		analyzeStep.SystemPromptSections!["tone"].Action.Should().Be(SystemPromptSectionAction.Replace);
+		analyzeStep.SystemPromptSections["tone"].Content.Should().Contain("direct and actionable");
+		analyzeStep.SystemPromptSections.Should().ContainKey("code_change_rules");
+		analyzeStep.SystemPromptSections["code_change_rules"].Action.Should().Be(SystemPromptSectionAction.Remove);
+		analyzeStep.SystemPromptSections.Should().ContainKey("guidelines");
+		analyzeStep.SystemPromptSections["guidelines"].Action.Should().Be(SystemPromptSectionAction.Append);
+
+		analyzeStep.Attachments.Should().HaveCount(1);
+		var fileAttachment = analyzeStep.Attachments[0].Should().BeOfType<FileImageAttachment>().Subject;
+		fileAttachment.Path.Should().Be("{{param.mockupPath}}");
+		fileAttachment.DisplayName.Should().Be("UI Mockup");
+
+		analyzeStep.InfiniteSessions.Should().NotBeNull();
+		analyzeStep.InfiniteSessions!.Enabled.Should().BeTrue();
+		analyzeStep.InfiniteSessions.BackgroundCompactionThreshold.Should().Be(0.80);
+		analyzeStep.InfiniteSessions.BufferExhaustionThreshold.Should().Be(0.95);
+
+		// Step: code-review-readonly — customize mode enforcing read-only
+		var reviewStep = orchestration.Steps.OfType<PromptOrchestrationStep>()
+			.Single(s => s.Name == "code-review-readonly");
+		reviewStep.SystemPromptMode.Should().Be(SystemPromptMode.Customize);
+		reviewStep.SystemPromptSections.Should().ContainKey("code_change_rules");
+		reviewStep.SystemPromptSections!["code_change_rules"].Action.Should().Be(SystemPromptSectionAction.Replace);
+		reviewStep.SystemPromptSections["code_change_rules"].Content.Should().Contain("read-only review mode");
+	}
+
+	[Fact]
+	public void ParseOrchestration_AdvancedCopilotSdkFeaturesYaml_ParsesAllNewFeatures()
+	{
+		// Arrange
+		var examplesDir = Path.GetFullPath(
+			Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"));
+		var filePath = Path.Combine(examplesDir, "copilot-sdk-advanced-features.yaml");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(filePath, []);
+
+		// Assert
+		orchestration.Name.Should().Be("copilot-sdk-advanced-features");
+		orchestration.Tags.Should().Contain("infinite-sessions");
+		orchestration.Steps.Should().HaveCount(5);
+
+		// Step: analyze-ui — full feature showcase
+		var analyzeStep = orchestration.Steps.OfType<PromptOrchestrationStep>()
+			.Single(s => s.Name == "analyze-ui");
+		analyzeStep.SystemPromptMode.Should().Be(SystemPromptMode.Customize);
+		analyzeStep.SystemPromptSections.Should().HaveCount(3);
+		analyzeStep.SystemPromptSections!["tone"].Action.Should().Be(SystemPromptSectionAction.Replace);
+		analyzeStep.SystemPromptSections["code_change_rules"].Action.Should().Be(SystemPromptSectionAction.Remove);
+		analyzeStep.SystemPromptSections["guidelines"].Action.Should().Be(SystemPromptSectionAction.Append);
+
+		analyzeStep.Attachments.Should().HaveCount(1);
+		analyzeStep.Attachments[0].Should().BeOfType<FileImageAttachment>();
+
+		analyzeStep.InfiniteSessions.Should().NotBeNull();
+		analyzeStep.InfiniteSessions!.Enabled.Should().BeTrue();
+
+		// Step: code-review — infinite sessions disabled
+		var reviewStep = orchestration.Steps.OfType<PromptOrchestrationStep>()
+			.Single(s => s.Name == "code-review");
+		reviewStep.InfiniteSessions.Should().NotBeNull();
+		reviewStep.InfiniteSessions!.Enabled.Should().BeFalse();
 	}
 
 	#endregion

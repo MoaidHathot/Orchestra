@@ -53,10 +53,13 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		var subagents = Subagents;
 		var reasoningLevel = ReasoningLevel;
 		var systemPromptMode = SystemPromptMode;
+		var systemPromptSections = SystemPromptSectionOverrides;
 		var reporter = Reporter;
 		var engineTools = EngineTools;
 		var engineToolCtx = EngineToolCtx;
 		var skillDirectories = SkillDirectories;
+		var infiniteSessionConfig = InfiniteSession;
+		var attachments = Attachments;
 
 		await EnsureClientStartedAsync(cancellationToken).ConfigureAwait(false);
 
@@ -68,10 +71,13 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			subagents: subagents,
 			reasoningLevel: reasoningLevel,
 			systemPromptMode: systemPromptMode,
+			systemPromptSections: systemPromptSections,
 			reporter: reporter,
 			engineTools: engineTools,
 			engineToolContext: engineToolCtx,
 			skillDirectories: skillDirectories,
+			infiniteSessionConfig: infiniteSessionConfig,
+			attachments: attachments,
 			cachedAvailableModels: CachedAvailableModels,
 			onAvailableModelsListed: models => CachedAvailableModels = models,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()
@@ -90,10 +96,13 @@ public class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			subagents: config.Subagents,
 			reasoningLevel: config.ReasoningLevel,
 			systemPromptMode: config.SystemPromptMode,
+			systemPromptSections: config.SystemPromptSections,
 			reporter: config.Reporter,
 			engineTools: config.EngineTools,
 			engineToolContext: config.EngineToolCtx,
 			skillDirectories: config.SkillDirectories,
+			infiniteSessionConfig: config.InfiniteSessionConfig,
+			attachments: config.Attachments,
 			cachedAvailableModels: CachedAvailableModels,
 			onAvailableModelsListed: models => CachedAvailableModels = models,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>()

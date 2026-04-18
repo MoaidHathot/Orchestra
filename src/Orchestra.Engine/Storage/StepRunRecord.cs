@@ -237,6 +237,13 @@ public class StepExecutionTrace
 	/// Captures the complete multi-turn exchange for debugging multi-turn prompt steps.
 	/// </summary>
 	public List<ConversationMessage> ConversationHistory { get; init; } = [];
+
+	/// <summary>
+	/// Structured audit log entries captured by session hooks.
+	/// Records tool permissions, prompt submissions, session lifecycle, and errors
+	/// for compliance, debugging, and observability.
+	/// </summary>
+	public List<AuditLogEntry> AuditLog { get; init; } = [];
 }
 
 /// <summary>

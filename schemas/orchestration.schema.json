@@ -275,6 +275,88 @@
           "items": {
             "type": "string"
           }
+        },
+        "systemPromptSections": {
+          "type": "object",
+          "description": "Section-level overrides for the system prompt. Used with systemPromptMode: customize to surgically control specific sections.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": ["replace", "remove", "append", "prepend"],
+                "description": "The action to apply to this section."
+              },
+              "content": {
+                "type": "string",
+                "description": "The content for replace, append, or prepend actions."
+              }
+            },
+            "required": ["action"]
+          }
+        },
+        "infiniteSessions": {
+          "type": "object",
+          "description": "Configuration for infinite sessions (automatic context compaction).",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Whether infinite sessions are enabled. Default: true (SDK default)."
+            },
+            "backgroundCompactionThreshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Context utilization ratio (0.0-1.0) at which background compaction begins. Default: 0.80."
+            },
+            "bufferExhaustionThreshold": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Context utilization ratio (0.0-1.0) at which the session blocks until compaction completes. Default: 0.95."
+            }
+          }
+        },
+        "attachments": {
+          "type": "array",
+          "description": "Image attachments to send with the prompt. Supports file paths and base64 blob data.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["file", "blob"],
+                "description": "Attachment type: 'file' for disk paths, 'blob' for inline base64 data."
+              },
+              "path": {
+                "type": "string",
+                "description": "Absolute path to the image file (for type: file). Supports template expressions."
+              },
+              "data": {
+                "type": "string",
+                "description": "Base64-encoded image data (for type: blob). Supports template expressions."
+              },
+              "mimeType": {
+                "type": "string",
+                "description": "MIME type of the image (for type: blob), e.g. 'image/png'."
+              },
+              "displayName": {
+                "type": "string",
+                "description": "Optional display name for the attachment."
+              }
+            },
+            "required": ["type"],
+            "allOf": [
+              {
+                "if": { "properties": { "type": { "const": "file" } } },
+                "then": { "required": ["path"] }
+              },
+              {
+                "if": { "properties": { "type": { "const": "blob" } } },
+                "then": { "required": ["data", "mimeType"] }
+              }
+            ]
+          }
         }
       },
       "required": [],
@@ -887,7 +969,7 @@
     "systemPromptMode": {
       "type": "string",
       "description": "How the custom system prompt interacts with the SDK's default system prompt. 'replace' completely replaces the SDK's built-in prompt. 'append' adds your prompt to the SDK's default, preserving built-in capabilities.",
-      "enum": ["append", "replace", "Append", "Replace"]
+      "enum": ["append", "replace", "customize", "Append", "Replace", "Customize"]
     },
 
     "reasoningLevel": {

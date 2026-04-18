@@ -12,6 +12,7 @@ import type {
   Step,
   TraceData,
   RunContext,
+  AuditLogEntry,
   Profile,
 } from './types';
 import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
@@ -183,6 +184,7 @@ function App(): React.JSX.Element {
     stepEvents: {},
     stepResults: {},
     stepTraces: {},
+    stepAuditLogs: {},
     streamingContent: '',
     finalResult: '',
     status: 'idle',
@@ -622,6 +624,7 @@ function App(): React.JSX.Element {
     const stepStatuses: Record<string, string> = { ...initialStatuses };
     const stepResults: Record<string, string> = {};
     const stepTraces: Record<string, TraceData> = {};
+    const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
     let streamingContent = '';
     let finalResult = '';
     // Mutable tracker for execution ID (may be set later by execution-started event)
@@ -750,6 +753,25 @@ function App(): React.JSX.Element {
         const data: SSEEventData = JSON.parse(e.data);
         updateStepTrace(data.stepName, data as unknown as TraceData);
         addStepEvent(data.stepName, 'step-trace', { hasTrace: true });
+      } catch { /* ignore */ }
+    });
+
+    // audit-log
+    eventSource.addEventListener('audit-log', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as { stepName: string } & AuditLogEntry;
+        const { stepName, ...entry } = data;
+        if (!stepName) return;
+        if (!stepAuditLogs[stepName]) {
+          stepAuditLogs[stepName] = [];
+        }
+        stepAuditLogs[stepName].push(entry);
+        // Sort by sequence
+        stepAuditLogs[stepName].sort((a, b) => a.sequence - b.sequence);
+        setExecutionModal(prev => ({
+          ...prev,
+          stepAuditLogs: { ...stepAuditLogs },
+        }));
       } catch { /* ignore */ }
     });
 
@@ -1036,6 +1058,7 @@ function App(): React.JSX.Element {
       stepEvents: {},
       stepResults: {},
       stepTraces: {},
+      stepAuditLogs: {},
       streamingContent: '',
       finalResult: '',
       status: 'running',
@@ -1143,6 +1166,7 @@ function App(): React.JSX.Element {
       stepEvents: {},
       stepResults: {},
       stepTraces: {},
+      stepAuditLogs: {},
       streamingContent: '',
       finalResult: '',
       status: execution.status === 'Cancelling' ? 'cancelling' : 'running',
@@ -1184,6 +1208,7 @@ function App(): React.JSX.Element {
       stepEvents: {},
       stepResults: {},
       stepTraces: {},
+      stepAuditLogs: {},
       streamingContent: '',
       finalResult: '',
       status: 'loading',
@@ -1201,6 +1226,7 @@ function App(): React.JSX.Element {
       const stepEvents: Record<string, StepEvent[]> = {};
       const stepResults: Record<string, string> = {};
       const stepTraces: Record<string, TraceData> = {};
+      const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
       const finalResult = details.finalContent || '';
 
       if (details.steps) {
@@ -1222,6 +1248,11 @@ function App(): React.JSX.Element {
 
           if (step.trace) {
             stepTraces[step.name] = step.trace as unknown as TraceData;
+            // Extract audit log from trace if available
+            const traceAny = step.trace as unknown as TraceData;
+            if (traceAny.auditLog && traceAny.auditLog.length > 0) {
+              stepAuditLogs[step.name] = traceAny.auditLog;
+            }
           }
 
           // Create events from step data
@@ -1308,6 +1339,7 @@ function App(): React.JSX.Element {
         stepEvents,
         stepResults,
         stepTraces,
+        stepAuditLogs,
         streamingContent: finalResult,
         finalResult,
         status: modalStatus,
@@ -1834,6 +1866,7 @@ function App(): React.JSX.Element {
                             runOrchestration(orch?.id);
                           }
                         }}
+                        onToggleTrigger={(id, enabled) => toggleOrchestration(id, enabled)}
                       />
                     ))}
                   </div>
@@ -1867,6 +1900,7 @@ function App(): React.JSX.Element {
                             runOrchestration(orch?.id);
                           }
                         }}
+                        onToggleTrigger={(id, enabled) => toggleOrchestration(id, enabled)}
                       />
                     ))}
                   </div>
@@ -1927,6 +1961,7 @@ function App(): React.JSX.Element {
             stepEvents: {},
             stepResults: {},
             stepTraces: {},
+            stepAuditLogs: {},
             streamingContent: '',
             finalResult: '',
             status: 'idle',

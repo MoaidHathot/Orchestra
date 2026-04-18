@@ -70,7 +70,11 @@ public static partial class ExecutionApi
 					{
 						parameters = new Dictionary<string, string>();
 						foreach (var prop in paramsEl.EnumerateObject())
-							parameters[prop.Name] = prop.Value.GetString() ?? "";
+						{
+							var val = prop.Value.GetString();
+							if (val is not null && val.Length > 0)
+								parameters[prop.Name] = val;
+						}
 					}
 				}
 				catch (JsonException)

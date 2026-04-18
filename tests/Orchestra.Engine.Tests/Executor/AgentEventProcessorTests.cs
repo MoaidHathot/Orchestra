@@ -1368,6 +1368,102 @@ public class AgentEventProcessorTests
 
 	#endregion
 
+	#region Compaction Events
+
+	[Fact]
+	public async Task ProcessEventsAsync_CompactionStart_CollectsWarning()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent { Type = AgentEventType.CompactionStart }
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		_reporter.Received(1).ReportSessionWarning("compaction", "Context compaction started");
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Single(trace.Warnings);
+		Assert.Contains("compaction", trace.Warnings[0]);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_CompactionComplete_CollectsWarningWithTokenCounts()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent { Type = AgentEventType.CompactionStart },
+			new AgentEvent
+			{
+				Type = AgentEventType.CompactionComplete,
+				CompactionTokensBefore = 50000,
+				CompactionTokensAfter = 25000
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Equal(2, trace.Warnings.Count);
+		Assert.Contains("50000", trace.Warnings[1]);
+		Assert.Contains("25000", trace.Warnings[1]);
+	}
+
+	#endregion
+
+	#region Audit Log
+
+	[Fact]
+	public void AddAuditLogEntry_CollectsEntries()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+
+		// Act
+		processor.AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 1,
+			Timestamp = DateTimeOffset.UtcNow,
+			EventType = AuditEventType.SessionStart,
+			SessionSource = "startup"
+		});
+		processor.AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 2,
+			Timestamp = DateTimeOffset.UtcNow,
+			EventType = AuditEventType.PreToolUse,
+			ToolName = "read_file",
+			ToolArguments = "{\"path\": \"test.txt\"}"
+		});
+		processor.AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 3,
+			Timestamp = DateTimeOffset.UtcNow,
+			EventType = AuditEventType.PostToolUse,
+			ToolName = "read_file",
+			ToolSuccess = true,
+			ToolResult = "contents"
+		});
+
+		// Assert
+		Assert.Equal(3, processor.AuditLog.Count);
+		Assert.Equal(AuditEventType.SessionStart, processor.AuditLog[0].EventType);
+		Assert.Equal(0, processor.AuditLog[0].Sequence);
+		Assert.Equal(AuditEventType.PreToolUse, processor.AuditLog[1].EventType);
+		Assert.Equal("read_file", processor.AuditLog[1].ToolName);
+		Assert.Equal(1, processor.AuditLog[1].Sequence);
+		Assert.Equal(AuditEventType.PostToolUse, processor.AuditLog[2].EventType);
+		Assert.True(processor.AuditLog[2].ToolSuccess);
+		Assert.Equal(2, processor.AuditLog[2].Sequence);
+	}
+
+	#endregion
+
 	private static async IAsyncEnumerable<T> CreateAsyncEnumerable<T>(params T[] items)
 	{
 		foreach (var item in items)

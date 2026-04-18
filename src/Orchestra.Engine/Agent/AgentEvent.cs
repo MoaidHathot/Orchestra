@@ -98,6 +98,18 @@ public class AgentEvent
 	/// The list of tools available to the subagent (used by SubagentSelected).
 	/// </summary>
 	public string[]? SubagentTools { get; init; }
+
+	// ── Context compaction data (used by CompactionStart, CompactionComplete) ──
+
+	/// <summary>
+	/// Token count before compaction (used by CompactionComplete).
+	/// </summary>
+	public int? CompactionTokensBefore { get; init; }
+
+	/// <summary>
+	/// Token count after compaction (used by CompactionComplete).
+	/// </summary>
+	public int? CompactionTokensAfter { get; init; }
 }
 
 /// <summary>

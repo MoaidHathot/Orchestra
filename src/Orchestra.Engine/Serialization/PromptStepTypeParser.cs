@@ -57,6 +57,15 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			SkillDirectories = root.TryGetProperty("skillDirectories", out var skillDirs)
 				? skillDirs.EnumerateArray().Select(e => ResolveSkillDirectoryPath(e.GetString()!, context)).ToArray()
 				: [],
+			InfiniteSessions = root.TryGetProperty("infiniteSessions", out var infSessions)
+				? DeserializeInfiniteSessionConfig(infSessions)
+				: null,
+			SystemPromptSections = root.TryGetProperty("systemPromptSections", out var sps)
+				? DeserializeSystemPromptSections(sps)
+				: null,
+			Attachments = root.TryGetProperty("attachments", out var attachments)
+				? attachments.EnumerateArray().Select(DeserializeAttachment).ToArray()
+				: [],
 		};
 	}
 
@@ -210,6 +219,50 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			Target = element.GetProperty("target").GetString()!,
 			MaxIterations = element.GetProperty("maxIterations").GetInt32(),
 			ExitPattern = element.GetProperty("exitPattern").GetString()!,
+		};
+	}
+
+	private static InfiniteSessionConfig DeserializeInfiniteSessionConfig(JsonElement element)
+	{
+		return new InfiniteSessionConfig
+		{
+			Enabled = element.TryGetProperty("enabled", out var e) ? e.GetBoolean() : null,
+			BackgroundCompactionThreshold = element.TryGetProperty("backgroundCompactionThreshold", out var bct) ? bct.GetDouble() : null,
+			BufferExhaustionThreshold = element.TryGetProperty("bufferExhaustionThreshold", out var bet) ? bet.GetDouble() : null,
+		};
+	}
+
+	private static Dictionary<string, SystemPromptSectionOverride> DeserializeSystemPromptSections(JsonElement element)
+	{
+		var dict = new Dictionary<string, SystemPromptSectionOverride>(StringComparer.OrdinalIgnoreCase);
+		foreach (var prop in element.EnumerateObject())
+		{
+			dict[prop.Name] = new SystemPromptSectionOverride
+			{
+				Action = Enum.Parse<SystemPromptSectionAction>(prop.Value.GetProperty("action").GetString()!, ignoreCase: true),
+				Content = prop.Value.TryGetProperty("content", out var c) ? c.GetString() : null,
+			};
+		}
+		return dict;
+	}
+
+	private static ImageAttachment DeserializeAttachment(JsonElement element)
+	{
+		var type = element.GetProperty("type").GetString()!;
+		return type.ToLowerInvariant() switch
+		{
+			"file" => new FileImageAttachment
+			{
+				Path = element.GetProperty("path").GetString()!,
+				DisplayName = element.TryGetProperty("displayName", out var dn) ? dn.GetString() : null,
+			},
+			"blob" => new BlobImageAttachment
+			{
+				Data = element.GetProperty("data").GetString()!,
+				MimeType = element.GetProperty("mimeType").GetString()!,
+				DisplayName = element.TryGetProperty("displayName", out var dn) ? dn.GetString() : null,
+			},
+			_ => throw new JsonException($"Unknown attachment type: '{type}'. Expected 'file' or 'blob'."),
 		};
 	}
 

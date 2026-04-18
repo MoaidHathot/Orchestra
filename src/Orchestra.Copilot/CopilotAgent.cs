@@ -15,10 +15,13 @@ public partial class CopilotAgent : IAgent
 	private readonly Subagent[] _subagents;
 	private readonly ReasoningLevel? _reasoningLevel;
 	private readonly SystemPromptMode? _systemPromptMode;
+	private readonly Dictionary<string, SystemPromptSectionOverride>? _systemPromptSections;
 	private readonly IOrchestrationReporter _reporter;
 	private readonly IReadOnlyCollection<IEngineTool> _engineTools;
 	private readonly EngineToolContext? _engineToolContext;
 	private readonly string[] _skillDirectories;
+	private readonly Engine.InfiniteSessionConfig? _infiniteSessionConfig;
+	private readonly ImageAttachment[] _attachments;
 	private readonly ILogger<CopilotAgent> _logger;
 	private readonly IReadOnlyList<AvailableModelInfo>? _cachedAvailableModels;
 	private readonly Action<IReadOnlyList<AvailableModelInfo>>? _onAvailableModelsListed;
@@ -31,10 +34,13 @@ public partial class CopilotAgent : IAgent
 			Subagent[] subagents,
 			ReasoningLevel? reasoningLevel,
 			SystemPromptMode? systemPromptMode,
+			Dictionary<string, SystemPromptSectionOverride>? systemPromptSections,
 			IOrchestrationReporter reporter,
 			IReadOnlyCollection<IEngineTool> engineTools,
 			EngineToolContext? engineToolContext,
 			string[] skillDirectories,
+			Engine.InfiniteSessionConfig? infiniteSessionConfig,
+			ImageAttachment[] attachments,
 			ILogger<CopilotAgent> logger,
 			IReadOnlyList<AvailableModelInfo>? cachedAvailableModels = null,
 			Action<IReadOnlyList<AvailableModelInfo>>? onAvailableModelsListed = null)
@@ -46,10 +52,13 @@ public partial class CopilotAgent : IAgent
 		_subagents = subagents;
 		_reasoningLevel = reasoningLevel;
 		_systemPromptMode = systemPromptMode;
+		_systemPromptSections = systemPromptSections;
 		_reporter = reporter;
 		_engineTools = engineTools;
 		_engineToolContext = engineToolContext;
 		_skillDirectories = skillDirectories;
+		_infiniteSessionConfig = infiniteSessionConfig;
+		_attachments = attachments;
 		_logger = logger;
 		_cachedAvailableModels = cachedAvailableModels;
 		_onAvailableModelsListed = onAvailableModelsListed;
@@ -79,7 +88,14 @@ public partial class CopilotAgent : IAgent
 
 			session.On(handler.HandleEvent);
 
-			await session.SendAsync(new MessageOptions { Prompt = prompt }, cancellationToken).ConfigureAwait(false);
+			// Build message options with optional attachments
+			var messageOptions = new MessageOptions { Prompt = prompt };
+			if (_attachments.Length > 0)
+			{
+				messageOptions.Attachments = BuildAttachments();
+			}
+
+			await session.SendAsync(messageOptions, cancellationToken).ConfigureAwait(false);
 
 			using var registration = cancellationToken.Register(() =>
 			{
@@ -121,6 +137,7 @@ public partial class CopilotAgent : IAgent
 			config.ReasoningEffort = _reasoningLevel.Value.ToString().ToLowerInvariant();
 		}
 
+		// Configure system message with Append, Replace, or Customize mode
 		if (_systemPrompt is not null)
 		{
 			config.SystemMessage = new SystemMessageConfig
@@ -130,9 +147,32 @@ public partial class CopilotAgent : IAgent
 
 			if (_systemPromptMode is not null)
 			{
-				config.SystemMessage.Mode = _systemPromptMode.Value == SystemPromptMode.Append
-					? SystemMessageMode.Append
-					: SystemMessageMode.Replace;
+				config.SystemMessage.Mode = _systemPromptMode.Value switch
+				{
+					SystemPromptMode.Append => SystemMessageMode.Append,
+					SystemPromptMode.Customize => SystemMessageMode.Customize,
+					_ => SystemMessageMode.Replace,
+				};
+
+				// Apply section overrides for Customize mode
+				if (_systemPromptMode.Value == SystemPromptMode.Customize && _systemPromptSections is { Count: > 0 })
+				{
+					config.SystemMessage.Sections = _systemPromptSections
+						.ToDictionary(
+							kvp => kvp.Key,
+							kvp => new SectionOverride
+							{
+								Action = kvp.Value.Action switch
+								{
+									SystemPromptSectionAction.Replace => SectionOverrideAction.Replace,
+									SystemPromptSectionAction.Remove => SectionOverrideAction.Remove,
+									SystemPromptSectionAction.Append => SectionOverrideAction.Append,
+									SystemPromptSectionAction.Prepend => SectionOverrideAction.Prepend,
+									_ => SectionOverrideAction.Replace,
+								},
+								Content = kvp.Value.Content,
+							});
+				}
 			}
 		}
 
@@ -157,7 +197,162 @@ public partial class CopilotAgent : IAgent
 			config.SkillDirectories = [.. _skillDirectories];
 		}
 
+		// Configure infinite sessions
+		if (_infiniteSessionConfig is not null)
+		{
+			config.InfiniteSessions = new GitHub.Copilot.SDK.InfiniteSessionConfig();
+
+			if (_infiniteSessionConfig.Enabled.HasValue)
+				config.InfiniteSessions.Enabled = _infiniteSessionConfig.Enabled.Value;
+
+			if (_infiniteSessionConfig.BackgroundCompactionThreshold.HasValue)
+				config.InfiniteSessions.BackgroundCompactionThreshold = _infiniteSessionConfig.BackgroundCompactionThreshold.Value;
+
+			if (_infiniteSessionConfig.BufferExhaustionThreshold.HasValue)
+				config.InfiniteSessions.BufferExhaustionThreshold = _infiniteSessionConfig.BufferExhaustionThreshold.Value;
+		}
+
+		// Configure session hooks for structured audit logging
+		config.Hooks = BuildSessionHooks();
+
 		return config;
+	}
+
+	/// <summary>
+	/// Builds session hooks that capture structured audit log entries.
+	/// Hooks fire at well-defined points in the session lifecycle and record
+	/// tool calls, prompt submissions, errors, and lifecycle events.
+	/// </summary>
+	private SessionHooks BuildSessionHooks()
+	{
+		return new SessionHooks
+		{
+			OnSessionStart = (input, invocation) =>
+			{
+				_reporter.ReportAuditLogEntry(_stepName, new AuditLogEntry
+				{
+					Sequence = 0,
+					Timestamp = DateTimeOffset.UtcNow,
+					EventType = AuditEventType.SessionStart,
+					SessionSource = input.Source,
+					AdditionalContext = input.Cwd,
+				});
+				return Task.FromResult<SessionStartHookOutput?>(null);
+			},
+
+			OnUserPromptSubmitted = (input, invocation) =>
+			{
+				_reporter.ReportAuditLogEntry(_stepName, new AuditLogEntry
+				{
+					Sequence = 0,
+					Timestamp = DateTimeOffset.UtcNow,
+					EventType = AuditEventType.PromptSubmitted,
+					Prompt = input.Prompt?.Length > 500 ? input.Prompt[..500] + "..." : input.Prompt,
+				});
+				return Task.FromResult<UserPromptSubmittedHookOutput?>(null);
+			},
+
+			OnPreToolUse = (input, invocation) =>
+			{
+				string? argsJson = null;
+				if (input.ToolArgs is not null)
+				{
+					try { argsJson = System.Text.Json.JsonSerializer.Serialize(input.ToolArgs); }
+					catch { /* ignore */ }
+				}
+
+				_reporter.ReportAuditLogEntry(_stepName, new AuditLogEntry
+				{
+					Sequence = 0,
+					Timestamp = DateTimeOffset.UtcNow,
+					EventType = AuditEventType.PreToolUse,
+					ToolName = input.ToolName,
+					ToolArguments = argsJson,
+					PermissionDecision = "allow",
+				});
+
+				return Task.FromResult<PreToolUseHookOutput?>(
+					new PreToolUseHookOutput { PermissionDecision = "allow" });
+			},
+
+			OnPostToolUse = (input, invocation) =>
+			{
+				string? resultStr = input.ToolResult?.ToString();
+
+				_reporter.ReportAuditLogEntry(_stepName, new AuditLogEntry
+				{
+					Sequence = 0,
+					Timestamp = DateTimeOffset.UtcNow,
+					EventType = AuditEventType.PostToolUse,
+					ToolName = input.ToolName,
+					ToolResult = resultStr?.Length > 500 ? resultStr[..500] + "..." : resultStr,
+				});
+				return Task.FromResult<PostToolUseHookOutput?>(null);
+			},
+
+			OnErrorOccurred = (input, invocation) =>
+			{
+				_reporter.ReportAuditLogEntry(_stepName, new AuditLogEntry
+				{
+					Sequence = 0,
+					Timestamp = DateTimeOffset.UtcNow,
+					EventType = AuditEventType.Error,
+					Error = input.Error,
+					ErrorContext = input.ErrorContext,
+				});
+				return Task.FromResult<ErrorOccurredHookOutput?>(null);
+			},
+
+			OnSessionEnd = (input, invocation) =>
+			{
+				_reporter.ReportAuditLogEntry(_stepName, new AuditLogEntry
+				{
+					Sequence = 0,
+					Timestamp = DateTimeOffset.UtcNow,
+					EventType = AuditEventType.SessionEnd,
+					SessionEndReason = input.Reason,
+				});
+				return Task.FromResult<SessionEndHookOutput?>(null);
+			},
+		};
+	}
+
+	/// <summary>
+	/// The step name for audit log correlation. Set from the reporter context.
+	/// Defaults to the model name if no step name is available.
+	/// </summary>
+	private string _stepName => _engineToolContext?.StepName ?? _model;
+
+	/// <summary>
+	/// Builds image attachments for the Copilot SDK message.
+	/// </summary>
+	private List<UserMessageDataAttachmentsItem> BuildAttachments()
+	{
+		var attachments = new List<UserMessageDataAttachmentsItem>();
+
+		foreach (var attachment in _attachments)
+		{
+			switch (attachment)
+			{
+				case FileImageAttachment file:
+					attachments.Add(new UserMessageDataAttachmentsItemFile
+					{
+						Path = file.Path,
+						DisplayName = file.DisplayName ?? System.IO.Path.GetFileName(file.Path),
+					});
+					break;
+
+				case BlobImageAttachment blob:
+					attachments.Add(new UserMessageDataAttachmentsItemBlob
+					{
+						Data = blob.Data,
+						MimeType = blob.MimeType,
+					});
+					break;
+			}
+		}
+
+		return attachments;
 	}
 
 	private void LogMcpConfiguration()
@@ -211,6 +406,7 @@ public partial class CopilotAgent : IAgent
 						ReasoningEfforts = m.SupportedReasoningEfforts is { Count: > 0 }
 							? [.. m.SupportedReasoningEfforts]
 							: null,
+						SupportsVision = m.Capabilities?.Supports?.Vision,
 					})
 					.ToList();
 
