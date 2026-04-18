@@ -238,6 +238,35 @@ public class ServiceManagerIntegrationTests
 	}
 
 	[Fact]
+	public async Task ForceKill_ProcessService_KillsImmediatelyOnShutdown()
+	{
+		var manager = new ServiceManager(NullLogger<ServiceManager>.Instance);
+
+		var process = new ProcessService
+		{
+			Name = "force-kill-svc",
+			Command = IsWindows ? "ping" : "sleep",
+			Arguments = IsWindows ? ["-t", "127.0.0.1"] : ["3600"],
+			ShutdownTimeoutSeconds = 60,
+			ForceKill = true,
+		};
+
+		await manager.InitializeAsync([process]);
+
+		manager.Processes.Should().ContainKey("force-kill-svc");
+		var managed = manager.Processes["force-kill-svc"];
+		managed.State.Should().Be(ProcessState.Running);
+
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		await manager.StopAsync();
+		stopwatch.Stop();
+
+		managed.State.Should().Be(ProcessState.Stopped);
+		// With ForceKill, should complete well under the 60s shutdown timeout
+		stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
+	}
+
+	[Fact]
 	public async Task MixedEntries_FullLifecycle()
 	{
 		var manager = new ServiceManager(NullLogger<ServiceManager>.Instance);

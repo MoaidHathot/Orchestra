@@ -171,6 +171,68 @@ public class ManagedProcessTests
 		managed.ExitCode.Should().BeNull();
 	}
 
+	[Fact]
+	public async Task StopAsync_ForceKill_KillsImmediatelyWithoutTimeout()
+	{
+		// Use a long shutdown timeout to prove ForceKill bypasses it
+		var config = new ProcessService
+		{
+			Name = "force-kill-test",
+			Command = IsWindows ? "ping" : "sleep",
+			Arguments = IsWindows ? ["-t", "127.0.0.1"] : ["3600"],
+			ShutdownTimeoutSeconds = 60,
+			ForceKill = true,
+		};
+
+		await using var managed = new ManagedProcess(config, NullLogger.Instance);
+		await managed.StartAsync();
+		managed.State.Should().Be(ProcessState.Running);
+
+		var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+		await managed.StopAsync();
+		stopwatch.Stop();
+
+		managed.State.Should().Be(ProcessState.Stopped);
+		managed.HasExited.Should().BeTrue();
+		// With ForceKill, should complete well under the 60s timeout
+		stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(10));
+	}
+
+	[Fact]
+	public async Task StopAsync_ForceKill_StopAsync_TimeoutParamIgnored()
+	{
+		var config = new ProcessService
+		{
+			Name = "force-kill-timeout-ignored",
+			Command = IsWindows ? "ping" : "sleep",
+			Arguments = IsWindows ? ["-t", "127.0.0.1"] : ["3600"],
+			ShutdownTimeoutSeconds = 3,
+			ForceKill = true,
+		};
+
+		await using var managed = new ManagedProcess(config, NullLogger.Instance);
+		await managed.StartAsync();
+
+		// Pass a large timeout — ForceKill should ignore it
+		await managed.StopAsync(timeoutSeconds: 120);
+
+		managed.State.Should().Be(ProcessState.Stopped);
+		managed.HasExited.Should().BeTrue();
+	}
+
+	[Fact]
+	public async Task ProcessId_ReturnsValue_WhenRunning()
+	{
+		var config = CreatePingProcess("pid-test");
+		await using var managed = new ManagedProcess(config, NullLogger.Instance);
+
+		managed.ProcessId.Should().BeNull("process has not started");
+
+		await managed.StartAsync();
+		managed.ProcessId.Should().NotBeNull("process should have a PID after starting");
+		managed.ProcessId.Should().BeGreaterThan(0);
+	}
+
 	private static ProcessService CreatePingProcess(string name)
 	{
 		if (IsWindows)

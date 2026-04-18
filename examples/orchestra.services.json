@@ -22,6 +22,7 @@
         "timeoutSeconds": 15
       },
       "shutdownTimeoutSeconds": 5,
+      "forceKill": true,
       "required": true
     },
     {

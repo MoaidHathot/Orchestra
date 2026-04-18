@@ -46,6 +46,18 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 	public string Name => _config.Name;
 
 	/// <summary>
+	/// Gets the process ID of the underlying process, or null if not started or already exited.
+	/// </summary>
+	public int? ProcessId
+	{
+		get
+		{
+			try { return _process?.Id; }
+			catch (InvalidOperationException) { return null; }
+		}
+	}
+
+	/// <summary>
 	/// Gets the underlying process configuration.
 	/// </summary>
 	internal ProcessService Config => _config;
@@ -204,35 +216,47 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 
 	/// <summary>
 	/// Gracefully stops the process, then force-kills if the timeout is exceeded.
+	/// When <see cref="ProcessService.ForceKill"/> is true, the process tree is killed
+	/// immediately without attempting graceful shutdown.
 	/// </summary>
 	/// <param name="timeoutSeconds">Seconds to wait for graceful exit before force-killing.
-	/// If null, uses the configured <see cref="ProcessService.ShutdownTimeoutSeconds"/>.</param>
+	/// If null, uses the configured <see cref="ProcessService.ShutdownTimeoutSeconds"/>.
+	/// Ignored when <see cref="ProcessService.ForceKill"/> is true.</param>
 	public async Task StopAsync(int? timeoutSeconds = null)
 	{
 		if (_process is null || _state is ProcessState.Stopped or ProcessState.Pending)
 			return;
 
 		_state = ProcessState.Stopping;
-		var timeout = timeoutSeconds ?? _config.ShutdownTimeoutSeconds;
 
 		try
 		{
 			if (!_process.HasExited)
 			{
-				// Attempt graceful shutdown
-				KillProcessGracefully(_process);
-
-				using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
-				try
+				if (_config.ForceKill)
 				{
-					await _process.WaitForExitAsync(cts.Token);
-					LogProcessStopped(_config.Name, _process.ExitCode);
-				}
-				catch (OperationCanceledException)
-				{
-					// Timeout expired — force kill the entire process tree
+					// Immediate kill — no graceful shutdown attempt
 					KillProcessTree(_process);
 					LogProcessForceKilled(_config.Name);
+				}
+				else
+				{
+					// Attempt graceful shutdown with timeout
+					var timeout = timeoutSeconds ?? _config.ShutdownTimeoutSeconds;
+					KillProcessGracefully(_process);
+
+					using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeout));
+					try
+					{
+						await _process.WaitForExitAsync(cts.Token);
+						LogProcessStopped(_config.Name, _process.ExitCode);
+					}
+					catch (OperationCanceledException)
+					{
+						// Timeout expired — force kill the entire process tree
+						KillProcessTree(_process);
+						LogProcessForceKilled(_config.Name);
+					}
 				}
 			}
 

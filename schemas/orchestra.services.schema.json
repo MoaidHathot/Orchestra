@@ -75,7 +75,12 @@
               "type": "integer",
               "minimum": 0,
               "default": 10,
-              "description": "Grace period in seconds before force-killing the process during shutdown."
+              "description": "Grace period in seconds before force-killing the process during shutdown. Ignored when forceKill is true."
+            },
+            "forceKill": {
+              "type": "boolean",
+              "default": false,
+              "description": "If true, the process is killed immediately (entire process tree) during shutdown without attempting graceful shutdown or waiting for the timeout. Useful for processes that are known to never exit gracefully."
             },
             "required": {
               "type": "boolean",

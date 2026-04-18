@@ -12,6 +12,7 @@ namespace Orchestra.ProcessHost;
 public partial class ServiceManager : IAsyncDisposable
 {
 	private readonly ILogger<ServiceManager> _logger;
+	private readonly ProcessTracker? _processTracker;
 	private readonly ConcurrentDictionary<string, ManagedProcess> _processes = new();
 	private readonly ConcurrentDictionary<string, Task> _restartLoops = new();
 	private readonly List<CommandHook> _beforeStartHooks = [];
@@ -25,9 +26,10 @@ public partial class ServiceManager : IAsyncDisposable
 	/// </summary>
 	private const int MaxBackoffSeconds = 30;
 
-	public ServiceManager(ILogger<ServiceManager> logger)
+	public ServiceManager(ILogger<ServiceManager> logger, ProcessTracker? processTracker = null)
 	{
 		_logger = logger;
+		_processTracker = processTracker;
 	}
 
 	/// <summary>
@@ -53,6 +55,10 @@ public partial class ServiceManager : IAsyncDisposable
 
 		_initialized = true;
 		_shutdownCts = new CancellationTokenSource();
+
+		// Clean up orphaned processes from a previous session before starting anything.
+		// This handles the case where Orchestra crashed without stopping its managed processes.
+		_processTracker?.CleanupOrphans();
 
 		if (entries.Length == 0)
 		{
@@ -174,6 +180,10 @@ public partial class ServiceManager : IAsyncDisposable
 
 		_processes[config.Name] = managed;
 
+		// Track the process PID for orphan detection on future startups
+		if (_processTracker is not null && managed.ProcessId is int pid)
+			_processTracker.TrackProcess(config.Name, pid, config.Command);
+
 		// Start restart loop if policy is not Never
 		if (config.RestartPolicy != RestartPolicy.Never)
 		{
@@ -269,6 +279,11 @@ public partial class ServiceManager : IAsyncDisposable
 			if (newProcess is not null)
 			{
 				_processes[config.Name] = newProcess;
+
+				// Track the restarted process PID for orphan detection
+				if (_processTracker is not null && newProcess.ProcessId is int newPid)
+					_processTracker.TrackProcess(config.Name, newPid, config.Command);
+
 				attempt = 0; // Reset backoff on successful start
 			}
 			else
@@ -425,6 +440,9 @@ public partial class ServiceManager : IAsyncDisposable
 			await managed.DisposeAsync();
 		}
 		_processes.Clear();
+
+		// Clean shutdown — remove PID file so next startup doesn't see orphans
+		_processTracker?.Clear();
 
 		LogServiceManagerStopped();
 	}

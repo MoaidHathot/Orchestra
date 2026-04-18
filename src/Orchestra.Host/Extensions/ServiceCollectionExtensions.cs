@@ -157,7 +157,16 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton<McpManager>();
 
 		// ServiceManager: manages external processes and hooks from orchestra.services.json
-		services.AddSingleton<ServiceManager>();
+		services.AddSingleton<ProcessTracker>(sp =>
+		{
+			var configDir = Path.GetDirectoryName(OrchestraConfigLoader.GetDefaultConfigPath())!;
+			var pidFilePath = Path.Combine(configDir, ".orchestra.pids.json");
+			return new ProcessTracker(pidFilePath, sp.GetRequiredService<ILogger<ProcessTracker>>());
+		});
+		services.AddSingleton<ServiceManager>(sp =>
+			new ServiceManager(
+				sp.GetRequiredService<ILogger<ServiceManager>>(),
+				sp.GetRequiredService<ProcessTracker>()));
 
 		// ServiceManager shutdown: registered FIRST so it stops LAST (IHostedService
 		// instances are stopped in reverse registration order). This ensures managed

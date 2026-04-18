@@ -279,7 +279,7 @@ public class ServiceManagerTests : IAsyncLifetime
 		public Dictionary<string, bool> ProcessStartResults { get; } = [];
 
 		public TestableServiceManager()
-			: base(NullLogger<ServiceManager>.Instance)
+			: base(NullLogger<ServiceManager>.Instance, processTracker: null)
 		{
 		}
 

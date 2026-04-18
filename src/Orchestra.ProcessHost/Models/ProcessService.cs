@@ -19,8 +19,16 @@ public class ProcessService : ServiceEntry
 
 	/// <summary>
 	/// Grace period in seconds before force-killing the process during shutdown.
+	/// Ignored when <see cref="ForceKill"/> is true.
 	/// </summary>
 	public int ShutdownTimeoutSeconds { get; init; } = 10;
+
+	/// <summary>
+	/// If true, the process is killed immediately (entire process tree) during shutdown
+	/// without attempting graceful shutdown or waiting for the timeout. Useful for processes
+	/// that are known to never exit gracefully.
+	/// </summary>
+	public bool ForceKill { get; init; }
 
 	/// <summary>
 	/// If true, a readiness timeout will cause Orchestra startup to fail.
