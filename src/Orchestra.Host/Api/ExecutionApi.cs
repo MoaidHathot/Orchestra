@@ -231,6 +231,9 @@ public static partial class ExecutionApi
 			}
 			await httpContext.Response.Body.FlushAsync(sseToken);
 
+			// Start heartbeat to keep the SSE connection alive
+			_ = SendHeartbeatsAsync(reporter, sseToken);
+
 			// Stream future events until client disconnects OR orchestration completes
 			if (futureEvents is not null)
 			{
@@ -329,6 +332,9 @@ public static partial class ExecutionApi
 			{
 				return;
 			}
+
+			// Start heartbeat to keep the SSE connection alive
+			_ = SendHeartbeatsAsync(sseReporter, cancellationToken);
 
 			// Stream future events
 			if (futureEvents is not null)
@@ -589,4 +595,21 @@ public static partial class ExecutionApi
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to save failed run record for run '{RunId}'")]
 	private static partial void LogSaveFailedRunFailed(ILogger logger, string runId, Exception ex);
+
+	/// <summary>
+	/// Sends periodic heartbeat events on the execution SSE stream to prevent
+	/// proxies, load balancers, and idle TCP timeouts from silently closing the connection.
+	/// </summary>
+	private static async Task SendHeartbeatsAsync(SseReporter reporter, CancellationToken cancellationToken)
+	{
+		try
+		{
+			while (!cancellationToken.IsCancellationRequested && !reporter.IsCompleted)
+			{
+				await Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
+				reporter.SendHeartbeat();
+			}
+		}
+		catch (OperationCanceledException) { }
+	}
 }

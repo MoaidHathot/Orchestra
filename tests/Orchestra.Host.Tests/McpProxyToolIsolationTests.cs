@@ -128,6 +128,31 @@ public class McpProxyToolIsolationTests
 		toolsB.Should().BeEquivalentTo(ServerBTools);
 	}
 
+	// ── MCP Streamable HTTP protocol tests ──────────────────────────────
+	// These verify tool isolation when connecting via MCP protocol (the path
+	// the Copilot SDK uses). Currently failing because WithSdkProxyHandlers()
+	// returns ALL tools on every MapMcp route, bypassing the session's
+	// ToolCollection. McpProxy SDK needs to support per-server tool filtering
+	// on MCP Streamable HTTP endpoints, not just REST sub-routes.
+
+	[Fact(Skip = "McpProxy SDK gap: WithSdkProxyHandlers bypasses session ToolCollection, no per-server filtering on MapMcp routes")]
+	public async Task McpProtocol_ServerA_OnlyExposesServerATools()
+	{
+		await using var fixture = await ProxyFixture.CreateAsync(ServerATools, ServerBTools);
+		var tools = await fixture.ListToolsViaMcpProtocol("server-a");
+
+		tools.Should().BeEquivalentTo(ServerATools);
+	}
+
+	[Fact(Skip = "McpProxy SDK gap: WithSdkProxyHandlers bypasses session ToolCollection, no per-server filtering on MapMcp routes")]
+	public async Task McpProtocol_ServerB_OnlyExposesServerBTools()
+	{
+		await using var fixture = await ProxyFixture.CreateAsync(ServerATools, ServerBTools);
+		var tools = await fixture.ListToolsViaMcpProtocol("server-b");
+
+		tools.Should().BeEquivalentTo(ServerBTools);
+	}
+
 	// ── Helpers ──────────────────────────────────────────────────────────
 
 	private static LocalMcp CreateLocalMcp(string name) => new()
@@ -251,6 +276,25 @@ public class McpProxyToolIsolationTests
 			return tools.EnumerateArray()
 				.Select(t => t.GetProperty("name").GetString()!)
 				.ToList();
+		}
+
+		/// <summary>
+		/// Lists tools via MCP Streamable HTTP protocol (the same path the Copilot SDK uses).
+		/// Connects to /mcp/{serverName} with a full MCP client handshake.
+		/// </summary>
+		public async Task<List<string>> ListToolsViaMcpProtocol(string serverName)
+		{
+			var resolved = _manager.Resolve([CreateRemoteMcp(serverName)]);
+			var endpoint = ((RemoteMcp)resolved[0]).Endpoint;
+
+			await using var client = await McpClient.CreateAsync(
+				new HttpClientTransport(new HttpClientTransportOptions
+				{
+					Endpoint = new Uri(endpoint),
+				}));
+
+			var tools = await client.ListToolsAsync();
+			return [.. tools.Select(t => t.Name)];
 		}
 
 		public async ValueTask DisposeAsync()

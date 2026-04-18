@@ -150,8 +150,20 @@ internal sealed class CopilotSessionHandler
 			HandleError(err);
 			break;
 
+		case SessionShutdownEvent shutdown:
+			HandleShutdown(shutdown);
+			break;
+
+		case SessionTaskCompleteEvent taskComplete:
+			HandleTaskComplete(taskComplete);
+			break;
+
 			case SessionIdleEvent:
 				HandleIdle();
+				break;
+
+			default:
+				HandleUnknownEvent(evt);
 				break;
 		}
 	}
@@ -412,6 +424,42 @@ internal sealed class CopilotSessionHandler
 		// Complete the TCS so RunSessionAsync does not hang indefinitely
 		// waiting for SessionIdleEvent that may never arrive after a fatal error.
 		_done.TrySetResult();
+	}
+
+	private void HandleShutdown(SessionShutdownEvent shutdown)
+	{
+		var reason = shutdown.Data.ErrorReason ?? shutdown.Data.ShutdownType.ToString();
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.SessionIdle,
+			Content = $"Session shutdown ({reason})",
+		});
+		// The session is terminating — complete the TCS so the executor doesn't
+		// hang waiting for SessionIdleEvent that will never arrive.
+		_done.TrySetResult();
+	}
+
+	private void HandleTaskComplete(SessionTaskCompleteEvent taskComplete)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.SessionIdle,
+			Content = taskComplete.Data.Summary,
+		});
+		// Task is done — complete the TCS. SessionIdleEvent may or may not follow.
+		_done.TrySetResult();
+	}
+
+	private void HandleUnknownEvent(SessionEvent evt)
+	{
+		// Log unhandled event types so we don't silently drop signals
+		// that might indicate session termination or errors.
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.Warning,
+			DiagnosticType = "unhandled_sdk_event",
+			Content = $"Unhandled SDK event: {evt.GetType().Name}",
+		});
 	}
 
 	private void HandleIdle()
