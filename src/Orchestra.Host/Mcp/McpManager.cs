@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using McpProxy.Abstractions;
 using McpProxy.Sdk.Configuration;
 using McpProxy.Sdk.Sdk;
 using Microsoft.AspNetCore.Builder;
@@ -101,9 +102,19 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		_proxyBaseUrl = $"http://localhost:{_proxyPort}/mcp";
 
 		// Start the in-process proxy
-		await StartProxyAsync(globalMcps, cancellationToken);
+		try
+		{
+			await StartProxyAsync(globalMcps, cancellationToken);
+		}
+		catch (Exception)
+		{
+			// StartProxyAsync is expected to handle its own exceptions internally,
+			// but if a subclass override throws, we handle it here as a fallback.
+			_proxyBaseUrl = null;
+		}
 
-		LogProxyStarted(_proxyPort, globalMcps.Length, string.Join(", ", globalMcps.Select(m => m.Name)));
+		if (_proxyBaseUrl is not null)
+			LogProxyStarted(_proxyPort, globalMcps.Length, string.Join(", ", globalMcps.Select(m => m.Name)));
 	}
 
 	/// <summary>
@@ -227,6 +238,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		{
 			LogProxyStartFailed(ex);
 			_proxyApp = null;
+			_proxyBaseUrl = null;
 		}
 	}
 

@@ -143,6 +143,22 @@ public class AgentEventProcessor
 			case AgentEventType.CompactionComplete:
 				HandleCompactionComplete(evt);
 				break;
+
+			case AgentEventType.HookStart:
+				HandleHookStart(evt);
+				break;
+
+			case AgentEventType.HookEnd:
+				HandleHookEnd(evt);
+				break;
+
+			case AgentEventType.TurnStart:
+				HandleTurnStart(evt);
+				break;
+
+			case AgentEventType.SessionUsageInfo:
+				HandleSessionUsageInfo(evt);
+				break;
 		}
 	}
 
@@ -311,6 +327,61 @@ public class AgentEventProcessor
 		var message = $"[compaction] Context compaction complete — tokens before: {evt.CompactionTokensBefore}, after: {evt.CompactionTokensAfter}";
 		_warnings.Add(message);
 		_reporter.ReportSessionInfo("compaction", $"Context compaction complete — tokens before: {evt.CompactionTokensBefore}, after: {evt.CompactionTokensAfter}");
+	}
+
+	private void HandleHookStart(AgentEvent evt)
+	{
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.HookStart,
+			HookType = evt.HookType,
+			HookInvocationId = evt.HookInvocationId,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
+	}
+
+	private void HandleHookEnd(AgentEvent evt)
+	{
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.HookEnd,
+			HookType = evt.HookType,
+			HookInvocationId = evt.HookInvocationId,
+			HookSuccess = evt.HookSuccess,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
+
+		if (evt.HookSuccess == false)
+		{
+			var warningMessage = $"[hook_failed] Hook '{evt.HookType}' (invocation: {evt.HookInvocationId}) failed: {evt.ErrorMessage}";
+			_warnings.Add(warningMessage);
+			_reporter.ReportSessionWarning("hook_failed", $"Hook '{evt.HookType}' failed: {evt.ErrorMessage}");
+		}
+	}
+
+	private void HandleTurnStart(AgentEvent evt)
+	{
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.TurnStart,
+			TurnId = evt.TurnId,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
+	}
+
+	private void HandleSessionUsageInfo(AgentEvent evt)
+	{
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.SessionUsageInfo,
+			TokenLimit = evt.TokenLimit,
+			CurrentTokens = evt.CurrentTokens,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
 	}
 
 	private void HandleSubagentSelected(AgentEvent evt)

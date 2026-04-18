@@ -499,6 +499,38 @@ public class McpManagerTests : IAsyncLifetime
 
 	#endregion
 
+	#region Resolve — Proxy Failure Fallback
+
+	[Fact]
+	public async Task Resolve_WhenProxyFailedToStart_ReturnsInputUnchanged()
+	{
+		// Arrange — use a manager whose proxy fails to start
+		await using var failingManager = new FailingProxyMcpManager();
+		var globalMcp = CreateLocalMcp("server1");
+		await failingManager.InitializeAsync([globalMcp]);
+
+		// Act — the proxy failed, so Resolve should return original MCPs
+		var input = new Engine.Mcp[] { globalMcp };
+		var result = failingManager.Resolve(input);
+
+		// Assert — original MCPs returned unchanged (no dead proxy URLs)
+		result.Should().BeSameAs(input);
+	}
+
+	[Fact]
+	public async Task Resolve_WhenProxyFailedToStart_IsRunningIsFalse()
+	{
+		// Arrange
+		await using var failingManager = new FailingProxyMcpManager();
+		var globalMcp = CreateLocalMcp("server1");
+		await failingManager.InitializeAsync([globalMcp]);
+
+		// Assert
+		failingManager.IsRunning.Should().BeFalse();
+	}
+
+	#endregion
+
 	#region Helpers
 
 	private static LocalMcp CreateLocalMcp(string name) => new()
@@ -535,6 +567,22 @@ public class McpManagerTests : IAsyncLifetime
 		{
 			StartProxyCalled = true;
 			return Task.CompletedTask;
+		}
+	}
+
+	/// <summary>
+	/// Test subclass that simulates a proxy startup failure.
+	/// </summary>
+	private sealed class FailingProxyMcpManager : McpManager
+	{
+		public FailingProxyMcpManager()
+			: base(NullLogger<McpManager>.Instance)
+		{
+		}
+
+		protected override Task StartProxyAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken)
+		{
+			throw new InvalidOperationException("Simulated proxy startup failure");
 		}
 	}
 }

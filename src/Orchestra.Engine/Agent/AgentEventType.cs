@@ -32,4 +32,14 @@ public enum AgentEventType
 	// Context compaction (infinite sessions)
 	CompactionStart,
 	CompactionComplete,
+
+	// Hook lifecycle (SDK pre/post hooks)
+	HookStart,
+	HookEnd,
+
+	// Turn tracking (multi-turn conversations)
+	TurnStart,
+
+	// Session-level token usage info
+	SessionUsageInfo,
 }

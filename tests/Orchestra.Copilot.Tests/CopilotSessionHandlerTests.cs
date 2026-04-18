@@ -1429,4 +1429,237 @@ public class CopilotSessionHandlerTests
 	}
 
 	#endregion
+
+	#region Hook Events
+
+	[Fact]
+	public void HandleEvent_HookStart_WritesHookStartEvent()
+	{
+		// Arrange
+		var hookStartEvent = new HookStartEvent
+		{
+			Data = new HookStartData
+			{
+				HookInvocationId = "inv-123",
+				HookType = "preToolUse",
+				Input = null,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(hookStartEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.HookStart);
+		agentEvent.HookInvocationId.Should().Be("inv-123");
+		agentEvent.HookType.Should().Be("preToolUse");
+	}
+
+	[Fact]
+	public void HandleEvent_HookEnd_WritesHookEndEvent()
+	{
+		// Arrange
+		var hookEndEvent = new HookEndEvent
+		{
+			Data = new HookEndData
+			{
+				HookInvocationId = "inv-123",
+				HookType = "preToolUse",
+				Output = null,
+				Success = true,
+				Error = null,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(hookEndEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.HookEnd);
+		agentEvent.HookInvocationId.Should().Be("inv-123");
+		agentEvent.HookType.Should().Be("preToolUse");
+		agentEvent.HookSuccess.Should().BeTrue();
+	}
+
+	[Fact]
+	public void HandleEvent_HookEnd_WithFailure_SetsErrorMessage()
+	{
+		// Arrange
+		var hookEndEvent = new HookEndEvent
+		{
+			Data = new HookEndData
+			{
+				HookInvocationId = "inv-456",
+				HookType = "postToolUse",
+				Output = null,
+				Success = false,
+				Error = new HookEndDataError { Message = "Hook failed" },
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(hookEndEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.HookEnd);
+		agentEvent.HookSuccess.Should().BeFalse();
+		agentEvent.ErrorMessage.Should().NotBeNull();
+	}
+
+	#endregion
+
+	#region Turn Start Events
+
+	[Fact]
+	public void HandleEvent_TurnStart_WritesTurnStartEvent()
+	{
+		// Arrange
+		var turnStartEvent = new AssistantTurnStartEvent
+		{
+			Data = new AssistantTurnStartData
+			{
+				TurnId = "1",
+				InteractionId = "interaction-abc",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(turnStartEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.TurnStart);
+		agentEvent.TurnId.Should().Be("1");
+	}
+
+	#endregion
+
+	#region Session Usage Info Events
+
+	[Fact]
+	public void HandleEvent_SessionUsageInfo_WritesSessionUsageInfoEvent()
+	{
+		// Arrange
+		var usageInfoEvent = new SessionUsageInfoEvent
+		{
+			Data = new SessionUsageInfoData
+			{
+				TokenLimit = 128000,
+				CurrentTokens = 5000,
+				MessagesLength = 10,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(usageInfoEvent);
+
+		// Assert
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.SessionUsageInfo);
+		agentEvent.TokenLimit.Should().Be(128000);
+		agentEvent.CurrentTokens.Should().Be(5000);
+	}
+
+	#endregion
+
+	#region Informational Events (Silently Consumed)
+
+	[Fact]
+	public void HandleEvent_PendingMessagesModified_DoesNotWriteEvent()
+	{
+		// Arrange
+		var evt = new PendingMessagesModifiedEvent
+		{
+			Data = new PendingMessagesModifiedData()
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert — no event should be written to the channel
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionCustomAgentsUpdated_DoesNotWriteEvent()
+	{
+		// Arrange
+		var evt = new SessionCustomAgentsUpdatedEvent
+		{
+			Data = new SessionCustomAgentsUpdatedData
+			{
+				Agents = [],
+				Warnings = [],
+				Errors = [],
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionToolsUpdated_DoesNotWriteEvent()
+	{
+		// Arrange
+		var evt = new SessionToolsUpdatedEvent
+		{
+			Data = new SessionToolsUpdatedData
+			{
+				Model = "claude-opus-4.5",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_UserMessage_DoesNotWriteEvent()
+	{
+		// Arrange
+		var evt = new UserMessageEvent
+		{
+			Data = new UserMessageData
+			{
+				Content = "test message",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_AssistantStreamingDelta_DoesNotWriteEvent()
+	{
+		// Arrange
+		var evt = new AssistantStreamingDeltaEvent
+		{
+			Data = new AssistantStreamingDeltaData
+			{
+				TotalResponseSizeBytes = 1024,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	#endregion
 }

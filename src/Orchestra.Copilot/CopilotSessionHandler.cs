@@ -146,6 +146,33 @@ internal sealed class CopilotSessionHandler
 			HandleCompactionComplete(compactionComplete);
 			break;
 
+		// ── Hook lifecycle events ──
+		case HookStartEvent hookStart:
+			HandleHookStart(hookStart);
+			break;
+
+		case HookEndEvent hookEnd:
+			HandleHookEnd(hookEnd);
+			break;
+
+		// ── Turn tracking events ──
+		case AssistantTurnStartEvent turnStart:
+			HandleTurnStart(turnStart);
+			break;
+
+		// ── Session usage info ──
+		case SessionUsageInfoEvent usageInfo:
+			HandleSessionUsageInfo(usageInfo);
+			break;
+
+		// ── Informational events (silently consumed — no engine-level processing needed) ──
+		case PendingMessagesModifiedEvent:
+		case SessionCustomAgentsUpdatedEvent:
+		case SessionToolsUpdatedEvent:
+		case UserMessageEvent:
+		case AssistantStreamingDeltaEvent:
+			break;
+
 		case SessionErrorEvent err:
 			HandleError(err);
 			break;
@@ -411,6 +438,47 @@ internal sealed class CopilotSessionHandler
 			Type = AgentEventType.CompactionComplete,
 			CompactionTokensBefore = (int?)compactionComplete.Data.PreCompactionTokens,
 			CompactionTokensAfter = (int?)compactionComplete.Data.PostCompactionTokens,
+		});
+	}
+
+	private void HandleHookStart(HookStartEvent hookStart)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.HookStart,
+			HookInvocationId = hookStart.Data.HookInvocationId,
+			HookType = hookStart.Data.HookType,
+		});
+	}
+
+	private void HandleHookEnd(HookEndEvent hookEnd)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.HookEnd,
+			HookInvocationId = hookEnd.Data.HookInvocationId,
+			HookType = hookEnd.Data.HookType,
+			HookSuccess = hookEnd.Data.Success,
+			ErrorMessage = hookEnd.Data.Error?.ToString(),
+		});
+	}
+
+	private void HandleTurnStart(AssistantTurnStartEvent turnStart)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.TurnStart,
+			TurnId = turnStart.Data.TurnId,
+		});
+	}
+
+	private void HandleSessionUsageInfo(SessionUsageInfoEvent usageInfo)
+	{
+		_writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.SessionUsageInfo,
+			TokenLimit = usageInfo.Data.TokenLimit,
+			CurrentTokens = usageInfo.Data.CurrentTokens,
 		});
 	}
 

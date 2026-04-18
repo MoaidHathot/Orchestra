@@ -12,7 +12,7 @@
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.2" />
     <!-- LLM / MCP -->
     <PackageVersion Include="GitHub.Copilot.SDK" Version="0.2.2" />
-    <PackageVersion Include="McpProxy.Sdk" Version="1.14.0" />
+    <PackageVersion Include="McpProxy.Sdk" Version="1.16.0" />
     <PackageVersion Include="ModelContextProtocol" Version="1.2.0" />
     <!-- Serialization -->
     <PackageVersion Include="YamlDotNet" Version="17.0.1" />

@@ -110,6 +110,42 @@ public class AgentEvent
 	/// Token count after compaction (used by CompactionComplete).
 	/// </summary>
 	public int? CompactionTokensAfter { get; init; }
+
+	// ── Hook lifecycle data (used by HookStart, HookEnd) ──
+
+	/// <summary>
+	/// Unique identifier for a hook invocation, used to correlate HookStart/HookEnd events.
+	/// </summary>
+	public string? HookInvocationId { get; init; }
+
+	/// <summary>
+	/// The type of hook being executed (e.g., "preToolUse", "postToolUse", "sessionStart").
+	/// </summary>
+	public string? HookType { get; init; }
+
+	/// <summary>
+	/// Whether the hook completed successfully (used by HookEnd).
+	/// </summary>
+	public bool? HookSuccess { get; init; }
+
+	// ── Turn tracking data (used by TurnStart) ──
+
+	/// <summary>
+	/// Identifier for the current assistant turn in multi-turn conversations.
+	/// </summary>
+	public string? TurnId { get; init; }
+
+	// ── Session usage info data (used by SessionUsageInfo) ──
+
+	/// <summary>
+	/// Maximum context window token limit for the session.
+	/// </summary>
+	public double? TokenLimit { get; init; }
+
+	/// <summary>
+	/// Current token count used in the session.
+	/// </summary>
+	public double? CurrentTokens { get; init; }
 }
 
 /// <summary>

@@ -81,6 +81,36 @@ public class AuditLogEntry
 	/// The session end reason (for SessionEnd events).
 	/// </summary>
 	public string? SessionEndReason { get; init; }
+
+	/// <summary>
+	/// The hook type (for HookStart, HookEnd events, e.g. "preToolUse", "postToolUse", "sessionStart").
+	/// </summary>
+	public string? HookType { get; init; }
+
+	/// <summary>
+	/// Unique identifier for a hook invocation (for HookStart, HookEnd events).
+	/// </summary>
+	public string? HookInvocationId { get; init; }
+
+	/// <summary>
+	/// Whether the hook completed successfully (for HookEnd events).
+	/// </summary>
+	public bool? HookSuccess { get; init; }
+
+	/// <summary>
+	/// The turn identifier (for TurnStart events).
+	/// </summary>
+	public string? TurnId { get; init; }
+
+	/// <summary>
+	/// Maximum context window token limit (for SessionUsageInfo events).
+	/// </summary>
+	public double? TokenLimit { get; init; }
+
+	/// <summary>
+	/// Current token count used in the session (for SessionUsageInfo events).
+	/// </summary>
+	public double? CurrentTokens { get; init; }
 }
 
 /// <summary>
@@ -111,4 +141,16 @@ public enum AuditEventType
 
 	/// <summary>Context compaction completed (infinite sessions).</summary>
 	CompactionComplete,
+
+	/// <summary>An SDK hook started executing.</summary>
+	HookStart,
+
+	/// <summary>An SDK hook completed.</summary>
+	HookEnd,
+
+	/// <summary>A new assistant turn started in a multi-turn conversation.</summary>
+	TurnStart,
+
+	/// <summary>Session-level token usage information was received.</summary>
+	SessionUsageInfo,
 }

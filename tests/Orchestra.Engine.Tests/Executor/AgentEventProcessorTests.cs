@@ -1464,6 +1464,191 @@ public class AgentEventProcessorTests
 
 	#endregion
 
+	#region Hook Events
+
+	[Fact]
+	public async Task ProcessEventsAsync_HookStart_AddsAuditLogEntry()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.HookStart,
+				HookInvocationId = "inv-001",
+				HookType = "preToolUse",
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Single(processor.AuditLog);
+		Assert.Equal(AuditEventType.HookStart, processor.AuditLog[0].EventType);
+		Assert.Equal("inv-001", processor.AuditLog[0].HookInvocationId);
+		Assert.Equal("preToolUse", processor.AuditLog[0].HookType);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_HookEnd_Success_AddsAuditLogEntry()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.HookEnd,
+				HookInvocationId = "inv-001",
+				HookType = "preToolUse",
+				HookSuccess = true,
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Single(processor.AuditLog);
+		Assert.Equal(AuditEventType.HookEnd, processor.AuditLog[0].EventType);
+		Assert.True(processor.AuditLog[0].HookSuccess);
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Empty(trace.Warnings);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_HookEnd_Failure_AddsWarning()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.HookEnd,
+				HookInvocationId = "inv-002",
+				HookType = "postToolUse",
+				HookSuccess = false,
+				ErrorMessage = "Hook timed out",
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Single(processor.AuditLog);
+		Assert.False(processor.AuditLog[0].HookSuccess);
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Single(trace.Warnings);
+		Assert.Contains("hook_failed", trace.Warnings[0]);
+		Assert.Contains("postToolUse", trace.Warnings[0]);
+		_reporter.Received(1).ReportSessionWarning("hook_failed", Arg.Is<string>(s => s.Contains("postToolUse")));
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_HookStartAndEnd_CorrelatesByInvocationId()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.HookStart,
+				HookInvocationId = "inv-100",
+				HookType = "preToolUse",
+			},
+			new AgentEvent
+			{
+				Type = AgentEventType.HookEnd,
+				HookInvocationId = "inv-100",
+				HookType = "preToolUse",
+				HookSuccess = true,
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Equal(2, processor.AuditLog.Count);
+		Assert.Equal("inv-100", processor.AuditLog[0].HookInvocationId);
+		Assert.Equal("inv-100", processor.AuditLog[1].HookInvocationId);
+	}
+
+	#endregion
+
+	#region Turn Start Events
+
+	[Fact]
+	public async Task ProcessEventsAsync_TurnStart_AddsAuditLogEntry()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.TurnStart,
+				TurnId = "1",
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Single(processor.AuditLog);
+		Assert.Equal(AuditEventType.TurnStart, processor.AuditLog[0].EventType);
+		Assert.Equal("1", processor.AuditLog[0].TurnId);
+	}
+
+	#endregion
+
+	#region Session Usage Info Events
+
+	[Fact]
+	public async Task ProcessEventsAsync_SessionUsageInfo_AddsAuditLogEntry()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.SessionUsageInfo,
+				TokenLimit = 128000,
+				CurrentTokens = 15000,
+			}
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Single(processor.AuditLog);
+		Assert.Equal(AuditEventType.SessionUsageInfo, processor.AuditLog[0].EventType);
+		Assert.Equal(128000, processor.AuditLog[0].TokenLimit);
+		Assert.Equal(15000, processor.AuditLog[0].CurrentTokens);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_SessionUsageInfo_DoesNotAffectResponseSegments()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Hello" },
+			new AgentEvent { Type = AgentEventType.SessionUsageInfo, TokenLimit = 128000, CurrentTokens = 5000 }
+		);
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Single(processor.ResponseSegments);
+		Assert.Equal("Hello", processor.ResponseSegments[0]);
+	}
+
+	#endregion
+
 	private static async IAsyncEnumerable<T> CreateAsyncEnumerable<T>(params T[] items)
 	{
 		foreach (var item in items)
