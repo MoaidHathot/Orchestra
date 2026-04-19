@@ -51,7 +51,7 @@ Minimal valid orchestration:
       "type": "Prompt",
       "systemPrompt": "You are a helpful assistant.",
       "userPrompt": "Say hello.",
-      "model": "claude-opus-4.5"
+      "model": "gpt-5.4"
     }
   ]
 }
