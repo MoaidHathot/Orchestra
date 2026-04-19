@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Threading.Channels;
 using NSubstitute;
 
@@ -274,5 +275,115 @@ public static class MockAgentBuilderExtensions
 		});
 
 		return new MockAgentBuilder().WithResponse(finalContent, events.ToArray());
+	}
+
+	/// <summary>
+	/// Creates a realistic SDK event sequence that mirrors what CopilotSessionHandler produces:
+	/// SessionStart → TurnStart → ReasoningDelta* → MessageDelta* → TurnEnd
+	/// </summary>
+	public static AgentEvent[] BuildRealisticEventSequence(
+		string content,
+		string? reasoning = null,
+		(string toolName, string? arguments, string? result)[]? toolCalls = null)
+	{
+		var events = new List<AgentEvent>();
+		var turnId = Guid.NewGuid().ToString("N")[..8];
+
+		// Session start
+		events.Add(new AgentEvent { Type = AgentEventType.SessionStart, Model = "test-model" });
+
+		// Turn start
+		events.Add(new AgentEvent { Type = AgentEventType.TurnStart, TurnId = turnId });
+
+		// Reasoning (if provided)
+		if (reasoning is not null)
+		{
+			// Split reasoning into chunks to simulate streaming
+			foreach (var chunk in SplitIntoChunks(reasoning, 20))
+			{
+				events.Add(new AgentEvent { Type = AgentEventType.ReasoningDelta, Content = chunk });
+			}
+		}
+
+		// Tool calls (if provided)
+		if (toolCalls is not null)
+		{
+			foreach (var (toolName, arguments, result) in toolCalls)
+			{
+				var callId = Guid.NewGuid().ToString();
+				events.Add(new AgentEvent
+				{
+					Type = AgentEventType.ToolExecutionStart,
+					ToolCallId = callId,
+					ToolName = toolName,
+					ToolArguments = arguments,
+				});
+				events.Add(new AgentEvent
+				{
+					Type = AgentEventType.ToolExecutionComplete,
+					ToolCallId = callId,
+					ToolName = toolName,
+					ToolSuccess = true,
+					ToolResult = result,
+				});
+			}
+		}
+
+		// Message content (split into streaming chunks)
+		foreach (var chunk in SplitIntoChunks(content, 30))
+		{
+			events.Add(new AgentEvent { Type = AgentEventType.MessageDelta, Content = chunk });
+		}
+
+		// Turn end
+		events.Add(new AgentEvent { Type = AgentEventType.TurnEnd, TurnId = turnId });
+
+		return events.ToArray();
+	}
+
+	/// <summary>
+	/// Creates a handler that emits realistic event sequences and tracks which steps were invoked.
+	/// Each invocation is identified by a stepIdentifier extracted from the prompt.
+	/// </summary>
+	public static Func<string, CancellationToken, AgentTask> CreatePerStepHandler(
+		ConcurrentDictionary<string, List<AgentEventType>> receivedEventsByStep,
+		Func<string, string> stepNameExtractor,
+		Func<string, string>? contentFactory = null,
+		string? reasoning = null)
+	{
+		return (prompt, ct) =>
+		{
+			var stepName = stepNameExtractor(prompt);
+			var content = contentFactory?.Invoke(stepName) ?? $"Output from {stepName}";
+			var events = BuildRealisticEventSequence(content, reasoning);
+
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				var stepEvents = new List<AgentEventType>();
+
+				foreach (var evt in events)
+				{
+					stepEvents.Add(evt.Type);
+					await channel.Writer.WriteAsync(evt, ct);
+				}
+
+				// Record what this step received
+				receivedEventsByStep[stepName] = stepEvents;
+
+				channel.Writer.Complete();
+				return new AgentResult { Content = content, ActualModel = "test-model" };
+			}, ct);
+
+			return new AgentTask(channel.Reader, resultTask);
+		};
+	}
+
+	private static IEnumerable<string> SplitIntoChunks(string text, int chunkSize)
+	{
+		for (var i = 0; i < text.Length; i += chunkSize)
+		{
+			yield return text[i..Math.Min(i + chunkSize, text.Length)];
+		}
 	}
 }

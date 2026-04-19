@@ -120,6 +120,13 @@ public partial class OrchestrationExecutor
 		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
 		var effectiveParams = parameters ?? [];
 
+		// Create a run-scoped client for isolation: each orchestration run gets its own
+		// CLI process. All steps within this run share the client (each gets its own session).
+		// The client is disposed when the run ends, preventing stale connections across runs.
+		LogRunScopeAboutToCreate(runId, Environment.CurrentManagedThreadId);
+		await using var runScope = await _agentBuilder.CreateRunScopeAsync(cancellationToken).ConfigureAwait(false);
+		LogRunScopeReady(runId, Environment.CurrentManagedThreadId);
+
 		// Create temp file store if a data path is configured
 		OrchestrationTempFileStore? tempFileStore = null;
 		if (_dataPath is not null)
@@ -241,8 +248,13 @@ public partial class OrchestrationExecutor
 			if (!launchedSteps.TryAdd(stepName, 0))
 				return;
 
+			LogStepLaunchScheduled(stepName, Environment.CurrentManagedThreadId);
+			LogAsyncLocalDiagnostic("before-StartNew", _agentBuilder.GetRunScopedClientDiagnostic() ?? "null", Environment.CurrentManagedThreadId);
+
 			_ = Task.Factory.StartNew(async () =>
 			{
+				LogStepTaskStarted(stepName, Environment.CurrentManagedThreadId);
+				LogAsyncLocalDiagnostic("inside-StartNew", _agentBuilder.GetRunScopedClientDiagnostic() ?? "null", Environment.CurrentManagedThreadId);
 				var step = allSteps[stepName];
 				var stepExecutor = _stepExecutorRegistry.Resolve(step.Type);
 				var stepStartedAt = DateTimeOffset.UtcNow;
@@ -1279,6 +1291,21 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' has unresolved template expression: {Expression}")]
 	private partial void LogUnresolvedTemplateExpression(string stepName, string expression);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Step '{StepName}': scheduling launch on thread {ThreadId}")]
+	private partial void LogStepLaunchScheduled(string stepName, int threadId);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Step '{StepName}': task started on thread {ThreadId}")]
+	private partial void LogStepTaskStarted(string stepName, int threadId);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Run '{RunId}': about to create run scope on thread {ThreadId}")]
+	private partial void LogRunScopeAboutToCreate(string runId, int threadId);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Run '{RunId}': run scope ready on thread {ThreadId}")]
+	private partial void LogRunScopeReady(string runId, int threadId);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "AsyncLocal diagnostic [{Where}]: runScopedClient={ClientHash} on thread {ThreadId}")]
+	private partial void LogAsyncLocalDiagnostic(string where, string clientHash, int threadId);
 
 	#endregion
 }

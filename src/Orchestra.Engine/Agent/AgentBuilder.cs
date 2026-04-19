@@ -148,4 +148,27 @@ public abstract class AgentBuilder
 	/// Thread-safe — the config is constructed locally by the caller, eliminating shared mutable state.
 	/// </summary>
 	public abstract Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Creates a run-scoped resource scope for an orchestration run.
+	/// The returned scope manages shared resources (e.g., CLI client) that all steps
+	/// within a single orchestration run should share. Dispose the scope when the run ends.
+	///
+	/// Default implementation returns a no-op scope. SDK-specific builders (e.g., CopilotAgentBuilder)
+	/// override this to create per-run CLI clients for isolation and clean lifecycle management.
+	/// </summary>
+	public virtual Task<IAsyncDisposable> CreateRunScopeAsync(CancellationToken cancellationToken = default)
+		=> Task.FromResult<IAsyncDisposable>(NoOpRunScope.Instance);
+
+	/// <summary>
+	/// Diagnostic: returns a string description of the current run-scoped client (or null).
+	/// Default returns null. Used by the executor to verify ExecutionContext flow.
+	/// </summary>
+	public virtual string? GetRunScopedClientDiagnostic() => null;
+
+	private sealed class NoOpRunScope : IAsyncDisposable
+	{
+		public static readonly NoOpRunScope Instance = new();
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
 }
