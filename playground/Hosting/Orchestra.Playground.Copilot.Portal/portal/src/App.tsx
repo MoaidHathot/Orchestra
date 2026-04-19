@@ -14,6 +14,9 @@ import type {
   RunContext,
   AuditLogEntry,
   Profile,
+  ActorContext,
+  ActorStream,
+  StepActorStreams,
 } from './types';
 import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
 import type { CardExecution } from './components/ActiveOrchestrationCard';
@@ -186,6 +189,7 @@ function App(): React.JSX.Element {
     stepResults: {},
     stepTraces: {},
     stepAuditLogs: {},
+    stepActorStreams: {},
     streamingContent: '',
     finalResult: '',
     status: 'idle',
@@ -633,6 +637,86 @@ function App(): React.JSX.Element {
     // Accumulate reasoning content per step
     const reasoningAccumulators: Record<string, string> = {};
 
+    // ── Actor-keyed streaming buffers (Phase 1: backend now stamps every event
+    // with an `actor`; older Hosts won't, so we maintain a per-step temporal-
+    // scope stack of currently-active sub-agent toolCallIds as a fallback). ──
+    const stepActorStreams: Record<string, StepActorStreams> = {};
+    /** Per-step stack of active sub-agent toolCallIds (innermost on top). */
+    const subagentScopeByStep: Record<string, string[]> = {};
+    /** Per-step lookup: toolCallId → ActorContext (filled on subagent-started). */
+    const subagentActorByToolCallId: Record<string, Record<string, ActorContext>> = {};
+
+    const ensureMainStream = (stepName: string): ActorStream => {
+      if (!stepActorStreams[stepName]) {
+        stepActorStreams[stepName] = {
+          main: {
+            key: 'main',
+            actor: null,
+            content: '',
+            reasoning: '',
+            events: [],
+            startedAt: new Date().toISOString(),
+            status: 'running',
+          },
+          subagents: [],
+        };
+      }
+      return stepActorStreams[stepName].main;
+    };
+
+    const ensureSubagentStream = (stepName: string, actor: ActorContext): ActorStream => {
+      const bucket = stepActorStreams[stepName] ?? (() => {
+        ensureMainStream(stepName);
+        return stepActorStreams[stepName];
+      })();
+      let stream = bucket.subagents.find(s => s.key === actor.toolCallId);
+      if (!stream) {
+        stream = {
+          key: actor.toolCallId,
+          actor,
+          content: '',
+          reasoning: '',
+          events: [],
+          startedAt: new Date().toISOString(),
+          status: 'running',
+        };
+        bucket.subagents.push(stream);
+      }
+      return stream;
+    };
+
+    /**
+     * Resolves the right actor stream for an event:
+     *  1. If the wire payload carries `actor`, honor it (most precise).
+     *  2. Otherwise fall back to the per-step temporal-scope stack
+     *     (back-compat for older Hosts that don't stamp `actor`).
+     *  3. If no sub-agent is active, route to the main stream.
+     */
+    const resolveActorStream = (
+      stepName: string,
+      wireActor: ActorContext | undefined,
+    ): ActorStream => {
+      if (wireActor) {
+        return ensureSubagentStream(stepName, wireActor);
+      }
+      const scope = subagentScopeByStep[stepName];
+      if (scope && scope.length > 0) {
+        const top = scope[scope.length - 1];
+        const actor = subagentActorByToolCallId[stepName]?.[top];
+        if (actor) {
+          return ensureSubagentStream(stepName, actor);
+        }
+      }
+      return ensureMainStream(stepName);
+    };
+
+    const flushActorStreams = () => {
+      setExecutionModal(prev => ({
+        ...prev,
+        stepActorStreams: { ...stepActorStreams },
+      }));
+    };
+
     // ---- local helpers ----
 
     const addStepEvent = (stepName: string | undefined, type: string, data: Record<string, unknown>) => {
@@ -708,6 +792,12 @@ function App(): React.JSX.Element {
       try {
         const data: SSEEventData = JSON.parse(e.data);
         updateStepStatus(data.stepName, 'running');
+        if (data.stepName) {
+          // Pre-create the main stream so reasoning/content can stream into a
+          // ready bucket even before the first delta.
+          ensureMainStream(data.stepName);
+          flushActorStreams();
+        }
         addStepEvent(data.stepName, 'step-started', data as Record<string, unknown>);
       } catch { /* ignore */ }
     });
@@ -717,6 +807,11 @@ function App(): React.JSX.Element {
       try {
         const data: SSEEventData = JSON.parse(e.data);
         updateStepStatus(data.stepName, 'completed');
+        if (data.stepName && stepActorStreams[data.stepName]) {
+          stepActorStreams[data.stepName].main.status = 'completed';
+          stepActorStreams[data.stepName].main.completedAt = new Date().toISOString();
+          flushActorStreams();
+        }
         addStepEvent(data.stepName, 'step-completed', data as Record<string, unknown>);
       } catch { /* ignore */ }
     });
@@ -726,6 +821,12 @@ function App(): React.JSX.Element {
       try {
         const data: SSEEventData = JSON.parse(e.data);
         updateStepStatus(data.stepName, 'failed');
+        if (data.stepName && stepActorStreams[data.stepName]) {
+          stepActorStreams[data.stepName].main.status = 'failed';
+          stepActorStreams[data.stepName].main.completedAt = new Date().toISOString();
+          stepActorStreams[data.stepName].main.errorMessage = data.error ?? data.message;
+          flushActorStreams();
+        }
         addStepEvent(data.stepName, 'step-error', data as Record<string, unknown>);
       } catch { /* ignore */ }
     });
@@ -735,6 +836,11 @@ function App(): React.JSX.Element {
       try {
         const data: SSEEventData = JSON.parse(e.data);
         updateStepStatus(data.stepName, 'cancelled');
+        if (data.stepName && stepActorStreams[data.stepName]) {
+          stepActorStreams[data.stepName].main.status = 'cancelled';
+          stepActorStreams[data.stepName].main.completedAt = new Date().toISOString();
+          flushActorStreams();
+        }
         addStepEvent(data.stepName, 'step-cancelled', data as Record<string, unknown>);
       } catch { /* ignore */ }
     });
@@ -788,23 +894,103 @@ function App(): React.JSX.Element {
           }));
         }
         if (data.stepName) {
+          // Bucket the chunk into the right actor stream.
+          const stream = resolveActorStream(data.stepName, data.actor as ActorContext | undefined);
+          if (data.chunk) {
+            stream.content += data.chunk;
+            flushActorStreams();
+          }
           addStepEvent(data.stepName, 'content-delta', data as Record<string, unknown>);
         }
       } catch { /* ignore */ }
     });
 
-    // tool events
+    // tool events — route into the actor stream that owns them.
     (['tool-started', 'tool-completed'] as const).forEach(eventType => {
       eventSource.addEventListener(eventType, (e: MessageEvent) => {
         try {
           const data: SSEEventData = JSON.parse(e.data);
+          if (data.stepName) {
+            const stream = resolveActorStream(data.stepName, data.actor as ActorContext | undefined);
+            stream.events.push({
+              time: new Date().toLocaleTimeString(),
+              timestamp: new Date().toISOString(),
+              type: eventType,
+              ...data,
+            } as StepEvent);
+            flushActorStreams();
+          }
           addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
         } catch { /* ignore */ }
       });
     });
 
-    // subagent events
-    (['subagent-selected', 'subagent-started', 'subagent-completed', 'subagent-failed', 'subagent-deselected'] as const).forEach(eventType => {
+    // subagent events — drive the temporal-scope stack and lifecycle status.
+    eventSource.addEventListener('subagent-started', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as SSEEventData & {
+          toolCallId?: string;
+          agentName?: string;
+          displayName?: string;
+          description?: string;
+        };
+        if (data.stepName && data.toolCallId && data.agentName) {
+          const actor: ActorContext = {
+            agentName: data.agentName,
+            displayName: data.displayName,
+            toolCallId: data.toolCallId,
+            depth: (subagentScopeByStep[data.stepName]?.length ?? 0) + 1,
+          };
+          // Push onto the per-step scope stack and remember actor by toolCallId
+          // for the temporal-fallback path.
+          (subagentScopeByStep[data.stepName] ??= []).push(data.toolCallId);
+          (subagentActorByToolCallId[data.stepName] ??= {})[data.toolCallId] = actor;
+          // Pre-create the stream so the UI can render an empty card immediately.
+          ensureSubagentStream(data.stepName, actor);
+          flushActorStreams();
+        }
+        addStepEvent(data.stepName, 'subagent-started', data as Record<string, unknown>);
+      } catch { /* ignore */ }
+    });
+
+    const handleSubagentEnd = (
+      eventType: 'subagent-completed' | 'subagent-failed',
+      data: SSEEventData & { toolCallId?: string; error?: string },
+    ): void => {
+      if (data.stepName && data.toolCallId) {
+        const scope = subagentScopeByStep[data.stepName];
+        if (scope) {
+          const idx = scope.lastIndexOf(data.toolCallId);
+          if (idx >= 0) scope.splice(idx, 1);
+        }
+        const bucket = stepActorStreams[data.stepName];
+        const stream = bucket?.subagents.find(s => s.key === data.toolCallId);
+        if (stream) {
+          stream.completedAt = new Date().toISOString();
+          stream.status = eventType === 'subagent-failed' ? 'failed' : 'completed';
+          if (eventType === 'subagent-failed') {
+            stream.errorMessage = data.error;
+          }
+          flushActorStreams();
+        }
+      }
+      addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
+    };
+
+    eventSource.addEventListener('subagent-completed', (e: MessageEvent) => {
+      try {
+        handleSubagentEnd('subagent-completed', JSON.parse(e.data));
+      } catch { /* ignore */ }
+    });
+
+    eventSource.addEventListener('subagent-failed', (e: MessageEvent) => {
+      try {
+        handleSubagentEnd('subagent-failed', JSON.parse(e.data));
+      } catch { /* ignore */ }
+    });
+
+    // subagent-selected and subagent-deselected: pass through (no stack change)
+    (['subagent-selected', 'subagent-deselected'] as const).forEach(eventType => {
       eventSource.addEventListener(eventType, (e: MessageEvent) => {
         try {
           const data: SSEEventData = JSON.parse(e.data);
@@ -882,6 +1068,11 @@ function App(): React.JSX.Element {
             reasoningAccumulators[step] = '';
           }
           reasoningAccumulators[step] += data.chunk;
+          // Also bucket reasoning per actor so the modal can render a dim,
+          // collapsed-by-default reasoning subsection per main/sub-agent.
+          const stream = resolveActorStream(step, data.actor as ActorContext | undefined);
+          stream.reasoning += data.chunk;
+          flushActorStreams();
           // Don't call addStepEvent per delta — reasoning arrives at ~30ms intervals
           // and would produce hundreds of near-identical events.  The accumulated
           // reasoning is surfaced in the step trace panel instead.
@@ -1060,6 +1251,7 @@ function App(): React.JSX.Element {
       stepResults: {},
       stepTraces: {},
       stepAuditLogs: {},
+      stepActorStreams: {},
       streamingContent: '',
       finalResult: '',
       status: 'running',
@@ -1168,6 +1360,7 @@ function App(): React.JSX.Element {
       stepResults: {},
       stepTraces: {},
       stepAuditLogs: {},
+      stepActorStreams: {},
       streamingContent: '',
       finalResult: '',
       status: execution.status === 'Cancelling' ? 'cancelling' : 'running',
@@ -1210,6 +1403,7 @@ function App(): React.JSX.Element {
       stepResults: {},
       stepTraces: {},
       stepAuditLogs: {},
+      stepActorStreams: {},
       streamingContent: '',
       finalResult: '',
       status: 'loading',
@@ -1342,6 +1536,7 @@ function App(): React.JSX.Element {
         stepResults,
         stepTraces,
         stepAuditLogs,
+        stepActorStreams: {},
         streamingContent: finalResult,
         finalResult,
         status: modalStatus,
@@ -1964,6 +2159,7 @@ function App(): React.JSX.Element {
             stepResults: {},
             stepTraces: {},
             stepAuditLogs: {},
+            stepActorStreams: {},
             streamingContent: '',
             finalResult: '',
             status: 'idle',

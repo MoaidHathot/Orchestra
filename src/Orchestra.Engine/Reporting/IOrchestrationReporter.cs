@@ -44,4 +44,39 @@ public interface IOrchestrationReporter
 
 	// Audit log
 	void ReportAuditLogEntry(string stepName, AuditLogEntry entry);
+
+	// ── Actor-aware overloads (default-implemented for backward compatibility) ──
+	//
+	// These let consumers (CopilotSessionHandler / AgentEventProcessor) attribute
+	// streaming events to either the main agent or a specific sub-agent invocation.
+	// Reporters that care about the actor (e.g. SseReporter for the Portal) override
+	// these; reporters that don't fall through to the legacy actor-less overloads.
+
+	/// <summary>
+	/// Reports a content delta produced by <paramref name="actor"/>. Default implementation
+	/// ignores the actor and forwards to the legacy <see cref="ReportContentDelta(string,string)"/>.
+	/// </summary>
+	void ReportContentDelta(string stepName, string chunk, ActorContext actor)
+		=> ReportContentDelta(stepName, chunk);
+
+	/// <summary>
+	/// Reports a reasoning delta produced by <paramref name="actor"/>. Default implementation
+	/// ignores the actor and forwards to the legacy <see cref="ReportReasoningDelta(string,string)"/>.
+	/// </summary>
+	void ReportReasoningDelta(string stepName, string chunk, ActorContext actor)
+		=> ReportReasoningDelta(stepName, chunk);
+
+	/// <summary>
+	/// Reports a tool-start event produced by <paramref name="actor"/>. Default implementation
+	/// ignores the actor and forwards to the legacy overload.
+	/// </summary>
+	void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer, ActorContext actor)
+		=> ReportToolExecutionStarted(stepName, toolName, arguments, mcpServer);
+
+	/// <summary>
+	/// Reports a tool-complete event produced by <paramref name="actor"/>. Default implementation
+	/// ignores the actor and forwards to the legacy overload.
+	/// </summary>
+	void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error, ActorContext actor)
+		=> ReportToolExecutionCompleted(stepName, toolName, success, result, error);
 }

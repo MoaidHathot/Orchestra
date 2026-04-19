@@ -39,6 +39,12 @@ public static class OrchestrationsApi
 					var lastRun = trigger?.LastFireTime;
 					var nextRun = trigger?.NextFireTime;
 					var parameterNames = o.Orchestration.Steps.SelectMany(s => s.Parameters).Distinct().ToArray();
+					// hasParameters drives the Portal RunModal gate: when true, the user is
+					// prompted for input before the run is started. We must include both legacy
+					// step-level `parameters` AND orchestration-level typed `inputs`, otherwise
+					// orchestrations that declare only `inputs:` would be fired with no values
+					// and fail validation in OrchestrationExecutor with "Missing required input".
+					var hasInputs = o.Orchestration.Inputs is { Count: > 0 };
 					var effectiveTags = tagStore.GetEffectiveTags(o.Id, o.Orchestration.Tags);
 
 					result.Add(new
@@ -94,7 +100,7 @@ public static class OrchestrationsApi
 							};
 						}).ToArray(),
 						parameters = parameterNames,
-						hasParameters = parameterNames.Length > 0,
+						hasParameters = parameterNames.Length > 0 || hasInputs,
 						inputs = o.Orchestration.Inputs?.ToDictionary(
 							kvp => kvp.Key,
 							kvp => new

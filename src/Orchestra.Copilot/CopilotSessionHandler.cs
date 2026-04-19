@@ -27,6 +27,21 @@ internal sealed partial class CopilotSessionHandler
 	private readonly Dictionary<string, string> _toolCallNames = [];
 	private readonly System.Text.StringBuilder _accumulatedContent = new();
 
+	/// <summary>
+	/// Stack of currently-active sub-agent invocations (innermost on top). Pushed on
+	/// <c>SubagentStartedEvent</c>, popped on <c>SubagentCompletedEvent</c>/<c>SubagentFailedEvent</c>
+	/// matched by <c>ToolCallId</c>. Used to attribute reasoning deltas (which carry no SDK
+	/// linkage) and as a fallback for content/tool events when the SDK's
+	/// <c>ParentToolCallId</c> is absent. Stored as a <see cref="List{T}"/> so we can also
+	/// look up arbitrary frames when the SDK pins a delta to a non-top frame.
+	/// </summary>
+	private readonly List<SubagentFrame> _subagentStack = [];
+
+	private readonly record struct SubagentFrame(
+		string ToolCallId,
+		string AgentName,
+		string? AgentDisplayName);
+
 	private string? _finalContent;
 	private string? _selectedModel;
 	private string? _actualModel;
@@ -252,17 +267,109 @@ internal sealed partial class CopilotSessionHandler
 	{
 		_selectedModel = start.Data.SelectedModel;
 		_reporter.ReportSessionStarted(_requestedModel, _selectedModel);
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SessionStart,
 			Model = _selectedModel,
 		});
 	}
 
+	// ── Actor attribution helpers ──
+
+	/// <summary>
+	/// The actor for events that carry no SDK <c>ParentToolCallId</c>: the top of the
+	/// sub-agent stack if any, otherwise the main agent.
+	/// </summary>
+	private ActorContext CurrentActor()
+	{
+		if (_subagentStack.Count == 0)
+			return ActorContext.Main;
+
+		var top = _subagentStack[^1];
+		return new ActorContext(
+			AgentName: top.AgentName,
+			AgentDisplayName: top.AgentDisplayName,
+			ToolCallId: top.ToolCallId,
+			Depth: _subagentStack.Count);
+	}
+
+	/// <summary>
+	/// Resolves the actor for an event that may carry an SDK-supplied <paramref name="parentToolCallId"/>.
+	/// When the SDK pins the event to a specific sub-agent frame we honor it (most precise).
+	/// When the pinned frame is not on the stack we log a warning and fall back to the current top.
+	/// </summary>
+	private ActorContext ResolveActor(string? parentToolCallId)
+	{
+		if (parentToolCallId is null)
+			return CurrentActor();
+
+		// Find the matching frame (search top-down — innermost match wins).
+		for (var i = _subagentStack.Count - 1; i >= 0; i--)
+		{
+			var frame = _subagentStack[i];
+			if (frame.ToolCallId == parentToolCallId)
+			{
+				return new ActorContext(
+					AgentName: frame.AgentName,
+					AgentDisplayName: frame.AgentDisplayName,
+					ToolCallId: frame.ToolCallId,
+					Depth: i + 1);
+			}
+		}
+
+		LogParentToolCallIdNotFound(parentToolCallId);
+		return CurrentActor();
+	}
+
+	/// <summary>
+	/// Stamps <paramref name="evt"/> with the supplied actor context and writes it to the channel.
+	/// Centralised so every emission goes through the same attribution path.
+	/// </summary>
+	private void EmitEvent(AgentEvent evt, ActorContext? actor = null)
+	{
+		var ctx = actor ?? CurrentActor();
+		var stamped = new AgentEvent
+		{
+			Type = evt.Type,
+			Content = evt.Content,
+			ErrorMessage = evt.ErrorMessage,
+			Model = evt.Model,
+			PreviousModel = evt.PreviousModel,
+			Usage = evt.Usage,
+			ToolCallId = evt.ToolCallId,
+			ToolName = evt.ToolName,
+			ToolArguments = evt.ToolArguments,
+			McpServerName = evt.McpServerName,
+			ToolSuccess = evt.ToolSuccess,
+			ToolResult = evt.ToolResult,
+			ToolError = evt.ToolError,
+			DiagnosticType = evt.DiagnosticType,
+			McpServerStatuses = evt.McpServerStatuses,
+			McpServerStatus = evt.McpServerStatus,
+			SubagentName = evt.SubagentName,
+			SubagentDisplayName = evt.SubagentDisplayName,
+			SubagentDescription = evt.SubagentDescription,
+			SubagentTools = evt.SubagentTools,
+			CompactionTokensBefore = evt.CompactionTokensBefore,
+			CompactionTokensAfter = evt.CompactionTokensAfter,
+			HookInvocationId = evt.HookInvocationId,
+			HookType = evt.HookType,
+			HookSuccess = evt.HookSuccess,
+			TurnId = evt.TurnId,
+			TokenLimit = evt.TokenLimit,
+			CurrentTokens = evt.CurrentTokens,
+			ActorAgentName = ctx.AgentName,
+			ActorAgentDisplayName = ctx.AgentDisplayName,
+			ActorToolCallId = ctx.ToolCallId,
+			ActorDepth = ctx.Depth,
+		};
+		_writer.TryWrite(stamped);
+	}
+
 	private void HandleModelChange(SessionModelChangeEvent modelChange)
 	{
 		_reporter.ReportModelChange(modelChange.Data.PreviousModel, modelChange.Data.NewModel);
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.ModelChange,
 			Model = modelChange.Data.NewModel,
@@ -282,7 +389,7 @@ internal sealed partial class CopilotSessionHandler
 			Cost = usageEvt.Data.Cost,
 			Duration = usageEvt.Data.Duration,
 		};
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.Usage,
 			Model = _actualModel,
@@ -293,16 +400,18 @@ internal sealed partial class CopilotSessionHandler
 	private void HandleMessageDelta(AssistantMessageDeltaEvent delta)
 	{
 		_accumulatedContent.Append(delta.Data.DeltaContent);
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.MessageDelta,
 			Content = delta.Data.DeltaContent,
-		});
+		}, ResolveActor(delta.Data.ParentToolCallId));
 	}
 
 	private void HandleReasoningDelta(AssistantReasoningDeltaEvent reasoningDelta)
 	{
-		_writer.TryWrite(new AgentEvent
+		// Reasoning deltas have no SDK linkage to the originating sub-agent;
+		// the active sub-agent stack is the only attribution signal available.
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.ReasoningDelta,
 			Content = reasoningDelta.Data.DeltaContent,
@@ -312,16 +421,17 @@ internal sealed partial class CopilotSessionHandler
 	private void HandleMessage(AssistantMessageEvent msg)
 	{
 		_finalContent = msg.Data.Content;
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.Message,
 			Content = msg.Data.Content,
-		});
+		}, ResolveActor(msg.Data.ParentToolCallId));
 	}
 
 	private void HandleReasoning(AssistantReasoningEvent reasoning)
 	{
-		_writer.TryWrite(new AgentEvent
+		// Same SDK gap as ReasoningDelta — fall back to the stack.
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.Reasoning,
 			Content = reasoning.Data.Content,
@@ -341,14 +451,14 @@ internal sealed partial class CopilotSessionHandler
 			catch { /* ignore serialization failures - arguments are optional for trace */ }
 		}
 
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.ToolExecutionStart,
 			ToolCallId = toolStart.Data.ToolCallId,
 			ToolName = toolName,
 			ToolArguments = serializedArgs,
 			McpServerName = toolStart.Data.McpServerName,
-		});
+		}, ResolveActor(toolStart.Data.ParentToolCallId));
 	}
 
 	private void HandleToolExecutionComplete(ToolExecutionCompleteEvent toolComplete)
@@ -360,7 +470,7 @@ internal sealed partial class CopilotSessionHandler
 			_toolCallNames.Remove(toolComplete.Data.ToolCallId, out toolName);
 		}
 
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.ToolExecutionComplete,
 			ToolCallId = toolComplete.Data.ToolCallId,
@@ -368,12 +478,13 @@ internal sealed partial class CopilotSessionHandler
 			ToolSuccess = toolComplete.Data.Success,
 			ToolResult = toolComplete.Data.Result?.Content ?? toolComplete.Data.Result?.DetailedContent,
 			ToolError = toolComplete.Data.Error?.Message,
-		});
+		}, ResolveActor(toolComplete.Data.ParentToolCallId));
 	}
 
 	private void HandleSubagentSelected(SubagentSelectedEvent subagentSelected)
 	{
-		_writer.TryWrite(new AgentEvent
+		// "Selected" is a parent-side decision — attribute to the current scope.
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SubagentSelected,
 			SubagentName = subagentSelected.Data.AgentName,
@@ -384,22 +495,40 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleSubagentStarted(SubagentStartedEvent subagentStarted)
 	{
-		_writer.TryWrite(new AgentEvent
+		// Stamp the SubagentStarted event with the *parent* actor (the one delegating)
+		// so the Portal can place the sub-agent card inside the parent's timeline.
+		var parentActor = CurrentActor();
+
+		var toolCallId = subagentStarted.Data.ToolCallId;
+		if (!string.IsNullOrEmpty(toolCallId))
+		{
+			LogSubagentStackPush(toolCallId, subagentStarted.Data.AgentName, _subagentStack.Count + 1);
+			_subagentStack.Add(new SubagentFrame(
+				ToolCallId: toolCallId,
+				AgentName: subagentStarted.Data.AgentName,
+				AgentDisplayName: subagentStarted.Data.AgentDisplayName));
+		}
+
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SubagentStarted,
-			ToolCallId = subagentStarted.Data.ToolCallId,
+			ToolCallId = toolCallId,
 			SubagentName = subagentStarted.Data.AgentName,
 			SubagentDisplayName = subagentStarted.Data.AgentDisplayName,
 			SubagentDescription = subagentStarted.Data.AgentDescription,
-		});
+		}, parentActor);
 	}
 
 	private void HandleSubagentCompleted(SubagentCompletedEvent subagentCompleted)
 	{
-		_writer.TryWrite(new AgentEvent
+		var toolCallId = subagentCompleted.Data.ToolCallId;
+		PopSubagent(toolCallId);
+
+		// After popping, the current actor is the parent — emit accordingly.
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SubagentCompleted,
-			ToolCallId = subagentCompleted.Data.ToolCallId,
+			ToolCallId = toolCallId,
 			SubagentName = subagentCompleted.Data.AgentName,
 			SubagentDisplayName = subagentCompleted.Data.AgentDisplayName,
 		});
@@ -407,10 +536,13 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleSubagentFailed(SubagentFailedEvent subagentFailed)
 	{
-		_writer.TryWrite(new AgentEvent
+		var toolCallId = subagentFailed.Data.ToolCallId;
+		PopSubagent(toolCallId);
+
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SubagentFailed,
-			ToolCallId = subagentFailed.Data.ToolCallId,
+			ToolCallId = toolCallId,
 			SubagentName = subagentFailed.Data.AgentName,
 			SubagentDisplayName = subagentFailed.Data.AgentDisplayName,
 			ErrorMessage = subagentFailed.Data.Error,
@@ -419,16 +551,51 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleSubagentDeselected()
 	{
-		_writer.TryWrite(new AgentEvent
+		// Deselected is a parent-side signal that the sub-agent was dismissed without
+		// a matching Started/Completed pair (e.g. permission denied). It does NOT pop
+		// the stack — only Completed/Failed do.
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SubagentDeselected,
 		});
 	}
 
+	/// <summary>
+	/// Pops the matching frame from <see cref="_subagentStack"/>. If the topmost frame
+	/// matches we pop it; otherwise we search for the matching frame and pop it (this
+	/// can happen if the SDK reorders Completed events) and log a warning. If no match
+	/// is found we leave the stack intact and log.
+	/// </summary>
+	private void PopSubagent(string? toolCallId)
+	{
+		if (string.IsNullOrEmpty(toolCallId) || _subagentStack.Count == 0)
+			return;
+
+		if (_subagentStack[^1].ToolCallId == toolCallId)
+		{
+			LogSubagentStackPop(toolCallId, _subagentStack[^1].AgentName, _subagentStack.Count - 1);
+			_subagentStack.RemoveAt(_subagentStack.Count - 1);
+			return;
+		}
+
+		// Out-of-order completion — find and remove. This is unusual but defensible.
+		for (var i = _subagentStack.Count - 1; i >= 0; i--)
+		{
+			if (_subagentStack[i].ToolCallId == toolCallId)
+			{
+				LogSubagentStackOutOfOrderPop(toolCallId, _subagentStack[i].AgentName, i);
+				_subagentStack.RemoveAt(i);
+				return;
+			}
+		}
+
+		LogSubagentStackPopMissing(toolCallId);
+	}
+
 	private void HandleWarning(SessionWarningEvent warning)
 	{
 		_reporter.ReportSessionWarning(warning.Data.WarningType, warning.Data.Message);
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.Warning,
 			ErrorMessage = warning.Data.Message,
@@ -439,7 +606,7 @@ internal sealed partial class CopilotSessionHandler
 	private void HandleInfo(SessionInfoEvent info)
 	{
 		_reporter.ReportSessionInfo(info.Data.InfoType, info.Data.Message);
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.Info,
 			Content = info.Data.Message,
@@ -457,7 +624,7 @@ internal sealed partial class CopilotSessionHandler
 		)).ToList();
 
 		_reporter.ReportMcpServersLoaded(statuses);
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.McpServersLoaded,
 			McpServerStatuses = statuses,
@@ -468,7 +635,7 @@ internal sealed partial class CopilotSessionHandler
 	{
 		var status = mcpStatusChanged.Data.Status.ToString();
 		_reporter.ReportMcpServerStatusChanged(mcpStatusChanged.Data.ServerName, status);
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.McpServerStatusChanged,
 			McpServerName = mcpStatusChanged.Data.ServerName,
@@ -478,7 +645,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleCompactionStart()
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.CompactionStart,
 		});
@@ -486,7 +653,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleCompactionComplete(SessionCompactionCompleteEvent compactionComplete)
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.CompactionComplete,
 			CompactionTokensBefore = (int?)compactionComplete.Data.PreCompactionTokens,
@@ -496,7 +663,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleHookStart(HookStartEvent hookStart)
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.HookStart,
 			HookInvocationId = hookStart.Data.HookInvocationId,
@@ -506,7 +673,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleHookEnd(HookEndEvent hookEnd)
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.HookEnd,
 			HookInvocationId = hookEnd.Data.HookInvocationId,
@@ -518,7 +685,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleTurnStart(AssistantTurnStartEvent turnStart)
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.TurnStart,
 			TurnId = turnStart.Data.TurnId,
@@ -527,7 +694,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleSessionUsageInfo(SessionUsageInfoEvent usageInfo)
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SessionUsageInfo,
 			TokenLimit = usageInfo.Data.TokenLimit,
@@ -537,7 +704,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleTurnEnd(AssistantTurnEndEvent turnEnd)
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.TurnEnd,
 			TurnId = turnEnd.Data.TurnId,
@@ -557,7 +724,7 @@ internal sealed partial class CopilotSessionHandler
 			catch { /* ignore serialization failures - arguments are optional for trace */ }
 		}
 
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.ToolExecutionStart,
 			ToolCallId = externalTool.Data.ToolCallId,
@@ -573,7 +740,7 @@ internal sealed partial class CopilotSessionHandler
 		// Loud ERROR log: a fatal session-level error from the CLI MUST be visible.
 		LogSessionError(_requestedModel, message);
 
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.Error,
 			ErrorMessage = message,
@@ -598,7 +765,7 @@ internal sealed partial class CopilotSessionHandler
 			// This is a fatal failure; the orchestration step MUST fail.
 			LogAbnormalShutdown(_requestedModel, shutdownType, errorReason);
 
-			_writer.TryWrite(new AgentEvent
+			EmitEvent(new AgentEvent
 			{
 				Type = AgentEventType.Error,
 				ErrorMessage = $"Session shutdown abnormally ({shutdownType}): {errorReason}",
@@ -613,7 +780,7 @@ internal sealed partial class CopilotSessionHandler
 		}
 
 		// Clean shutdown — normal end of session.
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SessionIdle,
 			Content = $"Session shutdown ({shutdownType})",
@@ -623,7 +790,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleTaskComplete(SessionTaskCompleteEvent taskComplete)
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SessionIdle,
 			Content = taskComplete.Data.Summary,
@@ -637,7 +804,7 @@ internal sealed partial class CopilotSessionHandler
 		// Log unhandled event types so we don't silently drop signals
 		// that might indicate session termination or errors.
 		var message = $"Unhandled SDK event: {evt.GetType().Name}";
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.Warning,
 			DiagnosticType = "unhandled_sdk_event",
@@ -648,7 +815,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleIdle()
 	{
-		_writer.TryWrite(new AgentEvent
+		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SessionIdle,
 		});
@@ -668,6 +835,36 @@ internal sealed partial class CopilotSessionHandler
 		Level = LogLevel.Error,
 		Message = "Copilot session shutdown abnormally (model={Model}, type={ShutdownType}): {Reason}")]
 	private partial void LogAbnormalShutdown(string model, string shutdownType, string reason);
+
+	[LoggerMessage(
+		EventId = 3,
+		Level = LogLevel.Debug,
+		Message = "Sub-agent stack push: toolCallId={ToolCallId} agent={AgentName} depth={Depth}")]
+	private partial void LogSubagentStackPush(string toolCallId, string agentName, int depth);
+
+	[LoggerMessage(
+		EventId = 4,
+		Level = LogLevel.Debug,
+		Message = "Sub-agent stack pop: toolCallId={ToolCallId} agent={AgentName} remainingDepth={RemainingDepth}")]
+	private partial void LogSubagentStackPop(string toolCallId, string agentName, int remainingDepth);
+
+	[LoggerMessage(
+		EventId = 5,
+		Level = LogLevel.Warning,
+		Message = "Sub-agent completion arrived out of order: toolCallId={ToolCallId} agent={AgentName} index={Index}. Stack repaired.")]
+	private partial void LogSubagentStackOutOfOrderPop(string toolCallId, string agentName, int index);
+
+	[LoggerMessage(
+		EventId = 6,
+		Level = LogLevel.Warning,
+		Message = "Sub-agent completion for unknown toolCallId={ToolCallId}. Stack left intact (event predates a SubagentStarted, or was already popped).")]
+	private partial void LogSubagentStackPopMissing(string toolCallId);
+
+	[LoggerMessage(
+		EventId = 7,
+		Level = LogLevel.Warning,
+		Message = "SDK ParentToolCallId={ParentToolCallId} not found in active sub-agent stack; falling back to current actor.")]
+	private partial void LogParentToolCallIdNotFound(string parentToolCallId);
 
 	#endregion
 }

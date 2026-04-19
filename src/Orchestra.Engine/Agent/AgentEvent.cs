@@ -146,6 +146,40 @@ public class AgentEvent
 	/// Current token count used in the session.
 	/// </summary>
 	public double? CurrentTokens { get; init; }
+
+	// ── Actor attribution (sub-agent vs main agent) ──
+
+	/// <summary>
+	/// The unique name/identifier of the sub-agent that emitted this event,
+	/// or null if the event was emitted by the main agent for the step.
+	/// Stamped on every event by <see cref="CopilotSessionHandler"/> using the SDK's
+	/// <c>ParentToolCallId</c> when available, or the active sub-agent stack otherwise.
+	/// </summary>
+	public string? ActorAgentName { get; init; }
+
+	/// <summary>
+	/// Human-readable display name of the actor sub-agent, for UI rendering.
+	/// </summary>
+	public string? ActorAgentDisplayName { get; init; }
+
+	/// <summary>
+	/// The <c>ToolCallId</c> of the <c>SubagentStarted</c> event that opened the
+	/// current actor's scope. Stable per sub-agent invocation; lets clients group
+	/// all events from a single invocation together (e.g. one card per invocation).
+	/// </summary>
+	public string? ActorToolCallId { get; init; }
+
+	/// <summary>
+	/// Nesting depth: 0 = main agent for the step, 1 = first-level sub-agent,
+	/// 2+ = nested sub-agent invocations. Future-proofs nested sub-agent rendering.
+	/// </summary>
+	public int ActorDepth { get; init; }
+
+	/// <summary>
+	/// Convenience accessor that materialises the actor fields as an <see cref="ActorContext"/>.
+	/// </summary>
+	public ActorContext Actor =>
+		new(ActorAgentName, ActorAgentDisplayName, ActorToolCallId, ActorDepth);
 }
 
 /// <summary>

@@ -339,4 +339,28 @@ public class ToolCallRecord
 	/// When the tool call completed.
 	/// </summary>
 	public DateTimeOffset? CompletedAt { get; init; }
+
+	/// <summary>
+	/// Name of the sub-agent that issued this tool call, or null if it was issued by
+	/// the main agent for the step. Used by historical run views (Portal, CLI) to
+	/// attribute tool usage to a specific actor.
+	/// </summary>
+	public string? ActorAgentName { get; init; }
+
+	/// <summary>
+	/// Display name of the actor sub-agent for UI rendering.
+	/// </summary>
+	public string? ActorAgentDisplayName { get; init; }
+
+	/// <summary>
+	/// The <c>ToolCallId</c> of the <c>SubagentStarted</c> event that opened the actor's
+	/// scope. Stable per sub-agent invocation; lets historical views group tool calls
+	/// by invocation just like the live view.
+	/// </summary>
+	public string? ActorToolCallId { get; init; }
+
+	/// <summary>
+	/// Nesting depth: 0 = main agent, 1+ = sub-agent.
+	/// </summary>
+	public int ActorDepth { get; init; }
 }

@@ -562,6 +562,7 @@ export async function renderMermaidDag(
 export function generateExecutionDagCode(
   steps: Step[],
   stepStatuses: Record<string, string>,
+  activeSubagentCounts: Record<string, number> = {},
 ): { mermaidCode: string; stepNameToId: Map<string, string>; stepTypeMap: Map<string, string> } {
   let mermaidCode = 'graph TD\n';
   const stepNameToId = new Map<string, string>();
@@ -660,6 +661,15 @@ export function generateExecutionDagCode(
       labelParts.push(buildSubagentInlineLabel(subagents));
     }
 
+    // Active sub-agent badge: shown only while at least one sub-agent is
+    // currently running for this step. Surfaces "the step is delegating right
+    // now" at a glance from the DAG without opening the modal.
+    const activeCount = activeSubagentCounts[stepName] ?? 0;
+    if (activeCount > 0) {
+      const noun = activeCount === 1 ? 'sub-agent' : 'sub-agents';
+      labelParts.push(`<small>\u25C9 ${activeCount} active ${noun}</small>`);
+    }
+
     // Disabled badge
     if (isDisabled) {
       labelParts.push(`<small>DISABLED</small>`);
@@ -735,6 +745,7 @@ export async function renderExecutionDag(
   container: HTMLElement,
   onNodeClick?: (stepName: string) => void,
   selectedStep?: string,
+  activeSubagentCounts: Record<string, number> = {},
 ): Promise<void> {
   const steps = orchestration?.steps;
   if (!steps || steps.length === 0) {
@@ -743,7 +754,11 @@ export async function renderExecutionDag(
     return;
   }
 
-  const { mermaidCode, stepNameToId, stepTypeMap } = generateExecutionDagCode(steps, stepStatuses);
+  const { mermaidCode, stepNameToId, stepTypeMap } = generateExecutionDagCode(
+    steps,
+    stepStatuses,
+    activeSubagentCounts,
+  );
 
   try {
     mermaid.initialize(getMermaidConfig());

@@ -47,7 +47,7 @@ public class PromptExecutorTests
 		await executor.ExecuteAsync(step, context);
 
 		// Assert
-		reporter.Received().ReportContentDelta("test-step", Arg.Any<string>());
+		reporter.Received().ReportContentDelta("test-step", Arg.Any<string>(), Arg.Any<ActorContext>());
 	}
 
 	[Fact]
@@ -385,8 +385,8 @@ public class PromptExecutorTests
 		await executor.ExecuteAsync(step, context);
 
 		// Assert
-		reporter.Received().ReportToolExecutionStarted("tool-step", "read_file", Arg.Any<string?>(), Arg.Any<string?>());
-		reporter.Received().ReportToolExecutionCompleted("tool-step", "read_file", true, Arg.Any<string?>(), Arg.Any<string?>());
+		reporter.Received().ReportToolExecutionStarted("tool-step", "read_file", Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<ActorContext>());
+		reporter.Received().ReportToolExecutionCompleted("tool-step", "read_file", true, Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<ActorContext>());
 	}
 
 	[Fact]
@@ -465,7 +465,7 @@ public class PromptExecutorTests
 		await executor.ExecuteAsync(step, context);
 
 		// Assert
-		reporter.Received().ReportReasoningDelta("reasoning-step", "Let me think...");
+		reporter.Received().ReportReasoningDelta("reasoning-step", "Let me think...", Arg.Any<ActorContext>());
 	}
 
 	[Fact]

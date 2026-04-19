@@ -20,8 +20,8 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportContentDelta("test-step", "Hello");
-		_reporter.Received(1).ReportContentDelta("test-step", " World");
+		_reporter.Received(1).ReportContentDelta("test-step", "Hello", Arg.Any<ActorContext>());
+		_reporter.Received(1).ReportContentDelta("test-step", " World", Arg.Any<ActorContext>());
 	}
 
 	[Fact]
@@ -56,8 +56,8 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportReasoningDelta("test-step", "Let me think");
-		_reporter.Received(1).ReportReasoningDelta("test-step", " about this...");
+		_reporter.Received(1).ReportReasoningDelta("test-step", "Let me think", Arg.Any<ActorContext>());
+		_reporter.Received(1).ReportReasoningDelta("test-step", " about this...", Arg.Any<ActorContext>());
 		Assert.Equal("Let me think about this...", processor.Reasoning);
 	}
 
@@ -89,8 +89,8 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportToolExecutionStarted("test-step", "read_file", "{\"path\": \"test.txt\"}", "filesystem");
-		_reporter.Received(1).ReportToolExecutionCompleted("test-step", "read_file", true, "file contents", null);
+		_reporter.Received(1).ReportToolExecutionStarted("test-step", "read_file", "{\"path\": \"test.txt\"}", "filesystem", Arg.Any<ActorContext>());
+		_reporter.Received(1).ReportToolExecutionCompleted("test-step", "read_file", true, "file contents", null, Arg.Any<ActorContext>());
 
 		Assert.Single(processor.ToolCalls);
 		var toolCall = processor.ToolCalls[0];
@@ -260,7 +260,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportContentDelta("test-step", string.Empty);
+		_reporter.Received(1).ReportContentDelta("test-step", string.Empty, Arg.Any<ActorContext>());
 	}
 
 	#region Subagent Events
@@ -498,7 +498,7 @@ public class AgentEventProcessorTests
 		{
 			_reporter.ReportSubagentSelected("coordinator-step", "researcher", "Research Agent", Arg.Any<string[]>());
 			_reporter.ReportSubagentStarted("coordinator-step", "call-1", "researcher", "Research Agent", "Finds information");
-			_reporter.ReportContentDelta("coordinator-step", "Searching...");
+			_reporter.ReportContentDelta("coordinator-step", "Searching...", Arg.Any<ActorContext>());
 			_reporter.ReportSubagentCompleted("coordinator-step", "call-1", "researcher", "Research Agent");
 			_reporter.ReportSubagentDeselected("coordinator-step");
 		});
@@ -600,7 +600,7 @@ public class AgentEventProcessorTests
 
 		// Assert
 		_reporter.Received(1).ReportSubagentFailed("test-step", "call-fail", "failing-agent", Arg.Any<string?>(), "Agent crashed");
-		_reporter.Received(1).ReportContentDelta("test-step", "Handling failure gracefully");
+		_reporter.Received(1).ReportContentDelta("test-step", "Handling failure gracefully", Arg.Any<ActorContext>());
 	}
 
 	#endregion

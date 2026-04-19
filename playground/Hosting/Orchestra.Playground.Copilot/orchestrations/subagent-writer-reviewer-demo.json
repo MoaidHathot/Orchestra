@@ -1,0 +1,36 @@
+{
+  "$schema": "../../../../schemas/orchestration.schema.json",
+  "name": "subagent-writer-reviewer-demo",
+  "description": "End-to-end demo for the Portal sub-agent visualisation pipeline. The 'draft' step delegates to a Writer sub-agent (which produces the draft) and then a Reviewer sub-agent (which critiques it). Used to visually verify per-actor stream attribution: SubagentCard rendering, reasoning subsection, status badges, auto-collapse on completion, DAG active-sub-agent badge.",
+  "steps": [
+    {
+      "name": "draft",
+      "type": "prompt",
+      "dependsOn": [],
+      "systemPrompt": "You orchestrate a two-person writing crew. For any topic the user provides, do the following in order:\n\n1. Delegate to the Writer sub-agent to produce a short (3-5 sentence) draft about the topic.\n2. Delegate to the Reviewer sub-agent to critique the draft and suggest one concrete improvement.\n3. Synthesise both into a final answer of the form:\n\n   Draft: <writer's text>\n   Review: <reviewer's text>\n\nDo not write the draft or the review yourself \u2014 always delegate.",
+      "userPrompt": "Topic: {{topic}}",
+      "parameters": ["topic"],
+      "model": "gpt-5.4",
+      "subagents": [
+        {
+          "name": "writer",
+          "displayName": "Writer",
+          "description": "Produces a short (3-5 sentence) draft on the given topic. Use this when you need original prose written from scratch.",
+          "prompt": "You are a concise writer. Given a topic, produce a 3-5 sentence draft. No headings, no lists, plain prose only. Return only the draft text.",
+          "infer": true
+        },
+        {
+          "name": "reviewer",
+          "displayName": "Reviewer",
+          "description": "Critiques a draft and suggests one concrete improvement. Use this after the writer has produced a draft.",
+          "prompt": "You are a sharp editor. Given a draft, return: (a) one sentence stating the strongest aspect, (b) one sentence proposing the single most impactful improvement. Be specific.",
+          "infer": true
+        }
+      ]
+    }
+  ],
+  "trigger": {
+    "type": "webhook",
+    "enabled": true
+  }
+}

@@ -279,6 +279,12 @@ export interface ExecutionModalState {
   stepResults: Record<string, string>;
   stepTraces: Record<string, TraceData>;
   stepAuditLogs: Record<string, AuditLogEntry[]>;
+  /**
+   * Per-step actor-keyed streaming buffers. Lets the modal render sub-agent
+   * activity (deltas, reasoning, tool calls) as inline indented cards instead
+   * of merging everything into a single flat <c>streamingContent</c> string.
+   */
+  stepActorStreams: Record<string, StepActorStreams>;
   streamingContent: string;
   finalResult: string;
   status: string;
@@ -310,7 +316,71 @@ export interface StepEvent {
   result?: string;
   error?: string;
   timestamp?: string;
+  /**
+   * Identifies which actor (main agent or specific sub-agent invocation) produced
+   * this event. Absent when the event came from the main agent (back-compat with
+   * older Host versions that didn't stamp actor info).
+   */
+  actor?: ActorContext;
   [key: string]: unknown;
+}
+
+/**
+ * Identifies the producer of a streamed agent event. Stamped on every relevant
+ * SSE payload by the Host's <c>SseReporter</c>, mirroring the backend
+ * <c>ActorContext</c>. Absent on the wire means "main agent".
+ */
+export interface ActorContext {
+  agentName: string;
+  displayName?: string;
+  /**
+   * The <c>ToolCallId</c> of the <c>SubagentStarted</c> event that opened the
+   * current actor's scope. Stable per sub-agent invocation; the Portal uses this
+   * as the bucket key so two consecutive invocations of the same sub-agent name
+   * render as two separate cards.
+   */
+  toolCallId: string;
+  /** Nesting depth (1 = first-level sub-agent, 2+ = nested). */
+  depth: number;
+}
+
+/**
+ * Streaming buffer for a single actor inside a step. The Portal accumulates
+ * deltas separately per actor so sub-agent activity stays visually distinct
+ * from main-agent output during a running orchestration.
+ */
+export interface ActorStream {
+  /** Stable bucket key. For main: the literal "main". For sub-agents: the toolCallId. */
+  key: string;
+  /** Null when this stream represents the main agent. */
+  actor: ActorContext | null;
+  /** Live-streamed assistant content (concatenated content-delta chunks). */
+  content: string;
+  /** Live-streamed reasoning text (concatenated reasoning-delta chunks). */
+  reasoning: string;
+  /** Lifecycle events that belong to this actor (tool calls, sub-agent boundaries, etc.). */
+  events: StepEvent[];
+  /** Wall-clock time the first event arrived for this actor. */
+  startedAt: string;
+  /**
+   * Wall-clock time the actor finished, set on subagent-completed/subagent-failed
+   * for sub-agent streams; always undefined for the main stream while running.
+   */
+  completedAt?: string;
+  /** Final status of the actor (set when it completes). */
+  status?: 'running' | 'completed' | 'failed' | 'cancelled';
+  /** Error message when status === 'failed'. */
+  errorMessage?: string;
+}
+
+/**
+ * Per-step grouping of actor streams. <c>main</c> is always present; sub-agent
+ * streams are appended in start order so the UI can render them inline at the
+ * point they were spawned.
+ */
+export interface StepActorStreams {
+  main: ActorStream;
+  subagents: ActorStream[];
 }
 
 // File browser

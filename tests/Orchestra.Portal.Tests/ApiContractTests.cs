@@ -93,12 +93,41 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 
 	private async Task<(string Id, string Name)> RegisterTestOrchestrationAsync(
 		string? name = null, bool withWebhookTrigger = false, bool triggerEnabled = false,
-		bool withParameters = false)
+		bool withParameters = false, bool withInputs = false)
 	{
 		name ??= $"Contract Test {Guid.NewGuid():N}";
 
 		string json;
-		if (withParameters)
+		if (withInputs)
+		{
+			// Orchestration-level typed inputs (no step-level `parameters`). The Portal
+			// must still surface this as `hasParameters=true` so the RunModal opens
+			// and collects the value before invoking the run; otherwise the executor
+			// would fail with "Missing required input".
+			json = """
+			{
+				"name": "ORCH_NAME_PLACEHOLDER",
+				"description": "Orchestration with typed inputs",
+				"inputs": {
+					"researchRequest": {
+						"type": "string",
+						"description": "Research topic",
+						"required": true,
+						"multiline": true
+					}
+				},
+				"steps": [{
+					"name": "step-a",
+					"type": "Prompt",
+					"dependsOn": [],
+					"systemPrompt": "Research",
+					"userPrompt": "{{param.researchRequest}}",
+					"model": "claude-opus-4.5"
+				}]
+			}
+			""".Replace("ORCH_NAME_PLACEHOLDER", name);
+		}
+		else if (withParameters)
 		{
 			json = """
 			{
@@ -403,6 +432,42 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 		parameters.ValueKind.Should().Be(JsonValueKind.Array);
 		parameters.GetArrayLength().Should().Be(0);
 		orch.GetProperty("hasParameters").GetBoolean().Should().BeFalse();
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_TypedInputs_HasParametersIsTrue()
+	{
+		// Regression: orchestrations that declare typed `inputs:` (e.g. the
+		// deep-research example) must surface as hasParameters=true so the
+		// Portal's RunModal opens before the run is fired. Otherwise the
+		// executor immediately fails with "Input validation failed: Missing
+		// required input 'X'", with no UI form ever shown.
+		var (id, _) = await RegisterTestOrchestrationAsync(withInputs: true);
+
+		var response = await _client.GetAsync("/api/orchestrations");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		var orchestrations = result.GetProperty("orchestrations");
+		var orch = orchestrations.EnumerateArray()
+			.First(o => o.GetProperty("id").GetString() == id);
+
+		// The legacy step-level `parameters` array is empty for this orchestration...
+		var parameters = orch.GetProperty("parameters");
+		parameters.ValueKind.Should().Be(JsonValueKind.Array);
+		parameters.GetArrayLength().Should().Be(0);
+
+		// ...but `inputs` carries the typed schema...
+		var inputs = orch.GetProperty("inputs");
+		inputs.ValueKind.Should().Be(JsonValueKind.Object);
+		inputs.GetProperty("researchRequest").GetProperty("required").GetBoolean()
+			.Should().BeTrue();
+
+		// ...and hasParameters MUST be true so the Portal opens the RunModal.
+		orch.GetProperty("hasParameters").GetBoolean().Should().BeTrue(
+			"orchestrations with required typed `inputs:` must surface as " +
+			"hasParameters=true; otherwise the Portal RunModal is bypassed and " +
+			"the executor fails with 'Missing required input'.");
 	}
 
 	[Fact]

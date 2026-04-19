@@ -168,19 +168,19 @@ public class AgentEventProcessor
 
 	private void HandleMessageDelta(AgentEvent evt)
 	{
-		_reporter.ReportContentDelta(_stepName, evt.Content ?? string.Empty);
+		_reporter.ReportContentDelta(_stepName, evt.Content ?? string.Empty, evt.Actor);
 		_currentResponseBuilder.Append(evt.Content ?? string.Empty);
 	}
 
 	private void HandleReasoningDelta(AgentEvent evt)
 	{
-		_reporter.ReportReasoningDelta(_stepName, evt.Content ?? string.Empty);
+		_reporter.ReportReasoningDelta(_stepName, evt.Content ?? string.Empty, evt.Actor);
 		_reasoningBuilder.Append(evt.Content ?? string.Empty);
 	}
 
 	private void HandleToolExecutionStart(AgentEvent evt)
 	{
-		_reporter.ReportToolExecutionStarted(_stepName, evt.ToolName ?? "unknown", evt.ToolArguments, evt.McpServerName);
+		_reporter.ReportToolExecutionStarted(_stepName, evt.ToolName ?? "unknown", evt.ToolArguments, evt.McpServerName, evt.Actor);
 
 		// Save current response segment before tool call (if any content)
 		if (_currentResponseBuilder.Length > 0)
@@ -213,7 +213,8 @@ public class AgentEventProcessor
 				evt.ToolName ?? "unknown",
 				evt.ToolArguments,
 				evt.McpServerName,
-				DateTimeOffset.UtcNow
+				DateTimeOffset.UtcNow,
+				evt.Actor
 			);
 		}
 		else
@@ -225,13 +226,17 @@ public class AgentEventProcessor
 				Arguments = evt.ToolArguments,
 				McpServer = evt.McpServerName,
 				StartedAt = DateTimeOffset.UtcNow,
+				ActorAgentName = evt.Actor.AgentName,
+				ActorAgentDisplayName = evt.Actor.AgentDisplayName,
+				ActorToolCallId = evt.Actor.ToolCallId,
+				ActorDepth = evt.Actor.Depth,
 			});
 		}
 	}
 
 	private void HandleToolExecutionComplete(AgentEvent evt)
 	{
-		_reporter.ReportToolExecutionCompleted(_stepName, evt.ToolName ?? "unknown", evt.ToolSuccess ?? false, evt.ToolResult, evt.ToolError);
+		_reporter.ReportToolExecutionCompleted(_stepName, evt.ToolName ?? "unknown", evt.ToolSuccess ?? false, evt.ToolResult, evt.ToolError, evt.Actor);
 
 		// Record tool result in conversation history
 		_conversationHistory.Add(new ConversationMessage
@@ -258,6 +263,10 @@ public class AgentEventProcessor
 				Error = evt.ToolError,
 				StartedAt = pending.StartedAt,
 				CompletedAt = DateTimeOffset.UtcNow,
+				ActorAgentName = pending.Actor.AgentName,
+				ActorAgentDisplayName = pending.Actor.AgentDisplayName,
+				ActorToolCallId = pending.Actor.ToolCallId,
+				ActorDepth = pending.Actor.Depth,
 			});
 		}
 		else
@@ -271,6 +280,10 @@ public class AgentEventProcessor
 				Result = evt.ToolResult,
 				Error = evt.ToolError,
 				CompletedAt = DateTimeOffset.UtcNow,
+				ActorAgentName = evt.Actor.AgentName,
+				ActorAgentDisplayName = evt.Actor.AgentDisplayName,
+				ActorToolCallId = evt.Actor.ToolCallId,
+				ActorDepth = evt.Actor.Depth,
 			});
 		}
 	}
@@ -555,5 +568,6 @@ public class AgentEventProcessor
 		string ToolName,
 		string? Arguments,
 		string? McpServer,
-		DateTimeOffset StartedAt);
+		DateTimeOffset StartedAt,
+		ActorContext Actor);
 }

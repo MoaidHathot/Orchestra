@@ -563,6 +563,111 @@ public class SseReporterTests : IDisposable
 		future.Should().NotBeNull();
 		future!.Completion.IsCompleted.Should().BeTrue();
 	}
+
+	// ── Actor attribution wire-format ──────────────────────────────────────────
+
+	[Fact]
+	public void ContentDelta_MainActor_OmitsActorField()
+	{
+		// Main-agent payloads stay slim — `actor` is only emitted for sub-agents.
+		_reporter.ReportContentDelta("step-1", "hello", ActorContext.Main);
+
+		var evt = _reporter.AccumulatedEvents.Single();
+		evt.Type.Should().Be("content-delta");
+		evt.Data.Should().NotContain("\"actor\"");
+	}
+
+	[Fact]
+	public void ContentDelta_SubagentActor_IncludesActorObject()
+	{
+		var actor = new ActorContext("researcher", "Researcher", "tc-1", 1);
+
+		_reporter.ReportContentDelta("step-1", "hello", actor);
+
+		var evt = _reporter.AccumulatedEvents.Single();
+		evt.Type.Should().Be("content-delta");
+		evt.Data.Should().Contain("\"actor\":");
+		evt.Data.Should().Contain("\"agentName\":\"researcher\"");
+		evt.Data.Should().Contain("\"displayName\":\"Researcher\"");
+		evt.Data.Should().Contain("\"toolCallId\":\"tc-1\"");
+		evt.Data.Should().Contain("\"depth\":1");
+	}
+
+	[Fact]
+	public void ReasoningDelta_SubagentActor_IncludesActorObject()
+	{
+		var actor = new ActorContext("planner", "Planner", "tc-7", 2);
+
+		_reporter.ReportReasoningDelta("step-1", "thinking", actor);
+
+		var evt = _reporter.AccumulatedEvents.Single();
+		evt.Type.Should().Be("reasoning-delta");
+		evt.Data.Should().Contain("\"agentName\":\"planner\"");
+		evt.Data.Should().Contain("\"depth\":2");
+	}
+
+	[Fact]
+	public void ToolStarted_SubagentActor_IncludesActorObject()
+	{
+		var actor = new ActorContext("researcher", null, "tc-3", 1);
+
+		_reporter.ReportToolExecutionStarted("step-1", "search", "{\"q\":\"x\"}", null, actor);
+
+		var evt = _reporter.AccumulatedEvents.Single();
+		evt.Type.Should().Be("tool-started");
+		evt.Data.Should().Contain("\"actor\":");
+		evt.Data.Should().Contain("\"agentName\":\"researcher\"");
+		evt.Data.Should().Contain("\"toolCallId\":\"tc-3\"");
+	}
+
+	[Fact]
+	public void ToolCompleted_MainActor_OmitsActorField()
+	{
+		_reporter.ReportToolExecutionCompleted("step-1", "search", true, "ok", null, ActorContext.Main);
+
+		var evt = _reporter.AccumulatedEvents.Single();
+		evt.Type.Should().Be("tool-completed");
+		evt.Data.Should().NotContain("\"actor\"");
+	}
+
+	[Fact]
+	public void StepTrace_ToolCallWithActor_SerialisesActorObject()
+	{
+		var trace = new StepExecutionTrace
+		{
+			ToolCalls =
+			{
+				new ToolCallRecord
+				{
+					CallId = "tc-1",
+					ToolName = "search",
+					Success = true,
+					ActorAgentName = "researcher",
+					ActorAgentDisplayName = "Researcher",
+					ActorToolCallId = "tc-1",
+					ActorDepth = 1,
+				},
+				new ToolCallRecord
+				{
+					CallId = "tc-2",
+					ToolName = "read_file",
+					Success = true,
+					// Main-agent tool call — actor stays null.
+				},
+			},
+		};
+
+		_reporter.ReportStepTrace("step-1", trace);
+
+		var evt = _reporter.AccumulatedEvents.Single();
+		evt.Type.Should().Be("step-trace");
+		// Sub-agent tool: actor object present
+		evt.Data.Should().Contain("\"agentName\":\"researcher\"");
+		evt.Data.Should().Contain("\"displayName\":\"Researcher\"");
+		// Main-agent tool: actor field is omitted (JSON serializer drops null per
+		// WhenWritingNull). The second tool call shows no `actor` key at all.
+		evt.Data.Should().Contain("\"callId\":\"tc-2\",\"toolName\":\"read_file\",\"success\":true}");
+	}
 }
 
 /// <summary>

@@ -289,6 +289,47 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("tool-completed", new { stepName, toolName, success, result, error });
 	}
 
+	// ── Actor-aware overloads (used by the Portal to distinguish sub-agents) ──
+
+	public void ReportContentDelta(string stepName, string chunk, ActorContext actor)
+	{
+		Write("content-delta", new { stepName, chunk, actor = ActorPayload(actor) });
+	}
+
+	public void ReportReasoningDelta(string stepName, string chunk, ActorContext actor)
+	{
+		Write("reasoning-delta", new { stepName, chunk, actor = ActorPayload(actor) });
+	}
+
+	public void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer, ActorContext actor)
+	{
+		Write("tool-started", new { stepName, toolName, arguments, mcpServer, actor = ActorPayload(actor) });
+	}
+
+	public void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error, ActorContext actor)
+	{
+		Write("tool-completed", new { stepName, toolName, success, result, error, actor = ActorPayload(actor) });
+	}
+
+	/// <summary>
+	/// Returns a JSON-friendly payload for an <see cref="ActorContext"/>, or null when the
+	/// event was emitted by the main agent. Keeping main-agent payloads slim preserves
+	/// backward compatibility for older consumers and avoids redundant per-event noise.
+	/// </summary>
+	private static object? ActorPayload(ActorContext actor)
+	{
+		if (actor.IsMain)
+			return null;
+
+		return new
+		{
+			agentName = actor.AgentName,
+			displayName = actor.AgentDisplayName,
+			toolCallId = actor.ToolCallId,
+			depth = actor.Depth,
+		};
+	}
+
 	public void ReportStepError(string stepName, string errorMessage)
 	{
 		Write("step-error", new { stepName, error = errorMessage });
@@ -336,7 +377,16 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 				result = tc.Result,
 				error = tc.Error,
 				startedAt = tc.StartedAt?.ToString("o"),
-				completedAt = tc.CompletedAt?.ToString("o")
+				completedAt = tc.CompletedAt?.ToString("o"),
+				actor = tc.ActorAgentName is null
+					? null
+					: (object)new
+					{
+						agentName = tc.ActorAgentName,
+						displayName = tc.ActorAgentDisplayName,
+						toolCallId = tc.ActorToolCallId,
+						depth = tc.ActorDepth,
+					},
 			}).ToArray(),
 			responseSegments = trace.ResponseSegments,
 			finalResponse = trace.FinalResponse,

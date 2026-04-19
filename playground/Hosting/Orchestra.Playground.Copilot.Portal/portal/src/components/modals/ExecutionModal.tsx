@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry } from '../../types';
+import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry, StepActorStreams } from '../../types';
 import { Icons } from '../../icons';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import ZoomableDag from '../ZoomableDag';
+import SubagentCard from '../SubagentCard';
 
 /** Extract a display name from a step MCP reference (string or object). */
 function mcpDisplayName(ref: StepMcpRef): string {
@@ -65,6 +66,12 @@ interface Props {
   stepResults: Record<string, string>;
   stepTraces: Record<string, TraceData>;
   stepAuditLogs: Record<string, AuditLogEntry[]>;
+  /**
+   * Per-step actor-keyed streaming buffers, populated live by App's
+   * <c>wireEventSource</c>. When present for the selected step we render
+   * sub-agent activity as inline indented cards.
+   */
+  stepActorStreams: Record<string, StepActorStreams>;
   streamingContent: string;
   finalResult: string;
   status: string;
@@ -84,6 +91,7 @@ export default function ExecutionModal({
   stepResults,
   stepTraces,
   stepAuditLogs,
+  stepActorStreams,
   streamingContent,
   finalResult,
   status,
@@ -198,15 +206,28 @@ export default function ExecutionModal({
   // the ZoomableDag remounts and the ref becomes a fresh empty div.
   useEffect(() => {
     if (open && dagRef.current && orchestration && !showGantt) {
+      // Derive per-step active sub-agent counts from the live actor streams
+      // so the DAG can decorate steps that are currently delegating.
+      const activeCounts: Record<string, number> = {};
+      if (stepActorStreams) {
+        for (const [stepName, streams] of Object.entries(stepActorStreams)) {
+          const active = streams.subagents.filter(
+            sa => sa.status === 'running' || sa.status === undefined,
+          ).length;
+          if (active > 0) activeCounts[stepName] = active;
+        }
+      }
       renderExecutionDag(
         orchestration,
         stepStatuses || {},
         dagRef.current,
         setSelectedStep,
+        undefined,
+        activeCounts,
       );
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, orchestration, stepStatuses, showGantt]);
+  }, [open, orchestration, stepStatuses, showGantt, stepActorStreams]);
 
   // Highlight the selected step via direct DOM manipulation instead of
   // re-rendering the entire DAG (which would destroy click handlers).
@@ -2251,7 +2272,14 @@ export default function ExecutionModal({
                   )}
                 </div>
                 <div className="streaming-content">
-                  {displayContent.content ? (
+                  {selectedStep && stepActorStreams && stepActorStreams[selectedStep] ? (
+                    <div className="actor-stream-list">
+                      <SubagentCard stream={stepActorStreams[selectedStep].main} depth={0} />
+                      {stepActorStreams[selectedStep].subagents.map(sub => (
+                        <SubagentCard key={sub.key} stream={sub} />
+                      ))}
+                    </div>
+                  ) : displayContent.content ? (
                     displayContent.content
                   ) : (
                     <span style={{ color: 'var(--text-dim)' }}>

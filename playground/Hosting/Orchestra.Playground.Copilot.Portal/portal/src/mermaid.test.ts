@@ -630,4 +630,55 @@ describe('edge cases', () => {
     // Should parse as valid Mermaid syntax
     await assertMermaidParses(mermaidCode);
   });
+
+  it('decorates step nodes with active sub-agent badge when count > 0', async () => {
+    const steps: Step[] = [
+      {
+        name: 'orchestrator',
+        type: 'Prompt',
+        model: 'claude-opus-4.6',
+        dependsOn: [],
+      },
+      {
+        name: 'idle-step',
+        type: 'Prompt',
+        model: 'claude-opus-4.6',
+        dependsOn: ['orchestrator'],
+      },
+    ];
+    const statuses: Record<string, string> = { orchestrator: 'running', 'idle-step': 'pending' };
+    const { mermaidCode } = generateExecutionDagCode(steps, statuses, {
+      orchestrator: 2,
+    });
+
+    // Singular vs plural noun handling and the badge marker character.
+    expect(mermaidCode).toContain('2 active sub-agents');
+    expect(mermaidCode).toContain('\u25C9');
+    // Steps with no active sub-agents must not get the badge.
+    expect(mermaidCode).not.toContain('active sub-agent ');
+
+    await assertMermaidParses(mermaidCode);
+  });
+
+  it('uses singular noun when exactly one sub-agent is active', async () => {
+    const steps: Step[] = [
+      { name: 'orchestrator', type: 'Prompt', model: 'claude-opus-4.6', dependsOn: [] },
+    ];
+    const { mermaidCode } = generateExecutionDagCode(
+      steps,
+      { orchestrator: 'running' },
+      { orchestrator: 1 },
+    );
+    expect(mermaidCode).toContain('1 active sub-agent');
+    expect(mermaidCode).not.toContain('1 active sub-agents');
+  });
+
+  it('omits the badge entirely when no sub-agents are active', async () => {
+    const steps: Step[] = [
+      { name: 'orchestrator', type: 'Prompt', model: 'claude-opus-4.6', dependsOn: [] },
+    ];
+    const { mermaidCode } = generateExecutionDagCode(steps, { orchestrator: 'running' });
+    expect(mermaidCode).not.toContain('active sub-agent');
+    expect(mermaidCode).not.toContain('\u25C9');
+  });
 });

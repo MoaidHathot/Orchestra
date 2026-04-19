@@ -2878,3 +2878,169 @@
       color: var(--text-secondary, #8b949e);
       margin-top: 2px;
     }
+
+    /* ============================================================
+       Sub-agent inline cards (live execution view)
+       ============================================================ */
+    .actor-stream-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .subagent-card {
+      border-radius: 6px;
+      overflow: hidden;
+      background: var(--bg-elevated, #0d1117);
+      border: 1px solid var(--border, #30363d);
+    }
+    .subagent-card[data-status="running"] {
+      border-color: var(--accent, #58a6ff);
+    }
+    .subagent-card[data-status="failed"] {
+      border-color: var(--danger, #f85149);
+    }
+    .subagent-card-header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      background: transparent;
+      color: var(--text, #e6edf3);
+      border: none;
+      border-radius: 0;
+      cursor: pointer;
+      font-size: 12px;
+      text-align: left;
+    }
+    .subagent-card-header:hover {
+      background: rgba(110, 118, 129, 0.08);
+    }
+    .subagent-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .subagent-name {
+      font-weight: 600;
+    }
+    .subagent-depth {
+      font-size: 10px;
+      color: var(--text-secondary, #8b949e);
+      padding: 1px 6px;
+      border: 1px solid var(--border, #30363d);
+      border-radius: 10px;
+    }
+    .subagent-status {
+      font-size: 10px;
+      text-transform: uppercase;
+      padding: 1px 6px;
+      border-radius: 3px;
+      letter-spacing: 0.5px;
+    }
+    .subagent-status--running {
+      background: rgba(88, 166, 255, 0.15);
+      color: var(--accent, #58a6ff);
+    }
+    .subagent-status--completed {
+      background: rgba(63, 185, 80, 0.15);
+      color: var(--success, #3fb950);
+    }
+    .subagent-status--failed {
+      background: rgba(248, 81, 73, 0.15);
+      color: var(--danger, #f85149);
+    }
+    .subagent-status--cancelled {
+      background: rgba(139, 148, 158, 0.15);
+      color: var(--text-secondary, #8b949e);
+    }
+    .subagent-elapsed {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--text-secondary, #8b949e);
+      font-variant-numeric: tabular-nums;
+    }
+    .subagent-toggle {
+      font-size: 12px;
+      color: var(--text-secondary, #8b949e);
+    }
+    .subagent-card-body {
+      padding: 8px 12px 10px 12px;
+      border-top: 1px solid var(--border, #30363d);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .subagent-section-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      color: var(--text-secondary, #8b949e);
+      letter-spacing: 0.5px;
+      margin-bottom: 4px;
+    }
+    .subagent-content {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .subagent-reasoning-toggle {
+      background: transparent;
+      border: none;
+      color: var(--text-secondary, #8b949e);
+      font-size: 11px;
+      padding: 0;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .subagent-reasoning {
+      margin: 4px 0 0 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 11px;
+      line-height: 1.45;
+      color: var(--text-secondary, #8b949e);
+      opacity: 0.85;
+      font-style: italic;
+    }
+    .subagent-event-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .subagent-event {
+      display: flex;
+      gap: 8px;
+      font-size: 11px;
+      align-items: baseline;
+    }
+    .subagent-event-type {
+      color: var(--text-secondary, #8b949e);
+      min-width: 110px;
+    }
+    .subagent-event-tool {
+      color: var(--accent, #58a6ff);
+      font-family: var(--font-mono, monospace);
+    }
+    .subagent-event-error {
+      color: var(--danger, #f85149);
+    }
+    .subagent-error {
+      color: var(--danger, #f85149);
+      font-size: 12px;
+      padding: 4px 8px;
+      background: rgba(248, 81, 73, 0.08);
+      border-radius: 3px;
+    }
+    .subagent-empty {
+      font-size: 11px;
+      color: var(--text-secondary, #8b949e);
+      font-style: italic;
+    }
