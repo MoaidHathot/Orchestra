@@ -26,6 +26,7 @@ public partial class CopilotAgent : IAgent
 	private readonly ILoggerFactory _loggerFactory;
 	private readonly IReadOnlyList<AvailableModelInfo>? _cachedAvailableModels;
 	private readonly Action<IReadOnlyList<AvailableModelInfo>>? _onAvailableModelsListed;
+	private readonly ISessionFaultBroker? _faultBroker;
 
 	internal CopilotAgent(
 			CopilotClient client,
@@ -45,7 +46,8 @@ public partial class CopilotAgent : IAgent
 			ILogger<CopilotAgent> logger,
 			ILoggerFactory? loggerFactory = null,
 			IReadOnlyList<AvailableModelInfo>? cachedAvailableModels = null,
-			Action<IReadOnlyList<AvailableModelInfo>>? onAvailableModelsListed = null)
+			Action<IReadOnlyList<AvailableModelInfo>>? onAvailableModelsListed = null,
+			ISessionFaultBroker? faultBroker = null)
 	{
 		_client = client;
 		_model = model;
@@ -65,6 +67,7 @@ public partial class CopilotAgent : IAgent
 		_loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
 		_cachedAvailableModels = cachedAvailableModels;
 		_onAvailableModelsListed = onAvailableModelsListed;
+		_faultBroker = faultBroker;
 	}
 
 	public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
@@ -81,6 +84,27 @@ public partial class CopilotAgent : IAgent
 	{
 		try
 		{
+			// Fast-fail: if a sibling session has already declared this CLI client unhealthy,
+			// don't even attempt CreateSessionAsync — the JSON-RPC call would just hang or
+			// throw "connection lost" anyway. Surface a loud, structured exception so the
+			// engine's retry policy can short-circuit instead of burning the retry budget.
+			if (_faultBroker?.IsClientUnhealthy == true)
+			{
+				LogSessionSkippedClientUnhealthy(
+					_client.GetHashCode(),
+					_faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)",
+					_faultBroker.UnhealthyReason ?? "(no details)");
+
+				throw new CopilotClientUnhealthyException(
+					triggeringSessionId: _faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)",
+					triggeringFailureReason: _faultBroker.UnhealthyTriggeringFailureReason ?? "(unknown)",
+					probeDetails: _faultBroker.UnhealthyReason,
+					message: $"Copilot CLI client is unhealthy and will not be used. " +
+							 $"First failure: session '{_faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)"}' " +
+							 $"({_faultBroker.UnhealthyTriggeringFailureReason ?? "(unknown)"}). " +
+							 $"Probe: {_faultBroker.UnhealthyReason ?? "(no details)"}.");
+			}
+
 			var config = BuildSessionConfig();
 			LogMcpConfiguration();
 
@@ -104,6 +128,13 @@ public partial class CopilotAgent : IAgent
 
 			session.On(handler.HandleEvent);
 
+			// Register this session with the per-run fault broker so that, if a sibling
+			// session on the same CopilotClient detects a CLI-level fault, this session
+			// gets faulted too instead of waiting for its per-step timeout.
+			using var _faultRegistration = _faultBroker?.RegisterSession(
+				session.SessionId,
+				faultException => done.TrySetException(faultException));
+
 			// Build message options with optional attachments
 			var messageOptions = new MessageOptions { Prompt = prompt };
 			if (_attachments.Length > 0)
@@ -119,7 +150,31 @@ public partial class CopilotAgent : IAgent
 				_ = session.AbortAsync();
 				done.TrySetCanceled(cancellationToken);
 			});
-			await done.Task.ConfigureAwait(false);
+
+			try
+			{
+				await done.Task.ConfigureAwait(false);
+			}
+			catch (CopilotSessionFailedException sessionEx) when (_faultBroker is not null)
+			{
+				// A session-level error fired. Probe the CLI; if it's unhealthy, the broker
+				// will fault all OTHER in-flight sessions on this client so they fast-fail
+				// instead of hanging until their per-step timeout. We always re-throw the
+				// original exception for THIS session — the broker's job is to defend its
+				// siblings, not change our own outcome.
+				try
+				{
+					_ = await _faultBroker.ProbeAndMaybeFaultSiblingsAsync(
+						failedSessionId: session.SessionId,
+						failureReason: sessionEx.Message,
+						cancellationToken: CancellationToken.None).ConfigureAwait(false);
+				}
+				catch (Exception probeEx)
+				{
+					LogFaultBrokerProbeThrew(probeEx, session.SessionId);
+				}
+				throw;
+			}
 
 			// Handle model mismatch detection and reporting
 			var availableModels = await CheckModelMismatchAsync(handler.ActualModel, cancellationToken).ConfigureAwait(false);
@@ -618,6 +673,14 @@ public partial class CopilotAgent : IAgent
 	[LoggerMessage(EventId = 10, Level = LogLevel.Error,
 		Message = "Session: CreateSessionAsync FAILED on client#{ClientHash} after {ElapsedMs}ms")]
 	private partial void LogSessionCreateFailed(Exception ex, int clientHash, long elapsedMs);
+
+	[LoggerMessage(EventId = 11, Level = LogLevel.Warning,
+		Message = "Session '{SessionId}': fault-broker probe threw — sibling sessions may not be faulted")]
+	private partial void LogFaultBrokerProbeThrew(Exception ex, string sessionId);
+
+	[LoggerMessage(EventId = 12, Level = LogLevel.Error,
+		Message = "Session: skipped on client#{ClientHash} — broker latched unhealthy by session '{TriggeringSessionId}'. Reason: {Reason}")]
+	private partial void LogSessionSkippedClientUnhealthy(int clientHash, string triggeringSessionId, string reason);
 
 	#endregion
 }

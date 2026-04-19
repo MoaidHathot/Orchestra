@@ -770,6 +770,14 @@ public partial class OrchestrationExecutor
 		if (result.Status != ExecutionStatus.Failed)
 			return result;
 
+		// Skip retries when the underlying agent client is unhealthy — retrying on a
+		// dead client is guaranteed to fail and just wastes the configured retry budget.
+		if (result.ErrorCategory == StepErrorCategory.ClientUnhealthy)
+		{
+			LogStepRetrySkippedClientUnhealthy(step.Name, result.ErrorMessage ?? "(no message)");
+			return result;
+		}
+
 		// Check if the failure was a timeout and retryOnTimeout is disabled
 		var isTimeout = result.ErrorMessage?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true;
 		if (isTimeout && !retryPolicy.RetryOnTimeout)
@@ -830,6 +838,13 @@ public partial class OrchestrationExecutor
 			if (isTimeout && !retryPolicy.RetryOnTimeout)
 			{
 				LogStepRetryAbortedTimeout(step.Name, attempt);
+				break;
+			}
+
+			// Stop retrying if the agent client became unhealthy mid-loop.
+			if (result.ErrorCategory == StepErrorCategory.ClientUnhealthy)
+			{
+				LogStepRetrySkippedClientUnhealthy(step.Name, result.ErrorMessage ?? "(no message)");
 				break;
 			}
 		}
@@ -1282,6 +1297,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Step '{StepName}' failed after exhausting all {MaxRetries} retry attempts.")]
 	private partial void LogStepRetryExhausted(string stepName, int maxRetries);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Step '{StepName}' not retried — agent client is unhealthy. Error: {Error}")]
+	private partial void LogStepRetrySkippedClientUnhealthy(string stepName, string error);
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Checkpoint saved for orchestration '{Name}', run '{RunId}' after step '{StepName}' ({CompletedSteps}/{TotalSteps}).")]
 	private partial void LogCheckpointSaved(string name, string runId, string stepName, int completedSteps, int totalSteps);

@@ -29,6 +29,15 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		/// stomp on each other's cache.
 		/// </summary>
 		public IReadOnlyList<AvailableModelInfo>? CachedAvailableModels;
+
+		/// <summary>
+		/// Per-run fault broker. When one session on this client errors out, the broker
+		/// probes the CLI; if the CLI is unhealthy, all other in-flight sessions on this
+		/// client are faulted with <see cref="CopilotClientUnhealthyException"/> so they
+		/// fail fast instead of waiting for their per-step timeout.
+		/// Created at the same time as <see cref="Client"/> in CreateRunScopeAsyncCore.
+		/// </summary>
+		public SessionFaultBroker? FaultBroker;
 	}
 
 	public CopilotAgentBuilder(ILoggerFactory? loggerFactory = null)
@@ -72,6 +81,10 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			throw;
 		}
 		holder.Client = client;
+		holder.FaultBroker = new SessionFaultBroker(
+			scopeId,
+			probe: ct => ProbeClientHealthAsync(client, scopeId, ct),
+			logger: _loggerFactory.CreateLogger<SessionFaultBroker>());
 		LogRunScopeCreated(scopeId, sw.ElapsedMilliseconds, client.GetHashCode());
 		LogRunScopeAsyncLocalCheck(scopeId, _runScopedClient.Value?.Client?.GetHashCode().ToString() ?? "null", Environment.CurrentManagedThreadId);
 		return new RunScope(this, holder, client, scopeId);
@@ -152,6 +165,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			attachments: attachments,
 			cachedAvailableModels: holder.CachedAvailableModels,
 			onAvailableModelsListed: models => holder.CachedAvailableModels = models,
+			faultBroker: holder.FaultBroker,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
 			loggerFactory: _loggerFactory
 		);
@@ -179,6 +193,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			attachments: config.Attachments,
 			cachedAvailableModels: holder.CachedAvailableModels,
 			onAvailableModelsListed: models => holder.CachedAvailableModels = models,
+			faultBroker: holder.FaultBroker,
 			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
 			loggerFactory: _loggerFactory
 		);
@@ -190,6 +205,45 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		// via its RunScope and disposes it when the scope ends.
 		GC.SuppressFinalize(this);
 		return ValueTask.CompletedTask;
+	}
+
+	/// <summary>
+	/// Health probe used by <see cref="SessionFaultBroker"/>. Sends a short-deadline ping
+	/// and inspects the SDK <see cref="CopilotClient.State"/>. The CLI is considered
+	/// healthy only when both succeed within the deadline.
+	/// </summary>
+	private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(5);
+
+	private async Task<ProbeResult> ProbeClientHealthAsync(CopilotClient client, int scopeId, CancellationToken cancellationToken)
+	{
+		using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		probeCts.CancelAfter(ProbeTimeout);
+
+		var state = client.State.ToString();
+		LogProbeAttempt(scopeId, state);
+
+		try
+		{
+			var pingSw = System.Diagnostics.Stopwatch.StartNew();
+			_ = await client.PingAsync("orchestra-health-probe", probeCts.Token).ConfigureAwait(false);
+			pingSw.Stop();
+
+			var stateAfter = client.State;
+			if (stateAfter != ConnectionState.Connected)
+			{
+				return new ProbeResult(false, $"ping ok in {pingSw.ElapsedMilliseconds}ms but state={stateAfter}");
+			}
+
+			return new ProbeResult(true, $"ping ok in {pingSw.ElapsedMilliseconds}ms, state=Connected");
+		}
+		catch (OperationCanceledException) when (probeCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+		{
+			return new ProbeResult(false, $"ping timed out after {ProbeTimeout.TotalSeconds}s, state={client.State}");
+		}
+		catch (Exception ex)
+		{
+			return new ProbeResult(false, $"ping threw {ex.GetType().Name}: {ex.Message}, state={client.State}");
+		}
 	}
 
 	/// <summary>
@@ -276,6 +330,10 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	[LoggerMessage(EventId = 108, Level = LogLevel.Error,
 		Message = "BuildAgent: NO RUN SCOPE active on thread {ThreadId} — refusing to build agent. Open a CreateRunScopeAsync first. Stack:\n{StackTrace}")]
 	private partial void LogBuildAgentOutsideScope(int threadId, string stackTrace);
+
+	[LoggerMessage(EventId = 112, Level = LogLevel.Debug,
+		Message = "RunScope#{ScopeId}: probing CLI client health (currentState={State})")]
+	private partial void LogProbeAttempt(int scopeId, string state);
 
 	#endregion
 }

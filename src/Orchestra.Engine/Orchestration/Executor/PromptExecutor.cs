@@ -280,7 +280,24 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			_reporter.ReportStepTrace(step.Name, trace);
 
 			_reporter.ReportStepError(step.Name, ex.Message);
-			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace, errorCategory: StepErrorCategory.ModelError);
+
+			// Detect agent-client-unhealthy faults via the marker interface so the engine
+			// can categorize the failure as ClientUnhealthy and the executor's retry loop
+			// can short-circuit (retries on a dead client are guaranteed to fail).
+			// Walk inner exceptions in case a wrapper (AggregateException, etc.) hides it.
+			var category = StepErrorCategory.ModelError;
+			for (var probe = ex; probe is not null; probe = probe.InnerException!)
+			{
+				if (probe is IAgentClientUnhealthyException unhealthy)
+				{
+					category = StepErrorCategory.ClientUnhealthy;
+					LogStepFailedClientUnhealthy(step.Name, unhealthy.TriggeringSessionId, unhealthy.TriggeringFailureReason);
+					break;
+				}
+				if (probe.InnerException is null) break;
+			}
+
+			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace, errorCategory: category);
 		}
 	}
 
@@ -542,6 +559,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' output handler returned empty/whitespace response, falling back to original content")]
 	private partial void LogOutputHandlerEmptyResponse(string stepName);
+
+	[LoggerMessage(
+		EventId = 9,
+		Level = LogLevel.Error,
+		Message = "Step '{StepName}' failed because the agent client is unhealthy (triggered by session '{TriggeringSessionId}': {TriggeringFailureReason}). Categorized as ClientUnhealthy; retries will be skipped.")]
+	private partial void LogStepFailedClientUnhealthy(string stepName, string triggeringSessionId, string triggeringFailureReason);
 
 	#endregion
 }

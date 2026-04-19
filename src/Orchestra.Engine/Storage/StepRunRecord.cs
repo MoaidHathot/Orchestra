@@ -179,6 +179,13 @@ public enum StepErrorCategory
 
 	/// <summary>Template transform evaluation failed.</summary>
 	TransformError,
+
+	/// <summary>
+	/// The underlying agent client (e.g. Copilot CLI) has been declared unhealthy
+	/// for the remainder of the run scope. Subsequent retries on the same client
+	/// are guaranteed to fail and should be skipped.
+	/// </summary>
+	ClientUnhealthy,
 }
 
 /// <summary>

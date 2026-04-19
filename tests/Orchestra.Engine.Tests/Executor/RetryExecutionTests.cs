@@ -524,4 +524,113 @@ public class RetryExecutionTests
 	}
 
 	#endregion
+
+	#region ClientUnhealthy Short-Circuit
+
+	/// <summary>Test-only stand-in for the agent-implementation exception that signals an unhealthy client.</summary>
+	private sealed class FakeClientUnhealthyException : Exception, IAgentClientUnhealthyException
+	{
+		public FakeClientUnhealthyException(string message) : base(message) { }
+		public string TriggeringSessionId => "test-trigger-session";
+		public string TriggeringFailureReason => "test-trigger-reason";
+		public string? ProbeDetails => "test-probe-details";
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ClientUnhealthyOnFirstAttempt_DoesNotRetry()
+	{
+		// Arrange — first attempt throws an IAgentClientUnhealthyException; if retry logic
+		// were to fire we'd see callCount > 1. The executor MUST short-circuit because retries
+		// on a dead client are guaranteed to fail.
+		var callCount = 0;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			Interlocked.Increment(ref callCount);
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			channel.Writer.Complete();
+			return new AgentTask(channel.Reader,
+				Task.FromException<AgentResult>(new FakeClientUnhealthyException("client is dead")));
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, reporter, _loggerFactory);
+		var orchestration = CreateOrchestration(
+			[CreateStep(retry: new RetryPolicy { MaxRetries = 5, BackoffSeconds = 0.01 })]);
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert — exactly one attempt, no retries reported, category is ClientUnhealthy.
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		callCount.Should().Be(1);
+		result.StepResults["test-step"].ErrorCategory.Should().Be(StepErrorCategory.ClientUnhealthy);
+		reporter.DidNotReceive().ReportStepRetry(
+			Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<TimeSpan>());
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ClientUnhealthyWrappedInInnerException_StillShortCircuits()
+	{
+		// Arrange — wrap the unhealthy exception so the executor must walk InnerException chain.
+		var callCount = 0;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			Interlocked.Increment(ref callCount);
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			channel.Writer.Complete();
+			var wrapped = new InvalidOperationException(
+				"agent crashed",
+				new FakeClientUnhealthyException("client is dead"));
+			return new AgentTask(channel.Reader, Task.FromException<AgentResult>(wrapped));
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, reporter, _loggerFactory);
+		var orchestration = CreateOrchestration(
+			[CreateStep(retry: new RetryPolicy { MaxRetries = 4, BackoffSeconds = 0.01 })]);
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		callCount.Should().Be(1);
+		result.StepResults["test-step"].ErrorCategory.Should().Be(StepErrorCategory.ClientUnhealthy);
+		reporter.DidNotReceive().ReportStepRetry(
+			Arg.Any<string>(), Arg.Any<int>(), Arg.Any<int>(), Arg.Any<string>(), Arg.Any<TimeSpan>());
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_GenericFailure_StillRetries_RegressionGuard()
+	{
+		// Arrange — a plain Exception (NOT IAgentClientUnhealthyException) MUST still retry.
+		// This guards against the short-circuit accidentally firing on every failure.
+		var callCount = 0;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			Interlocked.Increment(ref callCount);
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			channel.Writer.Complete();
+			return new AgentTask(channel.Reader,
+				Task.FromException<AgentResult>(new InvalidOperationException("transient model error")));
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, reporter, _loggerFactory);
+		var orchestration = CreateOrchestration(
+			[CreateStep(retry: new RetryPolicy { MaxRetries = 3, BackoffSeconds = 0.01 })]);
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert — initial attempt + 3 retries = 4 total calls.
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		callCount.Should().Be(4);
+		result.StepResults["test-step"].ErrorCategory.Should().NotBe(StepErrorCategory.ClientUnhealthy);
+	}
+
+	#endregion
 }
