@@ -76,6 +76,15 @@ Console.WriteLine($"Testing MCP proxy at {baseUrl}");
 Console.WriteLine($"Servers to test: {string.Join(", ", servers)}");
 Console.WriteLine(new string('─', 60));
 
+var indentedJson = new JsonSerializerOptions { WriteIndented = true };
+
+static void PrintInputSchema(JsonElement schema, string indent)
+{
+	var pretty = JsonSerializer.Serialize(schema, new JsonSerializerOptions { WriteIndented = true });
+	foreach (var line in pretty.Split('\n'))
+		Console.WriteLine($"{indent}{line.TrimEnd('\r')}");
+}
+
 // ── Test 1: HTTP connectivity check ──────────────────────────────────────
 Console.WriteLine("\n[1] HTTP connectivity check");
 using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
@@ -109,12 +118,22 @@ foreach (var server in servers)
 			var json = JsonDocument.Parse(body);
 			if (json.RootElement.TryGetProperty("tools", out var tools))
 			{
-				var toolNames = tools.EnumerateArray()
-					.Select(t => t.GetProperty("name").GetString())
-					.ToArray();
-				Console.WriteLine($"    {server}: {status} → {toolNames.Length} tool(s)");
-				foreach (var name in toolNames)
+				var toolArray = tools.EnumerateArray().ToArray();
+				Console.WriteLine($"    {server}: {status} → {toolArray.Length} tool(s)");
+				foreach (var tool in toolArray)
+				{
+					var name = tool.GetProperty("name").GetString();
 					Console.WriteLine($"      - {name}");
+					if (tool.TryGetProperty("inputSchema", out var schema))
+					{
+						Console.WriteLine($"        inputSchema:");
+						PrintInputSchema(schema, "          ");
+					}
+					else
+					{
+						Console.WriteLine($"        inputSchema: <missing>");
+					}
+				}
 			}
 			else
 			{
@@ -151,7 +170,11 @@ foreach (var server in servers)
 		var tools = await client.ListToolsAsync();
 		Console.WriteLine($"    {server}: Connected → {tools.Count} tool(s)");
 		foreach (var tool in tools)
+		{
 			Console.WriteLine($"      - {tool.Name}: {tool.Description?[..Math.Min(tool.Description.Length, 60)]}");
+			Console.WriteLine($"        inputSchema:");
+			PrintInputSchema(tool.JsonSchema, "          ");
+		}
 	}
 	catch (Exception ex)
 	{
