@@ -54,6 +54,27 @@ public class CopilotAgentBuilderTests
 			.WithParameterName("Model");
 	}
 
+	[Fact]
+	public async Task BuildAgentAsync_OutsideRunScope_Throws()
+	{
+		// Architectural invariant: every BuildAgentAsync MUST happen inside an active
+		// CreateRunScopeAsync. There is no fallback shared CLI client by design — that
+		// would defeat the one-CLI-process-per-orchestration model. If callers violate
+		// this they must fail loudly, not silently lazy-create a process-wide client.
+		var builder = new CopilotAgentBuilder();
+		var config = new AgentBuildConfig
+		{
+			Model = "claude-opus-4.6",
+			SystemPrompt = "test",
+			Mcps = [],
+		};
+
+		var act = () => builder.BuildAgentAsync(config);
+
+		await act.Should().ThrowAsync<InvalidOperationException>()
+			.WithMessage("*outside an active CreateRunScopeAsync*");
+	}
+
 	#endregion
 
 	#region Constructor

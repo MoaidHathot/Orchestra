@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Threading.Channels;
 using GitHub.Copilot.SDK;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 
 namespace Orchestra.Copilot;
@@ -15,12 +17,13 @@ namespace Orchestra.Copilot;
 /// changes to allow concurrent callback dispatch, this class must be updated to use
 /// ConcurrentDictionary and thread-safe string accumulation.
 /// </summary>
-internal sealed class CopilotSessionHandler
+internal sealed partial class CopilotSessionHandler
 {
 	private readonly ChannelWriter<AgentEvent> _writer;
 	private readonly IOrchestrationReporter _reporter;
 	private readonly string _requestedModel;
 	private readonly TaskCompletionSource _done;
+	private readonly ILogger<CopilotSessionHandler> _logger;
 	private readonly Dictionary<string, string> _toolCallNames = [];
 	private readonly System.Text.StringBuilder _accumulatedContent = new();
 
@@ -33,12 +36,14 @@ internal sealed class CopilotSessionHandler
 		ChannelWriter<AgentEvent> writer,
 		IOrchestrationReporter reporter,
 		string requestedModel,
-		TaskCompletionSource done)
+		TaskCompletionSource done,
+		ILogger<CopilotSessionHandler>? logger = null)
 	{
 		_writer = writer;
 		_reporter = reporter;
 		_requestedModel = requestedModel;
 		_done = done;
+		_logger = logger ?? NullLogger<CopilotSessionHandler>.Instance;
 	}
 
 	/// <summary>
@@ -563,26 +568,56 @@ internal sealed class CopilotSessionHandler
 
 	private void HandleError(SessionErrorEvent err)
 	{
+		var message = err.Data.Message ?? "(no message)";
+
+		// Loud ERROR log: a fatal session-level error from the CLI MUST be visible.
+		LogSessionError(_requestedModel, message);
+
 		_writer.TryWrite(new AgentEvent
 		{
 			Type = AgentEventType.Error,
-			ErrorMessage = err.Data.Message,
+			ErrorMessage = message,
 		});
-		// Complete the TCS so RunSessionAsync does not hang indefinitely
-		// waiting for SessionIdleEvent that may never arrive after a fatal error.
-		_done.TrySetResult();
+
+		// Fault the TCS so RunSessionAsync throws and the orchestration step fails
+		// with a clear error category instead of silently succeeding with empty content.
+		_done.TrySetException(new CopilotSessionFailedException(
+			CopilotSessionFailureKind.SessionError,
+			_requestedModel,
+			$"Copilot session failed: {message}"));
 	}
 
 	private void HandleShutdown(SessionShutdownEvent shutdown)
 	{
-		var reason = shutdown.Data.ErrorReason ?? shutdown.Data.ShutdownType.ToString();
+		var errorReason = shutdown.Data.ErrorReason;
+		var shutdownType = shutdown.Data.ShutdownType.ToString();
+
+		if (!string.IsNullOrEmpty(errorReason))
+		{
+			// Abnormal shutdown — the CLI is terminating because of an error.
+			// This is a fatal failure; the orchestration step MUST fail.
+			LogAbnormalShutdown(_requestedModel, shutdownType, errorReason);
+
+			_writer.TryWrite(new AgentEvent
+			{
+				Type = AgentEventType.Error,
+				ErrorMessage = $"Session shutdown abnormally ({shutdownType}): {errorReason}",
+			});
+
+			_done.TrySetException(new CopilotSessionFailedException(
+				CopilotSessionFailureKind.AbnormalShutdown,
+				_requestedModel,
+				$"Copilot session shutdown abnormally ({shutdownType}): {errorReason}",
+				reason: errorReason));
+			return;
+		}
+
+		// Clean shutdown — normal end of session.
 		_writer.TryWrite(new AgentEvent
 		{
 			Type = AgentEventType.SessionIdle,
-			Content = $"Session shutdown ({reason})",
+			Content = $"Session shutdown ({shutdownType})",
 		});
-		// The session is terminating — complete the TCS so the executor doesn't
-		// hang waiting for SessionIdleEvent that will never arrive.
 		_done.TrySetResult();
 	}
 
@@ -619,4 +654,20 @@ internal sealed class CopilotSessionHandler
 		});
 		_done.TrySetResult();
 	}
+
+	#region Source-Generated Logging
+
+	[LoggerMessage(
+		EventId = 1,
+		Level = LogLevel.Error,
+		Message = "Copilot session failed (model={Model}): {Message}")]
+	private partial void LogSessionError(string model, string message);
+
+	[LoggerMessage(
+		EventId = 2,
+		Level = LogLevel.Error,
+		Message = "Copilot session shutdown abnormally (model={Model}, type={ShutdownType}): {Reason}")]
+	private partial void LogAbnormalShutdown(string model, string shutdownType, string reason);
+
+	#endregion
 }

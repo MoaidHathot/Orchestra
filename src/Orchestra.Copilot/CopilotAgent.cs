@@ -23,6 +23,7 @@ public partial class CopilotAgent : IAgent
 	private readonly Engine.InfiniteSessionConfig? _infiniteSessionConfig;
 	private readonly ImageAttachment[] _attachments;
 	private readonly ILogger<CopilotAgent> _logger;
+	private readonly ILoggerFactory _loggerFactory;
 	private readonly IReadOnlyList<AvailableModelInfo>? _cachedAvailableModels;
 	private readonly Action<IReadOnlyList<AvailableModelInfo>>? _onAvailableModelsListed;
 
@@ -42,6 +43,7 @@ public partial class CopilotAgent : IAgent
 			Engine.InfiniteSessionConfig? infiniteSessionConfig,
 			ImageAttachment[] attachments,
 			ILogger<CopilotAgent> logger,
+			ILoggerFactory? loggerFactory = null,
 			IReadOnlyList<AvailableModelInfo>? cachedAvailableModels = null,
 			Action<IReadOnlyList<AvailableModelInfo>>? onAvailableModelsListed = null)
 	{
@@ -60,6 +62,7 @@ public partial class CopilotAgent : IAgent
 		_infiniteSessionConfig = infiniteSessionConfig;
 		_attachments = attachments;
 		_logger = logger;
+		_loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
 		_cachedAvailableModels = cachedAvailableModels;
 		_onAvailableModelsListed = onAvailableModelsListed;
 	}
@@ -97,7 +100,7 @@ public partial class CopilotAgent : IAgent
 			await using var _sessionDispose = session;
 
 			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-			var handler = new CopilotSessionHandler(writer, _reporter, _model, done);
+			var handler = new CopilotSessionHandler(writer, _reporter, _model, done, _loggerFactory.CreateLogger<CopilotSessionHandler>());
 
 			session.On(handler.HandleEvent);
 

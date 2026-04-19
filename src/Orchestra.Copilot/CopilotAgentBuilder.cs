@@ -10,7 +10,6 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	private readonly ILoggerFactory _loggerFactory;
 	private readonly ILogger<CopilotAgentBuilder> _logger;
 	private static int _scopeCounter;
-	private static int _fallbackBuildCounter;
 
 	/// <summary>
 	/// Per-run client scoped via AsyncLocal&lt;Holder&gt;. The Holder is a mutable wrapper
@@ -24,21 +23,13 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	private sealed class ClientHolder
 	{
 		public CopilotClient? Client;
+		/// <summary>
+		/// Cached available model info from the last ListModelsAsync call within this run.
+		/// Lives on the holder (not the singleton builder) so concurrent runs cannot
+		/// stomp on each other's cache.
+		/// </summary>
+		public IReadOnlyList<AvailableModelInfo>? CachedAvailableModels;
 	}
-
-	/// <summary>
-	/// Fallback client for code paths that don't create a run scope (e.g., tests, standalone usage).
-	/// Created lazily on first use and disposed with the builder.
-	/// </summary>
-	private CopilotClient? _fallbackClient;
-	private volatile bool _fallbackStarted;
-	private readonly SemaphoreSlim _fallbackLock = new(1, 1);
-
-	/// <summary>
-	/// Cached available model info from the last ListModelsAsync call.
-	/// Avoids repeated network calls when multiple steps hit model mismatch in the same run.
-	/// </summary>
-	internal IReadOnlyList<AvailableModelInfo>? CachedAvailableModels { get; set; }
 
 	public CopilotAgentBuilder(ILoggerFactory? loggerFactory = null)
 	{
@@ -96,47 +87,30 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	public override string? GetRunScopedClientDiagnostic()
 		=> _runScopedClient.Value?.Client?.GetHashCode().ToString();
 
-	private async Task<CopilotClient> GetActiveClientAsync(CancellationToken cancellationToken)
+	/// <summary>
+	/// Gets the active run-scoped client. Throws if no <see cref="CreateRunScopeAsync"/>
+	/// is currently active on the calling ExecutionContext. Every agent build MUST happen
+	/// inside a per-run scope — there is no fallback shared CLI process by design.
+	/// </summary>
+	private Task<CopilotClient> GetActiveClientAsync(CancellationToken cancellationToken)
 	{
-		// Prefer run-scoped client (set by CreateRunScopeAsync via the holder)
+		_ = cancellationToken;
 		var holder = _runScopedClient.Value;
 		var client = holder?.Client;
 		LogActiveClientCheck(client is null ? "null" : client.GetHashCode().ToString(), Environment.CurrentManagedThreadId);
-		if (client is not null)
+		if (client is null)
 		{
-			LogActiveClientResolved("run-scoped", client.GetHashCode(), Environment.CurrentManagedThreadId);
-			return client;
+			LogBuildAgentOutsideScope(Environment.CurrentManagedThreadId, Environment.StackTrace);
+			throw new InvalidOperationException(
+				"BuildAgentAsync was called outside an active CreateRunScopeAsync. " +
+				"Every Copilot agent build must happen inside a per-orchestration run scope " +
+				"so each orchestration gets its own CLI process. " +
+				"Open a scope with `await using var scope = await builder.CreateRunScopeAsync(...)` " +
+				"or call BuildAgentAsync from within OrchestrationExecutor.ExecuteAsync.");
 		}
 
-		// Fallback: lazily create a shared client (for standalone/test usage)
-		var fallback = await GetOrCreateFallbackClientAsync(cancellationToken).ConfigureAwait(false);
-		LogActiveClientResolved("fallback", fallback.GetHashCode(), Environment.CurrentManagedThreadId);
-		return fallback;
-	}
-
-	private async Task<CopilotClient> GetOrCreateFallbackClientAsync(CancellationToken cancellationToken)
-	{
-		if (_fallbackStarted && _fallbackClient is not null)
-			return _fallbackClient;
-
-		await _fallbackLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-		try
-		{
-			if (!_fallbackStarted || _fallbackClient is null)
-			{
-				var fallbackId = Interlocked.Increment(ref _fallbackBuildCounter);
-				LogFallbackClientCreating(fallbackId, Environment.CurrentManagedThreadId, Environment.StackTrace);
-				_fallbackClient = new CopilotClient();
-				await _fallbackClient.StartAsync(cancellationToken).ConfigureAwait(false);
-				_fallbackStarted = true;
-				LogFallbackClientCreated(fallbackId, _fallbackClient.GetHashCode());
-			}
-			return _fallbackClient;
-		}
-		finally
-		{
-			_fallbackLock.Release();
-		}
+		LogActiveClientResolved("run-scoped", client.GetHashCode(), Environment.CurrentManagedThreadId);
+		return Task.FromResult(client);
 	}
 
 	public override async Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)
@@ -158,6 +132,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		var infiniteSessionConfig = InfiniteSession;
 		var attachments = Attachments;
 
+		var holder = _runScopedClient.Value!; // GetActiveClientAsync threw if null
 		var client = await GetActiveClientAsync(cancellationToken).ConfigureAwait(false);
 
 		return new CopilotAgent(
@@ -175,14 +150,16 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			skillDirectories: skillDirectories,
 			infiniteSessionConfig: infiniteSessionConfig,
 			attachments: attachments,
-			cachedAvailableModels: CachedAvailableModels,
-			onAvailableModelsListed: models => CachedAvailableModels = models,
-			logger: _loggerFactory.CreateLogger<CopilotAgent>()
+			cachedAvailableModels: holder.CachedAvailableModels,
+			onAvailableModelsListed: models => holder.CachedAvailableModels = models,
+			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
+			loggerFactory: _loggerFactory
 		);
 	}
 
 	public override async Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 	{
+		var holder = _runScopedClient.Value!; // GetActiveClientAsync below throws if null
 		var client = await GetActiveClientAsync(cancellationToken).ConfigureAwait(false);
 
 		return new CopilotAgent(
@@ -200,22 +177,19 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			skillDirectories: config.SkillDirectories,
 			infiniteSessionConfig: config.InfiniteSessionConfig,
 			attachments: config.Attachments,
-			cachedAvailableModels: CachedAvailableModels,
-			onAvailableModelsListed: models => CachedAvailableModels = models,
-			logger: _loggerFactory.CreateLogger<CopilotAgent>()
+			cachedAvailableModels: holder.CachedAvailableModels,
+			onAvailableModelsListed: models => holder.CachedAvailableModels = models,
+			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
+			loggerFactory: _loggerFactory
 		);
 	}
 
-	public async ValueTask DisposeAsync()
+	public ValueTask DisposeAsync()
 	{
-		if (_fallbackClient is not null)
-		{
-			try { await _fallbackClient.StopAsync().ConfigureAwait(false); } catch { }
-			try { await _fallbackClient.DisposeAsync().ConfigureAwait(false); } catch { }
-		}
-		_fallbackLock.Dispose();
-
+		// No process-wide resources to clean up: each orchestration run owns its CopilotClient
+		// via its RunScope and disposes it when the scope ends.
 		GC.SuppressFinalize(this);
+		return ValueTask.CompletedTask;
 	}
 
 	/// <summary>
@@ -242,11 +216,9 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			_builder.LogRunScopeDisposing(_scopeId, _client.GetHashCode(), Environment.CurrentManagedThreadId);
 
 			// Clear the holder's client field so any stragglers see a null run-scoped client
-			// and fall through to the fallback path (which will warn). We don't clear the
-			// AsyncLocal itself because the holder reference may still be in flight in other
-			// async branches and we want them to observe a definitive null.
+			// and now correctly fail fast (no fallback path remains). The CachedAvailableModels
+			// lives on the holder itself and is naturally GCed when the holder is dropped.
 			_holder.Client = null;
-			_builder.CachedAvailableModels = null;
 
 			var sw = System.Diagnostics.Stopwatch.StartNew();
 			try { await _client.StopAsync().ConfigureAwait(false); }
@@ -301,13 +273,9 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		Message = "RunScope#{ScopeId}: post-set check, _runScopedClient.Value = {ClientValue} on thread {ThreadId}")]
 	private partial void LogRunScopeAsyncLocalCheck(int scopeId, string clientValue, int threadId);
 
-	[LoggerMessage(EventId = 108, Level = LogLevel.Warning,
-		Message = "Fallback#{FallbackId}: NO RUN SCOPE active on thread {ThreadId} — creating fallback CLI client. Stack:\n{StackTrace}")]
-	private partial void LogFallbackClientCreating(int fallbackId, int threadId, string stackTrace);
-
-	[LoggerMessage(EventId = 109, Level = LogLevel.Warning,
-		Message = "Fallback#{FallbackId}: fallback CLI client started (clientHash={ClientHash})")]
-	private partial void LogFallbackClientCreated(int fallbackId, int clientHash);
+	[LoggerMessage(EventId = 108, Level = LogLevel.Error,
+		Message = "BuildAgent: NO RUN SCOPE active on thread {ThreadId} — refusing to build agent. Open a CreateRunScopeAsync first. Stack:\n{StackTrace}")]
+	private partial void LogBuildAgentOutsideScope(int threadId, string stackTrace);
 
 	#endregion
 }

@@ -1370,10 +1370,12 @@ public class CopilotSessionHandlerTests
 	#region Error Event Completes TCS
 
 	[Fact]
-	public void HandleEvent_Error_CompletesTaskCompletionSource()
+	public void HandleEvent_Error_FaultsTaskCompletionSourceWithCopilotSessionFailedException()
 	{
-		// Arrange — Error events should complete the TCS so RunSessionAsync
-		// doesn't hang forever waiting for an idle event that may never come.
+		// Arrange — Error events should FAULT the TCS so the orchestration sees a real failure
+		// rather than silently completing with empty content. This protects against the
+		// previous "silent success on session error" behaviour: the AI model can fail mid-stream
+		// and we must surface that as a hard failure with a typed exception.
 		var errorEvent = CreateErrorEvent("Fatal session error");
 
 		// Act
@@ -1381,15 +1383,19 @@ public class CopilotSessionHandlerTests
 
 		// Assert
 		_done.Task.IsCompleted.Should().BeTrue();
-		_done.Task.IsCompletedSuccessfully.Should().BeTrue(
-			"error should set result (not fault) — the error is reported via the event, not the TCS");
+		_done.Task.IsFaulted.Should().BeTrue(
+			"session errors must fault the TCS so PromptExecutor surfaces a failed step (no silent success)");
+
+		var ex = _done.Task.Exception!.Flatten().InnerException;
+		ex.Should().BeOfType<CopilotSessionFailedException>();
+		((CopilotSessionFailedException)ex!).Kind.Should().Be(CopilotSessionFailureKind.SessionError);
 	}
 
 	[Fact]
 	public void HandleEvent_Error_ThenIdle_DoesNotThrow()
 	{
 		// Arrange — If both error and idle arrive (e.g., SDK cleanup), the second
-		// TrySetResult should be a no-op, not throw.
+		// completion attempt should be a no-op, not throw.
 		_handler.HandleEvent(CreateErrorEvent("Error first"));
 
 		// Act — Should not throw on second completion
@@ -1398,6 +1404,7 @@ public class CopilotSessionHandlerTests
 		// Assert
 		act.Should().NotThrow();
 		_done.Task.IsCompleted.Should().BeTrue();
+		_done.Task.IsFaulted.Should().BeTrue("error fault must not be overridden by a later idle event");
 	}
 
 	#endregion

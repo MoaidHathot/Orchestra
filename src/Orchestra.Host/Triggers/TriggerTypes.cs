@@ -122,7 +122,7 @@ public class ActiveExecutionInfo
 	/// <summary>
 	/// Parameters passed to the orchestration when it was started.
 	/// </summary>
-	public Dictionary<string, string>? Parameters { get; init; }
+	public Dictionary<string, string>? Parameters { get; set; }
 
 	/// <summary>
 	/// Current execution status.

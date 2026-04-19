@@ -309,7 +309,13 @@ public class WebhookTriggerTests : IClassFixture<PortalWebApplicationFactory>, I
 		""";
 	}
 
+	// E2E: this test fires a real Prompt step against the Copilot CLI + model. It used to
+	// "pass" against a missing/flaky model because session errors were silently coerced into
+	// success results (the SSE pipeline still saw a step-completed). After the WS1 fix that
+	// makes session errors fault the step, this test legitimately requires a working CLI and
+	// a responsive model — i.e. it is an end-to-end test, not a unit/integration test.
 	[Fact]
+	[Trait("Category", "E2E")]
 	public async Task WebhookTrigger_Execution_EmitsTerminalSseEvents()
 	{
 		// Arrange - Register and enable a webhook orchestration

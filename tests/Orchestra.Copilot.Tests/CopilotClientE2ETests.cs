@@ -289,6 +289,80 @@ public class CopilotClientE2ETests : IAsyncLifetime
 	}
 
 	[Fact]
+	public async Task TwoRunsBackToBack_HandlerAndStepShareSameClient_BothSucceed()
+	{
+		// Architectural invariant: per-orchestration run, there is exactly ONE Copilot CLI
+		// process. Both the trigger's InputHandlerPrompt agent and the orchestration step
+		// agents share that single client (each gets its own SDK Session, not its own
+		// CLI subprocess).
+		//
+		// Regression history: TriggerManager used to BuildAgentAsync for the InputHandlerPrompt
+		// either OUTSIDE any scope (silently lazy-creating a long-lived shared "fallback"
+		// CopilotClient — first run worked, second run hit broken pipes) or INSIDE a separate
+		// per-handler scope (two CLI processes per logical run, defeating the isolation model).
+		// The current design: the handler runs as a delegate invoked by OrchestrationExecutor
+		// AFTER the run scope is open, so handler + steps share the same client.
+		//
+		// This test reproduces the production sequence: for each "run", open ONE scope, build
+		// the input-handler agent inside it, then build the step agent inside it. Verify both
+		// agents resolved to the SAME underlying client (one CLI process for the whole run)
+		// AND that running the same pattern twice in sequence both succeed (no stale state
+		// leaking between runs).
+		var builder = new CopilotAgentBuilder(_loggerFactory);
+
+		string? clientHashRun1 = null;
+		string? clientHashRun2 = null;
+
+		for (var run = 1; run <= 2; run++)
+		{
+			await using var runScope = await builder.CreateRunScopeAsync();
+
+			// --- Input handler agent inside the run scope ---
+			var inputAgent = await builder
+				.WithModel("claude-opus-4.6")
+				.WithReporter(NullOrchestrationReporter.Instance)
+				.BuildAgentAsync();
+
+			var clientHashAfterHandlerBuild = builder.GetRunScopedClientDiagnostic();
+
+			var inputTask = inputAgent.SendAsync($"Reply with exactly: input{run}");
+			await foreach (var _ in inputTask) { }
+			var inputContent = (await inputTask.GetResultAsync()).Content;
+
+			inputContent.Should().NotBeNullOrEmpty(
+				$"Run {run} input-handler agent must produce content");
+
+			// --- Step agent inside the SAME run scope ---
+			var stepAgent = await builder
+				.WithModel("claude-opus-4.6")
+				.WithReporter(NullOrchestrationReporter.Instance)
+				.BuildAgentAsync();
+
+			var clientHashAfterStepBuild = builder.GetRunScopedClientDiagnostic();
+
+			clientHashAfterStepBuild.Should().Be(clientHashAfterHandlerBuild,
+				$"Run {run}: handler and step MUST resolve to the same per-run CLI client " +
+				"(one CLI process per orchestration, multiple sessions). If this fails, the " +
+				"per-run-scope invariant has regressed.");
+
+			var stepTask = stepAgent.SendAsync($"Reply with exactly: step{run}");
+			await foreach (var _ in stepTask) { }
+			var stepContent = (await stepTask.GetResultAsync()).Content;
+
+			stepContent.Should().NotBeNullOrEmpty(
+				$"Run {run} step agent must produce content within the same run scope");
+
+			if (run == 1) clientHashRun1 = clientHashAfterStepBuild;
+			else clientHashRun2 = clientHashAfterStepBuild;
+		}
+
+		clientHashRun1.Should().NotBeNullOrEmpty();
+		clientHashRun2.Should().NotBeNullOrEmpty();
+		clientHashRun1.Should().NotBe(clientHashRun2,
+			"each run MUST get its own dedicated CLI process — runs must NOT share clients");
+	}
+
+	[Fact]
 	public async Task PerRunScope_SequentialSessions_EventsFlowCorrectly()
 	{
 		// This test exercises the per-run scope lifecycle:

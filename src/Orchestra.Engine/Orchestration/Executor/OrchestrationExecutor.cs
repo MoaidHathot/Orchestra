@@ -63,6 +63,7 @@ public partial class OrchestrationExecutor
 		Orchestration orchestration,
 		Dictionary<string, string>? parameters = null,
 		string? triggerId = null,
+		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform = null,
 		CancellationToken cancellationToken = default)
 	{
 		LogStartingOrchestration(orchestration.Name);
@@ -76,10 +77,6 @@ public partial class OrchestrationExecutor
 		var parseValidation = TemplateExpressionValidator.ValidateOrchestration(orchestration);
 		if (!parseValidation.IsValid)
 			throw new InvalidOperationException(parseValidation.FormatErrors());
-
-		var runtimeValidation = TemplateExpressionValidator.ValidateRuntime(orchestration, parameters);
-		if (!runtimeValidation.IsValid)
-			throw new InvalidOperationException(runtimeValidation.FormatErrors());
 
 		// Apply orchestration-level timeout if configured
 		CancellationTokenSource? orchestrationTimeoutCts = null;
@@ -95,7 +92,7 @@ public partial class OrchestrationExecutor
 
 		try
 		{
-			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken);
+			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform);
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -114,11 +111,11 @@ public partial class OrchestrationExecutor
 		string? triggerId,
 		CancellationToken cancellationToken,
 		CancellationToken externalCancellationToken,
-		CheckpointData? checkpoint = null)
+		CheckpointData? checkpoint = null,
+		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform = null)
 	{
 		var runId = checkpoint?.RunId ?? Guid.NewGuid().ToString("N")[..12];
 		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
-		var effectiveParams = parameters ?? [];
 
 		// Create a run-scoped client for isolation: each orchestration run gets its own
 		// CLI process. All steps within this run share the client (each gets its own session).
@@ -126,6 +123,26 @@ public partial class OrchestrationExecutor
 		LogRunScopeAboutToCreate(runId, Environment.CurrentManagedThreadId);
 		await using var runScope = await _agentBuilder.CreateRunScopeAsync(cancellationToken).ConfigureAwait(false);
 		LogRunScopeReady(runId, Environment.CurrentManagedThreadId);
+
+		// Pre-execution parameter transform (e.g. trigger InputHandlerPrompt) runs INSIDE the
+		// run scope so it shares the orchestration's CLI process — it gets its own session,
+		// not its own CLI subprocess. The runtime validation of template expressions runs
+		// AFTER the transform so transformed parameters are validated against the orchestration.
+		if (preExecutionParameterTransform is not null)
+		{
+			var transformed = await preExecutionParameterTransform(cancellationToken).ConfigureAwait(false);
+			if (transformed is not null)
+			{
+				parameters = transformed;
+			}
+		}
+
+		var effectiveParams = parameters ?? [];
+
+		// Validate template expressions against final parameters (post-transform).
+		var runtimeValidation = TemplateExpressionValidator.ValidateRuntime(orchestration, effectiveParams);
+		if (!runtimeValidation.IsValid)
+			throw new InvalidOperationException(runtimeValidation.FormatErrors());
 
 		// Create temp file store if a data path is configured
 		OrchestrationTempFileStore? tempFileStore = null;
@@ -517,19 +534,17 @@ public partial class OrchestrationExecutor
 	{
 		LogResumingOrchestration(orchestration.Name, checkpoint.RunId);
 
-		var resumeParams = ValidateAndApplyDefaults(orchestration, checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null);
+		_ = ValidateAndApplyDefaults(orchestration, checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null);
 
 		// Scheduler validates the DAG (detects cycles, missing deps)
 		_ = _scheduler.Schedule(orchestration);
 
-		// Validate all template expressions before execution
+		// Validate all template expressions before execution. The runtime template-expression
+		// validation against parameters now runs inside ExecuteCoreAsync (post-transform), so
+		// only the static parse-time validation happens here.
 		var parseValidation = TemplateExpressionValidator.ValidateOrchestration(orchestration);
 		if (!parseValidation.IsValid)
 			throw new InvalidOperationException(parseValidation.FormatErrors());
-
-		var runtimeValidation = TemplateExpressionValidator.ValidateRuntime(orchestration, resumeParams);
-		if (!runtimeValidation.IsValid)
-			throw new InvalidOperationException(runtimeValidation.FormatErrors());
 
 		// Apply orchestration-level timeout if configured
 		CancellationTokenSource? orchestrationTimeoutCts = null;

@@ -795,43 +795,54 @@ public partial class TriggerManager : BackgroundService
 			var schedule = _scheduler.Schedule(orchestration);
 
 			// ── Input Handler Prompt: transform raw parameters via LLM ──
+			// This delegate is invoked by OrchestrationExecutor INSIDE its run scope so the
+			// input-handler agent build shares the orchestration's CLI process (it gets its
+			// own SDK session, not its own CLI subprocess). This preserves the
+			// one-CLI-process-per-orchestration invariant.
+			Func<CancellationToken, Task<Dictionary<string, string>?>>? inputHandlerTransform = null;
 			if (!string.IsNullOrWhiteSpace(reg.Config.InputHandlerPrompt) && parameters is { Count: > 0 })
 			{
-				try
+				var capturedParameters = parameters;
+				inputHandlerTransform = async ct =>
 				{
-					var rawInputJson = JsonSerializer.Serialize(parameters, _jsonOptions);
-					var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
-
-				var agent = await _agentBuilder
-					.BuildAgentAsync(new AgentBuildConfig
+					try
 					{
-						Model = reg.Config.InputHandlerModel ?? _defaultModel ?? "claude-opus-4.6",
-						SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
-						Mcps = [],
-					});
+						var rawInputJson = JsonSerializer.Serialize(capturedParameters, _jsonOptions);
+						var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
-					var task = agent.SendAsync(fullPrompt);
-					var result = await task.GetResultAsync();
+						var agent = await _agentBuilder
+							.BuildAgentAsync(new AgentBuildConfig
+							{
+								Model = reg.Config.InputHandlerModel ?? _defaultModel ?? "claude-opus-4.6",
+								SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
+								Mcps = [],
+							}, ct);
 
-					var content = result.Content.Trim();
-					if (content.StartsWith("```"))
-					{
-						var firstNewline = content.IndexOf('\n');
-						if (firstNewline >= 0) content = content[(firstNewline + 1)..];
-						if (content.EndsWith("```")) content = content[..^3].TrimEnd();
+						var task = agent.SendAsync(fullPrompt);
+						var result = await task.GetResultAsync();
+
+						var content = result.Content.Trim();
+						if (content.StartsWith("```"))
+						{
+							var firstNewline = content.IndexOf('\n');
+							if (firstNewline >= 0) content = content[(firstNewline + 1)..];
+							if (content.EndsWith("```")) content = content[..^3].TrimEnd();
+						}
+
+						var transformed = JsonSerializer.Deserialize<Dictionary<string, string>>(content, _jsonOptions);
+						if (transformed is { Count: > 0 })
+						{
+							LogInputHandlerTransformed(reg.Id, capturedParameters.Count, transformed.Count);
+							return transformed;
+						}
+						return null;
 					}
-
-					var transformed = JsonSerializer.Deserialize<Dictionary<string, string>>(content, _jsonOptions);
-					if (transformed is { Count: > 0 })
+					catch (Exception ex)
 					{
-						LogInputHandlerTransformed(reg.Id, parameters.Count, transformed.Count);
-						parameters = transformed;
+						LogInputHandlerFailed(ex, reg.Id);
+						return null;
 					}
-				}
-				catch (Exception ex)
-				{
-					LogInputHandlerFailed(ex, reg.Id);
-				}
+				};
 			}
 
 			// Create executor with reporter
@@ -862,7 +873,29 @@ public partial class TriggerManager : BackgroundService
 			OrchestrationResult? executionResult = null;
 			try
 			{
-				var orchResult = await executor.ExecuteAsync(orchestration, parameters, triggerId: reg.Id, cancellationToken: cts.Token);
+				// Wrap the input handler so it also updates executionInfo.Parameters with the
+				// transformed values when the executor invokes it (otherwise the UI would
+				// keep showing the pre-transform raw input).
+				Func<CancellationToken, Task<Dictionary<string, string>?>>? executorTransform = null;
+				if (inputHandlerTransform is not null)
+				{
+					executorTransform = async ct =>
+					{
+						var transformed = await inputHandlerTransform(ct).ConfigureAwait(false);
+						if (transformed is not null)
+						{
+							executionInfo.Parameters = transformed;
+						}
+						return transformed;
+					};
+				}
+
+				var orchResult = await executor.ExecuteAsync(
+					orchestration,
+					parameters,
+					triggerId: reg.Id,
+					preExecutionParameterTransform: executorTransform,
+					cancellationToken: cts.Token);
 				executionResult = orchResult;
 
 				// Send terminal SSE events so attached clients see real-time completion.
