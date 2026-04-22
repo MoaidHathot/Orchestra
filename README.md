@@ -1,6 +1,6 @@
 # Orchestra
 
-A declarative orchestration engine for LLM workflows built on .NET. Define multi-step AI pipelines in JSON with DAG-based execution, multiple step types, MCP tool integration, quality control loops, subagent delegation, checkpointing, and automatic triggers. Includes a full-featured web portal, CLI client, and REST API.
+Orchestra is a deterministic AI orchestration engine for .NET. Define multi-step AI workflows in JSON with DAG-based execution, MCP integration, quality control loops, checkpointing, triggers, and a built-in web portal, CLI, and REST API.
 
 ## Features
 

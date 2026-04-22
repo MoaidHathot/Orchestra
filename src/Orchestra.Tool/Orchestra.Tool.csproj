@@ -4,9 +4,10 @@
     <OutputType>Exe</OutputType>
     <RootNamespace>Orchestra.Tool</RootNamespace>
     <PackageId>Orchestra</PackageId>
-    <Description>Orchestra portal and host distributed as a .NET tool.</Description>
+    <Description>Deterministic AI orchestrations for .NET with declarative workflows, DAG execution, MCP integration, triggers, and a built-in portal.</Description>
     <IsPackable>true</IsPackable>
     <PackAsTool>true</PackAsTool>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <ToolCommandName>orchestra</ToolCommandName>
   </PropertyGroup>
 
@@ -17,6 +18,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\..\README.md"
+          Link="README.md"
+          Pack="true"
+          PackagePath="\" />
     <Compile Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\PortalApp.cs"
              Link="PortalApp.cs" />
     <Compile Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\PortalStatusService.cs"
