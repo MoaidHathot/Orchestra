@@ -12,6 +12,10 @@
     <ProjectReference Include="..\..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="Orchestra.Tool" />
+  </ItemGroup>
+
   <!-- Collect portal source files for incremental build detection -->
   <ItemGroup>
     <PortalSourceFiles Include="$(SpaRoot)src\**\*" />

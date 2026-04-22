@@ -6,6 +6,7 @@
     <Project Path="src/Orchestra.Host/Orchestra.Host.csproj" />
     <Project Path="src/Orchestra.ProcessHost/Orchestra.ProcessHost.csproj" />
     <Project Path="src/Orchestra.Server/Orchestra.Server.csproj" />
+    <Project Path="src/Orchestra.Tool/Orchestra.Tool.csproj" />
   </Folder>
   <Folder Name="/playground/">
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot/Orchestra.Playground.Copilot.csproj" />

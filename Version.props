@@ -1,0 +1,10 @@
+<Project>
+
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <PackageVersion>$(Version)</PackageVersion>
+    <Authors>Moaid Hathot</Authors>
+    <RepositoryUrl>https://github.com/MoaidHathot/Orchestra.git</RepositoryUrl>
+  </PropertyGroup>
+
+</Project>

@@ -3,7 +3,7 @@ namespace Orchestra.Playground.Copilot.Portal;
 /// <summary>
 /// Service for tracking and reporting portal status.
 /// </summary>
-public class PortalStatusService
+internal class PortalStatusService
 {
 	/// <summary>
 	/// Gets the current status as a snapshot object.
@@ -23,7 +23,7 @@ public class PortalStatusService
 /// <summary>
 /// Snapshot of portal status for API responses.
 /// </summary>
-public class PortalStatus
+internal class PortalStatus
 {
 	public required DateTime StartTime { get; init; }
 	public required int UptimeSeconds { get; init; }
