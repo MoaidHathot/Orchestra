@@ -331,6 +331,12 @@ public static class OrchestraConfigLoader
 public class OrchestraConfigFile
 {
 	/// <summary>
+	/// URL binding configuration for the ASP.NET host.
+	/// Example: "http://127.0.0.1:5200" or multiple URLs separated by semicolons.
+	/// </summary>
+	public string? Urls { get; set; }
+
+	/// <summary>
 	/// Root data path for runs, triggers, registry, etc.
 	/// </summary>
 	public string? DataPath { get; set; }

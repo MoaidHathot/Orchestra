@@ -78,6 +78,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		var options = new OrchestrationHostOptions();
 		var config = new OrchestraConfigFile
 		{
+			Urls = "http://127.0.0.1:5400",
 			DataPath = "/custom/data",
 			HostBaseUrl = "http://localhost:9999",
 			Scan = new ScanConfigFile
@@ -507,6 +508,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		var configPath = Path.Combine(_tempDir, "load-test.json");
 		File.WriteAllText(configPath, """
 		{
+			"urls": "http://127.0.0.1:5500",
 			"dataPath": "/load/data",
 			"logLevel": "Debug",
 			"shutdownTimeoutSeconds": 99
@@ -519,7 +521,8 @@ public class OrchestraConfigLoaderTests : IDisposable
 
 		// Assert
 		result.Should().NotBeNull();
-		result!.DataPath.Should().Be("/load/data");
+		result!.Urls.Should().Be("http://127.0.0.1:5500");
+		result.DataPath.Should().Be("/load/data");
 		result.LogLevel.Should().Be("Debug");
 		result.ShutdownTimeoutSeconds.Should().Be(99);
 		result.HostBaseUrl.Should().BeNull();

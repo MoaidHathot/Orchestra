@@ -15,11 +15,26 @@ namespace Orchestra.Portal.Tests;
 public class PortalWebApplicationFactory : WebApplicationFactory<Program>
 {
 	private readonly string _testDataPath;
+	private readonly string _configDirectory;
+	private readonly Dictionary<string, string?> _savedEnvVars = new();
 
 	public PortalWebApplicationFactory()
 	{
 		_testDataPath = Path.Combine(Path.GetTempPath(), "Orchestra.Portal.Tests", Guid.NewGuid().ToString("N"));
+		_configDirectory = Path.Combine(_testDataPath, "config-root");
 		Directory.CreateDirectory(_testDataPath);
+		Directory.CreateDirectory(_configDirectory);
+
+		SaveAndSetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", Path.Combine(_configDirectory, "orchestra.json"));
+		SaveAndSetEnvironmentVariable("ASPNETCORE_URLS", null);
+		SaveAndSetEnvironmentVariable("DOTNET_URLS", null);
+
+		File.WriteAllText(Path.Combine(_configDirectory, "orchestra.json"),
+			"""
+			{
+			  "urls": "http://127.0.0.1:5999"
+			}
+			""");
 	}
 
 	protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -34,15 +49,25 @@ public class PortalWebApplicationFactory : WebApplicationFactory<Program>
 			config.AddInMemoryCollection(new Dictionary<string, string?>
 			{
 				["data-path"] = _testDataPath,
+				["Urls"] = "http://127.0.0.1:5117",
 			});
 		});
 	}
 
 	public string TestDataPath => _testDataPath;
 
+	private void SaveAndSetEnvironmentVariable(string name, string? value)
+	{
+		_savedEnvVars[name] = Environment.GetEnvironmentVariable(name);
+		Environment.SetEnvironmentVariable(name, value);
+	}
+
 	protected override void Dispose(bool disposing)
 	{
 		base.Dispose(disposing);
+
+		foreach (var pair in _savedEnvVars)
+			Environment.SetEnvironmentVariable(pair.Key, pair.Value);
 
 		// Clean up test data directory
 		if (Directory.Exists(_testDataPath))

@@ -3,6 +3,9 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Orchestra.Portal.Tests;
@@ -62,6 +65,15 @@ public class SpaRoutingTests : IClassFixture<PortalWebApplicationFactory>, IDisp
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var content = await response.Content.ReadAsStringAsync();
 		content.Should().Contain("orchestrations");
+	}
+
+	[Fact]
+	public async Task InMemoryConfiguration_Overrides_OrchestraJson_Urls()
+	{
+		var addresses = _factory.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>();
+		addresses.Should().NotBeNull();
+		addresses!.Addresses.Should().ContainSingle();
+		addresses.Addresses.Single().Should().Be("http://127.0.0.1:5117");
 	}
 }
 

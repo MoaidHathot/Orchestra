@@ -17,6 +17,7 @@ internal static class PortalApp
 	public static async Task RunAsync(string[] args, Type loggerCategoryType, bool useAppBaseContentRoot)
 	{
 		ConfigureThreadPool();
+		var orchestraConfig = OrchestraConfigLoader.Load();
 
 		var builder = useAppBaseContentRoot
 			? WebApplication.CreateBuilder(new WebApplicationOptions
@@ -26,6 +27,8 @@ internal static class PortalApp
 				WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
 			})
 			: WebApplication.CreateBuilder(args);
+
+		ApplyUrlBindingFallback(builder.Configuration, orchestraConfig);
 
 		builder.Logging.AddSimpleConsole(options =>
 		{
@@ -85,6 +88,21 @@ internal static class PortalApp
 		var targetMin = Math.Max(workerMin, 64);
 		var targetIoMin = Math.Max(ioMin, 64);
 		ThreadPool.SetMinThreads(targetMin, targetIoMin);
+	}
+
+	private static void ApplyUrlBindingFallback(IConfigurationManager configuration, OrchestraConfigFile? orchestraConfig)
+	{
+		if (string.IsNullOrWhiteSpace(orchestraConfig?.Urls))
+			return;
+
+		var hasExplicitUrls = !string.IsNullOrWhiteSpace(configuration["Urls"])
+			|| !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS"))
+			|| !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_URLS"));
+
+		if (hasExplicitUrls)
+			return;
+
+		configuration["Urls"] = orchestraConfig.Urls;
 	}
 
 	private static void MapPortalEndpoints(WebApplication app)
