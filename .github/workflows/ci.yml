@@ -48,5 +48,5 @@ jobs:
           --configuration Release
           -m:1
           --logger "trx;LogFileName=test-results.trx"
-          --filter "FullyQualifiedName!~Portal.E2E"
+          --filter "Category!=E2E"
           --verbosity normal
