@@ -46,6 +46,7 @@ jobs:
           dotnet test OrchestrationEngine.Tests.slnx
           --no-build
           --configuration Release
+          -m:1
           --logger "trx;LogFileName=test-results.trx"
           --filter "FullyQualifiedName!~Portal.E2E"
           --verbosity normal
