@@ -248,6 +248,7 @@ public class CopilotClientE2ETests : IAsyncLifetime
 		// It simulates what happens when two orchestration steps run sequentially.
 
 		var builder = new CopilotAgentBuilder(_loggerFactory);
+		await using var runScope = await builder.CreateRunScopeAsync();
 
 		// Step 1
 		var agent1 = await builder
