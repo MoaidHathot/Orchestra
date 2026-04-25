@@ -372,8 +372,10 @@ public class OrchestrationSyncServiceTests : IDisposable
 			await Task.Delay(10); // Much faster than debounce delay
 		}
 
-		// Wait for final debounce to complete
-		await WaitForConditionAsync(() => _registry.Count == 1, TimeSpan.FromSeconds(5));
+		// Wait for the debounced update pipeline to settle on the latest write.
+		await WaitForConditionAsync(
+			() => _registry.Count == 1 && _registry.GetAll().First().Orchestration.Description == "Version 5",
+			TimeSpan.FromSeconds(5));
 
 		await service.StopAsync(CancellationToken.None);
 
