@@ -21,6 +21,7 @@
     <PackageReference Include="Cronos" />
     <PackageReference Include="McpProxy.Sdk" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
+    <PackageReference Include="OpenTelemetry.Api" />
   </ItemGroup>
 
 </Project>

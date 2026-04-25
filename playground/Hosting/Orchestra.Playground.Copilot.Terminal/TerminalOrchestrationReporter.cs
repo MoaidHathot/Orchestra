@@ -322,6 +322,16 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 		AddEvent(new ReporterEvent("run-context", $"Run {context.RunId} — {context.OrchestrationName} v{context.OrchestrationVersion}"));
 	}
 
+	public void ReportHookExecuted(HookExecutionRecord hookExecution)
+	{
+		var scope = hookExecution.StepName is not null
+			? $"step {hookExecution.StepName}"
+			: hookExecution.Source.ToString();
+		AddEvent(new ReporterEvent(
+			"hook-executed",
+			$"[{hookExecution.HookName}] {hookExecution.Status} on {scope}"));
+	}
+
 	public void ReportAuditLogEntry(string stepName, AuditLogEntry entry)
 	{
 		// No-op for terminal reporter

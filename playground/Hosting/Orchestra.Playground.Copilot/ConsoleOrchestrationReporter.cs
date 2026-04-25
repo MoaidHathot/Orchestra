@@ -223,6 +223,14 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 			Console.WriteLine($"    Env vars accessed: {string.Join(", ", context.AccessedEnvironmentVariables.Keys)}");
 	}
 
+	public void ReportHookExecuted(HookExecutionRecord hookExecution)
+	{
+		var scope = hookExecution.StepName is not null
+			? $"step {hookExecution.StepName}"
+			: hookExecution.Source.ToString();
+		Console.WriteLine($"  [hook:{hookExecution.HookName}] {hookExecution.Status} on {scope}");
+	}
+
 	public void ReportAuditLogEntry(string stepName, AuditLogEntry entry)
 	{
 		// No-op for console reporter
