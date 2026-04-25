@@ -6,6 +6,7 @@ Real-world examples demonstrating common orchestration patterns. All examples us
 - [Minimal Orchestration](#minimal-orchestration)
 - [Code Review Pipeline (YAML)](#code-review-pipeline-yaml)
 - [Typed Inputs with Validation](#typed-inputs-with-validation)
+- [Lifecycle Hooks for Failure Triage](#lifecycle-hooks-for-failure-triage)
 - [Script Step with Inline PowerShell](#script-step-with-inline-powershell)
 - [Multi-Step DAG with All Step Types](#multi-step-dag-with-all-step-types)
 - [Loop/Checker Pattern](#loopchecker-pattern)
@@ -160,6 +161,55 @@ Demonstrates typed input schema with type validation, enum constraints, and defa
   ]
 }
 ```
+
+---
+
+## Lifecycle Hooks for Failure Triage
+
+Demonstrates orchestration-level hooks that fire after failures and write a structured JSON payload to disk:
+
+```yaml
+$schema: ../schemas/orchestration.schema.json
+name: hooks-step-failure
+description: Demonstrates a step failure hook that only runs for selected step names and receives the current step payload.
+version: 1.0.0
+
+hooks:
+  - name: capture-build-or-deploy-failure
+    on: step.failure
+    when:
+      steps:
+        names: [build, deploy]
+        status: failed
+        match: any
+    payload:
+      detail: compact
+      steps: current
+      includeRefs: true
+    action:
+      type: script
+      shell: pwsh
+      scriptFile: ./hooks/write-hook-payload.ps1
+      arguments:
+        - ./artifacts/step-failure-payload.json
+    failurePolicy: warn
+
+steps:
+  - name: build
+    type: Command
+    command: dotnet
+    arguments: [build, ./does-not-exist/Nope.csproj]
+    includeStdErr: true
+
+  - name: summarize
+    type: Prompt
+    dependsOn: [build]
+    systemPrompt: You summarize build output.
+    userPrompt: Summarize the build output.
+    model: claude-opus-4.6
+```
+
+This example demonstrates: top-level `hooks`, `step.failure` subscriptions, `when.steps` filtering, payload shaping with `detail` and `steps`, script-based hook actions, and `failurePolicy`.
 
 ---
 
@@ -679,4 +729,4 @@ steps:
       {{code-review.output}}
 ```
 
-This example demonstrates: `systemPromptMode: customize` with section overrides (`replace`, `remove`, `append`), image attachments via file path with template expressions, infinite sessions with custom thresholds (enabled/disabled per step), and read-only enforcement via `code_change_rules` replacement. Session hooks automatically capture a structured audit log for every step, visible in the portal's Audit Log trace section.
+This example demonstrates: `systemPromptMode: customize` with section overrides (`replace`, `remove`, `append`), image attachments via file path with template expressions, infinite sessions with custom thresholds (enabled/disabled per step), and read-only enforcement via `code_change_rules` replacement.

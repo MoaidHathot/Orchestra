@@ -1,6 +1,6 @@
 ---
 name: orchestration-authoring
-description: Creates and validates Orchestra orchestration files (JSON/YAML) that define DAGs of steps (Prompt, Command, Script, Http, Transform) with triggers, MCPs, subagents, loops, typed inputs, and template expressions. Use when authoring new orchestrations, generating orchestration files from descriptions, reviewing existing orchestrations for correctness, or debugging orchestration issues.
+description: Creates and validates Orchestra orchestration files (JSON/YAML) that define DAGs of steps (Prompt, Command, Script, Http, Transform) with triggers, hooks, MCPs, subagents, loops, typed inputs, and template expressions. Use when authoring new orchestrations, generating orchestration files from descriptions, reviewing existing orchestrations for correctness, or debugging orchestration issues.
 ---
 
 # Orchestra Orchestration Authoring Reference
@@ -33,6 +33,7 @@ Orchestrations are single JSON or YAML objects. Three fields are required: `name
 | `timeoutSeconds` | int | No | 3600 | Orchestration-level timeout (0 to disable) |
 | `variables` | object | No | {} | Key-value pairs accessed via `{{vars.name}}` |
 | `tags` | string[] | No | [] | Categorization tags |
+| `hooks` | Hook[] | No | [] | Lifecycle hooks that run after step or orchestration outcomes |
 
 ## Typed Inputs (InputDefinition)
 
@@ -46,6 +47,87 @@ Each key in `inputs` is the input name. Values:
 | `default` | string | null | Default for optional inputs |
 | `enum` | string[] | [] | Allowed values (case-insensitive) |
 | `multiline` | bool | false | UI hint: renders textarea instead of single-line input |
+
+## Hooks
+
+Hooks run after step or orchestration lifecycle events. They are top-level orchestration configuration, not DAG steps. Use them for follow-up automation such as notifications, archival, incident creation, or failure triage.
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `name` | string | No | null | Optional hook name for diagnostics and reporting |
+| `on` | string | Yes | -- | Event: `step.success`, `step.failure`, `step.after`, `orchestration.success`, `orchestration.failure`, or `orchestration.after` |
+| `when` | HookWhen | No | null | Optional filter to decide whether the hook should run |
+| `payload` | HookPayload | No | `{ detail: compact, includeRefs: false }` | Controls how much run/step data is included in the JSON payload |
+| `action` | HookAction | Yes | -- | What to execute when the hook fires |
+| `failurePolicy` | string | No | `warn` | `warn` or `ignore` when the hook action fails |
+
+### Hook Filters (`when`)
+
+In v1, filtering is intentionally small and step-focused:
+
+```yaml
+when:
+  steps:
+    names: [build, deploy]
+    status: failed
+    match: any
+```
+
+`when.steps` properties:
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `names` | string[] | [] | Optional step names to evaluate |
+| `status` | string | `any` | `any`, `succeeded`, `failed`, `cancelled`, `skipped`, `noAction`, or `nonSucceeded` |
+| `match` | string | `any` | Whether `any` or `all` named steps must satisfy the condition |
+
+### Hook Payload (`payload`)
+
+Hook payloads are structured JSON sent to the action on stdin.
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `detail` | string | `compact` | `compact`, `standard`, or `full` step detail level |
+| `steps` | string or string[] | null | `none`, `current`, `failed`, `nonSucceeded`, `terminal`, `all`, or explicit step names |
+| `includeRefs` | bool | `false` | Include API and MCP references for fetching more run data |
+
+### Hook Action (`action`)
+
+In v1, hooks support `script` actions only.
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `type` | string | Yes | -- | Must be `script` |
+| `shell` | string | No | `pwsh` | Shell/interpreter used to execute the hook |
+| `script` | string | Yes* | -- | Inline script content |
+| `scriptFile` | string | Yes* | -- | Path to script file, resolved relative to the orchestration file |
+| `arguments` | string[] | No | [] | Arguments passed to the script |
+| `workingDirectory` | string | No | null | Optional working directory for the hook process |
+| `environment` | object | No | {} | Environment variables for the hook process |
+| `includeStdErr` | bool | No | false | Include stderr in the action output when the script succeeds |
+
+*Use exactly one of `script` or `scriptFile`.
+
+Example:
+
+```yaml
+hooks:
+  - name: archive-run-failure
+    on: orchestration.failure
+    payload:
+      detail: compact
+      steps: failed
+      includeRefs: true
+    action:
+      type: script
+      shell: pwsh
+      scriptFile: ./hooks/archive-failure.ps1
+```
+
+Hooks are different from Prompt step handlers:
+
+- `inputHandlerPrompt` and `outputHandlerPrompt` transform Prompt step input/output
+- hooks run after lifecycle events and do not alter orchestration execution
 
 ## Steps
 
@@ -560,6 +642,9 @@ Orchestrations can be registered in Orchestra via:
 13. **`systemPromptSections` requires `systemPromptMode: "customize"`**. Section overrides are ignored with `append` or `replace`.
 14. **Image attachments require a vision-capable model** (e.g., `claude-opus-4.6`, `gpt-4o`). Non-vision models will not understand the images.
 15. **`infiniteSessions` thresholds are ratios (0.0-1.0)**, not token counts. `0.80` means 80% of context used.
+16. **`hooks` is a top-level array**, not a step-level property.
+17. **Hook actions require exactly one of `script` or `scriptFile`.** Do not specify both.
+18. **Hook `failurePolicy` only supports `warn` or `ignore`** in v1.
 
 ## Naming Conventions
 
