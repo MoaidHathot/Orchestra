@@ -93,7 +93,24 @@ public class OrchestrationSyncServiceTests : IDisposable
 		// Write atomically via temp file + move to avoid conflicts with concurrent readers
 		var tempPath = path + $".{Guid.NewGuid():N}.tmp";
 		File.WriteAllText(tempPath, json);
-		File.Move(tempPath, path, overwrite: true);
+
+		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+		while (true)
+		{
+			try
+			{
+				File.Move(tempPath, path, overwrite: true);
+				break;
+			}
+			catch (UnauthorizedAccessException) when (DateTime.UtcNow < deadline)
+			{
+				Thread.Sleep(25);
+			}
+			catch (IOException) when (DateTime.UtcNow < deadline)
+			{
+				Thread.Sleep(25);
+			}
+		}
 
 		return path;
 	}
