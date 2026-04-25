@@ -86,6 +86,26 @@ public class CheckpointStepResult
 	public string? ActualModel { get; init; }
 
 	/// <summary>
+	/// The model selected by the server at session start.
+	/// </summary>
+	public string? SelectedModel { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the configured/requested model.
+	/// </summary>
+	public AvailableModelInfo? RequestedModelInfo { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the server-selected model.
+	/// </summary>
+	public AvailableModelInfo? SelectedModelInfo { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the actual model that produced the response.
+	/// </summary>
+	public AvailableModelInfo? ActualModelInfo { get; init; }
+
+	/// <summary>
 	/// Token usage statistics for this step.
 	/// </summary>
 	public TokenUsage? Usage { get; init; }
@@ -117,6 +137,10 @@ public class CheckpointStepResult
 		RawDependencyOutputs = RawDependencyOutputs,
 		PromptSent = PromptSent,
 		ActualModel = ActualModel,
+		SelectedModel = SelectedModel,
+		RequestedModelInfo = RequestedModelInfo,
+		SelectedModelInfo = SelectedModelInfo,
+		ActualModelInfo = ActualModelInfo,
 		Usage = Usage,
 		Trace = Trace,
 		RetryHistory = RetryHistory,
@@ -137,6 +161,10 @@ public class CheckpointStepResult
 			: new Dictionary<string, string>(result.RawDependencyOutputs),
 		PromptSent = result.PromptSent,
 		ActualModel = result.ActualModel,
+		SelectedModel = result.SelectedModel,
+		RequestedModelInfo = result.RequestedModelInfo,
+		SelectedModelInfo = result.SelectedModelInfo,
+		ActualModelInfo = result.ActualModelInfo,
 		Usage = result.Usage,
 		Trace = result.Trace,
 		RetryHistory = result.RetryHistory,

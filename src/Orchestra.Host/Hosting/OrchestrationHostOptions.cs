@@ -1,3 +1,5 @@
+using Orchestra.Engine;
+
 namespace Orchestra.Host.Hosting;
 
 /// <summary>
@@ -78,6 +80,11 @@ public class OrchestrationHostOptions
 	/// If null, defaults to "claude-opus-4.6".
 	/// </summary>
 	public string? DefaultModel { get; set; }
+
+	/// <summary>
+	/// Optional global lifecycle hooks applied to all orchestrations executed by this host.
+	/// </summary>
+	public HookDefinition[] Hooks { get; set; } = [];
 }
 
 /// <summary>

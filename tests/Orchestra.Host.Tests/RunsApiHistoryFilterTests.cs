@@ -74,6 +74,7 @@ public class RunsApiHistoryFilterTests : IDisposable
 			CompletedByStep = completedByStep,
 			IsIncomplete = isIncomplete,
 			FinalContent = "Test result",
+			HookExecutions = [],
 			StepRecords = new Dictionary<string, StepRunRecord>(),
 			AllStepRecords = new Dictionary<string, StepRunRecord>()
 		};

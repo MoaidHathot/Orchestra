@@ -53,6 +53,7 @@ public class RunRetentionTests : IDisposable
 			CompletedAt = now,
 			Status = status,
 			FinalContent = "Test result content",
+			HookExecutions = [],
 			StepRecords = new Dictionary<string, StepRunRecord>(),
 			AllStepRecords = new Dictionary<string, StepRunRecord>()
 		};

@@ -204,7 +204,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					userPrompt,
 					result.ActualModel,
 					trace,
-					selectedModel: result.SelectedModel), engineToolCtx, step.Name);
+					selectedModel: result.SelectedModel,
+					requestedModelInfo: result.RequestedModelInfo,
+					selectedModelInfo: result.SelectedModelInfo,
+					actualModelInfo: result.ActualModelInfo), engineToolCtx, step.Name);
 			}
 
 			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
@@ -218,7 +221,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					result.ActualModel,
 					tokenUsage,
 					trace,
-					selectedModel: result.SelectedModel), engineToolCtx, step.Name);
+					selectedModel: result.SelectedModel,
+					requestedModelInfo: result.RequestedModelInfo,
+					selectedModelInfo: result.SelectedModelInfo,
+					actualModelInfo: result.ActualModelInfo), engineToolCtx, step.Name);
 			}
 
 			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
@@ -235,7 +241,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				result.ActualModel,
 				tokenUsage,
 				trace,
-				selectedModel: result.SelectedModel), engineToolCtx, step.Name);
+				selectedModel: result.SelectedModel,
+				requestedModelInfo: result.RequestedModelInfo,
+				selectedModelInfo: result.SelectedModelInfo,
+				actualModelInfo: result.ActualModelInfo), engineToolCtx, step.Name);
 		}
 		catch (OperationCanceledException) when (engineToolCtx.StepCompletionRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -499,6 +508,9 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			PromptSent = result.PromptSent,
 			ActualModel = result.ActualModel,
 			SelectedModel = result.SelectedModel,
+			RequestedModelInfo = result.RequestedModelInfo,
+			SelectedModelInfo = result.SelectedModelInfo,
+			ActualModelInfo = result.ActualModelInfo,
 			Usage = result.Usage,
 			Trace = result.Trace,
 			RetryHistory = result.RetryHistory,

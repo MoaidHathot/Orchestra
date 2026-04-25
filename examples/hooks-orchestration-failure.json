@@ -1,0 +1,52 @@
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "hooks-orchestration-failure",
+  "description": "Demonstrates an orchestration failure hook that only runs when named steps fail and includes the failed steps in the payload.",
+  "version": "1.0.0",
+  "hooks": [
+    {
+      "name": "capture-deploy-failures",
+      "on": "orchestration.failure",
+      "when": {
+        "steps": {
+          "names": ["build", "deploy"],
+          "status": "failed",
+          "match": "any"
+        }
+      },
+      "payload": {
+        "detail": "standard",
+        "steps": "failed",
+        "includeRefs": true
+      },
+      "action": {
+        "type": "script",
+        "shell": "pwsh",
+        "scriptFile": "./hooks/write-hook-payload.ps1",
+        "arguments": ["./artifacts/orchestration-failure-payload.json"]
+      }
+    }
+  ],
+  "steps": [
+    {
+      "name": "build",
+      "type": "Command",
+      "command": "dotnet",
+      "arguments": ["build", "./missing-project/Missing.csproj"],
+      "includeStdErr": true
+    },
+    {
+      "name": "deploy",
+      "type": "Command",
+      "dependsOn": ["build"],
+      "command": "pwsh",
+      "arguments": ["-NoProfile", "-Command", "throw 'deploy should not run if build fails'"]
+    },
+    {
+      "name": "report",
+      "type": "Transform",
+      "dependsOn": ["deploy"],
+      "template": "Deployment result: {{deploy.output}}"
+    }
+  ]
+}

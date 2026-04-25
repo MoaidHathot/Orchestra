@@ -526,6 +526,27 @@ public class SseReporterTests : IDisposable
 	}
 
 	[Fact]
+	public void ReportHookExecuted_AddsEvent()
+	{
+		_reporter.ReportHookExecuted(new HookExecutionRecord
+		{
+			HookName = "notify",
+			EventType = HookEventType.StepFailure,
+			Source = HookSource.Orchestration,
+			Status = ExecutionStatus.Succeeded,
+			StartedAt = DateTimeOffset.UtcNow.AddSeconds(-1),
+			CompletedAt = DateTimeOffset.UtcNow,
+			StepName = "step-1",
+			FailurePolicy = HookFailurePolicy.Warn,
+			ActionType = HookActionType.Script,
+		});
+
+		_reporter.AccumulatedEvents.Should().Contain(e => e.Type == "hook-executed");
+		_reporter.AccumulatedEvents[^1].Data.Should().Contain("notify");
+		_reporter.AccumulatedEvents[^1].Data.Should().Contain("StepFailure");
+	}
+
+	[Fact]
 	public async Task FullLifecycle_LateAttach_ReceivesReplayIncludingTerminalEvents()
 	{
 		// Act — simulate a completed execution (no subscriber at start)
@@ -938,6 +959,7 @@ public class DefaultExecutionCallbackTests
 		public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error) { }
 		public void ReportSubagentDeselected(string stepName) { }
 		public void ReportRunContext(RunContext context) { }
+		public void ReportHookExecuted(HookExecutionRecord hookExecution) { }
 		public void ReportAuditLogEntry(string stepName, AuditLogEntry entry) { }
 		public void ReportStepStatusSet(string stepName, string status, string reason) { }
 	}

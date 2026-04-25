@@ -70,6 +70,7 @@ public static class RunsApi
 				status = s.Status.ToString(),
 				completionReason = s.CompletionReason,
 				completedByStep = s.CompletedByStep,
+				hookExecutionCount = s.HookExecutionCount,
 				isActive = false,
 				isIncomplete = s.IsIncomplete
 			});
@@ -148,6 +149,7 @@ public static class RunsApi
 					status = s.Status.ToString(),
 					completionReason = s.CompletionReason,
 					completedByStep = s.CompletedByStep,
+					hookExecutionCount = s.HookExecutionCount,
 					isActive = false,
 					isIncomplete = s.IsIncomplete
 				});
@@ -170,6 +172,7 @@ public static class RunsApi
 				status = s.Status.ToString(),
 				completionReason = s.CompletionReason,
 				completedByStep = s.CompletedByStep,
+				hookExecutionCount = s.HookExecutionCount,
 				isActive = false,
 				isIncomplete = s.IsIncomplete
 			});
@@ -245,6 +248,7 @@ public static class RunsApi
 					status = s.Status.ToString(),
 					completionReason = s.CompletionReason,
 					completedByStep = s.CompletedByStep,
+					hookExecutionCount = s.HookExecutionCount,
 					isActive = false,
 					isIncomplete = s.IsIncomplete
 				})
@@ -311,6 +315,23 @@ public static class RunsApi
 					accessedEnvironmentVariables = ctx.AccessedEnvironmentVariables.Count > 0 ? ctx.AccessedEnvironmentVariables : null,
 					dataDirectory = matchingIndex?.FolderPath ?? ctx.DataDirectory,
 				} : null,
+				hookExecutions = record.HookExecutions.Count > 0
+					? record.HookExecutions.Select(h => new
+					{
+						hookName = h.HookName,
+						eventType = h.EventType.ToString(),
+						source = h.Source.ToString(),
+						status = h.Status.ToString(),
+						startedAt = h.StartedAt.ToString("o"),
+						completedAt = h.CompletedAt.ToString("o"),
+						durationSeconds = Math.Round(h.Duration.TotalSeconds, 2),
+						stepName = h.StepName,
+						errorMessage = h.ErrorMessage,
+						content = h.Content,
+						failurePolicy = h.FailurePolicy.ToString(),
+						actionType = h.ActionType.ToString(),
+					}).ToArray()
+					: null,
 				steps = record.StepRecords.Select(kv => new
 				{
 					name = kv.Key,
@@ -323,6 +344,9 @@ public static class RunsApi
 					promptSent = kv.Value.PromptSent,
 					actualModel = kv.Value.ActualModel,
 					selectedModel = kv.Value.SelectedModel,
+					requestedModelInfo = kv.Value.RequestedModelInfo,
+					selectedModelInfo = kv.Value.SelectedModelInfo,
+					actualModelInfo = kv.Value.ActualModelInfo,
 					usage = kv.Value.Usage is { } u ? new
 					{
 						inputTokens = u.InputTokens,

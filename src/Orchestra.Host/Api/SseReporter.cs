@@ -351,6 +351,9 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			stepType = stepType.ToString().ToLowerInvariant(),
 			actualModel = result.ActualModel,
 			selectedModel = result.SelectedModel,
+			requestedModelInfo = result.RequestedModelInfo,
+			selectedModelInfo = result.SelectedModelInfo,
+			actualModelInfo = result.ActualModelInfo,
 			contentPreview = result.Content.Length > 500
 				? result.Content[..500] + "..."
 				: result.Content,
@@ -535,6 +538,25 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			resolvedVariables = context.ResolvedVariables.Count > 0 ? context.ResolvedVariables : null,
 			accessedEnvironmentVariables = context.AccessedEnvironmentVariables.Count > 0 ? context.AccessedEnvironmentVariables : null,
 			dataDirectory = context.DataDirectory,
+		});
+	}
+
+	public void ReportHookExecuted(HookExecutionRecord hookExecution)
+	{
+		Write("hook-executed", new
+		{
+			hookName = hookExecution.HookName,
+			eventType = hookExecution.EventType.ToString(),
+			source = hookExecution.Source.ToString(),
+			status = hookExecution.Status.ToString(),
+			startedAt = hookExecution.StartedAt.ToString("o"),
+			completedAt = hookExecution.CompletedAt.ToString("o"),
+			durationSeconds = Math.Round(hookExecution.Duration.TotalSeconds, 2),
+			stepName = hookExecution.StepName,
+			errorMessage = hookExecution.ErrorMessage,
+			content = hookExecution.Content,
+			failurePolicy = hookExecution.FailurePolicy.ToString(),
+			actionType = hookExecution.ActionType.ToString(),
 		});
 	}
 

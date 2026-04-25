@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Orchestra.Engine;
 using Orchestra.Host.Hosting;
 using Xunit;
 
@@ -742,5 +743,42 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.Scan!.Directory.Should().Be("/file/based/scan");
 		options.Scan.Watch.Should().BeTrue();
 		options.Scan.Recursive.Should().BeFalse();
+	}
+
+	[Fact]
+	public void LoadAndApply_Hooks_FromJsonFile()
+	{
+		var hookDir = Path.Combine(_tempDir, "hooks");
+		Directory.CreateDirectory(hookDir);
+		var configPath = Path.Combine(_tempDir, "hooks-config.json");
+		File.WriteAllText(configPath, """
+		{
+			"hooks": [
+				{
+					"name": "archive-failure",
+					"on": "orchestration.failure",
+					"payload": {
+						"detail": "compact",
+						"steps": "failed",
+						"includeRefs": true
+					},
+					"action": {
+						"type": "script",
+						"scriptFile": "hooks/archive.ps1"
+					}
+				}
+			]
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		options.Hooks.Should().HaveCount(1);
+		options.Hooks[0].On.Should().Be(HookEventType.OrchestrationFailure);
+		options.Hooks[0].Payload.Steps!.Selector.Should().Be(HookStepSelector.Failed);
+		options.Hooks[0].Action.ScriptFile.Should().Be(Path.GetFullPath(Path.Combine(_tempDir, "hooks", "archive.ps1")));
 	}
 }

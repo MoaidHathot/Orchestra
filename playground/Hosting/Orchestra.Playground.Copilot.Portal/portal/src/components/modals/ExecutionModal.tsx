@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry, StepActorStreams } from '../../types';
+import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry, StepActorStreams, HookExecution, ModelInfo } from '../../types';
 import { Icons } from '../../icons';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
@@ -57,6 +57,101 @@ interface DisplayContent {
   source: 'step' | 'final' | 'streaming';
 }
 
+interface StepModelState {
+  requestedModel?: string;
+  selectedModel?: string;
+  actualModel?: string;
+  requestedModelInfo?: ModelInfo;
+  selectedModelInfo?: ModelInfo;
+  actualModelInfo?: ModelInfo;
+}
+
+function formatNumber(value: number | undefined): string | null {
+  if (value == null) return null;
+  return new Intl.NumberFormat().format(value);
+}
+
+function formatBytes(value: number | undefined): string | null {
+  if (value == null) return null;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function modelDetailRows(info: ModelInfo): Array<{ label: string; value: string }> {
+  const rows: Array<{ label: string; value: string | null }> = [
+    { label: 'ID', value: info.id },
+    { label: 'Name', value: info.name ?? null },
+    { label: 'Default effort', value: info.defaultReasoningEffort ?? null },
+    { label: 'Reasoning efforts', value: info.reasoningEfforts?.join(', ') ?? null },
+    { label: 'Supports reasoning effort', value: info.supportsReasoningEffort == null ? null : String(info.supportsReasoningEffort) },
+    { label: 'Supports vision', value: info.supportsVision == null ? null : String(info.supportsVision) },
+    { label: 'Max context tokens', value: formatNumber(info.maxContextWindowTokens) },
+    { label: 'Max prompt tokens', value: formatNumber(info.maxPromptTokens) },
+    { label: 'Max prompt images', value: formatNumber(info.maxPromptImages) },
+    { label: 'Max prompt image size', value: formatBytes(info.maxPromptImageSize) },
+    { label: 'Vision media types', value: info.visionSupportedMediaTypes?.join(', ') ?? null },
+    { label: 'Billing multiplier', value: info.billingMultiplier == null ? null : String(info.billingMultiplier) },
+    { label: 'Policy state', value: info.policyState ?? null },
+    { label: 'Policy terms', value: info.policyTerms ?? null },
+  ];
+
+  return rows
+    .filter((row): row is { label: string; value: string } => row.value != null && row.value !== '')
+    .map((row) => ({ label: row.label, value: row.value }));
+}
+
+function ModelMetadataCard({
+  title,
+  model,
+  info,
+  highlight,
+}: {
+  title: string;
+  model?: string;
+  info?: ModelInfo;
+  highlight?: boolean;
+}): React.JSX.Element | null {
+  if (!model && !info) return null;
+
+  const details = info ? modelDetailRows(info) : [];
+  const displayModel = model ?? info?.id;
+
+  return (
+    <div
+      style={{
+        minWidth: '220px',
+        flex: '1 1 260px',
+        padding: '8px 10px',
+        background: 'var(--surface)',
+        borderRadius: '6px',
+        border: highlight
+          ? '1px solid rgba(210, 153, 34, 0.35)'
+          : '1px solid var(--border-subtle)',
+      }}
+    >
+      <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '4px' }}>
+        {title}
+      </div>
+      {displayModel && (
+        <div style={{ color: highlight ? 'var(--warning)' : 'var(--text-secondary)', fontWeight: 600, wordBreak: 'break-word' }}>
+          {displayModel}
+        </div>
+      )}
+      {details.length > 0 && (
+        <div style={{ marginTop: '8px', display: 'grid', gap: '4px' }}>
+          {details.map((detail) => (
+            <div key={`${title}-${detail.label}`} style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px' }}>
+              <span style={{ color: 'var(--text-dim)' }}>{detail.label}</span>
+              <span style={{ color: 'var(--text-secondary)', wordBreak: 'break-word' }}>{detail.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   open: boolean;
   orchestration: Orchestration | null;
@@ -78,6 +173,7 @@ interface Props {
   errorMessage: string | null;
   completedByStep: string | null;
   runContext: RunContext | null;
+  hookExecutions: HookExecution[];
   onClose: () => void;
   onCancel: (executionId: string) => void;
 }
@@ -98,6 +194,7 @@ export default function ExecutionModal({
   errorMessage,
   completedByStep,
   runContext,
+  hookExecutions,
   onClose,
   onCancel,
 }: Props): React.JSX.Element {
@@ -278,32 +375,51 @@ export default function ExecutionModal({
     return typeof step === 'object' ? step : null;
   }, [selectedStep, orchestration]);
 
-  // Extract actual model info from step events (from step-completed/usage SSE events)
-  const stepModelInfo = useMemo<{ actualModel?: string; selectedModel?: string } | null>(() => {
+  // Extract requested/selected/actual model info from step events.
+  const stepModelInfo = useMemo<StepModelState | null>(() => {
     if (!selectedStep || !stepEvents) return null;
     const events = stepEvents[selectedStep];
     if (!events || events.length === 0) return null;
 
+    let requestedModel: string | undefined;
     let actualModel: string | undefined;
     let selectedModel: string | undefined;
+    let requestedModelInfo: ModelInfo | undefined;
+    let selectedModelInfo: ModelInfo | undefined;
+    let actualModelInfo: ModelInfo | undefined;
+
+    if (selectedStepData?.model) {
+      requestedModel = selectedStepData.model;
+    }
 
     for (const event of events) {
       if (event.type === 'step-completed') {
-        // step-completed carries actualModel and selectedModel
+        // step-completed carries selected/actual model ids and metadata.
         if (event.actualModel) actualModel = event.actualModel as string;
         if (event.selectedModel) selectedModel = event.selectedModel as string;
+        if (event.requestedModelInfo) requestedModelInfo = event.requestedModelInfo as ModelInfo;
+        if (event.selectedModelInfo) selectedModelInfo = event.selectedModelInfo as ModelInfo;
+        if (event.actualModelInfo) actualModelInfo = event.actualModelInfo as ModelInfo;
       } else if (event.type === 'usage' && !actualModel) {
-        // usage carries model (the actual model used)
         if (event.model) actualModel = event.model as string;
       } else if (event.type === 'model-mismatch') {
-        // model-mismatch carries configuredModel and actualModel
         if (event.actualModel) actualModel = event.actualModel as string;
       }
     }
 
-    if (!actualModel && !selectedModel) return null;
-    return { actualModel, selectedModel };
-  }, [selectedStep, stepEvents]);
+    if (!requestedModel && !actualModel && !selectedModel && !requestedModelInfo && !selectedModelInfo && !actualModelInfo) {
+      return null;
+    }
+
+    return {
+      requestedModel,
+      selectedModel,
+      actualModel,
+      requestedModelInfo,
+      selectedModelInfo,
+      actualModelInfo,
+    };
+  }, [selectedStep, selectedStepData, stepEvents]);
 
   const handleCancel = useCallback(() => {
     if (executionId) {
@@ -684,6 +800,47 @@ export default function ExecutionModal({
               )}
             </div>
           )}
+          {hookExecutions.length > 0 && (
+            <div className="run-context-panel">
+              <div className="run-context-header">
+                <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
+                  Hook Executions
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--text-dim)', marginLeft: '8px' }}>
+                  {hookExecutions.length} recorded
+                </span>
+              </div>
+              <div className="run-context-body" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {hookExecutions.map((hook, index) => (
+                  <div key={`${hook.hookName}-${hook.startedAt || index}`} style={{
+                    padding: '10px 12px',
+                    background: 'var(--bg-tertiary)',
+                    borderRadius: '6px',
+                    borderLeft: `3px solid ${hook.status === 'Failed' ? 'var(--error)' : 'var(--success)'}`,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                      <div>
+                        <strong>{hook.hookName}</strong>
+                        <span className="text-muted" style={{ marginLeft: '8px' }}>{hook.eventType}</span>
+                      </div>
+                      <div className={`step-status-badge ${hook.status === 'Failed' ? 'failed' : 'completed'}`}>
+                        {hook.status}
+                      </div>
+                    </div>
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                      {hook.source && <span>{hook.source}</span>}
+                      {hook.stepName && <span>step: {hook.stepName}</span>}
+                      {hook.durationSeconds != null && <span>{hook.durationSeconds}s</span>}
+                      {hook.actionType && <span>{hook.actionType}</span>}
+                    </div>
+                    {hook.errorMessage && (
+                      <div style={{ marginTop: '6px', color: 'var(--error)', fontSize: '12px' }}>{hook.errorMessage}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="execution-modal-content">
             {/* DAG Section */}
             <div className="execution-dag-section">
@@ -1020,13 +1177,23 @@ export default function ExecutionModal({
                               </span>
                             </div>
                           )}
-                          {selectedStepData?.model && (
+                          {stepModelInfo?.requestedModel && (
                             <div>
                               <span style={{ color: 'var(--text-dim)' }}>
-                                Model:
+                                Configured Model:
                               </span>{' '}
                               <span style={{ color: 'var(--text-secondary)' }}>
-                                {selectedStepData.model}
+                                {stepModelInfo.requestedModel}
+                              </span>
+                            </div>
+                          )}
+                          {stepModelInfo?.selectedModel && (
+                            <div>
+                              <span style={{ color: 'var(--text-dim)' }}>
+                                Selected Model:
+                              </span>{' '}
+                              <span style={{ color: 'var(--text-secondary)' }}>
+                                {stepModelInfo.selectedModel}
                               </span>
                             </div>
                           )}
@@ -1036,13 +1203,13 @@ export default function ExecutionModal({
                                 Actual Model:
                               </span>{' '}
                               <span style={{
-                                color: selectedStepData?.model && stepModelInfo.actualModel !== selectedStepData.model
+                                color: stepModelInfo.requestedModel && stepModelInfo.actualModel !== stepModelInfo.requestedModel
                                   ? 'var(--warning)'
                                   : 'var(--text-secondary)',
                               }}>
                                 {stepModelInfo.actualModel}
                               </span>
-                              {selectedStepData?.model && stepModelInfo.actualModel !== selectedStepData.model && (
+                              {stepModelInfo.requestedModel && stepModelInfo.actualModel !== stepModelInfo.requestedModel && (
                                 <span
                                   style={{
                                     marginLeft: '6px',
@@ -1053,13 +1220,35 @@ export default function ExecutionModal({
                                     border: '1px solid rgba(210, 153, 34, 0.3)',
                                     color: 'var(--warning)',
                                   }}
-                                  title={`Requested "${selectedStepData?.model}" but the provider used "${stepModelInfo.actualModel}"`}
+                                  title={`Requested "${stepModelInfo.requestedModel}" but the provider used "${stepModelInfo.actualModel}"`}
                                 >
                                   differs
                                 </span>
-                               )}
+                              )}
                             </div>
                           )}
+                        </div>
+
+                        {(stepModelInfo?.requestedModelInfo || stepModelInfo?.selectedModelInfo || stepModelInfo?.actualModelInfo) && (
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: selectedStepData?.mcps && selectedStepData.mcps.length > 0 ? '8px' : '0' }}>
+                            <ModelMetadataCard
+                              title="Configured Metadata"
+                              model={stepModelInfo.requestedModel}
+                              info={stepModelInfo.requestedModelInfo}
+                            />
+                            <ModelMetadataCard
+                              title="Selected Metadata"
+                              model={stepModelInfo.selectedModel}
+                              info={stepModelInfo.selectedModelInfo}
+                            />
+                            <ModelMetadataCard
+                              title="Actual Metadata"
+                              model={stepModelInfo.actualModel}
+                              info={stepModelInfo.actualModelInfo}
+                              highlight={!!stepModelInfo.requestedModel && stepModelInfo.actualModel !== stepModelInfo.requestedModel}
+                            />
+                          </div>
+                        )}
 
                         {/* Audit Log */}
                         {selectedStepAuditLog.length > 0 && (
@@ -1300,7 +1489,6 @@ export default function ExecutionModal({
                               )}
                             </div>
                           )}
-                      </div>
                         {selectedStepData?.mcps &&
                           selectedStepData.mcps.length > 0 && (
                             <div>

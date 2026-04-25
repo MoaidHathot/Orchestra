@@ -117,6 +117,66 @@ public class OrchestrationParserTests
 	}
 
 	[Fact]
+	public void ParseOrchestration_WithHooks_ParsesHookDefinition()
+	{
+		var json = """
+			{
+				"name": "hooked",
+				"description": "Test",
+				"hooks": [
+					{
+						"name": "notify-build-failure",
+						"on": "step.failure",
+						"when": {
+							"steps": {
+								"names": ["build", "deploy"],
+								"status": "failed",
+								"match": "any"
+							}
+						},
+						"payload": {
+							"detail": "standard",
+							"steps": "current",
+							"includeRefs": true
+						},
+						"action": {
+							"type": "script",
+							"shell": "pwsh",
+							"script": "param($input) $input | Out-File hook.json"
+						}
+					}
+				],
+				"steps": []
+			}
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Hooks.Should().HaveCount(1);
+		var hook = orchestration.Hooks[0];
+		hook.Name.Should().Be("notify-build-failure");
+		hook.On.Should().Be(HookEventType.StepFailure);
+		hook.When.Should().NotBeNull();
+		hook.When!.Steps!.Names.Should().BeEquivalentTo(["build", "deploy"]);
+		hook.When.Steps.Status.Should().Be(HookStepStatusFilter.Failed);
+		hook.Payload.Detail.Should().Be(HookPayloadDetail.Standard);
+		hook.Payload.Steps!.Selector.Should().Be(HookStepSelector.Current);
+		hook.Payload.IncludeRefs.Should().BeTrue();
+		hook.Action.Type.Should().Be(HookActionType.Script);
+	}
+
+	[Fact]
+	public void ParseOrchestrationFile_WithHookScriptFile_ResolvesRelativePath()
+	{
+		var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples", "hooks-orchestration-failure.json"));
+
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(path, []);
+
+		orchestration.Hooks.Should().HaveCount(1);
+		orchestration.Hooks[0].Action.ScriptFile.Should().Be(Path.GetFullPath(Path.Combine(Path.GetDirectoryName(path)!, "hooks", "write-hook-payload.ps1")));
+	}
+
+	[Fact]
 	public void ParseOrchestration_WithoutDefaultSystemPromptMode_DefaultsToNull()
 	{
 		// Arrange

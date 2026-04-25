@@ -76,4 +76,9 @@ public class OrchestrationRunRecord
 	/// Aggregate token usage across all steps in this run.
 	/// </summary>
 	public TokenUsage? TotalUsage { get; init; }
+
+	/// <summary>
+	/// Lifecycle hook executions that ran during this orchestration run.
+	/// </summary>
+	public IReadOnlyList<HookExecutionRecord> HookExecutions { get; init; } = [];
 }

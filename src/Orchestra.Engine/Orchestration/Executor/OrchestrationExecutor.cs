@@ -16,6 +16,7 @@ public partial class OrchestrationExecutor
 	private readonly StepExecutorRegistry _stepExecutorRegistry;
 	private readonly string? _dataPath;
 	private readonly string? _serverUrl;
+	private readonly HookDefinition[] _globalHooks;
 
 	public OrchestrationExecutor(
 		IScheduler scheduler,
@@ -28,6 +29,7 @@ public partial class OrchestrationExecutor
 		StepExecutorRegistry? stepExecutorRegistry = null,
 		EngineToolRegistry? engineToolRegistry = null,
 		IMcpResolver? mcpResolver = null,
+		HookDefinition[]? globalHooks = null,
 		string? dataPath = null,
 		string? serverUrl = null)
 	{
@@ -37,10 +39,11 @@ public partial class OrchestrationExecutor
 		_promptFormatter = promptFormatter ?? DefaultPromptFormatter.Instance;
 		_loggerFactory = loggerFactory;
 		_logger = loggerFactory.CreateLogger<OrchestrationExecutor>();
-		_runStore = runStore ?? NullRunStore.Instance;
-		_checkpointStore = checkpointStore ?? NullCheckpointStore.Instance;
-		_dataPath = dataPath;
-		_serverUrl = serverUrl;
+			_runStore = runStore ?? NullRunStore.Instance;
+			_checkpointStore = checkpointStore ?? NullCheckpointStore.Instance;
+			_globalHooks = MarkHookSources(globalHooks ?? [], HookSource.Global);
+			_dataPath = dataPath;
+			_serverUrl = serverUrl;
 
 		// If no registry is provided, create a default one with all built-in step types
 		if (stepExecutorRegistry is not null)
@@ -167,6 +170,9 @@ public partial class OrchestrationExecutor
 			TempFileStore = tempFileStore,
 			ServerUrl = _serverUrl,
 		};
+		var hookRuntime = new HookRuntime(_loggerFactory, _serverUrl, _reporter);
+		var hooks = CombineHooks(_globalHooks, orchestration.Hooks);
+		var hookExecutions = new ConcurrentQueue<HookExecutionRecord>();
 		var stepResults = new ConcurrentDictionary<string, ExecutionResult>();
 		var stepRecords = new ConcurrentDictionary<string, StepRunRecord>();
 		var allStepRecords = new ConcurrentDictionary<string, StepRunRecord>();
@@ -214,6 +220,9 @@ public partial class OrchestrationExecutor
 						RawDependencyOutputs = result.RawDependencyOutputs,
 						PromptSent = result.PromptSent,
 						ActualModel = result.ActualModel,
+						RequestedModelInfo = result.RequestedModelInfo,
+						SelectedModelInfo = result.SelectedModelInfo,
+						ActualModelInfo = result.ActualModelInfo,
 					};
 					stepRecords[stepName] = record;
 					allStepRecords[stepName] = record;
@@ -286,6 +295,7 @@ public partial class OrchestrationExecutor
 				var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
 				stepRecords[step.Name] = record;
 				allStepRecords[step.Name] = record;
+				await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
 				// Report step completed/failed/no-action to the reporter so the UI
 				// can update step status immediately (not just at orchestration-done).
@@ -297,6 +307,10 @@ public partial class OrchestrationExecutor
 					{
 						Content = result.Content,
 						ActualModel = result.ActualModel,
+						SelectedModel = result.SelectedModel,
+						RequestedModelInfo = result.RequestedModelInfo,
+						SelectedModelInfo = result.SelectedModelInfo,
+						ActualModelInfo = result.ActualModelInfo,
 					}, step.Type);
 				}
 
@@ -355,6 +369,7 @@ public partial class OrchestrationExecutor
 					var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
 					stepRecords[step.Name] = record;
 					allStepRecords[step.Name] = record;
+					await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 					_reporter.ReportStepCancelled(step.Name);
 					completionSources[step.Name].TrySetResult(cancelled);
 				}
@@ -366,6 +381,7 @@ public partial class OrchestrationExecutor
 					var record = BuildStepRecord(step, failed, effectiveParams, stepStartedAt);
 					stepRecords[step.Name] = record;
 					allStepRecords[step.Name] = record;
+					await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 					_reporter.ReportStepError(step.Name, ex.Message);
 					completionSources[step.Name].TrySetResult(failed);
 				}
@@ -462,6 +478,7 @@ public partial class OrchestrationExecutor
 		// orchestration was cancelled — the run record must be persisted to history.
 		var runCompletedAt = DateTimeOffset.UtcNow;
 		var finalContent = BuildFinalContent(orchestrationResult);
+		await ExecuteOrchestrationHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, runCompletedAt, triggerId, stepRecords, hookExecutions, finalContent, orchestrationResult.Status, CancellationToken.None).ConfigureAwait(false);
 
 		var runRecord = new OrchestrationRunRecord
 		{
@@ -479,6 +496,7 @@ public partial class OrchestrationExecutor
 			CompletedByStep = orchestrationResult.CompletedByStep,
 			IsIncomplete = orchestrationResult.IsIncomplete,
 			TotalUsage = AggregateTokenUsage(stepRecords.Values),
+			HookExecutions = hookExecutions.OrderBy(h => h.StartedAt).ToArray(),
 			Context = new RunContext
 			{
 				RunId = runId,
@@ -822,6 +840,9 @@ public partial class OrchestrationExecutor
 					PromptSent = result.PromptSent,
 					ActualModel = result.ActualModel,
 					SelectedModel = result.SelectedModel,
+					RequestedModelInfo = result.RequestedModelInfo,
+					SelectedModelInfo = result.SelectedModelInfo,
+					ActualModelInfo = result.ActualModelInfo,
 					Usage = result.Usage,
 					Trace = result.Trace,
 					RetryHistory = retryHistory,
@@ -1099,6 +1120,9 @@ public partial class OrchestrationExecutor
 			PromptSent = result.PromptSent,
 			ActualModel = result.ActualModel,
 			SelectedModel = result.SelectedModel,
+			RequestedModelInfo = result.RequestedModelInfo,
+			SelectedModelInfo = result.SelectedModelInfo,
+			ActualModelInfo = result.ActualModelInfo,
 			Usage = result.Usage,
 			Trace = result.Trace,
 			RetryHistory = result.RetryHistory,
@@ -1176,6 +1200,136 @@ public partial class OrchestrationExecutor
 			orchestrationResult.Results
 				.Where(kv => kv.Value.Status == ExecutionStatus.Succeeded)
 				.Select(kv => $"## {kv.Key}\n{kv.Value.Content}"));
+	}
+
+	private async Task ExecuteStepHooksAsync(
+		HookRuntime hookRuntime,
+		HookDefinition[] hooks,
+		Orchestration orchestration,
+		OrchestrationExecutionContext executionContext,
+		string runId,
+		DateTimeOffset runStartedAt,
+		string? triggerId,
+		IReadOnlyDictionary<string, StepRunRecord> stepRecords,
+		IReadOnlyDictionary<string, OrchestrationStep> allSteps,
+		StepRunRecord currentRecord,
+		ConcurrentQueue<HookExecutionRecord> hookExecutions,
+		string? finalContent,
+		CancellationToken cancellationToken)
+	{
+		if (hooks.Length == 0)
+			return;
+
+		var terminalStepNames = GetTerminalStepNames(allSteps);
+		var context = new HookExecutionContext
+		{
+			Orchestration = orchestration,
+			ExecutionContext = executionContext,
+			RunId = runId,
+			RunStartedAt = runStartedAt,
+			TriggerId = triggerId,
+			StepRecords = stepRecords,
+			TerminalStepNames = terminalStepNames,
+			CurrentStepRecord = currentRecord,
+			FinalContent = finalContent,
+		};
+
+		if (currentRecord.Status == ExecutionStatus.Failed)
+		{
+			EnqueueHookExecutions(hookExecutions, await hookRuntime.ExecuteAsync(hooks, HookEventType.StepFailure, context, cancellationToken).ConfigureAwait(false));
+		}
+		else if (currentRecord.Status == ExecutionStatus.Succeeded)
+		{
+			EnqueueHookExecutions(hookExecutions, await hookRuntime.ExecuteAsync(hooks, HookEventType.StepSuccess, context, cancellationToken).ConfigureAwait(false));
+		}
+
+		EnqueueHookExecutions(hookExecutions, await hookRuntime.ExecuteAsync(hooks, HookEventType.StepAfter, context, cancellationToken).ConfigureAwait(false));
+	}
+
+	private async Task ExecuteOrchestrationHooksAsync(
+		HookRuntime hookRuntime,
+		HookDefinition[] hooks,
+		Orchestration orchestration,
+		OrchestrationExecutionContext executionContext,
+		string runId,
+		DateTimeOffset runStartedAt,
+		DateTimeOffset runCompletedAt,
+		string? triggerId,
+		IReadOnlyDictionary<string, StepRunRecord> stepRecords,
+		ConcurrentQueue<HookExecutionRecord> hookExecutions,
+		string finalContent,
+		ExecutionStatus orchestrationStatus,
+		CancellationToken cancellationToken)
+	{
+		if (hooks.Length == 0)
+			return;
+
+		var allSteps = orchestration.Steps.ToDictionary(s => s.Name, s => s);
+		var context = new HookExecutionContext
+		{
+			Orchestration = orchestration,
+			ExecutionContext = executionContext,
+			RunId = runId,
+			RunStartedAt = runStartedAt,
+			RunCompletedAt = runCompletedAt,
+			TriggerId = triggerId,
+			OrchestrationStatus = orchestrationStatus,
+			StepRecords = stepRecords,
+			TerminalStepNames = GetTerminalStepNames(allSteps),
+			FinalContent = finalContent,
+		};
+
+		if (orchestrationStatus == ExecutionStatus.Failed)
+		{
+			EnqueueHookExecutions(hookExecutions, await hookRuntime.ExecuteAsync(hooks, HookEventType.OrchestrationFailure, context, cancellationToken).ConfigureAwait(false));
+		}
+		else if (orchestrationStatus == ExecutionStatus.Succeeded)
+		{
+			EnqueueHookExecutions(hookExecutions, await hookRuntime.ExecuteAsync(hooks, HookEventType.OrchestrationSuccess, context, cancellationToken).ConfigureAwait(false));
+		}
+
+		EnqueueHookExecutions(hookExecutions, await hookRuntime.ExecuteAsync(hooks, HookEventType.OrchestrationAfter, context, cancellationToken).ConfigureAwait(false));
+	}
+
+	private static string[] GetTerminalStepNames(IReadOnlyDictionary<string, OrchestrationStep> allSteps)
+	{
+		var dependedOn = new HashSet<string>(
+			allSteps.Values.SelectMany(s => s.DependsOn),
+			StringComparer.OrdinalIgnoreCase);
+
+		return allSteps.Keys
+			.Where(name => !dependedOn.Contains(name))
+			.ToArray();
+	}
+
+	private static HookDefinition[] CombineHooks(HookDefinition[] globalHooks, HookDefinition[] orchestrationHooks)
+	{
+		var markedOrchestrationHooks = MarkHookSources(orchestrationHooks, HookSource.Orchestration);
+
+		if (globalHooks.Length == 0)
+			return markedOrchestrationHooks;
+		if (markedOrchestrationHooks.Length == 0)
+			return globalHooks;
+
+		return [.. globalHooks, .. markedOrchestrationHooks];
+	}
+
+	private static HookDefinition[] MarkHookSources(HookDefinition[] hooks, HookSource source)
+	{
+		foreach (var hook in hooks)
+		{
+			hook.Source = source;
+		}
+
+		return hooks;
+	}
+
+	private static void EnqueueHookExecutions(ConcurrentQueue<HookExecutionRecord> queue, IReadOnlyList<HookExecutionRecord> executions)
+	{
+		foreach (var execution in executions)
+		{
+			queue.Enqueue(execution);
+		}
 	}
 
 	/// <summary>

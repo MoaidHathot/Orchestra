@@ -76,6 +76,7 @@ public class OrchestrationsApiTests : IDisposable
 					services.AddSingleton(registry);
 					services.AddSingleton<IScheduler>(scheduler);
 					services.AddSingleton(triggerManager);
+					services.AddSingleton(new Orchestra.Host.Hosting.OrchestrationHostOptions());
 					services.AddSingleton(new OrchestrationTagStore(_tempDir, NullLoggerFactory.Instance.CreateLogger<OrchestrationTagStore>()));
 				});
 				webHost.Configure(app =>
@@ -286,5 +287,48 @@ public class OrchestrationsApiTests : IDisposable
 
 		// Assert
 		response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+	}
+
+	[Fact]
+	public async Task GetOrchestrationById_WithHooks_ReturnsHookMetadata()
+	{
+		var orchestrationJson = """
+		{
+			"name": "test-hooks",
+			"description": "Orchestration with hooks",
+			"hooks": [
+				{
+					"name": "notify-failure",
+					"on": "step.failure",
+					"payload": { "detail": "compact", "steps": "current" },
+					"action": {
+						"type": "script",
+						"shell": "pwsh",
+						"scriptFile": "hooks/write.ps1"
+					}
+				}
+			],
+			"steps": []
+		}
+		""";
+
+		var path = CreateOrchestrationFile("test-hooks", orchestrationJson);
+		var registry = new OrchestrationRegistry(_persistPath, NullLoggerFactory.Instance.CreateLogger<OrchestrationRegistry>());
+		var entry = registry.Register(path, null, persist: false);
+
+		using var host = CreateTestHost(registry);
+		var client = host.GetTestClient();
+
+		var response = await client.GetAsync($"/api/orchestrations/{entry.Id}");
+
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var json = await response.Content.ReadAsStringAsync();
+		using var doc = JsonDocument.Parse(json);
+		var hooks = doc.RootElement.GetProperty("hooks");
+		hooks.GetArrayLength().Should().Be(1);
+		hooks[0].GetProperty("name").GetString().Should().Be("notify-failure");
+		hooks[0].GetProperty("eventType").GetString().Should().Be("StepFailure");
+		hooks[0].GetProperty("action").GetProperty("type").GetString().Should().Be("Script");
 	}
 }

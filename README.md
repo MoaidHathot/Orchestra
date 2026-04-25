@@ -289,6 +289,7 @@ Script steps can also reference external files:
 | `timeoutSeconds` | int | No | `3600` | Maximum time for the entire orchestration run |
 | `mcps` | array | No | `[]` | Inline MCP server definitions |
 | `trigger` | object | No | Manual | Automatic trigger configuration |
+| `hooks` | array | No | `[]` | Lifecycle hooks that run after step/orchestration outcomes |
 
 ### Base Step Properties (All Step Types)
 
@@ -317,6 +318,59 @@ Script steps can also reference external files:
 | `loop` | object | Retry/check loop configuration |
 | `subagents` | array | Subagent definitions for multi-agent delegation |
 | `skillDirectories` | array | Directories containing SKILL.md files |
+
+## Hooks
+
+Hooks let an orchestration react to step and run outcomes without embedding all of that logic in the main DAG. In v1, hooks are lifecycle-driven and execute scripts with a structured JSON payload provided on stdin.
+
+Supported events:
+
+- `step.success`
+- `step.failure`
+- `step.after`
+- `orchestration.success`
+- `orchestration.failure`
+- `orchestration.after`
+
+Payload options:
+
+- `detail`: `compact`, `standard`, or `full`
+- `steps`: `none`, `current`, `failed`, `nonSucceeded`, `terminal`, `all`, or an explicit step-name array
+- `includeRefs`: include API / MCP references for fetching more run data
+
+Filtering:
+
+- `when.steps.names`: step names to evaluate
+- `when.steps.status`: `any`, `succeeded`, `failed`, `cancelled`, `skipped`, `noAction`, `nonSucceeded`
+- `when.steps.match`: `any` or `all`
+
+Example:
+
+```yaml
+hooks:
+  - name: triage-critical-step-failures
+    on: step.failure
+    when:
+      steps:
+        names: [build, deploy]
+        status: failed
+        match: any
+    payload:
+      detail: compact
+      steps: current
+      includeRefs: true
+    action:
+      type: script
+      shell: pwsh
+      script: |
+        $payload = $input | Out-String
+        $payload | Set-Content ./hook-output.json
+```
+
+Hooks are different from `inputHandlerPrompt` and `outputHandlerPrompt`:
+
+- handlers transform prompt input or output for a Prompt step
+- hooks run after lifecycle events and are meant for follow-up automation
 
 ## Typed Inputs
 
@@ -779,6 +833,8 @@ See the `examples/` folder for 20 complete orchestration examples:
 | `system-prompt-mode-example.json` | System prompt mode demonstration |
 | `advanced-combined-features.json` | Full pipeline with loops and MCPs |
 | `webhook-triggered-notification.json` | Webhook trigger with input handler and sync response |
+| `hooks-step-failure.yaml` | Step failure hook with current-step payload |
+| `hooks-orchestration-failure.json` | Orchestration failure hook with filtered failed steps |
 | `code-review-azure-devops.json` | Code review workflow |
 | `weather-roads-seattle.json` | Parallel prompt execution |
 

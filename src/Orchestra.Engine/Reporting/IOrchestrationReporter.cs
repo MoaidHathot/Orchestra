@@ -42,6 +42,9 @@ public interface IOrchestrationReporter
 	// Run context
 	void ReportRunContext(RunContext context);
 
+	// Hook lifecycle
+	void ReportHookExecuted(HookExecutionRecord hookExecution);
+
 	// Audit log
 	void ReportAuditLogEntry(string stepName, AuditLogEntry entry);
 

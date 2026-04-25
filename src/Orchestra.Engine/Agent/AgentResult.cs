@@ -24,6 +24,21 @@ public class AgentResult
 	/// Available models reported by the server. Populated when a model mismatch is detected.
 	/// </summary>
 	public IReadOnlyList<AvailableModelInfo>? AvailableModels { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the configured/requested model.
+	/// </summary>
+	public AvailableModelInfo? RequestedModelInfo { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the server-selected model.
+	/// </summary>
+	public AvailableModelInfo? SelectedModelInfo { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the actual model that produced the response.
+	/// </summary>
+	public AvailableModelInfo? ActualModelInfo { get; init; }
 }
 
 public class AgentUsage

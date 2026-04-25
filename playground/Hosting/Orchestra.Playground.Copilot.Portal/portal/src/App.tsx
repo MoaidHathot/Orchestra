@@ -8,6 +8,8 @@ import type {
   ActiveData,
   ServerStatus,
   ExecutionModalState,
+  HookExecution,
+  ModelInfo,
   StepEvent,
   Step,
   TraceData,
@@ -55,6 +57,9 @@ interface ExecutionDetailStep {
   completedAt?: string;
   actualModel?: string;
   selectedModel?: string;
+  requestedModelInfo?: ModelInfo;
+  selectedModelInfo?: ModelInfo;
+  actualModelInfo?: ModelInfo;
   errorMessage?: string;
   usage?: {
     inputTokens?: number;
@@ -78,6 +83,7 @@ interface ExecutionDetailsResponse {
   finalContent?: string;
   steps?: ExecutionDetailStep[];
   context?: RunContext | null;
+  hookExecutions?: HookExecution[];
 }
 
 // ── Viewer / History / Add / Run modal state types ──────────────────────────
@@ -196,6 +202,7 @@ function App(): React.JSX.Element {
     errorMessage: null,
     completedByStep: null,
     runContext: null,
+    hookExecutions: [],
   });
   const eventSourceRef = useRef<EventSource | null>(null);
   const [mcpsModal, setMcpsModal] = useState<McpsModalState>({ open: false });
@@ -630,6 +637,7 @@ function App(): React.JSX.Element {
     const stepResults: Record<string, string> = {};
     const stepTraces: Record<string, TraceData> = {};
     const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
+    const hookExecutions: HookExecution[] = [];
     let streamingContent = '';
     let finalResult = '';
     // Mutable tracker for execution ID (may be set later by execution-started event)
@@ -717,6 +725,13 @@ function App(): React.JSX.Element {
       }));
     };
 
+    const updateHookExecutions = () => {
+      setExecutionModal(prev => ({
+        ...prev,
+        hookExecutions: [...hookExecutions],
+      }));
+    };
+
     // ---- local helpers ----
 
     const addStepEvent = (stepName: string | undefined, type: string, data: Record<string, unknown>) => {
@@ -783,6 +798,18 @@ function App(): React.JSX.Element {
         // Also store in the per-execution map so cards can display it
         if (trackedExecutionId) {
           runContextsRef.current.set(trackedExecutionId, data);
+        }
+      } catch { /* ignore */ }
+    });
+
+    eventSource.addEventListener('hook-executed', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as HookExecution;
+        hookExecutions.push(data);
+        updateHookExecutions();
+
+        if (data.stepName) {
+          addStepEvent(data.stepName, 'hook-executed', data as unknown as Record<string, unknown>);
         }
       } catch { /* ignore */ }
     });
@@ -1258,6 +1285,7 @@ function App(): React.JSX.Element {
       errorMessage: null,
       completedByStep: null,
       runContext: null,
+      hookExecutions: [],
     });
 
     try {
@@ -1367,6 +1395,7 @@ function App(): React.JSX.Element {
       errorMessage: null,
       completedByStep: null,
       runContext: null,
+      hookExecutions: [],
     });
 
     try {
@@ -1410,6 +1439,7 @@ function App(): React.JSX.Element {
       errorMessage: null,
       completedByStep: null,
       runContext: null,
+      hookExecutions: [],
     });
 
     try {
@@ -1423,6 +1453,7 @@ function App(): React.JSX.Element {
       const stepTraces: Record<string, TraceData> = {};
       const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
       const finalResult = details.finalContent || '';
+      const hookExecutions = details.hookExecutions || [];
 
       if (details.steps) {
         details.steps.forEach((step: ExecutionDetailStep) => {
@@ -1490,6 +1521,9 @@ function App(): React.JSX.Element {
               type: 'step-completed',
               actualModel: step.actualModel,
               selectedModel: step.selectedModel,
+              requestedModelInfo: step.requestedModelInfo,
+              selectedModelInfo: step.selectedModelInfo,
+              actualModelInfo: step.actualModelInfo,
               contentPreview: step.content
                 ? step.content.substring(0, 200) + (step.content.length > 200 ? '...' : '')
                 : undefined,
@@ -1500,6 +1534,9 @@ function App(): React.JSX.Element {
               type: 'step-completed',
               actualModel: step.actualModel,
               selectedModel: step.selectedModel,
+              requestedModelInfo: step.requestedModelInfo,
+              selectedModelInfo: step.selectedModelInfo,
+              actualModelInfo: step.actualModelInfo,
             } as StepEvent);
           } else if (step.errorMessage) {
             stepEvents[step.name].push({
@@ -1543,6 +1580,7 @@ function App(): React.JSX.Element {
         errorMessage: null,
         completedByStep: details.completedByStep || null,
         runContext: details.context || null,
+        hookExecutions,
       });
     } catch (err) {
       console.error('Failed to load execution details:', err);
@@ -2166,6 +2204,7 @@ function App(): React.JSX.Element {
             errorMessage: null,
             completedByStep: null,
             runContext: null,
+            hookExecutions: [],
           });
         }}
         onCancel={() => cancelExecution(executionModal.executionId)}

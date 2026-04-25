@@ -220,7 +220,8 @@ public static class ServiceCollectionExtensions
 				mcpResolver: sp.GetRequiredService<McpManager>(),
 				dataPath: opts.DataPath,
 				serverUrl: opts.HostBaseUrl,
-				defaultModel: opts.DefaultModel);
+				defaultModel: opts.DefaultModel,
+				globalHooks: opts.Hooks);
 
 			// Apply shutdown timeout from configuration
 			triggerManager.ShutdownTimeout = TimeSpan.FromSeconds(opts.ShutdownTimeoutSeconds);

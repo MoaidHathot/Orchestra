@@ -35,6 +35,21 @@ public class ExecutionResult
 	public string? SelectedModel { get; init; }
 
 	/// <summary>
+	/// SDK-reported metadata for the configured/requested model.
+	/// </summary>
+	public AvailableModelInfo? RequestedModelInfo { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the server-selected model.
+	/// </summary>
+	public AvailableModelInfo? SelectedModelInfo { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the actual model that produced the response.
+	/// </summary>
+	public AvailableModelInfo? ActualModelInfo { get; init; }
+
+	/// <summary>
 	/// Token usage statistics for this step.
 	/// </summary>
 	public TokenUsage? Usage { get; init; }
@@ -84,7 +99,10 @@ public class ExecutionResult
 		TokenUsage? usage = null,
 		StepExecutionTrace? trace = null,
 		List<RetryAttemptRecord>? retryHistory = null,
-		string? selectedModel = null) => new()
+		string? selectedModel = null,
+		AvailableModelInfo? requestedModelInfo = null,
+		AvailableModelInfo? selectedModelInfo = null,
+		AvailableModelInfo? actualModelInfo = null) => new()
 	{
 		Content = content,
 		Status = ExecutionStatus.Succeeded,
@@ -93,6 +111,9 @@ public class ExecutionResult
 		PromptSent = promptSent,
 		ActualModel = actualModel,
 		SelectedModel = selectedModel,
+		RequestedModelInfo = requestedModelInfo,
+		SelectedModelInfo = selectedModelInfo,
+		ActualModelInfo = actualModelInfo,
 		Usage = usage,
 		Trace = trace,
 		RetryHistory = retryHistory,
@@ -106,7 +127,10 @@ public class ExecutionResult
 		StepExecutionTrace? trace = null,
 		StepErrorCategory errorCategory = StepErrorCategory.Unknown,
 		List<RetryAttemptRecord>? retryHistory = null,
-		string? selectedModel = null) => new()
+		string? selectedModel = null,
+		AvailableModelInfo? requestedModelInfo = null,
+		AvailableModelInfo? selectedModelInfo = null,
+		AvailableModelInfo? actualModelInfo = null) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Failed,
@@ -115,6 +139,9 @@ public class ExecutionResult
 		PromptSent = promptSent,
 		ActualModel = actualModel,
 		SelectedModel = selectedModel,
+		RequestedModelInfo = requestedModelInfo,
+		SelectedModelInfo = selectedModelInfo,
+		ActualModelInfo = actualModelInfo,
 		Trace = trace,
 		ErrorCategory = errorCategory,
 		RetryHistory = retryHistory,
@@ -145,7 +172,10 @@ public class ExecutionResult
 		string? actualModel = null,
 		TokenUsage? usage = null,
 		StepExecutionTrace? trace = null,
-		string? selectedModel = null) => new()
+		string? selectedModel = null,
+		AvailableModelInfo? requestedModelInfo = null,
+		AvailableModelInfo? selectedModelInfo = null,
+		AvailableModelInfo? actualModelInfo = null) => new()
 	{
 		Content = reason,
 		Status = ExecutionStatus.NoAction,
@@ -153,6 +183,9 @@ public class ExecutionResult
 		PromptSent = promptSent,
 		ActualModel = actualModel,
 		SelectedModel = selectedModel,
+		RequestedModelInfo = requestedModelInfo,
+		SelectedModelInfo = selectedModelInfo,
+		ActualModelInfo = actualModelInfo,
 		Usage = usage,
 		Trace = trace,
 	};

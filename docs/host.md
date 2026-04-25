@@ -68,6 +68,33 @@ app.Run();
 | `LoadPersistedOrchestrations` | `bool` | `true` | Load saved orchestrations on startup |
 | `LoadPersistedTriggers` | `bool` | `true` | Load saved trigger states on startup |
 | `RegisterJsonTriggers` | `bool` | `true` | Register triggers defined in orchestration JSON |
+| `Hooks` | `HookDefinition[]` | `[]` | Global hooks applied to every orchestration executed by the host |
+
+### Global Hooks
+
+Global hooks let you apply the same lifecycle automation to all orchestrations run by the host. They use the same shape as inline orchestration hooks and are loaded from `orchestra.json`.
+
+```json
+{
+  "hooks": [
+    {
+      "name": "archive-failures",
+      "on": "orchestration.failure",
+      "payload": {
+        "detail": "compact",
+        "steps": "failed",
+        "includeRefs": true
+      },
+      "action": {
+        "type": "script",
+        "scriptFile": "hooks/archive-failure.ps1"
+      }
+    }
+  ]
+}
+```
+
+Relative `scriptFile` and `workingDirectory` paths resolve from the directory containing `orchestra.json`.
 
 ### Environment Variables
 

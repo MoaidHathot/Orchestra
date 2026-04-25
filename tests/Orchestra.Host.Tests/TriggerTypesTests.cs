@@ -387,6 +387,7 @@ public class TriggerTypesTests
 		public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error) { }
 		public void ReportSubagentDeselected(string stepName) { }
 		public void ReportRunContext(RunContext context) { }
+		public void ReportHookExecuted(HookExecutionRecord hookExecution) { }
 		public void ReportAuditLogEntry(string stepName, AuditLogEntry entry) { }
 		public void ReportStepStatusSet(string stepName, string status, string reason) { }
 	}

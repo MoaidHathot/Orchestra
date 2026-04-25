@@ -27,7 +27,7 @@ public static class OrchestrationsApi
 		var group = endpoints.MapGroup("/api/orchestrations");
 
 		// GET /api/orchestrations - List all registered orchestrations
-		group.MapGet("", (OrchestrationRegistry registry, TriggerManager triggerManager, OrchestrationTagStore tagStore, ILoggerFactory loggerFactory) =>
+		group.MapGet("", (OrchestrationRegistry registry, TriggerManager triggerManager, OrchestrationTagStore tagStore, OrchestrationHostOptions hostOptions, ILoggerFactory loggerFactory) =>
 		{
 			var logger = loggerFactory.CreateLogger(typeof(OrchestrationsApi));
 			var result = new List<object>();
@@ -124,9 +124,10 @@ public static class OrchestrationsApi
 						runCount = trigger?.RunCount ?? 0,
 						lastExecutionId = trigger?.LastExecutionId,
 						hasInlineMcps = o.Orchestration.Mcps.Length > 0,
-						mcps = o.Orchestration.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray(),
-						models = o.Orchestration.Steps
-							.OfType<PromptOrchestrationStep>()
+					mcps = o.Orchestration.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray(),
+					hooks = BuildCombinedHookInfo(hostOptions.Hooks, o.Orchestration.Hooks),
+					models = o.Orchestration.Steps
+						.OfType<PromptOrchestrationStep>()
 							.Select(s => s.Model)
 							.Where(m => !string.IsNullOrEmpty(m))
 							.Distinct()
@@ -143,7 +144,7 @@ public static class OrchestrationsApi
 		});
 
 		// GET /api/orchestrations/{id} - Get a specific orchestration
-		group.MapGet("/{id}", async (string id, OrchestrationRegistry registry, IScheduler scheduler, TriggerManager triggerManager, OrchestrationTagStore tagStore) =>
+		group.MapGet("/{id}", async (string id, OrchestrationRegistry registry, IScheduler scheduler, TriggerManager triggerManager, OrchestrationTagStore tagStore, OrchestrationHostOptions hostOptions) =>
 		{
 			var entry = registry.Get(id);
 			if (entry is null)
@@ -281,6 +282,7 @@ public static class OrchestrationsApi
 				variables = o.Variables.Count > 0 ? o.Variables : null,
 				referencedEnvVars = ExtractReferencedEnvVars(o),
 				trigger = FormatTriggerInfoWithWebhook(o.Trigger, triggerRegistration, allParameters),
+				hooks = BuildCombinedHookInfo(hostOptions.Hooks, o.Hooks),
 				mcps = o.Mcps.Select(m => new
 				{
 					name = m.Name,
@@ -645,6 +647,52 @@ public static class OrchestrationsApi
 			},
 			_ => null
 		};
+	}
+
+	private static object FormatHookInfo(HookDefinition hook, HookSource source)
+	{
+		return new
+		{
+			name = hook.Name ?? hook.On.ToString(),
+			eventType = hook.On.ToString(),
+			source = source.ToString(),
+			failurePolicy = hook.FailurePolicy.ToString(),
+			when = hook.When?.Steps is { } steps
+				? new
+				{
+					names = steps.Names.Length > 0 ? steps.Names : null,
+					status = steps.Status.ToString(),
+					match = steps.Match.ToString(),
+				}
+				: null,
+			payload = new
+			{
+				detail = hook.Payload.Detail.ToString(),
+				steps = hook.Payload.Steps?.Selector is { } selector
+					? (object?)selector.ToString()
+					: hook.Payload.Steps?.Names,
+				includeRefs = hook.Payload.IncludeRefs,
+			},
+			action = new
+			{
+				type = hook.Action.Type.ToString(),
+				shell = hook.Action.Shell,
+				scriptFile = hook.Action.ScriptFile,
+				workingDirectory = hook.Action.WorkingDirectory,
+				arguments = hook.Action.Arguments.Length > 0 ? hook.Action.Arguments : null,
+				includeStdErr = hook.Action.IncludeStdErr ? true : (bool?)null,
+				hasInlineScript = !string.IsNullOrWhiteSpace(hook.Action.Script),
+			},
+		};
+	}
+
+	private static object[]? BuildCombinedHookInfo(HookDefinition[] globalHooks, HookDefinition[] orchestrationHooks)
+	{
+		var combined = globalHooks
+			.Select(h => FormatHookInfo(h, HookSource.Global))
+			.Concat(orchestrationHooks.Select(h => FormatHookInfo(h, HookSource.Orchestration)))
+			.ToArray();
+		return combined.Length > 0 ? combined : null;
 	}
 
 	private static readonly Regex EnvExpressionPattern = new(@"\{\{env\.([^}]+)\}\}", RegexOptions.Compiled);

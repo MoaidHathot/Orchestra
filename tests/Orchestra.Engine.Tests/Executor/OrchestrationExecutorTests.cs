@@ -908,6 +908,172 @@ public class OrchestrationExecutorTests
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
 	}
 
+	[Fact]
+	public async Task ExecuteAsync_StepFailureHook_WritesCurrentStepPayload()
+	{
+		var outputPath = Path.Combine(Path.GetTempPath(), $"orchestra-hook-step-{Guid.NewGuid():N}.json");
+		try
+		{
+			var agentBuilder = new MockAgentBuilder().WithException(new Exception("Boom"));
+			var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+			var orchestration = new Orchestration
+			{
+				Name = "single-step-hook",
+				Description = "Single step orchestration",
+				Steps = [TestOrchestrations.CreatePromptStep("step1")],
+				Hooks =
+				[
+					new HookDefinition
+					{
+						On = HookEventType.StepFailure,
+						Payload = new HookPayloadOptions
+						{
+							Detail = HookPayloadDetail.Compact,
+							Steps = new HookStepSelection(HookStepSelector.Current),
+						},
+						Action = new HookAction
+						{
+							Type = HookActionType.Script,
+							Shell = "pwsh",
+							Script = $"$input | Set-Content -Path '{outputPath.Replace("'", "''")}'"
+						}
+					}
+				]
+			};
+
+			await executor.ExecuteAsync(orchestration);
+
+			File.Exists(outputPath).Should().BeTrue();
+			var json = await File.ReadAllTextAsync(outputPath);
+			json.Should().Contain("\"eventType\":\"step.failure\"");
+			json.Should().Contain("\"name\":\"step1\"");
+			json.Should().Contain("\"errorMessage\":\"Boom\"");
+		}
+		finally
+		{
+			if (File.Exists(outputPath))
+				File.Delete(outputPath);
+		}
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_OrchestrationFailureHook_WhenFilterMatchesNamedFailedStep_WritesFailedStepsPayload()
+	{
+		var outputPath = Path.Combine(Path.GetTempPath(), $"orchestra-hook-run-{Guid.NewGuid():N}.json");
+		try
+		{
+			var agentBuilder = new MockAgentBuilder().WithException(new Exception("Boom"));
+			var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+			var orchestration = new Orchestration
+			{
+				Name = "linear-chain-hook",
+				Description = "Linear chain: A -> B -> C",
+				Steps =
+				[
+					TestOrchestrations.CreatePromptStep("A"),
+					TestOrchestrations.CreatePromptStep("B", dependsOn: ["A"]),
+					TestOrchestrations.CreatePromptStep("C", dependsOn: ["B"]),
+				],
+				Hooks =
+				[
+					new HookDefinition
+					{
+						On = HookEventType.OrchestrationFailure,
+						When = new HookWhenFilter
+						{
+							Steps = new HookStepCondition
+							{
+								Names = ["A"],
+								Status = HookStepStatusFilter.Failed,
+								Match = HookStepMatch.Any,
+							}
+						},
+						Payload = new HookPayloadOptions
+						{
+							Detail = HookPayloadDetail.Compact,
+							Steps = new HookStepSelection(HookStepSelector.Failed),
+						},
+						Action = new HookAction
+						{
+							Type = HookActionType.Script,
+							Shell = "pwsh",
+							Script = $"$input | Set-Content -Path '{outputPath.Replace("'", "''")}'"
+						}
+					}
+				]
+			};
+
+			await executor.ExecuteAsync(orchestration);
+
+			File.Exists(outputPath).Should().BeTrue();
+			var json = await File.ReadAllTextAsync(outputPath);
+			json.Should().Contain("\"eventType\":\"orchestration.failure\"");
+			json.Should().Contain("\"name\":\"A\"");
+			json.Should().Contain("\"errorMessage\":\"Boom\"");
+			json.Should().NotContain("\"name\":\"B\"");
+		}
+		finally
+		{
+			if (File.Exists(outputPath))
+				File.Delete(outputPath);
+		}
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_Hooks_ArePersistedInRunRecordAndReported()
+	{
+		var runStore = Substitute.For<IRunStore>();
+		OrchestrationRunRecord? capturedRecord = null;
+		runStore
+			.SaveRunAsync(Arg.Do<OrchestrationRunRecord>(r => capturedRecord = r), Arg.Any<CancellationToken>())
+			.Returns(Task.CompletedTask);
+
+		var outputPath = Path.Combine(Path.GetTempPath(), $"orchestra-hook-persist-{Guid.NewGuid():N}.json");
+		try
+		{
+			var agentBuilder = new MockAgentBuilder().WithException(new Exception("Boom"));
+			var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory, runStore: runStore);
+			var orchestration = new Orchestration
+			{
+				Name = "hook-persisted",
+				Description = "Hook persistence test",
+				Steps = [TestOrchestrations.CreatePromptStep("step1")],
+				Hooks =
+				[
+					new HookDefinition
+					{
+						Name = "persisted-hook",
+						On = HookEventType.StepFailure,
+						Action = new HookAction
+						{
+							Type = HookActionType.Script,
+							Shell = "pwsh",
+							Script = $"$input | Set-Content -Path '{outputPath.Replace("'", "''")}'"
+						}
+					}
+				]
+			};
+
+			await executor.ExecuteAsync(orchestration);
+
+			capturedRecord.Should().NotBeNull();
+			capturedRecord!.HookExecutions.Should().ContainSingle();
+			capturedRecord.HookExecutions[0].HookName.Should().Be("persisted-hook");
+			capturedRecord.HookExecutions[0].EventType.Should().Be(HookEventType.StepFailure);
+			capturedRecord.HookExecutions[0].Source.Should().Be(HookSource.Orchestration);
+			capturedRecord.HookExecutions[0].StepName.Should().Be("step1");
+			_reporter.Received().ReportHookExecuted(Arg.Is<HookExecutionRecord>(h =>
+				h.HookName == "persisted-hook" &&
+				h.EventType == HookEventType.StepFailure &&
+				h.StepName == "step1"));
+		}
+		finally
+		{
+			if (File.Exists(outputPath))
+				File.Delete(outputPath);
+		}
+	}
+
 	#endregion
 
 	#region DefaultSystemPromptMode

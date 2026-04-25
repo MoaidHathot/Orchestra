@@ -228,6 +228,7 @@ public sealed class DataPlaneTools
 			runStore: runStore,
 			engineToolRegistry: engineToolRegistry,
 			mcpResolver: mcpManager,
+			globalHooks: hostOptions.Hooks,
 			dataPath: hostOptions.DataPath,
 			serverUrl: hostOptions.HostBaseUrl);
 

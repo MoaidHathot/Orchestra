@@ -120,6 +120,9 @@ public partial class FileSystemRunStore : IRunStore
 					Content = stepRecord.Content,
 					ActualModel = stepRecord.ActualModel,
 					SelectedModel = stepRecord.SelectedModel,
+					RequestedModelInfo = stepRecord.RequestedModelInfo,
+					SelectedModelInfo = stepRecord.SelectedModelInfo,
+					ActualModelInfo = stepRecord.ActualModelInfo,
 					Usage = stepRecord.Usage
 				};
 				var outputsJson = JsonSerializer.Serialize(outputs, _jsonOptions);
@@ -168,6 +171,7 @@ public partial class FileSystemRunStore : IRunStore
 			CompletionReason = record.CompletionReason,
 			CompletedByStep = record.CompletedByStep,
 			IsIncomplete = record.IsIncomplete,
+			HookExecutionCount = record.HookExecutions.Count,
 		};
 
 		lock (_indexWriteLock)
@@ -423,6 +427,7 @@ public partial class FileSystemRunStore : IRunStore
 						CompletionReason = record.CompletionReason,
 						CompletedByStep = record.CompletedByStep,
 						IsIncomplete = record.IsIncomplete,
+						HookExecutionCount = record.HookExecutions.Count,
 					};
 				}
 				catch (Exception ex)
@@ -675,6 +680,11 @@ public class RunIndex
 	/// or the orchestration was completed early via orchestra_complete.
 	/// </summary>
 	public bool IsIncomplete { get; init; }
+
+	/// <summary>
+	/// Number of hook executions recorded for this run.
+	/// </summary>
+	public int HookExecutionCount { get; init; }
 }
 
 /// <summary>
@@ -696,6 +706,9 @@ public class StepOutputsRecord
 	public required string Content { get; init; }
 	public string? ActualModel { get; init; }
 	public string? SelectedModel { get; init; }
+	public AvailableModelInfo? RequestedModelInfo { get; init; }
+	public AvailableModelInfo? SelectedModelInfo { get; init; }
+	public AvailableModelInfo? ActualModelInfo { get; init; }
 	public TokenUsage? Usage { get; init; }
 }
 

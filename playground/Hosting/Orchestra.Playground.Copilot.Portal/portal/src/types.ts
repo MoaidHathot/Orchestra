@@ -14,10 +14,52 @@ export interface Orchestration {
   referencedEnvVars?: string[];
   trigger?: TriggerConfig;
   mcps?: McpConfig[];
+  hooks?: HookDefinition[];
   models?: string[];
   registeredAt?: string;
   contentHash?: string;
   tags?: string[];
+}
+
+export interface HookDefinition {
+  name: string;
+  eventType: string;
+  source?: string;
+  failurePolicy?: string;
+  when?: {
+    names?: string[] | null;
+    status?: string;
+    match?: string;
+  } | null;
+  payload?: {
+    detail?: string;
+    steps?: string | string[] | null;
+    includeRefs?: boolean;
+  } | null;
+  action?: {
+    type?: string;
+    shell?: string | null;
+    scriptFile?: string | null;
+    workingDirectory?: string | null;
+    arguments?: string[] | null;
+    includeStdErr?: boolean | null;
+    hasInlineScript?: boolean | null;
+  } | null;
+}
+
+export interface HookExecution {
+  hookName: string;
+  eventType: string;
+  source?: string;
+  status: string;
+  startedAt?: string;
+  completedAt?: string;
+  durationSeconds?: number;
+  stepName?: string | null;
+  errorMessage?: string | null;
+  content?: string | null;
+  failurePolicy?: string;
+  actionType?: string;
 }
 
 /**
@@ -140,10 +182,31 @@ export interface StepResultData {
   status?: string;
   errorMessage?: string;
   actualModel?: string;
+  selectedModel?: string;
+  requestedModelInfo?: ModelInfo;
+  selectedModelInfo?: ModelInfo;
+  actualModelInfo?: ModelInfo;
   usage?: UsageData;
   trace?: TraceData;
   errorCategory?: string;
   retryHistory?: RetryAttemptRecord[];
+}
+
+export interface ModelInfo {
+  id: string;
+  name?: string;
+  defaultReasoningEffort?: string;
+  billingMultiplier?: number;
+  reasoningEfforts?: string[];
+  policyState?: string;
+  policyTerms?: string;
+  supportsReasoningEffort?: boolean;
+  supportsVision?: boolean;
+  maxContextWindowTokens?: number;
+  maxPromptTokens?: number;
+  visionSupportedMediaTypes?: string[];
+  maxPromptImages?: number;
+  maxPromptImageSize?: number;
 }
 
 export interface UsageData {
@@ -291,6 +354,7 @@ export interface ExecutionModalState {
   errorMessage: string | null;
   completedByStep: string | null;
   runContext: RunContext | null;
+  hookExecutions: HookExecution[];
 }
 
 export interface RunContext {

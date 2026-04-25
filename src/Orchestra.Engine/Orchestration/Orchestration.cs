@@ -94,4 +94,10 @@ public class Orchestration
 	/// </para>
 	/// </summary>
 	public Dictionary<string, InputDefinition>? Inputs { get; init; }
+
+	/// <summary>
+	/// Optional lifecycle hooks that run for this orchestration.
+	/// Hooks can observe step/orchestration outcomes and execute follow-up actions.
+	/// </summary>
+	public HookDefinition[] Hooks { get; init; } = [];
 }

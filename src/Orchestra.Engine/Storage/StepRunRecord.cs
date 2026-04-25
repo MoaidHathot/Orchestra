@@ -60,6 +60,21 @@ public class StepRunRecord
 	public string? SelectedModel { get; init; }
 
 	/// <summary>
+	/// SDK-reported metadata for the configured/requested model.
+	/// </summary>
+	public AvailableModelInfo? RequestedModelInfo { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the server-selected model.
+	/// </summary>
+	public AvailableModelInfo? SelectedModelInfo { get; init; }
+
+	/// <summary>
+	/// SDK-reported metadata for the actual model that produced the response.
+	/// </summary>
+	public AvailableModelInfo? ActualModelInfo { get; init; }
+
+	/// <summary>
 	/// Token usage statistics for this step (input tokens, output tokens, total).
 	/// </summary>
 	public TokenUsage? Usage { get; init; }

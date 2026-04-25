@@ -44,6 +44,9 @@ public class NullOrchestrationReporter : IOrchestrationReporter
 	// Run context
 	public void ReportRunContext(RunContext context) { }
 
+	// Hook lifecycle
+	public void ReportHookExecuted(HookExecutionRecord hookExecution) { }
+
 	// Audit log
 	public void ReportAuditLogEntry(string stepName, AuditLogEntry entry) { }
 }

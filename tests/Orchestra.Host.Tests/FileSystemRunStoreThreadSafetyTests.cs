@@ -49,6 +49,7 @@ public class FileSystemRunStoreThreadSafetyTests : IDisposable
 			TriggeredBy = triggeredBy,
 			TriggerId = triggerId,
 			FinalContent = $"Result for {id}",
+			HookExecutions = [],
 			StepRecords = new Dictionary<string, StepRunRecord>
 			{
 				["step-1"] = new StepRunRecord

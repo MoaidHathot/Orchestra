@@ -56,5 +56,11 @@ export function formatLogContent(log: LogEvent): string {
   if (log.type === 'mcp-server-status-changed') {
     return `MCP '${log.serverName || 'unknown'}' -> ${log.status || 'unknown'}`;
   }
+  if (log.type === 'hook-executed') {
+    const name = String(log.hookName || 'hook');
+    const status = String(log.status || 'unknown').toLowerCase();
+    const step = log.stepName ? ` for ${String(log.stepName)}` : '';
+    return `Hook ${name}${step}: ${status}`;
+  }
   return JSON.stringify(log).substring(0, 200);
 }

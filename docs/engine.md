@@ -60,6 +60,68 @@ When `Inputs` is defined on an orchestration, parameters are validated against t
 
 When `Inputs` is not defined, the engine falls back to legacy behavior: parameter names are collected from step-level `Parameters` arrays and all are treated as required strings.
 
+### Hooks
+
+Orchestrations can define lifecycle hooks that run after step or orchestration outcomes. Hooks are a lightweight extensibility point for notifications, archival, incident triage, and similar follow-up automation.
+
+```csharp
+public class HookDefinition
+{
+    public string? Name { get; set; }
+    public HookEventType On { get; set; }
+    public HookWhenFilter? When { get; set; }
+    public HookPayloadOptions Payload { get; set; } = new();
+    public required HookAction Action { get; set; }
+    public HookFailurePolicy FailurePolicy { get; set; } = HookFailurePolicy.Warn;
+}
+```
+
+Supported events:
+
+- `step.success`
+- `step.failure`
+- `step.after`
+- `orchestration.success`
+- `orchestration.failure`
+- `orchestration.after`
+
+Filtering is intentionally small in v1:
+
+```yaml
+when:
+  steps:
+    names: [build, deploy]
+    status: failed
+    match: any
+```
+
+Payload shaping is also preset-based rather than field-by-field:
+
+- `detail`: `compact`, `standard`, `full`
+- `steps`: `none`, `current`, `failed`, `nonSucceeded`, `terminal`, `all`, or explicit step names
+- `includeRefs`: include API and MCP references for fetching more run data
+
+In v1, hooks support `script` actions. The hook payload is serialized as JSON and sent to the script on stdin.
+
+```yaml
+hooks:
+  - name: archive-run-failure
+    on: orchestration.failure
+    payload:
+      detail: compact
+      steps: failed
+      includeRefs: true
+    action:
+      type: script
+      shell: pwsh
+      scriptFile: ./hooks/archive-failure.ps1
+```
+
+Hooks are different from Prompt step handlers:
+
+- `inputHandlerPrompt` and `outputHandlerPrompt` transform Prompt step input/output
+- hooks run after lifecycle events and do not alter orchestration execution
+
 ### Steps
 
 Steps are the building blocks of orchestrations. Each step has a type that determines its executor: `PromptOrchestrationStep` for LLM calls, `CommandOrchestrationStep` for shell commands, `ScriptOrchestrationStep` for inline/file scripts, `HttpOrchestrationStep` for REST requests, and `TransformOrchestrationStep` for string interpolation.

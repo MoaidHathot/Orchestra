@@ -91,6 +91,14 @@
       "additionalProperties": {
         "$ref": "#/$defs/inputDefinition"
       }
+    },
+    "hooks": {
+      "type": "array",
+      "description": "Optional lifecycle hooks that run after step or orchestration outcomes. Hooks receive structured JSON payloads through stdin and can execute follow-up scripts.",
+      "items": {
+        "$ref": "#/$defs/hook"
+      },
+      "default": []
     }
   },
   "$defs": {
@@ -736,6 +744,181 @@
           "minimum": 1
         }
       },
+      "additionalProperties": false
+    },
+
+    "hook": {
+      "type": "object",
+      "description": "Lifecycle hook definition. Hooks run in response to step or orchestration completion events and receive a structured JSON payload via stdin.",
+      "required": ["on", "action"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Optional name for diagnostics and logs."
+        },
+        "on": {
+          "type": "string",
+          "description": "Hook event to subscribe to.",
+          "enum": [
+            "orchestration.success",
+            "orchestration.failure",
+            "orchestration.after",
+            "step.success",
+            "step.failure",
+            "step.after"
+          ]
+        },
+        "when": {
+          "$ref": "#/$defs/hookWhen",
+          "description": "Optional filter that decides whether the hook should run."
+        },
+        "payload": {
+          "$ref": "#/$defs/hookPayload",
+          "description": "Controls how much step data is included in the hook payload."
+        },
+        "action": {
+          "$ref": "#/$defs/hookAction",
+          "description": "Action to execute when the hook fires."
+        },
+        "failurePolicy": {
+          "type": "string",
+          "description": "What to do if the hook action fails.",
+          "enum": ["ignore", "warn"],
+          "default": "warn"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "hookWhen": {
+      "type": "object",
+      "properties": {
+        "steps": {
+          "$ref": "#/$defs/hookStepCondition",
+          "description": "Filter the hook based on the status of one or more named steps."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "hookStepCondition": {
+      "type": "object",
+      "properties": {
+        "names": {
+          "type": "array",
+          "description": "Optional list of step names to evaluate.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "status": {
+          "type": "string",
+          "description": "Status condition to test for the named steps.",
+          "enum": ["any", "succeeded", "failed", "cancelled", "skipped", "noAction", "nonSucceeded"],
+          "default": "any"
+        },
+        "match": {
+          "type": "string",
+          "description": "Whether any or all named steps must satisfy the status condition.",
+          "enum": ["any", "all"],
+          "default": "any"
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "hookPayload": {
+      "type": "object",
+      "properties": {
+        "detail": {
+          "type": "string",
+          "description": "Preset payload detail level for included step records.",
+          "enum": ["compact", "standard", "full"],
+          "default": "compact"
+        },
+        "steps": {
+          "description": "Step records to include in the hook payload: a selector string or an explicit list of step names.",
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": ["none", "current", "failed", "nonSucceeded", "terminal", "all"]
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "includeRefs": {
+          "type": "boolean",
+          "description": "When true, includes API and MCP references for fetching more run data.",
+          "default": false
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "hookAction": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Hook action type.",
+          "enum": ["script"]
+        },
+        "shell": {
+          "type": "string",
+          "description": "Shell/interpreter to use when executing the hook script.",
+          "default": "pwsh"
+        },
+        "script": {
+          "type": "string",
+          "description": "Inline script content. Mutually exclusive with scriptFile. The hook payload is provided through stdin."
+        },
+        "scriptFile": {
+          "type": "string",
+          "description": "Path to a script file. Mutually exclusive with script. Relative paths resolve from the orchestration file directory."
+        },
+        "arguments": {
+          "type": "array",
+          "description": "Optional arguments passed to the script.",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "Optional working directory for the hook process. Relative paths resolve from the orchestration file directory."
+        },
+        "environment": {
+          "type": "object",
+          "description": "Optional environment variables for the hook process.",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
+        },
+        "includeStdErr": {
+          "type": "boolean",
+          "description": "When true, stderr is included in the script output if it succeeds.",
+          "default": false
+        }
+      },
+      "oneOf": [
+        {
+          "required": ["script"],
+          "not": { "required": ["scriptFile"] }
+        },
+        {
+          "required": ["scriptFile"],
+          "not": { "required": ["script"] }
+        }
+      ],
       "additionalProperties": false
     },
 

@@ -44,6 +44,8 @@ public static class OrchestrationParser
 				new OrchestrationStepConverter(parserRegistry, context),
 				new McpConverter(),
 				new TriggerConfigConverter(),
+				new HookEventTypeJsonConverter(),
+				new HookStepSelectionJsonConverter(),
 				new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
 			},
 		};
@@ -58,6 +60,7 @@ public static class OrchestrationParser
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory: null);
 		ResolveStepMcps(orchestration, availableMcps);
 		return orchestration;
 	}
@@ -75,6 +78,7 @@ public static class OrchestrationParser
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory: null);
 		ResolveStepMcps(orchestration, availableMcps);
 		return orchestration;
 	}
@@ -91,6 +95,7 @@ public static class OrchestrationParser
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, Path.GetDirectoryName(Path.GetFullPath(path)));
 		ResolveStepMcps(orchestration, availableMcps);
 		return orchestration;
 	}
@@ -110,6 +115,7 @@ public static class OrchestrationParser
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, Path.GetDirectoryName(Path.GetFullPath(path)));
 		ResolveStepMcps(orchestration, availableMcps);
 		return orchestration;
 	}
@@ -123,8 +129,11 @@ public static class OrchestrationParser
 		var context = new StepParseContext(BaseDirectory: null, MetadataOnly: true);
 		var options = CreateOptions(s_defaultParserRegistry, context);
 
-		return JsonSerializer.Deserialize<Orchestration>(json, options)
+		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory: null);
+		return orchestration;
 	}
 
 	/// <summary>
@@ -136,8 +145,11 @@ public static class OrchestrationParser
 		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)), MetadataOnly: true);
 		var options = CreateOptions(s_defaultParserRegistry, context);
 
-		return JsonSerializer.Deserialize<Orchestration>(json, options)
+		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, Path.GetDirectoryName(Path.GetFullPath(path)));
+		return orchestration;
 	}
 
 	public static Mcp[] ParseMcps(string json)

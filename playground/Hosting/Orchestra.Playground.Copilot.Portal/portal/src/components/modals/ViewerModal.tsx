@@ -456,6 +456,46 @@ function ViewerModal({ open, orchestration, onClose, onRun, onTagsChanged }: Pro
                     </div>
                   )}
 
+                  {/* Hooks */}
+                  {displayOrch.hooks && displayOrch.hooks.length > 0 && (
+                    <div className="form-group">
+                      <label className="form-label">Hooks ({displayOrch.hooks.length})</label>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        {displayOrch.hooks.map((hook, i) => (
+                          <div key={`${hook.name}-${i}`} style={{
+                            padding: '10px 12px',
+                            background: 'var(--surface)',
+                            borderRadius: '6px',
+                            borderLeft: `3px solid ${hook.source === 'Global' ? '#d29922' : '#58a6ff'}`,
+                          }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                              <div>
+                                <span style={{ color: '#79c0ff', fontWeight: 600 }}>{hook.name}</span>
+                                <span className="text-muted" style={{ marginLeft: '8px', fontSize: '12px' }}>{hook.eventType}</span>
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                {hook.source && <span className="text-muted" style={{ fontSize: '12px' }}>{hook.source}</span>}
+                                {hook.action?.type && <span className="text-muted" style={{ fontSize: '12px' }}>{hook.action.type}</span>}
+                              </div>
+                            </div>
+                            <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--text-muted)', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+                              {hook.action?.shell && <span>shell: {hook.action.shell}</span>}
+                              {hook.failurePolicy && <span>failure: {hook.failurePolicy}</span>}
+                              {hook.payload?.detail && <span>detail: {hook.payload.detail}</span>}
+                            </div>
+                            {(hook.action?.scriptFile || hook.when?.names?.length || hook.when?.status) && (
+                              <div style={{ marginTop: '6px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                                {hook.action?.scriptFile && <div style={{ wordBreak: 'break-all' }}>script: {hook.action.scriptFile}</div>}
+                                {hook.when?.names && hook.when.names.length > 0 && <div>steps: {hook.when.names.join(', ')}</div>}
+                                {hook.when?.status && <div>step status: {hook.when.status}</div>}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Webhook Trigger Details */}
                   {trigger?.type === 'webhook' && (
                     <div className="form-group">

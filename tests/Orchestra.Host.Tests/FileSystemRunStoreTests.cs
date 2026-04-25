@@ -49,9 +49,52 @@ public class FileSystemRunStoreTests : IDisposable
 			CompletedAt = now,
 			Status = status,
 			FinalContent = "Test result content",
+			HookExecutions = [],
 			StepRecords = new Dictionary<string, StepRunRecord>(),
 			AllStepRecords = new Dictionary<string, StepRunRecord>()
 		};
+	}
+
+	[Fact]
+	public async Task SaveRunAsync_PersistsHookExecutions()
+	{
+		var record = CreateTestRecord(runId: "hook-record");
+		record = new OrchestrationRunRecord
+		{
+			RunId = record.RunId,
+			OrchestrationName = record.OrchestrationName,
+			OrchestrationVersion = record.OrchestrationVersion,
+			TriggeredBy = record.TriggeredBy,
+			TriggerId = record.TriggerId,
+			StartedAt = record.StartedAt,
+			CompletedAt = record.CompletedAt,
+			Status = record.Status,
+			FinalContent = record.FinalContent,
+			StepRecords = record.StepRecords,
+			AllStepRecords = record.AllStepRecords,
+			HookExecutions =
+			[
+				new HookExecutionRecord
+				{
+					HookName = "notify",
+					EventType = HookEventType.OrchestrationAfter,
+					Source = HookSource.Global,
+					Status = ExecutionStatus.Succeeded,
+					StartedAt = record.StartedAt,
+					CompletedAt = record.CompletedAt,
+					FailurePolicy = HookFailurePolicy.Warn,
+					ActionType = HookActionType.Script,
+				}
+			]
+		};
+
+		await _store.SaveRunAsync(record, cancellationToken: default);
+
+		var loaded = await _store.GetRunAsync(record.OrchestrationName, record.RunId, default);
+		loaded.Should().NotBeNull();
+		loaded!.HookExecutions.Should().ContainSingle();
+		loaded.HookExecutions[0].HookName.Should().Be("notify");
+		loaded.HookExecutions[0].Source.Should().Be(HookSource.Global);
 	}
 
 	[Fact]

@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Orchestra.Engine;
 using Orchestra.ProcessHost;
 
 namespace Orchestra.Host.Hosting;
@@ -38,6 +39,8 @@ public static class OrchestraConfigLoader
 		WriteIndented = true,
 		Converters =
 		{
+			new HookEventTypeJsonConverter(),
+			new HookStepSelectionJsonConverter(),
 			new JsonStringEnumConverter(JsonNamingPolicy.CamelCase),
 			new ServiceEntryJsonConverter(),
 		}
@@ -289,6 +292,12 @@ public static class OrchestraConfigLoader
 
 		if (config.DefaultModel is not null)
 			options.DefaultModel = config.DefaultModel;
+
+		if (config.Hooks is { Length: > 0 })
+		{
+			HookDefinitionResolver.ApplyBaseDirectory(config.Hooks, configDirectory);
+			options.Hooks = config.Hooks;
+		}
 	}
 
 	/// <summary>
@@ -380,6 +389,11 @@ public class OrchestraConfigFile
 	/// MCP server endpoint configuration.
 	/// </summary>
 	public McpServerConfig? McpServer { get; set; }
+
+	/// <summary>
+	/// Global hooks applied to all orchestrations executed by the host.
+	/// </summary>
+	public HookDefinition[]? Hooks { get; set; }
 }
 
 /// <summary>

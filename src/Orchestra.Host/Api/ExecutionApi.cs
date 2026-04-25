@@ -143,7 +143,7 @@ public static partial class ExecutionApi
 				entry.Orchestration.Name,
 				"manual");
 
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl);
+			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl);
 			var cancellationToken = cts.Token;
 			var runId = executionId;
 			var runStartedAt = DateTimeOffset.UtcNow;
@@ -479,7 +479,8 @@ public static partial class ExecutionApi
 			TriggeredBy = "manual",
 			StepRecords = stepRecords,
 			AllStepRecords = allStepRecords,
-			FinalContent = summary.ToString()
+			FinalContent = summary.ToString(),
+			HookExecutions = [],
 		};
 
 		try
@@ -577,7 +578,8 @@ public static partial class ExecutionApi
 			TriggeredBy = "manual",
 			StepRecords = stepRecords,
 			AllStepRecords = allStepRecords,
-			FinalContent = summary.ToString()
+			FinalContent = summary.ToString(),
+			HookExecutions = [],
 		};
 
 		try

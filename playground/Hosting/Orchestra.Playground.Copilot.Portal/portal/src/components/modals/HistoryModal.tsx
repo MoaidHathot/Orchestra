@@ -19,6 +19,7 @@ interface HistoryExecution {
   startedAt?: string;
   durationSeconds?: number;
   parameters?: Record<string, unknown>;
+  hookExecutionCount?: number;
 }
 
 interface PaginatedHistoryResponse {
@@ -350,6 +351,9 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
                       )}
                     </div>
                     <div className="history-time">{formatTime(exec.startedAt)}</div>
+                    {(exec.hookExecutionCount ?? 0) > 0 && (
+                      <div className="history-time">{exec.hookExecutionCount} hooks</div>
+                    )}
                   </div>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                     {exec.isActive ? 'In progress' : `${exec.durationSeconds}s`}

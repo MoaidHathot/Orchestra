@@ -177,7 +177,8 @@ public partial class CopilotAgent : IAgent
 			}
 
 			// Handle model mismatch detection and reporting
-			var availableModels = await CheckModelMismatchAsync(handler.ActualModel, cancellationToken).ConfigureAwait(false);
+			var availableModels = await GetAvailableModelsAsync(cancellationToken).ConfigureAwait(false);
+			ReportModelMismatchIfNeeded(handler.ActualModel, availableModels);
 
 			return new AgentResult
 			{
@@ -186,6 +187,9 @@ public partial class CopilotAgent : IAgent
 				ActualModel = handler.ActualModel,
 				Usage = handler.Usage,
 				AvailableModels = availableModels,
+				RequestedModelInfo = FindModelInfo(availableModels, _model),
+				SelectedModelInfo = FindModelInfo(availableModels, handler.SelectedModel),
+				ActualModelInfo = FindModelInfo(availableModels, handler.ActualModel),
 			};
 		}
 		catch (OperationCanceledException)
@@ -455,13 +459,8 @@ public partial class CopilotAgent : IAgent
 		}
 	}
 
-	private async Task<IReadOnlyList<AvailableModelInfo>?> CheckModelMismatchAsync(
-		string? actualModel,
-		CancellationToken cancellationToken)
+	private async Task<IReadOnlyList<AvailableModelInfo>?> GetAvailableModelsAsync(CancellationToken cancellationToken)
 	{
-		if (actualModel is null || string.Equals(actualModel, _model, StringComparison.OrdinalIgnoreCase))
-			return null;
-
 		// Use cached models if available to avoid repeated network calls
 		// across parallel steps in the same orchestration run.
 		var availableModels = _cachedAvailableModels;
@@ -473,16 +472,7 @@ public partial class CopilotAgent : IAgent
 				var models = await _client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
 				availableModels = models
 					.OrderBy(m => m.Id)
-					.Select(m => new AvailableModelInfo
-					{
-						Id = m.Id,
-						Name = m.Name,
-						BillingMultiplier = m.Billing?.Multiplier,
-						ReasoningEfforts = m.SupportedReasoningEfforts is { Count: > 0 }
-							? [.. m.SupportedReasoningEfforts]
-							: null,
-						SupportsVision = m.Capabilities?.Supports?.Vision,
-					})
+					.Select(MapAvailableModelInfo)
 					.ToList();
 
 				// Cache for other agents in this run
@@ -494,6 +484,14 @@ public partial class CopilotAgent : IAgent
 				LogListModelsFailed(ex);
 			}
 		}
+
+		return availableModels;
+	}
+
+	private void ReportModelMismatchIfNeeded(string? actualModel, IReadOnlyList<AvailableModelInfo>? availableModels)
+	{
+		if (actualModel is null || string.Equals(actualModel, _model, StringComparison.OrdinalIgnoreCase))
+			return;
 
 		_reporter.ReportModelMismatch(new ModelMismatchInfo
 		{
@@ -509,9 +507,35 @@ public partial class CopilotAgent : IAgent
 				: null,
 			AvailableModels = availableModels,
 		});
-
-		return availableModels;
 	}
+
+	private static AvailableModelInfo? FindModelInfo(IReadOnlyList<AvailableModelInfo>? availableModels, string? modelId)
+		=> modelId is null
+			? null
+			: availableModels?.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
+
+	private static AvailableModelInfo MapAvailableModelInfo(ModelInfo model)
+		=> new()
+		{
+			Id = model.Id,
+			Name = model.Name,
+			DefaultReasoningEffort = model.DefaultReasoningEffort,
+			BillingMultiplier = model.Billing?.Multiplier,
+			ReasoningEfforts = model.SupportedReasoningEfforts is { Count: > 0 }
+				? [.. model.SupportedReasoningEfforts]
+				: null,
+			PolicyState = model.Policy?.State,
+			PolicyTerms = model.Policy?.Terms,
+			SupportsReasoningEffort = model.Capabilities?.Supports?.ReasoningEffort,
+			SupportsVision = model.Capabilities?.Supports?.Vision,
+			MaxContextWindowTokens = model.Capabilities?.Limits?.MaxContextWindowTokens,
+			MaxPromptTokens = model.Capabilities?.Limits?.MaxPromptTokens,
+			VisionSupportedMediaTypes = model.Capabilities?.Limits?.Vision?.SupportedMediaTypes is { Count: > 0 }
+				? [.. model.Capabilities.Limits.Vision.SupportedMediaTypes]
+				: null,
+			MaxPromptImages = model.Capabilities?.Limits?.Vision?.MaxPromptImages,
+			MaxPromptImageSize = model.Capabilities?.Limits?.Vision?.MaxPromptImageSize,
+		};
 
 	private Dictionary<string, object> BuildMcpServers() => BuildMcpServerDictionary(_mcps);
 
