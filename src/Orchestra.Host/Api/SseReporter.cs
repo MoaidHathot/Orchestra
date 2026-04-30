@@ -266,6 +266,9 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			cacheWriteTokens = usage.CacheWriteTokens,
 			cost = usage.Cost,
 			duration = usage.Duration,
+			reasoningTokens = usage.ReasoningTokens,
+			totalNanoAiu = usage.TotalNanoAiu,
+			timeToFirstTokenMs = usage.TimeToFirstTokenMs,
 		});
 	}
 
@@ -515,12 +518,54 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			additionalContext = entry.AdditionalContext,
 			sessionSource = entry.SessionSource,
 			sessionEndReason = entry.SessionEndReason,
+			autoModeRequestId = entry.AutoModeRequestId,
+			autoModeErrorCode = entry.AutoModeErrorCode,
+			autoModeResponse = entry.AutoModeResponse,
+			notificationKind = entry.NotificationKind,
+			notificationMessage = entry.NotificationMessage,
 		});
 	}
 
 	public void ReportStepStatusSet(string stepName, string status, string reason)
 	{
 		Write("step-status-set", new { stepName, status, reason });
+	}
+
+	// ── Auto-mode + system notifications + quota (SDK 0.3.0 telemetry) ──
+
+	public void ReportAutoModeSwitchRequested(string stepName, string requestId, string? errorCode)
+	{
+		Write("auto-mode-switch-requested", new { stepName, requestId, errorCode });
+	}
+
+	public void ReportAutoModeSwitchCompleted(string stepName, string requestId, string? response)
+	{
+		Write("auto-mode-switch-completed", new { stepName, requestId, response });
+	}
+
+	public void ReportSystemNotification(string stepName, string kind, string? message)
+	{
+		Write("system-notification", new { stepName, kind, message });
+	}
+
+	public void ReportQuotaSnapshot(string stepName, IReadOnlyDictionary<string, AgentQuotaSnapshot> snapshots)
+	{
+		Write("quota-snapshot", new
+		{
+			stepName,
+			snapshots = snapshots.Select(kv => new
+			{
+				name = kv.Key,
+				entitlementRequests = kv.Value.EntitlementRequests,
+				usedRequests = kv.Value.UsedRequests,
+				remainingPercentage = kv.Value.RemainingPercentage,
+				overage = kv.Value.Overage,
+				isUnlimitedEntitlement = kv.Value.IsUnlimitedEntitlement,
+				usageAllowedWithExhaustedQuota = kv.Value.UsageAllowedWithExhaustedQuota,
+				overageAllowedWithExhaustedQuota = kv.Value.OverageAllowedWithExhaustedQuota,
+				resetDate = kv.Value.ResetDate?.ToString("o"),
+			}).ToArray(),
+		});
 	}
 
 	public void ReportRunContext(RunContext context)

@@ -49,4 +49,27 @@ public class AgentUsage
 	public double? CacheWriteTokens { get; init; }
 	public double? Cost { get; init; }
 	public double? Duration { get; init; }
+
+	/// <summary>
+	/// Reasoning tokens spent for chain-of-thought / extended thinking models. SDK 0.3.0.
+	/// </summary>
+	public double? ReasoningTokens { get; init; }
+
+	/// <summary>
+	/// Total nano-AIU (Anthropic / OpenAI billable units) consumed; SDK 0.3.0 surfaces this
+	/// alongside cost so the Portal can show actual platform billing units.
+	/// </summary>
+	public double? TotalNanoAiu { get; init; }
+
+	/// <summary>
+	/// Time-to-first-token in milliseconds (latency of the first response chunk). SDK 0.3.0.
+	/// </summary>
+	public double? TimeToFirstTokenMs { get; init; }
+
+	/// <summary>
+	/// Per-account / per-model quota snapshots reported by the SDK with usage events.
+	/// Lets the Portal show entitlement vs used vs overage for each plan slot.
+	/// Keyed by quota name (e.g. "premium-requests", "claude-sonnet-4.5").
+	/// </summary>
+	public IReadOnlyDictionary<string, AgentQuotaSnapshot>? QuotaSnapshots { get; init; }
 }

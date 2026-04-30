@@ -141,6 +141,18 @@ internal sealed partial class CopilotSessionHandler
 				HandleSubagentDeselected();
 				break;
 
+			case AutoModeSwitchRequestedEvent autoModeReq:
+				HandleAutoModeSwitchRequested(autoModeReq);
+				break;
+
+			case AutoModeSwitchCompletedEvent autoModeDone:
+				HandleAutoModeSwitchCompleted(autoModeDone);
+				break;
+
+			case SystemNotificationEvent notification:
+				HandleSystemNotification(notification);
+				break;
+
 			case SessionWarningEvent warning:
 				HandleWarning(warning);
 				break;
@@ -231,7 +243,6 @@ internal sealed partial class CopilotSessionHandler
 		case SessionWorkspaceFileChangedEvent:
 		case SkillInvokedEvent:
 		case SystemMessageEvent:
-		case SystemNotificationEvent:
 		case ToolExecutionPartialResultEvent:
 		case ToolExecutionProgressEvent:
 		case ToolUserRequestedEvent:
@@ -307,6 +318,25 @@ internal sealed partial class CopilotSessionHandler
 		LogParentToolCallIdNotFound(parentToolCallId);
 		return CurrentActor();
 	}
+
+	// ── Obsolete-API isolation helpers ──
+	//
+	// SDK 0.3.0 marked the four ParentToolCallId properties below as `[Obsolete]` with the
+	// generic message "This member is deprecated and will be removed in a future version."
+	// but does NOT yet ship a replacement (no ActorContext / lineage struct, no Subagent*
+	// event surfaces a parentToolCallId in lieu of these). Until the SDK provides one, we
+	// continue to read the property — it is the only signal that lets us pin a streaming
+	// event to a specific sub-agent invocation when the active stack is ambiguous.
+	//
+	// The reads are isolated in these helpers so a future migration touches one place per
+	// data shape rather than every emission site.
+
+#pragma warning disable CS0618 // Type or member is obsolete
+	private static string? ReadParentToolCallId(AssistantMessageDeltaData data) => data.ParentToolCallId;
+	private static string? ReadParentToolCallId(AssistantMessageData data) => data.ParentToolCallId;
+	private static string? ReadParentToolCallId(ToolExecutionStartData data) => data.ParentToolCallId;
+	private static string? ReadParentToolCallId(ToolExecutionCompleteData data) => data.ParentToolCallId;
+#pragma warning restore CS0618
 
 	private ActorContext CreateActorContext(SubagentFrame frame, int depth) => new(
 		AgentName: frame.AgentName,
@@ -407,6 +437,12 @@ internal sealed partial class CopilotSessionHandler
 			TurnId = evt.TurnId,
 			TokenLimit = evt.TokenLimit,
 			CurrentTokens = evt.CurrentTokens,
+			AutoModeRequestId = evt.AutoModeRequestId,
+			AutoModeErrorCode = evt.AutoModeErrorCode,
+			AutoModeResponse = evt.AutoModeResponse,
+			NotificationKind = evt.NotificationKind,
+			NotificationMessage = evt.NotificationMessage,
+			QuotaSnapshots = evt.QuotaSnapshots,
 			ActorAgentName = ctx.AgentName,
 			ActorAgentDisplayName = ctx.AgentDisplayName,
 			ActorToolCallId = ctx.ToolCallId,
@@ -429,6 +465,30 @@ internal sealed partial class CopilotSessionHandler
 	private void HandleUsage(AssistantUsageEvent usageEvt)
 	{
 		_actualModel = usageEvt.Data.Model;
+
+		// SDK 0.3.0 surfaces per-bucket quota snapshots alongside usage. Capture them so the
+		// Portal can render entitlement vs used vs overage in real time. The dictionary is
+		// keyed by quota name (e.g. "premium-requests", "claude-sonnet-4.5").
+		IReadOnlyDictionary<string, AgentQuotaSnapshot>? quotaSnapshots = null;
+		if (usageEvt.Data.QuotaSnapshots is { Count: > 0 } sdkQuotas)
+		{
+			var captured = new Dictionary<string, AgentQuotaSnapshot>(sdkQuotas.Count, StringComparer.Ordinal);
+			foreach (var (name, snap) in sdkQuotas)
+			{
+				if (snap is null) continue;
+				captured[name] = new AgentQuotaSnapshot(
+					EntitlementRequests: snap.EntitlementRequests,
+					UsedRequests: snap.UsedRequests,
+					RemainingPercentage: snap.RemainingPercentage,
+					Overage: snap.Overage,
+					IsUnlimitedEntitlement: snap.IsUnlimitedEntitlement,
+					UsageAllowedWithExhaustedQuota: snap.UsageAllowedWithExhaustedQuota,
+					OverageAllowedWithExhaustedQuota: snap.OverageAllowedWithExhaustedQuota,
+					ResetDate: snap.ResetDate);
+			}
+			quotaSnapshots = captured;
+		}
+
 		_usage = new AgentUsage
 		{
 			InputTokens = usageEvt.Data.InputTokens,
@@ -437,6 +497,10 @@ internal sealed partial class CopilotSessionHandler
 			CacheWriteTokens = usageEvt.Data.CacheWriteTokens,
 			Cost = usageEvt.Data.Cost,
 			Duration = usageEvt.Data.Duration,
+			ReasoningTokens = usageEvt.Data.ReasoningTokens,
+			TotalNanoAiu = usageEvt.Data.CopilotUsage?.TotalNanoAiu,
+			TimeToFirstTokenMs = usageEvt.Data.TtftMs,
+			QuotaSnapshots = quotaSnapshots,
 		};
 		EmitEvent(new AgentEvent
 		{
@@ -444,6 +508,16 @@ internal sealed partial class CopilotSessionHandler
 			Model = _actualModel,
 			Usage = _usage,
 		});
+
+		// Emit a separate QuotaSnapshot event so the Portal can react without parsing usage.
+		if (quotaSnapshots is not null)
+		{
+			EmitEvent(new AgentEvent
+			{
+				Type = AgentEventType.QuotaSnapshot,
+				QuotaSnapshots = quotaSnapshots,
+			});
+		}
 	}
 
 	private void HandleMessageDelta(AssistantMessageDeltaEvent delta)
@@ -453,7 +527,7 @@ internal sealed partial class CopilotSessionHandler
 		{
 			Type = AgentEventType.MessageDelta,
 			Content = delta.Data.DeltaContent,
-		}, ResolveActor(delta.Data.ParentToolCallId));
+		}, ResolveActor(ReadParentToolCallId(delta.Data)));
 	}
 
 	private void HandleReasoningDelta(AssistantReasoningDeltaEvent reasoningDelta)
@@ -474,7 +548,7 @@ internal sealed partial class CopilotSessionHandler
 		{
 			Type = AgentEventType.Message,
 			Content = msg.Data.Content,
-		}, ResolveActor(msg.Data.ParentToolCallId));
+		}, ResolveActor(ReadParentToolCallId(msg.Data)));
 	}
 
 	private void HandleReasoning(AssistantReasoningEvent reasoning)
@@ -507,7 +581,7 @@ internal sealed partial class CopilotSessionHandler
 			ToolName = toolName,
 			ToolArguments = serializedArgs,
 			McpServerName = toolStart.Data.McpServerName,
-		}, ResolveActor(toolStart.Data.ParentToolCallId));
+		}, ResolveActor(ReadParentToolCallId(toolStart.Data)));
 	}
 
 	private void HandleToolExecutionComplete(ToolExecutionCompleteEvent toolComplete)
@@ -527,7 +601,7 @@ internal sealed partial class CopilotSessionHandler
 			ToolSuccess = toolComplete.Data.Success,
 			ToolResult = toolComplete.Data.Result?.Content ?? toolComplete.Data.Result?.DetailedContent,
 			ToolError = toolComplete.Data.Error?.Message,
-		}, ResolveActor(toolComplete.Data.ParentToolCallId));
+		}, ResolveActor(ReadParentToolCallId(toolComplete.Data)));
 	}
 
 	private void HandleSubagentSelected(SubagentSelectedEvent subagentSelected)
@@ -715,6 +789,39 @@ internal sealed partial class CopilotSessionHandler
 			Type = AgentEventType.SessionUsageInfo,
 			TokenLimit = usageInfo.Data.TokenLimit,
 			CurrentTokens = usageInfo.Data.CurrentTokens,
+		});
+	}
+
+	private void HandleAutoModeSwitchRequested(AutoModeSwitchRequestedEvent evt)
+	{
+		EmitEvent(new AgentEvent
+		{
+			Type = AgentEventType.AutoModeSwitchRequested,
+			AutoModeRequestId = evt.Data.RequestId,
+			AutoModeErrorCode = evt.Data.ErrorCode,
+		});
+	}
+
+	private void HandleAutoModeSwitchCompleted(AutoModeSwitchCompletedEvent evt)
+	{
+		EmitEvent(new AgentEvent
+		{
+			Type = AgentEventType.AutoModeSwitchCompleted,
+			AutoModeRequestId = evt.Data.RequestId,
+			AutoModeResponse = evt.Data.Response,
+		});
+	}
+
+	private void HandleSystemNotification(SystemNotificationEvent evt)
+	{
+		// SDK 0.3.0: SystemNotificationData.Kind is a typed discriminator; .Type carries
+		// the kind name (e.g. "agent_completed", "shell_completed", "new_inbox_message").
+		// Surfacing both .Type and .Content lets the Portal render rich rows.
+		EmitEvent(new AgentEvent
+		{
+			Type = AgentEventType.SystemNotification,
+			NotificationKind = evt.Data.Kind?.Type,
+			NotificationMessage = evt.Data.Content,
 		});
 	}
 

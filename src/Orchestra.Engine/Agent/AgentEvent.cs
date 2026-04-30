@@ -147,6 +147,47 @@ public class AgentEvent
 	/// </summary>
 	public double? CurrentTokens { get; init; }
 
+	// ── Auto mode switching (SDK 0.3.0) ──
+
+	/// <summary>
+	/// SDK request id correlating <see cref="AgentEventType.AutoModeSwitchRequested"/>
+	/// with its corresponding <see cref="AgentEventType.AutoModeSwitchCompleted"/>.
+	/// </summary>
+	public string? AutoModeRequestId { get; init; }
+
+	/// <summary>
+	/// SDK error code that triggered an auto-mode model switch (e.g. rate-limit code).
+	/// Null on the completed event.
+	/// </summary>
+	public string? AutoModeErrorCode { get; init; }
+
+	/// <summary>
+	/// SDK response on completion (typically the new model name or status string).
+	/// Null on the requested event.
+	/// </summary>
+	public string? AutoModeResponse { get; init; }
+
+	// ── System notifications (SDK 0.3.0) ──
+
+	/// <summary>
+	/// Discriminator for <see cref="AgentEventType.SystemNotification"/>: e.g. "agent_completed",
+	/// "agent_idle", "shell_completed", "shell_detached_completed", "new_inbox_message".
+	/// </summary>
+	public string? NotificationKind { get; init; }
+
+	/// <summary>
+	/// Human-readable notification text from the SDK (the <c>Content</c> field on
+	/// <c>SystemNotificationData</c>).
+	/// </summary>
+	public string? NotificationMessage { get; init; }
+
+	// ── Quota snapshots (SDK 0.3.0 — emitted alongside AssistantUsageEvent) ──
+
+	/// <summary>
+	/// Quota snapshots as reported by the SDK, keyed by quota name.
+	/// </summary>
+	public IReadOnlyDictionary<string, AgentQuotaSnapshot>? QuotaSnapshots { get; init; }
+
 	// ── Actor attribution (sub-agent vs main agent) ──
 
 	/// <summary>

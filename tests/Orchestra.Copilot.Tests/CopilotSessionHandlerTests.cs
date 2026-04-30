@@ -1745,4 +1745,172 @@ public class CopilotSessionHandlerTests
 	}
 
 	#endregion
+
+	#region SDK 0.3.0 Telemetry — Auto-mode switch / System notifications / Quota snapshots
+
+	[Fact]
+	public void HandleEvent_AutoModeSwitchRequestedEvent_EmitsAutoModeSwitchRequested()
+	{
+		// Arrange
+		var evt = new AutoModeSwitchRequestedEvent
+		{
+			Data = new AutoModeSwitchRequestedData
+			{
+				RequestId = "req-42",
+				ErrorCode = "rate_limited",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.AutoModeSwitchRequested);
+		emitted.AutoModeRequestId.Should().Be("req-42");
+		emitted.AutoModeErrorCode.Should().Be("rate_limited");
+		emitted.AutoModeResponse.Should().BeNull();
+	}
+
+	[Fact]
+	public void HandleEvent_AutoModeSwitchCompletedEvent_EmitsAutoModeSwitchCompleted()
+	{
+		// Arrange
+		var evt = new AutoModeSwitchCompletedEvent
+		{
+			Data = new AutoModeSwitchCompletedData
+			{
+				RequestId = "req-42",
+				Response = "claude-sonnet-4.5",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.AutoModeSwitchCompleted);
+		emitted.AutoModeRequestId.Should().Be("req-42");
+		emitted.AutoModeResponse.Should().Be("claude-sonnet-4.5");
+		emitted.AutoModeErrorCode.Should().BeNull();
+	}
+
+	[Fact]
+	public void HandleEvent_SystemNotificationEvent_EmitsSystemNotificationWithKindAndMessage()
+	{
+		// Arrange — SDK 0.3.0 system notification with typed discriminator.
+		var evt = new SystemNotificationEvent
+		{
+			Data = new SystemNotificationData
+			{
+				Kind = new SystemNotificationAgentIdle
+				{
+					Type = "agent_idle",
+					AgentId = "main",
+					AgentType = "default",
+					Description = "agent is now idle",
+				},
+				Content = "Main agent is idle",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.SystemNotification);
+		emitted.NotificationKind.Should().Be("agent_idle");
+		emitted.NotificationMessage.Should().Be("Main agent is idle");
+	}
+
+	[Fact]
+	public void HandleEvent_AssistantUsageWithQuotaSnapshots_EmitsUsageThenQuotaSnapshotEvent()
+	{
+		// Arrange — usage event carrying quota snapshots (SDK 0.3.0).
+		var resetDate = DateTimeOffset.Parse("2026-05-01T00:00:00Z");
+		var evt = new AssistantUsageEvent
+		{
+			Data = new AssistantUsageData
+			{
+				Model = "claude-opus-4.5",
+				InputTokens = 1000,
+				OutputTokens = 200,
+				ReasoningTokens = 50,
+				TtftMs = 230,
+				CopilotUsage = new AssistantUsageCopilotUsage
+				{
+					TotalNanoAiu = 1.234,
+					TokenDetails = Array.Empty<AssistantUsageCopilotUsageTokenDetail>(),
+				},
+				QuotaSnapshots = new Dictionary<string, AssistantUsageQuotaSnapshot>
+				{
+					["premium-requests"] = new AssistantUsageQuotaSnapshot
+					{
+						EntitlementRequests = 1500,
+						UsedRequests = 750,
+						RemainingPercentage = 0.5,
+						Overage = 0,
+						IsUnlimitedEntitlement = false,
+						UsageAllowedWithExhaustedQuota = true,
+						OverageAllowedWithExhaustedQuota = false,
+						ResetDate = resetDate,
+					},
+				}
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert — first event is Usage with new SDK 0.3.0 fields populated.
+		_channel.Reader.TryRead(out var usage).Should().BeTrue();
+		usage!.Type.Should().Be(AgentEventType.Usage);
+		usage.Usage.Should().NotBeNull();
+		usage.Usage!.ReasoningTokens.Should().Be(50);
+		usage.Usage.TotalNanoAiu.Should().Be(1.234);
+		usage.Usage.TimeToFirstTokenMs.Should().Be(230);
+		usage.Usage.QuotaSnapshots.Should().NotBeNull();
+		usage.Usage.QuotaSnapshots!.Should().ContainKey("premium-requests");
+
+		// Assert — second event is the dedicated QuotaSnapshot event.
+		_channel.Reader.TryRead(out var quota).Should().BeTrue();
+		quota!.Type.Should().Be(AgentEventType.QuotaSnapshot);
+		quota.QuotaSnapshots.Should().NotBeNull();
+		var snap = quota.QuotaSnapshots!["premium-requests"];
+		snap.EntitlementRequests.Should().Be(1500);
+		snap.UsedRequests.Should().Be(750);
+		snap.RemainingPercentage.Should().Be(0.5);
+		snap.IsUnlimitedEntitlement.Should().BeFalse();
+		snap.UsageAllowedWithExhaustedQuota.Should().BeTrue();
+		snap.ResetDate.Should().Be(resetDate);
+	}
+
+	[Fact]
+	public void HandleEvent_AssistantUsageWithoutQuotaSnapshots_DoesNotEmitQuotaEvent()
+	{
+		// Arrange — usage event with no quota snapshots; only Usage should be emitted.
+		var evt = new AssistantUsageEvent
+		{
+			Data = new AssistantUsageData
+			{
+				Model = "claude-opus-4.5",
+				InputTokens = 100,
+				OutputTokens = 20,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var usage).Should().BeTrue();
+		usage!.Type.Should().Be(AgentEventType.Usage);
+		_channel.Reader.TryRead(out var follow).Should().BeFalse(
+			"a usage event without quota snapshots must not emit a follow-up QuotaSnapshot event");
+		follow.Should().BeNull();
+	}
+
+	#endregion
 }

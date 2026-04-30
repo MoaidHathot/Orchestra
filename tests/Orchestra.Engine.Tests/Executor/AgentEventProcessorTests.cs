@@ -1705,4 +1705,107 @@ public class AgentEventProcessorTests
 		}
 		await Task.CompletedTask;
 	}
+
+	#region SDK 0.3.0 Telemetry forwarding
+
+	[Fact]
+	public async Task ProcessEventsAsync_AutoModeSwitchRequested_CallsReporterAndAddsAuditEntry()
+	{
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var events = CreateAsyncEnumerable(new AgentEvent
+		{
+			Type = AgentEventType.AutoModeSwitchRequested,
+			AutoModeRequestId = "req-99",
+			AutoModeErrorCode = "rate_limited",
+		});
+
+		await processor.ProcessEventsAsync(events);
+
+		_reporter.Received(1).ReportAutoModeSwitchRequested("step-x", "req-99", "rate_limited");
+		_reporter.Received(1).ReportSessionInfo("auto_mode_switch_requested", Arg.Any<string>());
+		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.AutoModeSwitchRequested
+			&& e.AutoModeRequestId == "req-99" && e.AutoModeErrorCode == "rate_limited");
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_AutoModeSwitchCompleted_CallsReporterAndAddsAuditEntry()
+	{
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var events = CreateAsyncEnumerable(new AgentEvent
+		{
+			Type = AgentEventType.AutoModeSwitchCompleted,
+			AutoModeRequestId = "req-99",
+			AutoModeResponse = "claude-sonnet-4.5",
+		});
+
+		await processor.ProcessEventsAsync(events);
+
+		_reporter.Received(1).ReportAutoModeSwitchCompleted("step-x", "req-99", "claude-sonnet-4.5");
+		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.AutoModeSwitchCompleted
+			&& e.AutoModeRequestId == "req-99" && e.AutoModeResponse == "claude-sonnet-4.5");
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_SystemNotification_CallsReporterAndAddsAuditEntry()
+	{
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var events = CreateAsyncEnumerable(new AgentEvent
+		{
+			Type = AgentEventType.SystemNotification,
+			NotificationKind = "shell_completed",
+			NotificationMessage = "shell finished",
+		});
+
+		await processor.ProcessEventsAsync(events);
+
+		_reporter.Received(1).ReportSystemNotification("step-x", "shell_completed", "shell finished");
+		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.SystemNotification
+			&& e.NotificationKind == "shell_completed" && e.NotificationMessage == "shell finished");
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_QuotaSnapshotWithEntries_CallsReporter()
+	{
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var snapshots = new Dictionary<string, AgentQuotaSnapshot>
+		{
+			["premium-requests"] = new(
+				EntitlementRequests: 1500,
+				UsedRequests: 500,
+				RemainingPercentage: 0.667,
+				Overage: 0,
+				IsUnlimitedEntitlement: false,
+				UsageAllowedWithExhaustedQuota: true,
+				OverageAllowedWithExhaustedQuota: false,
+				ResetDate: DateTimeOffset.UtcNow.AddDays(7))
+		};
+		var events = CreateAsyncEnumerable(new AgentEvent
+		{
+			Type = AgentEventType.QuotaSnapshot,
+			QuotaSnapshots = snapshots,
+		});
+
+		await processor.ProcessEventsAsync(events);
+
+		_reporter.Received(1).ReportQuotaSnapshot("step-x", snapshots);
+		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.QuotaSnapshot);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_QuotaSnapshotEmpty_NoReporterCall()
+	{
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var events = CreateAsyncEnumerable(new AgentEvent
+		{
+			Type = AgentEventType.QuotaSnapshot,
+			QuotaSnapshots = null,
+		});
+
+		await processor.ProcessEventsAsync(events);
+
+		_reporter.DidNotReceive().ReportQuotaSnapshot(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, AgentQuotaSnapshot>>());
+		Assert.DoesNotContain(processor.AuditLog, e => e.EventType == AuditEventType.QuotaSnapshot);
+	}
+
+	#endregion
 }

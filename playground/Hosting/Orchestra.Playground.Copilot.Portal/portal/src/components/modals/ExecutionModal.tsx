@@ -488,6 +488,65 @@ export default function ExecutionModal({
     });
   }, [selectedStepEvents, eventSearchQuery]);
 
+  /**
+   * SDK 0.3.0 telemetry summary derived from selectedStepEvents.
+   * Lightweight aggregation (single pass) so the panel stays responsive even with
+   * thousands of events. Quota snapshots use a "latest-wins" strategy keyed by
+   * snapshot name so the Portal always shows the most recent state per bucket.
+   */
+  type QuotaSnapshotRow = {
+    name: string;
+    usedRequests: number;
+    entitlementRequests: number;
+    remainingPercentage: number;
+    overage: number;
+    isUnlimitedEntitlement: boolean;
+    resetDate?: string | null;
+  };
+  const telemetrySummary = useMemo(() => {
+    const autoModeSwitches: Array<{ requestId?: string; errorCode?: string; response?: string; status: 'requested' | 'completed'; timestamp?: string }> = [];
+    const notifications: Array<{ kind?: string; message?: string; timestamp?: string }> = [];
+    const quotas = new Map<string, QuotaSnapshotRow>();
+    let lastQuotaTimestamp: string | undefined;
+
+    for (const evt of selectedStepEvents) {
+      if (evt.type === 'auto-mode-switch-requested') {
+        autoModeSwitches.push({
+          status: 'requested',
+          requestId: evt.requestId as string | undefined,
+          errorCode: evt.errorCode as string | undefined,
+          timestamp: evt.timestamp,
+        });
+      } else if (evt.type === 'auto-mode-switch-completed') {
+        autoModeSwitches.push({
+          status: 'completed',
+          requestId: evt.requestId as string | undefined,
+          response: evt.response as string | undefined,
+          timestamp: evt.timestamp,
+        });
+      } else if (evt.type === 'system-notification') {
+        notifications.push({
+          kind: evt.kind as string | undefined,
+          message: evt.message as string | undefined,
+          timestamp: evt.timestamp,
+        });
+      } else if (evt.type === 'quota-snapshot') {
+        const snaps = (evt.snapshots as QuotaSnapshotRow[] | undefined) ?? [];
+        for (const s of snaps) {
+          if (s?.name) quotas.set(s.name, s);
+        }
+        lastQuotaTimestamp = evt.timestamp;
+      }
+    }
+
+    return {
+      autoModeSwitches,
+      notifications,
+      quotas: Array.from(quotas.values()),
+      lastQuotaTimestamp,
+    };
+  }, [selectedStepEvents]);
+
   /** Detect loop iterations from stepStatuses keys (pattern: "stepName:iteration-N"). */
   const loopIterations = useMemo<Record<string, { iteration: number; status: string; key: string }[]>>(() => {
     const result: Record<string, { iteration: number; status: string; key: string }[]> = {};
@@ -2451,6 +2510,79 @@ export default function ExecutionModal({
                             </button>
                           )}
                         </div>
+                        {/* SDK 0.3.0 Telemetry summary panel — auto-mode switches, quotas, system notifications */}
+                        {(telemetrySummary.autoModeSwitches.length > 0
+                          || telemetrySummary.notifications.length > 0
+                          || telemetrySummary.quotas.length > 0) && (
+                          <div
+                            className="telemetry-summary"
+                            style={{
+                              background: 'var(--surface)',
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: '4px',
+                              padding: '8px 10px',
+                              marginBottom: '8px',
+                              fontSize: '11px',
+                              color: 'var(--text-muted)',
+                            }}
+                          >
+                            <div style={{ fontWeight: 600, color: 'var(--accent)', marginBottom: '6px' }}>
+                              Telemetry
+                            </div>
+                            {telemetrySummary.quotas.length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '6px' }}>
+                                {telemetrySummary.quotas.map((q) => {
+                                  const pct = q.isUnlimitedEntitlement
+                                    ? 100
+                                    : Math.max(0, Math.min(100, Math.round((q.remainingPercentage ?? 0) * 100)));
+                                  const exhausted = !q.isUnlimitedEntitlement && pct <= 5;
+                                  return (
+                                    <div
+                                      key={q.name}
+                                      title={q.resetDate ? `Resets ${q.resetDate}` : undefined}
+                                      style={{
+                                        background: 'var(--bg)',
+                                        borderRadius: '4px',
+                                        padding: '4px 8px',
+                                        border: `1px solid ${exhausted ? 'var(--error)' : 'var(--border-subtle)'}`,
+                                        minWidth: '160px',
+                                      }}
+                                    >
+                                      <div style={{ fontWeight: 500, color: 'var(--text)' }}>{q.name}</div>
+                                      <div>
+                                        {q.isUnlimitedEntitlement
+                                          ? 'unlimited'
+                                          : `${q.usedRequests} / ${q.entitlementRequests} (${pct}% left)`}
+                                        {q.overage > 0 && (
+                                          <span style={{ color: 'var(--warning)', marginLeft: '6px' }}>
+                                            +{q.overage} overage
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {telemetrySummary.autoModeSwitches.length > 0 && (
+                              <div style={{ marginBottom: telemetrySummary.notifications.length > 0 ? '6px' : 0 }}>
+                                <span style={{ color: 'var(--warning)', fontWeight: 500 }}>
+                                  Auto-mode switches: {telemetrySummary.autoModeSwitches.length}
+                                </span>{' '}
+                                <span style={{ color: 'var(--text-dim)' }}>
+                                  ({telemetrySummary.autoModeSwitches.filter(s => s.status === 'completed').length} completed)
+                                </span>
+                              </div>
+                            )}
+                            {telemetrySummary.notifications.length > 0 && (
+                              <div>
+                                <span style={{ color: 'var(--cyan)', fontWeight: 500 }}>
+                                  Notifications: {telemetrySummary.notifications.length}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        )}
                         {filteredStepEvents.length === 0 ? (
                           <div className="no-step-selected">
                             {eventSearchQuery

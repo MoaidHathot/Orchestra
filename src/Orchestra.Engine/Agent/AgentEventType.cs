@@ -43,4 +43,15 @@ public enum AgentEventType
 
 	// Session-level token usage info
 	SessionUsageInfo,
+
+	// Auto mode switching (model fallback when rate-limited; SDK 0.3.0)
+	AutoModeSwitchRequested,
+	AutoModeSwitchCompleted,
+
+	// System notifications (SDK 0.3.0 typed discriminator: agent_completed,
+	// agent_idle, shell_completed, shell_detached_completed, new_inbox_message)
+	SystemNotification,
+
+	// Quota / entitlement snapshot (emitted alongside usage events)
+	QuotaSnapshot,
 }

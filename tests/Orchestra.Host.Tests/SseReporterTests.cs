@@ -92,6 +92,63 @@ public class SseReporterTests : IDisposable
 	}
 
 	[Fact]
+	public void ReportAutoModeSwitchRequested_EmitsTypedEventWithFields()
+	{
+		_reporter.ReportAutoModeSwitchRequested("step-x", "req-1", "rate_limited");
+
+		var events = _reporter.AccumulatedEvents;
+		events.Should().HaveCount(1);
+		events[0].Type.Should().Be("auto-mode-switch-requested");
+		events[0].Data.Should().Contain("\"requestId\":\"req-1\"");
+		events[0].Data.Should().Contain("\"errorCode\":\"rate_limited\"");
+	}
+
+	[Fact]
+	public void ReportAutoModeSwitchCompleted_EmitsTypedEventWithFields()
+	{
+		_reporter.ReportAutoModeSwitchCompleted("step-x", "req-1", "claude-sonnet-4.5");
+
+		var events = _reporter.AccumulatedEvents;
+		events[0].Type.Should().Be("auto-mode-switch-completed");
+		events[0].Data.Should().Contain("\"response\":\"claude-sonnet-4.5\"");
+	}
+
+	[Fact]
+	public void ReportSystemNotification_EmitsTypedEventWithKindAndMessage()
+	{
+		_reporter.ReportSystemNotification("step-x", "agent_completed", "main agent done");
+
+		var events = _reporter.AccumulatedEvents;
+		events[0].Type.Should().Be("system-notification");
+		events[0].Data.Should().Contain("\"kind\":\"agent_completed\"");
+		events[0].Data.Should().Contain("\"message\":\"main agent done\"");
+	}
+
+	[Fact]
+	public void ReportQuotaSnapshot_EmitsTypedEventWithSnapshotsArray()
+	{
+		var snapshots = new Dictionary<string, AgentQuotaSnapshot>
+		{
+			["premium-requests"] = new(
+				EntitlementRequests: 1500,
+				UsedRequests: 500,
+				RemainingPercentage: 0.667,
+				Overage: 0,
+				IsUnlimitedEntitlement: false,
+				UsageAllowedWithExhaustedQuota: true,
+				OverageAllowedWithExhaustedQuota: false,
+				ResetDate: null),
+		};
+		_reporter.ReportQuotaSnapshot("step-x", snapshots);
+
+		var events = _reporter.AccumulatedEvents;
+		events[0].Type.Should().Be("quota-snapshot");
+		events[0].Data.Should().Contain("\"name\":\"premium-requests\"");
+		events[0].Data.Should().Contain("\"entitlementRequests\":1500");
+		events[0].Data.Should().Contain("\"usedRequests\":500");
+	}
+
+	[Fact]
 	public void Complete_ClosesAllSubscriberChannels()
 	{
 		var (_, future1) = _reporter.Subscribe();

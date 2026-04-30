@@ -163,6 +163,22 @@ public class AgentEventProcessor
 			case AgentEventType.SessionUsageInfo:
 				HandleSessionUsageInfo(evt);
 				break;
+
+			case AgentEventType.AutoModeSwitchRequested:
+				HandleAutoModeSwitchRequested(evt);
+				break;
+
+			case AgentEventType.AutoModeSwitchCompleted:
+				HandleAutoModeSwitchCompleted(evt);
+				break;
+
+			case AgentEventType.SystemNotification:
+				HandleSystemNotification(evt);
+				break;
+
+			case AgentEventType.QuotaSnapshot:
+				HandleQuotaSnapshot(evt);
+				break;
 		}
 	}
 
@@ -408,6 +424,78 @@ public class AgentEventProcessor
 			EventType = AuditEventType.SessionUsageInfo,
 			TokenLimit = evt.TokenLimit,
 			CurrentTokens = evt.CurrentTokens,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
+	}
+
+	private void HandleAutoModeSwitchRequested(AgentEvent evt)
+	{
+		// Auto-mode switches are not "errors" from the orchestration's POV — they are
+		// resilience signals (the SDK transparently fell back to a different model).
+		// Surface as INFO so the Portal renders them in the warnings panel without
+		// failing the step.
+		_reporter.ReportAutoModeSwitchRequested(
+			_stepName,
+			evt.AutoModeRequestId ?? string.Empty,
+			evt.AutoModeErrorCode);
+		_reporter.ReportSessionInfo(
+			"auto_mode_switch_requested",
+			$"Auto-mode switch requested (errorCode={evt.AutoModeErrorCode ?? "n/a"}, requestId={evt.AutoModeRequestId ?? "n/a"})");
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.AutoModeSwitchRequested,
+			AutoModeRequestId = evt.AutoModeRequestId,
+			AutoModeErrorCode = evt.AutoModeErrorCode,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
+	}
+
+	private void HandleAutoModeSwitchCompleted(AgentEvent evt)
+	{
+		_reporter.ReportAutoModeSwitchCompleted(
+			_stepName,
+			evt.AutoModeRequestId ?? string.Empty,
+			evt.AutoModeResponse);
+		_reporter.ReportSessionInfo(
+			"auto_mode_switch_completed",
+			$"Auto-mode switch completed (requestId={evt.AutoModeRequestId ?? "n/a"}, response={evt.AutoModeResponse ?? "n/a"})");
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.AutoModeSwitchCompleted,
+			AutoModeRequestId = evt.AutoModeRequestId,
+			AutoModeResponse = evt.AutoModeResponse,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
+	}
+
+	private void HandleSystemNotification(AgentEvent evt)
+	{
+		_reporter.ReportSystemNotification(
+			_stepName,
+			evt.NotificationKind ?? "unknown",
+			evt.NotificationMessage);
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.SystemNotification,
+			NotificationKind = evt.NotificationKind,
+			NotificationMessage = evt.NotificationMessage,
+			Timestamp = DateTimeOffset.UtcNow,
+		});
+	}
+
+	private void HandleQuotaSnapshot(AgentEvent evt)
+	{
+		if (evt.QuotaSnapshots is null || evt.QuotaSnapshots.Count == 0)
+			return;
+
+		_reporter.ReportQuotaSnapshot(_stepName, evt.QuotaSnapshots);
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.QuotaSnapshot,
 			Timestamp = DateTimeOffset.UtcNow,
 		});
 	}

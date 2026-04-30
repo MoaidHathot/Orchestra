@@ -111,6 +111,23 @@ public class AuditLogEntry
 	/// Current token count used in the session (for SessionUsageInfo events).
 	/// </summary>
 	public double? CurrentTokens { get; init; }
+
+	// ── Auto-mode switch + system notification telemetry (SDK 0.3.0) ──
+
+	/// <summary>SDK request id correlating an auto-mode switch request with its completion.</summary>
+	public string? AutoModeRequestId { get; init; }
+
+	/// <summary>SDK error code that triggered an auto-mode switch (e.g. rate-limit code).</summary>
+	public string? AutoModeErrorCode { get; init; }
+
+	/// <summary>SDK response on auto-mode completion (typically the new model name).</summary>
+	public string? AutoModeResponse { get; init; }
+
+	/// <summary>System notification kind discriminator (agent_completed, shell_completed, etc.).</summary>
+	public string? NotificationKind { get; init; }
+
+	/// <summary>System notification message body.</summary>
+	public string? NotificationMessage { get; init; }
 }
 
 /// <summary>
@@ -156,4 +173,16 @@ public enum AuditEventType
 
 	/// <summary>Session-level token usage information was received.</summary>
 	SessionUsageInfo,
+
+	/// <summary>SDK requested an auto-mode model switch (rate-limit or transient failure). SDK 0.3.0.</summary>
+	AutoModeSwitchRequested,
+
+	/// <summary>Auto-mode switch completed; new model is active. SDK 0.3.0.</summary>
+	AutoModeSwitchCompleted,
+
+	/// <summary>CLI emitted a system notification (agent_idle, shell_completed, etc.). SDK 0.3.0.</summary>
+	SystemNotification,
+
+	/// <summary>Per-bucket quota / entitlement snapshot was received with a usage event. SDK 0.3.0.</summary>
+	QuotaSnapshot,
 }

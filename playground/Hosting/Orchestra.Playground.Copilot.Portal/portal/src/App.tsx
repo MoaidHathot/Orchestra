@@ -1135,6 +1135,18 @@ function App(): React.JSX.Element {
       });
     });
 
+    // SDK 0.3.0 telemetry: auto-mode switches, system notifications, quota snapshots.
+    // These flow through the same per-step event timeline so the ExecutionModal can
+    // render them inline without bespoke routing.
+    (['auto-mode-switch-requested', 'auto-mode-switch-completed', 'system-notification', 'quota-snapshot'] as const).forEach(eventType => {
+      eventSource.addEventListener(eventType, (e: MessageEvent) => {
+        try {
+          const data: SSEEventData = JSON.parse(e.data);
+          addStepEvent(data.stepName, eventType, data as Record<string, unknown>);
+        } catch { /* ignore */ }
+      });
+    });
+
     // execution-started
     eventSource.addEventListener('execution-started', (e: MessageEvent) => {
       try {

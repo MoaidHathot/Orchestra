@@ -27,7 +27,19 @@ export function formatLogContent(log: LogEvent): string {
   if (log.type === 'step-error') return log.error || '';
   if (log.type === 'tool-started') return `Tool: ${log.toolName}`;
   if (log.type === 'tool-completed') return `Tool ${log.toolName}: ${log.success ? 'success' : 'failed'}`;
-  if (log.type === 'usage') return `Tokens: ${log.inputTokens || 0} in / ${log.outputTokens || 0} out`;
+  if (log.type === 'usage') {
+    const parts = [`Tokens: ${log.inputTokens || 0} in / ${log.outputTokens || 0} out`];
+    if (typeof log.reasoningTokens === 'number' && log.reasoningTokens > 0) {
+      parts.push(`reasoning: ${log.reasoningTokens}`);
+    }
+    if (typeof log.totalNanoAiu === 'number' && log.totalNanoAiu > 0) {
+      parts.push(`nAIU: ${log.totalNanoAiu.toFixed(2)}`);
+    }
+    if (typeof log.timeToFirstTokenMs === 'number' && log.timeToFirstTokenMs > 0) {
+      parts.push(`TTFT: ${Math.round(log.timeToFirstTokenMs)}ms`);
+    }
+    return parts.join(' • ');
+  }
   if (log.type === 'content-delta') return (log.chunk?.substring(0, 100) ?? '') + ((log.chunk?.length ?? 0) > 100 ? '...' : '');
   if (log.type === 'subagent-selected') {
     const name = log.displayName || log.agentName || 'unknown';
@@ -61,6 +73,25 @@ export function formatLogContent(log: LogEvent): string {
     const status = String(log.status || 'unknown').toLowerCase();
     const step = log.stepName ? ` for ${String(log.stepName)}` : '';
     return `Hook ${name}${step}: ${status}`;
+  }
+  // SDK 0.3.0 telemetry events.
+  if (log.type === 'auto-mode-switch-requested') {
+    return `Auto-mode switch requested${log.errorCode ? ` (errorCode=${String(log.errorCode)})` : ''}${log.requestId ? ` [req=${String(log.requestId)}]` : ''}`;
+  }
+  if (log.type === 'auto-mode-switch-completed') {
+    return `Auto-mode switch completed${log.response ? ` -> ${String(log.response)}` : ''}${log.requestId ? ` [req=${String(log.requestId)}]` : ''}`;
+  }
+  if (log.type === 'system-notification') {
+    return `Notification [${String(log.kind || 'unknown')}]: ${String(log.message || '')}`;
+  }
+  if (log.type === 'quota-snapshot') {
+    const snaps = (log.snapshots as Array<{ name: string; usedRequests: number; entitlementRequests: number; remainingPercentage: number; isUnlimitedEntitlement: boolean }>) || [];
+    if (snaps.length === 0) return 'Quota snapshot (empty)';
+    return `Quota: ${snaps.map(s => {
+      if (s.isUnlimitedEntitlement) return `${s.name}=∞`;
+      const pct = Math.round((s.remainingPercentage ?? 0) * 100);
+      return `${s.name}=${s.usedRequests}/${s.entitlementRequests} (${pct}% left)`;
+    }).join(', ')}`;
   }
   return JSON.stringify(log).substring(0, 200);
 }

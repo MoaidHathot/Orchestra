@@ -48,6 +48,36 @@ public interface IOrchestrationReporter
 	// Audit log
 	void ReportAuditLogEntry(string stepName, AuditLogEntry entry);
 
+	// ── Auto-mode switch telemetry (SDK 0.3.0). Default no-op for back-compat. ──
+
+	/// <summary>
+	/// Reports that the SDK requested a model switch because the current model hit a rate-limit
+	/// or transient failure. <paramref name="errorCode"/> is the SDK-supplied trigger reason.
+	/// </summary>
+	void ReportAutoModeSwitchRequested(string stepName, string requestId, string? errorCode) { }
+
+	/// <summary>
+	/// Reports that an auto-mode switch completed and the next model is now active.
+	/// <paramref name="response"/> is typically the new model name or a status string.
+	/// </summary>
+	void ReportAutoModeSwitchCompleted(string stepName, string requestId, string? response) { }
+
+	// ── System notifications (SDK 0.3.0 typed discriminator). ──
+
+	/// <summary>
+	/// Reports a CLI-level system notification (agent idle/completed, shell completed,
+	/// new inbox message, etc.). <paramref name="kind"/> is the SDK discriminator.
+	/// </summary>
+	void ReportSystemNotification(string stepName, string kind, string? message) { }
+
+	// ── Quota snapshots (SDK 0.3.0 — alongside AssistantUsageEvent). ──
+
+	/// <summary>
+	/// Reports per-bucket quota / entitlement snapshots so the Portal can show plan
+	/// utilization in real time. Default no-op for reporters that don't render telemetry.
+	/// </summary>
+	void ReportQuotaSnapshot(string stepName, IReadOnlyDictionary<string, AgentQuotaSnapshot> snapshots) { }
+
 	// ── Actor-aware overloads (default-implemented for backward compatibility) ──
 	//
 	// These let consumers (CopilotSessionHandler / AgentEventProcessor) attribute
