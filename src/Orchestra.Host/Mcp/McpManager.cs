@@ -148,6 +148,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 					Type = McpType.Remote,
 					Endpoint = $"{_proxyBaseUrl}/{mcp.Name}",
 					Headers = [],
+					Timeout = mcp.Timeout, // Preserve per-server timeout configuration
 				});
 			}
 			else

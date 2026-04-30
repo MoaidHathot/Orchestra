@@ -108,6 +108,7 @@ public static class CheckpointApi
 			EngineToolRegistry engineToolRegistry,
 			McpManager mcpManager,
 			IOrchestrationReporterFactory reporterFactory,
+			IChildOrchestrationLauncher childLauncher,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
 		{
@@ -194,7 +195,7 @@ public static class CheckpointApi
 			}, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl);
+			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, childLauncher: childLauncher, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl);
 			var cancellationToken = cts.Token;
 
 			// Execute resume in background

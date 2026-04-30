@@ -37,6 +37,7 @@ public class TriggerManagerExecutionRefactorTests : IDisposable
 			runsDir: runsDir,
 			runStore: null!,
 			checkpointStore: null!,
+			launcher: null!,
 			dataPath: _tempDir);
 	}
 

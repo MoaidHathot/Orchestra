@@ -190,6 +190,21 @@ public partial class OrchestrationRegistry
 		_entries.TryGetValue(id, out var entry) ? entry : null;
 
 	/// <summary>
+	/// Gets an orchestration entry by ID or, if not found, by orchestration name (case-insensitive).
+	/// This is the lookup method used by user-facing surfaces (YAML <c>orchestration:</c> step
+	/// fields, MCP <c>invoke_orchestration</c> calls) where authors typically reference an
+	/// orchestration by its declared <c>name</c> rather than the auto-generated registry ID.
+	/// Returns the first match — if multiple orchestrations share a name (rare), prefer
+	/// referencing them by ID.
+	/// </summary>
+	public OrchestrationEntry? GetByIdOrName(string idOrName)
+	{
+		if (string.IsNullOrWhiteSpace(idOrName)) return null;
+		if (_entries.TryGetValue(idOrName, out var byId)) return byId;
+		return _entries.Values.FirstOrDefault(e => string.Equals(e.Orchestration.Name, idOrName, StringComparison.OrdinalIgnoreCase));
+	}
+
+	/// <summary>
 	/// Gets all registered orchestration entries.
 	/// </summary>
 	public IEnumerable<OrchestrationEntry> GetAll() => _entries.Values;

@@ -10,6 +10,7 @@ using Orchestra.Host.Mcp;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
+using Orchestra.Host.Services;
 using Orchestra.Host.Triggers;
 
 namespace Orchestra.Host.McpServer;
@@ -88,18 +89,7 @@ public sealed class DataPlaneTools
 		"Use mode='sync' to block until the orchestration completes (with optional timeout). " +
 		"Use get_orchestration_status to check the result of async invocations.")]
 	public static async Task<string> InvokeOrchestration(
-		OrchestrationRegistry registry,
-		AgentBuilder agentBuilder,
-		IScheduler scheduler,
-		ILoggerFactory loggerFactory,
-		FileSystemRunStore runStore,
-		OrchestrationHostOptions hostOptions,
-		EngineToolRegistry engineToolRegistry,
-		McpServerOptions mcpOptions,
-		IOrchestrationReporterFactory reporterFactory,
-		McpManager mcpManager,
-		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
-		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		IChildOrchestrationLauncher launcher,
 		[Description("The orchestration ID to invoke.")] string orchestrationId,
 		[Description("JSON object with parameter key-value pairs. All values must be strings.")] string? parameters = null,
 		[Description("Execution mode: 'async' (default, returns immediately with execution ID) or 'sync' (blocks until completion).")] string mode = "async",
@@ -108,10 +98,6 @@ public sealed class DataPlaneTools
 		[Description("Parent execution ID for nested invocations. Set automatically when called from within an orchestration.")] string? parentExecutionId = null,
 		CancellationToken cancellationToken = default)
 	{
-		var entry = registry.Get(orchestrationId);
-		if (entry is null)
-			return JsonSerializer.Serialize(new { error = $"Orchestration '{orchestrationId}' not found." }, s_jsonOptions);
-
 		// Parse parameters
 		Dictionary<string, string>? parsedParams = null;
 		if (!string.IsNullOrWhiteSpace(parameters))
@@ -126,7 +112,7 @@ public sealed class DataPlaneTools
 			}
 		}
 
-		// Parse metadata
+		// Parse metadata (parse failures are non-fatal)
 		Dictionary<string, string>? parsedMetadata = null;
 		if (!string.IsNullOrWhiteSpace(metadata))
 		{
@@ -134,246 +120,104 @@ public sealed class DataPlaneTools
 			{
 				parsedMetadata = JsonSerializer.Deserialize<Dictionary<string, string>>(metadata, s_jsonOptions);
 			}
-			catch (JsonException)
-			{
-				// Metadata parsing failure is non-fatal
-			}
+			catch (JsonException) { /* non-fatal */ }
 		}
-
-		// Parse the orchestration (global MCPs are available via registry.GlobalMcps)
-		Orchestration orchestration;
-		try
-		{
-			orchestration = OrchestrationParser.ParseOrchestrationFile(entry.Path, registry.GlobalMcps);
-		}
-		catch (Exception ex)
-		{
-			return JsonSerializer.Serialize(new { error = $"Failed to parse orchestration: {ex.Message}" }, s_jsonOptions);
-		}
-
-		// Create execution infrastructure
-		var executionId = Guid.NewGuid().ToString("N")[..12];
-		var reporter = (SseReporter)reporterFactory.Create();
-
-		// Wire up progress callbacks so ActiveExecutionInfo stays current
-		// (the Portal UI polls this for step progress and current-step display).
-		reporter.OnStepStarted = stepName =>
-		{
-			if (activeExecutionInfos.TryGetValue(executionId, out var info))
-				info.CurrentStep = stepName;
-		};
-		reporter.OnStepCompleted = stepName =>
-		{
-			if (activeExecutionInfos.TryGetValue(executionId, out var info))
-			{
-				info.IncrementCompletedSteps();
-				info.CurrentStep = null;
-			}
-		};
-
-		// ── Nesting: compute depth and enforce limit ──
-		var parentDepth = 0;
-		string? rootExecutionId = executionId;
-
-		if (!string.IsNullOrWhiteSpace(parentExecutionId) &&
-			activeExecutionInfos.TryGetValue(parentExecutionId, out var parentInfo))
-		{
-			parentDepth = (parentInfo.NestingMetadata?.Depth ?? 0) + 1;
-			rootExecutionId = parentInfo.NestingMetadata?.RootExecutionId ?? parentExecutionId;
-
-			if (parentDepth > mcpOptions.MaxNestingDepth)
-			{
-				return JsonSerializer.Serialize(new
-				{
-					error = $"Maximum nesting depth ({mcpOptions.MaxNestingDepth}) exceeded. " +
-						$"This orchestration would be at depth {parentDepth}. " +
-						$"Root execution: {rootExecutionId}.",
-				}, s_jsonOptions);
-			}
-		}
-
-		var nestingMetadata = new ExecutionMetadata
-		{
-			ParentExecutionId = parentExecutionId,
-			ParentStepName = null, // Set by the calling step if available
-			RootExecutionId = rootExecutionId,
-			Depth = parentDepth,
-			UserMetadata = parsedMetadata ?? [],
-		};
-
-		// Link cancellation to parent if nested
-		var cts = !string.IsNullOrWhiteSpace(parentExecutionId) &&
-			activeExecutions.TryGetValue(parentExecutionId, out var parentCts)
-				? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, parentCts.Token)
-				: CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-		activeExecutions[executionId] = cts;
-		var executionInfo = new ActiveExecutionInfo
-		{
-			ExecutionId = executionId,
-			OrchestrationId = orchestrationId,
-			OrchestrationName = orchestration.Name,
-			StartedAt = DateTimeOffset.UtcNow,
-			TriggeredBy = parentDepth > 0 ? $"orchestration:{parentExecutionId}" : "mcp",
-			CancellationTokenSource = cts,
-			Reporter = reporter,
-			Parameters = parsedParams,
-			TotalSteps = orchestration.Steps.Length,
-			NestingMetadata = nestingMetadata,
-		};
-		activeExecutionInfos[executionId] = executionInfo;
-
-		var executor = new OrchestrationExecutor(
-			scheduler, agentBuilder, reporter, loggerFactory,
-			runStore: runStore,
-			engineToolRegistry: engineToolRegistry,
-			mcpResolver: mcpManager,
-			globalHooks: hostOptions.Hooks,
-			dataPath: hostOptions.DataPath,
-			serverUrl: hostOptions.HostBaseUrl);
 
 		var isSync = string.Equals(mode, "sync", StringComparison.OrdinalIgnoreCase);
 
-		if (isSync)
+		ParentExecutionContext? parentContext = null;
+		if (!string.IsNullOrWhiteSpace(parentExecutionId))
 		{
-			// Synchronous mode: block until completion
-			using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
-			timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
-
-			try
+			// Depth/root are filled in by the launcher from the live active-executions table.
+			parentContext = new ParentExecutionContext
 			{
-				var result = await executor.ExecuteAsync(orchestration, parsedParams, cancellationToken: timeoutCts.Token);
-
-				executionInfo.Status = result.Status == ExecutionStatus.Succeeded
-					? HostExecutionStatus.Completed
-					: HostExecutionStatus.Failed;
-
-				// Emit terminal SSE events so attached UI clients see completion
-				if (result.Status == ExecutionStatus.Cancelled)
-				{
-					reporter.ReportOrchestrationCancelled();
-				}
-				else
-				{
-					foreach (var (stepName, stepResult) in result.StepResults)
-					{
-						if (stepResult.Status == ExecutionStatus.Succeeded)
-							reporter.ReportStepOutput(stepName, stepResult.Content);
-					}
-					reporter.ReportOrchestrationDone(result);
-				}
-
-				// Build a summary from terminal step results
-				var terminalContent = string.Join("\n---\n",
-					result.Results
-						.Where(kvp => kvp.Value.Status == ExecutionStatus.Succeeded)
-						.Select(kvp => $"[{kvp.Key}]\n{kvp.Value.Content}"));
-
-				return JsonSerializer.Serialize(new
-				{
-					executionId,
-					orchestrationId,
-					orchestrationName = orchestration.Name,
-					mode = "sync",
-					status = result.Status.ToString().ToLowerInvariant(),
-					completionReason = result.CompletionReason,
-					stepResults = result.StepResults.ToDictionary(
-						kvp => kvp.Key,
-						kvp => new
-						{
-							status = kvp.Value.Status.ToString().ToLowerInvariant(),
-							content = TruncateContent(kvp.Value.Content, 4000),
-						}),
-					summary = TruncateContent(terminalContent, 8000),
-					metadata = parsedMetadata,
-				}, s_jsonOptions);
-			}
-			catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
-			{
-				executionInfo.Status = HostExecutionStatus.Failed;
-				reporter.ReportOrchestrationError($"Orchestration timed out after {timeoutSeconds} seconds.");
-				return JsonSerializer.Serialize(new
-				{
-					executionId,
-					orchestrationId,
-					mode = "sync",
-					status = "timeout",
-					error = $"Orchestration did not complete within {timeoutSeconds} seconds.",
-				}, s_jsonOptions);
-			}
-			catch (Exception ex)
-			{
-				executionInfo.Status = HostExecutionStatus.Failed;
-				reporter.ReportOrchestrationError(ex.Message);
-				return JsonSerializer.Serialize(new
-				{
-					executionId,
-					orchestrationId,
-					mode = "sync",
-					status = "error",
-					error = ex.Message,
-				}, s_jsonOptions);
-			}
-			finally
-			{
-				reporter.Complete();
-				CleanupExecution(executionId, activeExecutions, activeExecutionInfos, cts);
-			}
+				ParentExecutionId = parentExecutionId!,
+			};
 		}
-		else
+
+		var request = new ChildLaunchRequest
 		{
-			// Async mode: fire-and-forget, return execution ID
-			_ = Task.Run(async () =>
-			{
-				try
-				{
-					var result = await executor.ExecuteAsync(orchestration, parsedParams, cancellationToken: cts.Token);
-					executionInfo.Status = result.Status == ExecutionStatus.Succeeded
-						? HostExecutionStatus.Completed
-						: HostExecutionStatus.Failed;
+			OrchestrationId = orchestrationId,
+			Parameters = parsedParams,
+			Mode = isSync ? ChildLaunchMode.Sync : ChildLaunchMode.Async,
+			TimeoutSeconds = isSync ? timeoutSeconds : null,
+			TriggeredBy = parentContext is not null ? $"orchestration:{parentExecutionId}" : "mcp",
+			ParentContext = parentContext,
+			UserMetadata = parsedMetadata,
+		};
 
-					// Emit terminal SSE events
-					if (result.Status == ExecutionStatus.Cancelled)
-					{
-						reporter.ReportOrchestrationCancelled();
-					}
-					else
-					{
-						foreach (var (stepName, stepResult) in result.StepResults)
-						{
-							if (stepResult.Status == ExecutionStatus.Succeeded)
-								reporter.ReportStepOutput(stepName, stepResult.Content);
-						}
-						reporter.ReportOrchestrationDone(result);
-					}
-				}
-				catch (OperationCanceledException)
-				{
-					executionInfo.Status = HostExecutionStatus.Cancelled;
-					reporter.ReportOrchestrationCancelled();
-				}
-				catch
-				{
-					executionInfo.Status = HostExecutionStatus.Failed;
-				}
-				finally
-				{
-					reporter.Complete();
-					CleanupExecution(executionId, activeExecutions, activeExecutionInfos, cts);
-				}
-			}, CancellationToken.None);
+		ChildOrchestrationHandle handle;
+		try
+		{
+			handle = await launcher.LaunchAsync(request, cancellationToken);
+		}
+		catch (ChildOrchestrationLaunchException ex)
+		{
+			return JsonSerializer.Serialize(new { error = ex.Message }, s_jsonOptions);
+		}
 
+		if (!isSync)
+		{
 			return JsonSerializer.Serialize(new
 			{
-				executionId,
-				orchestrationId,
-				orchestrationName = orchestration.Name,
+				executionId = handle.ExecutionId,
+				orchestrationId = handle.OrchestrationId,
+				orchestrationName = handle.OrchestrationName,
 				mode = "async",
 				status = "started",
 				message = "Orchestration started. Use get_orchestration_status to check progress.",
 				metadata = parsedMetadata,
 			}, s_jsonOptions);
 		}
+
+		// Sync: await the run to completion. The launcher handles cleanup; we just translate
+		// the result into the historical JSON response shape that external MCP clients expect.
+		var result = await handle.Completion;
+
+		if (result.TimedOut)
+		{
+			return JsonSerializer.Serialize(new
+			{
+				executionId = handle.ExecutionId,
+				orchestrationId = handle.OrchestrationId,
+				mode = "sync",
+				status = "timeout",
+				error = result.ErrorMessage ?? $"Orchestration did not complete within {timeoutSeconds} seconds.",
+			}, s_jsonOptions);
+		}
+
+		if (result.OrchestrationResult is null)
+		{
+			// Engine threw before producing a result
+			return JsonSerializer.Serialize(new
+			{
+				executionId = handle.ExecutionId,
+				orchestrationId = handle.OrchestrationId,
+				mode = "sync",
+				status = "error",
+				error = result.ErrorMessage ?? "Orchestration ended without producing a result.",
+			}, s_jsonOptions);
+		}
+
+		var orch = result.OrchestrationResult;
+		return JsonSerializer.Serialize(new
+		{
+			executionId = handle.ExecutionId,
+			orchestrationId = handle.OrchestrationId,
+			orchestrationName = handle.OrchestrationName,
+			mode = "sync",
+			status = orch.Status.ToString().ToLowerInvariant(),
+			completionReason = orch.CompletionReason,
+			stepResults = orch.StepResults.ToDictionary(
+				kvp => kvp.Key,
+				kvp => new
+				{
+					status = kvp.Value.Status.ToString().ToLowerInvariant(),
+					content = TruncateContent(kvp.Value.Content, 4000),
+				}),
+			summary = TruncateContent(result.FinalContent, 8000),
+			metadata = parsedMetadata,
+		}, s_jsonOptions);
 	}
 
 	[McpServerTool(Name = "get_orchestration_status"), Description(
@@ -434,6 +278,13 @@ public sealed class DataPlaneTools
 							errorMessage = kvp.Value.ErrorMessage,
 						}),
 					summary = TruncateContent(run.FinalContent, 4000),
+					nesting = run.ParentExecutionId is not null || run.NestingDepth > 0 ? new
+					{
+						parentExecutionId = run.ParentExecutionId,
+						parentStepName = run.ParentStepName,
+						rootExecutionId = run.RootExecutionId,
+						depth = run.NestingDepth,
+					} : null,
 				}, s_jsonOptions);
 			}
 
@@ -502,22 +353,6 @@ public sealed class DataPlaneTools
 		if (content is null) return null;
 		if (content.Length <= maxLength) return content;
 		return content[..maxLength] + "... (truncated)";
-	}
-
-	private static void CleanupExecution(
-		string executionId,
-		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
-		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
-		CancellationTokenSource cts)
-	{
-		_ = Task.Run(async () =>
-		{
-			// Keep the execution info around briefly so status queries can find it
-			await Task.Delay(TimeSpan.FromSeconds(30));
-			activeExecutions.TryRemove(executionId, out _);
-			activeExecutionInfos.TryRemove(executionId, out _);
-			cts.Dispose();
-		});
 	}
 
 	private static readonly JsonSerializerOptions s_jsonOptions = new()

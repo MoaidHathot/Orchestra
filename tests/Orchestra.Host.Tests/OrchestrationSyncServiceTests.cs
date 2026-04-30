@@ -53,6 +53,7 @@ public class OrchestrationSyncServiceTests : IDisposable
 			runsDir: runsDir,
 			runStore: null!,
 			checkpointStore: null!,
+			launcher: null!,
 			dataPath: _dataPath);
 
 		_profileStore = new ProfileStore(_dataPath, NullLogger<ProfileStore>.Instance);

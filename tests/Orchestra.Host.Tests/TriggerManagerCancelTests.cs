@@ -39,7 +39,8 @@ public class TriggerManagerCancelTests
 			logger: logger,
 			runsDir: runsDir,
 			runStore: null!, // Not needed for cancel tests
-			checkpointStore: null! // Not needed for cancel tests
+			checkpointStore: null!, // Not needed for cancel tests
+			launcher: null! // Not needed for cancel tests
 		);
 	}
 

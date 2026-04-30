@@ -688,6 +688,54 @@ public class OrchestrationParserTests
 		remote.Endpoint.Should().Be("https://api.example.com/mcp");
 		remote.Headers.Should().ContainKey("Authorization");
 		remote.Headers["Authorization"].Should().Be("Bearer token123");
+		remote.Timeout.Should().BeNull("timeout is optional");
+	}
+
+	[Fact]
+	public void ParseMcps_RemoteMcp_TimeoutSeconds_ParsesIntoTimeSpan()
+	{
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "long-running",
+						"type": "remote",
+						"endpoint": "https://api.example.com/mcp",
+						"timeoutSeconds": 14400
+					}
+				]
+			}
+			""";
+
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		var remote = mcps.OfType<RemoteMcp>().Single();
+		remote.Timeout.Should().NotBeNull();
+		remote.Timeout!.Value.Should().Be(TimeSpan.FromSeconds(14400));
+	}
+
+	[Fact]
+	public void ParseMcps_LocalMcp_TimeoutSeconds_ParsesIntoTimeSpan()
+	{
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "local-tool",
+						"type": "local",
+						"command": "node",
+						"arguments": ["server.js"],
+						"timeoutSeconds": 600
+					}
+				]
+			}
+			""";
+
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		var local = mcps.OfType<LocalMcp>().Single();
+		local.Timeout.Should().NotBeNull();
+		local.Timeout!.Value.Should().Be(TimeSpan.FromMinutes(10));
 	}
 
 	#endregion

@@ -584,6 +584,14 @@ public partial class CopilotAgent : IAgent
 
 		foreach (var mcp in mcps)
 		{
+			// Optional per-server tool-call timeout (in milliseconds for the SDK).
+			// When set on the YAML 'mcps' entry as 'timeoutSeconds', this overrides the SDK's
+			// default ~3-minute MCP request timeout. Use this for long-running tools such as
+			// orchestra MCP's invoke_orchestration in sync mode.
+			int? timeoutMs = mcp.Timeout is { TotalMilliseconds: > 0 } ts
+				? (int)Math.Min(int.MaxValue, ts.TotalMilliseconds)
+				: null;
+
 			switch (mcp)
 			{
 				case LocalMcp local:
@@ -593,6 +601,7 @@ public partial class CopilotAgent : IAgent
 						Args = [.. local.Arguments],
 						Cwd = local.WorkingDirectory,
 						Tools = ["*"],
+						Timeout = timeoutMs,
 					};
 					break;
 
@@ -602,6 +611,7 @@ public partial class CopilotAgent : IAgent
 						Url = remote.Endpoint,
 						Headers = remote.Headers,
 						Tools = ["*"],
+						Timeout = timeoutMs,
 					};
 					break;
 			}

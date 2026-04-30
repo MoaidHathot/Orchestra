@@ -63,7 +63,8 @@ public class OrchestrationsApiTests : IDisposable
 			logger: new NullLogger<TriggerManager>(),
 			runsDir: _runsDir,
 			runStore: null!,
-			checkpointStore: null!
+			checkpointStore: null!,
+			launcher: null!
 		);
 
 		var host = new HostBuilder()

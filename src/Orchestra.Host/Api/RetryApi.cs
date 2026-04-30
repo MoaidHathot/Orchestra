@@ -48,6 +48,7 @@ public static partial class RetryApi
 			EngineToolRegistry engineToolRegistry,
 			McpManager mcpManager,
 			IOrchestrationReporterFactory reporterFactory,
+			IChildOrchestrationLauncher childLauncher,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 			DashboardEventBroadcaster dashboardBroadcaster) =>
@@ -160,6 +161,7 @@ public static partial class RetryApi
 				checkpointStore: checkpointStore,
 				engineToolRegistry: engineToolRegistry,
 				mcpResolver: mcpManager,
+				childLauncher: childLauncher,
 				globalHooks: hostOptions.Hooks,
 				dataPath: hostOptions.DataPath,
 				serverUrl: hostOptions.HostBaseUrl);

@@ -134,6 +134,7 @@ public class EngineToolRegistryDiTests
 				runsDir: runsDir,
 				runStore: null!,
 				checkpointStore: null!,
+				launcher: null!,
 				engineToolRegistry: registry,
 				dataPath: tempDir);
 
@@ -168,6 +169,7 @@ public class EngineToolRegistryDiTests
 				runsDir: runsDir,
 				runStore: null!,
 				checkpointStore: null!,
+				launcher: null!,
 				dataPath: tempDir);
 
 			// Assert

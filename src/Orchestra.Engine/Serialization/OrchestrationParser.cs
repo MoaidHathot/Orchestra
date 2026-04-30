@@ -14,7 +14,8 @@ public static class OrchestrationParser
 		.Register(new HttpStepTypeParser())
 		.Register(new TransformStepTypeParser())
 		.Register(new CommandStepTypeParser())
-		.Register(new ScriptStepTypeParser());
+		.Register(new ScriptStepTypeParser())
+		.Register(new OrchestrationStepTypeParser());
 
 	private static readonly StepParseContext s_defaultContext = new(BaseDirectory: null);
 
@@ -31,7 +32,8 @@ public static class OrchestrationParser
 			.Register(new HttpStepTypeParser())
 			.Register(new TransformStepTypeParser())
 			.Register(new CommandStepTypeParser())
-			.Register(new ScriptStepTypeParser());
+			.Register(new ScriptStepTypeParser())
+			.Register(new OrchestrationStepTypeParser());
 	}
 
 	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry, StepParseContext context)
@@ -234,6 +236,16 @@ public static class OrchestrationParser
 
 			var name = root.GetProperty("name").GetString()!;
 
+			// Optional per-server timeout (seconds). Allows YAML authors to configure long
+			// timeouts for MCP servers that host long-running tools (e.g., orchestra MCP's
+			// invoke_orchestration in sync mode).
+			TimeSpan? timeout = null;
+			if (root.TryGetProperty("timeoutSeconds", out var ts) && ts.ValueKind == JsonValueKind.Number)
+			{
+				var seconds = ts.GetDouble();
+				if (seconds > 0) timeout = TimeSpan.FromSeconds(seconds);
+			}
+
 			return type switch
 			{
 				McpType.Local => new LocalMcp
@@ -245,6 +257,7 @@ public static class OrchestrationParser
 						? args.EnumerateArray().Select(e => e.GetString()!).ToArray()
 						: [],
 					WorkingDirectory = root.TryGetProperty("workingDirectory", out var wd) ? wd.GetString() : null,
+					Timeout = timeout,
 				},
 				McpType.Remote => new RemoteMcp
 				{
@@ -254,6 +267,7 @@ public static class OrchestrationParser
 					Headers = root.TryGetProperty("headers", out var headers)
 						? headers.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!)
 						: [],
+					Timeout = timeout,
 				},
 				_ => throw new JsonException($"Unknown MCP type: '{type}'."),
 			};

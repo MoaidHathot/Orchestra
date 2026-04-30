@@ -296,13 +296,24 @@ public partial class ProfileManager : BackgroundService
 		var nowActive = newSet.Except(previousSet).ToArray();
 		var nowInactive = previousSet.Except(newSet).ToArray();
 
-		if (nowActive.Length == 0 && nowInactive.Length == 0)
+		var hasOrchestrationDiff = nowActive.Length > 0 || nowInactive.Length > 0;
+		var profileTransitioned = profileIdChanged is not null && activated.HasValue;
+
+		// Always notify when a profile's IsActive flipped, even if the resulting effective
+		// orchestration ID set didn't change (e.g. another active profile already covers
+		// the same orchestrations, or the profile filter matches nothing). The dashboard
+		// UI relies on this notification to refresh the profile selector's IsActive flags.
+		if (!hasOrchestrationDiff && !profileTransitioned)
 			return;
 
-		LogEffectiveActiveSetChanged(nowActive.Length, nowInactive.Length, trigger);
+		if (hasOrchestrationDiff)
+		{
+			LogEffectiveActiveSetChanged(nowActive.Length, nowInactive.Length, trigger);
+		}
 
-		// Record history for the profile that changed
-		if (profileIdChanged is not null)
+		// Record history for the profile that changed (only when there was an actual diff;
+		// no-diff transitions don't add meaningful orchestration-level history).
+		if (profileIdChanged is not null && hasOrchestrationDiff)
 		{
 			_store.AppendHistory(profileIdChanged, new ProfileHistoryEntry
 			{

@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Registry;
+using Orchestra.Host.Services;
 
 namespace Orchestra.Host.Triggers;
 
@@ -34,6 +35,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly string? _defaultModel;
 	private readonly HookDefinition[] _globalHooks;
 	private readonly JsonSerializerOptions _jsonOptions;
+	private readonly IChildOrchestrationLauncher _launcher;
 
 	/// <summary>
 	/// Tracks all fire-and-forget tasks so they can be awaited during shutdown.
@@ -62,6 +64,7 @@ public partial class TriggerManager : BackgroundService
 		string runsDir,
 		IRunStore runStore,
 		ICheckpointStore checkpointStore,
+		IChildOrchestrationLauncher launcher,
 		ITriggerExecutionCallback? executionCallback = null,
 		EngineToolRegistry? engineToolRegistry = null,
 		IMcpResolver? mcpResolver = null,
@@ -80,6 +83,7 @@ public partial class TriggerManager : BackgroundService
 		_triggersDir = Path.Combine(Path.GetDirectoryName(runsDir)!, "triggers");
 		_runStore = runStore;
 		_checkpointStore = checkpointStore;
+		_launcher = launcher;
 		_executionCallback = executionCallback;
 		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 		_mcpResolver = mcpResolver;
@@ -381,7 +385,7 @@ public partial class TriggerManager : BackgroundService
 		var executionId = checkpoint.RunId;
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl);
+		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, childLauncher: _launcher, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl);
 
 		using var cts = new CancellationTokenSource();
 		_activeExecutions[executionId] = cts;
@@ -774,8 +778,9 @@ public partial class TriggerManager : BackgroundService
 	}
 
 	/// <summary>
-	/// Shared execution logic: sets up trigger state, parses orchestration,
-	/// transforms parameters via input handler, executes, persists history, and cleans up.
+	/// Shared execution logic: sets up trigger state, transforms parameters via input handler,
+	/// delegates execution to <see cref="IChildOrchestrationLauncher"/>, persists trigger-side
+	/// history, and cleans up trigger bookkeeping.
 	/// </summary>
 	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationCoreAsync(
 		TriggerRegistration reg,
@@ -786,215 +791,78 @@ public partial class TriggerManager : BackgroundService
 		reg.IncrementRunCount();
 		reg.LastError = null;
 
-		var executionId = Guid.NewGuid().ToString("N")[..12];
-		reg.ActiveExecutionId = executionId;
+		LogTriggerFiring(reg.Id, reg.OrchestrationPath, "(launcher-assigned)", reg.RunCount);
 
-		LogTriggerFiring(reg.Id, reg.OrchestrationPath, executionId, reg.RunCount);
-
-		try
+		// ── Input Handler Prompt: transform raw parameters via LLM ──
+		// Invoked by the engine inside the run scope so the input-handler agent shares the
+		// orchestration's CLI process. Wrapping here keeps the LLM-driven parameter transform
+		// out of the launcher's responsibilities.
+		Func<CancellationToken, Task<Dictionary<string, string>?>>? inputHandlerTransform = null;
+		if (!string.IsNullOrWhiteSpace(reg.Config.InputHandlerPrompt) && parameters is { Count: > 0 })
 		{
-			// Parse orchestration (global MCPs available via GlobalMcps property)
-			var orchestration = OrchestrationParser.ParseOrchestrationFile(reg.OrchestrationPath, GlobalMcps);
-			var schedule = _scheduler.Schedule(orchestration);
-
-			// ── Input Handler Prompt: transform raw parameters via LLM ──
-			// This delegate is invoked by OrchestrationExecutor INSIDE its run scope so the
-			// input-handler agent build shares the orchestration's CLI process (it gets its
-			// own SDK session, not its own CLI subprocess). This preserves the
-			// one-CLI-process-per-orchestration invariant.
-			Func<CancellationToken, Task<Dictionary<string, string>?>>? inputHandlerTransform = null;
-			if (!string.IsNullOrWhiteSpace(reg.Config.InputHandlerPrompt) && parameters is { Count: > 0 })
+			var capturedParameters = parameters;
+			var capturedReg = reg;
+			inputHandlerTransform = async ct =>
 			{
-				var capturedParameters = parameters;
-				inputHandlerTransform = async ct =>
-				{
-					try
-					{
-						var rawInputJson = JsonSerializer.Serialize(capturedParameters, _jsonOptions);
-						var fullPrompt = $"{reg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
-
-						var agent = await _agentBuilder
-							.BuildAgentAsync(new AgentBuildConfig
-							{
-								Model = reg.Config.InputHandlerModel ?? _defaultModel ?? "claude-opus-4.6",
-								SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
-								Mcps = [],
-							}, ct);
-
-						var task = agent.SendAsync(fullPrompt);
-						var result = await task.GetResultAsync();
-
-						var content = result.Content.Trim();
-						if (content.StartsWith("```"))
-						{
-							var firstNewline = content.IndexOf('\n');
-							if (firstNewline >= 0) content = content[(firstNewline + 1)..];
-							if (content.EndsWith("```")) content = content[..^3].TrimEnd();
-						}
-
-						var transformed = JsonSerializer.Deserialize<Dictionary<string, string>>(content, _jsonOptions);
-						if (transformed is { Count: > 0 })
-						{
-							LogInputHandlerTransformed(reg.Id, capturedParameters.Count, transformed.Count);
-							return transformed;
-						}
-						return null;
-					}
-					catch (Exception ex)
-					{
-						LogInputHandlerFailed(ex, reg.Id);
-						return null;
-					}
-				};
-			}
-
-			// Create executor with reporter
-			var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-			var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl);
-
-			using var cts = new CancellationTokenSource();
-			_activeExecutions[executionId] = cts;
-
-			// Track in activeExecutionInfos for UI visibility
-			var executionInfo = new ActiveExecutionInfo
-			{
-				ExecutionId = executionId,
-				OrchestrationId = reg.Id,
-				OrchestrationName = orchestration.Name,
-				StartedAt = DateTimeOffset.UtcNow,
-				TriggeredBy = reg.Config.Type.ToString().ToLowerInvariant(),
-				CancellationTokenSource = cts,
-				Reporter = reporter,
-				Parameters = parameters,
-				TotalSteps = orchestration.Steps.Length
-			};
-			_activeExecutionInfos[executionId] = executionInfo;
-
-			// Notify callback that execution has started (allows it to set up reporter callbacks)
-			_executionCallback?.OnExecutionStarted(executionInfo);
-
-			OrchestrationResult? executionResult = null;
-			try
-			{
-				// Wrap the input handler so it also updates executionInfo.Parameters with the
-				// transformed values when the executor invokes it (otherwise the UI would
-				// keep showing the pre-transform raw input).
-				Func<CancellationToken, Task<Dictionary<string, string>?>>? executorTransform = null;
-				if (inputHandlerTransform is not null)
-				{
-					executorTransform = async ct =>
-					{
-						var transformed = await inputHandlerTransform(ct).ConfigureAwait(false);
-						if (transformed is not null)
-						{
-							executionInfo.Parameters = transformed;
-						}
-						return transformed;
-					};
-				}
-
-				var orchResult = await executor.ExecuteAsync(
-					orchestration,
-					parameters,
-					triggerId: reg.Id,
-					preExecutionParameterTransform: executorTransform,
-					cancellationToken: cts.Token);
-				executionResult = orchResult;
-
-				// Send terminal SSE events so attached clients see real-time completion.
-				// This mirrors what ExecutionApi does for manual SSE-based executions.
-				if (reporter is SseReporter sseReporter)
-				{
-					if (orchResult.Status == ExecutionStatus.Cancelled)
-					{
-						sseReporter.ReportOrchestrationCancelled();
-					}
-					else
-					{
-						foreach (var (stepName, stepResult) in orchResult.StepResults)
-						{
-							if (stepResult.Status == ExecutionStatus.Succeeded)
-								sseReporter.ReportStepOutput(stepName, stepResult.Content);
-						}
-						sseReporter.ReportOrchestrationDone(orchResult);
-					}
-				}
-
-				// Persist history
 				try
 				{
-					var historyEntry = new
-					{
-						id = executionId,
-						orchestrationName = orchestration.Name,
-						orchestrationDescription = orchestration.Description,
-						orchestrationVersion = orchestration.Version,
-						orchestrationPath = reg.OrchestrationPath,
-						triggerId = reg.Id,
-						triggerType = reg.Config.Type.ToString(),
-						startedAt = reg.LastFireTime?.ToString("o"),
-						status = orchResult.Status.ToString(),
-						stepCount = orchestration.Steps.Length,
-						results = orchResult.StepResults.ToDictionary(
-							kv => kv.Key,
-							kv => new
-							{
-								status = kv.Value.Status.ToString(),
-								content = kv.Value.Content,
-								error = kv.Value.ErrorMessage,
-							}),
-					};
-					var historyJson = JsonSerializer.Serialize(historyEntry, _jsonOptions);
-					var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
-					await File.WriteAllTextAsync(historyPath, historyJson);
-				}
-				catch (Exception ex) { LogHistoryPersistFailed(executionId, ex); }
+					var rawInputJson = JsonSerializer.Serialize(capturedParameters, _jsonOptions);
+					var fullPrompt = $"{capturedReg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
-				return (executionId, orchResult);
-			}
-			catch (OperationCanceledException)
-			{
-				if (reporter is SseReporter cancelSseReporter)
-					cancelSseReporter.ReportOrchestrationCancelled();
-				throw;
-			}
-			catch (Exception ex)
-			{
-				if (reporter is SseReporter errorSseReporter)
+					var agent = await _agentBuilder
+						.BuildAgentAsync(new AgentBuildConfig
+						{
+							Model = capturedReg.Config.InputHandlerModel ?? _defaultModel ?? "claude-opus-4.6",
+							SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
+							Mcps = [],
+						}, ct);
+
+					var task = agent.SendAsync(fullPrompt);
+					var result = await task.GetResultAsync();
+
+					var content = result.Content.Trim();
+					if (content.StartsWith("```"))
+					{
+						var firstNewline = content.IndexOf('\n');
+						if (firstNewline >= 0) content = content[(firstNewline + 1)..];
+						if (content.EndsWith("```")) content = content[..^3].TrimEnd();
+					}
+
+					var transformed = JsonSerializer.Deserialize<Dictionary<string, string>>(content, _jsonOptions);
+					if (transformed is { Count: > 0 })
+					{
+						LogInputHandlerTransformed(capturedReg.Id, capturedParameters.Count, transformed.Count);
+						return transformed;
+					}
+					return null;
+				}
+				catch (Exception ex)
 				{
-					errorSseReporter.ReportStepError("orchestration", ex.Message);
-					errorSseReporter.ReportOrchestrationError(ex.Message);
+					LogInputHandlerFailed(ex, capturedReg.Id);
+					return null;
 				}
-				throw;
-			}
-			finally
-			{
-				// Complete the SSE reporter so attached clients' streams terminate.
-				if (reporter is SseReporter completeSseReporter)
-					completeSseReporter.Complete();
+			};
+		}
 
-				_activeExecutions.TryRemove(executionId, out _);
-				// Update status and notify callback
-				if (_activeExecutionInfos.TryGetValue(executionId, out var info))
-				{
-					info.Status = executionResult?.Status switch
-					{
-						ExecutionStatus.Cancelled => HostExecutionStatus.Cancelled,
-						ExecutionStatus.Failed => HostExecutionStatus.Failed,
-						_ => HostExecutionStatus.Completed
-					};
-					_executionCallback?.OnExecutionCompleted(info);
+		// Custom reporter from the execution callback (defaults to NullOrchestrationReporter when unset)
+		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
 
-					// Remove after a short delay — tracked for graceful shutdown
-					TrackBackgroundTask(Task.Run(async () =>
-					{
-						await Task.Delay(5000);
-						_activeExecutionInfos.TryRemove(executionId, out _);
-					}));
-				}
-				reg.LastExecutionId = executionId;
-				reg.ActiveExecutionId = null;
-			}
+		var request = new ChildLaunchRequest
+		{
+			OrchestrationId = reg.Id,
+			OrchestrationPath = reg.OrchestrationPath, // Triggers carry their own path (independent of registry)
+			Parameters = parameters,
+			Mode = ChildLaunchMode.Sync,
+			TriggeredBy = reg.Config.Type.ToString().ToLowerInvariant(),
+			TriggerId = reg.Id,
+			Reporter = reporter,
+			PreExecutionParameterTransform = inputHandlerTransform,
+		};
+
+		ChildOrchestrationHandle handle;
+		try
+		{
+			handle = await _launcher.LaunchAsync(request);
 		}
 		catch (Exception ex)
 		{
@@ -1004,6 +872,75 @@ public partial class TriggerManager : BackgroundService
 			LogOrchestrationExecutionFailed(ex, reg.Id);
 			return (null, null);
 		}
+
+		var executionId = handle.ExecutionId;
+		reg.ActiveExecutionId = executionId;
+
+		// Notify the callback that the execution has started so it can wire reporter
+		// callbacks to refresh the dashboard / Portal.
+		if (_activeExecutionInfos.TryGetValue(executionId, out var infoForCallback))
+		{
+			_executionCallback?.OnExecutionStarted(infoForCallback);
+		}
+
+		ChildOrchestrationResult? terminalResult = null;
+		try
+		{
+			terminalResult = await handle.Completion;
+		}
+		catch (Exception ex)
+		{
+			// handle.Completion does not throw in the current launcher implementation, but
+			// we defensively log if a future implementation begins to.
+			reg.Status = TriggerStatus.Error;
+			reg.LastError = ex.Message;
+			reg.ActiveExecutionId = null;
+			LogOrchestrationExecutionFailed(ex, reg.Id);
+			return (executionId, null);
+		}
+
+		var orchResult = terminalResult.OrchestrationResult;
+
+		// Persist trigger-side history JSON sidecar (separate from engine's IRunStore).
+		try
+		{
+			var historyEntry = new
+			{
+				id = executionId,
+				orchestrationName = handle.OrchestrationName,
+				orchestrationDescription = (string?)null,
+				orchestrationVersion = (string?)null,
+				orchestrationPath = reg.OrchestrationPath,
+				triggerId = reg.Id,
+				triggerType = reg.Config.Type.ToString(),
+				startedAt = reg.LastFireTime?.ToString("o"),
+				status = (orchResult?.Status ?? terminalResult.Status).ToString(),
+				stepCount = orchResult?.StepResults.Count ?? 0,
+				results = orchResult?.StepResults.ToDictionary(
+					kv => kv.Key,
+					kv => new
+					{
+						status = kv.Value.Status.ToString(),
+						content = kv.Value.Content,
+						error = kv.Value.ErrorMessage,
+					}),
+			};
+			var historyJson = JsonSerializer.Serialize(historyEntry, _jsonOptions);
+			var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
+			await File.WriteAllTextAsync(historyPath, historyJson);
+		}
+		catch (Exception ex) { LogHistoryPersistFailed(executionId, ex); }
+
+		// Notify completion callback after the launcher has updated executionInfo.Status.
+		if (_activeExecutionInfos.TryGetValue(executionId, out var infoForComplete))
+		{
+			_executionCallback?.OnExecutionCompleted(infoForComplete);
+		}
+
+		reg.LastExecutionId = executionId;
+		reg.ActiveExecutionId = null;
+
+		return (executionId, orchResult);
 	}
 
 	/// <summary>

@@ -297,6 +297,10 @@ public static class RunsApi
 				isIncomplete = record.IsIncomplete,
 				retriedFromRunId = record.RetriedFromRunId,
 				retryMode = record.RetryMode,
+				parentExecutionId = record.ParentExecutionId,
+				parentStepName = record.ParentStepName,
+				rootExecutionId = record.RootExecutionId,
+				nestingDepth = record.NestingDepth,
 				parameters = record.Parameters,
 				finalContent = record.FinalContent,
 				totalUsage = record.TotalUsage is { } tu ? new

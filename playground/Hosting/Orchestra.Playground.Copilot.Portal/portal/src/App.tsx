@@ -354,6 +354,13 @@ function App(): React.JSX.Element {
   // Subscribe to the backend dashboard-events SSE stream so the UI reflects changes
   // driven by schedulers / triggers immediately, without waiting for the next poll.
   useDashboardEvents({
+    onConnected: () => {
+      // The SSE stream just (re)connected. Any state changes that happened while we were
+      // disconnected (network blip, server restart, sleep/wake) were not delivered. Do a
+      // full re-sync of the profile selector so its IsActive flags don't go stale.
+      loadProfiles();
+      refreshOrchestrations();
+    },
     onProfileActiveSetChanged: () => {
       // A profile's active state flipped (scheduled transition, manual toggle from another
       // tab/client). Refresh profiles (for the "Active Orchestrations" dropdown) and
@@ -377,6 +384,19 @@ function App(): React.JSX.Element {
       refreshHistory();
     },
   });
+
+  // Defense-in-depth polling fallback for /api/profiles.
+  // SSE is the primary update mechanism, but if a `profile-active-set-changed` event is
+  // ever missed (reconnect race, suppressed emission, transient backend hiccup), the
+  // selector's IsActive flags would otherwise stay stale until the next manual refresh.
+  // A low-frequency periodic reload is sufficient to self-heal without significant load.
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (!serverReachableRef.current) return;
+      loadProfiles();
+    }, 30_000);
+    return () => clearInterval(interval);
+  }, [loadProfiles]);
 
   // Reload data when coming back online
   useEffect(() => {

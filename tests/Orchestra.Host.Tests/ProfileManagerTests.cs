@@ -336,6 +336,60 @@ public class ProfileManagerTests : IDisposable
 		receivedEvent!.DeactivatedOrchestrationIds.Should().Contain(orchId);
 	}
 
+	[Fact]
+	public void ActivateProfile_WhenAnotherProfileAlreadyCoversSameOrchestrations_StillEmitsChangeEvent()
+	{
+		// Regression: previously RecomputeEffectiveActiveSet short-circuited when the
+		// effective orchestration ID set didn't change between recomputations, even
+		// though Profile.IsActive had flipped. The dashboard's profile selector relies
+		// on this notification to refresh its IsActive flags, so the event must fire
+		// whenever a profile actually transitions — even if no orchestration moved
+		// between active/inactive.
+		var mgr = CreateManager();
+		RegisterOrchestration("Shared Orch", ["test"]);
+
+		// Profile A is already active and covers the orchestration.
+		var profileA = mgr.CreateProfile("A", null, new ProfileFilter { Tags = ["test"] });
+		mgr.ActivateProfile(profileA!.Id);
+
+		// Profile B has the same filter, so activating it doesn't change the effective
+		// orchestration ID set (still the same single orchestration).
+		var profileB = mgr.CreateProfile("B", null, new ProfileFilter { Tags = ["test"] });
+
+		EffectiveActiveSetChangedEvent? receivedEvent = null;
+		mgr.OnEffectiveActiveSetChanged += evt => receivedEvent = evt;
+
+		mgr.ActivateProfile(profileB!.Id);
+
+		receivedEvent.Should().NotBeNull("the profile selector needs to refresh even when no orchestration ID moved");
+		receivedEvent!.ActivatedOrchestrationIds.Should().BeEmpty();
+		receivedEvent.DeactivatedOrchestrationIds.Should().BeEmpty();
+		mgr.GetProfile(profileB.Id)!.IsActive.Should().BeTrue();
+	}
+
+	[Fact]
+	public void DeactivateProfile_WhenAnotherProfileStillCoversSameOrchestrations_StillEmitsChangeEvent()
+	{
+		var mgr = CreateManager();
+		RegisterOrchestration("Shared Orch", ["test"]);
+
+		var profileA = mgr.CreateProfile("A", null, new ProfileFilter { Tags = ["test"] });
+		var profileB = mgr.CreateProfile("B", null, new ProfileFilter { Tags = ["test"] });
+		mgr.ActivateProfile(profileA!.Id);
+		mgr.ActivateProfile(profileB!.Id);
+
+		EffectiveActiveSetChangedEvent? receivedEvent = null;
+		mgr.OnEffectiveActiveSetChanged += evt => receivedEvent = evt;
+
+		// Deactivating B leaves the effective set unchanged (A still covers it).
+		mgr.DeactivateProfile(profileB.Id);
+
+		receivedEvent.Should().NotBeNull();
+		receivedEvent!.ActivatedOrchestrationIds.Should().BeEmpty();
+		receivedEvent.DeactivatedOrchestrationIds.Should().BeEmpty();
+		mgr.GetProfile(profileB.Id)!.IsActive.Should().BeFalse();
+	}
+
 	// ── Default Profile ──
 
 	[Fact]

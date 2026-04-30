@@ -7,9 +7,11 @@ using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Mcp;
+using Orchestra.Host.McpServer;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
+using Orchestra.Host.Services;
 using Orchestra.Host.Triggers;
 using Orchestra.ProcessHost;
 
@@ -156,6 +158,17 @@ public static class ServiceCollectionExtensions
 		// McpManager: manages globally shared MCP servers from orchestra.mcp.json
 		services.AddSingleton<McpManager>();
 
+		// McpServerOptions: a default registration so the launcher can resolve it even when
+		// the consumer hasn't called AddMcpServer. AddMcpServer (if called) registers its own
+		// configured instance, which wins because AddSingleton wins by last-registration.
+		services.TryAddSingleton<McpServerOptions>();
+
+		// ChildOrchestrationLauncher: centralized in-process child orchestration launcher.
+		// Used by DataPlaneTools.InvokeOrchestration, TriggerManager, and the manual SSE run
+		// endpoint to share a single code path for execution-id generation, nesting, cancellation
+		// linking, and ActiveExecutionInfo registration.
+		services.AddSingleton<IChildOrchestrationLauncher, ChildOrchestrationLauncher>();
+
 		// ServiceManager: manages external processes and hooks from orchestra.services.json
 		services.AddSingleton<ProcessTracker>(sp =>
 		{
@@ -215,6 +228,7 @@ public static class ServiceCollectionExtensions
 				runsPath,
 				sp.GetRequiredService<IRunStore>(),
 				sp.GetRequiredService<ICheckpointStore>(),
+				sp.GetRequiredService<IChildOrchestrationLauncher>(),
 				sp.GetRequiredService<ITriggerExecutionCallback>(),
 				sp.GetRequiredService<EngineToolRegistry>(),
 				mcpResolver: sp.GetRequiredService<McpManager>(),

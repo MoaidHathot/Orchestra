@@ -79,6 +79,7 @@ public static partial class TemplateResolver
 				WorkingDirectory = local.WorkingDirectory is not null
 					? ResolveStatic(local.WorkingDirectory, parameters, context)
 					: null,
+				Timeout = local.Timeout,
 			},
 			RemoteMcp remote => new RemoteMcp
 			{
@@ -87,6 +88,7 @@ public static partial class TemplateResolver
 				Endpoint = ResolveStatic(remote.Endpoint, parameters, context),
 				Headers = remote.Headers
 					.ToDictionary(h => h.Key, h => ResolveStatic(h.Value, parameters, context)),
+				Timeout = remote.Timeout,
 			},
 			_ => mcp, // Unknown subtype — return as-is
 		};

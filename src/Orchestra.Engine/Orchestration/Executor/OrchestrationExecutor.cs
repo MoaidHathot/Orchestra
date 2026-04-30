@@ -29,6 +29,7 @@ public partial class OrchestrationExecutor
 		StepExecutorRegistry? stepExecutorRegistry = null,
 		EngineToolRegistry? engineToolRegistry = null,
 		IMcpResolver? mcpResolver = null,
+		IChildOrchestrationLauncher? childLauncher = null,
 		HookDefinition[]? globalHooks = null,
 		string? dataPath = null,
 		string? serverUrl = null)
@@ -59,6 +60,17 @@ public partial class OrchestrationExecutor
 				.Register(new TransformStepExecutor(loggerFactory.CreateLogger<TransformStepExecutor>()))
 				.Register(new CommandStepExecutor(reporter, loggerFactory.CreateLogger<CommandStepExecutor>()))
 				.Register(new ScriptStepExecutor(reporter, loggerFactory.CreateLogger<ScriptStepExecutor>()));
+
+			// Only register the Orchestration step executor when a launcher is supplied;
+			// without one there is no way to invoke child orchestrations.
+			if (childLauncher is not null)
+			{
+				_stepExecutorRegistry.Register(new OrchestrationStepExecutor(
+					childLauncher,
+					agentBuilder,
+					reporter,
+					loggerFactory.CreateLogger<OrchestrationStepExecutor>()));
+			}
 		}
 	}
 
@@ -68,6 +80,8 @@ public partial class OrchestrationExecutor
 		string? triggerId = null,
 		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform = null,
 		RetryMetadata? retryMetadata = null,
+		ParentExecutionContext? parentContext = null,
+		string? executionIdOverride = null,
 		CancellationToken cancellationToken = default)
 	{
 		LogStartingOrchestration(orchestration.Name);
@@ -96,7 +110,7 @@ public partial class OrchestrationExecutor
 
 		try
 		{
-			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform, retryMetadata: retryMetadata);
+			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform, retryMetadata: retryMetadata, parentContext: parentContext, executionIdOverride: executionIdOverride);
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -117,9 +131,11 @@ public partial class OrchestrationExecutor
 		CancellationToken externalCancellationToken,
 		CheckpointData? checkpoint = null,
 		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform = null,
-		RetryMetadata? retryMetadata = null)
+		RetryMetadata? retryMetadata = null,
+		ParentExecutionContext? parentContext = null,
+		string? executionIdOverride = null)
 	{
-		var runId = retryMetadata?.OverrideRunId ?? checkpoint?.RunId ?? Guid.NewGuid().ToString("N")[..12];
+		var runId = retryMetadata?.OverrideRunId ?? checkpoint?.RunId ?? executionIdOverride ?? Guid.NewGuid().ToString("N")[..12];
 		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
 
 		// Create a run-scoped client for isolation: each orchestration run gets its own
@@ -502,6 +518,12 @@ public partial class OrchestrationExecutor
 			IsIncomplete = orchestrationResult.IsIncomplete,
 			TotalUsage = AggregateTokenUsage(stepRecords.Values),
 			HookExecutions = hookExecutions.OrderBy(h => h.StartedAt).ToArray(),
+			ParentExecutionId = parentContext?.ParentExecutionId,
+			ParentStepName = parentContext?.ParentStepName,
+			RootExecutionId = parentContext is null
+				? runId
+				: (parentContext.RootExecutionId ?? parentContext.ParentExecutionId),
+			NestingDepth = parentContext is null ? 0 : parentContext.Depth + 1,
 			Context = new RunContext
 			{
 				RunId = runId,

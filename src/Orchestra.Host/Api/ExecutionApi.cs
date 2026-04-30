@@ -10,6 +10,7 @@ using Orchestra.Host.Hosting;
 using Orchestra.Host.Mcp;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Registry;
+using Orchestra.Host.Services;
 using Orchestra.Host.Triggers;
 
 namespace Orchestra.Host.Api;
@@ -30,15 +31,10 @@ public static partial class ExecutionApi
 			HttpContext httpContext,
 			string id,
 			OrchestrationRegistry registry,
-			AgentBuilder agentBuilder,
-			IScheduler scheduler,
-			ILoggerFactory loggerFactory,
+			IChildOrchestrationLauncher launcher,
 			FileSystemRunStore runStore,
-			OrchestrationHostOptions hostOptions,
-			EngineToolRegistry engineToolRegistry,
-			McpManager mcpManager,
 			IOrchestrationReporterFactory reporterFactory,
-			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
+			ILoggerFactory loggerFactory,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 			DashboardEventBroadcaster dashboardBroadcaster) =>
 		{
@@ -93,42 +89,46 @@ public static partial class ExecutionApi
 				}
 			}
 
+			// Create the reporter ourselves (rather than letting the launcher create it) so we
+			// can subscribe to its event stream BEFORE the orchestration starts emitting events.
+			// Both the early-replay and the late-future-events branches of Subscribe() then have
+			// access to the full SSE timeline.
+			var reporter = (SseReporter)reporterFactory.Create();
+
 			// Set up SSE response
 			httpContext.Response.ContentType = "text/event-stream";
 			httpContext.Response.Headers.CacheControl = "no-cache";
 			httpContext.Response.Headers.Connection = "keep-alive";
 			await httpContext.Response.Body.FlushAsync();
 
-			// Generate execution ID and create reporter
-			var executionId = Guid.NewGuid().ToString("N")[..12];
-			var reporter = (SseReporter)reporterFactory.Create();
-			var cts = new CancellationTokenSource();
+			ChildOrchestrationHandle handle;
+			try
+			{
+				handle = await launcher.LaunchAsync(new ChildLaunchRequest
+				{
+					OrchestrationId = id,
+					Parameters = parameters,
+					Mode = ChildLaunchMode.Async, // We stream SSE; do not block the request thread
+					TriggeredBy = "manual",
+					Reporter = reporter,
+				});
+			}
+			catch (ChildOrchestrationLaunchException ex)
+			{
+				httpContext.Response.StatusCode = 500;
+				httpContext.Response.ContentType = "application/problem+json";
+				await httpContext.Response.WriteAsJsonAsync(new
+				{
+					type = "https://tools.ietf.org/html/rfc7807",
+					title = "Launch Failed",
+					status = 500,
+					detail = ex.Message,
+					instance = httpContext.Request.Path.Value,
+				});
+				return;
+			}
 
-			activeExecutions[executionId] = cts;
-			var executionInfo = new ActiveExecutionInfo
-			{
-				ExecutionId = executionId,
-				OrchestrationId = id,
-				OrchestrationName = entry.Orchestration.Name,
-				StartedAt = DateTimeOffset.UtcNow,
-				TriggeredBy = "manual",
-				CancellationTokenSource = cts,
-				Reporter = reporter,
-				Parameters = parameters,
-				TotalSteps = entry.Orchestration.Steps.Length
-			};
-			activeExecutionInfos[executionId] = executionInfo;
-
-			// Set up progress callbacks
-			reporter.OnStepStarted = (stepName) =>
-			{
-				executionInfo.CurrentStep = stepName;
-			};
-			reporter.OnStepCompleted = (stepName) =>
-			{
-				executionInfo.IncrementCompletedSteps();
-				executionInfo.CurrentStep = null;
-			};
+			var executionId = handle.ExecutionId;
 
 			// Send execution-started event
 			await httpContext.Response.WriteAsync($"event: execution-started\n");
@@ -143,80 +143,36 @@ public static partial class ExecutionApi
 				entry.Orchestration.Name,
 				"manual");
 
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl);
-			var cancellationToken = cts.Token;
-			var runId = executionId;
-			var runStartedAt = DateTimeOffset.UtcNow;
 			var logger = loggerFactory.CreateLogger(typeof(ExecutionApi));
+			var runStartedAt = handle.StartedAt;
 
-			// Execute in background
+			// Track the orchestration result for fallback persistence on cancellation/failure
+			// (the launcher's reporter completion arrives asynchronously through Completion).
 			var executionTask = Task.Run(async () =>
 			{
-				try
+				var result = await handle.Completion;
+
+				if (result.Status is ExecutionStatus.Cancelled
+					&& result.OrchestrationResult is null)
 				{
-					var result = await executor.ExecuteAsync(
-						entry.Orchestration,
-						parameters,
-						cancellationToken: cancellationToken);
-
-					if (result.Status == ExecutionStatus.Cancelled)
-					{
-						// Engine already saved the run record with Cancelled status.
-				reporter.ReportOrchestrationCancelled();
-					executionInfo.Status = HostExecutionStatus.Cancelled;
-					return;
-					}
-
-					foreach (var (stepName, stepResult) in result.StepResults)
-					{
-						if (stepResult.Status == ExecutionStatus.Succeeded)
-							reporter.ReportStepOutput(stepName, stepResult.Content);
-					}
-
-				reporter.ReportOrchestrationDone(result);
-				executionInfo.Status = HostExecutionStatus.Completed;
+					await SaveCancelledRunAsync(runStore, entry, executionId, runStartedAt, parameters, reporter, logger);
 				}
-				catch (OperationCanceledException)
+				else if (result.Status is ExecutionStatus.Failed
+					&& result.OrchestrationResult is null
+					&& result.ErrorMessage is not null)
 				{
-					// Engine may not have saved the run record if cancellation occurred
-					// before steps could complete, so save a cancelled record from SSE events.
-					reporter.ReportOrchestrationCancelled();
-					executionInfo.Status = HostExecutionStatus.Cancelled;
-					await SaveCancelledRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, logger);
+					await SaveFailedRunAsync(runStore, entry, executionId, runStartedAt, parameters, reporter, result.ErrorMessage, logger);
 				}
-				catch (Exception ex)
-				{
-					reporter.ReportStepError("orchestration", ex.Message);
-				reporter.ReportOrchestrationError(ex.Message);
-				executionInfo.Status = HostExecutionStatus.Failed;
-					await SaveFailedRunAsync(runStore, entry, runId, runStartedAt, parameters, reporter, ex.Message, logger);
-				}
-				finally
-				{
-					reporter.Complete();
 
-					// Notify dashboard subscribers that the execution reached a terminal state.
-					dashboardBroadcaster.BroadcastExecutionCompleted(
-						executionId,
-						id,
-						entry.Orchestration.Name,
-						executionInfo.Status.ToString());
-
-					_ = Task.Run(async () =>
-					{
-						try
-						{
-							await Task.Delay(TimeSpan.FromSeconds(5));
-						}
-						catch (ObjectDisposedException) { }
-						finally
-						{
-							activeExecutions.TryRemove(executionId, out _);
-							activeExecutionInfos.TryRemove(executionId, out _);
-							try { cts.Dispose(); } catch (ObjectDisposedException) { }
-						}
-					});
-				}
+				// Notify dashboard subscribers that the execution reached a terminal state.
+				var dashboardStatus = activeExecutionInfos.TryGetValue(executionId, out var info)
+					? info.Status.ToString()
+					: result.Status.ToString();
+				dashboardBroadcaster.BroadcastExecutionCompleted(
+					executionId,
+					id,
+					entry.Orchestration.Name,
+					dashboardStatus);
 			}, CancellationToken.None);
 
 			// Subscribe and stream SSE events to this client

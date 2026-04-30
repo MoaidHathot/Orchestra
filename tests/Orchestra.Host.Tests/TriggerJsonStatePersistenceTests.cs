@@ -54,6 +54,7 @@ public class TriggerJsonStatePersistenceTests : IDisposable
 			runsDir: _runsDir,
 			runStore: null!,
 			checkpointStore: null!,
+			launcher: null!,
 			dataPath: _tempDir);
 	}
 

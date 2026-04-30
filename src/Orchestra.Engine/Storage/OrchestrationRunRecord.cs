@@ -92,4 +92,29 @@ public class OrchestrationRunRecord
 	/// Values: "failed" (skip succeeded steps), "all" (full re-run), "from-step:&lt;stepName&gt;" (re-run target step + downstream).
 	/// </summary>
 	public string? RetryMode { get; init; }
+
+	// ── Parent / nesting lineage (Phase 5) ──
+
+	/// <summary>
+	/// The execution ID of the parent run that launched this run as a child orchestration.
+	/// Null for top-level runs.
+	/// </summary>
+	public string? ParentExecutionId { get; init; }
+
+	/// <summary>
+	/// The name of the step in the parent orchestration that launched this run.
+	/// Null for top-level runs.
+	/// </summary>
+	public string? ParentStepName { get; init; }
+
+	/// <summary>
+	/// The execution ID at the root of the nesting chain. Equal to <see cref="RunId"/> for
+	/// top-level runs, otherwise the ID of the original (root) parent.
+	/// </summary>
+	public string? RootExecutionId { get; init; }
+
+	/// <summary>
+	/// Nesting depth of this run. 0 = top-level, 1 = direct child of top-level, etc.
+	/// </summary>
+	public int NestingDepth { get; init; }
 }
