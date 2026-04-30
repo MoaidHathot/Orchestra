@@ -485,7 +485,7 @@ public class CopilotAgentTests
 
 		// Assert
 		config.McpServers.Should().ContainKey("icm");
-		var serverConfig = config.McpServers!["icm"].Should().BeOfType<McpLocalServerConfig>().Subject;
+		var serverConfig = config.McpServers!["icm"].Should().BeOfType<McpStdioServerConfig>().Subject;
 		serverConfig.Command.Should().Be("dnx");
 		serverConfig.Args.Should().BeEquivalentTo(["IcM.Mcp"]);
 		serverConfig.Tools.Should().ContainSingle().Which.Should().Be("*");
@@ -508,7 +508,7 @@ public class CopilotAgentTests
 
 		// Assert
 		config.McpServers.Should().ContainKey("api");
-		var serverConfig = config.McpServers!["api"].Should().BeOfType<McpRemoteServerConfig>().Subject;
+		var serverConfig = config.McpServers!["api"].Should().BeOfType<McpHttpServerConfig>().Subject;
 		serverConfig.Url.Should().Be("https://api.example.com/mcp");
 		serverConfig.Tools.Should().ContainSingle().Which.Should().Be("*");
 	}
@@ -548,13 +548,13 @@ public class CopilotAgentTests
 		// Assert
 		config.McpServers.Should().HaveCount(3);
 
-		var local1 = config.McpServers!["local-1"].Should().BeOfType<McpLocalServerConfig>().Subject;
+		var local1 = config.McpServers!["local-1"].Should().BeOfType<McpStdioServerConfig>().Subject;
 		local1.Tools.Should().ContainSingle().Which.Should().Be("*");
 
-		var remote1 = config.McpServers!["remote-1"].Should().BeOfType<McpRemoteServerConfig>().Subject;
+		var remote1 = config.McpServers!["remote-1"].Should().BeOfType<McpHttpServerConfig>().Subject;
 		remote1.Tools.Should().ContainSingle().Which.Should().Be("*");
 
-		var local2 = config.McpServers!["local-2"].Should().BeOfType<McpLocalServerConfig>().Subject;
+		var local2 = config.McpServers!["local-2"].Should().BeOfType<McpStdioServerConfig>().Subject;
 		local2.Tools.Should().ContainSingle().Which.Should().Be("*");
 		local2.Cwd.Should().Be("/app");
 	}

@@ -409,7 +409,7 @@ public partial class TriggerManager : BackgroundService
 		{
 			try
 			{
-				var result = await executor.ResumeAsync(entry.Orchestration, checkpoint, cts.Token);
+				var result = await executor.ResumeAsync(entry.Orchestration, checkpoint, cancellationToken: cts.Token);
 
 				executionInfo.Status = result.Status switch
 				{

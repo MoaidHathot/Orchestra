@@ -205,7 +205,7 @@ public static class CheckpointApi
 					var result = await executor.ResumeAsync(
 						entry.Orchestration,
 						checkpoint,
-						cancellationToken);
+						cancellationToken: cancellationToken);
 
 					if (cancellationToken.IsCancellationRequested)
 					{

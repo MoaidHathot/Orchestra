@@ -151,8 +151,10 @@ public static class RunsApi
 					completedByStep = s.CompletedByStep,
 					hookExecutionCount = s.HookExecutionCount,
 					isActive = false,
-					isIncomplete = s.IsIncomplete
-				});
+				isIncomplete = s.IsIncomplete,
+				retriedFromRunId = s.RetriedFromRunId,
+				retryMode = s.RetryMode,
+			});
 				allItems.AddRange(completedItems.Cast<object>());
 			}
 		}
@@ -174,7 +176,9 @@ public static class RunsApi
 				completedByStep = s.CompletedByStep,
 				hookExecutionCount = s.HookExecutionCount,
 				isActive = false,
-				isIncomplete = s.IsIncomplete
+				isIncomplete = s.IsIncomplete,
+				retriedFromRunId = s.RetriedFromRunId,
+				retryMode = s.RetryMode,
 			});
 			allItems.AddRange(completedItems.Cast<object>());
 			}
@@ -250,7 +254,9 @@ public static class RunsApi
 					completedByStep = s.CompletedByStep,
 					hookExecutionCount = s.HookExecutionCount,
 					isActive = false,
-					isIncomplete = s.IsIncomplete
+					isIncomplete = s.IsIncomplete,
+					retriedFromRunId = s.RetriedFromRunId,
+					retryMode = s.RetryMode,
 				})
 				.Cast<object>()
 				.ToList();
@@ -289,6 +295,8 @@ public static class RunsApi
 				completionReason = record.CompletionReason,
 				completedByStep = record.CompletedByStep,
 				isIncomplete = record.IsIncomplete,
+				retriedFromRunId = record.RetriedFromRunId,
+				retryMode = record.RetryMode,
 				parameters = record.Parameters,
 				finalContent = record.FinalContent,
 				totalUsage = record.TotalUsage is { } tu ? new

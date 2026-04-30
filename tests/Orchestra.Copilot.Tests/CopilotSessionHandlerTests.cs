@@ -985,7 +985,7 @@ public class CopilotSessionHandlerTests
 	#region MCP Servers Loaded
 
 	private static SessionMcpServersLoadedEvent CreateMcpServersLoadedEvent(
-		params SessionMcpServersLoadedDataServersItem[] servers) => new()
+		params McpServersLoadedServer[] servers) => new()
 	{
 		Data = new SessionMcpServersLoadedData
 		{
@@ -993,9 +993,9 @@ public class CopilotSessionHandlerTests
 		}
 	};
 
-	private static SessionMcpServersLoadedDataServersItem CreateMcpServerItem(
+	private static McpServersLoadedServer CreateMcpServerItem(
 		string name,
-		SessionMcpServersLoadedDataServersItemStatus status,
+		McpServersLoadedServerStatus status,
 		string? source = null,
 		string? error = null) => new()
 	{
@@ -1010,8 +1010,8 @@ public class CopilotSessionHandlerTests
 	{
 		// Arrange
 		var evt = CreateMcpServersLoadedEvent(
-			CreateMcpServerItem("icm", SessionMcpServersLoadedDataServersItemStatus.Connected, "local"),
-			CreateMcpServerItem("graph", SessionMcpServersLoadedDataServersItemStatus.Failed, "remote", "Connection refused"));
+			CreateMcpServerItem("icm", McpServersLoadedServerStatus.Connected, "local"),
+			CreateMcpServerItem("graph", McpServersLoadedServerStatus.Failed, "remote", "Connection refused"));
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -1037,7 +1037,7 @@ public class CopilotSessionHandlerTests
 	{
 		// Arrange
 		var evt = CreateMcpServersLoadedEvent(
-			CreateMcpServerItem("icm", SessionMcpServersLoadedDataServersItemStatus.Connected));
+			CreateMcpServerItem("icm", McpServersLoadedServerStatus.Connected));
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -1068,11 +1068,11 @@ public class CopilotSessionHandlerTests
 	{
 		// Arrange
 		var evt = CreateMcpServersLoadedEvent(
-			CreateMcpServerItem("s1", SessionMcpServersLoadedDataServersItemStatus.Connected),
-			CreateMcpServerItem("s2", SessionMcpServersLoadedDataServersItemStatus.Failed, error: "timeout"),
-			CreateMcpServerItem("s3", SessionMcpServersLoadedDataServersItemStatus.Pending),
-			CreateMcpServerItem("s4", SessionMcpServersLoadedDataServersItemStatus.Disabled),
-			CreateMcpServerItem("s5", SessionMcpServersLoadedDataServersItemStatus.NotConfigured));
+			CreateMcpServerItem("s1", McpServersLoadedServerStatus.Connected),
+			CreateMcpServerItem("s2", McpServersLoadedServerStatus.Failed, error: "timeout"),
+			CreateMcpServerItem("s3", McpServersLoadedServerStatus.Pending),
+			CreateMcpServerItem("s4", McpServersLoadedServerStatus.Disabled),
+			CreateMcpServerItem("s5", McpServersLoadedServerStatus.NotConfigured));
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -1095,12 +1095,13 @@ public class CopilotSessionHandlerTests
 
 	private static SessionMcpServerStatusChangedEvent CreateMcpServerStatusChangedEvent(
 		string serverName,
-		SessionMcpServersLoadedDataServersItemStatus status) => new()
+		McpServersLoadedServerStatus status) => new()
 	{
 		Data = new SessionMcpServerStatusChangedData
 		{
 			ServerName = serverName,
-			Status = status
+			// Both enums share the same value layout; cast bridges the SDK 0.3.0 split.
+			Status = (McpServerStatusChangedStatus)(int)status
 		}
 	};
 
@@ -1108,7 +1109,7 @@ public class CopilotSessionHandlerTests
 	public void HandleEvent_McpServerStatusChanged_WritesMcpServerStatusChangedEvent()
 	{
 		// Arrange
-		var evt = CreateMcpServerStatusChangedEvent("icm", SessionMcpServersLoadedDataServersItemStatus.Connected);
+		var evt = CreateMcpServerStatusChangedEvent("icm", McpServersLoadedServerStatus.Connected);
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -1124,7 +1125,7 @@ public class CopilotSessionHandlerTests
 	public void HandleEvent_McpServerStatusChanged_ReportsMcpServerStatusChanged()
 	{
 		// Arrange
-		var evt = CreateMcpServerStatusChangedEvent("graph", SessionMcpServersLoadedDataServersItemStatus.Failed);
+		var evt = CreateMcpServerStatusChangedEvent("graph", McpServersLoadedServerStatus.Failed);
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -1142,10 +1143,10 @@ public class CopilotSessionHandlerTests
 	{
 		// Arrange & Act - Simulate a session with MCP server lifecycle events
 		_handler.HandleEvent(CreateSessionStartEvent("claude-opus-4.5"));
-		_handler.HandleEvent(CreateMcpServerStatusChangedEvent("icm", SessionMcpServersLoadedDataServersItemStatus.Pending));
+		_handler.HandleEvent(CreateMcpServerStatusChangedEvent("icm", McpServersLoadedServerStatus.Pending));
 		_handler.HandleEvent(CreateMcpServersLoadedEvent(
-			CreateMcpServerItem("icm", SessionMcpServersLoadedDataServersItemStatus.Connected, "local"),
-			CreateMcpServerItem("graph", SessionMcpServersLoadedDataServersItemStatus.Failed, error: "timeout")));
+			CreateMcpServerItem("icm", McpServersLoadedServerStatus.Connected, "local"),
+			CreateMcpServerItem("graph", McpServersLoadedServerStatus.Failed, error: "timeout")));
 		_handler.HandleEvent(CreateMessageDeltaEvent("Working with IcM tools..."));
 		_handler.HandleEvent(CreateMessageEvent("Done."));
 		_handler.HandleEvent(CreateUsageEvent("claude-opus-4.5", 100, 50));
@@ -1502,7 +1503,7 @@ public class CopilotSessionHandlerTests
 				HookType = "postToolUse",
 				Output = null,
 				Success = false,
-				Error = new HookEndDataError { Message = "Hook failed" },
+				Error = new HookEndError { Message = "Hook failed" },
 			}
 		};
 

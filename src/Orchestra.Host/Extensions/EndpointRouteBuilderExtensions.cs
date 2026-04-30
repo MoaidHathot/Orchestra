@@ -59,6 +59,7 @@ public static class EndpointRouteBuilderExtensions
 		endpoints.MapWebhooksApi(jsonOptions);
 		endpoints.MapRunsApi(jsonOptions);
 		endpoints.MapExecutionApi(jsonOptions);
+		endpoints.MapRetryApi(jsonOptions);
 		endpoints.MapCheckpointApi(jsonOptions);
 		endpoints.MapVersionsApi(jsonOptions);
 		endpoints.MapProfilesApi(jsonOptions);

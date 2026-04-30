@@ -20,6 +20,8 @@ interface HistoryExecution {
   durationSeconds?: number;
   parameters?: Record<string, unknown>;
   hookExecutionCount?: number;
+  retriedFromRunId?: string | null;
+  retryMode?: string | null;
 }
 
 interface PaginatedHistoryResponse {
@@ -45,10 +47,16 @@ interface Props {
   onClose: () => void;
   onAttachToExecution?: (exec: HistoryExecution, orchestration: Orchestration | undefined) => void;
   onViewExecution?: (exec: HistoryExecution) => void;
+  /**
+   * Invoked when the user clicks one of the per-row Retry buttons. The history
+   * modal stays open so the user can launch multiple retries; a separate flow
+   * (the execution modal opening live) signals that the retry has started.
+   */
+  onRetryExecution?: (orchestrationName: string, sourceRunId: string, mode: 'failed' | 'all' | 'from-step', fromStep?: string) => void;
   orchestrations?: Orchestration[];
 }
 
-function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orchestrations }: Props): React.JSX.Element {
+function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, onRetryExecution, orchestrations }: Props): React.JSX.Element {
   const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
   const [history, setHistory] = useState<HistoryExecution[]>([]);
   const [loading, setLoading] = useState(true);
@@ -349,6 +357,15 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
                           {exec.status === 'Cancelling' ? 'Cancelling' : 'Running'}
                         </span>
                       )}
+                      {exec.retriedFromRunId && (
+                        <span
+                          className="step-status-badge"
+                          style={{ marginLeft: '8px', fontSize: '10px', padding: '2px 6px', background: 'var(--surface-2, #2a2a2a)', color: 'var(--text-muted)' }}
+                          title={`Retried from run ${exec.retriedFromRunId}${exec.retryMode ? ` (${exec.retryMode})` : ''}`}
+                        >
+                          ↩ retry
+                        </span>
+                      )}
                     </div>
                     <div className="history-time">{formatTime(exec.startedAt)}</div>
                     {(exec.hookExecutionCount ?? 0) > 0 && (
@@ -358,6 +375,31 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, orc
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                     {exec.isActive ? 'In progress' : `${exec.durationSeconds}s`}
                   </div>
+                  {!exec.isActive && onRetryExecution && (
+                    <div style={{ display: 'flex', gap: '4px', marginLeft: '8px' }}>
+                      <button
+                        className="btn btn-sm btn-secondary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRetryExecution(exec.orchestrationName, exec.runId, 'failed');
+                        }}
+                        title="Retry only the failed/skipped/cancelled steps; reuse outputs of succeeded steps."
+                        disabled={exec.status === 'Succeeded' && !exec.isIncomplete}
+                      >
+                        Retry Failed
+                      </button>
+                      <button
+                        className="btn btn-sm btn-secondary"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRetryExecution(exec.orchestrationName, exec.runId, 'all');
+                        }}
+                        title="Re-run the entire orchestration from scratch with the original parameters."
+                      >
+                        Re-run All
+                      </button>
+                    </div>
+                  )}
                 </div>
               ))}
               {hasMore && !searchQuery && statusFilter === 'all' && (

@@ -405,16 +405,16 @@ public partial class CopilotAgent : IAgent
 	/// <summary>
 	/// Builds image attachments for the Copilot SDK message.
 	/// </summary>
-	private List<UserMessageDataAttachmentsItem> BuildAttachments()
+	private List<UserMessageAttachment> BuildAttachments()
 	{
-		var attachments = new List<UserMessageDataAttachmentsItem>();
+		var attachments = new List<UserMessageAttachment>();
 
 		foreach (var attachment in _attachments)
 		{
 			switch (attachment)
 			{
 				case FileImageAttachment file:
-					attachments.Add(new UserMessageDataAttachmentsItemFile
+					attachments.Add(new UserMessageAttachmentFile
 					{
 						Path = file.Path,
 						DisplayName = file.DisplayName ?? System.IO.Path.GetFileName(file.Path),
@@ -422,7 +422,7 @@ public partial class CopilotAgent : IAgent
 					break;
 
 				case BlobImageAttachment blob:
-					attachments.Add(new UserMessageDataAttachmentsItemBlob
+					attachments.Add(new UserMessageAttachmentBlob
 					{
 						Data = blob.Data,
 						MimeType = blob.MimeType,
@@ -537,7 +537,7 @@ public partial class CopilotAgent : IAgent
 			MaxPromptImageSize = model.Capabilities?.Limits?.Vision?.MaxPromptImageSize,
 		};
 
-	private Dictionary<string, object> BuildMcpServers() => BuildMcpServerDictionary(_mcps);
+	private Dictionary<string, McpServerConfig> BuildMcpServers() => BuildMcpServerDictionary(_mcps);
 
 	private List<CustomAgentConfig> BuildCustomAgents()
 	{
@@ -576,18 +576,18 @@ public partial class CopilotAgent : IAgent
 		return customAgents;
 	}
 
-	private Dictionary<string, object> BuildMcpServersFor(Mcp[] mcps) => BuildMcpServerDictionary(mcps);
+	private Dictionary<string, McpServerConfig> BuildMcpServersFor(Mcp[] mcps) => BuildMcpServerDictionary(mcps);
 
-	private static Dictionary<string, object> BuildMcpServerDictionary(Mcp[] mcps)
+	private static Dictionary<string, McpServerConfig> BuildMcpServerDictionary(Mcp[] mcps)
 	{
-		var servers = new Dictionary<string, object>();
+		var servers = new Dictionary<string, McpServerConfig>();
 
 		foreach (var mcp in mcps)
 		{
 			switch (mcp)
 			{
 				case LocalMcp local:
-					servers[mcp.Name] = new McpLocalServerConfig
+					servers[mcp.Name] = new McpStdioServerConfig
 					{
 						Command = local.Command,
 						Args = [.. local.Arguments],
@@ -597,7 +597,7 @@ public partial class CopilotAgent : IAgent
 					break;
 
 				case RemoteMcp remote:
-					servers[mcp.Name] = new McpRemoteServerConfig
+					servers[mcp.Name] = new McpHttpServerConfig
 					{
 						Url = remote.Endpoint,
 						Headers = remote.Headers,

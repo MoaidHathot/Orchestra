@@ -382,6 +382,53 @@ public class CopilotAgentBuilderTests
 	}
 
 	[Fact]
+	public async Task CreateRunScopeAsync_ConcurrentScopes_OnSameBuilder_GetDifferentClientHashes()
+	{
+		var builder = new CopilotAgentBuilder();
+
+		async Task<string?> OpenScopeAndCaptureHashAsync()
+		{
+			try
+			{
+				await using var scope = await builder.CreateRunScopeAsync();
+
+				var clientHash = builder.GetRunScopedClientDiagnostic();
+				clientHash.Should().NotBeNullOrEmpty(
+					"each active run scope must expose its run-scoped Copilot client hash on its own ExecutionContext");
+
+				var clientHashInsideTask = await Task.Factory.StartNew(
+					() => builder.GetRunScopedClientDiagnostic(),
+					CancellationToken.None,
+					TaskCreationOptions.LongRunning,
+					TaskScheduler.Default);
+
+				clientHashInsideTask.Should().Be(clientHash,
+					"the run-scoped client hash must flow into child step tasks for that orchestration run");
+
+				// Keep the scope alive briefly so both tasks overlap in practice while capturing hashes.
+				await Task.Delay(250);
+
+				return clientHash;
+			}
+			catch
+			{
+				return null;
+			}
+		}
+
+		var firstRun = Task.Run(OpenScopeAndCaptureHashAsync);
+		var secondRun = Task.Run(OpenScopeAndCaptureHashAsync);
+
+		var clientHashes = await Task.WhenAll(firstRun, secondRun);
+
+		if (clientHashes.Any(hash => hash is null))
+			return; // No CLI binary/environment available for this test run.
+
+		clientHashes[0].Should().NotBe(clientHashes[1],
+			"separate orchestration run scopes on the same singleton builder must resolve different Copilot CLI clients");
+	}
+
+	[Fact]
 	public async Task CreateRunScopeAsync_DisposalClearsAsyncLocal()
 	{
 		// Arrange

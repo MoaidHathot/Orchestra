@@ -290,13 +290,14 @@ public class CopilotSessionHandlerActorContextTests
 	// ── Out-of-order completion ────────────────────────────────────────────────
 
 	[Fact]
-	public void OutOfOrderCompletion_PopsCorrectFrame_AndWarns()
+	public void ParallelSiblingCompletion_RemovesCorrectFrame_WithoutWarning()
 	{
 		_handler.HandleEvent(SubagentStarted("outer", "outer-agent"));
 		_handler.HandleEvent(SubagentStarted("inner", "inner-agent"));
 
-		// Complete the OUTER first (out-of-order). The handler should still pop the
-		// outer frame and leave inner as the active top.
+		// Complete the earlier sibling first. This is normal for parallel sub-agents,
+		// so the handler should remove that frame without warning and leave the latest
+		// active sibling as the fallback current actor.
 		_handler.HandleEvent(SubagentCompleted("outer", "outer-agent"));
 
 		_handler.HandleEvent(MessageDelta("after weird pop"));
@@ -306,9 +307,7 @@ public class CopilotSessionHandlerActorContextTests
 		// Depth reported is the index+1 of the surviving frame; with one frame left it must be 1.
 		delta.ActorDepth.Should().Be(1);
 
-		_logger.Entries.Should().Contain(e =>
-			e.Level == LogLevel.Warning &&
-			e.Message.Contains("out of order", StringComparison.OrdinalIgnoreCase));
+		_logger.Entries.Should().NotContain(e => e.Level == LogLevel.Warning);
 	}
 
 	[Fact]

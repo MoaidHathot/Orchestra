@@ -84,6 +84,8 @@ interface ExecutionDetailsResponse {
   steps?: ExecutionDetailStep[];
   context?: RunContext | null;
   hookExecutions?: HookExecution[];
+  retriedFromRunId?: string | null;
+  retryMode?: string | null;
 }
 
 // ── Viewer / History / Add / Run modal state types ──────────────────────────
@@ -203,6 +205,9 @@ function App(): React.JSX.Element {
     completedByStep: null,
     runContext: null,
     hookExecutions: [],
+    retriedFromRunId: null,
+    retryMode: null,
+    historicalRun: null,
   });
   const eventSourceRef = useRef<EventSource | null>(null);
   const [mcpsModal, setMcpsModal] = useState<McpsModalState>({ open: false });
@@ -1136,7 +1141,12 @@ function App(): React.JSX.Element {
         const data: SSEEventData = JSON.parse(e.data);
         if (data.executionId) {
           trackedExecutionId = data.executionId as string;
-          setExecutionModal(prev => ({ ...prev, executionId: data.executionId as string }));
+          setExecutionModal(prev => ({
+            ...prev,
+            executionId: data.executionId as string,
+            retriedFromRunId: (data.retriedFromRunId as string | undefined) ?? prev.retriedFromRunId ?? null,
+            retryMode: (data.retryMode as string | undefined) ?? prev.retryMode ?? null,
+          }));
           loadData();
         }
       } catch { /* ignore */ }
@@ -1286,6 +1296,9 @@ function App(): React.JSX.Element {
       completedByStep: null,
       runContext: null,
       hookExecutions: [],
+      retriedFromRunId: null,
+      retryMode: null,
+      historicalRun: null,
     });
 
     try {
@@ -1298,6 +1311,69 @@ function App(): React.JSX.Element {
     } catch (err) {
       console.error('Run error:', err);
       const message = err instanceof Error ? err.message : 'Failed to start orchestration';
+      setExecutionModal(prev => ({
+        ...prev,
+        status: 'error',
+        errorMessage: message,
+      }));
+    }
+  };
+
+  // ── Retry a historical execution (whole or from a specific step) ─────────
+
+  const retryExecution = async (
+    orchestrationName: string,
+    sourceRunId: string,
+    mode: 'failed' | 'all' | 'from-step',
+    fromStep?: string,
+  ): Promise<void> => {
+    if (!orchestrationName || !sourceRunId) return;
+
+    // Close any existing EventSource before opening a new one
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+
+    const orchestration = orchestrations.find(o =>
+      o.name === orchestrationName || o.id === orchestrationName,
+    );
+    const initialStatuses = buildInitialStatuses(orchestration);
+
+    setExecutionModal({
+      open: true,
+      orchestration: orchestration || null,
+      executionId: null,
+      stepStatuses: initialStatuses,
+      stepEvents: {},
+      stepResults: {},
+      stepTraces: {},
+      stepAuditLogs: {},
+      stepActorStreams: {},
+      streamingContent: '',
+      finalResult: '',
+      status: 'running',
+      errorMessage: null,
+      completedByStep: null,
+      runContext: null,
+      hookExecutions: [],
+      retriedFromRunId: sourceRunId,
+      retryMode: mode === 'from-step' ? `from-step:${fromStep ?? ''}` : mode,
+      historicalRun: null,
+    });
+
+    try {
+      const params = new URLSearchParams({ mode });
+      if (mode === 'from-step' && fromStep) {
+        params.set('step', fromStep);
+      }
+      const url = `/api/history/${encodeURIComponent(orchestrationName)}/${encodeURIComponent(sourceRunId)}/retry?${params.toString()}`;
+      const eventSource = new EventSource(url);
+      eventSourceRef.current = eventSource;
+      wireEventSource(eventSource, initialStatuses);
+    } catch (err) {
+      console.error('Retry error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to start retry';
       setExecutionModal(prev => ({
         ...prev,
         status: 'error',
@@ -1440,6 +1516,9 @@ function App(): React.JSX.Element {
       completedByStep: null,
       runContext: null,
       hookExecutions: [],
+      retriedFromRunId: null,
+      retryMode: null,
+      historicalRun: { name: exec.orchestrationName, runId: exec.runId },
     });
 
     try {
@@ -1581,6 +1660,9 @@ function App(): React.JSX.Element {
         completedByStep: details.completedByStep || null,
         runContext: details.context || null,
         hookExecutions,
+        retriedFromRunId: details.retriedFromRunId ?? null,
+        retryMode: details.retryMode ?? null,
+        historicalRun: { name: exec.orchestrationName, runId: exec.runId },
       });
     } catch (err) {
       console.error('Failed to load execution details:', err);
@@ -2166,6 +2248,7 @@ function App(): React.JSX.Element {
         onClose={() => setHistoryModal({ open: false })}
         onAttachToExecution={attachToExecution}
         onViewExecution={viewHistoricalExecution}
+        onRetryExecution={retryExecution}
         orchestrations={orchestrations}
       />
       <AddModal
@@ -2205,9 +2288,34 @@ function App(): React.JSX.Element {
             completedByStep: null,
             runContext: null,
             hookExecutions: [],
+            retriedFromRunId: null,
+            retryMode: null,
+            historicalRun: null,
           });
         }}
         onCancel={() => cancelExecution(executionModal.executionId)}
+        onRetry={(mode, fromStep) => {
+          // Prefer the historicalRun lineage if present (modal was opened from
+          // History). Otherwise fall back to the in-memory orchestration name +
+          // executionId so retries work for a freshly-completed live run too.
+          const name = executionModal.historicalRun?.name
+            ?? executionModal.orchestration?.name
+            ?? null;
+          const sourceRunId = executionModal.historicalRun?.runId
+            ?? executionModal.executionId
+            ?? null;
+          if (name && sourceRunId) {
+            retryExecution(name, sourceRunId, mode, fromStep);
+          }
+        }}
+        onViewSourceRun={(sourceRunId) => {
+          if (executionModal.orchestration?.name) {
+            viewHistoricalExecution({
+              orchestrationName: executionModal.orchestration.name,
+              runId: sourceRunId,
+            });
+          }
+        }}
       />
       <McpsModal
         {...mcpsModal}

@@ -172,6 +172,8 @@ public partial class FileSystemRunStore : IRunStore
 			CompletedByStep = record.CompletedByStep,
 			IsIncomplete = record.IsIncomplete,
 			HookExecutionCount = record.HookExecutions.Count,
+			RetriedFromRunId = record.RetriedFromRunId,
+			RetryMode = record.RetryMode,
 		};
 
 		lock (_indexWriteLock)
@@ -685,6 +687,16 @@ public class RunIndex
 	/// Number of hook executions recorded for this run.
 	/// </summary>
 	public int HookExecutionCount { get; init; }
+
+	/// <summary>
+	/// When this run was started as a retry, the RunId of the original source run.
+	/// </summary>
+	public string? RetriedFromRunId { get; init; }
+
+	/// <summary>
+	/// Retry mode descriptor (e.g. "failed", "all", "from-step:&lt;name&gt;") when this run is a retry.
+	/// </summary>
+	public string? RetryMode { get; init; }
 }
 
 /// <summary>

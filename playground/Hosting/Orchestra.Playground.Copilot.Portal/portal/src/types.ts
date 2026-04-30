@@ -175,6 +175,10 @@ export interface HistoryRun {
   parameters?: Record<string, unknown>;
   totalUsage?: UsageData;
   allStepRecords?: Record<string, StepResultData[]>;
+  /** When set, this run was started as a retry of the referenced source run. */
+  retriedFromRunId?: string | null;
+  /** Retry mode descriptor: "failed", "all", or "from-step:<stepName>". */
+  retryMode?: string | null;
 }
 
 export interface StepResultData {
@@ -355,6 +359,12 @@ export interface ExecutionModalState {
   completedByStep: string | null;
   runContext: RunContext | null;
   hookExecutions: HookExecution[];
+  /** When this run is a retry of an earlier run, the source RunId. */
+  retriedFromRunId?: string | null;
+  /** Retry mode descriptor when this run is a retry. */
+  retryMode?: string | null;
+  /** When viewing a historical (terminal) run, holds the run's name+id so retry buttons can build URLs. */
+  historicalRun?: { name: string; runId: string } | null;
 }
 
 export interface RunContext {

@@ -174,8 +174,21 @@ interface Props {
   completedByStep: string | null;
   runContext: RunContext | null;
   hookExecutions: HookExecution[];
+  /** When this run is a retry, the source RunId. */
+  retriedFromRunId?: string | null;
+  /** Retry mode descriptor when this run is a retry. */
+  retryMode?: string | null;
+  /**
+   * Set when the modal is showing a historical (terminal) run. Enables the
+   * Retry buttons in the header and per-step rows.
+   */
+  historicalRun?: { name: string; runId: string } | null;
   onClose: () => void;
   onCancel: (executionId: string) => void;
+  /** Invoked from the Retry buttons. Required to enable retry UI. */
+  onRetry?: (mode: 'failed' | 'all' | 'from-step', fromStep?: string) => void;
+  /** Invoked when the user clicks the "Retried from" badge to navigate to the source run. */
+  onViewSourceRun?: (sourceRunId: string) => void;
 }
 
 export default function ExecutionModal({
@@ -195,8 +208,13 @@ export default function ExecutionModal({
   completedByStep,
   runContext,
   hookExecutions,
+  retriedFromRunId,
+  retryMode,
+  historicalRun,
   onClose,
   onCancel,
+  onRetry,
+  onViewSourceRun,
 }: Props): React.JSX.Element {
   const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
   const dagRef = useRef<HTMLDivElement | null>(null);
@@ -593,10 +611,70 @@ export default function ExecutionModal({
               <span className="text-warning">Cancelled</span>
             )}
             {status === 'error' && <span className="text-error">Error</span>}
+            {retriedFromRunId && (
+              <button
+                type="button"
+                className="retry-lineage-badge"
+                title="Click to view the source run"
+                onClick={() => onViewSourceRun?.(retriedFromRunId)}
+              >
+                {retryMode ? `${retryMode.startsWith('from-step:') ? 'Retry from step' : `Retry (${retryMode})`} of ` : 'Retried from '}
+                <code>{retriedFromRunId.slice(0, 8)}</code>
+              </button>
+            )}
           </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
-            <Icons.X />
-          </button>
+          <div className="flex items-center gap-2">
+            {(() => {
+              // Show Retry buttons whenever we are looking at a terminal run
+              // and we know how to identify it (orchestration name + run id).
+              // This covers both historical views (opened from History) and
+              // live runs that just reached a terminal state.
+              const orchName = historicalRun?.name ?? orchestration?.name ?? null;
+              const sourceRunId = historicalRun?.runId ?? executionId ?? null;
+              const canRetry = !!(onRetry && orchName && sourceRunId && isCompleted);
+              if (!canRetry) return null;
+
+              const hasFailedSteps = Object.values(stepStatuses).some(
+                s => s === 'failed' || s === 'cancelled' || s === 'skipped',
+              );
+              return (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    title={hasFailedSteps
+                      ? 'Re-run only failed/skipped/cancelled steps; reuse outputs of succeeded steps.'
+                      : 'No failed steps to retry — every step succeeded.'}
+                    disabled={!hasFailedSteps}
+                    onClick={() => onRetry!('failed')}
+                  >
+                    Retry Failed
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-secondary"
+                    title="Re-run the entire orchestration from scratch with the original parameters."
+                    onClick={() => onRetry!('all')}
+                  >
+                    Re-run All
+                  </button>
+                  {selectedStep && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      title={`Re-run "${selectedStep}" and all of its downstream dependents.`}
+                      onClick={() => onRetry!('from-step', selectedStep)}
+                    >
+                      Retry from {selectedStep}
+                    </button>
+                  )}
+                </>
+              );
+            })()}
+            <button className="modal-close" onClick={onClose} aria-label="Close">
+              <Icons.X />
+            </button>
+          </div>
         </div>
         <div className="modal-body" style={{ padding: 0 }}>
           {/* Error Message Display */}

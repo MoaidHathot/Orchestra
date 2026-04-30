@@ -67,6 +67,7 @@ public partial class OrchestrationExecutor
 		Dictionary<string, string>? parameters = null,
 		string? triggerId = null,
 		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform = null,
+		RetryMetadata? retryMetadata = null,
 		CancellationToken cancellationToken = default)
 	{
 		LogStartingOrchestration(orchestration.Name);
@@ -95,7 +96,7 @@ public partial class OrchestrationExecutor
 
 		try
 		{
-			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform);
+			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform, retryMetadata: retryMetadata);
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -115,9 +116,10 @@ public partial class OrchestrationExecutor
 		CancellationToken cancellationToken,
 		CancellationToken externalCancellationToken,
 		CheckpointData? checkpoint = null,
-		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform = null)
+		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform = null,
+		RetryMetadata? retryMetadata = null)
 	{
-		var runId = checkpoint?.RunId ?? Guid.NewGuid().ToString("N")[..12];
+		var runId = retryMetadata?.OverrideRunId ?? checkpoint?.RunId ?? Guid.NewGuid().ToString("N")[..12];
 		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
 
 		// Create a run-scoped client for isolation: each orchestration run gets its own
@@ -489,6 +491,9 @@ public partial class OrchestrationExecutor
 			Status = orchestrationResult.Status,
 			Parameters = effectiveParams,
 			TriggerId = triggerId,
+			TriggeredBy = retryMetadata?.TriggeredBy ?? "manual",
+			RetriedFromRunId = retryMetadata?.RetriedFromRunId,
+			RetryMode = retryMetadata?.RetryMode,
 			StepRecords = stepRecords,
 			AllStepRecords = allStepRecords,
 			FinalContent = finalContent,
@@ -503,7 +508,7 @@ public partial class OrchestrationExecutor
 				OrchestrationName = orchestration.Name,
 				OrchestrationVersion = orchestration.Version,
 				StartedAt = runStartedAt,
-				TriggeredBy = triggerId is not null ? "trigger" : "manual",
+				TriggeredBy = retryMetadata?.TriggeredBy ?? (triggerId is not null ? "trigger" : "manual"),
 				TriggerId = triggerId,
 				Parameters = effectiveParams,
 				Variables = orchestration.Variables,
@@ -548,6 +553,7 @@ public partial class OrchestrationExecutor
 	public async Task<OrchestrationResult> ResumeAsync(
 		Orchestration orchestration,
 		CheckpointData checkpoint,
+		RetryMetadata? retryMetadata = null,
 		CancellationToken cancellationToken = default)
 	{
 		LogResumingOrchestration(orchestration.Name, checkpoint.RunId);
@@ -584,7 +590,8 @@ public partial class OrchestrationExecutor
 				checkpoint.TriggerId,
 				effectiveCancellationToken,
 				cancellationToken,
-				checkpoint);
+				checkpoint,
+				retryMetadata: retryMetadata);
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{

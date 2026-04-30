@@ -81,4 +81,15 @@ public class OrchestrationRunRecord
 	/// Lifecycle hook executions that ran during this orchestration run.
 	/// </summary>
 	public IReadOnlyList<HookExecutionRecord> HookExecutions { get; init; } = [];
+
+	/// <summary>
+	/// When this run was started as a retry of another run, this is the source RunId.
+	/// </summary>
+	public string? RetriedFromRunId { get; init; }
+
+	/// <summary>
+	/// Indicates the retry mode for this run when it is a retry.
+	/// Values: "failed" (skip succeeded steps), "all" (full re-run), "from-step:&lt;stepName&gt;" (re-run target step + downstream).
+	/// </summary>
+	public string? RetryMode { get; init; }
 }

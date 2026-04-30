@@ -28,14 +28,13 @@ internal sealed partial class CopilotSessionHandler
 	private readonly System.Text.StringBuilder _accumulatedContent = new();
 
 	/// <summary>
-	/// Stack of currently-active sub-agent invocations (innermost on top). Pushed on
-	/// <c>SubagentStartedEvent</c>, popped on <c>SubagentCompletedEvent</c>/<c>SubagentFailedEvent</c>
-	/// matched by <c>ToolCallId</c>. Used to attribute reasoning deltas (which carry no SDK
-	/// linkage) and as a fallback for content/tool events when the SDK's
-	/// <c>ParentToolCallId</c> is absent. Stored as a <see cref="List{T}"/> so we can also
-	/// look up arbitrary frames when the SDK pins a delta to a non-top frame.
+	/// Currently-active sub-agent invocations in start order (latest active frame last).
+	/// This preserves the existing "current actor = most recently started active sub-agent"
+	/// fallback for SDK events that carry no <c>ParentToolCallId</c>, while also allowing
+	/// exact lifecycle correlation by <c>ToolCallId</c> for concurrent sibling completions.
 	/// </summary>
-	private readonly List<SubagentFrame> _subagentStack = [];
+	private readonly List<SubagentFrame> _activeSubagentFrames = [];
+	private readonly Dictionary<string, SubagentFrame> _activeSubagentFramesByToolCallId = [];
 
 	private readonly record struct SubagentFrame(
 		string ToolCallId,
@@ -277,48 +276,98 @@ internal sealed partial class CopilotSessionHandler
 	// ── Actor attribution helpers ──
 
 	/// <summary>
-	/// The actor for events that carry no SDK <c>ParentToolCallId</c>: the top of the
-	/// sub-agent stack if any, otherwise the main agent.
+	/// The actor for events that carry no SDK <c>ParentToolCallId</c>: the most recently
+	/// started active sub-agent if any, otherwise the main agent.
 	/// </summary>
 	private ActorContext CurrentActor()
 	{
-		if (_subagentStack.Count == 0)
+		if (_activeSubagentFrames.Count == 0)
 			return ActorContext.Main;
 
-		var top = _subagentStack[^1];
-		return new ActorContext(
-			AgentName: top.AgentName,
-			AgentDisplayName: top.AgentDisplayName,
-			ToolCallId: top.ToolCallId,
-			Depth: _subagentStack.Count);
+		return CreateActorContext(_activeSubagentFrames[^1], _activeSubagentFrames.Count);
 	}
 
 	/// <summary>
 	/// Resolves the actor for an event that may carry an SDK-supplied <paramref name="parentToolCallId"/>.
-	/// When the SDK pins the event to a specific sub-agent frame we honor it (most precise).
-	/// When the pinned frame is not on the stack we log a warning and fall back to the current top.
+	/// When the SDK pins the event to a specific active sub-agent frame we honor it (most precise).
+	/// When the pinned frame is no longer active we log a warning and fall back to the current actor.
 	/// </summary>
 	private ActorContext ResolveActor(string? parentToolCallId)
 	{
 		if (parentToolCallId is null)
 			return CurrentActor();
 
-		// Find the matching frame (search top-down — innermost match wins).
-		for (var i = _subagentStack.Count - 1; i >= 0; i--)
+		if (_activeSubagentFramesByToolCallId.TryGetValue(parentToolCallId, out var frame))
 		{
-			var frame = _subagentStack[i];
-			if (frame.ToolCallId == parentToolCallId)
-			{
-				return new ActorContext(
-					AgentName: frame.AgentName,
-					AgentDisplayName: frame.AgentDisplayName,
-					ToolCallId: frame.ToolCallId,
-					Depth: i + 1);
-			}
+			var depth = FindActiveSubagentDepth(parentToolCallId);
+			if (depth is not null)
+				return CreateActorContext(frame, depth.Value);
 		}
 
 		LogParentToolCallIdNotFound(parentToolCallId);
 		return CurrentActor();
+	}
+
+	private ActorContext CreateActorContext(SubagentFrame frame, int depth) => new(
+		AgentName: frame.AgentName,
+		AgentDisplayName: frame.AgentDisplayName,
+		ToolCallId: frame.ToolCallId,
+		Depth: depth);
+
+	private int? FindActiveSubagentDepth(string toolCallId)
+	{
+		for (var i = _activeSubagentFrames.Count - 1; i >= 0; i--)
+		{
+			if (_activeSubagentFrames[i].ToolCallId == toolCallId)
+				return i + 1;
+		}
+
+		return null;
+	}
+
+	private void ActivateSubagent(SubagentFrame frame)
+	{
+		if (_activeSubagentFramesByToolCallId.ContainsKey(frame.ToolCallId))
+		{
+			LogSubagentFrameReplaced(frame.ToolCallId, frame.AgentName);
+			DeactivateSubagent(frame.ToolCallId, warnIfMissing: false);
+		}
+
+		_activeSubagentFrames.Add(frame);
+		_activeSubagentFramesByToolCallId[frame.ToolCallId] = frame;
+		LogSubagentFrameActivated(frame.ToolCallId, frame.AgentName, _activeSubagentFrames.Count);
+	}
+
+	private void DeactivateSubagent(string? toolCallId, bool warnIfMissing = true)
+	{
+		if (string.IsNullOrEmpty(toolCallId))
+			return;
+
+		var index = -1;
+		for (var i = _activeSubagentFrames.Count - 1; i >= 0; i--)
+		{
+			if (_activeSubagentFrames[i].ToolCallId == toolCallId)
+			{
+				index = i;
+				break;
+			}
+		}
+
+		var removedFromMap = _activeSubagentFramesByToolCallId.Remove(toolCallId, out var frame);
+		if (index >= 0)
+		{
+			frame = _activeSubagentFrames[index];
+			_activeSubagentFrames.RemoveAt(index);
+		}
+
+		if (!removedFromMap && index < 0)
+		{
+			if (warnIfMissing)
+				LogSubagentFrameMissing(toolCallId);
+			return;
+		}
+
+		LogSubagentFrameRemoved(toolCallId, frame.AgentName, _activeSubagentFrames.Count);
 	}
 
 	/// <summary>
@@ -502,8 +551,7 @@ internal sealed partial class CopilotSessionHandler
 		var toolCallId = subagentStarted.Data.ToolCallId;
 		if (!string.IsNullOrEmpty(toolCallId))
 		{
-			LogSubagentStackPush(toolCallId, subagentStarted.Data.AgentName, _subagentStack.Count + 1);
-			_subagentStack.Add(new SubagentFrame(
+			ActivateSubagent(new SubagentFrame(
 				ToolCallId: toolCallId,
 				AgentName: subagentStarted.Data.AgentName,
 				AgentDisplayName: subagentStarted.Data.AgentDisplayName));
@@ -522,7 +570,7 @@ internal sealed partial class CopilotSessionHandler
 	private void HandleSubagentCompleted(SubagentCompletedEvent subagentCompleted)
 	{
 		var toolCallId = subagentCompleted.Data.ToolCallId;
-		PopSubagent(toolCallId);
+		DeactivateSubagent(toolCallId);
 
 		// After popping, the current actor is the parent — emit accordingly.
 		EmitEvent(new AgentEvent
@@ -537,7 +585,7 @@ internal sealed partial class CopilotSessionHandler
 	private void HandleSubagentFailed(SubagentFailedEvent subagentFailed)
 	{
 		var toolCallId = subagentFailed.Data.ToolCallId;
-		PopSubagent(toolCallId);
+		DeactivateSubagent(toolCallId);
 
 		EmitEvent(new AgentEvent
 		{
@@ -558,38 +606,6 @@ internal sealed partial class CopilotSessionHandler
 		{
 			Type = AgentEventType.SubagentDeselected,
 		});
-	}
-
-	/// <summary>
-	/// Pops the matching frame from <see cref="_subagentStack"/>. If the topmost frame
-	/// matches we pop it; otherwise we search for the matching frame and pop it (this
-	/// can happen if the SDK reorders Completed events) and log a warning. If no match
-	/// is found we leave the stack intact and log.
-	/// </summary>
-	private void PopSubagent(string? toolCallId)
-	{
-		if (string.IsNullOrEmpty(toolCallId) || _subagentStack.Count == 0)
-			return;
-
-		if (_subagentStack[^1].ToolCallId == toolCallId)
-		{
-			LogSubagentStackPop(toolCallId, _subagentStack[^1].AgentName, _subagentStack.Count - 1);
-			_subagentStack.RemoveAt(_subagentStack.Count - 1);
-			return;
-		}
-
-		// Out-of-order completion — find and remove. This is unusual but defensible.
-		for (var i = _subagentStack.Count - 1; i >= 0; i--)
-		{
-			if (_subagentStack[i].ToolCallId == toolCallId)
-			{
-				LogSubagentStackOutOfOrderPop(toolCallId, _subagentStack[i].AgentName, i);
-				_subagentStack.RemoveAt(i);
-				return;
-			}
-		}
-
-		LogSubagentStackPopMissing(toolCallId);
 	}
 
 	private void HandleWarning(SessionWarningEvent warning)
@@ -839,31 +855,31 @@ internal sealed partial class CopilotSessionHandler
 	[LoggerMessage(
 		EventId = 3,
 		Level = LogLevel.Debug,
-		Message = "Sub-agent stack push: toolCallId={ToolCallId} agent={AgentName} depth={Depth}")]
-	private partial void LogSubagentStackPush(string toolCallId, string agentName, int depth);
+		Message = "Sub-agent frame activated: toolCallId={ToolCallId} agent={AgentName} depth={Depth}")]
+	private partial void LogSubagentFrameActivated(string toolCallId, string agentName, int depth);
 
 	[LoggerMessage(
 		EventId = 4,
 		Level = LogLevel.Debug,
-		Message = "Sub-agent stack pop: toolCallId={ToolCallId} agent={AgentName} remainingDepth={RemainingDepth}")]
-	private partial void LogSubagentStackPop(string toolCallId, string agentName, int remainingDepth);
+		Message = "Sub-agent frame removed: toolCallId={ToolCallId} agent={AgentName} remainingDepth={RemainingDepth}")]
+	private partial void LogSubagentFrameRemoved(string toolCallId, string agentName, int remainingDepth);
 
 	[LoggerMessage(
 		EventId = 5,
 		Level = LogLevel.Warning,
-		Message = "Sub-agent completion arrived out of order: toolCallId={ToolCallId} agent={AgentName} index={Index}. Stack repaired.")]
-	private partial void LogSubagentStackOutOfOrderPop(string toolCallId, string agentName, int index);
+		Message = "Sub-agent start reused active toolCallId={ToolCallId}; replacing previous frame for agent={AgentName}.")]
+	private partial void LogSubagentFrameReplaced(string toolCallId, string agentName);
 
 	[LoggerMessage(
 		EventId = 6,
 		Level = LogLevel.Warning,
-		Message = "Sub-agent completion for unknown toolCallId={ToolCallId}. Stack left intact (event predates a SubagentStarted, or was already popped).")]
-	private partial void LogSubagentStackPopMissing(string toolCallId);
+		Message = "Sub-agent completion for unknown toolCallId={ToolCallId}. Active frames left intact (event predates a SubagentStarted, or was already removed).")]
+	private partial void LogSubagentFrameMissing(string toolCallId);
 
 	[LoggerMessage(
 		EventId = 7,
 		Level = LogLevel.Warning,
-		Message = "SDK ParentToolCallId={ParentToolCallId} not found in active sub-agent stack; falling back to current actor.")]
+		Message = "SDK ParentToolCallId={ParentToolCallId} not found in active sub-agent frames; falling back to current actor.")]
 	private partial void LogParentToolCallIdNotFound(string parentToolCallId);
 
 	#endregion

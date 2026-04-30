@@ -2793,6 +2793,34 @@
     }
 
     /* ============================================================
+       Retry lineage badge (in ExecutionModal header)
+       ============================================================ */
+    .retry-lineage-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      margin-left: 8px;
+      padding: 2px 8px;
+      font-size: 11px;
+      color: var(--text-secondary, #8b949e);
+      background: var(--surface, #21262d);
+      border: 1px solid var(--border, #30363d);
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+    .retry-lineage-badge:hover {
+      background: var(--surface-hover, #2d333b);
+      color: var(--text-primary, #c9d1d9);
+    }
+    .retry-lineage-badge code {
+      font-family: var(--font-mono, monospace);
+      font-size: 10px;
+      background: transparent;
+      padding: 0;
+    }
+
+    /* ============================================================
        Loop iteration styles
        ============================================================ */
     .loop-iterations {
