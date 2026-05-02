@@ -646,7 +646,7 @@ Runs a local process as an MCP server using stdio transport.
       "name": "filesystem",
       "type": "local",
       "command": "npx",
-      "arguments": ["-y", "@anthropic/mcp-server-filesystem", "{{workingDirectory}}"]
+      "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "{{workingDirectory}}"]
     }
   ]
 }
@@ -691,7 +691,7 @@ A separate `mcp.json` file can be placed alongside orchestration files. It conta
       "name": "filesystem",
       "type": "local",
       "command": "npx",
-      "arguments": ["-y", "@anthropic/mcp-server-filesystem", "."]
+      "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "."]
     }
   ]
 }

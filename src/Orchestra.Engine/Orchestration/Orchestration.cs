@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace Orchestra.Engine;
 
 public class Orchestration
@@ -100,4 +102,18 @@ public class Orchestration
 	/// Hooks can observe step/orchestration outcomes and execute follow-up actions.
 	/// </summary>
 	public HookDefinition[] Hooks { get; init; } = [];
+
+	/// <summary>
+	/// Free-form metadata for the orchestration. Values may be any JSON type
+	/// (string, number, boolean, object, array). Metadata is purely informational
+	/// and does not affect execution; it is intended for orchestration authors
+	/// and managers to record details such as authorship, datetime, ticket links,
+	/// environment, SLA, or any other semi-structured data.
+	/// </summary>
+	/// <remarks>
+	/// Stored as <see cref="JsonNode"/> values so the original JSON shape (objects,
+	/// arrays, mixed types) is preserved on round-trip. The runtime never inspects
+	/// the contents of this dictionary.
+	/// </remarks>
+	public Dictionary<string, JsonNode?> Metadata { get; init; } = [];
 }

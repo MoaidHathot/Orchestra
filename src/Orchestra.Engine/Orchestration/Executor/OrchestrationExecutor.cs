@@ -82,6 +82,8 @@ public partial class OrchestrationExecutor
 		RetryMetadata? retryMetadata = null,
 		ParentExecutionContext? parentContext = null,
 		string? executionIdOverride = null,
+		ResolveCancellationCauseDelegate? resolveExternalCancellationCause = null,
+		string? triggeredBy = null,
 		CancellationToken cancellationToken = default)
 	{
 		LogStartingOrchestration(orchestration.Name);
@@ -110,7 +112,7 @@ public partial class OrchestrationExecutor
 
 		try
 		{
-			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform, retryMetadata: retryMetadata, parentContext: parentContext, executionIdOverride: executionIdOverride);
+			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform, retryMetadata: retryMetadata, parentContext: parentContext, executionIdOverride: executionIdOverride, orchestrationTimeoutCts: orchestrationTimeoutCts, resolveExternalCancellationCause: resolveExternalCancellationCause, triggeredBy: triggeredBy);
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -133,7 +135,10 @@ public partial class OrchestrationExecutor
 		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform = null,
 		RetryMetadata? retryMetadata = null,
 		ParentExecutionContext? parentContext = null,
-		string? executionIdOverride = null)
+		string? executionIdOverride = null,
+		CancellationTokenSource? orchestrationTimeoutCts = null,
+		ResolveCancellationCauseDelegate? resolveExternalCancellationCause = null,
+		string? triggeredBy = null)
 	{
 		var runId = retryMetadata?.OverrideRunId ?? checkpoint?.RunId ?? executionIdOverride ?? Guid.NewGuid().ToString("N")[..12];
 		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
@@ -475,8 +480,72 @@ public partial class OrchestrationExecutor
 				$"Step '{unresolved.StepName}' has unresolved template expression: {unresolved.Expression}");
 		}
 
+		// Determine the cancellation cause (if any) so it can be persisted on the run
+		// record and used to enrich step error messages. Resolution order:
+		//   1) The orchestration's own timeoutSeconds fired (we own that CTS).
+		//   2) The orchestra_complete tool was invoked by a step.
+		//   3) An external token cancelled. Ask the wrapper-supplied probe (e.g. the
+		//      sync-invoke timeout owner) before falling back to a generic External cause.
+		// If no cancellation occurred (e.g. the run completed normally) cancellationDetails stays null.
+		CancellationDetails? cancellationDetails = null;
+		var anyStepCancelled = stepResults.Values.Any(r => r.Status == ExecutionStatus.Cancelled);
+
+		if (anyStepCancelled)
+		{
+			if (orchestrationTimeoutCts is not null
+				&& orchestrationTimeoutCts.IsCancellationRequested
+				&& !externalCancellationToken.IsCancellationRequested)
+			{
+				cancellationDetails = CancellationDetails.OrchestrationTimeout(orchestration.TimeoutSeconds!.Value);
+			}
+			else if (orchestrationCompleteStatus is not null
+				&& !externalCancellationToken.IsCancellationRequested
+				&& (orchestrationTimeoutCts is null || !orchestrationTimeoutCts.IsCancellationRequested))
+			{
+				cancellationDetails = CancellationDetails.OrchestrationComplete(
+					orchestrationCompleteReason,
+					orchestrationCompleteStepName);
+			}
+			else if (cancellationToken.IsCancellationRequested || externalCancellationToken.IsCancellationRequested)
+			{
+				cancellationDetails = resolveExternalCancellationCause?.Invoke()
+					?? CancellationDetails.External();
+			}
+		}
+
+		// Enrich each Cancelled step's ErrorMessage with the determined cause so
+		// the on-disk *-result.json files and run.json carry the precise reason.
+		// We only rewrite messages that are still the default "Cancelled" so that
+		// any step-specific reason already supplied (e.g. by orchestra_complete)
+		// is preserved verbatim.
+		if (cancellationDetails is not null)
+		{
+			var enrichedMessage = $"Cancelled: {cancellationDetails.Reason}";
+
+			foreach (var name in stepResults.Keys.ToArray())
+			{
+				if (stepResults.TryGetValue(name, out var existing)
+					&& existing.Status == ExecutionStatus.Cancelled
+					&& IsDefaultCancelledMessage(existing.ErrorMessage))
+				{
+					var replaced = ExecutionResult.Cancelled(enrichedMessage);
+					stepResults[name] = replaced;
+					context.AddResult(name, replaced);
+
+					if (stepRecords.TryGetValue(name, out var record))
+					{
+						stepRecords[name] = CloneRecordWithError(record, enrichedMessage);
+					}
+					if (allStepRecords.TryGetValue(name, out var allRecord))
+					{
+						allStepRecords[name] = CloneRecordWithError(allRecord, enrichedMessage);
+					}
+				}
+			}
+		}
+
 		var orchestrationResult = OrchestrationResult.From(
-			orchestration, stepResults, orchestrationCompleteStatus, orchestrationCompleteReason, orchestrationCompleteStepName);
+			orchestration, stepResults, orchestrationCompleteStatus, orchestrationCompleteReason, orchestrationCompleteStepName, cancellationDetails);
 
 		if (orchestrationResult.Status == ExecutionStatus.Succeeded)
 		{
@@ -498,6 +567,16 @@ public partial class OrchestrationExecutor
 		var finalContent = BuildFinalContent(orchestrationResult);
 		await ExecuteOrchestrationHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, runCompletedAt, triggerId, stepRecords, hookExecutions, finalContent, orchestrationResult.Status, CancellationToken.None).ConfigureAwait(false);
 
+		// Determine the run's TriggeredBy. Resolution order:
+		//   1. retryMetadata.TriggeredBy — explicit retry path always wins.
+		//   2. triggeredBy parameter — supplied by the caller (e.g. ChildOrchestrationLauncher
+		//      forwarding ChildLaunchRequest.TriggeredBy such as "orchestration:<parent>" or "mcp").
+		//   3. "manual" — final fallback for direct ExecuteAsync calls without context.
+		// Without (2), runs invoked via the data-plane MCP or as child orchestrations were
+		// previously persisted as "manual", losing the parent/lineage information that was
+		// available on the in-memory ChildLaunchRequest.
+		var resolvedTriggeredBy = retryMetadata?.TriggeredBy ?? triggeredBy ?? "manual";
+
 		var runRecord = new OrchestrationRunRecord
 		{
 			RunId = runId,
@@ -507,7 +586,7 @@ public partial class OrchestrationExecutor
 			Status = orchestrationResult.Status,
 			Parameters = effectiveParams,
 			TriggerId = triggerId,
-			TriggeredBy = retryMetadata?.TriggeredBy ?? "manual",
+			TriggeredBy = resolvedTriggeredBy,
 			RetriedFromRunId = retryMetadata?.RetriedFromRunId,
 			RetryMode = retryMetadata?.RetryMode,
 			StepRecords = stepRecords,
@@ -516,6 +595,7 @@ public partial class OrchestrationExecutor
 			CompletionReason = orchestrationResult.CompletionReason,
 			CompletedByStep = orchestrationResult.CompletedByStep,
 			IsIncomplete = orchestrationResult.IsIncomplete,
+			Cancellation = orchestrationResult.Cancellation,
 			TotalUsage = AggregateTokenUsage(stepRecords.Values),
 			HookExecutions = hookExecutions.OrderBy(h => h.StartedAt).ToArray(),
 			ParentExecutionId = parentContext?.ParentExecutionId,
@@ -530,7 +610,7 @@ public partial class OrchestrationExecutor
 				OrchestrationName = orchestration.Name,
 				OrchestrationVersion = orchestration.Version,
 				StartedAt = runStartedAt,
-				TriggeredBy = retryMetadata?.TriggeredBy ?? (triggerId is not null ? "trigger" : "manual"),
+				TriggeredBy = retryMetadata?.TriggeredBy ?? triggeredBy ?? (triggerId is not null ? "trigger" : "manual"),
 				TriggerId = triggerId,
 				Parameters = effectiveParams,
 				Variables = orchestration.Variables,
@@ -613,7 +693,8 @@ public partial class OrchestrationExecutor
 				effectiveCancellationToken,
 				cancellationToken,
 				checkpoint,
-				retryMetadata: retryMetadata);
+				retryMetadata: retryMetadata,
+				orchestrationTimeoutCts: orchestrationTimeoutCts);
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -1159,6 +1240,43 @@ public partial class OrchestrationExecutor
 		};
 	}
 
+	/// <summary>
+	/// Returns true when <paramref name="errorMessage"/> is the bare default emitted by
+	/// <see cref="ExecutionResult.Cancelled(string?)"/> with no caller-supplied detail.
+	/// Used to decide whether the post-run cancellation-cause enricher may rewrite it.
+	/// </summary>
+	private static bool IsDefaultCancelledMessage(string? errorMessage) =>
+		errorMessage is null || errorMessage == "Cancelled";
+
+	/// <summary>
+	/// Returns a copy of <paramref name="record"/> with only its <see cref="StepRunRecord.ErrorMessage"/> replaced.
+	/// Used to enrich Cancelled step records with the determined cancellation cause without
+	/// losing any of the other fields the original record carried.
+	/// </summary>
+	private static StepRunRecord CloneRecordWithError(StepRunRecord record, string errorMessage) => new()
+	{
+		StepName = record.StepName,
+		Status = record.Status,
+		StartedAt = record.StartedAt,
+		CompletedAt = record.CompletedAt,
+		Content = record.Content,
+		RawContent = record.RawContent,
+		ErrorMessage = errorMessage,
+		Parameters = record.Parameters,
+		LoopIteration = record.LoopIteration,
+		RawDependencyOutputs = record.RawDependencyOutputs,
+		PromptSent = record.PromptSent,
+		ActualModel = record.ActualModel,
+		SelectedModel = record.SelectedModel,
+		RequestedModelInfo = record.RequestedModelInfo,
+		SelectedModelInfo = record.SelectedModelInfo,
+		ActualModelInfo = record.ActualModelInfo,
+		Usage = record.Usage,
+		Trace = record.Trace,
+		RetryHistory = record.RetryHistory,
+		ErrorCategory = record.ErrorCategory,
+	};
+
 	private static string BuildFinalContent(OrchestrationResult orchestrationResult)
 	{
 		if (orchestrationResult.Status is ExecutionStatus.Cancelled or ExecutionStatus.Failed)
@@ -1168,6 +1286,12 @@ public partial class OrchestrationExecutor
 			if (orchestrationResult.CompletionReason is not null)
 			{
 				summary.AppendLine($"Orchestration completed early: {orchestrationResult.CompletionReason}");
+			}
+			else if (orchestrationResult.Cancellation is { } cancel)
+			{
+				// Surface the structured cancellation cause (timeout vs caller-cancel vs orchestra_complete)
+				// directly in the human-readable summary so users do not have to back it out from timestamps.
+				summary.AppendLine($"Orchestration was cancelled: {cancel.Reason}.");
 			}
 			else
 			{

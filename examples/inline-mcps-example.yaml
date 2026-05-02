@@ -29,7 +29,7 @@ mcps:
     command: npx
     arguments:
       - "-y"
-      - "@anthropic/mcp-server-filesystem"
+      - "@modelcontextprotocol/server-filesystem"
       - "{{workingDirectory}}"
 
   - name: orchestra

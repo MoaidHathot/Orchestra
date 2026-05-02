@@ -94,6 +94,11 @@ public static class ServiceCollectionExtensions
 		// Register engine services (if not already registered by the consumer)
 		services.TryAddSingleton<IScheduler, OrchestrationScheduler>();
 
+		// IHttpContextAccessor is required by DataPlaneTools to read parent-execution
+		// headers (set by the engine when an orchestration's prompt step targets /mcp/data)
+		// and auto-populate parentExecutionId for nested invoke_orchestration calls.
+		services.AddHttpContextAccessor();
+
 		// Engine tool registry (default includes all built-in tools; consumers can customize via AddEngineTools)
 		if (!services.Any(d => d.ServiceType == typeof(EngineToolRegistry)))
 		{

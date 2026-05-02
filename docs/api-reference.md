@@ -523,7 +523,7 @@ GET /api/mcps
       "name": "filesystem",
       "type": "Local",
       "command": "npx",
-      "arguments": ["-y", "@anthropic/mcp-server-filesystem", "."],
+      "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "."],
       "usedByCount": 2,
       "usedBy": ["research-assistant-abc123", "code-reviewer-def456"]
     },

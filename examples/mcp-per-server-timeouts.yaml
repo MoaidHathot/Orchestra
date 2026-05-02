@@ -1,0 +1,152 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: mcp-per-server-timeouts
+description: >
+  Reference example for the per-server timeoutSeconds field on mcps[] entries.
+  Shows how each MCP can have its own deadline applied to every tool call
+  routed through it. The Copilot SDK uses these values to set the per-MCP
+  request timeout (overriding its built-in ~3-minute default). For Orchestra's
+  data-plane MCP specifically, the host injects a 30-minute default when the
+  field is omitted; for any other MCP, omitting timeoutSeconds means "use the
+  SDK default".
+
+  Priority chain for the data-plane MCP timeout (highest wins):
+    1. timeoutSeconds set on the orchestration's mcps[] entry (this file)
+    2. timeoutSeconds set on the global orchestra.mcp.json entry (if any)
+    3. McpServerOptions.DefaultOrchestraInvokeTimeoutSeconds (host config)
+    4. Copilot SDK built-in default (~3 min)
+version: "1.0.0"
+
+inputs:
+  query:
+    type: string
+    description: User query that drives the demo
+    required: true
+
+mcps:
+  # 1. Orchestra's data-plane MCP with an explicit, very long timeout for
+  #    deeply-nested orchestration trees (e.g., 2 hours).
+  - name: orchestra
+    type: remote
+    endpoint: "{{server.url}}/mcp/data"
+    timeoutSeconds: 7200  # 2 hours
+
+  # 2. A short-leash data store MCP — fail fast on slow queries.
+  - name: db
+    type: remote
+    endpoint: "https://internal.example.com/mcp/db"
+    headers:
+      Authorization: "Bearer {{env.DB_TOKEN}}"
+    timeoutSeconds: 30  # 30 seconds
+
+  # 3. A local filesystem MCP using the SDK default (no override).
+  - name: filesystem
+    type: local
+    command: npx
+    arguments:
+      - "-y"
+      - "@modelcontextprotocol/server-filesystem"
+      - "{{orchestration.tempDir}}"
+
+  # 4. A long-running custom analyzer MCP that legitimately needs minutes
+  #    per call. Without this override, the SDK would cut it off at ~3 min.
+  - name: code-analyzer
+    type: local
+    command: dotnet
+    arguments:
+      - "run"
+      - "--project"
+      - "tools/code-analyzer-mcp"
+    timeoutSeconds: 900  # 15 minutes
+
+steps:
+  - name: classify
+    type: Prompt
+    dependsOn: []
+    parameters:
+      - query
+    # This step uses the fast db MCP only — short timeouts surface
+    # broken DB connections quickly without dragging out the run.
+    mcps:
+      - db
+    model: claude-opus-4.6
+    systemPrompt: |
+      You are a query classifier. Use the database MCP to look up which
+      analyzer should handle the user's query and return a single keyword.
+    userPrompt: |
+      Classify this query into one of: code-review, runtime-analysis,
+      file-inspection, or other.
+
+      Query: {{param.query}}
+
+  - name: deep-analyze
+    type: Prompt
+    dependsOn:
+      - classify
+    parameters:
+      - query
+    # This step uses the long-running analyzer AND filesystem. The 15-min
+    # per-server timeout on code-analyzer is what unblocks the analysis.
+    mcps:
+      - code-analyzer
+      - filesystem
+    model: claude-opus-4.6
+    reasoningLevel: high
+    systemPrompt: |
+      You are a senior code analyst. Run the analyzer tool against the
+      target the classifier identified, then save its raw JSON output to
+      {{orchestration.tempDir}}/analysis.json. Tools may take many minutes
+      to return — that is expected; do not retry just because a call is slow.
+    userPrompt: |
+      Classifier said: {{classify.output}}
+
+      Run the appropriate analyzer for this query:
+      {{param.query}}
+
+      When done, persist the raw analyzer output to
+      {{orchestration.tempDir}}/analysis.json.
+
+  - name: invoke-followup
+    type: Prompt
+    dependsOn:
+      - deep-analyze
+    parameters:
+      - query
+    # This step calls into Orchestra MCP to spawn a child orchestration
+    # that may take over an hour. The 2-hour timeout on the 'orchestra'
+    # MCP entry above keeps each invoke_orchestration call alive long
+    # enough to complete.
+    mcps:
+      - orchestra
+    model: claude-opus-4.6
+    timeoutSeconds: 8400  # 2h 20m — generous step cap
+    systemPrompt: |
+      Spawn a follow-up orchestration via the Orchestra MCP based on the
+      analysis output. Use mode="sync" so we receive its result inline.
+    userPrompt: |
+      Original query: {{param.query}}
+      Analysis: {{deep-analyze.output}}
+
+      Use list_orchestrations to find a suitable follow-up orchestration,
+      then invoke_orchestration with mode="sync" to run it. Return its
+      content verbatim.
+
+  - name: report
+    type: Transform
+    dependsOn:
+      - invoke-followup
+    template: |
+      # Multi-MCP Run Report
+
+      **Query:** {{param.query}}
+      **Run ID:** {{orchestration.runId}}
+
+      ## Classification
+      {{classify.output}}
+
+      ## Deep Analysis
+      {{deep-analyze.output}}
+
+      ## Follow-up Orchestration Result
+      {{invoke-followup.output}}
+    parameters:
+      - query

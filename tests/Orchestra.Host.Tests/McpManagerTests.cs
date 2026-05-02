@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 using Orchestra.Host.Mcp;
+using Orchestra.Host.McpServer;
 using Xunit;
 
 namespace Orchestra.Host.Tests;
@@ -531,6 +532,523 @@ public class McpManagerTests : IAsyncLifetime
 
 	#endregion
 
+	#region Resolve — Data-Plane Default Timeout
+
+	/// <summary>
+	/// When an inline RemoteMcp targets the configured data-plane route and the
+	/// orchestration didn't set timeoutSeconds, the configured default is applied
+	/// so long-running invoke_orchestration calls in sync mode aren't capped at
+	/// the Copilot SDK's ~3-minute default.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_DataPlaneRemoteMcp_NoYamlTimeout_AppliesDefault()
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var inline = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			// Timeout deliberately null
+		};
+
+		// Act
+		var result = manager.Resolve([inline]);
+
+		// Assert — entry is replaced with one carrying the default timeout
+		result.Should().HaveCount(1);
+		var resolved = result[0].Should().BeOfType<RemoteMcp>().Subject;
+		resolved.Name.Should().Be("orchestra");
+		resolved.Endpoint.Should().Be("http://localhost:5001/mcp/data");
+		resolved.Timeout.Should().Be(TimeSpan.FromSeconds(1800));
+	}
+
+	/// <summary>
+	/// When the orchestration explicitly sets <c>timeoutSeconds</c> on the
+	/// data-plane MCP entry, the YAML override wins over the host default.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_DataPlaneRemoteMcp_WithYamlTimeout_OverrideWins()
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var inline = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			Timeout = TimeSpan.FromSeconds(60),
+		};
+
+		// Act
+		var result = manager.Resolve([inline]);
+
+		// Assert — original entry passed through (no override) with caller-supplied 60s
+		result.Should().HaveCount(1);
+		result[0].Should().BeSameAs(inline);
+		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(60));
+	}
+
+	/// <summary>
+	/// Non-data-plane MCPs (other Remote MCPs and Local MCPs) MUST NOT receive the
+	/// data-plane default; they retain whatever the YAML specified (including null).
+	/// </summary>
+	[Fact]
+	public async Task Resolve_NonDataPlaneMcp_NoDefaultApplied()
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var localTool = CreateLocalMcp("filesystem");
+		var unrelatedRemote = new RemoteMcp
+		{
+			Name = "github",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com/mcp",
+			Headers = [],
+		};
+		var input = new Engine.Mcp[] { localTool, unrelatedRemote };
+
+		// Act
+		var result = manager.Resolve(input);
+
+		// Assert — no transformation; same reference returned and timeouts unchanged
+		result.Should().BeSameAs(input);
+		result[0].Timeout.Should().BeNull();
+		result[1].Timeout.Should().BeNull();
+	}
+
+	/// <summary>
+	/// Setting <c>DefaultOrchestraInvokeTimeoutSeconds = 0</c> disables the host
+	/// default entirely so authors can opt out (e.g. to fall back to the SDK default).
+	/// </summary>
+	[Fact]
+	public async Task Resolve_DataPlaneRemoteMcp_DefaultDisabled_NoTimeoutApplied()
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 0,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var inline = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+		};
+
+		// Act
+		var result = manager.Resolve([inline]);
+
+		// Assert — entry passes through unchanged; SDK default will apply
+		result.Should().HaveCount(1);
+		result[0].Should().BeSameAs(inline);
+		result[0].Timeout.Should().BeNull();
+	}
+
+	/// <summary>
+	/// The default value is configurable: changing it changes the applied timeout.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_DataPlaneRemoteMcp_CustomDefault_Applied()
+	{
+		// Arrange — operator overrides default to 600s
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 600,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var inline = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+		};
+
+		// Act
+		var result = manager.Resolve([inline]);
+
+		// Assert
+		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(600));
+	}
+
+	/// <summary>
+	/// Endpoint detection tolerates trailing slashes, ports, and absolute URIs.
+	/// </summary>
+	[Theory]
+	[InlineData("http://localhost:5001/mcp/data")]
+	[InlineData("http://localhost:5001/mcp/data/")]
+	[InlineData("https://orchestra.example.com:443/mcp/data")]
+	[InlineData("http://127.0.0.1:8080/mcp/data?session=abc")]
+	public async Task Resolve_DataPlaneEndpoint_VariousFormats_DetectedAndDefaultApplied(string endpoint)
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var inline = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = endpoint,
+			Headers = [],
+		};
+
+		// Act
+		var result = manager.Resolve([inline]);
+
+		// Assert
+		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(1800),
+			$"endpoint '{endpoint}' should be recognized as the data-plane MCP");
+	}
+
+	/// <summary>
+	/// A custom DataPlaneRoute is honored: the same endpoint that previously matched
+	/// no longer triggers the default once the route changes.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_DataPlaneRoute_Customized_DetectionFollowsConfig()
+	{
+		// Arrange — operator changed the route from /mcp/data to /api/mcp/data
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/api/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var customRouteInline = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/api/mcp/data",
+			Headers = [],
+		};
+
+		var oldRouteInline = new RemoteMcp
+		{
+			Name = "orchestra-old",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data", // no longer the configured route
+			Headers = [],
+		};
+
+		// Act
+		var result = manager.Resolve([customRouteInline, oldRouteInline]);
+
+		// Assert
+		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(1800),
+			"endpoint matching the custom data-plane route should get the default");
+		result[1].Timeout.Should().BeNull(
+			"endpoint that does NOT match the configured data-plane route should not get the default");
+	}
+
+	/// <summary>
+	/// When the orchestration references a global MCP (defined in orchestra.mcp.json)
+	/// whose original definition pointed at the data-plane route, the resulting proxy
+	/// RemoteMcp inherits the host default timeout — even though the proxy URL itself
+	/// no longer contains <c>/mcp/data</c>.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_GlobalMcpPointingAtDataPlane_AppliesDefault()
+	{
+		// Arrange — register a global MCP whose endpoint is the data plane
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+
+		var globalDataPlane = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			// no Timeout configured globally either
+		};
+		await manager.InitializeAsync([globalDataPlane]);
+
+		// The orchestration references the global by name (post-template-resolver clone)
+		var clonedReference = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+		};
+
+		// Act
+		var result = manager.Resolve([clonedReference]);
+
+		// Assert — replaced with proxy URL but carrying the data-plane default timeout
+		result.Should().HaveCount(1);
+		var proxy = result[0].Should().BeOfType<RemoteMcp>().Subject;
+		proxy.Endpoint.Should().Contain("/mcp/orchestra", "global MCPs are routed via the proxy");
+		proxy.Timeout.Should().Be(TimeSpan.FromSeconds(1800));
+	}
+
+	/// <summary>
+	/// When the global MCP itself sets a timeout, that explicit value is preserved
+	/// across proxy replacement and the host default does not override it.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_GlobalMcpWithExplicitTimeout_TakesPrecedenceOverDefault()
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+
+		var globalDataPlane = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			Timeout = TimeSpan.FromMinutes(5), // explicit value
+		};
+		await manager.InitializeAsync([globalDataPlane]);
+
+		var reference = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+		};
+
+		// Act
+		var result = manager.Resolve([reference]);
+
+		// Assert — explicit global timeout (5 min) wins over host default (30 min)
+		result[0].Timeout.Should().Be(TimeSpan.FromMinutes(5));
+	}
+
+	/// <summary>
+	/// The orchestration's per-entry <c>timeoutSeconds</c> still wins over both the
+	/// global definition's timeout and the host default — orchestration intent
+	/// always takes top priority.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_OrchestrationOverride_BeatsGlobalAndHostDefault()
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+
+		var globalDataPlane = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			Timeout = TimeSpan.FromMinutes(5), // global default
+		};
+		await manager.InitializeAsync([globalDataPlane]);
+
+		var orchestrationOverride = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			Timeout = TimeSpan.FromSeconds(45), // orchestration YAML override
+		};
+
+		// Act
+		var result = manager.Resolve([orchestrationOverride]);
+
+		// Assert — orchestration override wins
+		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(45));
+	}
+
+	#endregion
+
+	#region Resolve(Mcps, ParentExecutionAnnotation) — parent-execution header injection
+
+	[Fact]
+	public async Task ResolveWithParent_OnInlineDataPlaneMcp_StampsParentExecutionHeaders()
+	{
+		// Arrange — orchestration declares an inline RemoteMcp pointing at /mcp/data,
+		// matching the misconfiguration that caused the recursive-launch bug.
+		var options = new McpServerOptions { DataPlaneRoute = "/mcp/data" };
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var inlineDataPlane = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = new Dictionary<string, string> { ["X-Existing"] = "preserve-me" },
+		};
+
+		var parent = new ParentExecutionAnnotation
+		{
+			ExecutionId = "abc123",
+			OrchestrationName = "find-meeting",
+			StepName = "search",
+		};
+
+		// Act
+		var result = manager.Resolve([inlineDataPlane], parent);
+
+		// Assert
+		result.Should().HaveCount(1);
+		var remote = result[0].Should().BeOfType<RemoteMcp>().Subject;
+		remote.Headers.Should().ContainKey(OrchestraHeaders.ParentExecutionId).WhoseValue.Should().Be("abc123");
+		remote.Headers.Should().ContainKey(OrchestraHeaders.ParentOrchestrationName).WhoseValue.Should().Be("find-meeting");
+		remote.Headers.Should().ContainKey(OrchestraHeaders.ParentStepName).WhoseValue.Should().Be("search");
+
+		// Existing user-defined headers must be preserved.
+		remote.Headers.Should().ContainKey("X-Existing").WhoseValue.Should().Be("preserve-me");
+	}
+
+	[Fact]
+	public async Task ResolveWithParent_OnNonOrchestraMcp_DoesNotInjectHeaders()
+	{
+		// Arrange — endpoint points at an external MCP server. Headers must NOT be added,
+		// otherwise we'd leak internal execution IDs to third parties.
+		var options = new McpServerOptions { DataPlaneRoute = "/mcp/data" };
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var externalMcp = new RemoteMcp
+		{
+			Name = "external",
+			Type = McpType.Remote,
+			Endpoint = "https://example.com/some-mcp",
+			Headers = [],
+		};
+
+		var parent = new ParentExecutionAnnotation
+		{
+			ExecutionId = "abc123",
+			OrchestrationName = "x",
+			StepName = "y",
+		};
+
+		// Act
+		var result = manager.Resolve([externalMcp], parent);
+
+		// Assert — external endpoints are returned unchanged.
+		result.Should().HaveCount(1);
+		var remote = result[0].Should().BeOfType<RemoteMcp>().Subject;
+		remote.Headers.Should().NotContainKey(OrchestraHeaders.ParentExecutionId);
+		remote.Headers.Should().NotContainKey(OrchestraHeaders.ParentOrchestrationName);
+		remote.Headers.Should().NotContainKey(OrchestraHeaders.ParentStepName);
+	}
+
+	[Fact]
+	public async Task ResolveWithParent_NullAnnotation_BehavesLikePlainResolve()
+	{
+		// Arrange
+		var options = new McpServerOptions { DataPlaneRoute = "/mcp/data" };
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var inlineDataPlane = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+		};
+
+		// Act
+		var result = manager.Resolve([inlineDataPlane], parent: null);
+
+		// Assert — no headers injected when parent is null.
+		var remote = result[0].Should().BeOfType<RemoteMcp>().Subject;
+		remote.Headers.Should().NotContainKey(OrchestraHeaders.ParentExecutionId);
+	}
+
+	[Fact]
+	public async Task ResolveWithParent_OverwritesUserSpoofedParentHeaders()
+	{
+		// Arrange — orchestration YAML contains hand-crafted headers that try to spoof
+		// the parent execution ID. The resolver must overwrite them so the LLM cannot
+		// forge run lineage by editing the YAML.
+		var options = new McpServerOptions { DataPlaneRoute = "/mcp/data" };
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var spoofingMcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+			{
+				[OrchestraHeaders.ParentExecutionId] = "spoofed-id",
+			},
+		};
+
+		var parent = new ParentExecutionAnnotation
+		{
+			ExecutionId = "real-id",
+			OrchestrationName = "real",
+			StepName = "step",
+		};
+
+		// Act
+		var result = manager.Resolve([spoofingMcp], parent);
+
+		// Assert
+		var remote = result[0].Should().BeOfType<RemoteMcp>().Subject;
+		remote.Headers[OrchestraHeaders.ParentExecutionId].Should().Be("real-id",
+			"the resolver must always win over caller-supplied parent headers");
+	}
+
+	#endregion
+
 	#region Helpers
 
 	private static LocalMcp CreateLocalMcp(string name) => new()
@@ -558,8 +1076,8 @@ public class McpManagerTests : IAsyncLifetime
 	{
 		public bool StartProxyCalled { get; private set; }
 
-		public TestableMcpManager()
-			: base(NullLogger<McpManager>.Instance)
+		public TestableMcpManager(McpServerOptions? options = null)
+			: base(NullLogger<McpManager>.Instance, options)
 		{
 		}
 
@@ -575,8 +1093,8 @@ public class McpManagerTests : IAsyncLifetime
 	/// </summary>
 	private sealed class FailingProxyMcpManager : McpManager
 	{
-		public FailingProxyMcpManager()
-			: base(NullLogger<McpManager>.Instance)
+		public FailingProxyMcpManager(McpServerOptions? options = null)
+			: base(NullLogger<McpManager>.Instance, options)
 		{
 		}
 

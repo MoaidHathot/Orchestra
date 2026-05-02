@@ -572,6 +572,68 @@ public class CopilotAgentTests
 		config.McpServers.Should().BeNull();
 	}
 
+	[Fact]
+	public void BuildSessionConfig_LocalMcpWithTimeout_PropagatesAsMilliseconds()
+	{
+		// Arrange — long-running tool needs a 30-minute MCP request timeout
+		var agent = CreateAgentWithMcps(new LocalMcp
+		{
+			Name = "long-runner",
+			Type = McpType.Local,
+			Command = "node",
+			Arguments = ["server.js"],
+			Timeout = TimeSpan.FromMinutes(30),
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert — Mcp.Timeout (TimeSpan) is converted to milliseconds for the SDK.
+		var serverConfig = config.McpServers!["long-runner"].Should().BeOfType<McpStdioServerConfig>().Subject;
+		serverConfig.Timeout.Should().Be(1_800_000, "30 minutes in milliseconds");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_RemoteMcpWithTimeout_PropagatesAsMilliseconds()
+	{
+		// Arrange — Orchestra data-plane MCP with the host default already applied (30 min).
+		var agent = CreateAgentWithMcps(new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			Timeout = TimeSpan.FromSeconds(1800),
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		var serverConfig = config.McpServers!["orchestra"].Should().BeOfType<McpHttpServerConfig>().Subject;
+		serverConfig.Timeout.Should().Be(1_800_000, "1800 seconds in milliseconds");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_McpWithoutTimeout_ServerConfigTimeoutIsNull()
+	{
+		// Arrange — no Mcp.Timeout means we let the Copilot SDK use its built-in default.
+		var agent = CreateAgentWithMcps(new RemoteMcp
+		{
+			Name = "no-timeout",
+			Type = McpType.Remote,
+			Endpoint = "https://example.com/mcp",
+			Headers = [],
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		var serverConfig = config.McpServers!["no-timeout"].Should().BeOfType<McpHttpServerConfig>().Subject;
+		serverConfig.Timeout.Should().BeNull();
+	}
+
 	#endregion
 
 	#region BuildSessionConfig Skill Directories Tests

@@ -335,7 +335,15 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 
 	public void ReportStepError(string stepName, string errorMessage)
 	{
-		Write("step-error", new { stepName, error = errorMessage });
+		// completedAt stamp: clients use this on replay to compute the actual elapsed time of
+		// the step. Without it they default to Date.now() and the duration appears reset to ~0
+		// each time the user opens the execution view.
+		Write("step-error", new
+		{
+			stepName,
+			error = errorMessage,
+			completedAt = DateTimeOffset.UtcNow.ToString("o"),
+		});
 	}
 
 	/// <summary>
@@ -343,7 +351,11 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	/// </summary>
 	public void ReportStepCancelled(string stepName)
 	{
-		Write("step-cancelled", new { stepName });
+		Write("step-cancelled", new
+		{
+			stepName,
+			completedAt = DateTimeOffset.UtcNow.ToString("o"),
+		});
 	}
 
 	public void ReportStepCompleted(string stepName, AgentResult result, OrchestrationStepType stepType)
@@ -360,6 +372,10 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			contentPreview = result.Content.Length > 500
 				? result.Content[..500] + "..."
 				: result.Content,
+			// Stamp completion time on the event so replayed events render the correct
+			// elapsed duration. The client previously used Date.now() at replay time, which
+			// reset the apparent duration every time the user opened the execution view.
+			completedAt = DateTimeOffset.UtcNow.ToString("o"),
 		});
 		OnStepCompleted?.Invoke(stepName);
 	}
@@ -425,7 +441,15 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 
 	public void ReportStepStarted(string stepName)
 	{
-		Write("step-started", new { stepName });
+		// Stamp the start time on the event itself so late-attaching SSE clients can compute
+		// elapsed time correctly on replay. Without this, the client used Date.now() when
+		// the event arrived (i.e. when the modal was opened) and the apparent duration reset
+		// to zero every time the user reopened the execution view.
+		Write("step-started", new
+		{
+			stepName,
+			startedAt = DateTimeOffset.UtcNow.ToString("o"),
+		});
 		OnStepStarted?.Invoke(stepName);
 	}
 
@@ -480,17 +504,40 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 
 	public void ReportSubagentStarted(string stepName, string? toolCallId, string agentName, string? displayName, string? description)
 	{
-		Write("subagent-started", new { stepName, toolCallId, agentName, displayName, description });
+		Write("subagent-started", new
+		{
+			stepName,
+			toolCallId,
+			agentName,
+			displayName,
+			description,
+			startedAt = DateTimeOffset.UtcNow.ToString("o"),
+		});
 	}
 
 	public void ReportSubagentCompleted(string stepName, string? toolCallId, string agentName, string? displayName)
 	{
-		Write("subagent-completed", new { stepName, toolCallId, agentName, displayName });
+		Write("subagent-completed", new
+		{
+			stepName,
+			toolCallId,
+			agentName,
+			displayName,
+			completedAt = DateTimeOffset.UtcNow.ToString("o"),
+		});
 	}
 
 	public void ReportSubagentFailed(string stepName, string? toolCallId, string agentName, string? displayName, string? error)
 	{
-		Write("subagent-failed", new { stepName, toolCallId, agentName, displayName, error });
+		Write("subagent-failed", new
+		{
+			stepName,
+			toolCallId,
+			agentName,
+			displayName,
+			error,
+			completedAt = DateTimeOffset.UtcNow.ToString("o"),
+		});
 	}
 
 	public void ReportSubagentDeselected(string stepName)
@@ -628,6 +675,15 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			completionReason = orchestrationResult.CompletionReason,
 			completedByStep = orchestrationResult.CompletedByStep,
 			isIncomplete = orchestrationResult.IsIncomplete,
+			cancellation = orchestrationResult.Cancellation is { } cancel ? new
+			{
+				kind = cancel.Kind.ToString(),
+				timeoutSeconds = cancel.TimeoutSeconds,
+				source = cancel.Source,
+				detail = cancel.Detail,
+				reason = cancel.Reason,
+				isTimeout = cancel.IsTimeout,
+			} : null,
 			results,
 		});
 	}
@@ -638,6 +694,26 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	public void ReportOrchestrationCancelled()
 	{
 		Write("orchestration-cancelled", new { status = HostExecutionStatus.Cancelled });
+	}
+
+	/// <summary>
+	/// Reports that the orchestration was cancelled with a structured cause (timeout, caller, etc).
+	/// </summary>
+	public void ReportOrchestrationCancelled(CancellationDetails cancellation)
+	{
+		Write("orchestration-cancelled", new
+		{
+			status = HostExecutionStatus.Cancelled,
+			cancellation = new
+			{
+				kind = cancellation.Kind.ToString(),
+				timeoutSeconds = cancellation.TimeoutSeconds,
+				source = cancellation.Source,
+				detail = cancellation.Detail,
+				reason = cancellation.Reason,
+				isTimeout = cancellation.IsTimeout,
+			},
+		});
 	}
 
 	/// <summary>

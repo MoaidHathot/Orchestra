@@ -1,0 +1,98 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: mcp-coordinator-with-default-timeout
+description: >
+  Demonstrates Orchestra's automatic 30-minute timeout for the data-plane MCP
+  when no per-server timeoutSeconds is configured. This orchestration invokes
+  child orchestrations through the Orchestra MCP in sync mode, where each
+  invoke_orchestration call may take well over the Copilot SDK's ~3-minute
+  default MCP request timeout. Because the 'orchestra' MCP entry below targets
+  /mcp/data (the host's configured data-plane route) and omits timeoutSeconds,
+  the host injects the configured DefaultOrchestraInvokeTimeoutSeconds (default
+  1800 s / 30 min) automatically — no extra configuration required.
+version: "1.0.0"
+
+inputs:
+  taskDescription:
+    type: string
+    description: Description of the task to coordinate across orchestrations
+    required: true
+
+mcps:
+  # The host detects this entry as Orchestra's data-plane MCP (endpoint ends
+  # with /mcp/data) and applies the configured default timeout (30 min by
+  # default) at runtime when timeoutSeconds is omitted. To customize per
+  # orchestration, see the sibling example mcp-coordinator-with-explicit-timeout.yaml.
+  - name: orchestra
+    type: remote
+    endpoint: "{{server.url}}/mcp/data"
+
+steps:
+  - name: discover
+    type: Prompt
+    dependsOn: []
+    parameters:
+      - taskDescription
+    mcps:
+      - orchestra
+    model: claude-opus-4.6
+    systemPrompt: |
+      You are an orchestration discovery agent. Use the Orchestra MCP tools
+      to find orchestrations that could help with the user's task. Return a
+      structured list of candidate orchestrations with their IDs and the
+      parameters each one expects.
+    userPrompt: |
+      Find orchestrations that could help with the following task:
+
+      {{param.taskDescription}}
+
+      Use the list_orchestrations tool. Return a concise list (id, name,
+      description, required parameters) of candidates worth invoking.
+
+  - name: coordinate
+    type: Prompt
+    dependsOn:
+      - discover
+    parameters:
+      - taskDescription
+    mcps:
+      - orchestra
+    model: claude-opus-4.6
+    reasoningLevel: high
+    # Per-step timeout: this whole step may take up to 1 hour because the
+    # invocations themselves can be long. The MCP-level default (30 min)
+    # only governs each individual tool call; this step-level cap governs
+    # the entire step (multiple sequential invocations).
+    timeoutSeconds: 3600
+    systemPrompt: |
+      You are an orchestration coordinator. Use invoke_orchestration in SYNC
+      mode to run candidate orchestrations end to end and capture each
+      result's content. Synchronous invocations may take many minutes — that
+      is expected. Treat any failure as an early signal and continue with
+      the remaining candidates.
+    userPrompt: |
+      Based on the discovered candidates:
+
+      {{discover.output}}
+
+      Coordinate execution to complete this task:
+      {{param.taskDescription}}
+
+      Use invoke_orchestration with mode="sync" and include all required
+      parameters for each call. Compile a summary of all outcomes.
+
+  - name: summary
+    type: Transform
+    dependsOn:
+      - coordinate
+    parameters:
+      - taskDescription
+    template: |
+      # Coordination Report
+
+      **Task:** {{param.taskDescription}}
+      **Run ID:** {{orchestration.runId}}
+      **Started:** {{orchestration.startedAt}}
+
+      ## Results
+
+      {{coordinate.output}}

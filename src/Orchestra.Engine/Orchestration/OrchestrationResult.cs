@@ -34,12 +34,21 @@ public class OrchestrationResult
 	/// </summary>
 	public bool IsIncomplete { get; init; }
 
+	/// <summary>
+	/// Structured cancellation cause when <see cref="Status"/> is <see cref="ExecutionStatus.Cancelled"/>.
+	/// Distinguishes external cancel, the orchestration's own <c>timeoutSeconds</c>,
+	/// a sync-invoke wrapper timeout, and early completion via <c>orchestra_complete</c>.
+	/// Null when the run was not cancelled.
+	/// </summary>
+	public CancellationDetails? Cancellation { get; init; }
+
 	public static OrchestrationResult From(
 		Orchestration orchestration,
 		IReadOnlyDictionary<string, ExecutionResult> stepResults,
 		ExecutionStatus? orchestrationCompleteStatus = null,
 		string? orchestrationCompleteReason = null,
-		string? orchestrationCompleteStepName = null)
+		string? orchestrationCompleteStepName = null,
+		CancellationDetails? cancellation = null)
 	{
 		// Terminal steps are those that no other step depends on
 		var dependedOn = new HashSet<string>(
@@ -96,6 +105,10 @@ public class OrchestrationResult
 			CompletionReason = orchestrationCompleteReason,
 			CompletedByStep = orchestrationCompleteStepName,
 			IsIncomplete = isIncomplete,
+			// Only attach cancellation details when the run actually ended Cancelled.
+			// (orchestra_complete may upgrade Cancelled → Succeeded/Failed, in which case
+			// the cancellation cause is irrelevant and would mislead consumers.)
+			Cancellation = status == ExecutionStatus.Cancelled ? cancellation : null,
 		};
 	}
 }

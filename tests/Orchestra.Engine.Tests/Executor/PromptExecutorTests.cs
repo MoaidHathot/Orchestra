@@ -1341,7 +1341,7 @@ public class PromptExecutorTests
 		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:9999/mcp", Headers = [] };
 
 		var resolver = Substitute.For<IMcpResolver>();
-		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(new Mcp[] { proxyMcp });
+		resolver.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>()).Returns(new Mcp[] { proxyMcp });
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
 		var reporter = Substitute.For<IOrchestrationReporter>();
@@ -1355,7 +1355,7 @@ public class PromptExecutorTests
 		await executor.ExecuteAsync(step, context);
 
 		// Assert — resolver was called
-		resolver.Received(1).Resolve(Arg.Any<Mcp[]>());
+		resolver.Received(1).Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>());
 
 		// Assert — the resolved proxy MCP was passed to the agent builder, not the original
 		agentBuilder.CapturedMcps.Should().HaveCount(1);
@@ -1374,7 +1374,7 @@ public class PromptExecutorTests
 
 		var resolver = Substitute.For<IMcpResolver>();
 		// Resolver should return inline + proxy (globals collapsed, inline preserved)
-		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(callInfo =>
+		resolver.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>()).Returns(callInfo =>
 		{
 			// Simulate McpManager behavior: remove global, add proxy, keep inline
 			return new Mcp[] { inlineMcp, proxyMcp };
@@ -1427,7 +1427,7 @@ public class PromptExecutorTests
 	{
 		// Arrange — step has no MCPs, so resolver should still be called but with empty array
 		var resolver = Substitute.For<IMcpResolver>();
-		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		resolver.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>()).Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
 		var reporter = Substitute.For<IOrchestrationReporter>();
@@ -1441,7 +1441,7 @@ public class PromptExecutorTests
 		await executor.ExecuteAsync(step, context);
 
 		// Assert — resolver still called (with empty array), MCPs are empty
-		resolver.Received(1).Resolve(Arg.Any<Mcp[]>());
+		resolver.Received(1).Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>());
 		agentBuilder.CapturedMcps.Should().BeEmpty();
 	}
 
@@ -1454,7 +1454,7 @@ public class PromptExecutorTests
 		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:7777/mcp", Headers = [] };
 
 		var resolver = Substitute.For<IMcpResolver>();
-		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(new Mcp[] { proxyMcp });
+		resolver.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>()).Returns(new Mcp[] { proxyMcp });
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
 		var reporter = Substitute.For<IOrchestrationReporter>();
@@ -1471,6 +1471,41 @@ public class PromptExecutorTests
 		agentBuilder.CapturedMcps.Should().HaveCount(1);
 		agentBuilder.CapturedMcps[0].Name.Should().Be("orchestra-mcp-proxy");
 		((RemoteMcp)agentBuilder.CapturedMcps[0]).Endpoint.Should().Be("http://localhost:7777/mcp");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithMcpResolver_ForwardsParentAnnotationFromContext()
+	{
+		// Arrange — captures the ParentExecutionAnnotation that PromptExecutor passes to the
+		// resolver. This is the handoff that lets DataPlaneTools.InvokeOrchestration auto-populate
+		// parentExecutionId on nested invocations.
+		ParentExecutionAnnotation? captured = null;
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo =>
+			{
+				captured = callInfo.ArgAt<ParentExecutionAnnotation?>(1);
+				return callInfo.ArgAt<Mcp[]>(0);
+			});
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Response");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("calling-step");
+		step.Mcps = [new RemoteMcp { Name = "orchestra", Type = McpType.Remote, Endpoint = "http://localhost/mcp/data", Headers = [] }];
+		var info = new OrchestrationInfo("parent-orch", "1.0.0", "parent-run-id-xyz", DateTimeOffset.UtcNow);
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = info };
+
+		// Act
+		await executor.ExecuteAsync(step, context);
+
+		// Assert
+		captured.Should().NotBeNull("PromptExecutor must hand the calling step's identity to the resolver");
+		captured!.ExecutionId.Should().Be("parent-run-id-xyz");
+		captured.OrchestrationName.Should().Be("parent-orch");
+		captured.StepName.Should().Be("calling-step");
 	}
 
 	#endregion

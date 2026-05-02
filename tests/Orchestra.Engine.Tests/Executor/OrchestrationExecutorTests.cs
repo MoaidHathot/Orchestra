@@ -1148,7 +1148,10 @@ public class OrchestrationExecutorTests
 		// Assert
 		capturedRecord.Should().NotBeNull();
 		capturedRecord!.Status.Should().Be(ExecutionStatus.Cancelled);
-		capturedRecord.FinalContent.Should().Contain("Orchestration was cancelled.");
+		// FinalContent now embeds the structured cancellation cause
+		// (e.g. "Orchestration was cancelled: cancelled by caller.") so we assert
+		// on the leading prefix rather than a trailing period.
+		capturedRecord.FinalContent.Should().Contain("Orchestration was cancelled");
 		capturedRecord.FinalContent.Should().Contain("Cancelled steps:");
 	}
 

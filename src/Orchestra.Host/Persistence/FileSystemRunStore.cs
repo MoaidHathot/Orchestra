@@ -171,6 +171,7 @@ public partial class FileSystemRunStore : IRunStore
 			CompletionReason = record.CompletionReason,
 			CompletedByStep = record.CompletedByStep,
 			IsIncomplete = record.IsIncomplete,
+			Cancellation = record.Cancellation,
 			HookExecutionCount = record.HookExecutions.Count,
 			RetriedFromRunId = record.RetriedFromRunId,
 			RetryMode = record.RetryMode,
@@ -429,6 +430,7 @@ public partial class FileSystemRunStore : IRunStore
 						CompletionReason = record.CompletionReason,
 						CompletedByStep = record.CompletedByStep,
 						IsIncomplete = record.IsIncomplete,
+						Cancellation = record.Cancellation,
 						HookExecutionCount = record.HookExecutions.Count,
 					};
 				}
@@ -682,6 +684,14 @@ public class RunIndex
 	/// or the orchestration was completed early via orchestra_complete.
 	/// </summary>
 	public bool IsIncomplete { get; init; }
+
+	/// <summary>
+	/// Structured cancellation cause when <see cref="Status"/> is <see cref="ExecutionStatus.Cancelled"/>.
+	/// Distinguishes external cancel, the orchestration's own <c>timeoutSeconds</c>,
+	/// a sync-invoke wrapper timeout, and early completion via <c>orchestra_complete</c>.
+	/// Null when the run was not cancelled.
+	/// </summary>
+	public CancellationDetails? Cancellation { get; init; }
 
 	/// <summary>
 	/// Number of hook executions recorded for this run.

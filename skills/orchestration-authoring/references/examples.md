@@ -2,9 +2,12 @@
 
 Real-world examples demonstrating common orchestration patterns. All examples use `claude-opus-4.6` as the default model.
 
+> **A note on `$schema` paths.** The examples below use repository-relative paths like `../schemas/orchestration.schema.json` because they live inside the Orchestra repo. If you are authoring orchestrations outside this repo, replace those paths with **either** the public URL (`https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json`) **or** a local copy produced by running `orchestra schemas` in your project (default location `./.orchestra/schemas/`). See [SKILL.md](../SKILL.md#format) for the full list of options.
+
 ## Contents
 - [Minimal Orchestration](#minimal-orchestration)
 - [Code Review Pipeline (YAML)](#code-review-pipeline-yaml)
+- [Free-Form Metadata (JSON & YAML)](#free-form-metadata-json--yaml)
 - [Typed Inputs with Validation](#typed-inputs-with-validation)
 - [Lifecycle Hooks for Failure Triage](#lifecycle-hooks-for-failure-triage)
 - [Script Step with Inline PowerShell](#script-step-with-inline-powershell)
@@ -93,6 +96,78 @@ steps:
 
       {{summarize-review.output}}
 ```
+
+---
+
+## Free-Form Metadata (JSON & YAML)
+
+The `metadata` top-level field accepts any JSON-compatible structure (string, number, boolean, array, nested object). It is purely informational -- the runtime never inspects it. Use it to record authorship, datetime, ticket links, environment, SLA, or any other semi-structured data that orchestration authors and managers want to keep alongside the file.
+
+### JSON form
+
+```json
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "deployment-with-metadata",
+  "description": "Demonstrates the free-form metadata field.",
+  "version": "1.0.0",
+  "metadata": {
+    "createdAt": "2026-04-30T12:00:00Z",
+    "author": "platform-team",
+    "owners": ["alice@example.com", "bob@example.com"],
+    "ticket": "JIRA-1234",
+    "environment": "staging",
+    "sla": {
+      "responseTimeMinutes": 15,
+      "businessHoursOnly": true
+    }
+  },
+  "steps": [
+    {
+      "name": "deploy",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a deployment assistant.",
+      "userPrompt": "Deploy the service.",
+      "model": "claude-opus-4.6"
+    }
+  ]
+}
+```
+
+### YAML form (use the modeline so editors validate the file)
+
+```yaml
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: deployment-with-metadata
+description: Demonstrates the free-form metadata field.
+version: "1.0.0"
+
+metadata:
+  createdAt: "2026-04-30T12:00:00Z"   # quote ISO-8601 dates so YAML keeps them as strings
+  author: platform-team
+  owners:
+    - alice@example.com
+    - bob@example.com
+  ticket: JIRA-1234
+  environment: staging
+  sla:
+    responseTimeMinutes: 15
+    businessHoursOnly: true
+
+steps:
+  - name: deploy
+    type: Prompt
+    dependsOn: []
+    model: claude-opus-4.6
+    systemPrompt: You are a deployment assistant.
+    userPrompt: Deploy the service.
+```
+
+**Notes**
+- The schema declares `additionalProperties: true` for `metadata`, so any keys/value types are accepted.
+- The runtime preserves the original JSON shape on parse (objects stay objects, arrays stay arrays, mixed types are kept).
+- Metadata is **not** available in template expressions like `{{vars.*}}` -- it is purely a sidecar for humans and external tooling.
 
 ---
 
@@ -500,7 +575,7 @@ mcps:
     command: npx
     arguments:
       - "-y"
-      - "@anthropic/mcp-server-filesystem"
+      - "@modelcontextprotocol/server-filesystem"
       - "{{workingDirectory}}"
 
 steps:

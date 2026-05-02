@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/anomalyco/orchestra/schemas/orchestra.mcp.schema.json",
+  "$id": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestra.mcp.schema.json",
   "title": "Orchestra MCP Configuration",
   "description": "Schema for orchestra.mcp.json files. Defines MCP (Model Context Protocol) servers available to all orchestrations in a directory.",
   "type": "object",

@@ -39,6 +39,8 @@ public static class McpServerExtensions
 				options.ControlPlaneRoute = mcpConfig.ControlPlaneRoute;
 			if (mcpConfig.MaxNestingDepth.HasValue)
 				options.MaxNestingDepth = mcpConfig.MaxNestingDepth.Value;
+			if (mcpConfig.DefaultOrchestraInvokeTimeoutSeconds.HasValue)
+				options.DefaultOrchestraInvokeTimeoutSeconds = mcpConfig.DefaultOrchestraInvokeTimeoutSeconds.Value;
 		}
 
 		// Then let programmatic overrides win

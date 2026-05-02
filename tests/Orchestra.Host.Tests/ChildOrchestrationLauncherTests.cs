@@ -100,11 +100,11 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 		return entry;
 	}
 
-	private ChildOrchestrationLauncher CreateLauncher()
+	private ChildOrchestrationLauncher CreateLauncher(AgentBuilder? agentBuilder = null)
 	{
 		return new ChildOrchestrationLauncher(
 			_registry,
-			agentBuilder: new TestAgentBuilder(),
+			agentBuilder: agentBuilder ?? new TestAgentBuilder(),
 			_scheduler,
 			NullLoggerFactory.Instance,
 			_runStore,
@@ -115,6 +115,35 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 			_mcpManager,
 			_activeExecutions,
 			_activeExecutionInfos);
+	}
+
+	/// <summary>
+	/// Writes a single-step Prompt orchestration to disk and registers it. Used together with
+	/// <see cref="HangingAgentBuilder"/> to exercise paths that need a long-running step.
+	/// </summary>
+	private OrchestrationEntry RegisterPromptOrchestration(string name, string model = "claude-opus-4.5")
+	{
+		var json = $$"""
+		{
+			"name": "{{name}}",
+			"description": "Hanging prompt for cancellation tests",
+			"version": "1.0.0",
+			"steps": [
+				{
+					"name": "wait",
+					"type": "Prompt",
+					"systemPrompt": "test",
+					"userPrompt": "test",
+					"model": "{{model}}"
+				}
+			]
+		}
+		""";
+
+		var path = Path.Combine(_tempDir, $"{name}.json");
+		File.WriteAllText(path, json);
+		_registry.Register(path);
+		return _registry.GetAll().Single(e => e.Orchestration.Name == name);
 	}
 
 	// ── Tests ────────────────────────────────────────────────────────────────
@@ -148,9 +177,19 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 			Mode = ChildLaunchMode.Sync,
 		});
 
+		// The handle should report the RESOLVED registry ID, not the raw name we passed in.
+		// Downstream UIs (Portal, /api/orchestrations/{id}) index by ID, so propagating the
+		// raw name here would result in 404s when the user tries to view the active execution.
+		handle.OrchestrationId.Should().Be(entry.Id);
 		handle.OrchestrationName.Should().Be("name-lookup-test");
+
+		// ActiveExecutionInfo should also carry the resolved registry ID.
+		_activeExecutionInfos.TryGetValue(handle.ExecutionId, out var info).Should().BeTrue();
+		info!.OrchestrationId.Should().Be(entry.Id, "active execution must point to a real registry entry");
+
 		var result = await handle.Completion;
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.OrchestrationId.Should().Be(entry.Id);
 	}
 
 	[Fact]
@@ -194,6 +233,33 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 		result.FinalContent.Should().Contain("static-result");
 		result.ErrorMessage.Should().BeNull();
 		result.TimedOut.Should().BeFalse();
+	}
+
+	[Fact]
+	public async Task LaunchAsync_RequestTriggeredBy_IsPersistedOnRunRecord()
+	{
+		// Arrange — caller (e.g. DataPlaneTools.InvokeOrchestration or OrchestrationStepExecutor)
+		// supplies TriggeredBy on the launch request. Previously the engine dropped this and
+		// always wrote "manual", which masked recursive MCP-driven launches as user actions.
+		var entry = RegisterTransformOrchestration("triggered-by-test", template: "ok");
+		var launcher = CreateLauncher();
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+			TriggeredBy = "orchestration:parent-run-abc",
+		});
+
+		var result = await handle.Completion;
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+
+		// Retrieve persisted run record and verify TriggeredBy was preserved.
+		var saved = await _runStore.GetRunAsync(entry.Orchestration.Name, handle.ExecutionId);
+		saved.Should().NotBeNull();
+		saved!.TriggeredBy.Should().Be("orchestration:parent-run-abc",
+			"the launcher must forward request.TriggeredBy to the engine instead of letting it default to 'manual'");
+		saved.Context!.TriggeredBy.Should().Be("orchestration:parent-run-abc");
 	}
 
 	[Fact]
@@ -476,6 +542,43 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 	}
 
 	[Fact]
+	public async Task LaunchAsync_SyncInvokeTimeoutFires_ResultIsTimedOut_AndCancellationIsSyncInvokeTimeout()
+	{
+		// Arrange — register a Prompt-based orchestration whose agent blocks forever, and ask
+		// the launcher to invoke it sync with a 1-second hard timeout. The wrapper-owned
+		// syncTimeoutCts should fire, the engine should record CancellationCauseKind.SyncInvokeTimeout,
+		// and the launcher should set ChildOrchestrationResult.TimedOut = true so MCP callers
+		// see status:"timeout" rather than a generic Cancelled status.
+		var entry = RegisterPromptOrchestration("sync-invoke-timeout");
+		var launcher = CreateLauncher(new HangingAgentBuilder());
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+			TimeoutSeconds = 1,
+			TriggeredBy = "test",
+		});
+
+		var result = await handle.Completion;
+
+		// Assert — surfaced to MCP callers as TimedOut.
+		result.TimedOut.Should().BeTrue("the sync wrapper's hard timeout fired before the run completed");
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+
+		// Engine-side run record should carry the precise cause.
+		result.OrchestrationResult.Should().NotBeNull();
+		result.OrchestrationResult!.Cancellation.Should().NotBeNull();
+		result.OrchestrationResult.Cancellation!.Kind.Should().Be(CancellationCauseKind.SyncInvokeTimeout);
+		result.OrchestrationResult.Cancellation.TimeoutSeconds.Should().Be(1);
+		result.OrchestrationResult.Cancellation.IsTimeout.Should().BeTrue();
+
+		// Step ErrorMessage should be enriched with the cause, not the bare "Cancelled".
+		result.OrchestrationResult.StepResults["wait"].ErrorMessage
+			.Should().Contain("sync invocation timed out after 1s");
+	}
+
+	[Fact]
 	public async Task LaunchAsync_HandleExecutionId_AppearsInActiveExecutions_BeforeCompletion()
 	{
 		var entry = RegisterTransformOrchestration("registration-timing", template: "v");
@@ -574,5 +677,32 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 
 		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 			=> throw new NotImplementedException("TestAgentBuilder should not be invoked for Transform-only orchestrations.");
+	}
+
+	/// <summary>
+	/// Agent builder whose agents block forever on the supplied cancellation token. Used to
+	/// exercise launcher cancellation paths (parent cancel, sync-invoke timeout, etc.).
+	/// </summary>
+	private sealed class HangingAgentBuilder : AgentBuilder
+	{
+		public override Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)
+			=> Task.FromResult<IAgent>(new HangingAgent());
+
+		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
+			=> Task.FromResult<IAgent>(new HangingAgent());
+
+		private sealed class HangingAgent : IAgent
+		{
+			public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
+			{
+				var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+				var resultTask = Task.Run<AgentResult>(async () =>
+				{
+					await Task.Delay(Timeout.Infinite, cancellationToken);
+					return new AgentResult { Content = "unreachable" };
+				}, cancellationToken);
+				return new AgentTask(channel.Reader, resultTask);
+			}
+		}
 	}
 }

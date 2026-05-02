@@ -37,4 +37,21 @@ public class McpServerOptions
 	/// Default: 5.
 	/// </summary>
 	public int MaxNestingDepth { get; set; } = 5;
+
+	/// <summary>
+	/// Default timeout (seconds) applied to MCP tool calls that target Orchestra's
+	/// own data-plane MCP endpoint when the orchestration YAML/JSON does not specify
+	/// a <c>timeoutSeconds</c> on the matching <c>mcps[]</c> entry.
+	/// <para>
+	/// Long-running tools such as <c>invoke_orchestration</c> in sync mode commonly
+	/// exceed the Copilot SDK's ~3-minute default MCP request timeout, so this default
+	/// is intentionally generous. Authors can still override per call by setting
+	/// <c>timeoutSeconds</c> on the <c>mcps[]</c> entry (any non-null value wins),
+	/// and per-invocation deadlines on the data-plane <c>invoke_orchestration</c> tool
+	/// itself (<c>request.timeoutSeconds</c>) continue to apply on the server side.
+	/// </para>
+	/// <para>Default: 1800 (30 minutes). Set to 0 or a negative value to disable the
+	/// default and fall back to the Copilot SDK's built-in default.</para>
+	/// </summary>
+	public int DefaultOrchestraInvokeTimeoutSeconds { get; set; } = 1800;
 }

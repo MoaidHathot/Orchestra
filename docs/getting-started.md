@@ -267,7 +267,7 @@ Create `mcp.json`:
       "name": "filesystem",
       "type": "local",
       "command": "npx",
-      "arguments": ["-y", "@anthropic/mcp-server-filesystem", "."]
+      "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "."]
     },
     {
       "name": "web-search",

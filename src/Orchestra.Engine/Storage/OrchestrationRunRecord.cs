@@ -67,6 +67,14 @@ public class OrchestrationRunRecord
 	public bool IsIncomplete { get; init; }
 
 	/// <summary>
+	/// Structured cancellation cause when <see cref="Status"/> is <see cref="ExecutionStatus.Cancelled"/>.
+	/// Distinguishes external cancel, the orchestration's own <c>timeoutSeconds</c>,
+	/// a sync-invoke wrapper timeout, and early completion via <c>orchestra_complete</c>.
+	/// Null when the run was not cancelled (or for older run records).
+	/// </summary>
+	public CancellationDetails? Cancellation { get; init; }
+
+	/// <summary>
 	/// Runtime context of this run, including resolved variables, accessed env vars,
 	/// orchestration metadata, and data directory path.
 	/// </summary>

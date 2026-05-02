@@ -146,7 +146,10 @@ public static class OrchestrationsApi
 		// GET /api/orchestrations/{id} - Get a specific orchestration
 		group.MapGet("/{id}", async (string id, OrchestrationRegistry registry, IScheduler scheduler, TriggerManager triggerManager, OrchestrationTagStore tagStore, OrchestrationHostOptions hostOptions) =>
 		{
-			var entry = registry.Get(id);
+			// Accept the registry ID or the orchestration's declared name. The Portal and
+			// other consumers may know an orchestration only by its name (e.g., when viewing
+			// an active execution that was launched by name from a parent orchestration).
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 

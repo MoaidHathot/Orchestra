@@ -48,10 +48,21 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context))
 			.ToArray();
 
-		// Replace globally shared MCPs with remote proxy endpoints
+		// Replace globally shared MCPs with remote proxy endpoints, and stamp parent-execution
+		// headers on remote MCPs that target Orchestra's own server endpoints. The headers let
+		// /mcp/data tool handlers (e.g. invoke_orchestration) auto-populate parentExecutionId
+		// for nested invocations — restoring run lineage that was previously lost when an LLM
+		// agent recursively invoked orchestrations through MCP.
 		if (_mcpResolver is not null)
-			resolvedMcps = _mcpResolver.Resolve(resolvedMcps);
-
+		{
+			var parentAnnotation = new ParentExecutionAnnotation
+			{
+				ExecutionId = context.OrchestrationInfo.RunId,
+				OrchestrationName = context.OrchestrationInfo.Name,
+				StepName = step.Name,
+			};
+			resolvedMcps = _mcpResolver.Resolve(resolvedMcps, parentAnnotation);
+		}
 		var resolvedSubagents = ResolveSubagentMcps(step.Subagents, context);
 
 		// Build MCP server descriptions for trace diagnostics (using resolved values)

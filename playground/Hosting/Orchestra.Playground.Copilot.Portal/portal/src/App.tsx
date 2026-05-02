@@ -679,7 +679,7 @@ function App(): React.JSX.Element {
     /** Per-step lookup: toolCallId → ActorContext (filled on subagent-started). */
     const subagentActorByToolCallId: Record<string, Record<string, ActorContext>> = {};
 
-    const ensureMainStream = (stepName: string): ActorStream => {
+    const ensureMainStream = (stepName: string, startedAt?: string): ActorStream => {
       if (!stepActorStreams[stepName]) {
         stepActorStreams[stepName] = {
           main: {
@@ -688,16 +688,23 @@ function App(): React.JSX.Element {
             content: '',
             reasoning: '',
             events: [],
-            startedAt: new Date().toISOString(),
+            // Prefer the server-supplied timestamp from the event payload so a late-attaching
+            // SSE client (replay path) sees the actual step start time. Without it, the elapsed
+            // counter resets to zero every time the user opens the execution view.
+            startedAt: startedAt ?? new Date().toISOString(),
             status: 'running',
           },
           subagents: [],
         };
+      } else if (startedAt && stepActorStreams[stepName].main.startedAt > startedAt) {
+        // The bucket was created lazily by a delta event before step-started arrived; fix it
+        // up with the authoritative timestamp now that we have one.
+        stepActorStreams[stepName].main.startedAt = startedAt;
       }
       return stepActorStreams[stepName].main;
     };
 
-    const ensureSubagentStream = (stepName: string, actor: ActorContext): ActorStream => {
+    const ensureSubagentStream = (stepName: string, actor: ActorContext, startedAt?: string): ActorStream => {
       const bucket = stepActorStreams[stepName] ?? (() => {
         ensureMainStream(stepName);
         return stepActorStreams[stepName];
@@ -710,7 +717,9 @@ function App(): React.JSX.Element {
           content: '',
           reasoning: '',
           events: [],
-          startedAt: new Date().toISOString(),
+          // See ensureMainStream — server-supplied timestamp wins so replays render the
+          // actual elapsed duration instead of resetting to zero on each open.
+          startedAt: startedAt ?? new Date().toISOString(),
           status: 'running',
         };
         bucket.subagents.push(stream);
@@ -846,8 +855,9 @@ function App(): React.JSX.Element {
         updateStepStatus(data.stepName, 'running');
         if (data.stepName) {
           // Pre-create the main stream so reasoning/content can stream into a
-          // ready bucket even before the first delta.
-          ensureMainStream(data.stepName);
+          // ready bucket even before the first delta. Server stamps `startedAt`
+          // on the event so replay produces correct elapsed durations.
+          ensureMainStream(data.stepName, typeof data.startedAt === 'string' ? data.startedAt : undefined);
           flushActorStreams();
         }
         addStepEvent(data.stepName, 'step-started', data as Record<string, unknown>);
@@ -861,8 +871,23 @@ function App(): React.JSX.Element {
         updateStepStatus(data.stepName, 'completed');
         if (data.stepName && stepActorStreams[data.stepName]) {
           stepActorStreams[data.stepName].main.status = 'completed';
-          stepActorStreams[data.stepName].main.completedAt = new Date().toISOString();
+          // Use the server-supplied completedAt so late-attaching clients see the actual
+          // completion time. Without this, replay rewrote the timestamp to "now" and the
+          // elapsed counter reset every time the modal was opened.
+          stepActorStreams[data.stepName].main.completedAt =
+            typeof data.completedAt === 'string'
+              ? data.completedAt
+              : new Date().toISOString();
           flushActorStreams();
+        }
+        // Backfill stepResults from the server's contentPreview for non-streaming step
+        // types (Orchestration/Transform/Script/Command/Http) that never emit content-delta
+        // events. Without this, the cards UI for those steps shows "No output produced"
+        // until the run finishes (which is when step-output finally fires).
+        if (data.stepName && typeof data.contentPreview === 'string' && data.contentPreview.length > 0) {
+          if (!stepResults[data.stepName]) {
+            updateStepResult(data.stepName, data.contentPreview);
+          }
         }
         addStepEvent(data.stepName, 'step-completed', data as Record<string, unknown>);
       } catch { /* ignore */ }
@@ -875,7 +900,10 @@ function App(): React.JSX.Element {
         updateStepStatus(data.stepName, 'failed');
         if (data.stepName && stepActorStreams[data.stepName]) {
           stepActorStreams[data.stepName].main.status = 'failed';
-          stepActorStreams[data.stepName].main.completedAt = new Date().toISOString();
+          stepActorStreams[data.stepName].main.completedAt =
+            typeof data.completedAt === 'string'
+              ? data.completedAt
+              : new Date().toISOString();
           stepActorStreams[data.stepName].main.errorMessage = data.error ?? data.message;
           flushActorStreams();
         }
@@ -890,7 +918,10 @@ function App(): React.JSX.Element {
         updateStepStatus(data.stepName, 'cancelled');
         if (data.stepName && stepActorStreams[data.stepName]) {
           stepActorStreams[data.stepName].main.status = 'cancelled';
-          stepActorStreams[data.stepName].main.completedAt = new Date().toISOString();
+          stepActorStreams[data.stepName].main.completedAt =
+            typeof data.completedAt === 'string'
+              ? data.completedAt
+              : new Date().toISOString();
           flushActorStreams();
         }
         addStepEvent(data.stepName, 'step-cancelled', data as Record<string, unknown>);
@@ -985,6 +1016,7 @@ function App(): React.JSX.Element {
           agentName?: string;
           displayName?: string;
           description?: string;
+          startedAt?: string;
         };
         if (data.stepName && data.toolCallId && data.agentName) {
           const actor: ActorContext = {
@@ -998,7 +1030,8 @@ function App(): React.JSX.Element {
           (subagentScopeByStep[data.stepName] ??= []).push(data.toolCallId);
           (subagentActorByToolCallId[data.stepName] ??= {})[data.toolCallId] = actor;
           // Pre-create the stream so the UI can render an empty card immediately.
-          ensureSubagentStream(data.stepName, actor);
+          // Use the server-supplied startedAt so replays show the correct elapsed time.
+          ensureSubagentStream(data.stepName, actor, data.startedAt);
           flushActorStreams();
         }
         addStepEvent(data.stepName, 'subagent-started', data as Record<string, unknown>);
@@ -1007,7 +1040,7 @@ function App(): React.JSX.Element {
 
     const handleSubagentEnd = (
       eventType: 'subagent-completed' | 'subagent-failed',
-      data: SSEEventData & { toolCallId?: string; error?: string },
+      data: SSEEventData & { toolCallId?: string; error?: string; completedAt?: string },
     ): void => {
       if (data.stepName && data.toolCallId) {
         const scope = subagentScopeByStep[data.stepName];
@@ -1018,7 +1051,12 @@ function App(): React.JSX.Element {
         const bucket = stepActorStreams[data.stepName];
         const stream = bucket?.subagents.find(s => s.key === data.toolCallId);
         if (stream) {
-          stream.completedAt = new Date().toISOString();
+          // Server-supplied completedAt wins so replays render the correct elapsed time
+          // for sub-agents that completed before the user attached.
+          stream.completedAt =
+            typeof data.completedAt === 'string'
+              ? data.completedAt
+              : new Date().toISOString();
           stream.status = eventType === 'subagent-failed' ? 'failed' : 'completed';
           if (eventType === 'subagent-failed') {
             stream.errorMessage = data.error;

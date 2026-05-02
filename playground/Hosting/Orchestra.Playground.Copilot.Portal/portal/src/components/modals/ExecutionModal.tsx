@@ -112,6 +112,8 @@ function ModelMetadataCard({
   info?: ModelInfo;
   highlight?: boolean;
 }): React.JSX.Element | null {
+  const [expanded, setExpanded] = useState(false);
+
   if (!model && !info) return null;
 
   const details = info ? modelDetailRows(info) : [];
@@ -130,22 +132,47 @@ function ModelMetadataCard({
           : '1px solid var(--border-subtle)',
       }}
     >
-      <div style={{ color: 'var(--text-dim)', fontSize: '11px', marginBottom: '4px' }}>
-        {title}
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
+        <span
+          style={{
+            transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s',
+            fontSize: '10px',
+            color: 'var(--text-dim)',
+          }}
+        >
+          &#9654;
+        </span>
+        <span style={{ color: 'var(--text-dim)', fontSize: '11px' }}>
+          {title}
+        </span>
       </div>
-      {displayModel && (
-        <div style={{ color: highlight ? 'var(--warning)' : 'var(--text-secondary)', fontWeight: 600, wordBreak: 'break-word' }}>
-          {displayModel}
-        </div>
-      )}
-      {details.length > 0 && (
-        <div style={{ marginTop: '8px', display: 'grid', gap: '4px' }}>
-          {details.map((detail) => (
-            <div key={`${title}-${detail.label}`} style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px' }}>
-              <span style={{ color: 'var(--text-dim)' }}>{detail.label}</span>
-              <span style={{ color: 'var(--text-secondary)', wordBreak: 'break-word' }}>{detail.value}</span>
+      {expanded && (
+        <div style={{ marginTop: '4px' }}>
+          {displayModel && (
+            <div style={{ color: highlight ? 'var(--warning)' : 'var(--text-secondary)', fontWeight: 600, wordBreak: 'break-word' }}>
+              {displayModel}
             </div>
-          ))}
+          )}
+          {details.length > 0 && (
+            <div style={{ marginTop: '8px', display: 'grid', gap: '4px' }}>
+              {details.map((detail) => (
+                <div key={`${title}-${detail.label}`} style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px' }}>
+                  <span style={{ color: 'var(--text-dim)' }}>{detail.label}</span>
+                  <span style={{ color: 'var(--text-secondary)', wordBreak: 'break-word' }}>{detail.value}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -280,6 +307,26 @@ export default function ExecutionModal({
     }
     return { content: streamingContent || '', source: 'streaming' };
   }, [selectedStep, stepResults, streamingContent, finalResult, isCompleted]);
+
+  /**
+   * True when the selected step's actor streams contain any actual activity (chunks of
+   * content, reasoning, recorded events, sub-agents, or an error message). Drives the
+   * decision to render the SubagentCard UI vs. fall through to <see cref="displayContent"/>.
+   *
+   * Without this guard, non-streaming step types (Orchestration / Transform / Script /
+   * Command / Http) — which never emit content-delta events — leave the cards empty and
+   * surface "No output produced" to the user, even when stepResults / finalContent
+   * actually carry the step's output.
+   */
+  const hasStreamActivity = useMemo<boolean>(() => {
+    if (!selectedStep || !stepActorStreams) return false;
+    const bucket = stepActorStreams[selectedStep];
+    if (!bucket) return false;
+    const main = bucket.main;
+    const mainHasOutput = !!(main?.content || main?.reasoning || main?.errorMessage)
+      || (main?.events?.length ?? 0) > 0;
+    return mainHasOutput || (bucket.subagents?.length ?? 0) > 0;
+  }, [selectedStep, stepActorStreams]);
 
   // Copy content to clipboard
   const copyContent = useCallback(() => {
@@ -2670,7 +2717,7 @@ export default function ExecutionModal({
                   )}
                 </div>
                 <div className="streaming-content">
-                  {selectedStep && stepActorStreams && stepActorStreams[selectedStep] ? (
+                  {selectedStep && hasStreamActivity && stepActorStreams && stepActorStreams[selectedStep] ? (
                     <div className="actor-stream-list">
                       <SubagentCard stream={stepActorStreams[selectedStep].main} depth={0} />
                       {stepActorStreams[selectedStep].subagents.map(sub => (

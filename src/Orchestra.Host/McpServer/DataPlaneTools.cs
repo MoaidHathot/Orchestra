@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 using Orchestra.Host.Api;
@@ -90,6 +91,7 @@ public sealed class DataPlaneTools
 		"Use get_orchestration_status to check the result of async invocations.")]
 	public static async Task<string> InvokeOrchestration(
 		IChildOrchestrationLauncher launcher,
+		IHttpContextAccessor httpContextAccessor,
 		[Description("The orchestration ID to invoke.")] string orchestrationId,
 		[Description("JSON object with parameter key-value pairs. All values must be strings.")] string? parameters = null,
 		[Description("Execution mode: 'async' (default, returns immediately with execution ID) or 'sync' (blocks until completion).")] string mode = "async",
@@ -125,6 +127,33 @@ public sealed class DataPlaneTools
 
 		var isSync = string.Equals(mode, "sync", StringComparison.OrdinalIgnoreCase);
 
+		// Auto-populate parentExecutionId from headers stamped by the engine when this MCP
+		// tool was reached from inside an orchestration's prompt step. The LLM cannot pass
+		// its own execution ID (it doesn't know it), so the engine's PromptExecutor +
+		// McpManager set X-Orchestra-Parent-* headers on outbound connections to /mcp/data.
+		// An explicit parentExecutionId argument from the caller still wins.
+		var parentStepName = (string?)null;
+		var parentOrchestrationName = (string?)null;
+		if (string.IsNullOrWhiteSpace(parentExecutionId)
+			&& httpContextAccessor.HttpContext is { } httpContext)
+		{
+			if (httpContext.Request.Headers.TryGetValue(OrchestraHeaders.ParentExecutionId, out var headerExecId)
+				&& !string.IsNullOrWhiteSpace(headerExecId))
+			{
+				parentExecutionId = headerExecId.ToString();
+			}
+			if (httpContext.Request.Headers.TryGetValue(OrchestraHeaders.ParentStepName, out var headerStepName)
+				&& !string.IsNullOrWhiteSpace(headerStepName))
+			{
+				parentStepName = headerStepName.ToString();
+			}
+			if (httpContext.Request.Headers.TryGetValue(OrchestraHeaders.ParentOrchestrationName, out var headerOrchName)
+				&& !string.IsNullOrWhiteSpace(headerOrchName))
+			{
+				parentOrchestrationName = headerOrchName.ToString();
+			}
+		}
+
 		ParentExecutionContext? parentContext = null;
 		if (!string.IsNullOrWhiteSpace(parentExecutionId))
 		{
@@ -132,8 +161,18 @@ public sealed class DataPlaneTools
 			parentContext = new ParentExecutionContext
 			{
 				ParentExecutionId = parentExecutionId!,
+				ParentStepName = parentStepName,
 			};
 		}
+
+		// Triggered-by string identifies the chain on the persisted run record. Use the
+		// orchestration name from headers when present so historical views can render
+		// "child of <orchestration>:<runId>" without cross-referencing.
+		var triggeredBy = parentExecutionId is not null
+			? (parentOrchestrationName is not null
+				? $"orchestration:{parentOrchestrationName}:{parentExecutionId}"
+				: $"orchestration:{parentExecutionId}")
+			: "mcp";
 
 		var request = new ChildLaunchRequest
 		{
@@ -141,7 +180,7 @@ public sealed class DataPlaneTools
 			Parameters = parsedParams,
 			Mode = isSync ? ChildLaunchMode.Sync : ChildLaunchMode.Async,
 			TimeoutSeconds = isSync ? timeoutSeconds : null,
-			TriggeredBy = parentContext is not null ? $"orchestration:{parentExecutionId}" : "mcp",
+			TriggeredBy = triggeredBy,
 			ParentContext = parentContext,
 			UserMetadata = parsedMetadata,
 		};
@@ -176,6 +215,7 @@ public sealed class DataPlaneTools
 
 		if (result.TimedOut)
 		{
+			var timeoutCancellation = result.OrchestrationResult?.Cancellation;
 			return JsonSerializer.Serialize(new
 			{
 				executionId = handle.ExecutionId,
@@ -183,6 +223,7 @@ public sealed class DataPlaneTools
 				mode = "sync",
 				status = "timeout",
 				error = result.ErrorMessage ?? $"Orchestration did not complete within {timeoutSeconds} seconds.",
+				cancellation = MapCancellation(timeoutCancellation),
 			}, s_jsonOptions);
 		}
 
@@ -208,6 +249,7 @@ public sealed class DataPlaneTools
 			mode = "sync",
 			status = orch.Status.ToString().ToLowerInvariant(),
 			completionReason = orch.CompletionReason,
+			cancellation = MapCancellation(orch.Cancellation),
 			stepResults = orch.StepResults.ToDictionary(
 				kvp => kvp.Key,
 				kvp => new
@@ -353,6 +395,28 @@ public sealed class DataPlaneTools
 		if (content is null) return null;
 		if (content.Length <= maxLength) return content;
 		return content[..maxLength] + "... (truncated)";
+	}
+
+	/// <summary>
+	/// Projects a <see cref="CancellationDetails"/> into the JSON shape returned by the MCP
+	/// data-plane tools. Returns <c>null</c> when <paramref name="details"/> is <c>null</c>.
+	/// </summary>
+	private static object? MapCancellation(CancellationDetails? details)
+	{
+		if (details is null)
+		{
+			return null;
+		}
+
+		return new
+		{
+			kind = details.Kind.ToString(),
+			timeoutSeconds = details.TimeoutSeconds,
+			source = details.Source,
+			detail = details.Detail,
+			reason = details.Reason,
+			isTimeout = details.IsTimeout,
+		};
 	}
 
 	private static readonly JsonSerializerOptions s_jsonOptions = new()

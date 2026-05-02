@@ -1,5 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestra.services.schema.json",
   "title": "Orchestra Services Configuration",
   "description": "Configuration for managed processes and lifecycle hooks in Orchestra.",
   "type": "object",

@@ -55,12 +55,47 @@ public class SseReporterTests : IDisposable
 	}
 
 	[Fact]
+	public void ReportStepStarted_StampsServerSideTimestamp_ForReplayCorrectness()
+	{
+		// Without a server-side timestamp on the SSE event, late-attaching clients fall back
+		// to Date.now() at replay time and the apparent step duration resets to ~0 every
+		// time the user opens the execution view. The reporter must stamp UtcNow on the
+		// payload so the original start time survives replay.
+		var before = DateTimeOffset.UtcNow;
+		_reporter.ReportStepStarted("step-with-timestamp");
+		var after = DateTimeOffset.UtcNow;
+
+		var data = _reporter.AccumulatedEvents[0].Data;
+		data.Should().Contain("\"startedAt\":\"",
+			"step-started events must carry a startedAt ISO timestamp for SSE replay correctness");
+
+		// Parse the timestamp out and verify it's within the expected window.
+		var startedAt = ExtractIsoTimestamp(data, "startedAt");
+		startedAt.Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
+	}
+
+	[Fact]
 	public void ReportStepCompleted_AddsEvent()
 	{
 		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" }, OrchestrationStepType.Prompt);
 
 		_reporter.AccumulatedEventCount.Should().Be(1);
 		_reporter.AccumulatedEvents[0].Type.Should().Be("step-completed");
+	}
+
+	[Fact]
+	public void ReportStepCompleted_StampsCompletedAt_ForReplayCorrectness()
+	{
+		var before = DateTimeOffset.UtcNow;
+		_reporter.ReportStepCompleted("step-1", new AgentResult { Content = "output" }, OrchestrationStepType.Prompt);
+		var after = DateTimeOffset.UtcNow;
+
+		var data = _reporter.AccumulatedEvents[0].Data;
+		data.Should().Contain("\"completedAt\":\"",
+			"step-completed events must carry a completedAt ISO timestamp for SSE replay correctness");
+
+		var completedAt = ExtractIsoTimestamp(data, "completedAt");
+		completedAt.Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
 	}
 
 	[Fact]
@@ -81,6 +116,82 @@ public class SseReporterTests : IDisposable
 		_reporter.AccumulatedEventCount.Should().Be(1);
 		_reporter.AccumulatedEvents[0].Type.Should().Be("step-error");
 		_reporter.AccumulatedEvents[0].Data.Should().Contain("something went wrong");
+	}
+
+	[Fact]
+	public void ReportStepError_StampsCompletedAt_ForReplayCorrectness()
+	{
+		var before = DateTimeOffset.UtcNow;
+		_reporter.ReportStepError("step-1", "boom");
+		var after = DateTimeOffset.UtcNow;
+
+		var data = _reporter.AccumulatedEvents[0].Data;
+		data.Should().Contain("\"completedAt\":\"");
+		ExtractIsoTimestamp(data, "completedAt").Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
+	}
+
+	[Fact]
+	public void ReportStepCancelled_StampsCompletedAt_ForReplayCorrectness()
+	{
+		var before = DateTimeOffset.UtcNow;
+		_reporter.ReportStepCancelled("step-1");
+		var after = DateTimeOffset.UtcNow;
+
+		var data = _reporter.AccumulatedEvents[0].Data;
+		data.Should().Contain("\"completedAt\":\"");
+		ExtractIsoTimestamp(data, "completedAt").Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
+	}
+
+	[Fact]
+	public void ReportSubagentStarted_StampsStartedAt_ForReplayCorrectness()
+	{
+		var before = DateTimeOffset.UtcNow;
+		_reporter.ReportSubagentStarted("step-1", "tool-call-1", "agent-x", "Agent X", "desc");
+		var after = DateTimeOffset.UtcNow;
+
+		var data = _reporter.AccumulatedEvents[0].Data;
+		data.Should().Contain("\"startedAt\":\"");
+		ExtractIsoTimestamp(data, "startedAt").Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
+	}
+
+	[Fact]
+	public void ReportSubagentCompleted_StampsCompletedAt_ForReplayCorrectness()
+	{
+		var before = DateTimeOffset.UtcNow;
+		_reporter.ReportSubagentCompleted("step-1", "tool-call-1", "agent-x", "Agent X");
+		var after = DateTimeOffset.UtcNow;
+
+		var data = _reporter.AccumulatedEvents[0].Data;
+		data.Should().Contain("\"completedAt\":\"");
+		ExtractIsoTimestamp(data, "completedAt").Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
+	}
+
+	[Fact]
+	public void ReportSubagentFailed_StampsCompletedAt_ForReplayCorrectness()
+	{
+		var before = DateTimeOffset.UtcNow;
+		_reporter.ReportSubagentFailed("step-1", "tool-call-1", "agent-x", "Agent X", "boom");
+		var after = DateTimeOffset.UtcNow;
+
+		var data = _reporter.AccumulatedEvents[0].Data;
+		data.Should().Contain("\"completedAt\":\"");
+		ExtractIsoTimestamp(data, "completedAt").Should().BeOnOrAfter(before).And.BeOnOrBefore(after);
+	}
+
+	/// <summary>
+	/// Extracts an ISO-8601 timestamp value from a JSON string by property name. Uses
+	/// <see cref="System.Text.Json.JsonDocument"/> so JSON escaping in the raw event payload
+	/// (notably <c>\u002B</c> for the <c>+</c> in <c>+00:00</c> emitted by the default
+	/// <see cref="System.Text.Json.JsonSerializer"/> escaping policy) is decoded automatically.
+	/// </summary>
+	private static DateTimeOffset ExtractIsoTimestamp(string json, string propertyName)
+	{
+		using var doc = System.Text.Json.JsonDocument.Parse(json);
+		doc.RootElement.TryGetProperty(propertyName, out var prop)
+			.Should().BeTrue($"event payload should contain '{propertyName}'");
+		var iso = prop.GetString();
+		iso.Should().NotBeNullOrWhiteSpace();
+		return DateTimeOffset.Parse(iso!, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.RoundtripKind);
 	}
 
 	[Fact]

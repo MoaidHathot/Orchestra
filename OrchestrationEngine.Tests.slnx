@@ -6,5 +6,6 @@
     <Project Path="tests/Orchestra.Terminal.Tests/Orchestra.Terminal.Tests.csproj" />
     <Project Path="tests/Orchestra.Server.Tests/Orchestra.Server.Tests.csproj" />
     <Project Path="tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj" />
+    <Project Path="tests/Orchestra.Tool.Tests/Orchestra.Tool.Tests.csproj" />
   </Folder>
 </Solution>

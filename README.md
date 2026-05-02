@@ -130,9 +130,69 @@ dotnet run --project playground/Hosting/Orchestra.Playground.Copilot \
   -print
 ```
 
+### Editor Validation (`$schema` setup)
+
+Orchestra ships three JSON Schemas that give you autocomplete, type-checking, and unknown-field errors in any editor that supports JSON Schema (VS Code, JetBrains, neovim, etc.):
+
+| Schema file | Validates |
+|---|---|
+| `orchestration.schema.json` | Orchestration definition files (`.json` and `.yaml`) |
+| `orchestra.mcp.schema.json` | `orchestra.mcp.json` (folder-scoped MCP server lists) |
+| `orchestra.services.schema.json` | `orchestra.services.json` (managed processes and lifecycle hooks) |
+
+You have three ways to reference them — pick whichever fits your environment:
+
+**1. Public URL (zero setup, network required to fetch once).** Reference the schemas hosted on GitHub:
+
+```jsonc
+{
+  "$schema": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json",
+  "name": "my-orchestration",
+  ...
+}
+```
+
+```yaml
+# yaml-language-server: $schema=https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json
+name: my-orchestration
+```
+
+For stable validation that does not move with `main`, replace `main` with a release tag (e.g., `v0.2.0`).
+
+**2. Local copy bundled with the tool (offline, version-pinned to your installed Orchestra).** Run once in your project root:
+
+```bash
+orchestra schemas
+# Wrote: <cwd>/.orchestra/schemas/orchestration.schema.json
+# Wrote: <cwd>/.orchestra/schemas/orchestra.mcp.schema.json
+# Wrote: <cwd>/.orchestra/schemas/orchestra.services.schema.json
+```
+
+This copies the three schemas from the installed `Orchestra` NuGet tool into `./.orchestra/schemas/`. Then reference them with a relative path:
+
+```jsonc
+{ "$schema": ".orchestra/schemas/orchestration.schema.json", ... }
+```
+
+```yaml
+# yaml-language-server: $schema=./.orchestra/schemas/orchestration.schema.json
+```
+
+Flags:
+- `--output <dir>` — write to a different directory (default: `./.orchestra/schemas`)
+- `--force` — overwrite existing schema files
+- `--help` — print usage
+
+**3. Repository-relative path (only when authoring inside this repo's `examples/` folder).** All bundled examples use:
+
+```yaml
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+```
+
 ## Table of Contents
 
 - [Step Types](#step-types)
+- [Editor Validation (`$schema` setup)](#editor-validation-schema-setup)
 - [Orchestration Schema](#orchestration-schema)
 - [Typed Inputs](#typed-inputs)
 - [Template Expressions](#template-expressions)
@@ -290,6 +350,37 @@ Script steps can also reference external files:
 | `mcps` | array | No | `[]` | Inline MCP server definitions |
 | `trigger` | object | No | Manual | Automatic trigger configuration |
 | `hooks` | array | No | `[]` | Lifecycle hooks that run after step/orchestration outcomes |
+| `metadata` | object | No | `{}` | Free-form metadata (any JSON shape). Not inspected by the runtime; for authors and managers only. |
+
+### Editor Schema Validation
+
+The `schemas/orchestration.schema.json` JSON Schema works for both JSON and YAML orchestration files in any editor that supports JSON Schema. Once bound, you get autocomplete, hover docs, type checks, and unknown-field errors.
+
+**JSON files** -- editors auto-detect via the `$schema` property. Just keep this at the top:
+
+```json
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "...",
+  ...
+}
+```
+
+**YAML files** -- because YAML has no built-in schema indirection, declare it explicitly using one of these conventions:
+
+```yaml
+# yaml-language-server: $schema=../schemas/orchestration.schema.json   <-- modeline (recommended)
+name: ...
+```
+
+or
+
+```yaml
+$schema: ../schemas/orchestration.schema.json   # top-level key
+name: ...
+```
+
+Known-good editors: VS Code (Red Hat YAML extension), JetBrains IDEs (Rider/IntelliJ), and anything else built on `yaml-language-server` (Neovim, Helix, etc.).
 
 ### Base Step Properties (All Step Types)
 
@@ -553,7 +644,7 @@ Orchestra supports [Model Context Protocol](https://modelcontextprotocol.io/) se
       "name": "filesystem",
       "type": "local",
       "command": "npx",
-      "arguments": ["-y", "@anthropic/mcp-server-filesystem", "{{workingDirectory}}"]
+      "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "{{workingDirectory}}"]
     },
     {
       "name": "remote-api",
@@ -830,6 +921,7 @@ See the `examples/` folder for 20 complete orchestration examples:
 | `command-build-and-analyze.json` | Command steps with build and git analysis |
 | `script-step-example.yaml` | Script step with inline PowerShell and mixed step types |
 | `variables-and-metadata.json` | Variables with recursive expansion and metadata expressions |
+| `variables-and-metadata.yaml` | YAML twin of variables-and-metadata.json -- shows free-form metadata in YAML |
 | `system-prompt-mode-example.json` | System prompt mode demonstration |
 | `advanced-combined-features.json` | Full pipeline with loops and MCPs |
 | `webhook-triggered-notification.json` | Webhook trigger with input handler and sync response |

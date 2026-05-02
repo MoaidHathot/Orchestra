@@ -6,6 +6,7 @@ This is the complete property-level reference for every field, step type, trigge
 
 - [File Structure Overview](#file-structure-overview)
 - [Top-Level Properties](#top-level-properties)
+- [Editor Schema Validation](#editor-schema-validation)
 - [Typed Inputs](#typed-inputs)
 - [Hooks](#hooks)
 - [Steps](#steps)
@@ -67,6 +68,67 @@ steps:
 | `variables` | `object` | No | `{}` | Key-value pairs of user-defined variables. Values can contain template expressions. Accessed via `{{vars.name}}`. |
 | `tags` | `string[]` | No | `[]` | Tags for categorizing and filtering orchestrations. |
 | `hooks` | `Hook[]` | No | `[]` | Lifecycle hooks that run after step or orchestration outcomes. Hooks receive structured JSON payloads on stdin and can execute follow-up scripts. |
+| `metadata` | `object` | No | `{}` | Free-form metadata. Values may be any JSON type (string, number, boolean, array, nested object). Purely informational -- the runtime never inspects this dictionary. Use for authorship, datetime, ticket links, environment, SLA, or any other semi-structured data. |
+
+---
+
+## Editor Schema Validation
+
+The `schemas/orchestration.schema.json` JSON Schema works for both JSON and YAML files in any editor that supports JSON Schema. Once bound, you get autocomplete, hover documentation, type validation, and unknown-field errors.
+
+**JSON files** -- editors auto-detect via the `$schema` property:
+
+```json
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "my-orchestration",
+  "description": "...",
+  "steps": []
+}
+```
+
+**YAML files** -- because YAML has no built-in schema indirection, declare it explicitly. Two conventions are supported:
+
+```yaml
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: my-orchestration
+description: ...
+steps: []
+```
+
+or
+
+```yaml
+$schema: ../schemas/orchestration.schema.json
+name: my-orchestration
+description: ...
+steps: []
+```
+
+The modeline form is recommended -- it works in VS Code (Red Hat YAML extension), JetBrains IDEs (Rider/IntelliJ), Neovim/Helix via `yaml-language-server`, and any other editor built on the same LSP. The top-level `$schema` form works in JetBrains IDEs and recent versions of `yaml-language-server`.
+
+### Metadata field caveats in YAML
+
+The `metadata` field accepts any JSON-compatible shape (`additionalProperties: true` in the schema). Two YAML-specific gotchas:
+
+1. **Quote ISO-8601 datetimes** (`"2026-04-30T12:00:00Z"`) so YAML does not coerce them to native date nodes. Quoted values stay as strings, which is what most consumers expect.
+2. **Indentation matters** for nested objects -- standard YAML rules apply.
+
+Example:
+
+```yaml
+metadata:
+  createdAt: "2026-04-30T12:00:00Z"
+  author: platform-team
+  owners:
+    - alice@example.com
+    - bob@example.com
+  ticket: JIRA-1234
+  environment: staging
+  sla:
+    responseTimeMinutes: 15
+    businessHoursOnly: true
+```
 
 ---
 

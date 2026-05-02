@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: mcp-coordinator-with-explicit-timeout
+description: >
+  Demonstrates how to override the host-level default for Orchestra's
+  data-plane MCP on a per-orchestration basis. This pattern is useful when:
+    1. A specific child orchestration is known to run unusually long
+       (e.g., a code-review pipeline over a large repo) and 30 minutes
+       is not enough.
+    2. You want to FAIL FAST instead — set a small timeoutSeconds to
+       surface stuck child orchestrations quickly.
+  Setting timeoutSeconds on the mcps[] entry always wins over the host
+  default (DefaultOrchestraInvokeTimeoutSeconds).
+version: "1.0.0"
+
+inputs:
+  childOrchestrationId:
+    type: string
+    description: ID of the child orchestration to invoke synchronously
+    required: true
+  childParameters:
+    type: string
+    description: JSON object of parameters to pass to the child
+    required: true
+
+mcps:
+  - name: orchestra
+    type: remote
+    endpoint: "{{server.url}}/mcp/data"
+    # Per-server tool-call timeout. This is the deadline the Copilot SDK
+    # applies to EACH individual MCP request to this server (e.g., each
+    # invoke_orchestration call). Increase for very long workflows; lower
+    # for fail-fast behavior. This value overrides any host default.
+    timeoutSeconds: 5400  # 90 minutes — for unusually long child orchestrations
+
+  # A second MCP for comparison: a fast filesystem MCP keeps its
+  # native default (no timeoutSeconds) — only the data-plane MCP gets
+  # the long timeout it actually needs.
+  - name: filesystem
+    type: local
+    command: npx
+    arguments:
+      - "-y"
+      - "@modelcontextprotocol/server-filesystem"
+      - "{{orchestration.tempDir}}"
+
+steps:
+  - name: invoke-child
+    type: Prompt
+    dependsOn: []
+    parameters:
+      - childOrchestrationId
+      - childParameters
+    mcps:
+      - orchestra
+      - filesystem
+    model: claude-opus-4.6
+    # Step timeout > MCP timeout so a single MCP-level timeout doesn't
+    # masquerade as a step timeout in trace diagnostics.
+    timeoutSeconds: 6000
+    systemPrompt: |
+      You are an orchestration runner. Invoke a single child orchestration
+      synchronously and persist its content to disk for downstream steps.
+    userPrompt: |
+      Use invoke_orchestration with:
+        - id: {{param.childOrchestrationId}}
+        - mode: "sync"
+        - parameters: {{param.childParameters}}
+
+      When the call returns, save the full result content to
+      {{orchestration.tempDir}}/child-result.md using the filesystem tool.
+      Then summarize what the child produced in a few sentences.
+
+  - name: report
+    type: Transform
+    dependsOn:
+      - invoke-child
+    template: |
+      # Child Orchestration Result
+
+      **Child ID:** {{param.childOrchestrationId}}
+      **Run ID:** {{orchestration.runId}}
+
+      ## Summary
+      {{invoke-child.output}}
+
+      Full content saved to: {{orchestration.tempDir}}/child-result.md
+    parameters:
+      - childOrchestrationId

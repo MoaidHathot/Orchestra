@@ -137,4 +137,62 @@ public class RetryMetadataTests
 		saved.RetryMode.Should().BeNull();
 		saved.TriggeredBy.Should().Be("manual", "default for non-retry, non-trigger runs");
 	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithTriggeredByParameter_PersistsTriggeredByOnRunRecord()
+	{
+		// Arrange — simulates ChildOrchestrationLauncher forwarding ChildLaunchRequest.TriggeredBy
+		// (e.g. "orchestration:<parentRunId>" or "mcp") through the engine. Without the new
+		// parameter, the engine previously fell back to "manual" and lost lineage information
+		// that callers like the data-plane MCP and OrchestrationStepExecutor were supplying.
+		OrchestrationRunRecord? saved = null;
+		var runStore = Substitute.For<IRunStore>();
+		runStore
+			.SaveRunAsync(Arg.Do<OrchestrationRunRecord>(r => saved = r), Arg.Any<CancellationToken>())
+			.Returns(Task.CompletedTask);
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("ok");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, NullOrchestrationReporter.Instance, NullLoggerFactory.Instance, runStore: runStore);
+
+		// Act
+		await executor.ExecuteAsync(Orch(Step("a")), triggeredBy: "orchestration:parentrun123");
+
+		// Assert
+		saved.Should().NotBeNull();
+		saved!.TriggeredBy.Should().Be("orchestration:parentrun123");
+		saved.Context!.TriggeredBy.Should().Be("orchestration:parentrun123",
+			"Context.TriggeredBy must mirror the run-record TriggeredBy so SSE/templating see the same value");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_RetryMetadataTriggeredBy_OverridesTriggeredByParameter()
+	{
+		// Arrange — retryMetadata is the explicit retry path and must take priority.
+		OrchestrationRunRecord? saved = null;
+		var runStore = Substitute.For<IRunStore>();
+		runStore
+			.SaveRunAsync(Arg.Do<OrchestrationRunRecord>(r => saved = r), Arg.Any<CancellationToken>())
+			.Returns(Task.CompletedTask);
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("ok");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, NullOrchestrationReporter.Instance, NullLoggerFactory.Instance, runStore: runStore);
+
+		var meta = new RetryMetadata
+		{
+			RetriedFromRunId = "src-run",
+			RetryMode = "all",
+			TriggeredBy = "retry",
+		};
+
+		// Act
+		await executor.ExecuteAsync(
+			Orch(Step("a")),
+			retryMetadata: meta,
+			triggeredBy: "should-be-ignored-by-retry");
+
+		// Assert
+		saved.Should().NotBeNull();
+		saved!.TriggeredBy.Should().Be("retry",
+			"retryMetadata.TriggeredBy must always win over the launcher-supplied triggeredBy");
+	}
 }

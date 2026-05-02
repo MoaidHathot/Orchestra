@@ -70,6 +70,7 @@ public static class RunsApi
 				status = s.Status.ToString(),
 				completionReason = s.CompletionReason,
 				completedByStep = s.CompletedByStep,
+				cancellation = MapCancellation(s.Cancellation),
 				hookExecutionCount = s.HookExecutionCount,
 				isActive = false,
 				isIncomplete = s.IsIncomplete
@@ -149,6 +150,7 @@ public static class RunsApi
 					status = s.Status.ToString(),
 					completionReason = s.CompletionReason,
 					completedByStep = s.CompletedByStep,
+					cancellation = MapCancellation(s.Cancellation),
 					hookExecutionCount = s.HookExecutionCount,
 					isActive = false,
 				isIncomplete = s.IsIncomplete,
@@ -174,6 +176,7 @@ public static class RunsApi
 				status = s.Status.ToString(),
 				completionReason = s.CompletionReason,
 				completedByStep = s.CompletedByStep,
+				cancellation = MapCancellation(s.Cancellation),
 				hookExecutionCount = s.HookExecutionCount,
 				isActive = false,
 				isIncomplete = s.IsIncomplete,
@@ -252,6 +255,7 @@ public static class RunsApi
 					status = s.Status.ToString(),
 					completionReason = s.CompletionReason,
 					completedByStep = s.CompletedByStep,
+					cancellation = MapCancellation(s.Cancellation),
 					hookExecutionCount = s.HookExecutionCount,
 					isActive = false,
 					isIncomplete = s.IsIncomplete,
@@ -294,6 +298,7 @@ public static class RunsApi
 				status = record.Status.ToString(),
 				completionReason = record.CompletionReason,
 				completedByStep = record.CompletedByStep,
+				cancellation = MapCancellation(record.Cancellation),
 				isIncomplete = record.IsIncomplete,
 				retriedFromRunId = record.RetriedFromRunId,
 				retryMode = record.RetryMode,
@@ -590,5 +595,28 @@ public static class RunsApi
 		});
 
 		return endpoints;
+	}
+
+	/// <summary>
+	/// Projects a <see cref="CancellationDetails"/> into a stable JSON shape for API responses.
+	/// Returns <c>null</c> when <paramref name="details"/> is <c>null</c> so non-cancelled runs
+	/// emit no <c>cancellation</c> field at all.
+	/// </summary>
+	private static object? MapCancellation(CancellationDetails? details)
+	{
+		if (details is null)
+		{
+			return null;
+		}
+
+		return new
+		{
+			kind = details.Kind.ToString(),
+			timeoutSeconds = details.TimeoutSeconds,
+			source = details.Source,
+			detail = details.Detail,
+			reason = details.Reason,
+			isTimeout = details.IsTimeout,
+		};
 	}
 }

@@ -450,7 +450,7 @@ var localMcp = new LocalMcp
     Name = "filesystem",
     Type = McpType.Local,
     Command = "npx",
-    Arguments = new[] { "-y", "@anthropic/mcp-server-filesystem", "." },
+    Arguments = new[] { "-y", "@modelcontextprotocol/server-filesystem", "." },
     WorkingDirectory = "/path/to/project"
 };
 ```

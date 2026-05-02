@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.McpServer;
 
 namespace Orchestra.Host.Mcp;
 
@@ -21,6 +22,7 @@ namespace Orchestra.Host.Mcp;
 public partial class McpManager : IMcpResolver, IAsyncDisposable
 {
 	private readonly ILogger<McpManager> _logger;
+	private readonly McpServerOptions _mcpServerOptions;
 
 	/// <summary>
 	/// The names of global MCP servers managed by this instance.
@@ -56,9 +58,10 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	/// </summary>
 	private bool _initialized;
 
-	public McpManager(ILogger<McpManager> logger)
+	public McpManager(ILogger<McpManager> logger, McpServerOptions? mcpServerOptions = null)
 	{
 		_logger = logger;
+		_mcpServerOptions = mcpServerOptions ?? new McpServerOptions();
 	}
 
 	/// <summary>
@@ -121,46 +124,189 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	/// Resolves MCPs for a step. Each global MCP (identified by name) is replaced
 	/// with a <see cref="RemoteMcp"/> pointing to its per-server proxy route
 	/// (e.g. <c>http://localhost:{port}/mcp/{name}</c>).
-	/// Inline MCPs are returned unchanged.
+	/// Inline MCPs are returned unchanged, except that any <see cref="RemoteMcp"/>
+	/// targeting Orchestra's own data-plane endpoint without an explicit
+	/// <see cref="Engine.Mcp.Timeout"/> has the configured
+	/// <see cref="McpServerOptions.DefaultOrchestraInvokeTimeoutSeconds"/> applied
+	/// so that long-running <c>invoke_orchestration</c> calls in sync mode do not
+	/// hit the Copilot SDK's ~3-minute default MCP request timeout.
+	///
+	/// When <paramref name="parent"/> is supplied, additionally stamps parent-execution
+	/// headers (see <see cref="OrchestraHeaders"/>) on any <see cref="RemoteMcp"/> whose
+	/// endpoint targets this Orchestra host. The headers let server-side MCP tool handlers
+	/// (e.g. <c>DataPlaneTools.InvokeOrchestration</c>) auto-populate <c>parentExecutionId</c>
+	/// for nested invocations, restoring run lineage that was previously lost when an LLM
+	/// agent recursively invoked orchestrations through MCP.
+	/// Endpoints that are NOT Orchestra-owned receive no headers (avoiding leakage of
+	/// internal execution IDs to foreign servers).
 	/// </summary>
 	/// <remarks>
 	/// Name-based matching is used instead of reference equality because upstream
 	/// template resolution (<see cref="TemplateResolver.ResolveStaticMcp"/>) creates
 	/// new MCP object instances, which would break reference-equality checks.
 	/// </remarks>
-	public Engine.Mcp[] Resolve(Engine.Mcp[] mcps)
+	public Engine.Mcp[] Resolve(Engine.Mcp[] mcps, ParentExecutionAnnotation? parent = null)
 	{
-		if (_globalMcpNames.Count == 0 || mcps.Length == 0 || _proxyBaseUrl is null)
+		if (mcps.Length == 0)
 			return mcps;
 
 		var result = new List<Engine.Mcp>(mcps.Length);
-		var hasAnyGlobal = false;
+		var changed = false;
 
 		foreach (var mcp in mcps)
 		{
-			if (_globalMcpNames.Contains(mcp.Name))
+			Engine.Mcp current = mcp;
+
+			// Step 1 — replace global MCPs (defined in orchestra.mcp.json) with a
+			// RemoteMcp pointing at the per-server proxy route.
+			if (_globalMcpNames.Contains(mcp.Name) && _proxyBaseUrl is not null)
 			{
-				hasAnyGlobal = true;
-				// Replace with a RemoteMcp pointing to this server's per-server proxy route
-				result.Add(new RemoteMcp
+				// Look up the original global definition so we can preserve its semantic
+				// timeout when the orchestration didn't override it.
+				var originalGlobal = _globalMcpList.FirstOrDefault(g =>
+					string.Equals(g.Name, mcp.Name, StringComparison.OrdinalIgnoreCase));
+
+				current = new RemoteMcp
 				{
 					Name = mcp.Name,
 					Type = McpType.Remote,
 					Endpoint = $"{_proxyBaseUrl}/{mcp.Name}",
 					Headers = [],
-					Timeout = mcp.Timeout, // Preserve per-server timeout configuration
-				});
+					Timeout = mcp.Timeout ?? originalGlobal?.Timeout, // Orchestration override > global default
+				};
+				changed = true;
 			}
-			else
+
+			// Step 2 — for the Orchestra data-plane MCP specifically, apply the configured
+			// default timeout when neither the orchestration nor a global definition supplied
+			// one. Detection considers both the inline MCP (current.Endpoint == /mcp/data)
+			// and global MCPs whose original definition pointed at /mcp/data, since by step 1
+			// the endpoint has already been rewritten to the proxy URL for global ones.
+			if (current.Timeout is null && _mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds > 0)
 			{
-				result.Add(mcp);
+				var originalGlobal = _globalMcpNames.Contains(mcp.Name)
+					? _globalMcpList.FirstOrDefault(g =>
+						string.Equals(g.Name, mcp.Name, StringComparison.OrdinalIgnoreCase))
+					: null;
+
+				if (TargetsOrchestraDataPlane(mcp) || TargetsOrchestraDataPlane(originalGlobal))
+				{
+					var defaultTimeout = TimeSpan.FromSeconds(_mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds);
+
+					current = current switch
+					{
+						RemoteMcp r => new RemoteMcp
+						{
+							Name = r.Name,
+							Type = r.Type,
+							Endpoint = r.Endpoint,
+							Headers = r.Headers,
+							Timeout = defaultTimeout,
+						},
+						LocalMcp l => new LocalMcp
+						{
+							Name = l.Name,
+							Type = l.Type,
+							Command = l.Command,
+							Arguments = l.Arguments,
+							WorkingDirectory = l.WorkingDirectory,
+							Timeout = defaultTimeout,
+						},
+						_ => current,
+					};
+
+					LogAppliedDataPlaneDefaultTimeout(mcp.Name, _mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds);
+					changed = true;
+				}
 			}
+
+			// Step 3 — when a parent annotation is supplied, stamp parent-execution headers
+			// on any RemoteMcp whose endpoint targets this Orchestra host. Headers are
+			// overwritten (not merged with caller-supplied values) so the orchestration YAML
+			// cannot spoof the parent ID.
+			if (parent is not null
+				&& current is RemoteMcp remoteForParent
+				&& IsOrchestraOwnedEndpoint(remoteForParent.Endpoint))
+			{
+				var headers = new Dictionary<string, string>(remoteForParent.Headers, StringComparer.OrdinalIgnoreCase)
+				{
+					[OrchestraHeaders.ParentExecutionId] = parent.ExecutionId,
+					[OrchestraHeaders.ParentOrchestrationName] = parent.OrchestrationName,
+					[OrchestraHeaders.ParentStepName] = parent.StepName,
+				};
+
+				current = new RemoteMcp
+				{
+					Name = remoteForParent.Name,
+					Type = remoteForParent.Type,
+					Endpoint = remoteForParent.Endpoint,
+					Headers = headers,
+					Timeout = remoteForParent.Timeout,
+				};
+				changed = true;
+			}
+
+			result.Add(current);
 		}
 
-		if (!hasAnyGlobal)
-			return mcps;
+		return changed ? [.. result] : mcps;
+	}
 
-		return [.. result];
+	/// <summary>
+	/// Returns <c>true</c> when the given endpoint URL targets this Orchestra host's own
+	/// MCP surface — either the data plane directly or the per-MCP proxy route that
+	/// global MCPs are rewritten to in <see cref="Resolve(Engine.Mcp[], ParentExecutionAnnotation?)"/>.
+	/// </summary>
+	private bool IsOrchestraOwnedEndpoint(string? endpoint)
+	{
+		if (string.IsNullOrWhiteSpace(endpoint))
+		{
+			return false;
+		}
+
+		// Direct data-plane endpoint (handles inline orchestration MCPs that target /mcp/data).
+		if (TargetsOrchestraDataPlane(new RemoteMcp { Name = "_", Type = McpType.Remote, Endpoint = endpoint!, Headers = [] }))
+		{
+			return true;
+		}
+
+		// Global-MCP proxy rewrites point at the local proxy base URL; those proxies forward
+		// to the underlying server, which may itself be the Orchestra data plane.
+		if (_proxyBaseUrl is not null
+			&& endpoint!.StartsWith(_proxyBaseUrl, StringComparison.OrdinalIgnoreCase))
+		{
+			return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>
+	/// Returns <c>true</c> when the given MCP is a <see cref="RemoteMcp"/> whose endpoint
+	/// targets this host's configured data-plane route (default <c>/mcp/data</c>). The
+	/// match compares the URL path component (case-insensitive) so it tolerates port
+	/// numbers, schemes, and trailing slashes.
+	/// </summary>
+	private bool TargetsOrchestraDataPlane(Engine.Mcp? mcp)
+	{
+		if (mcp is not RemoteMcp remote || string.IsNullOrEmpty(remote.Endpoint))
+			return false;
+
+		var configuredRoute = (_mcpServerOptions.DataPlaneRoute ?? string.Empty).TrimEnd('/');
+		if (configuredRoute.Length == 0)
+			return false;
+
+		// Try parsing as an absolute URI so we can match on the path component without
+		// being fooled by scheme/host/port/query differences.
+		if (Uri.TryCreate(remote.Endpoint, UriKind.Absolute, out var uri))
+		{
+			var path = uri.AbsolutePath.TrimEnd('/');
+			return path.Equals(configuredRoute, StringComparison.OrdinalIgnoreCase)
+				|| path.EndsWith(configuredRoute, StringComparison.OrdinalIgnoreCase);
+		}
+
+		// Fallback: substring match for unparseable endpoints (e.g., still-templated values).
+		return remote.Endpoint.Contains(configuredRoute, StringComparison.OrdinalIgnoreCase);
 	}
 
 	protected virtual async Task StartProxyAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken)
@@ -308,6 +454,12 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		Level = LogLevel.Information,
 		Message = "MCP proxy stopped.")]
 	private partial void LogProxyStopped();
+
+	[LoggerMessage(
+		EventId = 8,
+		Level = LogLevel.Information,
+		Message = "Applied default Orchestra data-plane MCP timeout {DefaultTimeoutSeconds}s to MCP entry '{McpName}' (no timeoutSeconds set on the orchestration's mcps[] entry).")]
+	private partial void LogAppliedDataPlaneDefaultTimeout(string mcpName, int defaultTimeoutSeconds);
 
 	#endregion
 }

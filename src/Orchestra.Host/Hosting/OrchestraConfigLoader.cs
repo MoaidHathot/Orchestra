@@ -475,6 +475,15 @@ public class McpServerConfig
 	/// 0 = top-level only (no nesting). Default: 5.
 	/// </summary>
 	public int? MaxNestingDepth { get; set; }
+
+	/// <summary>
+	/// Default timeout (seconds) applied to MCP tool calls that target Orchestra's
+	/// own data-plane MCP endpoint when the orchestration's <c>mcps[]</c> entry does
+	/// not specify a <c>timeoutSeconds</c>. Use this to raise the cap above the
+	/// Copilot SDK's ~3-minute default for long-running <c>invoke_orchestration</c>
+	/// calls in sync mode. Default: 1800 (30 minutes). Set to 0 or negative to disable.
+	/// </summary>
+	public int? DefaultOrchestraInvokeTimeoutSeconds { get; set; }
 }
 
 /// <summary>

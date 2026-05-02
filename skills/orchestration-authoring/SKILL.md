@@ -15,6 +15,28 @@ Complete reference for creating valid, idiomatic Orchestra orchestration files.
 
 Orchestrations are single JSON or YAML objects. Three fields are required: `name`, `description`, `steps`. YAML is recommended for orchestrations with multi-line prompts (use `|` block scalars).
 
+**Editor schema validation.** Bind the orchestration JSON Schema for autocomplete, type-checking, and unknown-field errors. Pick one of three options based on how you obtained Orchestra:
+
+1. **Public URL** (works anywhere, requires network the first time):
+   - JSON: `"$schema": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json"`
+   - YAML: `# yaml-language-server: $schema=https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json`
+   - Same pattern for `orchestra.mcp.schema.json` and `orchestra.services.schema.json`.
+   - For version-pinned validation, replace `main` with a release tag (e.g., `v0.2.0`).
+
+2. **Local copy bundled with the tool** (offline, version-pinned to your installed Orchestra):
+   - Run once in your project root: `orchestra schemas`
+   - This writes the three schemas to `./.orchestra/schemas/`.
+   - Then reference them with a relative path:
+     - JSON: `"$schema": ".orchestra/schemas/orchestration.schema.json"`
+     - YAML: `# yaml-language-server: $schema=./.orchestra/schemas/orchestration.schema.json`
+   - Use `--output <dir>` to choose a different folder; `--force` to overwrite.
+
+3. **Repository-relative path** (only inside this repository's `examples/` folder):
+   - JSON: `"$schema": "../schemas/orchestration.schema.json"`
+   - YAML: `# yaml-language-server: $schema=../schemas/orchestration.schema.json`
+
+YAML modelines work in VS Code (Red Hat YAML extension), JetBrains IDEs, and any editor on `yaml-language-server`. A top-level `$schema:` key is also supported.
+
 ## Top-Level Properties
 
 | Property | Type | Required | Default | Description |
@@ -34,6 +56,7 @@ Orchestrations are single JSON or YAML objects. Three fields are required: `name
 | `variables` | object | No | {} | Key-value pairs accessed via `{{vars.name}}` |
 | `tags` | string[] | No | [] | Categorization tags |
 | `hooks` | Hook[] | No | [] | Lifecycle hooks that run after step or orchestration outcomes |
+| `metadata` | object | No | {} | Free-form metadata (any JSON shape: string, number, bool, array, nested object). Not inspected by the runtime; for authors and managers only. Use for datetime, owners, ticket links, environment, SLA, etc. |
 
 ## Typed Inputs (InputDefinition)
 
@@ -364,7 +387,7 @@ mcps:
     command: npx
     arguments:
       - "-y"
-      - "@anthropic/mcp-server-filesystem"
+      - "@modelcontextprotocol/server-filesystem"
       - "{{workingDirectory}}"
 ```
 

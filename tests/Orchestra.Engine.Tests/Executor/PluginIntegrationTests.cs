@@ -634,7 +634,7 @@ public class PluginIntegrationTests
 		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:5555/mcp", Headers = [] };
 
 		var resolver = Substitute.For<IMcpResolver>();
-		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(new Mcp[] { proxyMcp });
+		resolver.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>()).Returns(new Mcp[] { proxyMcp });
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Step output");
 		var registry = CreateRegistry(agentBuilder, mcpResolver: resolver);
@@ -667,7 +667,7 @@ public class PluginIntegrationTests
 
 		// Assert
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		resolver.Received(1).Resolve(Arg.Any<Mcp[]>());
+		resolver.Received(1).Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>());
 
 		// Verify the agent received the proxy MCP, not the original global
 		agentBuilder.CapturedMcps.Should().HaveCount(1);
@@ -684,7 +684,7 @@ public class PluginIntegrationTests
 		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:6666/mcp", Headers = [] };
 
 		var resolver = Substitute.For<IMcpResolver>();
-		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(new Mcp[] { proxyMcp });
+		resolver.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>()).Returns(new Mcp[] { proxyMcp });
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Step output");
 		var registry = CreateRegistry(agentBuilder, mcpResolver: resolver);
@@ -728,7 +728,7 @@ public class PluginIntegrationTests
 
 		// Assert — both steps succeeded and resolver was called for each
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		resolver.Received(2).Resolve(Arg.Any<Mcp[]>());
+		resolver.Received(2).Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>());
 	}
 
 	[Fact]
@@ -740,7 +740,7 @@ public class PluginIntegrationTests
 		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:4444/mcp", Headers = [] };
 
 		var resolver = Substitute.For<IMcpResolver>();
-		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(new Mcp[] { proxyMcp });
+		resolver.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>()).Returns(new Mcp[] { proxyMcp });
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Parallel output");
 		var registry = CreateRegistry(agentBuilder, mcpResolver: resolver);
@@ -765,7 +765,7 @@ public class PluginIntegrationTests
 
 		// Assert — all three steps resolved
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		resolver.Received(3).Resolve(Arg.Any<Mcp[]>());
+		resolver.Received(3).Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>());
 	}
 
 	[Fact]
@@ -778,7 +778,7 @@ public class PluginIntegrationTests
 		var proxyMcp = new RemoteMcp { Name = "orchestra-mcp-proxy", Type = McpType.Remote, Endpoint = "http://localhost:3333/mcp", Headers = [] };
 
 		var resolver = Substitute.For<IMcpResolver>();
-		resolver.Resolve(Arg.Any<Mcp[]>()).Returns(new Mcp[] { proxyMcp });
+		resolver.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>()).Returns(new Mcp[] { proxyMcp });
 
 		var agentBuilder = new MockAgentBuilder().WithResponse("Result");
 
@@ -813,7 +813,7 @@ public class PluginIntegrationTests
 
 		// Assert
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		resolver.Received(1).Resolve(Arg.Any<Mcp[]>());
+		resolver.Received(1).Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>());
 
 		// The agent should have received the proxy MCP
 		agentBuilder.CapturedMcps.Should().HaveCount(1);

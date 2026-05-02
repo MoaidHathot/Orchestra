@@ -29,7 +29,7 @@
       "command": "npx",
       "arguments": [
         "-y",
-        "@anthropic/mcp-server-filesystem",
+        "@modelcontextprotocol/server-filesystem",
         "P:\\Work\\Networking\\Repo\\Zero-Trust-Segmentation\\ZTS"
       ]
     }

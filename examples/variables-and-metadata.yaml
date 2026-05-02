@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: variables-and-metadata
+description: >
+  YAML twin of variables-and-metadata.json. Demonstrates orchestration-level
+  variables, environment variables, built-in metadata template expressions,
+  and the free-form 'metadata' field. Variables let you define reusable
+  values (with recursive expansion) that any step can reference via
+  {{vars.name}}. Environment variables are accessed via {{env.VAR_NAME}}.
+  Steps can also access orchestration metadata ({{orchestration.name}},
+  {{orchestration.runId}}, etc.) and their own step metadata
+  ({{step.name}}, {{step.type}}). The 'metadata' object holds free-form,
+  semi-structured information that does NOT affect execution -- use it for
+  authorship, datetime, ticket links, environment, SLA, etc.
+version: "1.0.0"
+
+# Free-form metadata. Never inspected by the runtime; for authors and
+# managers. Any JSON-compatible shape is accepted (string, number, bool,
+# array, nested object). ISO-8601 datetimes are quoted to keep them as
+# strings rather than YAML-native dates.
+metadata:
+  createdAt: "2026-04-30T12:00:00Z"
+  author: platform-team
+  owners:
+    - alice@example.com
+    - bob@example.com
+  ticket: JIRA-1234
+  environment: staging
+  sla:
+    responseTimeMinutes: 15
+    businessHoursOnly: true
+
+variables:
+  baseUrl: https://api.example.com/v2
+  outputDir: /reports/{{param.project}}
+  logPrefix: "[{{orchestration.name}}:{{orchestration.runId}}]"
+
+steps:
+  - name: fetch-data
+    type: Http
+    dependsOn: []
+    method: GET
+    url: "{{vars.baseUrl}}/projects/{{param.project}}/summary"
+    headers:
+      Accept: application/json
+      Authorization: "Bearer {{env.API_TOKEN}}"
+      X-Request-Source: "{{orchestration.name}}/{{orchestration.version}}"
+    parameters:
+      - project
+
+  - name: generate-report
+    type: Prompt
+    dependsOn:
+      - fetch-data
+    model: claude-opus-4.6
+    parameters:
+      - project
+    systemPrompt: |
+      You are a project reporting assistant. Generate clear, actionable
+      reports from raw API data. Include the run metadata for traceability.
+    userPrompt: |
+      {{vars.logPrefix}} Generate a project status report for {{param.project}}.
+
+      Step executing: {{step.name}} ({{step.type}})
+      Orchestration: {{orchestration.name}} v{{orchestration.version}}
+      Run ID: {{orchestration.runId}}
+      Started at: {{orchestration.startedAt}}
+
+      API Response:
+      {{fetch-data.output}}
+
+      Save the report to: {{vars.outputDir}}/status-report.md
+
+  - name: format-output
+    type: Transform
+    dependsOn:
+      - generate-report
+    parameters:
+      - project
+    template: |
+      # Report: {{param.project}}
+
+      **Orchestration:** {{orchestration.name}} v{{orchestration.version}}
+      **Run ID:** {{orchestration.runId}}
+      **Output Directory:** {{vars.outputDir}}
+
+      ---
+
+      {{generate-report.output}}

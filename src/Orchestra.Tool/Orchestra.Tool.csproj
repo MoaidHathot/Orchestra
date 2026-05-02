@@ -36,6 +36,11 @@
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
              Pack="false" />
+    <Content Include="..\..\schemas\*.json"
+             Link="schemas\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Pack="false" />
   </ItemGroup>
 
 </Project>

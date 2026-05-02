@@ -1233,6 +1233,139 @@ public class OrchestrationParserTests
 
 	#endregion
 
+	#region Metadata Parsing
+
+	[Fact]
+	public void ParseOrchestration_WithMetadata_ParsesAllValueTypes()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "metadata-test",
+				"description": "Test with metadata",
+				"metadata": {
+					"datetime": "2026-04-30T12:00:00Z",
+					"author": "alice",
+					"priority": 3,
+					"production": true,
+					"owners": ["alice", "bob"],
+					"links": {
+						"ticket": "JIRA-123",
+						"runbook": "https://example.com/runbook"
+					}
+				},
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Metadata.Should().HaveCount(6);
+		orchestration.Metadata["datetime"]!.GetValue<string>().Should().Be("2026-04-30T12:00:00Z");
+		orchestration.Metadata["author"]!.GetValue<string>().Should().Be("alice");
+		orchestration.Metadata["priority"]!.GetValue<int>().Should().Be(3);
+		orchestration.Metadata["production"]!.GetValue<bool>().Should().BeTrue();
+		orchestration.Metadata["owners"]!.AsArray().Should().HaveCount(2);
+		orchestration.Metadata["owners"]![0]!.GetValue<string>().Should().Be("alice");
+		orchestration.Metadata["links"]!["ticket"]!.GetValue<string>().Should().Be("JIRA-123");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithoutMetadata_DefaultsToEmptyDictionary()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "no-metadata",
+				"description": "Test without metadata",
+				"steps": []
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Metadata.Should().NotBeNull();
+		orchestration.Metadata.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithMetadata_DoesNotAffectExecution()
+	{
+		// Arrange - metadata should be ignored entirely by the runtime;
+		// the rest of the orchestration must parse normally even when metadata is present.
+		var json = """
+			{
+				"name": "metadata-and-steps",
+				"description": "Metadata coexists with normal fields",
+				"metadata": {
+					"createdAt": "2026-04-30T08:00:00Z",
+					"team": "platform"
+				},
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPrompt": "Test",
+						"userPrompt": "Test",
+						"model": "claude-opus-4.6"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Name.Should().Be("metadata-and-steps");
+		orchestration.Steps.Should().HaveCount(1);
+		orchestration.Steps[0].Name.Should().Be("step1");
+		orchestration.Metadata["team"]!.GetValue<string>().Should().Be("platform");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithMetadata_RoundTripsThroughSerialization()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "roundtrip",
+				"description": "Round-trip metadata",
+				"metadata": {
+					"datetime": "2026-04-30T12:00:00Z",
+					"nested": { "key": "value", "count": 7 }
+				},
+				"steps": []
+			}
+			""";
+
+		// Act - parse, serialize the metadata dictionary as JSON, then reconstruct
+		// an orchestration JSON and re-parse to confirm structure survives round-trip.
+		var first = OrchestrationParser.ParseOrchestration(json, []);
+		var metadataJson = System.Text.Json.JsonSerializer.Serialize(first.Metadata);
+		var rebuilt = $$"""
+			{
+				"name": "roundtrip",
+				"description": "Round-trip metadata",
+				"metadata": {{metadataJson}},
+				"steps": []
+			}
+			""";
+		var second = OrchestrationParser.ParseOrchestration(rebuilt, []);
+
+		// Assert - metadata survives the round-trip with structure intact
+		second.Metadata["datetime"]!.GetValue<string>().Should().Be("2026-04-30T12:00:00Z");
+		second.Metadata["nested"]!["key"]!.GetValue<string>().Should().Be("value");
+		second.Metadata["nested"]!["count"]!.GetValue<int>().Should().Be(7);
+	}
+
+	#endregion
+
 	#region Step Enabled Parsing
 
 	[Fact]
@@ -1638,6 +1771,85 @@ public class OrchestrationParserTests
 		return data;
 	}
 
+	/// <summary>
+	/// Locks in the contract demonstrated by the mcp-coordinator-with-explicit-timeout
+	/// example: the per-server <c>timeoutSeconds</c> on an Orchestra data-plane MCP
+	/// entry parses into <see cref="Mcp.Timeout"/> exactly as authored. This guards
+	/// against regressions where the example would silently lose its override and
+	/// fall back to the host default.
+	/// </summary>
+	[Fact]
+	public void ParseOrchestrationFile_McpCoordinatorWithExplicitTimeoutExample_PreservesPerServerTimeout()
+	{
+		var path = Path.GetFullPath(Path.Combine(
+			AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+			"examples", "mcp-coordinator-with-explicit-timeout.yaml"));
+
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(path, []);
+
+		var orchestraMcp = orchestration.Mcps.OfType<RemoteMcp>()
+			.Single(m => string.Equals(m.Name, "orchestra", StringComparison.OrdinalIgnoreCase));
+		orchestraMcp.Timeout.Should().Be(TimeSpan.FromSeconds(5400),
+			"the example explicitly demonstrates a 90-minute per-server override");
+
+		// The companion filesystem MCP demonstrates the 'no override' case.
+		var fsMcp = orchestration.Mcps.OfType<LocalMcp>()
+			.Single(m => string.Equals(m.Name, "filesystem", StringComparison.OrdinalIgnoreCase));
+		fsMcp.Timeout.Should().BeNull(
+			"the example deliberately leaves the local filesystem MCP at the SDK default");
+	}
+
+	/// <summary>
+	/// Locks in the contract demonstrated by the mcp-per-server-timeouts example:
+	/// each MCP can have its own deadline, and entries that omit timeoutSeconds
+	/// remain unset at parse time (the host's data-plane default is applied later
+	/// by McpManager.Resolve, not at parse time).
+	/// </summary>
+	[Fact]
+	public void ParseOrchestrationFile_McpPerServerTimeoutsExample_EachServerHasDistinctTimeout()
+	{
+		var path = Path.GetFullPath(Path.Combine(
+			AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+			"examples", "mcp-per-server-timeouts.yaml"));
+
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(path, []);
+
+		var orchestra = orchestration.Mcps.OfType<RemoteMcp>().Single(m => m.Name == "orchestra");
+		var db = orchestration.Mcps.OfType<RemoteMcp>().Single(m => m.Name == "db");
+		var fs = orchestration.Mcps.OfType<LocalMcp>().Single(m => m.Name == "filesystem");
+		var analyzer = orchestration.Mcps.OfType<LocalMcp>().Single(m => m.Name == "code-analyzer");
+
+		orchestra.Timeout.Should().Be(TimeSpan.FromSeconds(7200), "2-hour deep-tree override");
+		db.Timeout.Should().Be(TimeSpan.FromSeconds(30), "30-second fail-fast cap");
+		fs.Timeout.Should().BeNull("filesystem entry deliberately uses the SDK default");
+		analyzer.Timeout.Should().Be(TimeSpan.FromSeconds(900), "15-minute analyzer override");
+	}
+
+	/// <summary>
+	/// Locks in the contract demonstrated by mcp-coordinator-with-default-timeout:
+	/// the data-plane MCP entry intentionally OMITS timeoutSeconds so that the
+	/// host's DefaultOrchestraInvokeTimeoutSeconds applies at runtime. If a future
+	/// edit silently adds a per-orchestration override, this test will fail and
+	/// alert the author that the example's narrative no longer matches its config.
+	/// </summary>
+	[Fact]
+	public void ParseOrchestrationFile_McpCoordinatorWithDefaultTimeoutExample_OmitsPerServerTimeout()
+	{
+		var path = Path.GetFullPath(Path.Combine(
+			AppContext.BaseDirectory, "..", "..", "..", "..", "..",
+			"examples", "mcp-coordinator-with-default-timeout.yaml"));
+
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(path, []);
+
+		var orchestraMcp = orchestration.Mcps.OfType<RemoteMcp>()
+			.Single(m => string.Equals(m.Name, "orchestra", StringComparison.OrdinalIgnoreCase));
+		orchestraMcp.Timeout.Should().BeNull(
+			"this example demonstrates the host-level default; an explicit timeoutSeconds " +
+			"would defeat the example's purpose");
+		orchestraMcp.Endpoint.Should().Contain("/mcp/data",
+			"the example targets Orchestra's data-plane route, which is what triggers the default");
+	}
+
 	#endregion
 
 	#region Inputs Parsing
@@ -2005,6 +2217,83 @@ public class OrchestrationParserTests
 		orchestration.Variables["greeting"].Should().Be("hello");
 		orchestration.Variables.Should().ContainKey("target");
 		orchestration.Variables["target"].Should().Be("world");
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_WithMetadata_ParsesAllValueTypes()
+	{
+		var yaml = """
+			name: yaml-metadata-test
+			description: Test metadata in YAML
+			metadata:
+			  datetime: "2026-04-30T12:00:00Z"
+			  author: alice
+			  priority: 3
+			  production: true
+			  owners:
+			    - alice
+			    - bob
+			  links:
+			    ticket: JIRA-123
+			    runbook: https://example.com/runbook
+			steps: []
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Metadata.Should().HaveCount(6);
+		orchestration.Metadata["datetime"]!.GetValue<string>().Should().Be("2026-04-30T12:00:00Z");
+		orchestration.Metadata["author"]!.GetValue<string>().Should().Be("alice");
+		orchestration.Metadata["priority"]!.GetValue<int>().Should().Be(3);
+		orchestration.Metadata["production"]!.GetValue<bool>().Should().BeTrue();
+		orchestration.Metadata["owners"]!.AsArray().Should().HaveCount(2);
+		orchestration.Metadata["owners"]![0]!.GetValue<string>().Should().Be("alice");
+		orchestration.Metadata["links"]!["ticket"]!.GetValue<string>().Should().Be("JIRA-123");
+	}
+
+	[Fact]
+	public void ConvertYamlToJson_WithoutMetadata_DefaultsToEmptyDictionary()
+	{
+		var yaml = """
+			name: yaml-no-metadata
+			description: Test without metadata
+			steps: []
+			""";
+
+		var json = OrchestrationParser.ConvertYamlToJson(yaml);
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.Metadata.Should().NotBeNull();
+		orchestration.Metadata.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void ParseOrchestrationFile_VariablesAndMetadataYamlExample_ParsesCorrectly()
+	{
+		// Arrange - load the bundled YAML example so it stays valid going forward.
+		var examplesDir = Path.GetFullPath(
+			Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples"));
+		var filePath = Path.Combine(examplesDir, "variables-and-metadata.yaml");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(filePath, []);
+
+		// Assert - core structure
+		orchestration.Name.Should().Be("variables-and-metadata");
+		orchestration.Steps.Should().HaveCount(3);
+		orchestration.Variables.Should().ContainKey("baseUrl");
+
+		// Assert - metadata round-trips with mixed value types intact
+		orchestration.Metadata.Should().HaveCount(6);
+		orchestration.Metadata["createdAt"]!.GetValue<string>().Should().Be("2026-04-30T12:00:00Z");
+		orchestration.Metadata["author"]!.GetValue<string>().Should().Be("platform-team");
+		orchestration.Metadata["ticket"]!.GetValue<string>().Should().Be("JIRA-1234");
+		orchestration.Metadata["environment"]!.GetValue<string>().Should().Be("staging");
+		orchestration.Metadata["owners"]!.AsArray().Should().HaveCount(2);
+		orchestration.Metadata["owners"]![0]!.GetValue<string>().Should().Be("alice@example.com");
+		orchestration.Metadata["sla"]!["responseTimeMinutes"]!.GetValue<int>().Should().Be(15);
+		orchestration.Metadata["sla"]!["businessHoursOnly"]!.GetValue<bool>().Should().BeTrue();
 	}
 
 	[Fact]

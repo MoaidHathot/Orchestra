@@ -96,9 +96,11 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		// declared name — YAML authors and external MCP callers typically use the name,
 		// while internal callers (TriggerManager) use the ID.
 		string entryPath;
+		string resolvedOrchestrationId; // The actual registry ID — what UIs/APIs index by.
 		if (!string.IsNullOrWhiteSpace(request.OrchestrationPath))
 		{
 			entryPath = request.OrchestrationPath;
+			resolvedOrchestrationId = request.OrchestrationId;
 		}
 		else
 		{
@@ -110,6 +112,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 					$"Orchestration '{request.OrchestrationId}' not found.");
 			}
 			entryPath = entry.Path;
+			resolvedOrchestrationId = entry.Id;
 		}
 
 		// 2. Parse orchestration file (with global MCPs)
@@ -169,7 +172,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		var executionInfo = new ActiveExecutionInfo
 		{
 			ExecutionId = executionId,
-			OrchestrationId = request.OrchestrationId,
+			OrchestrationId = resolvedOrchestrationId,
 			OrchestrationName = orchestration.Name,
 			StartedAt = startedAt,
 			TriggeredBy = request.TriggeredBy,
@@ -233,7 +236,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		var handle = new ChildOrchestrationHandle
 		{
 			ExecutionId = executionId,
-			OrchestrationId = request.OrchestrationId,
+			OrchestrationId = resolvedOrchestrationId,
 			OrchestrationName = orchestration.Name,
 			Reporter = reporter,
 			StartedAt = startedAt,
@@ -302,6 +305,12 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		var executorToken = cts.Token;
 		var timedOut = false;
 
+		// Probe the engine consults if it observes external cancellation. Returns a
+		// SyncInvokeTimeout cause when our wrapper-owned syncTimeoutCts is the trigger,
+		// allowing the engine to record a precise CancellationDetails on the run record
+		// instead of a generic "External" entry.
+		ResolveCancellationCauseDelegate? cancellationCauseProbe = null;
+
 		try
 		{
 			if (request.Mode == ChildLaunchMode.Sync && request.TimeoutSeconds is > 0)
@@ -309,6 +318,14 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 				syncTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
 				syncTimeoutCts.CancelAfter(TimeSpan.FromSeconds(request.TimeoutSeconds.Value));
 				executorToken = syncTimeoutCts.Token;
+
+				var configuredTimeout = request.TimeoutSeconds.Value;
+				var capturedSyncCts = syncTimeoutCts;
+				var capturedParentCts = cts;
+				cancellationCauseProbe = () =>
+					capturedSyncCts.IsCancellationRequested && !capturedParentCts.IsCancellationRequested
+						? CancellationDetails.SyncInvokeTimeout(configuredTimeout)
+						: null;
 			}
 
 			OrchestrationResult? orchResult;
@@ -336,6 +353,8 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 					preExecutionParameterTransform: preExecutionParameterTransform,
 					parentContext: engineParentContext,
 					executionIdOverride: executionInfo.ExecutionId,
+					resolveExternalCancellationCause: cancellationCauseProbe,
+					triggeredBy: request.TriggeredBy,
 					cancellationToken: executorToken).ConfigureAwait(false);
 			}
 			catch (OperationCanceledException) when (
@@ -425,10 +444,23 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 				_ => HostExecutionStatus.Failed,
 			};
 
+			// If the engine returned a Cancelled result and our sync-invoke wrapper owned
+			// the cancellation, surface that to MCP callers as a timeout (status="timeout")
+			// even though the engine cleaned up gracefully without throwing.
+			if (!timedOut
+				&& orchResult.Status == ExecutionStatus.Cancelled
+				&& orchResult.Cancellation?.Kind == CancellationCauseKind.SyncInvokeTimeout)
+			{
+				timedOut = true;
+				LogSyncTimeout(executionInfo.ExecutionId, request.TimeoutSeconds!.Value);
+			}
+
 			var finalContent = BuildFinalContent(orchResult);
 			string? errorMessage = orchResult.Status == ExecutionStatus.Succeeded
 				? null
-				: $"Child orchestration ended with status '{orchResult.Status}'.";
+				: orchResult.Cancellation is { } cancel
+					? $"Child orchestration ended with status '{orchResult.Status}': {cancel.Reason}."
+					: $"Child orchestration ended with status '{orchResult.Status}'.";
 
 			return BuildResult(
 				request,
@@ -469,7 +501,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		return new ChildOrchestrationResult
 		{
 			ExecutionId = info.ExecutionId,
-			OrchestrationId = request.OrchestrationId,
+			OrchestrationId = info.OrchestrationId,
 			OrchestrationName = orchestration.Name,
 			Status = status,
 			OrchestrationResult = orchResult,
