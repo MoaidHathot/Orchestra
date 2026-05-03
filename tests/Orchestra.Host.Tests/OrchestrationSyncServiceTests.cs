@@ -418,6 +418,38 @@ public class OrchestrationSyncServiceTests : IDisposable
 		}
 	}
 
+	/// <summary>
+	/// Reads events from the reader until one matches the predicate or the timeout elapses.
+	/// Returns all events drained (including the matching one, if any). Avoids the race
+	/// inherent in polling a side-effect (e.g., store mutation) and then doing a non-blocking
+	/// TryRead — broadcasting happens AFTER the store mutation completes.
+	/// </summary>
+	private static async Task<List<SseEvent>> DrainEventsUntilAsync(
+		System.Threading.Channels.ChannelReader<SseEvent> reader,
+		Func<SseEvent, bool> predicate,
+		TimeSpan timeout)
+	{
+		var events = new List<SseEvent>();
+		using var cts = new CancellationTokenSource(timeout);
+		try
+		{
+			while (await reader.WaitToReadAsync(cts.Token))
+			{
+				while (reader.TryRead(out var evt))
+				{
+					events.Add(evt);
+					if (predicate(evt))
+						return events;
+				}
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			// Timeout — return whatever was drained so the caller can produce a useful failure message.
+		}
+		return events;
+	}
+
 	// ── Profile watcher tests ──
 
 	private string WriteProfileFile(string directory, string name, string[]? tags = null, string? description = null)
@@ -601,13 +633,12 @@ public class OrchestrationSyncServiceTests : IDisposable
 		// Act — create a new profile file
 		WriteProfileFile(profilesDir, "broadcast-profile");
 
-		// Wait for debounce + processing
-		await WaitForConditionAsync(() => _profileStore.GetAll().Any(p => p.Name == "broadcast-profile"), TimeSpan.FromSeconds(5));
-
-		// Assert — broadcaster should have emitted a profiles-changed event
-		var events = new List<SseEvent>();
-		while (reader!.TryRead(out var evt))
-			events.Add(evt);
+		// Wait for the broadcast event itself (not just the store update) — broadcasting
+		// happens after the store save, so polling the store racy.
+		var events = await DrainEventsUntilAsync(
+			reader!,
+			e => e.Type == "profiles-changed",
+			TimeSpan.FromSeconds(10));
 
 		events.Should().Contain(e => e.Type == "profiles-changed",
 			"creating a profile file should broadcast a profiles-changed event");
@@ -637,13 +668,12 @@ public class OrchestrationSyncServiceTests : IDisposable
 		// Act — delete the profile file
 		File.Delete(filePath);
 
-		// Wait for debounce + processing
-		await WaitForConditionAsync(() => _profileStore.GetAll().Count == 0, TimeSpan.FromSeconds(10));
-
-		// Assert — broadcaster should have emitted a profiles-changed event
-		var events = new List<SseEvent>();
-		while (reader!.TryRead(out var evt))
-			events.Add(evt);
+		// Wait for the broadcast event itself (not just the store update) — broadcasting
+		// happens after the store removal, so polling the store is racy.
+		var events = await DrainEventsUntilAsync(
+			reader!,
+			e => e.Type == "profiles-changed",
+			TimeSpan.FromSeconds(15));
 
 		events.Should().Contain(e => e.Type == "profiles-changed",
 			"deleting a profile file should broadcast a profiles-changed event");
