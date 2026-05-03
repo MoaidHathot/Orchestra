@@ -21,5 +21,6 @@
     <Project Path="tests/Orchestra.ProcessHost.Tests/Orchestra.ProcessHost.Tests.csproj" />
     <Project Path="tests/Orchestra.Terminal.Tests/Orchestra.Terminal.Tests.csproj" />
     <Project Path="tests/Orchestra.Server.Tests/Orchestra.Server.Tests.csproj" />
+    <Project Path="tests/Orchestra.Tool.Tests/Orchestra.Tool.Tests.csproj" />
   </Folder>
 </Solution>
