@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  formatTime,
   isIncompleteExecution,
   profileFilterMatchesOrchestration,
   getMatchingProfiles,
@@ -7,6 +8,28 @@ import {
   orchestrationMatchesSearch,
 } from './utils';
 import type { Profile, ProfileFilter } from './types';
+
+// ── formatTime ───────────────────────────────────────────────────────────────
+
+describe('formatTime', () => {
+  it('includes both date and time for execution timestamps', () => {
+    const dateStr = '2026-05-06T13:45:00Z';
+    const expected = new Date(dateStr).toLocaleString([], {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    expect(formatTime(dateStr)).toBe(expected);
+  });
+
+  it('returns an empty string when timestamp is missing', () => {
+    expect(formatTime(undefined)).toBe('');
+    expect(formatTime(null)).toBe('');
+  });
+});
 
 // ── isIncompleteExecution ────────────────────────────────────────────────────
 
