@@ -1,0 +1,145 @@
+using FluentAssertions;
+using GitHub.Copilot.SDK;
+using Microsoft.Extensions.Logging.Abstractions;
+using Orchestra.Engine;
+
+namespace Orchestra.Copilot.Tests;
+
+public class CopilotClientPoolTests
+{
+	[Fact]
+	public async Task AcquireAsync_ConcurrentRequests_ScalesUpToMaxInstances()
+	{
+		var factory = new FakeCopilotClientFactory();
+		await using var pool = CreatePool(factory, maxInstances: 3, maxSessionsPerInstance: 1);
+
+		await using var lease1 = await pool.AcquireAsync(CancellationToken.None);
+		await using var lease2 = await pool.AcquireAsync(CancellationToken.None);
+		await using var lease3 = await pool.AcquireAsync(CancellationToken.None);
+
+		factory.CreatedClients.Should().HaveCount(3);
+		new[] { lease1.Client.DiagnosticHash, lease2.Client.DiagnosticHash, lease3.Client.DiagnosticHash }
+			.Should().OnlyHaveUniqueItems();
+	}
+
+	[Fact]
+	public async Task AcquireAsync_AtCapacity_WaitsUntilLeaseIsReleased()
+	{
+		var factory = new FakeCopilotClientFactory();
+		await using var pool = CreatePool(factory, maxInstances: 1, maxSessionsPerInstance: 1);
+
+		var firstLease = await pool.AcquireAsync(CancellationToken.None);
+		var secondAcquire = pool.AcquireAsync(CancellationToken.None).AsTask();
+
+		await Task.Delay(100);
+		secondAcquire.IsCompleted.Should().BeFalse();
+
+		await firstLease.DisposeAsync();
+		await using var secondLease = await secondAcquire;
+
+		secondLease.Client.DiagnosticHash.Should().Be(firstLease.Client.DiagnosticHash);
+		factory.CreatedClients.Should().HaveCount(1);
+	}
+
+	[Fact]
+	public async Task PrewarmAsync_StartsMinInstances()
+	{
+		var factory = new FakeCopilotClientFactory();
+		await using var pool = CreatePool(factory, minInstances: 2, maxInstances: 4, maxSessionsPerInstance: 1);
+
+		await pool.PrewarmAsync(CancellationToken.None);
+
+		factory.CreatedClients.Should().HaveCount(2);
+		factory.CreatedClients.Should().AllSatisfy(client => client.StartCalls.Should().Be(1));
+	}
+
+	[Fact]
+	public async Task DisposeAsync_StopsAndDisposesAllWorkers()
+	{
+		var factory = new FakeCopilotClientFactory();
+		var pool = CreatePool(factory, maxInstances: 2, maxSessionsPerInstance: 1);
+
+		await using var lease1 = await pool.AcquireAsync(CancellationToken.None);
+		await using var lease2 = await pool.AcquireAsync(CancellationToken.None);
+
+		await pool.DisposeAsync();
+
+		factory.CreatedClients.Should().HaveCount(2);
+		factory.CreatedClients.Should().AllSatisfy(client =>
+		{
+			client.StopCalls.Should().Be(1);
+			client.DisposeCalls.Should().Be(1);
+		});
+	}
+
+	private static CopilotClientPool CreatePool(
+		FakeCopilotClientFactory factory,
+		int minInstances = 0,
+		int maxInstances = 4,
+		int maxSessionsPerInstance = 1,
+		int idleTimeoutSeconds = 0)
+	{
+		return new CopilotClientPool(
+			new AgentPoolConfig
+			{
+				MinInstances = minInstances,
+				MaxInstances = maxInstances,
+				MaxSessionsPerInstance = maxSessionsPerInstance,
+				IdleTimeoutSeconds = idleTimeoutSeconds,
+			},
+			new CopilotAgentPoolOptions(),
+			factory,
+			NullLoggerFactory.Instance);
+	}
+
+	private sealed class FakeCopilotClientFactory : ICopilotClientFactory
+	{
+		private int _nextHash;
+		public List<FakeCopilotClient> CreatedClients { get; } = [];
+
+		public ICopilotClient CreateClient()
+		{
+			var client = new FakeCopilotClient(Interlocked.Increment(ref _nextHash));
+			CreatedClients.Add(client);
+			return client;
+		}
+	}
+
+	private sealed class FakeCopilotClient : ICopilotClient
+	{
+		public FakeCopilotClient(int diagnosticHash)
+		{
+			DiagnosticHash = diagnosticHash;
+		}
+
+		public int DiagnosticHash { get; }
+		public ConnectionState State { get; private set; } = ConnectionState.Disconnected;
+		public int StartCalls { get; private set; }
+		public int StopCalls { get; private set; }
+		public int DisposeCalls { get; private set; }
+
+		public Task StartAsync(CancellationToken cancellationToken)
+		{
+			StartCalls++;
+			State = ConnectionState.Connected;
+			return Task.CompletedTask;
+		}
+
+		public Task StopAsync()
+		{
+			StopCalls++;
+			State = ConnectionState.Disconnected;
+			return Task.CompletedTask;
+		}
+
+		public Task PingAsync(string message, CancellationToken cancellationToken) => Task.CompletedTask;
+		public Task<CopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken) => throw new NotSupportedException();
+		public Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+
+		public ValueTask DisposeAsync()
+		{
+			DisposeCalls++;
+			return ValueTask.CompletedTask;
+		}
+	}
+}

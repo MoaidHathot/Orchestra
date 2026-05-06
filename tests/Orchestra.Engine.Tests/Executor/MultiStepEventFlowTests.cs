@@ -479,10 +479,12 @@ public class MultiStepEventFlowTests
 			_onCreateRunScope = onCreateRunScope;
 		}
 
-		public override Task<IAsyncDisposable> CreateRunScopeAsync(CancellationToken cancellationToken = default)
+		public override Task<IAsyncDisposable> CreateRunScopeAsync(
+			AgentPoolConfig? agentPool = null,
+			CancellationToken cancellationToken = default)
 		{
 			_onCreateRunScope();
-			return base.CreateRunScopeAsync(cancellationToken);
+			return base.CreateRunScopeAsync(agentPool, cancellationToken);
 		}
 	}
 

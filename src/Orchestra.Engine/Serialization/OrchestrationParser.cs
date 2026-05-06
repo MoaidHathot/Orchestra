@@ -44,6 +44,7 @@ public static class OrchestrationParser
 			Converters =
 			{
 				new OrchestrationStepConverter(parserRegistry, context),
+				new AgentPoolConfigConverter(),
 				new McpConverter(),
 				new TriggerConfigConverter(),
 				new HookEventTypeJsonConverter(),
@@ -171,6 +172,56 @@ public static class OrchestrationParser
 	private sealed class McpConfigDocument
 	{
 		public required Mcp[] Mcps { get; init; }
+	}
+
+	private sealed class AgentPoolConfigConverter : JsonConverter<AgentPoolConfig>
+	{
+		public override AgentPoolConfig Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+		{
+			using var doc = JsonDocument.ParseValue(ref reader);
+			var root = doc.RootElement;
+
+			return new AgentPoolConfig
+			{
+				MinInstances = ReadOptionalNonNegativeInt(root, "minInstances"),
+				MaxInstances = ReadOptionalPositiveInt(root, "maxInstances"),
+				MaxSessionsPerInstance = ReadOptionalPositiveInt(root, "maxSessionsPerInstance"),
+				IdleTimeoutSeconds = ReadOptionalNonNegativeInt(root, "idleTimeoutSeconds"),
+			};
+		}
+
+		public override void Write(Utf8JsonWriter writer, AgentPoolConfig value, JsonSerializerOptions options)
+		{
+			writer.WriteStartObject();
+			if (value.MinInstances.HasValue)
+				writer.WriteNumber("minInstances", value.MinInstances.Value);
+			if (value.MaxInstances.HasValue)
+				writer.WriteNumber("maxInstances", value.MaxInstances.Value);
+			if (value.MaxSessionsPerInstance.HasValue)
+				writer.WriteNumber("maxSessionsPerInstance", value.MaxSessionsPerInstance.Value);
+			if (value.IdleTimeoutSeconds.HasValue)
+				writer.WriteNumber("idleTimeoutSeconds", value.IdleTimeoutSeconds.Value);
+			writer.WriteEndObject();
+		}
+
+		private static int? ReadOptionalPositiveInt(JsonElement root, string propertyName)
+		{
+			var value = ReadOptionalNonNegativeInt(root, propertyName);
+			if (value is <= 0)
+				throw new JsonException($"agentPool.{propertyName} must be greater than 0.");
+			return value;
+		}
+
+		private static int? ReadOptionalNonNegativeInt(JsonElement root, string propertyName)
+		{
+			if (!root.TryGetProperty(propertyName, out var prop))
+				return null;
+
+			var value = prop.GetInt32();
+			if (value < 0)
+				throw new JsonException($"agentPool.{propertyName} must be 0 or greater.");
+			return value;
+		}
 	}
 
 	private static void ResolveStepMcps(Orchestration orchestration, Mcp[] availableMcps)

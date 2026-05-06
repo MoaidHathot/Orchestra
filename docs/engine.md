@@ -126,6 +126,16 @@ Hooks are different from Prompt step handlers:
 
 Steps are the building blocks of orchestrations. Each step has a type that determines its executor: `PromptOrchestrationStep` for LLM calls, `CommandOrchestrationStep` for shell commands, `ScriptOrchestrationStep` for inline/file scripts, `HttpOrchestrationStep` for REST requests, and `TransformOrchestrationStep` for string interpolation.
 
+Prompt-heavy orchestrations can request provider worker-pool capacity with top-level `agentPool`. Providers map these neutral settings to their own resources; the Copilot provider maps instances to CLI clients. `maxInstances` is a ceiling, not a static count: workers are created on demand up to the ceiling, and idle workers above `minInstances` are stopped after `idleTimeoutSeconds`.
+
+```yaml
+agentPool:
+  minInstances: 1
+  maxInstances: 4
+  maxSessionsPerInstance: 1
+  idleTimeoutSeconds: 120
+```
+
 ```csharp
 public abstract class OrchestrationStep
 {

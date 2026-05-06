@@ -55,6 +55,13 @@ public class Orchestration
 	public string? DefaultModel { get; init; }
 
 	/// <summary>
+	/// Optional provider-neutral agent worker pool settings for this orchestration run.
+	/// Providers decide how to map these settings to their own resources (for example,
+	/// Copilot maps instances to CLI clients).
+	/// </summary>
+	public AgentPoolConfig? AgentPool { get; init; }
+
+	/// <summary>
 	/// Default timeout in seconds applied to all steps that don't define their own
 	/// <see cref="OrchestrationStep.TimeoutSeconds"/>.
 	/// When null, steps without an explicit timeout run with no per-step timeout

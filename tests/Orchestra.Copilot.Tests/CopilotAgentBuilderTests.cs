@@ -402,8 +402,8 @@ public class CopilotAgentBuilderTests
 					TaskCreationOptions.LongRunning,
 					TaskScheduler.Default);
 
-				clientHashInsideTask.Should().Be(clientHash,
-					"the run-scoped client hash must flow into child step tasks for that orchestration run");
+			clientHashInsideTask.Should().Be(clientHash,
+				"the run-scoped pool diagnostic must flow into child step tasks for that orchestration run");
 
 				// Keep the scope alive briefly so both tasks overlap in practice while capturing hashes.
 				await Task.Delay(250);
@@ -425,7 +425,7 @@ public class CopilotAgentBuilderTests
 			return; // No CLI binary/environment available for this test run.
 
 		clientHashes[0].Should().NotBe(clientHashes[1],
-			"separate orchestration run scopes on the same singleton builder must resolve different Copilot CLI clients");
+			"separate orchestration run scopes on the same singleton builder must resolve different Copilot CLI pools");
 	}
 
 	[Fact]

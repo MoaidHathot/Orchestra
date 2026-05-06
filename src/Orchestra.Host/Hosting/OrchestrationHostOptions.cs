@@ -89,6 +89,18 @@ public class OrchestrationHostOptions
 	public string? DefaultModel { get; set; }
 
 	/// <summary>
+	/// Default provider-neutral agent worker pool settings applied when an
+	/// orchestration does not specify agentPool values.
+	/// </summary>
+	public AgentPoolConfig AgentPool { get; set; } = new()
+	{
+		MinInstances = 1,
+		MaxInstances = 4,
+		MaxSessionsPerInstance = 1,
+		IdleTimeoutSeconds = 120,
+	};
+
+	/// <summary>
 	/// Optional global lifecycle hooks applied to all orchestrations executed by this host.
 	/// </summary>
 	public HookDefinition[] Hooks { get; set; } = [];

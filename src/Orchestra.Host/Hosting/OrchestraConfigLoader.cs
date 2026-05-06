@@ -296,6 +296,21 @@ public static class OrchestraConfigLoader
 		if (config.DefaultModel is not null)
 			options.DefaultModel = config.DefaultModel;
 
+		if (config.AgentPool is not null)
+		{
+			if (config.AgentPool.MinInstances.HasValue)
+				options.AgentPool.MinInstances = config.AgentPool.MinInstances.Value;
+
+			if (config.AgentPool.MaxInstances.HasValue)
+				options.AgentPool.MaxInstances = config.AgentPool.MaxInstances.Value;
+
+			if (config.AgentPool.MaxSessionsPerInstance.HasValue)
+				options.AgentPool.MaxSessionsPerInstance = config.AgentPool.MaxSessionsPerInstance.Value;
+
+			if (config.AgentPool.IdleTimeoutSeconds.HasValue)
+				options.AgentPool.IdleTimeoutSeconds = config.AgentPool.IdleTimeoutSeconds.Value;
+		}
+
 		if (config.Hooks is { Length: > 0 })
 		{
 			HookDefinitionResolver.ApplyBaseDirectory(config.Hooks, configDirectory);
@@ -392,6 +407,11 @@ public class OrchestraConfigFile
 	/// Default AI model to use for internal LLM calls (e.g., trigger input handlers).
 	/// </summary>
 	public string? DefaultModel { get; set; }
+
+	/// <summary>
+	/// Default agent worker pool settings for orchestration runs.
+	/// </summary>
+	public AgentPoolConfig? AgentPool { get; set; }
 
 	/// <summary>
 	/// MCP server endpoint configuration.

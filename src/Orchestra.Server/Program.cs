@@ -31,9 +31,6 @@ builder.Logging.AddSimpleConsole(options =>
 	options.ColorBehavior = LoggerColorBehavior.Enabled;
 });
 
-// Register the Copilot agent builder (required for prompt step execution)
-builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
-
 // Add Orchestra Host services.  The IConfiguration-aware overload ensures that
 // data-path and orchestrations-path are read from the host's IConfiguration
 // (resolved after Build()), so WebApplicationFactory.ConfigureAppConfiguration
@@ -58,6 +55,21 @@ builder.Services.AddOrchestraHost((options, configuration) =>
 	}
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
+});
+
+// Register the Copilot agent builder (required for prompt step execution) after
+// host options so the provider pool defaults can come from orchestra.json.
+builder.Services.AddSingleton<AgentBuilder>(sp =>
+{
+	var options = sp.GetRequiredService<OrchestrationHostOptions>();
+	var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+	return new CopilotAgentBuilder(loggerFactory, new CopilotAgentPoolOptions
+	{
+		DefaultMinInstances = options.AgentPool.MinInstances ?? 1,
+		DefaultMaxInstancesPerRun = options.AgentPool.MaxInstances ?? 4,
+		DefaultMaxSessionsPerInstance = options.AgentPool.MaxSessionsPerInstance ?? 1,
+		DefaultIdleTimeoutSeconds = options.AgentPool.IdleTimeoutSeconds ?? 120,
+	});
 });
 
 // Add Orchestra MCP server (data-plane enabled by default, control-plane disabled by default)

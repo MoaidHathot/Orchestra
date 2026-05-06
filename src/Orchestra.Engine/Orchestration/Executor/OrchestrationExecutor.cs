@@ -147,7 +147,7 @@ public partial class OrchestrationExecutor
 		// CLI process. All steps within this run share the client (each gets its own session).
 		// The client is disposed when the run ends, preventing stale connections across runs.
 		LogRunScopeAboutToCreate(runId, Environment.CurrentManagedThreadId);
-		await using var runScope = await _agentBuilder.CreateRunScopeAsync(cancellationToken).ConfigureAwait(false);
+		await using var runScope = await _agentBuilder.CreateRunScopeAsync(orchestration.AgentPool, cancellationToken).ConfigureAwait(false);
 		LogRunScopeReady(runId, Environment.CurrentManagedThreadId);
 
 		// Pre-execution parameter transform (e.g. trigger InputHandlerPrompt) runs INSIDE the

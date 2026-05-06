@@ -49,6 +49,7 @@ YAML modelines work in VS Code (Red Hat YAML extension), JetBrains IDEs, and any
 | `trigger` | TriggerConfig | No | Manual | How the orchestration is triggered |
 | `mcps` | Mcp[] | No | [] | Inline MCP server definitions |
 | `defaultModel` | string | No | null | Default model for all Prompt steps. Steps can override. |
+| `agentPool` | object | No | provider defaults | Provider worker-pool capacity request for prompt execution |
 | `defaultSystemPromptMode` | string | No | null | `"append"`, `"replace"`, or `"customize"` for all Prompt steps |
 | `defaultRetryPolicy` | RetryPolicy | No | null | Default retry for all steps |
 | `defaultStepTimeoutSeconds` | int | No | null | Default per-step timeout |

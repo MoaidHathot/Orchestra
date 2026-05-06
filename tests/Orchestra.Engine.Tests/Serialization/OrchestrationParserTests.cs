@@ -195,6 +195,52 @@ public class OrchestrationParserTests
 		orchestration.DefaultSystemPromptMode.Should().BeNull();
 	}
 
+	[Fact]
+	public void ParseOrchestration_WithAgentPool_ParsesPoolConfig()
+	{
+		var json = """
+			{
+				"name": "pooled",
+				"description": "Test",
+				"agentPool": {
+					"minInstances": 2,
+					"maxInstances": 6,
+					"maxSessionsPerInstance": 1,
+					"idleTimeoutSeconds": 30
+				},
+				"steps": []
+			}
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.AgentPool.Should().NotBeNull();
+		orchestration.AgentPool!.MinInstances.Should().Be(2);
+		orchestration.AgentPool.MaxInstances.Should().Be(6);
+		orchestration.AgentPool.MaxSessionsPerInstance.Should().Be(1);
+		orchestration.AgentPool.IdleTimeoutSeconds.Should().Be(30);
+	}
+
+	[Fact]
+	public void ParseOrchestration_AgentPoolMaxInstancesZero_ThrowsJsonException()
+	{
+		var json = """
+			{
+				"name": "bad-pool",
+				"description": "Test",
+				"agentPool": {
+					"maxInstances": 0
+				},
+				"steps": []
+			}
+			""";
+
+		var act = () => OrchestrationParser.ParseOrchestration(json, []);
+
+		act.Should().Throw<System.Text.Json.JsonException>()
+			.WithMessage("*agentPool.maxInstances*");
+	}
+
 	#endregion
 
 	#region Step Parsing

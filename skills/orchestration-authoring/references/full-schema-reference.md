@@ -61,6 +61,7 @@ steps:
 | `trigger` | `TriggerConfig` | No | Manual | How the orchestration is triggered. Defaults to manual (on-demand). |
 | `mcps` | `Mcp[]` | No | `[]` | Inline MCP (Model Context Protocol) server definitions available to steps. |
 | `defaultModel` | `string` | No | `null` | Default model for all Prompt steps. Steps can override. |
+| `agentPool` | `AgentPoolConfig` | No | Provider defaults | Provider worker-pool capacity request for prompt execution. Providers map instances to their own resources, such as Copilot CLI clients. |
 | `defaultSystemPromptMode` | `string` | No | `null` | Default system prompt mode for all Prompt steps. Values: `"append"`, `"replace"`, or `"customize"`. |
 | `defaultRetryPolicy` | `RetryPolicy` | No | `null` | Default retry policy applied to all steps unless overridden at the step level. |
 | `defaultStepTimeoutSeconds` | `int` | No | `null` | Default per-step timeout in seconds. Individual steps can override this. |

@@ -8,7 +8,7 @@ namespace Orchestra.Copilot;
 
 public partial class CopilotAgent : IAgent
 {
-	private readonly CopilotClient _client;
+	private readonly ICopilotClientPool _clientPool;
 	private readonly string _model;
 	private readonly string? _systemPrompt;
 	private readonly Mcp[] _mcps;
@@ -24,9 +24,6 @@ public partial class CopilotAgent : IAgent
 	private readonly ImageAttachment[] _attachments;
 	private readonly ILogger<CopilotAgent> _logger;
 	private readonly ILoggerFactory _loggerFactory;
-	private readonly IReadOnlyList<AvailableModelInfo>? _cachedAvailableModels;
-	private readonly Action<IReadOnlyList<AvailableModelInfo>>? _onAvailableModelsListed;
-	private readonly ISessionFaultBroker? _faultBroker;
 
 	internal CopilotAgent(
 			CopilotClient client,
@@ -44,12 +41,46 @@ public partial class CopilotAgent : IAgent
 			Engine.InfiniteSessionConfig? infiniteSessionConfig,
 			ImageAttachment[] attachments,
 			ILogger<CopilotAgent> logger,
-			ILoggerFactory? loggerFactory = null,
-			IReadOnlyList<AvailableModelInfo>? cachedAvailableModels = null,
-			Action<IReadOnlyList<AvailableModelInfo>>? onAvailableModelsListed = null,
-			ISessionFaultBroker? faultBroker = null)
+			ILoggerFactory? loggerFactory = null)
+		: this(
+			clientPool: new FixedCopilotClientPool(new CopilotSdkClientAdapter(client, ownsClient: false)),
+			model,
+			systemPrompt,
+			mcps,
+			subagents,
+			reasoningLevel,
+			systemPromptMode,
+			systemPromptSections,
+			reporter,
+			engineTools,
+			engineToolContext,
+			skillDirectories,
+			infiniteSessionConfig,
+			attachments,
+			logger,
+			loggerFactory)
 	{
-		_client = client;
+	}
+
+	internal CopilotAgent(
+			ICopilotClientPool clientPool,
+			string model,
+			string? systemPrompt,
+			Mcp[] mcps,
+			Subagent[] subagents,
+			ReasoningLevel? reasoningLevel,
+			SystemPromptMode? systemPromptMode,
+			Dictionary<string, SystemPromptSectionOverride>? systemPromptSections,
+			IOrchestrationReporter reporter,
+			IReadOnlyCollection<IEngineTool> engineTools,
+			EngineToolContext? engineToolContext,
+			string[] skillDirectories,
+			Engine.InfiniteSessionConfig? infiniteSessionConfig,
+			ImageAttachment[] attachments,
+			ILogger<CopilotAgent> logger,
+			ILoggerFactory? loggerFactory = null)
+	{
+		_clientPool = clientPool;
 		_model = model;
 		_systemPrompt = systemPrompt;
 		_mcps = mcps;
@@ -65,9 +96,6 @@ public partial class CopilotAgent : IAgent
 		_attachments = attachments;
 		_logger = logger;
 		_loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
-		_cachedAvailableModels = cachedAvailableModels;
-		_onAvailableModelsListed = onAvailableModelsListed;
-		_faultBroker = faultBroker;
 	}
 
 	public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
@@ -82,45 +110,50 @@ public partial class CopilotAgent : IAgent
 			ChannelWriter<AgentEvent> writer,
 			CancellationToken cancellationToken)
 	{
+		ICopilotClientLease? lease = null;
 		try
 		{
+			lease = await _clientPool.AcquireAsync(cancellationToken).ConfigureAwait(false);
+			var client = lease.Client;
+			var faultBroker = lease.FaultBroker;
+
 			// Fast-fail: if a sibling session has already declared this CLI client unhealthy,
 			// don't even attempt CreateSessionAsync — the JSON-RPC call would just hang or
 			// throw "connection lost" anyway. Surface a loud, structured exception so the
 			// engine's retry policy can short-circuit instead of burning the retry budget.
-			if (_faultBroker?.IsClientUnhealthy == true)
+			if (faultBroker?.IsClientUnhealthy == true)
 			{
 				LogSessionSkippedClientUnhealthy(
-					_client.GetHashCode(),
-					_faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)",
-					_faultBroker.UnhealthyReason ?? "(no details)");
+					client.DiagnosticHash,
+					faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)",
+					faultBroker.UnhealthyReason ?? "(no details)");
 
 				throw new CopilotClientUnhealthyException(
-					triggeringSessionId: _faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)",
-					triggeringFailureReason: _faultBroker.UnhealthyTriggeringFailureReason ?? "(unknown)",
-					probeDetails: _faultBroker.UnhealthyReason,
+					triggeringSessionId: faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)",
+					triggeringFailureReason: faultBroker.UnhealthyTriggeringFailureReason ?? "(unknown)",
+					probeDetails: faultBroker.UnhealthyReason,
 					message: $"Copilot CLI client is unhealthy and will not be used. " +
-							 $"First failure: session '{_faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)"}' " +
-							 $"({_faultBroker.UnhealthyTriggeringFailureReason ?? "(unknown)"}). " +
-							 $"Probe: {_faultBroker.UnhealthyReason ?? "(no details)"}.");
+							 $"First failure: session '{faultBroker.UnhealthyTriggeringSessionId ?? "(unknown)"}' " +
+							 $"({faultBroker.UnhealthyTriggeringFailureReason ?? "(unknown)"}). " +
+							 $"Probe: {faultBroker.UnhealthyReason ?? "(no details)"}.");
 			}
 
 			var config = BuildSessionConfig();
 			LogMcpConfiguration();
 
-			LogSessionCreating(_client.GetHashCode(), _model, _mcps.Length, Environment.CurrentManagedThreadId);
+			LogSessionCreating(client.DiagnosticHash, _model, _mcps.Length, Environment.CurrentManagedThreadId);
 			var sw = System.Diagnostics.Stopwatch.StartNew();
 			CopilotSession session;
 			try
 			{
-				session = await _client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
+				session = await client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
 			}
 			catch (Exception ex)
 			{
-				LogSessionCreateFailed(ex, _client.GetHashCode(), sw.ElapsedMilliseconds);
+				LogSessionCreateFailed(ex, client.DiagnosticHash, sw.ElapsedMilliseconds);
 				throw;
 			}
-			LogSessionCreated(_client.GetHashCode(), sw.ElapsedMilliseconds);
+			LogSessionCreated(client.DiagnosticHash, sw.ElapsedMilliseconds);
 			await using var _sessionDispose = session;
 
 			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -128,10 +161,10 @@ public partial class CopilotAgent : IAgent
 
 			session.On(handler.HandleEvent);
 
-			// Register this session with the per-run fault broker so that, if a sibling
+			// Register this session with the per-worker fault broker so that, if a sibling
 			// session on the same CopilotClient detects a CLI-level fault, this session
 			// gets faulted too instead of waiting for its per-step timeout.
-			using var _faultRegistration = _faultBroker?.RegisterSession(
+			using var _faultRegistration = faultBroker?.RegisterSession(
 				session.SessionId,
 				faultException => done.TrySetException(faultException));
 
@@ -155,7 +188,7 @@ public partial class CopilotAgent : IAgent
 			{
 				await done.Task.ConfigureAwait(false);
 			}
-			catch (CopilotSessionFailedException sessionEx) when (_faultBroker is not null)
+			catch (CopilotSessionFailedException sessionEx) when (faultBroker is not null)
 			{
 				// A session-level error fired. Probe the CLI; if it's unhealthy, the broker
 				// will fault all OTHER in-flight sessions on this client so they fast-fail
@@ -164,7 +197,7 @@ public partial class CopilotAgent : IAgent
 				// siblings, not change our own outcome.
 				try
 				{
-					_ = await _faultBroker.ProbeAndMaybeFaultSiblingsAsync(
+					_ = await faultBroker.ProbeAndMaybeFaultSiblingsAsync(
 						failedSessionId: session.SessionId,
 						failureReason: sessionEx.Message,
 						cancellationToken: CancellationToken.None).ConfigureAwait(false);
@@ -177,7 +210,7 @@ public partial class CopilotAgent : IAgent
 			}
 
 			// Handle model mismatch detection and reporting
-			var availableModels = await GetAvailableModelsAsync(cancellationToken).ConfigureAwait(false);
+			var availableModels = await GetAvailableModelsAsync(client, lease, cancellationToken).ConfigureAwait(false);
 			ReportModelMismatchIfNeeded(handler.ActualModel, availableModels);
 
 			return new AgentResult
@@ -198,6 +231,10 @@ public partial class CopilotAgent : IAgent
 		}
 		finally
 		{
+			if (lease is not null)
+			{
+				await lease.DisposeAsync().ConfigureAwait(false);
+			}
 			writer.TryComplete();
 		}
 	}
@@ -459,24 +496,27 @@ public partial class CopilotAgent : IAgent
 		}
 	}
 
-	private async Task<IReadOnlyList<AvailableModelInfo>?> GetAvailableModelsAsync(CancellationToken cancellationToken)
+	private async Task<IReadOnlyList<AvailableModelInfo>?> GetAvailableModelsAsync(
+		ICopilotClient client,
+		ICopilotClientLease lease,
+		CancellationToken cancellationToken)
 	{
 		// Use cached models if available to avoid repeated network calls
 		// across parallel steps in the same orchestration run.
-		var availableModels = _cachedAvailableModels;
+		var availableModels = lease.CachedAvailableModels;
 
 		if (availableModels is null)
 		{
 			try
 			{
-				var models = await _client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
+				var models = await client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
 				availableModels = models
 					.OrderBy(m => m.Id)
 					.Select(MapAvailableModelInfo)
 					.ToList();
 
 				// Cache for other agents in this run
-				_onAvailableModelsListed?.Invoke(availableModels);
+				lease.SetCachedAvailableModels(availableModels);
 			}
 			catch (Exception ex)
 			{

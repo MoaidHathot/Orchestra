@@ -58,6 +58,10 @@
       "description": "Default model applied to all Prompt steps that don't define their own model. When absent, each Prompt step must specify its own model.",
       "minLength": 1
     },
+    "agentPool": {
+      "$ref": "#/$defs/agentPoolConfig",
+      "description": "Provider-neutral agent worker pool settings for this orchestration run. Providers decide how to map instances to resources such as CLI clients. Values are treated as requests and may be capped by host/provider configuration."
+    },
     "defaultStepTimeoutSeconds": {
       "type": "integer",
       "description": "Default timeout in seconds applied to all steps that don't define their own timeoutSeconds. When absent, steps without an explicit timeout run with no per-step timeout (only the orchestration-level timeout applies).",
@@ -207,6 +211,33 @@
         }
       ],
       "unevaluatedProperties": false
+    },
+
+    "agentPoolConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "minInstances": {
+          "type": "integer",
+          "description": "Minimum provider workers to keep ready for this orchestration run. 0 disables prewarming.",
+          "minimum": 0
+        },
+        "maxInstances": {
+          "type": "integer",
+          "description": "Maximum provider workers that may be created for this orchestration run.",
+          "minimum": 1
+        },
+        "maxSessionsPerInstance": {
+          "type": "integer",
+          "description": "Maximum active prompt sessions each provider worker may host concurrently.",
+          "minimum": 1
+        },
+        "idleTimeoutSeconds": {
+          "type": "integer",
+          "description": "Seconds an idle provider worker above minInstances may remain alive before the provider shrinks the pool. 0 disables idle shrink.",
+          "minimum": 0
+        }
+      }
     },
 
     "promptStepProperties": {

@@ -157,7 +157,9 @@ public abstract class AgentBuilder
 	/// Default implementation returns a no-op scope. SDK-specific builders (e.g., CopilotAgentBuilder)
 	/// override this to create per-run CLI clients for isolation and clean lifecycle management.
 	/// </summary>
-	public virtual Task<IAsyncDisposable> CreateRunScopeAsync(CancellationToken cancellationToken = default)
+	public virtual Task<IAsyncDisposable> CreateRunScopeAsync(
+		AgentPoolConfig? agentPool = null,
+		CancellationToken cancellationToken = default)
 		=> Task.FromResult<IAsyncDisposable>(NoOpRunScope.Instance);
 
 	/// <summary>
