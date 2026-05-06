@@ -36,6 +36,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly HookDefinition[] _globalHooks;
 	private readonly JsonSerializerOptions _jsonOptions;
 	private readonly IChildOrchestrationLauncher _launcher;
+	private volatile bool _isStopping;
 
 	/// <summary>
 	/// Tracks all fire-and-forget tasks so they can be awaited during shutdown.
@@ -383,24 +384,40 @@ public partial class TriggerManager : BackgroundService
 		CheckpointData checkpoint)
 	{
 		var executionId = checkpoint.RunId;
+		if (_activeExecutions.ContainsKey(executionId))
+		{
+			LogResumeSkippedAlreadyActive(entry.Id, executionId);
+			return executionId;
+		}
+
+		var cts = new CancellationTokenSource();
+		_activeExecutions[executionId] = cts;
+		Orchestration resumedOrchestration;
+		try
+		{
+			resumedOrchestration = OrchestrationParser.ParseOrchestrationFile(entry.Path, GlobalMcps);
+		}
+		catch
+		{
+			_activeExecutions.TryRemove(executionId, out _);
+			cts.Dispose();
+			throw;
+		}
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
 		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, childLauncher: _launcher, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl);
-
-		using var cts = new CancellationTokenSource();
-		_activeExecutions[executionId] = cts;
 
 		var executionInfo = new ActiveExecutionInfo
 		{
 			ExecutionId = executionId,
 			OrchestrationId = entry.Id,
-			OrchestrationName = entry.Orchestration.Name,
+			OrchestrationName = resumedOrchestration.Name,
 			StartedAt = checkpoint.StartedAt,
 			TriggeredBy = "resume",
 			CancellationTokenSource = cts,
 			Reporter = reporter,
 			Parameters = checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null,
-			TotalSteps = entry.Orchestration.Steps.Length,
+			TotalSteps = resumedOrchestration.Steps.Length,
 			CompletedSteps = checkpoint.CompletedSteps.Count,
 		};
 		_activeExecutionInfos[executionId] = executionInfo;
@@ -413,7 +430,14 @@ public partial class TriggerManager : BackgroundService
 		{
 			try
 			{
-				var result = await executor.ResumeAsync(entry.Orchestration, checkpoint, cancellationToken: cts.Token);
+				ResolveCancellationCauseDelegate? cancellationCauseProbe = () =>
+					_isStopping ? CancellationDetails.HostShutdown("process stopping during resume") : null;
+
+				var result = await executor.ResumeAsync(
+					resumedOrchestration,
+					checkpoint,
+					resolveExternalCancellationCause: cancellationCauseProbe,
+					cancellationToken: cts.Token);
 
 				executionInfo.Status = result.Status switch
 				{
@@ -446,9 +470,9 @@ public partial class TriggerManager : BackgroundService
 					var historyEntry = new
 					{
 						id = executionId,
-						orchestrationName = entry.Orchestration.Name,
-						orchestrationDescription = entry.Orchestration.Description,
-						orchestrationVersion = entry.Orchestration.Version,
+						orchestrationName = resumedOrchestration.Name,
+						orchestrationDescription = resumedOrchestration.Description,
+						orchestrationVersion = resumedOrchestration.Version,
 						orchestrationPath = entry.Path,
 						triggerId = checkpoint.TriggerId,
 						triggerType = "resume",
@@ -494,6 +518,7 @@ public partial class TriggerManager : BackgroundService
 
 				_activeExecutions.TryRemove(executionId, out _);
 				_backgroundTasks.TryRemove(taskId, out _);
+				try { cts.Dispose(); } catch (ObjectDisposedException) { }
 
 				// Update status and remove after a short delay (matching ExecuteOrchestrationCoreAsync behavior)
 				if (_activeExecutionInfos.TryGetValue(executionId, out var resumeInfo))
@@ -642,7 +667,16 @@ public partial class TriggerManager : BackgroundService
 	/// </summary>
 	public override async Task StopAsync(CancellationToken cancellationToken)
 	{
+		_isStopping = true;
 		LogGracefulShutdownStarting(_activeExecutions.Count, _backgroundTasks.Count);
+
+		foreach (var info in _activeExecutionInfos.Values)
+		{
+			if (info.Status is HostExecutionStatus.Running or HostExecutionStatus.Cancelling)
+			{
+				info.CancellationCauseOverride = CancellationDetails.HostShutdown("process stopping");
+			}
+		}
 
 		// 1. Stop the polling loop first so no new triggers fire during drain
 		await base.StopAsync(cancellationToken);
@@ -1354,6 +1388,9 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Orchestration resume failed for '{OrchestrationId}' (execution '{ExecutionId}')")]
 	private partial void LogOrchestrationResumeFailed(string orchestrationId, string executionId, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Skipping resume for orchestration '{OrchestrationId}' because execution '{ExecutionId}' is already active.")]
+	private partial void LogResumeSkippedAlreadyActive(string orchestrationId, string executionId);
 
 	[LoggerMessage(Level = LogLevel.Debug, Message = "Skipping invalid orchestration file during scan: '{File}'")]
 	private partial void LogOrchestrationFileScanFailed(string file, Exception ex);

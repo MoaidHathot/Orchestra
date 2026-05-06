@@ -263,6 +263,9 @@ public static class OrchestraConfigLoader
 		if (config.ShutdownTimeoutSeconds.HasValue)
 			options.ShutdownTimeoutSeconds = config.ShutdownTimeoutSeconds.Value;
 
+		if (config.AutoResumeCheckpointsOnStartup.HasValue)
+			options.AutoResumeCheckpointsOnStartup = config.AutoResumeCheckpointsOnStartup.Value;
+
 		if (config.LogLevel is not null)
 			options.LogLevel = config.LogLevel;
 
@@ -369,6 +372,11 @@ public class OrchestraConfigFile
 	/// Maximum time in seconds to wait for in-flight tasks during graceful shutdown.
 	/// </summary>
 	public int? ShutdownTimeoutSeconds { get; set; }
+
+	/// <summary>
+	/// Whether to automatically resume persisted orchestration checkpoints on startup.
+	/// </summary>
+	public bool? AutoResumeCheckpointsOnStartup { get; set; }
 
 	/// <summary>
 	/// Minimum log level for the file logger. Values: Trace, Debug, Information, Warning, Error, Critical.

@@ -43,6 +43,27 @@ public class AgentEventProcessorTests
 	}
 
 	[Fact]
+	public async Task ProcessEventsAsync_WhenCancelled_FinalizesPartialResponseSegment()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		using var cts = new CancellationTokenSource();
+		var events = CreateCancellableAsyncEnumerable(cts, new AgentEvent
+		{
+			Type = AgentEventType.MessageDelta,
+			Content = "partial response",
+		});
+
+		// Act
+		var act = async () => await processor.ProcessEventsAsync(events, cts.Token);
+
+		// Assert
+		await Assert.ThrowsAnyAsync<OperationCanceledException>(act);
+		Assert.Single(processor.ResponseSegments);
+		Assert.Equal("partial response", processor.ResponseSegments[0]);
+	}
+
+	[Fact]
 	public async Task ProcessEventsAsync_ReasoningDelta_ReportsAndCollectsReasoning()
 	{
 		// Arrange
@@ -229,6 +250,45 @@ public class AgentEventProcessorTests
 		Assert.Null(trace.UserPromptProcessed);
 		Assert.Null(trace.FinalResponse);
 		Assert.Null(trace.OutputHandlerResult);
+	}
+
+	[Fact]
+	public async Task BuildPartialTrace_WithProcessedPrompt_IncludesPromptAndPendingToolCall()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.ToolExecutionStart,
+				ToolCallId = "call-1",
+				ToolName = "search",
+				ToolArguments = "{\"query\":\"timeout\"}",
+				McpServerName = "mcp"
+			});
+
+		await processor.ProcessEventsAsync(events);
+
+		// Act
+		var trace = processor.BuildPartialTrace(
+			systemPrompt: "System prompt",
+			userPromptRaw: "Raw prompt",
+			userPromptProcessed: "Processed prompt");
+
+		// Assert
+		Assert.Equal("Processed prompt", trace.UserPromptProcessed);
+		Assert.Single(trace.ToolCalls);
+		Assert.Equal("call-1", trace.ToolCalls[0].CallId);
+		Assert.Equal("search", trace.ToolCalls[0].ToolName);
+		Assert.Null(trace.ToolCalls[0].CompletedAt);
+		Assert.Collection(trace.ConversationHistory,
+			message => Assert.Equal("system", message.Role),
+			message =>
+			{
+				Assert.Equal("user", message.Role);
+				Assert.Equal("Processed prompt", message.Content);
+			},
+			message => Assert.Equal("assistant", message.Role));
 	}
 
 	[Fact]
@@ -1704,6 +1764,19 @@ public class AgentEventProcessorTests
 			yield return item;
 		}
 		await Task.CompletedTask;
+	}
+
+	private static async IAsyncEnumerable<T> CreateCancellableAsyncEnumerable<T>(
+		CancellationTokenSource cts,
+		params T[] items)
+	{
+		foreach (var item in items)
+		{
+			yield return item;
+		}
+
+		cts.Cancel();
+		await Task.Delay(Timeout.Infinite, cts.Token);
 	}
 
 	#region SDK 0.3.0 Telemetry forwarding

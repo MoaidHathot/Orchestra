@@ -214,6 +214,11 @@ public partial class OrchestrationExecutor
 		var allSteps = orchestration.Steps
 			.ToDictionary(s => s.Name, s => s);
 
+		if (checkpoint is null)
+		{
+			await SaveInitialCheckpointAsync(runId, orchestration, runStartedAt, effectiveParams, triggerId, CancellationToken.None);
+		}
+
 		// Restore completed steps from checkpoint if resuming
 		if (checkpoint is not null)
 		{
@@ -625,23 +630,38 @@ public partial class OrchestrationExecutor
 			_reporter.ReportRunContext(runRecord.Context);
 		}
 
-		try
+		if (orchestrationResult.Cancellation?.Kind != CancellationCauseKind.HostShutdown)
 		{
-			await _runStore.SaveRunAsync(runRecord, CancellationToken.None);
+			try
+			{
+				await _runStore.SaveRunAsync(runRecord, CancellationToken.None);
+			}
+			catch (Exception ex)
+			{
+				LogRunStoreSaveFailed(ex, orchestration.Name, runId);
+			}
 		}
-		catch (Exception ex)
+		else
 		{
-			LogRunStoreSaveFailed(ex, orchestration.Name, runId);
+			LogRunStoreSkippedForHostShutdown(orchestration.Name, runId);
 		}
 
-		// Clean up checkpoint now that execution is complete
-		try
+		// Clean up checkpoint now that execution is complete. Host-shutdown cancellation is
+		// process-wide interruption, so keep the last durable checkpoint for startup recovery.
+		if (orchestrationResult.Cancellation?.Kind != CancellationCauseKind.HostShutdown)
 		{
-			await _checkpointStore.DeleteCheckpointAsync(orchestration.Name, runId, CancellationToken.None);
+			try
+			{
+				await _checkpointStore.DeleteCheckpointAsync(orchestration.Name, runId, CancellationToken.None);
+			}
+			catch (Exception ex)
+			{
+				LogCheckpointDeleteFailed(ex, orchestration.Name, runId);
+			}
 		}
-		catch (Exception ex)
+		else
 		{
-			LogCheckpointDeleteFailed(ex, orchestration.Name, runId);
+			LogCheckpointPreservedForResume(orchestration.Name, runId);
 		}
 
 		return orchestrationResult;
@@ -656,6 +676,7 @@ public partial class OrchestrationExecutor
 		Orchestration orchestration,
 		CheckpointData checkpoint,
 		RetryMetadata? retryMetadata = null,
+		ResolveCancellationCauseDelegate? resolveExternalCancellationCause = null,
 		CancellationToken cancellationToken = default)
 	{
 		LogResumingOrchestration(orchestration.Name, checkpoint.RunId);
@@ -694,7 +715,9 @@ public partial class OrchestrationExecutor
 				cancellationToken,
 				checkpoint,
 				retryMetadata: retryMetadata,
-				orchestrationTimeoutCts: orchestrationTimeoutCts);
+				orchestrationTimeoutCts: orchestrationTimeoutCts,
+				resolveExternalCancellationCause: resolveExternalCancellationCause,
+				triggeredBy: retryMetadata?.TriggeredBy ?? "resume");
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -704,6 +727,40 @@ public partial class OrchestrationExecutor
 		finally
 		{
 			orchestrationTimeoutCts?.Dispose();
+		}
+	}
+
+	/// <summary>
+	/// Saves an initial checkpoint before any step starts so a process failure during
+	/// the first running step can restart the run from the beginning.
+	/// </summary>
+	private async Task SaveInitialCheckpointAsync(
+		string runId,
+		Orchestration orchestration,
+		DateTimeOffset runStartedAt,
+		Dictionary<string, string> parameters,
+		string? triggerId,
+		CancellationToken cancellationToken)
+	{
+		try
+		{
+			var checkpointData = new CheckpointData
+			{
+				RunId = runId,
+				OrchestrationName = orchestration.Name,
+				StartedAt = runStartedAt,
+				CheckpointedAt = DateTimeOffset.UtcNow,
+				Parameters = parameters,
+				TriggerId = triggerId,
+				CompletedSteps = [],
+			};
+
+			await _checkpointStore.SaveCheckpointAsync(checkpointData, cancellationToken);
+			LogInitialCheckpointSaved(orchestration.Name, runId);
+		}
+		catch (Exception ex)
+		{
+			LogCheckpointSaveFailed(ex, orchestration.Name, runId, "<initial>");
 		}
 	}
 
@@ -1088,12 +1145,19 @@ public partial class OrchestrationExecutor
 
 			return result;
 		}
+		catch (StepExecutionCanceledException ex) when (timeoutCts is not null && timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+		{
+			var message = $"Step timed out after {effectiveStepTimeout} seconds.";
+			LogStepTimedOut(step.Name, effectiveStepTimeout!.Value);
+			_reporter.ReportStepError(step.Name, message);
+			return BuildTimeoutResult(message, ex.PartialResult);
+		}
 		catch (OperationCanceledException) when (timeoutCts is not null && timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
 			var message = $"Step timed out after {effectiveStepTimeout} seconds.";
 			LogStepTimedOut(step.Name, effectiveStepTimeout!.Value);
 			_reporter.ReportStepError(step.Name, message);
-			return ExecutionResult.Failed(message);
+			return BuildTimeoutResult(message, partialResult: null);
 		}
 		finally
 		{
@@ -1197,6 +1261,25 @@ public partial class OrchestrationExecutor
 			LogLoopExhausted(checkerStep.Name, loop.MaxIterations);
 		}
 	}
+
+	private static ExecutionResult BuildTimeoutResult(string message, ExecutionResult? partialResult) => new()
+	{
+		Content = string.Empty,
+		Status = ExecutionStatus.Failed,
+		ErrorMessage = message,
+		RawContent = partialResult?.RawContent,
+		RawDependencyOutputs = partialResult?.RawDependencyOutputs ?? new Dictionary<string, string>(),
+		PromptSent = partialResult?.PromptSent,
+		ActualModel = partialResult?.ActualModel,
+		SelectedModel = partialResult?.SelectedModel,
+		RequestedModelInfo = partialResult?.RequestedModelInfo,
+		SelectedModelInfo = partialResult?.SelectedModelInfo,
+		ActualModelInfo = partialResult?.ActualModelInfo,
+		Usage = partialResult?.Usage,
+		Trace = partialResult?.Trace,
+		RetryHistory = partialResult?.RetryHistory,
+		ErrorCategory = StepErrorCategory.Timeout,
+	};
 
 	private static StepRunRecord BuildStepRecord(
 		OrchestrationStep step,
@@ -1548,6 +1631,9 @@ public partial class OrchestrationExecutor
 	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to save run record for orchestration '{Name}', run '{RunId}'.")]
 	private partial void LogRunStoreSaveFailed(Exception ex, string name, string runId);
 
+	[LoggerMessage(Level = LogLevel.Information, Message = "Run record for orchestration '{Name}', run '{RunId}' was not saved because the host is shutting down; checkpoint remains resumable.")]
+	private partial void LogRunStoreSkippedForHostShutdown(string name, string runId);
+
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' cancelled before starting.")]
 	private partial void LogStepCancelledBeforeStart(string stepName);
 
@@ -1611,11 +1697,17 @@ public partial class OrchestrationExecutor
 	[LoggerMessage(Level = LogLevel.Information, Message = "Checkpoint saved for orchestration '{Name}', run '{RunId}' after step '{StepName}' ({CompletedSteps}/{TotalSteps}).")]
 	private partial void LogCheckpointSaved(string name, string runId, string stepName, int completedSteps, int totalSteps);
 
+	[LoggerMessage(Level = LogLevel.Information, Message = "Initial checkpoint saved for orchestration '{Name}', run '{RunId}'.")]
+	private partial void LogInitialCheckpointSaved(string name, string runId);
+
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to save checkpoint for orchestration '{Name}', run '{RunId}' after step '{StepName}'.")]
 	private partial void LogCheckpointSaveFailed(Exception ex, string name, string runId, string stepName);
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to delete checkpoint for orchestration '{Name}', run '{RunId}'.")]
 	private partial void LogCheckpointDeleteFailed(Exception ex, string name, string runId);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Checkpoint preserved for orchestration '{Name}', run '{RunId}' because the host is shutting down.")]
+	private partial void LogCheckpointPreservedForResume(string name, string runId);
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Resuming orchestration '{Name}' from checkpoint, run '{RunId}'.")]
 	private partial void LogResumingOrchestration(string name, string runId);

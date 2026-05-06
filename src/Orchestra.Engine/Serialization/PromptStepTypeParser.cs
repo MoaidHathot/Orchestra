@@ -9,6 +9,8 @@ namespace Orchestra.Engine;
 /// </summary>
 public sealed partial class PromptStepTypeParser : IStepTypeParser
 {
+	private const int MaxVariablePathResolutionPasses = 10;
+
 	public string TypeName => "Prompt";
 
 	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
@@ -159,11 +161,22 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 		if (variables is null || !path.Contains("{{vars.", StringComparison.OrdinalIgnoreCase))
 			return path;
 
-		return VarsPattern().Replace(path, match =>
+		var resolved = path;
+		for (var i = 0; i < MaxVariablePathResolutionPasses; i++)
 		{
-			var varName = match.Groups["name"].Value;
-			return variables.TryGetValue(varName, out var value) ? value : match.Value;
-		});
+			var replaced = VarsPattern().Replace(resolved, match =>
+			{
+				var varName = match.Groups["name"].Value;
+				return variables.TryGetValue(varName, out var value) ? value : match.Value;
+			});
+
+			if (string.Equals(replaced, resolved, StringComparison.Ordinal))
+				return replaced;
+
+			resolved = replaced;
+		}
+
+		return resolved;
 	}
 
 	[System.Text.RegularExpressions.GeneratedRegex(@"\{\{vars\.(?<name>[^}]+)\}\}", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled)]

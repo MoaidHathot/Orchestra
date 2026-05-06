@@ -309,7 +309,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		// SyncInvokeTimeout cause when our wrapper-owned syncTimeoutCts is the trigger,
 		// allowing the engine to record a precise CancellationDetails on the run record
 		// instead of a generic "External" entry.
-		ResolveCancellationCauseDelegate? cancellationCauseProbe = null;
+		ResolveCancellationCauseDelegate? cancellationCauseProbe = () => executionInfo.CancellationCauseOverride;
 
 		try
 		{
@@ -325,7 +325,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 				cancellationCauseProbe = () =>
 					capturedSyncCts.IsCancellationRequested && !capturedParentCts.IsCancellationRequested
 						? CancellationDetails.SyncInvokeTimeout(configuredTimeout)
-						: null;
+						: executionInfo.CancellationCauseOverride;
 			}
 
 			OrchestrationResult? orchResult;

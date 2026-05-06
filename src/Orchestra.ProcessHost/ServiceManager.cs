@@ -97,7 +97,8 @@ public partial class ServiceManager : IAsyncDisposable
 			_beforeStartHooks.Count,
 			_afterStopHooks.Count);
 
-		// 1. Run beforeStart hooks sequentially
+		// 1. Run beforeStart hooks concurrently. There is no dependency model for hooks,
+		// so independent startup checks should not serialize service startup.
 		await RunBeforeStartHooksAsync(cancellationToken);
 
 		// 2. Start all processes in parallel
@@ -109,7 +110,7 @@ public partial class ServiceManager : IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Runs all beforeStart hooks in order. Throws if a required hook fails.
+	/// Runs all beforeStart hooks concurrently. Throws if any required hook fails.
 	/// Links the shutdown token so that <see cref="StopAsync"/> cancels running hooks.
 	/// </summary>
 	private async Task RunBeforeStartHooksAsync(CancellationToken cancellationToken)
@@ -119,31 +120,52 @@ public partial class ServiceManager : IAsyncDisposable
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
 			cancellationToken, _shutdownCts!.Token);
 
-		foreach (var hook in _beforeStartHooks)
+		HookRunResult[] results;
+		try
 		{
-			LogRunningBeforeStartHook(hook.Name, hook.Command);
-			var (exitCode, stderr) = await RunCommandAsync(hook, linkedCts.Token);
-
-			if (exitCode == 0)
-			{
-				LogBeforeStartHookCompleted(hook.Name, exitCode);
-			}
-			else if (linkedCts.IsCancellationRequested)
-			{
-				// Shutdown was requested — don't throw, just stop processing hooks
-				return;
-			}
-			else if (hook.Required)
-			{
-				LogBeforeStartHookFailed(hook.Name, exitCode, stderr);
-				throw new ServiceInitializationException(
-					$"Required beforeStart hook '{hook.Name}' failed with exit code {exitCode}: {stderr}");
-			}
-			else
-			{
-				LogBeforeStartHookFailedNonRequired(hook.Name, exitCode, stderr);
-			}
+			results = await Task.WhenAll(_beforeStartHooks.Select(hook => RunBeforeStartHookAsync(hook, linkedCts.Token)));
 		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			throw new ServiceInitializationException($"beforeStart hook execution failed: {ex.Message}", ex);
+		}
+
+		if (linkedCts.IsCancellationRequested)
+		{
+			return;
+		}
+
+		var requiredFailure = results.FirstOrDefault(result => result.Hook.Required && result.ExitCode != 0);
+		if (requiredFailure is not null)
+		{
+			throw new ServiceInitializationException(
+				$"Required beforeStart hook '{requiredFailure.Hook.Name}' failed with exit code {requiredFailure.ExitCode}: {requiredFailure.Stderr}");
+		}
+	}
+
+	private async Task<HookRunResult> RunBeforeStartHookAsync(CommandHook hook, CancellationToken cancellationToken)
+	{
+		LogRunningBeforeStartHook(hook.Name, hook.Command);
+		var (exitCode, stderr) = await RunCommandAsync(hook, cancellationToken);
+
+		if (exitCode == 0)
+		{
+			LogBeforeStartHookCompleted(hook.Name, exitCode);
+		}
+		else if (cancellationToken.IsCancellationRequested)
+		{
+			// Shutdown was requested; caller will return without failing startup.
+		}
+		else if (hook.Required)
+		{
+			LogBeforeStartHookFailed(hook.Name, exitCode, stderr);
+		}
+		else
+		{
+			LogBeforeStartHookFailedNonRequired(hook.Name, exitCode, stderr);
+		}
+
+		return new HookRunResult(hook, exitCode, stderr);
 	}
 
 	/// <summary>
@@ -431,7 +453,8 @@ public partial class ServiceManager : IAsyncDisposable
 		}
 		await Task.WhenAll(stopTasks);
 
-		// 3. Run afterStop hooks sequentially
+		// 3. Run afterStop hooks concurrently. Shutdown hooks are best-effort; each hook
+		// logs its own failure without blocking the others.
 		await RunAfterStopHooksAsync(cancellationToken);
 
 		// Dispose all managed processes
@@ -448,28 +471,32 @@ public partial class ServiceManager : IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Runs all afterStop hooks in order. Never throws — errors are logged.
+	/// Runs all afterStop hooks concurrently. Never throws — errors are logged.
 	/// </summary>
 	private async Task RunAfterStopHooksAsync(CancellationToken cancellationToken)
 	{
-		foreach (var hook in _afterStopHooks)
-		{
-			try
-			{
-				LogRunningAfterStopHook(hook.Name, hook.Command);
-				var (exitCode, stderr) = await RunCommandAsync(hook, cancellationToken);
+		await Task.WhenAll(_afterStopHooks.Select(hook => RunAfterStopHookAsync(hook, cancellationToken)));
+	}
 
-				if (exitCode != 0)
-					LogAfterStopHookFailed(hook.Name, exitCode, stderr);
-				else
-					LogAfterStopHookCompleted(hook.Name);
-			}
-			catch (Exception ex)
-			{
-				LogAfterStopHookException(hook.Name, ex);
-			}
+	private async Task RunAfterStopHookAsync(CommandHook hook, CancellationToken cancellationToken)
+	{
+		try
+		{
+			LogRunningAfterStopHook(hook.Name, hook.Command);
+			var (exitCode, stderr) = await RunCommandAsync(hook, cancellationToken);
+
+			if (exitCode != 0)
+				LogAfterStopHookFailed(hook.Name, exitCode, stderr);
+			else
+				LogAfterStopHookCompleted(hook.Name);
+		}
+		catch (Exception ex)
+		{
+			LogAfterStopHookException(hook.Name, ex);
 		}
 	}
+
+	private sealed record HookRunResult(CommandHook Hook, int ExitCode, string Stderr);
 
 	public async ValueTask DisposeAsync()
 	{

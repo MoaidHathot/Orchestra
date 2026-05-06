@@ -87,6 +87,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 				Directory = "/custom/orchestrations",
 			},
 			ShutdownTimeoutSeconds = 120,
+			AutoResumeCheckpointsOnStartup = false,
 			LogLevel = "Debug",
 			DefaultModel = "claude-sonnet-4",
 			Retention = new RetentionPolicyConfig
@@ -107,6 +108,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.Scan.Watch.Should().BeFalse();
 		options.Scan.Recursive.Should().BeFalse();
 		options.ShutdownTimeoutSeconds.Should().Be(120);
+		options.AutoResumeCheckpointsOnStartup.Should().BeFalse();
 		options.LogLevel.Should().Be("Debug");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
 		options.Retention.MaxRunsPerOrchestration.Should().Be(50);

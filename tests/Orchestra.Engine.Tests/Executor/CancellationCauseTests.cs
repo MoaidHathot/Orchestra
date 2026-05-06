@@ -358,6 +358,17 @@ public class CancellationCauseTests
 	}
 
 	[Fact]
+	public void CancellationDetails_HostShutdown_ReasonIdentifiesInterruption()
+	{
+		var details = CancellationDetails.HostShutdown("process stopping");
+
+		details.Kind.Should().Be(CancellationCauseKind.HostShutdown);
+		details.Source.Should().Be("host-shutdown");
+		details.IsTimeout.Should().BeFalse();
+		details.Reason.Should().Be("interrupted by host shutdown: process stopping");
+	}
+
+	[Fact]
 	public async Task CancellationDetails_OrchestrationComplete_CarriesCallerReason()
 	{
 		var details = CancellationDetails.OrchestrationComplete("nothing-to-do", "validate-step");

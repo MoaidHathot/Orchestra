@@ -64,13 +64,18 @@ public class AgentEventProcessor
 		IAsyncEnumerable<AgentEvent> events,
 		CancellationToken cancellationToken = default)
 	{
-		await foreach (var evt in events.WithCancellation(cancellationToken))
+		try
 		{
-			ProcessEvent(evt);
+			await foreach (var evt in events.WithCancellation(cancellationToken))
+			{
+				ProcessEvent(evt);
+			}
 		}
-
-		// Save any remaining response content after stream ends
-		FinalizeCurrentResponse();
+		finally
+		{
+			// Preserve any partial response emitted before cancellation or failure.
+			FinalizeCurrentResponse();
+		}
 	}
 
 	/// <summary>
@@ -600,7 +605,7 @@ public class AgentEventProcessor
 			UserPromptRaw = userPromptRaw,
 			UserPromptProcessed = userPromptProcessed,
 			Reasoning = Reasoning,
-			ToolCalls = _toolCalls,
+			ToolCalls = BuildToolCallList(includePending: false),
 			ResponseSegments = _responseSegments.ToList(),
 			FinalResponse = finalResponse,
 			OutputHandlerResult = outputHandlerResult,
@@ -614,18 +619,29 @@ public class AgentEventProcessor
 	/// <summary>
 	/// Builds a partial trace (typically used when an error occurs).
 	/// </summary>
-	public StepExecutionTrace BuildPartialTrace(string? systemPrompt, string? userPromptRaw, List<string>? mcpServers = null)
+	public StepExecutionTrace BuildPartialTrace(
+		string? systemPrompt,
+		string? userPromptRaw,
+		List<string>? mcpServers = null,
+		string? userPromptProcessed = null)
 	{
+		var history = new List<ConversationMessage>(_conversationHistory);
+		if (systemPrompt is not null)
+			history.Insert(0, new ConversationMessage { Role = "system", Content = systemPrompt, Timestamp = DateTimeOffset.UtcNow });
+		if (userPromptProcessed is not null)
+			history.Insert(systemPrompt is not null ? 1 : 0, new ConversationMessage { Role = "user", Content = userPromptProcessed, Timestamp = DateTimeOffset.UtcNow });
+
 		return new StepExecutionTrace
 		{
 			SystemPrompt = systemPrompt,
 			UserPromptRaw = userPromptRaw,
+			UserPromptProcessed = userPromptProcessed,
 			Reasoning = Reasoning,
-			ToolCalls = _toolCalls,
+			ToolCalls = BuildToolCallList(includePending: true),
 			ResponseSegments = _responseSegments.ToList(),
 			McpServers = BuildMcpServerList(mcpServers),
 			Warnings = _warnings.ToList(),
-			ConversationHistory = new List<ConversationMessage>(_conversationHistory),
+			ConversationHistory = history,
 			AuditLog = _auditLog.ToList(),
 		};
 	}
@@ -647,6 +663,34 @@ public class AgentEventProcessor
 		}
 
 		return configDescriptions ?? [];
+	}
+
+	private List<ToolCallRecord> BuildToolCallList(bool includePending)
+	{
+		var records = _toolCalls.ToList();
+
+		if (!includePending || _pendingToolCalls.Count == 0)
+		{
+			return records;
+		}
+
+		foreach (var (callId, pending) in _pendingToolCalls)
+		{
+			records.Add(new ToolCallRecord
+			{
+				CallId = callId,
+				ToolName = pending.ToolName,
+				Arguments = pending.Arguments,
+				McpServer = pending.McpServer,
+				StartedAt = pending.StartedAt,
+				ActorAgentName = pending.Actor.AgentName,
+				ActorAgentDisplayName = pending.Actor.AgentDisplayName,
+				ActorToolCallId = pending.Actor.ToolCallId,
+				ActorDepth = pending.Actor.Depth,
+			});
+		}
+
+		return records;
 	}
 
 	/// <summary>

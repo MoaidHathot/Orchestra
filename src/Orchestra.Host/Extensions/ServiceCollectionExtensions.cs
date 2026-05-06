@@ -517,6 +517,58 @@ public static class ServiceProviderExtensions
 			}
 		}
 
+		if (options.AutoResumeCheckpointsOnStartup)
+		{
+			var checkpointStore = services.GetRequiredService<ICheckpointStore>();
+			var runStoreForRecovery = services.GetRequiredService<FileSystemRunStore>();
+			async Task ResumePersistedCheckpointsAsync()
+			{
+				try
+				{
+					var checkpoints = await checkpointStore.ListCheckpointsAsync();
+					foreach (var checkpoint in checkpoints.OrderBy(c => c.StartedAt))
+					{
+						var existingRun = await runStoreForRecovery.GetRunAsync(checkpoint.OrchestrationName, checkpoint.RunId);
+						if (existingRun is not null
+							&& existingRun.Cancellation?.Kind != CancellationCauseKind.HostShutdown)
+						{
+							initLogger.LogDebug(
+								"Skipping checkpoint auto-resume for orchestration {OrchestrationName}, run {RunId}: terminal run already exists",
+								checkpoint.OrchestrationName,
+								checkpoint.RunId);
+							continue;
+						}
+
+						var entry = registry.GetAll().FirstOrDefault(e => string.Equals(
+							e.Orchestration.Name,
+							checkpoint.OrchestrationName,
+							StringComparison.OrdinalIgnoreCase));
+						if (entry is null)
+						{
+							initLogger.LogWarning(
+								"Cannot auto-resume checkpoint for orchestration {OrchestrationName}, run {RunId}: orchestration is not registered",
+								checkpoint.OrchestrationName,
+								checkpoint.RunId);
+							continue;
+						}
+
+						var executionId = await triggerManager.ResumeFromCheckpointAsync(entry, checkpoint);
+						initLogger.LogInformation(
+							"Auto-resumed checkpoint for orchestration {OrchestrationName}, run {RunId}, execution {ExecutionId}",
+							checkpoint.OrchestrationName,
+							checkpoint.RunId,
+							executionId);
+					}
+				}
+				catch (Exception ex)
+				{
+					initLogger.LogError(ex, "Failed to auto-resume persisted orchestration checkpoints");
+				}
+			}
+
+			_ = Task.Run(ResumePersistedCheckpointsAsync);
+		}
+
 		// Fire-and-forget preload of the run-history index so the first
 		// /api/history request doesn't pay the cold-load penalty.
 		var runStore = services.GetRequiredService<FileSystemRunStore>();

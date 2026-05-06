@@ -51,6 +51,13 @@ public class OrchestrationHostOptions
 	public bool RegisterJsonTriggers { get; set; } = true;
 
 	/// <summary>
+	/// Whether to automatically resume persisted checkpoints on startup. This recovers
+	/// runs interrupted by process-wide failure or host shutdown from the last completed step.
+	/// Default: true
+	/// </summary>
+	public bool AutoResumeCheckpointsOnStartup { get; set; } = true;
+
+	/// <summary>
 	/// Retention policy for automatic cleanup of old run records.
 	/// Default: no limits (runs are kept forever).
 	/// </summary>

@@ -39,7 +39,7 @@ public class CheckpointTests
 	#region Checkpoint Saving
 
 	[Fact]
-	public async Task ExecuteAsync_WithCheckpointStore_SavesCheckpointAfterEachStep()
+	public async Task ExecuteAsync_WithCheckpointStore_SavesInitialCheckpointAndAfterEachStep()
 	{
 		// Arrange
 		var checkpointStore = new InMemoryCheckpointStore();
@@ -62,8 +62,58 @@ public class CheckpointTests
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
 
 		// Checkpoints should have been saved after each step, but deleted on completion
-		checkpointStore.SaveCount.Should().Be(2, "one checkpoint per successful step");
+		checkpointStore.SaveCount.Should().Be(3, "one initial checkpoint plus one checkpoint per successful step");
 		checkpointStore.DeleteCount.Should().Be(1, "checkpoint cleaned up after completion");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_FirstStepCancelledAfterHostShutdown_KeepsCheckpointAndSkipsRunRecord()
+	{
+		// Arrange — no step finishes before shutdown. The initial checkpoint is still enough
+		// for startup recovery to replay the first step.
+		var checkpointStore = new InMemoryCheckpointStore();
+		var runStore = Substitute.For<IRunStore>();
+		var stepStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			stepStarted.TrySetResult();
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				await Task.Delay(Timeout.Infinite, ct);
+				return new AgentResult { Content = "unreachable" };
+			}, ct);
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var orchestration = CreateOrchestration([CreateStep("step-a")]);
+		var executor = new OrchestrationExecutor(
+			_scheduler, agentBuilder, NullOrchestrationReporter.Instance, _loggerFactory,
+			runStore: runStore,
+			checkpointStore: checkpointStore);
+		using var cts = new CancellationTokenSource();
+
+		// Act
+		var executeTask = executor.ExecuteAsync(
+			orchestration,
+			executionIdOverride: "host-shutdown-run",
+			resolveExternalCancellationCause: () => CancellationDetails.HostShutdown("test"),
+			cancellationToken: cts.Token);
+		await stepStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		cts.Cancel();
+		var result = await executeTask.WaitAsync(TimeSpan.FromSeconds(10));
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.Cancellation!.Kind.Should().Be(CancellationCauseKind.HostShutdown);
+
+		var checkpoints = await checkpointStore.ListCheckpointsAsync(orchestration.Name);
+		checkpoints.Should().ContainSingle();
+		checkpoints[0].RunId.Should().Be("host-shutdown-run");
+		checkpoints[0].CompletedSteps.Should().BeEmpty();
+		checkpointStore.DeleteCount.Should().Be(0, "host shutdown checkpoints must remain resumable");
+		await runStore.DidNotReceive().SaveRunAsync(Arg.Any<OrchestrationRunRecord>(), Arg.Any<CancellationToken>());
 	}
 
 	[Fact]
@@ -152,6 +202,7 @@ public class CheckpointTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — checkpoint should be deleted after completion
+		checkpointStore.SaveCount.Should().Be(2, "initial checkpoint plus completed-step checkpoint");
 		checkpointStore.DeleteCount.Should().Be(1);
 		var remaining = await checkpointStore.ListCheckpointsAsync();
 		remaining.Should().BeEmpty("checkpoint should be deleted after successful completion");
@@ -181,7 +232,7 @@ public class CheckpointTests
 
 		// Assert
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		checkpointStore.SaveCount.Should().Be(3, "one checkpoint save per step");
+		checkpointStore.SaveCount.Should().Be(4, "one initial checkpoint plus one checkpoint save per step");
 	}
 
 	[Fact]

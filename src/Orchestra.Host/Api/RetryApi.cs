@@ -201,8 +201,8 @@ public static partial class RetryApi
 						result = await executor.ResumeAsync(
 							entry.Orchestration,
 							checkpoint,
-							retryMetadata,
-							cancellationToken);
+							retryMetadata: retryMetadata,
+							cancellationToken: cancellationToken);
 					}
 
 					if (result.Status == ExecutionStatus.Cancelled)

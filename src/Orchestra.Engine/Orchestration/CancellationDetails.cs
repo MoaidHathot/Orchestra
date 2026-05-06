@@ -32,6 +32,12 @@ public enum CancellationCauseKind
 	/// A step explicitly requested early completion via the <c>orchestra_complete</c> engine tool.
 	/// </summary>
 	OrchestrationComplete = 4,
+
+	/// <summary>
+	/// The host process is stopping while the orchestration is still running. This is treated
+	/// as an interruption, not a user-requested cancellation, so a durable checkpoint can be resumed.
+	/// </summary>
+	HostShutdown = 5,
 }
 
 /// <summary>
@@ -83,6 +89,8 @@ public sealed class CancellationDetails
 						: "sync invocation timed out",
 				CancellationCauseKind.External =>
 					!string.IsNullOrWhiteSpace(Detail) ? $"cancelled by caller: {Detail}" : "cancelled by caller",
+				CancellationCauseKind.HostShutdown =>
+					!string.IsNullOrWhiteSpace(Detail) ? $"interrupted by host shutdown: {Detail}" : "interrupted by host shutdown",
 				CancellationCauseKind.OrchestrationComplete =>
 					!string.IsNullOrWhiteSpace(Detail)
 						? $"completed early: {Detail}"
@@ -126,6 +134,16 @@ public sealed class CancellationDetails
 	{
 		Kind = CancellationCauseKind.External,
 		Source = "caller",
+		Detail = detail,
+	};
+
+	/// <summary>
+	/// Convenience constructor for host-process shutdown interruption.
+	/// </summary>
+	public static CancellationDetails HostShutdown(string? detail = null) => new()
+	{
+		Kind = CancellationCauseKind.HostShutdown,
+		Source = "host-shutdown",
 		Detail = detail,
 	};
 

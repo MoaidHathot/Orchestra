@@ -656,6 +656,44 @@ public class PromptFileParsingTests : IDisposable
 	}
 
 	[Fact]
+	public void ParseOrchestrationFile_NestedVarsInPath_ResolvesAll()
+	{
+		// Arrange
+		var personasDir = Path.Combine(_tempDir, "Personas");
+		var personaDir = Path.Combine(personasDir, "liabadi");
+		Directory.CreateDirectory(personaDir);
+		File.WriteAllText(Path.Combine(personaDir, "system.md"), "Nested-var resolved content");
+
+		var orchestrationPath = CreateOrchestrationFile($$$"""
+			{
+				"name": "nested-vars-test",
+				"description": "Test",
+				"variables": {
+					"personasDir": "{{{personasDir.Replace("\\", "\\\\")}}}",
+					"liabadiDir": "{{vars.personasDir}}/liabadi"
+				},
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"dependsOn": [],
+						"systemPromptFile": "{{vars.liabadiDir}}/system.md",
+						"userPrompt": "Hello",
+						"model": "claude-opus-4.5"
+					}
+				]
+			}
+			""");
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestrationFile(orchestrationPath, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step!.SystemPrompt.Should().Be("Nested-var resolved content");
+	}
+
+	[Fact]
 	public void ParseOrchestrationFile_UndefinedVar_LeavesExpressionAndFailsFileNotFound()
 	{
 		// Arrange — vars.unknown is not defined, so the expression is left as-is

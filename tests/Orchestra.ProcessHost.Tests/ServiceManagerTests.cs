@@ -65,16 +65,23 @@ public class ServiceManagerTests : IAsyncLifetime
 	#region BeforeStart Hooks
 
 	[Fact]
-	public async Task InitializeAsync_RunsBeforeStartHooksSequentially()
+	public async Task InitializeAsync_RunsBeforeStartHooksConcurrently()
 	{
 		var hook1 = CreateCommandHook("hook1", HookPhase.BeforeStart);
 		var hook2 = CreateCommandHook("hook2", HookPhase.BeforeStart);
+		var releaseHooks = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		_manager.CommandBlockers["hook1"] = releaseHooks.Task;
+		_manager.CommandBlockers["hook2"] = releaseHooks.Task;
 
-		await _manager.InitializeAsync([hook1, hook2]);
+		var initTask = _manager.InitializeAsync([hook1, hook2]);
+		await _manager.WaitForCommandCallsAsync(2);
+		initTask.IsCompleted.Should().BeFalse("both hooks should be running at the same time and waiting on the shared blocker");
+
+		releaseHooks.SetResult();
+		await initTask;
 
 		_manager.RunCommandCalls.Should().HaveCount(2);
-		_manager.RunCommandCalls[0].Name.Should().Be("hook1");
-		_manager.RunCommandCalls[1].Name.Should().Be("hook2");
+		_manager.RunCommandCalls.Select(h => h.Name).Should().BeEquivalentTo(["hook1", "hook2"]);
 	}
 
 	[Fact]
@@ -192,6 +199,26 @@ public class ServiceManagerTests : IAsyncLifetime
 	}
 
 	[Fact]
+	public async Task StopAsync_RunsAfterStopHooksConcurrently()
+	{
+		var hook1 = CreateCommandHook("cleanup1", HookPhase.AfterStop);
+		var hook2 = CreateCommandHook("cleanup2", HookPhase.AfterStop);
+		var releaseHooks = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		_manager.CommandBlockers["cleanup1"] = releaseHooks.Task;
+		_manager.CommandBlockers["cleanup2"] = releaseHooks.Task;
+
+		await _manager.InitializeAsync([hook1, hook2]);
+		var stopTask = _manager.StopAsync();
+		await _manager.WaitForCommandCallsAsync(2);
+		stopTask.IsCompleted.Should().BeFalse("both afterStop hooks should be running concurrently and waiting on the shared blocker");
+
+		releaseHooks.SetResult();
+		await stopTask;
+
+		_manager.RunCommandCalls.Select(h => h.Name).Should().BeEquivalentTo(["cleanup1", "cleanup2"]);
+	}
+
+	[Fact]
 	public async Task StopAsync_AfterStopHookFails_DoesNotThrow()
 	{
 		var afterHook = CreateCommandHook("failing-cleanup", HookPhase.AfterStop);
@@ -262,15 +289,32 @@ public class ServiceManagerTests : IAsyncLifetime
 		public List<string> CreateProcessCalls { get; } = [];
 
 		/// <summary>
-		/// Command hooks that were executed, in order.
+		/// Command hooks that were executed.
 		/// </summary>
-		public List<CommandHook> RunCommandCalls { get; } = [];
+		private readonly List<CommandHook> _runCommandCalls = [];
+		public IReadOnlyList<CommandHook> RunCommandCalls
+		{
+			get
+			{
+				lock (_runCommandCallsLock)
+				{
+					return _runCommandCalls.ToArray();
+				}
+			}
+		}
+		private readonly object _runCommandCallsLock = new();
+		private TaskCompletionSource<int>? _waitForCommandCalls;
 
 		/// <summary>
 		/// Configurable results for command hooks, keyed by hook name.
 		/// Default: exit code 0, empty stderr.
 		/// </summary>
 		public Dictionary<string, (int ExitCode, string Stderr)> CommandResults { get; } = [];
+
+		/// <summary>
+		/// Optional blocker tasks for command hooks, keyed by hook name.
+		/// </summary>
+		public Dictionary<string, Task> CommandBlockers { get; } = [];
 
 		/// <summary>
 		/// Configurable start results for processes, keyed by process name.
@@ -297,15 +341,36 @@ public class ServiceManagerTests : IAsyncLifetime
 			return Task.FromResult<ManagedProcess?>(managed);
 		}
 
-		internal override Task<(int ExitCode, string Stderr)> RunCommandAsync(
+		public Task WaitForCommandCallsAsync(int count)
+		{
+			lock (_runCommandCallsLock)
+			{
+				if (_runCommandCalls.Count >= count)
+					return Task.CompletedTask;
+
+				_waitForCommandCalls = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+				return _waitForCommandCalls.Task.WaitAsync(TimeSpan.FromSeconds(5));
+			}
+		}
+
+		internal override async Task<(int ExitCode, string Stderr)> RunCommandAsync(
 			CommandHook hook, CancellationToken cancellationToken)
 		{
-			RunCommandCalls.Add(hook);
+			lock (_runCommandCallsLock)
+			{
+				_runCommandCalls.Add(hook);
+				_waitForCommandCalls?.TrySetResult(_runCommandCalls.Count);
+			}
+
+			if (CommandBlockers.TryGetValue(hook.Name, out var blocker))
+			{
+				await blocker.WaitAsync(cancellationToken);
+			}
 
 			if (CommandResults.TryGetValue(hook.Name, out var result))
-				return Task.FromResult(result);
+				return result;
 
-			return Task.FromResult((0, string.Empty));
+			return (0, string.Empty);
 		}
 	}
 }

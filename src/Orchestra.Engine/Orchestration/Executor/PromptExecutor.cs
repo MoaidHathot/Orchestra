@@ -90,11 +90,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		using var stepCompletionCts = new CancellationTokenSource();
 		engineToolCtx.StepCompletionCts = stepCompletionCts;
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stepCompletionCts.Token);
+		string? userPrompt = null;
 
 		try
 		{
 			// Build the user prompt, incorporating dependency outputs and parameters
-			var userPrompt = BuildUserPrompt(step, context);
+			userPrompt = BuildUserPrompt(step, context);
 
 			// Log step MCPs for debugging
 			LogStepMcps(step.Name, step.Mcps.Length, string.Join(", ", step.Mcps.Select(m => m.Name)));
@@ -287,9 +288,28 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			return WithOrchestrationComplete(ExecutionResult.Succeeded(
 				successReason, rawDependencyOutputs: rawDependencyOutputs, trace: trace), engineToolCtx, step.Name);
 		}
-		catch (OperationCanceledException)
+		catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
 		{
-			throw; // Let cancellation propagate to the caller for timeout handling
+			// Let the caller decide whether cancellation means timeout, external cancel,
+			// or host shutdown, while preserving the trace collected before cancellation.
+			var trace = eventProcessor.BuildPartialTrace(
+				resolvedSystemPrompt,
+				userPromptRaw,
+				mcpServerDescriptions,
+				userPrompt);
+			_reporter.ReportStepTrace(step.Name, trace);
+
+			var partialResult = new ExecutionResult
+			{
+				Content = string.Empty,
+				Status = ExecutionStatus.Cancelled,
+				ErrorMessage = "Cancelled",
+				RawDependencyOutputs = rawDependencyOutputs,
+				PromptSent = userPrompt,
+				Trace = trace,
+			};
+
+			throw new StepExecutionCanceledException("Prompt execution was cancelled.", partialResult, ex, cancellationToken);
 		}
 		catch (Exception ex)
 		{

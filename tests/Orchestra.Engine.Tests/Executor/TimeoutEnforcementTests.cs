@@ -96,6 +96,88 @@ public class TimeoutEnforcementTests
 		result.StepResults["slow-step"].Status.Should().Be(ExecutionStatus.Failed);
 		result.StepResults["slow-step"].ErrorMessage.Should().Contain("timed out");
 		result.StepResults["slow-step"].ErrorMessage.Should().Contain("1 seconds");
+		result.StepResults["slow-step"].ErrorCategory.Should().Be(StepErrorCategory.Timeout);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_TimedOutPrompt_PreservesPartialTraceAndPrompt()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				await channel.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.ReasoningDelta,
+					Content = "thinking before timeout"
+				}, CancellationToken.None);
+				await channel.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.MessageDelta,
+					Content = "partial answer"
+				}, CancellationToken.None);
+				await channel.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.ToolExecutionStart,
+					ToolCallId = "call-1",
+					ToolName = "lookup",
+					ToolArguments = "{\"id\":1}",
+					McpServerName = "azdo"
+				}, CancellationToken.None);
+
+				await Task.Delay(Timeout.Infinite, ct);
+				return new AgentResult { Content = "unreachable" };
+			}, ct);
+
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "timeout-partial-trace",
+			Description = "Timed out step preserves diagnostics",
+			Steps =
+			[
+				new PromptOrchestrationStep
+				{
+					Name = "slow-step",
+					Type = OrchestrationStepType.Prompt,
+					DependsOn = [],
+					Parameters = ["name"],
+					SystemPrompt = "You are a test assistant.",
+					UserPrompt = "Review {{param.name}}",
+					Model = "claude-opus-4.5",
+					TimeoutSeconds = 1
+				}
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration, new Dictionary<string, string>
+		{
+			["name"] = "PR 123",
+		});
+
+		// Assert
+		var step = result.StepResults["slow-step"];
+		step.Status.Should().Be(ExecutionStatus.Failed);
+		step.ErrorCategory.Should().Be(StepErrorCategory.Timeout);
+		step.PromptSent.Should().Contain("Review PR 123");
+		step.Trace.Should().NotBeNull();
+		step.Trace!.UserPromptRaw.Should().Be("Review PR 123");
+		step.Trace.UserPromptProcessed.Should().Contain("Review PR 123");
+		step.Trace.Reasoning.Should().Be("thinking before timeout");
+		step.Trace.ResponseSegments.Should().ContainSingle("partial answer");
+		step.Trace.ToolCalls.Should().ContainSingle(tc =>
+			tc.CallId == "call-1" && tc.ToolName == "lookup" && tc.McpServer == "azdo" && tc.CompletedAt == null);
+		reporter.Received().ReportStepTrace("slow-step", Arg.Is<StepExecutionTrace>(trace =>
+			trace.ResponseSegments.Contains("partial answer") &&
+			trace.ToolCalls.Any(tc => tc.CallId == "call-1")));
 	}
 
 	[Fact]

@@ -134,6 +134,18 @@ public class ActiveExecutionInfo
 		set => Volatile.Write(ref _status, (int)value);
 	}
 
+	private CancellationDetails? _cancellationCauseOverride;
+
+	/// <summary>
+	/// Optional structured cancellation cause supplied by the host layer before cancelling
+	/// the execution token. Used to distinguish host shutdown from user cancellation.
+	/// </summary>
+	public CancellationDetails? CancellationCauseOverride
+	{
+		get => Volatile.Read(ref _cancellationCauseOverride);
+		set => Volatile.Write(ref _cancellationCauseOverride, value);
+	}
+
 	/// <summary>
 	/// Total number of steps in the orchestration.
 	/// </summary>
