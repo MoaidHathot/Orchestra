@@ -153,7 +153,7 @@ public class CopilotClientPoolTests
 		}
 
 		public Task PingAsync(string message, CancellationToken cancellationToken) => Task.CompletedTask;
-		public Task<CopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken) => throw new NotSupportedException();
+		public Task<ICopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken) => throw new NotSupportedException();
 		public Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
 
 		public ValueTask DisposeAsync()

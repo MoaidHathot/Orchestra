@@ -183,7 +183,7 @@ Flags:
 - `--force` — overwrite existing schema files
 - `--help` — print usage
 
-**3. Repository-relative path (only when authoring inside this repo's `examples/` folder).** All bundled examples use:
+**3. Repository-relative path (only when authoring inside this repo's `examples/` folder).** Most bundled examples use:
 
 ```yaml
 # yaml-language-server: $schema=../schemas/orchestration.schema.json
@@ -908,7 +908,7 @@ if (result.Status == ExecutionStatus.Succeeded)
 
 ## Examples
 
-See the `examples/` folder for 20 complete orchestration examples:
+See the `examples/` folder for complete orchestration examples, including:
 
 | Example | Description |
 |---------|-------------|
@@ -923,6 +923,8 @@ See the `examples/` folder for 20 complete orchestration examples:
 | `variables-and-metadata.json` | Variables with recursive expansion and metadata expressions |
 | `variables-and-metadata.yaml` | YAML twin of variables-and-metadata.json -- shows free-form metadata in YAML |
 | `system-prompt-mode-example.json` | System prompt mode demonstration |
+| `remote-schema-reference.yaml` | YAML example using the public GitHub schema URL |
+| `remote-schema-reference.json` | JSON example using the public GitHub schema URL |
 | `advanced-combined-features.json` | Full pipeline with loops and MCPs |
 | `webhook-triggered-notification.json` | Webhook trigger with input handler and sync response |
 | `hooks-step-failure.yaml` | Step failure hook with current-step payload |

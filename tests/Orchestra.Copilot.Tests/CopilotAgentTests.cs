@@ -445,6 +445,148 @@ public class CopilotAgentTests
 
 	#endregion
 
+	#region Fault Broker Probing
+
+	[Fact]
+	public async Task SendAsync_CreateSessionFailure_ProbesFaultBroker()
+	{
+		var client = new ThrowingCopilotClient
+		{
+			CreateException = new InvalidOperationException("create pipe broken")
+		};
+		var broker = new RecordingFaultBroker();
+		var agent = CreateAgentWithClient(client, broker);
+
+		var task = agent.SendAsync("hello");
+
+		await foreach (var _ in task) { }
+		Func<Task> act = () => task.GetResultAsync();
+		await act.Should().ThrowAsync<InvalidOperationException>();
+		broker.ProbeCalls.Should().Be(1);
+		broker.FailedSessionIds.Should().ContainSingle().Which.Should().Be("(session-create)");
+		broker.FailureReasons.Should().ContainSingle().Which.Should().Contain("CreateSessionAsync failed: create pipe broken");
+	}
+
+	[Fact]
+	public async Task SendAsync_SendFailure_ProbesFaultBrokerWithSessionId()
+	{
+		var session = new FakeCopilotSession("session-send-fails")
+		{
+			SendException = new InvalidOperationException("send pipe broken")
+		};
+		var client = new ThrowingCopilotClient { Session = session };
+		var broker = new RecordingFaultBroker();
+		var agent = CreateAgentWithClient(client, broker);
+
+		var task = agent.SendAsync("hello");
+
+		await foreach (var _ in task) { }
+		Func<Task> act = () => task.GetResultAsync();
+		await act.Should().ThrowAsync<InvalidOperationException>();
+		broker.ProbeCalls.Should().Be(1);
+		broker.FailedSessionIds.Should().ContainSingle().Which.Should().Be("session-send-fails");
+		broker.FailureReasons.Should().ContainSingle().Which.Should().Contain("SendAsync failed: send pipe broken");
+	}
+
+	private static CopilotAgent CreateAgentWithClient(ICopilotClient client, ISessionFaultBroker broker)
+	{
+		return new CopilotAgent(
+			clientPool: new FixedCopilotClientPool(client, broker),
+			model: "test-model",
+			systemPrompt: null,
+			mcps: [],
+			subagents: [],
+			reasoningLevel: null,
+			systemPromptMode: null,
+			systemPromptSections: null,
+			reporter: NullOrchestrationReporter.Instance,
+			engineTools: [],
+			engineToolContext: null,
+			skillDirectories: [],
+			infiniteSessionConfig: null,
+			attachments: [],
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>(),
+			loggerFactory: NullLoggerFactory.Instance);
+	}
+
+	private sealed class RecordingFaultBroker : ISessionFaultBroker
+	{
+		public bool IsClientUnhealthy { get; set; }
+		public string? UnhealthyReason { get; set; }
+		public string? UnhealthyTriggeringSessionId { get; set; }
+		public string? UnhealthyTriggeringFailureReason { get; set; }
+		public int ProbeCalls { get; private set; }
+		public List<string> FailedSessionIds { get; } = [];
+		public List<string> FailureReasons { get; } = [];
+
+		public IDisposable RegisterSession(string sessionId, Action<Exception> onFault)
+			=> new NoopDisposable();
+
+		public Task<bool> ProbeAndMaybeFaultSiblingsAsync(
+			string failedSessionId,
+			string failureReason,
+			CancellationToken cancellationToken)
+		{
+			ProbeCalls++;
+			FailedSessionIds.Add(failedSessionId);
+			FailureReasons.Add(failureReason);
+			return Task.FromResult(true);
+		}
+	}
+
+	private sealed class ThrowingCopilotClient : ICopilotClient
+	{
+		public int DiagnosticHash => 123;
+		public ConnectionState State => ConnectionState.Connected;
+		public Exception? CreateException { get; init; }
+		public ICopilotSession? Session { get; init; }
+
+		public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+		public Task StopAsync() => Task.CompletedTask;
+		public Task PingAsync(string message, CancellationToken cancellationToken) => Task.CompletedTask;
+
+		public Task<ICopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+		{
+			if (CreateException is not null)
+				return Task.FromException<ICopilotSession>(CreateException);
+
+			return Task.FromResult(Session ?? new FakeCopilotSession("session-ok"));
+		}
+
+		public Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
+			=> Task.FromResult<IReadOnlyList<ModelInfo>>([]);
+
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	private sealed class FakeCopilotSession : ICopilotSession
+	{
+		public FakeCopilotSession(string sessionId)
+		{
+			SessionId = sessionId;
+		}
+
+		public string SessionId { get; }
+		public Exception? SendException { get; init; }
+
+		public IDisposable On(SessionEventHandler handler) => new NoopDisposable();
+
+		public Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken)
+			=> SendException is null
+				? Task.FromResult("message-id")
+				: Task.FromException<string>(SendException);
+
+		public Task AbortAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
+	private sealed class NoopDisposable : IDisposable
+	{
+		public void Dispose() { }
+	}
+
+	#endregion
+
 	#region BuildSessionConfig MCP Tools Tests
 
 	private static CopilotAgent CreateAgentWithMcps(params Mcp[] mcps)

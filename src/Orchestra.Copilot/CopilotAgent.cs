@@ -143,14 +143,22 @@ public partial class CopilotAgent : IAgent
 
 			LogSessionCreating(client.DiagnosticHash, _model, _mcps.Length, Environment.CurrentManagedThreadId);
 			var sw = System.Diagnostics.Stopwatch.StartNew();
-			CopilotSession session;
+			ICopilotSession session;
 			try
 			{
 				session = await client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
 			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				throw;
+			}
 			catch (Exception ex)
 			{
 				LogSessionCreateFailed(ex, client.DiagnosticHash, sw.ElapsedMilliseconds);
+				await ProbeAfterSdkFailureAsync(
+					faultBroker,
+					failedSessionId: "(session-create)",
+					failureReason: $"CreateSessionAsync failed: {ex.Message}").ConfigureAwait(false);
 				throw;
 			}
 			LogSessionCreated(client.DiagnosticHash, sw.ElapsedMilliseconds);
@@ -175,7 +183,22 @@ public partial class CopilotAgent : IAgent
 				messageOptions.Attachments = BuildAttachments();
 			}
 
-			await session.SendAsync(messageOptions, cancellationToken).ConfigureAwait(false);
+			try
+			{
+				await session.SendAsync(messageOptions, cancellationToken).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				throw;
+			}
+			catch (Exception ex)
+			{
+				await ProbeAfterSdkFailureAsync(
+					faultBroker,
+					failedSessionId: session.SessionId,
+					failureReason: $"SendAsync failed: {ex.Message}").ConfigureAwait(false);
+				throw;
+			}
 
 			using var registration = cancellationToken.Register(() =>
 			{
@@ -195,17 +218,10 @@ public partial class CopilotAgent : IAgent
 				// instead of hanging until their per-step timeout. We always re-throw the
 				// original exception for THIS session — the broker's job is to defend its
 				// siblings, not change our own outcome.
-				try
-				{
-					_ = await faultBroker.ProbeAndMaybeFaultSiblingsAsync(
-						failedSessionId: session.SessionId,
-						failureReason: sessionEx.Message,
-						cancellationToken: CancellationToken.None).ConfigureAwait(false);
-				}
-				catch (Exception probeEx)
-				{
-					LogFaultBrokerProbeThrew(probeEx, session.SessionId);
-				}
+				await ProbeAfterSdkFailureAsync(
+					faultBroker,
+					failedSessionId: session.SessionId,
+					failureReason: sessionEx.Message).ConfigureAwait(false);
 				throw;
 			}
 
@@ -236,6 +252,27 @@ public partial class CopilotAgent : IAgent
 				await lease.DisposeAsync().ConfigureAwait(false);
 			}
 			writer.TryComplete();
+		}
+	}
+
+	private async Task ProbeAfterSdkFailureAsync(
+		ISessionFaultBroker? faultBroker,
+		string failedSessionId,
+		string failureReason)
+	{
+		if (faultBroker is null)
+			return;
+
+		try
+		{
+			_ = await faultBroker.ProbeAndMaybeFaultSiblingsAsync(
+				failedSessionId,
+				failureReason,
+				CancellationToken.None).ConfigureAwait(false);
+		}
+		catch (Exception probeEx)
+		{
+			LogFaultBrokerProbeThrew(probeEx, failedSessionId);
 		}
 	}
 

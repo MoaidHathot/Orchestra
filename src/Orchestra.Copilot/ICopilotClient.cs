@@ -9,8 +9,16 @@ internal interface ICopilotClient : IAsyncDisposable
 	Task StartAsync(CancellationToken cancellationToken);
 	Task StopAsync();
 	Task PingAsync(string message, CancellationToken cancellationToken);
-	Task<CopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken);
+	Task<ICopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken);
 	Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken);
+}
+
+internal interface ICopilotSession : IAsyncDisposable
+{
+	string SessionId { get; }
+	IDisposable On(SessionEventHandler handler);
+	Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken);
+	Task AbortAsync(CancellationToken cancellationToken = default);
 }
 
 internal sealed class CopilotSdkClientAdapter : ICopilotClient
@@ -34,8 +42,11 @@ internal sealed class CopilotSdkClientAdapter : ICopilotClient
 		_ = await _client.PingAsync(message, cancellationToken).ConfigureAwait(false);
 	}
 
-	public Task<CopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
-		=> _client.CreateSessionAsync(config, cancellationToken);
+	public async Task<ICopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken)
+	{
+		var session = await _client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
+		return new CopilotSdkSessionAdapter(session);
+	}
 
 	public async Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
 	{
@@ -45,6 +56,22 @@ internal sealed class CopilotSdkClientAdapter : ICopilotClient
 
 	public ValueTask DisposeAsync()
 		=> _ownsClient ? _client.DisposeAsync() : ValueTask.CompletedTask;
+}
+
+internal sealed class CopilotSdkSessionAdapter : ICopilotSession
+{
+	private readonly CopilotSession _session;
+
+	public CopilotSdkSessionAdapter(CopilotSession session)
+	{
+		_session = session;
+	}
+
+	public string SessionId => _session.SessionId;
+	public IDisposable On(SessionEventHandler handler) => _session.On(handler);
+	public Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken) => _session.SendAsync(options, cancellationToken);
+	public Task AbortAsync(CancellationToken cancellationToken = default) => _session.AbortAsync(cancellationToken);
+	public ValueTask DisposeAsync() => _session.DisposeAsync();
 }
 
 internal interface ICopilotClientFactory

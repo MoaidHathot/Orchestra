@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json",
+  "name": "remote-schema-reference-json",
+  "description": "Demonstrates referencing the orchestration schema from GitHub for editor validation outside the Orchestra repository.",
+  "version": "1.0.0",
+  "steps": [
+    {
+      "name": "summarize-schema-source",
+      "type": "Transform",
+      "dependsOn": [],
+      "template": "This orchestration uses the public GitHub schema URL for editor validation."
+    }
+  ]
+}

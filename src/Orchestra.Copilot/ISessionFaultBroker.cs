@@ -50,11 +50,12 @@ internal interface ISessionFaultBroker
 	/// <summary>
 	/// Called by a session when it observes a failure. The broker probes the underlying
 	/// client and, if unhealthy, faults all other registered sessions on this client.
-	/// Returns true if the client appears healthy (treat as a per-session failure);
+	/// Returns true if the CLI transport responded (do not fault siblings);
 	/// returns false if the client is unhealthy and siblings have been faulted.
 	///
-	/// Probe is performed at most once per broker lifetime — subsequent calls return
-	/// the cached decision so cascading failures don't re-probe.
+	/// Unhealthy decisions latch for the broker lifetime. Healthy probe results are
+	/// not cached because they only prove the CLI transport responded at that moment,
+	/// not that later sessions or upstream model calls will work.
 	/// </summary>
 	Task<bool> ProbeAndMaybeFaultSiblingsAsync(
 		string failedSessionId,
@@ -73,9 +74,6 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 	private readonly Func<CancellationToken, Task<ProbeResult>> _probe;
 	private readonly ILogger<SessionFaultBroker> _logger;
 	private readonly int _scopeId;
-	private int _probeCompleted; // 0 = not yet, 1 = done
-	private bool _clientHealthyDecision;
-	private string? _probeDetails;
 	private readonly SemaphoreSlim _probeLock = new(1, 1);
 
 	// Latch state — set ONCE when probe declares the client unhealthy. One-way (false → true).
@@ -111,20 +109,20 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 		string failureReason,
 		CancellationToken cancellationToken)
 	{
-		// Fast path: probe already ran, return cached decision.
-		if (Volatile.Read(ref _probeCompleted) == 1)
+		// Fast path: unhealthy is a one-way latch for this client.
+		if (IsClientUnhealthy)
 		{
-			LogProbeCachedDecision(_scopeId, failedSessionId, _clientHealthyDecision);
-			return _clientHealthyDecision;
+			LogProbeCachedUnhealthy(_scopeId, failedSessionId);
+			return false;
 		}
 
 		await _probeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			if (Volatile.Read(ref _probeCompleted) == 1)
+			if (IsClientUnhealthy)
 			{
-				LogProbeCachedDecision(_scopeId, failedSessionId, _clientHealthyDecision);
-				return _clientHealthyDecision;
+				LogProbeCachedUnhealthy(_scopeId, failedSessionId);
+				return false;
 			}
 
 			LogProbeStarting(_scopeId, failedSessionId, failureReason, _registry.Count);
@@ -140,17 +138,17 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 				probeResult = new ProbeResult(false, $"probe threw: {ex.GetType().Name}: {ex.Message}");
 			}
 
-			_clientHealthyDecision = probeResult.Healthy;
-			_probeDetails = probeResult.Details;
-			Volatile.Write(ref _probeCompleted, 1);
-
 			if (probeResult.Healthy)
 			{
 				LogProbeHealthy(_scopeId, failedSessionId, sw.ElapsedMilliseconds, probeResult.Details ?? "(no details)");
 				return true;
 			}
 
-			LogProbeUnhealthy(_scopeId, failedSessionId, sw.ElapsedMilliseconds, probeResult.Details ?? "(no details)", _registry.Count - 1);
+			var siblings = _registry
+				.Where(kv => kv.Key != failedSessionId)
+				.ToArray();
+
+			LogProbeUnhealthy(_scopeId, failedSessionId, sw.ElapsedMilliseconds, probeResult.Details ?? "(no details)", siblings.Length);
 
 			// Latch unhealthy state so subsequent session attempts on this client fail fast
 			// instead of issuing JSON-RPC calls we already know will fail.
@@ -160,10 +158,6 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 			_isClientUnhealthy = true;
 
 			// Fault all other registered sessions.
-			var siblings = _registry
-				.Where(kv => kv.Key != failedSessionId)
-				.ToArray();
-
 			foreach (var (siblingId, callback) in siblings)
 			{
 				try
@@ -236,7 +230,7 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 	private partial void LogProbeStarting(int scopeId, string sessionId, string failureReason, int inFlightCount);
 
 	[LoggerMessage(EventId = 203, Level = LogLevel.Information,
-		Message = "FaultBroker#{ScopeId}: CLI healthy after session '{SessionId}' failure (probeMs={ProbeMs}, details={Details}). Treating as per-session failure.")]
+		Message = "FaultBroker#{ScopeId}: CLI transport responded after session '{SessionId}' failure (probeMs={ProbeMs}, details={Details}). Not faulting sibling sessions.")]
 	private partial void LogProbeHealthy(int scopeId, string sessionId, long probeMs, string details);
 
 	[LoggerMessage(EventId = 204, Level = LogLevel.Error,
@@ -252,8 +246,8 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 	private partial void LogSiblingFaultCallbackFailed(Exception ex, int scopeId, string siblingId);
 
 	[LoggerMessage(EventId = 207, Level = LogLevel.Debug,
-		Message = "FaultBroker#{ScopeId}: probe already ran for session '{SessionId}', returning cached decision (healthy={Healthy})")]
-	private partial void LogProbeCachedDecision(int scopeId, string sessionId, bool healthy);
+		Message = "FaultBroker#{ScopeId}: client already latched unhealthy; skipping probe for session '{SessionId}'")]
+	private partial void LogProbeCachedUnhealthy(int scopeId, string sessionId);
 
 	#endregion
 }

@@ -87,7 +87,7 @@ public class SessionFaultBrokerTests
 		{
 			Interlocked.Increment(ref probeCount);
 			// Hold the first probe open so the other two failures pile up against the lock
-			// and exercise the cached-decision fast path on release.
+			// and exercise the unhealthy latch fast path on release.
 			await probeGate.Task.ConfigureAwait(false);
 			return new ProbeResult(false, "unhealthy");
 		});
@@ -110,13 +110,48 @@ public class SessionFaultBrokerTests
 
 		// Assert
 		results.Should().AllSatisfy(r => r.Should().BeFalse());
-		probeCount.Should().Be(1, "the broker probes at most once per lifetime");
+		probeCount.Should().Be(1, "the first unhealthy probe latches the client for this broker");
 
 		// Only s1 (the first failure) drives the sibling-fault loop — it faults s2 and s3.
-		// s2/s3 arriving later get the cached decision and do NOT re-fault anyone.
+		// s2/s3 arriving later see the unhealthy latch and do NOT re-fault anyone.
 		s1Count.Should().Be(0, "originator of the probe is not faulted");
 		s2Count.Should().Be(1, "sibling faulted exactly once by the originating failure");
 		s3Count.Should().Be(1, "sibling faulted exactly once by the originating failure");
+	}
+
+	[Fact]
+	public async Task HealthyProbe_DoesNotCacheAcrossLaterFailures()
+	{
+		// Arrange — a healthy ping only proves the CLI transport responded at that moment.
+		// A later session failure must probe again so a newly-broken client can be latched.
+		var probeCount = 0;
+		var broker = CreateBroker(_ =>
+		{
+			var count = Interlocked.Increment(ref probeCount);
+			return Task.FromResult(count == 1
+				? new ProbeResult(true, "first ping ok")
+				: new ProbeResult(false, "second ping failed"));
+		});
+
+		Exception? siblingFault = null;
+		using var _first = broker.RegisterSession("first-failed", _ => { });
+		using var _second = broker.RegisterSession("second-failed", _ => { });
+		using var _sibling = broker.RegisterSession("sibling", ex => siblingFault = ex);
+
+		// Act
+		var firstHealthy = await broker.ProbeAndMaybeFaultSiblingsAsync(
+			"first-failed", "transient model failure", CancellationToken.None);
+		var secondHealthy = await broker.ProbeAndMaybeFaultSiblingsAsync(
+			"second-failed", "later transport failure", CancellationToken.None);
+
+		// Assert
+		firstHealthy.Should().BeTrue();
+		secondHealthy.Should().BeFalse();
+		probeCount.Should().Be(2, "healthy probe results must not be cached forever");
+		broker.IsClientUnhealthy.Should().BeTrue();
+		broker.UnhealthyReason.Should().Be("second ping failed");
+		broker.UnhealthyTriggeringSessionId.Should().Be("second-failed");
+		siblingFault.Should().BeOfType<CopilotClientUnhealthyException>();
 	}
 
 	[Fact]
@@ -242,7 +277,7 @@ public class SessionFaultBrokerTests
 		await broker.ProbeAndMaybeFaultSiblingsAsync("first-session", "first failure", CancellationToken.None);
 		await broker.ProbeAndMaybeFaultSiblingsAsync("second-session", "second failure", CancellationToken.None);
 
-		// Latch retains the FIRST triggering context — probe runs at most once.
+		// Latch retains the FIRST triggering context — unhealthy decisions are one-way.
 		broker.IsClientUnhealthy.Should().BeTrue();
 		broker.UnhealthyReason.Should().Be("first probe details");
 		broker.UnhealthyTriggeringSessionId.Should().Be("first-session");
