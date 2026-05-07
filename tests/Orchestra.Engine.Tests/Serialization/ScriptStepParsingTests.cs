@@ -150,6 +150,31 @@ public class ScriptStepParsingTests
 	}
 
 	[Fact]
+	public void Parse_WithRelativeWorkingDirectoryAndBaseDirectory_ResolvesPath()
+	{
+		// Arrange
+		var baseDir = Path.Combine(Path.GetTempPath(), "orchestra-script-base");
+		var json = JsonSerializer.Deserialize<JsonElement>("""
+			{
+				"name": "run-script",
+				"type": "Script",
+				"shell": "pwsh",
+				"script": "Write-Output 'hello'",
+				"workingDirectory": "./scripts"
+			}
+			""");
+		var parser = new ScriptStepTypeParser();
+		var context = new StepParseContext(BaseDirectory: baseDir);
+
+		// Act
+		var step = parser.Parse(json, context) as ScriptOrchestrationStep;
+
+		// Assert
+		step.Should().NotBeNull();
+		step!.WorkingDirectory.Should().Be(Path.GetFullPath(Path.Combine(baseDir, "scripts")));
+	}
+
+	[Fact]
 	public void Parse_MissingShell_ThrowsJsonException()
 	{
 		// Arrange

@@ -40,6 +40,10 @@ public sealed class ScriptStepTypeParser : IStepTypeParser
 			}
 		}
 
+		var workingDirectory = root.TryGetProperty("workingDirectory", out var wd)
+			? ResolvePath(wd.GetString()!, context)
+			: null;
+
 		return new ScriptOrchestrationStep
 		{
 			Name = root.GetProperty("name").GetString()!,
@@ -54,9 +58,7 @@ public sealed class ScriptStepTypeParser : IStepTypeParser
 			Arguments = root.TryGetProperty("arguments", out var args)
 				? args.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
-			WorkingDirectory = root.TryGetProperty("workingDirectory", out var wd)
-				? wd.GetString()
-				: null,
+			WorkingDirectory = workingDirectory,
 			Environment = root.TryGetProperty("environment", out var env)
 				? env.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!)
 				: [],
@@ -75,5 +77,10 @@ public sealed class ScriptStepTypeParser : IStepTypeParser
 				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
 		};
+	}
+
+	private static string ResolvePath(string path, StepParseContext context)
+	{
+		return PromptStepTypeParser.ResolvePathRelativeToBaseDirectory(path, context);
 	}
 }

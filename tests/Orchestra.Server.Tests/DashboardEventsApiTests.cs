@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Orchestra.Host.Api;
 using Orchestra.Host.Profiles;
 using Xunit;
@@ -87,6 +88,28 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 		using var doc = JsonDocument.Parse(frame.Data);
 		doc.RootElement.GetProperty("trigger").GetString().Should().Be("schedule");
 		doc.RootElement.GetProperty("activatedOrchestrationIds").GetArrayLength().Should().Be(2);
+	}
+
+	[Fact]
+	public async Task Events_Endpoint_Completes_When_ApplicationStopping_Fires()
+	{
+		await using var factory = new ServerWebApplicationFactory();
+		using var client = factory.CreateClient();
+		var lifetime = factory.Services.GetRequiredService<IHostApplicationLifetime>();
+
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+		using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events");
+		using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+		using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+		using var reader = new StreamReader(stream);
+
+		var connected = await ReadSseFrameAsync(reader, cts.Token);
+		connected.Type.Should().Be("connected");
+
+		lifetime.StopApplication();
+
+		var line = await reader.ReadLineAsync(cts.Token);
+		line.Should().BeNull("the dashboard SSE stream should end as soon as host shutdown starts");
 	}
 
 	[Fact]

@@ -7,6 +7,7 @@ import {
   getMatchingProfiles,
   orchestrationMatchesProfileFilter,
   orchestrationMatchesSearch,
+  activeOrchestrationMatchesSearch,
 } from './utils';
 import type { Profile, ProfileFilter } from './types';
 
@@ -344,5 +345,78 @@ describe('orchestrationMatchesSearch', () => {
     const withStringSteps = { name: 'Test', steps: ['step-one', 'step-two'] };
     expect(orchestrationMatchesSearch(withStringSteps, 'step-one')).toBe(true);
     expect(orchestrationMatchesSearch(withStringSteps, 'step-three')).toBe(false);
+  });
+
+  it('trims whitespace from the query', () => {
+    expect(orchestrationMatchesSearch(orch, '  email  ')).toBe(true);
+  });
+
+  it('matches trigger config type', () => {
+    expect(orchestrationMatchesSearch({ name: 'Test', trigger: { type: 'Webhook' } }, 'webhook')).toBe(true);
+  });
+
+  it('matches MCPs, models, skill directories, and subagents', () => {
+    const searchable = {
+      name: 'Research flow',
+      mcps: [{ name: 'filesystem' }],
+      models: ['claude-opus-4.6'],
+      steps: [{
+        name: 'review',
+        mcps: ['github'],
+        skillDirectories: ['P:/skills/review'],
+        subagents: [{ name: 'code-reviewer', displayName: 'Code Reviewer', description: 'Finds regressions' }],
+      }],
+    };
+
+    expect(orchestrationMatchesSearch(searchable, 'filesystem')).toBe(true);
+    expect(orchestrationMatchesSearch(searchable, 'opus')).toBe(true);
+    expect(orchestrationMatchesSearch(searchable, 'github')).toBe(true);
+    expect(orchestrationMatchesSearch(searchable, 'skills/review')).toBe(true);
+    expect(orchestrationMatchesSearch(searchable, 'regressions')).toBe(true);
+  });
+});
+
+// ── activeOrchestrationMatchesSearch ────────────────────────────────────────
+
+describe('activeOrchestrationMatchesSearch', () => {
+  const execution = {
+    orchestrationName: 'Nightly Report',
+    executionId: 'exec-1234567890',
+    status: 'Running',
+    triggeredBy: 'Scheduler',
+    currentStep: 'summarize-results',
+    webhookUrl: '/hooks/nightly-report',
+  };
+
+  const orchestration = {
+    name: 'Nightly Report',
+    description: 'Builds a report for finance',
+    tags: ['finance'],
+    steps: [{ name: 'fetch-records' }],
+  };
+
+  it('returns true when query is empty', () => {
+    expect(activeOrchestrationMatchesSearch(execution, orchestration, '')).toBe(true);
+  });
+
+  it('matches orchestration definition fields', () => {
+    expect(activeOrchestrationMatchesSearch(execution, orchestration, 'finance')).toBe(true);
+    expect(activeOrchestrationMatchesSearch(execution, orchestration, 'fetch-records')).toBe(true);
+  });
+
+  it('matches runtime execution fields', () => {
+    expect(activeOrchestrationMatchesSearch(execution, orchestration, 'exec-1234')).toBe(true);
+    expect(activeOrchestrationMatchesSearch(execution, orchestration, 'summarize')).toBe(true);
+    expect(activeOrchestrationMatchesSearch(execution, orchestration, 'scheduler')).toBe(true);
+    expect(activeOrchestrationMatchesSearch(execution, orchestration, 'hooks/nightly')).toBe(true);
+  });
+
+  it('falls back to execution fields when orchestration is unavailable', () => {
+    expect(activeOrchestrationMatchesSearch(execution, undefined, 'nightly')).toBe(true);
+    expect(activeOrchestrationMatchesSearch(execution, undefined, 'finance')).toBe(false);
+  });
+
+  it('returns false when nothing matches', () => {
+    expect(activeOrchestrationMatchesSearch(execution, orchestration, 'nonexistent')).toBe(false);
   });
 });

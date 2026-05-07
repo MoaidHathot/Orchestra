@@ -21,6 +21,13 @@ public sealed class ChildLaunchRequest
 	public string? OrchestrationPath { get; init; }
 
 	/// <summary>
+	/// Optional original source path for <see cref="OrchestrationPath"/>. When set, relative
+	/// file references inside the orchestration are resolved from this path's directory while
+	/// the orchestration content is still read from <see cref="OrchestrationPath"/>.
+	/// </summary>
+	public string? OrchestrationSourcePath { get; init; }
+
+	/// <summary>
 	/// Optional parameters for the child orchestration. Values are validated against
 	/// the child's declared <c>inputs</c> by the engine.
 	/// </summary>

@@ -331,7 +331,8 @@ public static class OrchestrationsApi
 						null,
 						TriggerSource.Json,
 						entry.Id,
-						entry.Orchestration);
+						entry.Orchestration,
+						entry.SourcePath);
 				}
 				}
 				catch (Exception ex)
@@ -362,7 +363,8 @@ public static class OrchestrationsApi
 					null,
 					TriggerSource.Json,
 					entry.Id,
-					entry.Orchestration);
+					entry.Orchestration,
+					entry.SourcePath);
 			}
 
 				return Results.Json(new
@@ -408,7 +410,8 @@ public static class OrchestrationsApi
 					null,
 					TriggerSource.Json,
 					entry.Id,
-					entry.Orchestration);
+					entry.Orchestration,
+					entry.SourcePath);
 			}
 			else
 			{

@@ -57,6 +57,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	/// Whether the manager has been initialized with global MCPs.
 	/// </summary>
 	private bool _initialized;
+	private bool _stopped;
 
 	public McpManager(ILogger<McpManager> logger, McpServerOptions? mcpServerOptions = null)
 	{
@@ -398,13 +399,18 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		return port;
 	}
 
-	public async ValueTask DisposeAsync()
+	public async Task StopAsync(CancellationToken cancellationToken = default)
 	{
+		if (_stopped)
+			return;
+
+		_stopped = true;
+
 		if (_proxyApp is not null)
 		{
 			try
 			{
-				await _proxyApp.StopAsync();
+				await _proxyApp.StopAsync(cancellationToken);
 				await _proxyApp.DisposeAsync();
 			}
 			catch (Exception ex)
@@ -414,10 +420,16 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 			finally
 			{
 				_proxyApp = null;
+				_proxyBaseUrl = null;
 			}
 		}
 
 		LogProxyStopped();
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+		await StopAsync();
 	}
 
 	#region Source-Generated Logging

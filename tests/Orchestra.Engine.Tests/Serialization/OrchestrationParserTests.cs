@@ -1131,6 +1131,74 @@ public class OrchestrationParserTests
 	}
 
 	[Fact]
+	public void ParseOrchestrationFile_WithRelativePaths_ResolvesPromptAssetsAndLocalMcpFromFileDirectory()
+	{
+		// Arrange
+		var tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-relative-paths-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempDir);
+		try
+		{
+			var promptsDir = Path.Combine(tempDir, "prompts");
+			Directory.CreateDirectory(promptsDir);
+			File.WriteAllText(Path.Combine(promptsDir, "system.md"), "System from relative prompt");
+
+			var path = Path.Combine(tempDir, "orchestration.json");
+			File.WriteAllText(path, """
+				{
+					"name": "relative-paths",
+					"description": "Relative path parsing test",
+					"variables": {
+						"skillsDir": "./skills",
+						"assetsDir": "./assets",
+						"mcpDir": "./mcp"
+					},
+					"mcps": [
+						{
+							"name": "local-tools",
+							"type": "local",
+							"command": "node",
+							"arguments": ["server.js"],
+							"workingDirectory": "{{vars.mcpDir}}"
+						}
+					],
+					"steps": [
+						{
+							"name": "step1",
+							"type": "Prompt",
+							"systemPromptFile": "./prompts/system.md",
+							"userPrompt": "Test",
+							"model": "claude-opus-4.5",
+							"skillDirectories": ["{{vars.skillsDir}}"],
+							"attachments": [
+								{ "type": "file", "path": "{{vars.assetsDir}}/image.png" }
+							]
+						}
+					]
+				}
+				""");
+
+			// Act
+			var orchestration = OrchestrationParser.ParseOrchestrationFile(path, []);
+
+			// Assert
+			var step = orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>().Subject;
+			step.SystemPrompt.Should().Be("System from relative prompt");
+			step.SkillDirectories.Should().Contain(Path.GetFullPath(Path.Combine(tempDir, "skills")));
+
+			var attachment = step.Attachments.Single().Should().BeOfType<FileImageAttachment>().Subject;
+			attachment.Path.Should().Be(Path.GetFullPath(Path.Combine(tempDir, "assets", "image.png")));
+
+			var mcp = orchestration.Mcps.Single().Should().BeOfType<LocalMcp>().Subject;
+			mcp.WorkingDirectory.Should().Be(Path.GetFullPath(Path.Combine(tempDir, "mcp")));
+		}
+		finally
+		{
+			if (Directory.Exists(tempDir))
+				Directory.Delete(tempDir, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void ParseOrchestration_WithEmptySkillDirectories_ParsesAsEmptyArray()
 	{
 		// Arrange

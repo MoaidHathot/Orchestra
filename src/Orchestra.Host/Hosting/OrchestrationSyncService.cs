@@ -350,7 +350,8 @@ public partial class OrchestrationSyncService : BackgroundService
 			null,
 			TriggerSource.Json,
 			entry.Id,
-			entry.Orchestration);
+			entry.Orchestration,
+			entry.SourcePath);
 
 		// Apply profile active set — disable if not in active set
 		var activeIds = _profileManager.GetEffectiveActiveOrchestrationIds();

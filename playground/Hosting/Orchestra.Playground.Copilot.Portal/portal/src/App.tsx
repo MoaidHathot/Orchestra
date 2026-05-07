@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './App.css';
 import { api } from './api';
 import { Icons } from './icons';
-import { formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch, buildRestoredStepStatusUpdates } from './utils';
+import { activeOrchestrationMatchesSearch, formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch, buildRestoredStepStatusUpdates } from './utils';
 import type { PortalStepStatus } from './utils';
 import type {
   Orchestration,
@@ -48,6 +48,15 @@ interface OrchestrationsResponse {
 interface HistoryResponse {
   runs: HistoryListEntry[];
 }
+
+type ActiveStatusFilter = 'all' | 'running' | 'enabled' | 'disabled';
+
+const ACTIVE_STATUS_FILTERS: { id: ActiveStatusFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'running', label: 'Running' },
+  { id: 'enabled', label: 'Enabled' },
+  { id: 'disabled', label: 'Disabled' },
+];
 
 /** Shape of a step in the detailed execution response from /api/history/:name/:runId */
 interface ExecutionDetailStep {
@@ -167,6 +176,8 @@ function App(): React.JSX.Element {
   const [orchestrations, setOrchestrations] = useState<RuntimeOrchestration[]>([]);
   const [history, setHistory] = useState<HistoryListEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [mainPaneSearchQuery, setMainPaneSearchQuery] = useState('');
+  const [activeStatusFilter, setActiveStatusFilter] = useState<ActiveStatusFilter>('all');
   const [selectedOrchId, setSelectedOrchId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -620,6 +631,47 @@ function App(): React.JSX.Element {
 
     return { running, enabled, disabled };
   }, [orchestrations, activeData, mainPaneProfileFilter, orchMatchesProfileFilter]);
+
+  const orchestrationById = useMemo(() => {
+    return new Map(orchestrations.map(orch => [orch.id, orch]));
+  }, [orchestrations]);
+
+  const searchedOrchestrationView = useMemo(() => {
+    const matchesSearch = (exec: CardExecution) => activeOrchestrationMatchesSearch(
+      exec,
+      orchestrationById.get(exec.orchestrationId),
+      mainPaneSearchQuery,
+    );
+
+    return {
+      running: orchestrationView.running.filter(matchesSearch),
+      enabled: orchestrationView.enabled.filter(matchesSearch),
+      disabled: orchestrationView.disabled.filter(matchesSearch),
+    };
+  }, [orchestrationView, orchestrationById, mainPaneSearchQuery]);
+
+  const activeStatusCounts: Record<ActiveStatusFilter, number> = useMemo(() => ({
+    all: searchedOrchestrationView.running.length + searchedOrchestrationView.enabled.length + searchedOrchestrationView.disabled.length,
+    running: searchedOrchestrationView.running.length,
+    enabled: searchedOrchestrationView.enabled.length,
+    disabled: searchedOrchestrationView.disabled.length,
+  }), [searchedOrchestrationView]);
+
+  const filteredOrchestrationView = useMemo(() => ({
+    running: activeStatusFilter === 'all' || activeStatusFilter === 'running'
+      ? searchedOrchestrationView.running
+      : [],
+    enabled: activeStatusFilter === 'all' || activeStatusFilter === 'enabled'
+      ? searchedOrchestrationView.enabled
+      : [],
+    disabled: activeStatusFilter === 'all' || activeStatusFilter === 'disabled'
+      ? searchedOrchestrationView.disabled
+      : [],
+  }), [activeStatusFilter, searchedOrchestrationView]);
+
+  const hasActiveOrchestrationFilters = mainPaneSearchQuery.trim().length > 0
+    || mainPaneProfileFilter.length > 0
+    || activeStatusFilter !== 'all';
 
   // ── Filtered / enabled orchestrations ─────────────────────────────────────
 
@@ -2154,7 +2206,7 @@ function App(): React.JSX.Element {
       {/* Main Pane */}
       <main id="main-content" className="main-pane">
         <div className="main-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div className="main-heading">
             <button
               className="mobile-menu-btn"
               onClick={() => setSidebarOpen(prev => !prev)}
@@ -2164,51 +2216,95 @@ function App(): React.JSX.Element {
             </button>
             <span className="main-title">Active Orchestrations</span>
           </div>
-          <div className="main-actions">
-            {profiles.length > 0 && (
-              <ProfileSelector
-                profiles={profiles}
-                selectedProfileIds={mainPaneProfileFilter}
-                onToggleProfile={toggleMainPaneProfileFilter}
-                onClearFilter={() => setMainPaneProfileFilter([])}
-                onProfileChanged={loadProfiles}
-                onManageProfiles={() => setProfilesModal(true)}
+          <div className="main-search-area" role="search" aria-label="Search active orchestrations">
+            <div className="search-box main-search-box">
+              <span className="search-icon" aria-hidden="true"><Icons.Search /></span>
+              <input
+                type="text"
+                placeholder="Search active orchestrations, tags, steps..."
+                value={mainPaneSearchQuery}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setMainPaneSearchQuery(e.target.value)}
+                aria-label="Search active orchestrations"
               />
-            )}
-            <span className="text-muted" style={{ fontSize: '12px', marginRight: '8px' }}>
-              {orchestrationView.running.length} running, {orchestrationView.enabled.length} enabled
-              {orchestrationView.disabled.length > 0 && (
-                <>, {orchestrationView.disabled.length} disabled</>
+              {mainPaneSearchQuery && (
+                <button
+                  className="search-clear-btn"
+                  onClick={() => setMainPaneSearchQuery('')}
+                  aria-label="Clear active orchestrations search"
+                  title="Clear search"
+                  type="button"
+                >
+                  <Icons.X />
+                </button>
               )}
-            </span>
+              {profiles.length > 0 && (
+                <ProfileSelector
+                  profiles={profiles}
+                  selectedProfileIds={mainPaneProfileFilter}
+                  onToggleProfile={toggleMainPaneProfileFilter}
+                  onClearFilter={() => setMainPaneProfileFilter([])}
+                  onProfileChanged={loadProfiles}
+                  onManageProfiles={() => setProfilesModal(true)}
+                />
+              )}
+              <select
+                className="active-status-select"
+                value={activeStatusFilter}
+                onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setActiveStatusFilter(e.target.value as ActiveStatusFilter)}
+                aria-label="Filter active orchestration status"
+              >
+                {ACTIVE_STATUS_FILTERS.map(filter => (
+                  <option key={filter.id} value={filter.id}>
+                    {filter.label} ({activeStatusCounts[filter.id]})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="main-actions">
             <button className="btn" onClick={loadData}>Refresh</button>
           </div>
         </div>
 
         <div className="cards-container" style={{ overflow: 'auto' }}>
-          {orchestrationView.running.length === 0
-            && orchestrationView.enabled.length === 0
-            && orchestrationView.disabled.length === 0 ? (
+          {filteredOrchestrationView.running.length === 0
+            && filteredOrchestrationView.enabled.length === 0
+            && filteredOrchestrationView.disabled.length === 0 ? (
             <div className="empty-state">
               <div className="empty-icon"><Icons.Activity /></div>
-              <div className="empty-title">No Orchestrations</div>
+              <div className="empty-title">
+                {hasActiveOrchestrationFilters ? 'No Matching Orchestrations' : 'No Orchestrations'}
+              </div>
               <div className="empty-text">
-                {mainPaneProfileFilter.length > 0
-                  ? 'No orchestrations match the selected profile filter.'
+                {hasActiveOrchestrationFilters
+                  ? 'No orchestrations match the current search or filters.'
                   : 'Add orchestrations to get started.'}
               </div>
+              {hasActiveOrchestrationFilters && (
+                <button
+                  className="btn btn-sm"
+                  style={{ marginTop: '12px' }}
+                  onClick={() => {
+                    setMainPaneSearchQuery('');
+                    setMainPaneProfileFilter([]);
+                    setActiveStatusFilter('all');
+                  }}
+                >
+                  Clear filters
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               {/* Running Section */}
-              {orchestrationView.running.length > 0 && (
+              {filteredOrchestrationView.running.length > 0 && (
                 <div>
                   <div className="cards-section-header">
                     <span className="cards-section-dot cards-section-dot-running"></span>
-                    Running ({orchestrationView.running.length})
+                    Running ({filteredOrchestrationView.running.length})
                   </div>
                   <div className="cards-grid">
-                    {orchestrationView.running.map(exec => (
+                    {filteredOrchestrationView.running.map(exec => (
                       <ActiveOrchestrationCard
                         key={exec.executionId || exec.orchestrationId}
                         execution={exec}
@@ -2236,14 +2332,14 @@ function App(): React.JSX.Element {
               )}
 
               {/* Enabled Section */}
-              {orchestrationView.enabled.length > 0 && (
+              {filteredOrchestrationView.enabled.length > 0 && (
                 <div>
                   <div className="cards-section-header">
                     <span className="cards-section-dot cards-section-dot-pending"></span>
-                    Enabled ({orchestrationView.enabled.length})
+                    Enabled ({filteredOrchestrationView.enabled.length})
                   </div>
                   <div className="cards-grid">
-                    {orchestrationView.enabled.map(exec => (
+                    {filteredOrchestrationView.enabled.map(exec => (
                       <ActiveOrchestrationCard
                         key={exec.orchestrationId}
                         execution={exec}
@@ -2270,14 +2366,14 @@ function App(): React.JSX.Element {
               )}
 
               {/* Disabled Section */}
-              {orchestrationView.disabled.length > 0 && (
+              {filteredOrchestrationView.disabled.length > 0 && (
                 <div>
                   <div className="cards-section-header">
                     <span className="cards-section-dot cards-section-dot-disabled"></span>
-                    Disabled ({orchestrationView.disabled.length})
+                    Disabled ({filteredOrchestrationView.disabled.length})
                   </div>
                   <div className="cards-grid">
-                    {orchestrationView.disabled.map(exec => (
+                    {filteredOrchestrationView.disabled.map(exec => (
                       <ActiveOrchestrationCard
                         key={exec.orchestrationId}
                         execution={exec}

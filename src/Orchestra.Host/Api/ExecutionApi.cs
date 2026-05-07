@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
@@ -35,6 +36,7 @@ public static partial class ExecutionApi
 			FileSystemRunStore runStore,
 			IOrchestrationReporterFactory reporterFactory,
 			ILoggerFactory loggerFactory,
+			IHostApplicationLifetime lifetime,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 			DashboardEventBroadcaster dashboardBroadcaster) =>
 		{
@@ -177,7 +179,10 @@ public static partial class ExecutionApi
 
 			// Subscribe and stream SSE events to this client
 			var (replay, futureEvents) = reporter.Subscribe();
-			var sseToken = httpContext.RequestAborted;
+			using var sseCts = CancellationTokenSource.CreateLinkedTokenSource(
+				httpContext.RequestAborted,
+				lifetime.ApplicationStopping);
+			var sseToken = sseCts.Token;
 
 			// Replay any events that happened before we subscribed
 			foreach (var evt in replay)
@@ -256,7 +261,11 @@ public static partial class ExecutionApi
 			httpContext.Response.Headers.Connection = "keep-alive";
 			await httpContext.Response.Body.FlushAsync();
 
-			var cancellationToken = httpContext.RequestAborted;
+			var lifetime = httpContext.RequestServices.GetRequiredService<IHostApplicationLifetime>();
+			using var sseCts = CancellationTokenSource.CreateLinkedTokenSource(
+				httpContext.RequestAborted,
+				lifetime.ApplicationStopping);
+			var cancellationToken = sseCts.Token;
 
 			// Send current execution info
 			await httpContext.Response.WriteAsync($"event: execution-info\n");

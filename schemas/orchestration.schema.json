@@ -314,9 +314,9 @@
             "$ref": "#/$defs/subagent"
           }
         },
-        "skillDirectories": {
-          "type": "array",
-          "description": "Paths to directories containing Agent Skills (SKILL.md files). Skills provide specialized knowledge and workflows the agent can discover and activate on demand.",
+		"skillDirectories": {
+		  "type": "array",
+		  "description": "Paths to directories containing Agent Skills (SKILL.md files). Relative paths are resolved from the orchestration file directory. Skills provide specialized knowledge and workflows the agent can discover and activate on demand.",
           "items": {
             "type": "string"
           }
@@ -362,9 +362,9 @@
             }
           }
         },
-        "attachments": {
-          "type": "array",
-          "description": "Image attachments to send with the prompt. Supports file paths and base64 blob data.",
+		"attachments": {
+		  "type": "array",
+		  "description": "Image attachments to send with the prompt. Supports file paths and base64 blob data.",
           "items": {
             "type": "object",
             "properties": {
@@ -372,11 +372,11 @@
                 "type": "string",
                 "enum": ["file", "blob"],
                 "description": "Attachment type: 'file' for disk paths, 'blob' for inline base64 data."
-              },
-              "path": {
-                "type": "string",
-                "description": "Absolute path to the image file (for type: file). Supports template expressions."
-              },
+		      },
+		      "path": {
+		        "type": "string",
+		        "description": "Path to the image file (for type: file). Relative paths are resolved from the orchestration file directory. Supports template expressions."
+		      },
               "data": {
                 "type": "string",
                 "description": "Base64-encoded image data (for type: blob). Supports template expressions."
@@ -534,10 +534,10 @@
           },
           "default": []
         },
-        "workingDirectory": {
-          "type": "string",
-          "description": "Working directory for the command. Supports template expressions."
-        },
+		"workingDirectory": {
+		  "type": "string",
+		  "description": "Working directory for the command. Relative paths are resolved from the orchestration file directory. Supports template expressions."
+		},
         "environment": {
           "type": "object",
           "description": "Environment variables to set for the command process.",
@@ -591,10 +591,10 @@
           },
           "default": []
         },
-        "workingDirectory": {
-          "type": "string",
-          "description": "Working directory for the script process. Supports template expressions."
-        },
+		"workingDirectory": {
+		  "type": "string",
+		  "description": "Working directory for the script process. Relative paths are resolved from the orchestration file directory. Supports template expressions."
+		},
         "environment": {
           "type": "object",
           "description": "Environment variables to set for the script process.",
@@ -998,10 +998,10 @@
                   "type": "string"
                 }
               },
-              "workingDirectory": {
-                "type": "string",
-                "description": "Working directory for the MCP server process."
-              },
+		      "workingDirectory": {
+		        "type": "string",
+		        "description": "Working directory for the MCP server process. Relative paths are resolved from the orchestration file directory."
+		      },
               "timeoutSeconds": {
                 "type": "number",
                 "description": "Optional per-server tool-call timeout in seconds. Overrides the Copilot SDK's ~3-minute default MCP request timeout for this server. Use larger values for MCP servers that host long-running tools. For Orchestra's data-plane MCP (endpoints ending with /mcp/data), the host applies a 30-minute default automatically when this field is omitted; set this field to override that default per orchestration.",

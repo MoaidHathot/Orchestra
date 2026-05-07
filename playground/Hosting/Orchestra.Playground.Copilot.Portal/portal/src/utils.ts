@@ -131,24 +131,102 @@ export function orchestrationMatchesProfileFilter(
   return selectedProfiles.some(sp => profileFilterMatchesOrchestration(sp.filter, orchId, orchTags));
 }
 
+type SearchableMcp = string | { name?: string };
+type SearchableSubagent = { name?: string; displayName?: string; description?: string };
+type SearchableStep = string | {
+  name?: string;
+  model?: string;
+  mcps?: SearchableMcp[];
+  skillDirectories?: string[];
+  subagents?: SearchableSubagent[];
+};
+type SearchableOrchestration = {
+  name?: string;
+  description?: string;
+  triggerType?: string;
+  trigger?: { type?: string };
+  tags?: string[];
+  steps?: SearchableStep[];
+  mcps?: SearchableMcp[];
+  models?: string[];
+};
+type SearchableActiveExecution = {
+  executionId?: string;
+  orchestrationName?: string;
+  status?: string;
+  triggeredBy?: string;
+  currentStep?: string;
+  webhookUrl?: string;
+};
+
+function normalizeSearchQuery(query: string): string {
+  return query.trim().toLowerCase();
+}
+
+function fieldMatchesSearch(value: string | undefined, query: string): boolean {
+  return !!value?.toLowerCase().includes(query);
+}
+
+function mcpMatchesSearch(mcp: SearchableMcp, query: string): boolean {
+  const name = typeof mcp === 'string' ? mcp : mcp.name;
+  return fieldMatchesSearch(name, query);
+}
+
 /**
  * Checks whether an orchestration matches a text search query.
- * Searches name, description, trigger type, tags, and step names.
+ * Searches name, description, trigger type, tags, step names, MCPs, models, skills, and subagents.
  */
 export function orchestrationMatchesSearch(
-  orch: { name?: string; description?: string; triggerType?: string; tags?: string[]; steps?: ({ name?: string } | string)[] },
+  orch: SearchableOrchestration,
   query: string,
 ): boolean {
-  if (!query) return true;
-  const q = query.toLowerCase();
+  const q = normalizeSearchQuery(query);
+  if (!q) return true;
+
   return !!(
-    orch.name?.toLowerCase().includes(q) ||
-    orch.description?.toLowerCase().includes(q) ||
-    orch.triggerType?.toLowerCase().includes(q) ||
-    orch.tags?.some(tag => tag.toLowerCase().includes(q)) ||
+    fieldMatchesSearch(orch.name, q) ||
+    fieldMatchesSearch(orch.description, q) ||
+    fieldMatchesSearch(orch.triggerType, q) ||
+    fieldMatchesSearch(orch.trigger?.type, q) ||
+    orch.tags?.some(tag => fieldMatchesSearch(tag, q)) ||
+    orch.mcps?.some(mcp => mcpMatchesSearch(mcp, q)) ||
+    orch.models?.some(model => fieldMatchesSearch(model, q)) ||
     orch.steps?.some(step => {
-      const stepName = typeof step === 'string' ? step : step.name;
-      return stepName?.toLowerCase().includes(q);
+      if (typeof step === 'string') return fieldMatchesSearch(step, q);
+      return !!(
+        fieldMatchesSearch(step.name, q) ||
+        fieldMatchesSearch(step.model, q) ||
+        step.mcps?.some(mcp => mcpMatchesSearch(mcp, q)) ||
+        step.skillDirectories?.some(dir => fieldMatchesSearch(dir, q)) ||
+        step.subagents?.some(subagent =>
+          fieldMatchesSearch(subagent.name, q) ||
+          fieldMatchesSearch(subagent.displayName, q) ||
+          fieldMatchesSearch(subagent.description, q)
+        )
+      );
     })
+  );
+}
+
+/**
+ * Checks whether an Active Orchestrations card matches a text search query.
+ * Includes runtime-only fields such as execution ID and current step.
+ */
+export function activeOrchestrationMatchesSearch(
+  execution: SearchableActiveExecution,
+  orchestration: SearchableOrchestration | undefined,
+  query: string,
+): boolean {
+  const q = normalizeSearchQuery(query);
+  if (!q) return true;
+
+  return !!(
+    (orchestration && orchestrationMatchesSearch(orchestration, q)) ||
+    fieldMatchesSearch(execution.orchestrationName, q) ||
+    fieldMatchesSearch(execution.executionId, q) ||
+    fieldMatchesSearch(execution.status, q) ||
+    fieldMatchesSearch(execution.triggeredBy, q) ||
+    fieldMatchesSearch(execution.currentStep, q) ||
+    fieldMatchesSearch(execution.webhookUrl, q)
   );
 }

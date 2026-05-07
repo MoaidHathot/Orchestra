@@ -45,7 +45,7 @@ public static class OrchestrationParser
 			{
 				new OrchestrationStepConverter(parserRegistry, context),
 				new AgentPoolConfigConverter(),
-				new McpConverter(),
+				new McpConverter(context),
 				new TriggerConfigConverter(),
 				new HookEventTypeJsonConverter(),
 				new HookStepSelectionJsonConverter(),
@@ -88,19 +88,16 @@ public static class OrchestrationParser
 
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps)
 	{
-		var json = ReadAsJson(path);
-		var variables = ExtractVariables(json);
-		var context = new StepParseContext(
-			BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)),
-			Variables: variables);
-		var options = CreateOptions(s_defaultParserRegistry, context);
+		return ParseOrchestrationFileCore(path, sourcePath: null, availableMcps, s_defaultParserRegistry);
+	}
 
-		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
-			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
-
-		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, Path.GetDirectoryName(Path.GetFullPath(path)));
-		ResolveStepMcps(orchestration, availableMcps);
-		return orchestration;
+	/// <summary>
+	/// Parses an orchestration file while resolving relative references from an original source path.
+	/// Use this when <paramref name="path"/> points at a managed copy of an orchestration file.
+	/// </summary>
+	public static Orchestration ParseOrchestrationFile(string path, string? sourcePath, Mcp[] availableMcps)
+	{
+		return ParseOrchestrationFileCore(path, sourcePath, availableMcps, s_defaultParserRegistry);
 	}
 
 	/// <summary>
@@ -108,17 +105,34 @@ public static class OrchestrationParser
 	/// </summary>
 	public static Orchestration ParseOrchestrationFile(string path, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
 	{
+		return ParseOrchestrationFileCore(path, sourcePath: null, availableMcps, parserRegistry);
+	}
+
+	/// <summary>
+	/// Parses an orchestration file using a custom step type parser registry while resolving
+	/// relative references from an original source path.
+	/// </summary>
+	public static Orchestration ParseOrchestrationFile(string path, string? sourcePath, Mcp[] availableMcps, StepTypeParserRegistry parserRegistry)
+	{
+		return ParseOrchestrationFileCore(path, sourcePath, availableMcps, parserRegistry);
+	}
+
+	private static Orchestration ParseOrchestrationFileCore(
+		string path,
+		string? sourcePath,
+		Mcp[] availableMcps,
+		StepTypeParserRegistry parserRegistry)
+	{
 		var json = ReadAsJson(path);
 		var variables = ExtractVariables(json);
-		var context = new StepParseContext(
-			BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)),
-			Variables: variables);
+		var baseDirectory = GetBaseDirectory(path, sourcePath);
+		var context = new StepParseContext(BaseDirectory: baseDirectory, Variables: variables);
 		var options = CreateOptions(parserRegistry, context);
 
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
-		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, Path.GetDirectoryName(Path.GetFullPath(path)));
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory);
 		ResolveStepMcps(orchestration, availableMcps);
 		return orchestration;
 	}
@@ -144,14 +158,24 @@ public static class OrchestrationParser
 	/// </summary>
 	public static Orchestration ParseOrchestrationFileMetadataOnly(string path)
 	{
+		return ParseOrchestrationFileMetadataOnly(path, sourcePath: null);
+	}
+
+	/// <summary>
+	/// Parses orchestration structure from file without resolving MCP references while resolving
+	/// relative references from an original source path.
+	/// </summary>
+	public static Orchestration ParseOrchestrationFileMetadataOnly(string path, string? sourcePath)
+	{
 		var json = ReadAsJson(path);
-		var context = new StepParseContext(BaseDirectory: Path.GetDirectoryName(Path.GetFullPath(path)), MetadataOnly: true);
+		var baseDirectory = GetBaseDirectory(path, sourcePath);
+		var context = new StepParseContext(BaseDirectory: baseDirectory, MetadataOnly: true);
 		var options = CreateOptions(s_defaultParserRegistry, context);
 
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
-		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, Path.GetDirectoryName(Path.GetFullPath(path)));
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory);
 		return orchestration;
 	}
 
@@ -276,6 +300,13 @@ public static class OrchestrationParser
 
 	private sealed class McpConverter : JsonConverter<Mcp>
 	{
+		private readonly StepParseContext _context;
+
+		public McpConverter(StepParseContext context)
+		{
+			_context = context;
+		}
+
 		public override Mcp Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
 		{
 			using var doc = JsonDocument.ParseValue(ref reader);
@@ -307,7 +338,7 @@ public static class OrchestrationParser
 					Arguments = root.TryGetProperty("arguments", out var args)
 						? args.EnumerateArray().Select(e => e.GetString()!).ToArray()
 						: [],
-					WorkingDirectory = root.TryGetProperty("workingDirectory", out var wd) ? wd.GetString() : null,
+					WorkingDirectory = ResolveWorkingDirectory(root, _context),
 					Timeout = timeout,
 				},
 				McpType.Remote => new RemoteMcp
@@ -327,6 +358,13 @@ public static class OrchestrationParser
 		public override void Write(Utf8JsonWriter writer, Mcp value, JsonSerializerOptions options)
 		{
 			JsonSerializer.Serialize(writer, value, value.GetType(), options);
+		}
+
+		private static string? ResolveWorkingDirectory(JsonElement root, StepParseContext context)
+		{
+			return root.TryGetProperty("workingDirectory", out var wd) && wd.GetString() is { } workingDirectory
+				? PromptStepTypeParser.ResolvePathRelativeToBaseDirectory(workingDirectory, context)
+				: null;
 		}
 	}
 
@@ -476,6 +514,12 @@ public static class OrchestrationParser
 	{
 		var content = File.ReadAllText(path);
 		return IsYamlFile(path) ? ConvertYamlToJson(content) : content;
+	}
+
+	private static string? GetBaseDirectory(string path, string? sourcePath)
+	{
+		var basePath = string.IsNullOrWhiteSpace(sourcePath) ? path : sourcePath;
+		return Path.GetDirectoryName(Path.GetFullPath(basePath));
 	}
 
 	/// <summary>

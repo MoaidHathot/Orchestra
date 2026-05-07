@@ -114,6 +114,30 @@ public class CommandStepParsingTests
 	}
 
 	[Fact]
+	public void Parse_WithRelativeWorkingDirectoryAndBaseDirectory_ResolvesPath()
+	{
+		// Arrange
+		var baseDir = Path.Combine(Path.GetTempPath(), "orchestra-command-base");
+		var json = JsonSerializer.Deserialize<JsonElement>("""
+			{
+				"name": "run-cmd",
+				"type": "Command",
+				"command": "dotnet",
+				"workingDirectory": "./src"
+			}
+			""");
+		var parser = new CommandStepTypeParser();
+		var context = new StepParseContext(BaseDirectory: baseDir);
+
+		// Act
+		var step = parser.Parse(json, context) as CommandOrchestrationStep;
+
+		// Assert
+		step.Should().NotBeNull();
+		step!.WorkingDirectory.Should().Be(Path.GetFullPath(Path.Combine(baseDir, "src")));
+	}
+
+	[Fact]
 	public void Parse_WithEnvironment_DeserializesEnvironmentVariables()
 	{
 		// Arrange

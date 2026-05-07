@@ -66,7 +66,7 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 				? DeserializeSystemPromptSections(sps)
 				: null,
 			Attachments = root.TryGetProperty("attachments", out var attachments)
-				? attachments.EnumerateArray().Select(DeserializeAttachment).ToArray()
+				? attachments.EnumerateArray().Select(e => DeserializeAttachment(e, context)).ToArray()
 				: [],
 		};
 	}
@@ -156,7 +156,7 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 	/// Replaces <c>{{vars.name}}</c> placeholders in a path string using the provided variables.
 	/// Returns the original string unchanged if no variables are available or no expressions match.
 	/// </summary>
-	private static string ResolveVarsInPath(string path, IReadOnlyDictionary<string, string>? variables)
+	internal static string ResolveVarsInPath(string path, IReadOnlyDictionary<string, string>? variables)
 	{
 		if (variables is null || !path.Contains("{{vars.", StringComparison.OrdinalIgnoreCase))
 			return path;
@@ -183,6 +183,21 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 	private static partial System.Text.RegularExpressions.Regex VarsPattern();
 
 	/// <summary>
+	/// Expands vars expressions and resolves non-templated relative paths from the orchestration base directory.
+	/// Other template expressions are left for runtime resolution.
+	/// </summary>
+	internal static string ResolvePathRelativeToBaseDirectory(string path, StepParseContext context)
+	{
+		var expanded = ResolveVarsInPath(path, context.Variables);
+		if (expanded.Contains("{{") || Path.IsPathRooted(expanded))
+			return expanded;
+
+		return context.BaseDirectory is not null
+			? Path.GetFullPath(Path.Combine(context.BaseDirectory, expanded))
+			: expanded;
+	}
+
+	/// <summary>
 	/// Resolves a skill directory path relative to the orchestration file's base directory.
 	/// Paths containing template expressions (e.g., <c>{{param.dir}}</c>) are left as-is
 	/// since they will be resolved at execution time by <see cref="TemplateResolver"/>.
@@ -190,18 +205,7 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 	/// </summary>
 	private static string ResolveSkillDirectoryPath(string path, StepParseContext context)
 	{
-		// Expand {{vars.*}} expressions first (same as prompt file paths)
-		var expanded = ResolveVarsInPath(path, context.Variables);
-
-		// If the path still contains template expressions, leave it for runtime resolution
-		if (expanded.Contains("{{"))
-			return expanded;
-
-		// Resolve relative paths against the orchestration file's directory
-		if (context.BaseDirectory is not null && !Path.IsPathRooted(expanded))
-			return Path.GetFullPath(Path.Combine(context.BaseDirectory, expanded));
-
-		return expanded;
+		return ResolvePathRelativeToBaseDirectory(path, context);
 	}
 
 	private static Subagent DeserializeSubagent(JsonElement element, string stepName, StepParseContext context)
@@ -259,14 +263,14 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 		return dict;
 	}
 
-	private static ImageAttachment DeserializeAttachment(JsonElement element)
+	private static ImageAttachment DeserializeAttachment(JsonElement element, StepParseContext context)
 	{
 		var type = element.GetProperty("type").GetString()!;
 		return type.ToLowerInvariant() switch
 		{
 			"file" => new FileImageAttachment
 			{
-				Path = element.GetProperty("path").GetString()!,
+				Path = ResolveAttachmentPath(element.GetProperty("path").GetString()!, context),
 				DisplayName = element.TryGetProperty("displayName", out var dn) ? dn.GetString() : null,
 			},
 			"blob" => new BlobImageAttachment
@@ -277,6 +281,11 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			},
 			_ => throw new JsonException($"Unknown attachment type: '{type}'. Expected 'file' or 'blob'."),
 		};
+	}
+
+	private static string ResolveAttachmentPath(string path, StepParseContext context)
+	{
+		return ResolvePathRelativeToBaseDirectory(path, context);
 	}
 
 	internal static RetryPolicy DeserializeRetryPolicy(JsonElement element)

@@ -186,10 +186,11 @@ public static class ServiceCollectionExtensions
 				sp.GetRequiredService<ILogger<ServiceManager>>(),
 				sp.GetRequiredService<ProcessTracker>()));
 
-		// ServiceManager shutdown: registered FIRST so it stops LAST (IHostedService
-		// instances are stopped in reverse registration order). This ensures managed
-		// services outlive MCPs, triggers, and other hosted services that may depend on them.
-		services.AddHostedService<ServiceManagerShutdownService>();
+		// External infrastructure shutdown: registered FIRST so it stops LAST
+		// (IHostedService instances are stopped in reverse registration order). This
+		// lets triggers and other hosted services shut down before MCPs and managed
+		// services are stopped together.
+		services.AddHostedService<InfrastructureShutdownService>();
 
 		// ── Profiles & Tags ──
 
@@ -365,27 +366,26 @@ public static class ServiceProviderExtensions
 		// long-running hooks instead of waiting for the full timeout to expire.
 		var shutdownToken = lifetime?.ApplicationStopping ?? CancellationToken.None;
 
-		// Initialize ServiceManager: load orchestra.services.json and start services/hooks.
-		// This runs BEFORE McpManager because services may be dependencies that MCPs need.
+		// Load external service and MCP configuration up front, then initialize both
+		// managers together. There is no explicit dependency model between these files,
+		// so startup should not serialize service readiness and MCP proxy startup.
+		ServiceEntry[] serviceEntries = [];
+		Engine.Mcp[] globalMcps = [];
+
 		if (!skipExternalServices)
 		{
 			var serviceConfigPath = OrchestraConfigLoader.ResolveServiceConfigPath();
-			ServiceEntry[] serviceEntries = [];
 			if (serviceConfigPath is not null)
 			{
 				serviceEntries = OrchestraConfigLoader.LoadServiceConfig(serviceConfigPath, initLogger) ?? [];
 				initLogger.LogInformation("Loaded {Count} service(s) from {Path}", serviceEntries.Length, serviceConfigPath);
 			}
-			await serviceManager.InitializeAsync(serviceEntries, shutdownToken);
 		}
 		else
 		{
 			initLogger.LogInformation("Skipping external service config (orchestra.services.json) in test environment");
-			await serviceManager.InitializeAsync([]);
 		}
 
-		// Initialize McpManager: load global orchestra.mcp.json and start proxy
-		Engine.Mcp[] globalMcps = [];
 		if (!skipExternalServices)
 		{
 			var globalMcpPath = OrchestraConfigLoader.ResolveGlobalMcpPath();
@@ -398,7 +398,13 @@ public static class ServiceProviderExtensions
 		{
 			initLogger.LogInformation("Skipping external MCP config (orchestra.mcp.json) in test environment");
 		}
-		await mcpManager.InitializeAsync(globalMcps);
+
+		await OrchestraInfrastructureLifecycle.InitializeAsync(
+			serviceManager,
+			mcpManager,
+			serviceEntries,
+			globalMcps,
+			shutdownToken);
 
 		// Make global MCPs available to the registry for parsing orchestration files
 		registry.GlobalMcps = globalMcps;
@@ -469,13 +475,14 @@ public static class ServiceProviderExtensions
 					? TriggerManager.CloneTriggerConfigWithEnabled(trigger, effectiveEnabled)
 					: trigger;
 
-			triggerManager.RegisterTrigger(
+				triggerManager.RegisterTrigger(
 					entry.Path,
 					effectiveTrigger,
 					null,
 					TriggerSource.Json,
 					entry.Id,
-					entry.Orchestration);
+					entry.Orchestration,
+					entry.SourcePath);
 			}
 		}
 

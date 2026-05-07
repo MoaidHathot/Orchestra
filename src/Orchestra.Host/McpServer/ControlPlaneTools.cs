@@ -94,7 +94,8 @@ public sealed class ControlPlaneTools
 			{
 				triggerManager.RegisterTrigger(
 					entry.Path, entry.Orchestration.Trigger,
-					null, TriggerSource.Json, entry.Id, entry.Orchestration);
+					null, TriggerSource.Json, entry.Id, entry.Orchestration,
+					entry.SourcePath);
 			}
 
 			return Json(new

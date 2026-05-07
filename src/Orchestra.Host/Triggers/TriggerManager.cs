@@ -135,7 +135,8 @@ public partial class TriggerManager : BackgroundService
 		Dictionary<string, string>? parameters = null,
 		TriggerSource source = TriggerSource.User,
 		string? orchestrationId = null,
-		Orchestration? preloadedOrchestration = null)
+		Orchestration? preloadedOrchestration = null,
+		string? orchestrationSourcePath = null)
 	{
 		// Use pre-loaded metadata if available, otherwise try to parse from file
 		string? orchName = preloadedOrchestration?.Name;
@@ -146,7 +147,7 @@ public partial class TriggerManager : BackgroundService
 		{
 			try
 			{
-				var orch = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath);
+				var orch = OrchestrationParser.ParseOrchestrationFileMetadataOnly(orchestrationPath, orchestrationSourcePath);
 				orchName = orch.Name;
 				orchDesc = orch.Description;
 				orchVersion = orch.Version;
@@ -161,6 +162,7 @@ public partial class TriggerManager : BackgroundService
 		{
 			Id = id,
 			OrchestrationPath = orchestrationPath,
+			OrchestrationSourcePath = orchestrationSourcePath,
 			Config = config,
 			Parameters = parameters,
 			Source = source,
@@ -366,6 +368,7 @@ public partial class TriggerManager : BackgroundService
 		{
 			Id = orchestrationId ?? GenerateTriggerId(orchestrationPath, orchName),
 			OrchestrationPath = orchestrationPath,
+			OrchestrationSourcePath = null,
 			Config = triggerConfig,
 			Parameters = parameters,
 			Source = TriggerSource.User,
@@ -395,7 +398,7 @@ public partial class TriggerManager : BackgroundService
 		Orchestration resumedOrchestration;
 		try
 		{
-			resumedOrchestration = OrchestrationParser.ParseOrchestrationFile(entry.Path, GlobalMcps);
+			resumedOrchestration = OrchestrationParser.ParseOrchestrationFile(entry.Path, entry.SourcePath, GlobalMcps);
 		}
 		catch
 		{
@@ -588,7 +591,12 @@ public partial class TriggerManager : BackgroundService
 
 				if (config != null)
 				{
-					RegisterTrigger(data.OrchestrationPath, config, data.Parameters, TriggerSource.User);
+					RegisterTrigger(
+						data.OrchestrationPath,
+						config,
+						data.Parameters,
+						TriggerSource.User,
+						orchestrationSourcePath: data.OrchestrationSourcePath);
 				}
 			}
 			catch (Exception ex)
@@ -885,6 +893,7 @@ public partial class TriggerManager : BackgroundService
 		{
 			OrchestrationId = reg.Id,
 			OrchestrationPath = reg.OrchestrationPath, // Triggers carry their own path (independent of registry)
+			OrchestrationSourcePath = reg.OrchestrationSourcePath,
 			Parameters = parameters,
 			Mode = ChildLaunchMode.Sync,
 			TriggeredBy = reg.Config.Type.ToString().ToLowerInvariant(),
@@ -1055,6 +1064,7 @@ public partial class TriggerManager : BackgroundService
 			var data = new PersistedTrigger
 			{
 				OrchestrationPath = reg.OrchestrationPath,
+				OrchestrationSourcePath = reg.OrchestrationSourcePath,
 				Trigger = reg.Config,
 				Parameters = reg.Parameters,
 			};
@@ -1308,6 +1318,7 @@ public partial class TriggerManager : BackgroundService
 	private class PersistedTrigger
 	{
 		public required string OrchestrationPath { get; init; }
+		public string? OrchestrationSourcePath { get; init; }
 		public required TriggerConfig Trigger { get; init; }
 		public Dictionary<string, string>? Parameters { get; init; }
 	}

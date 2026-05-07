@@ -102,8 +102,13 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 
 	private ChildOrchestrationLauncher CreateLauncher(AgentBuilder? agentBuilder = null)
 	{
+		return CreateLauncher(_registry, agentBuilder);
+	}
+
+	private ChildOrchestrationLauncher CreateLauncher(OrchestrationRegistry registry, AgentBuilder? agentBuilder = null)
+	{
 		return new ChildOrchestrationLauncher(
-			_registry,
+			registry,
 			agentBuilder: agentBuilder ?? new TestAgentBuilder(),
 			_scheduler,
 			NullLoggerFactory.Instance,
@@ -410,6 +415,109 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 	}
 
 	[Fact]
+	public async Task LaunchAsync_RegistryLookup_ParsesManagedCopyRelativePathsFromSourcePath()
+	{
+		// Arrange
+		var sourceDir = Path.Combine(_tempDir, "source-relative");
+		var promptsDir = Path.Combine(sourceDir, "prompts");
+		var dataPath = Path.Combine(_tempDir, "managed-relative-data");
+		Directory.CreateDirectory(promptsDir);
+		File.WriteAllText(Path.Combine(promptsDir, "system.md"), "System prompt from source path");
+
+		var sourcePath = Path.Combine(sourceDir, "managed-relative.json");
+		File.WriteAllText(sourcePath, """
+		{
+			"name": "managed-relative",
+			"description": "Managed copy relative path test",
+			"version": "1.0.0",
+			"steps": [
+				{
+					"name": "prompt",
+					"type": "Prompt",
+					"systemPromptFile": "./prompts/system.md",
+					"userPrompt": "Test prompt",
+					"model": "claude-opus-4.5"
+				}
+			]
+		}
+		""");
+
+		var registry = new OrchestrationRegistry(
+			persistPath: Path.Combine(dataPath, "registered-orchestrations.json"),
+			logger: NullLogger<OrchestrationRegistry>.Instance,
+			dataPath: dataPath);
+		var entry = registry.Register(sourcePath, persist: false);
+		entry.Path.Should().NotBe(sourcePath);
+
+		var agentBuilder = new CapturingAgentBuilder();
+		var launcher = CreateLauncher(registry, agentBuilder);
+
+		// Act
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+		});
+
+		var result = await handle.Completion;
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		agentBuilder.CapturedSystemPrompt.Should().Be("System prompt from source path");
+	}
+
+	[Fact]
+	public async Task LaunchAsync_PathOverride_UsesSourcePathForRelativePromptFiles()
+	{
+		// Arrange
+		var sourceDir = Path.Combine(_tempDir, "override-source");
+		var promptsDir = Path.Combine(sourceDir, "prompts");
+		var cacheDir = Path.Combine(_tempDir, "override-cache");
+		Directory.CreateDirectory(promptsDir);
+		Directory.CreateDirectory(cacheDir);
+		File.WriteAllText(Path.Combine(promptsDir, "system.md"), "Override source prompt");
+
+		var cachedPath = Path.Combine(cacheDir, "cached.json");
+		var sourcePath = Path.Combine(sourceDir, "source.json");
+		var json = """
+		{
+			"name": "override-source-relative",
+			"description": "Path override relative path test",
+			"version": "1.0.0",
+			"steps": [
+				{
+					"name": "prompt",
+					"type": "Prompt",
+					"systemPromptFile": "./prompts/system.md",
+					"userPrompt": "Test prompt",
+					"model": "claude-opus-4.5"
+				}
+			]
+		}
+		""";
+		File.WriteAllText(sourcePath, json);
+		File.WriteAllText(cachedPath, json);
+
+		var agentBuilder = new CapturingAgentBuilder();
+		var launcher = CreateLauncher(agentBuilder);
+
+		// Act
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = "path-override-relative",
+			OrchestrationPath = cachedPath,
+			OrchestrationSourcePath = sourcePath,
+			Mode = ChildLaunchMode.Sync,
+		});
+
+		var result = await handle.Completion;
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		agentBuilder.CapturedSystemPrompt.Should().Be("Override source prompt");
+	}
+
+	[Fact]
 	public async Task LaunchAsync_AsyncMode_ReturnsHandleBeforeCompletion()
 	{
 		var entry = RegisterTransformOrchestration("async-mode", template: "v");
@@ -677,6 +785,35 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 
 		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 			=> throw new NotImplementedException("TestAgentBuilder should not be invoked for Transform-only orchestrations.");
+	}
+
+	private sealed class CapturingAgentBuilder : AgentBuilder
+	{
+		public string? CapturedSystemPrompt { get; private set; }
+
+		public override Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)
+			=> Task.FromResult<IAgent>(new StaticAgent());
+
+		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
+		{
+			CapturedSystemPrompt = config.SystemPrompt;
+			return BuildAgentAsync(cancellationToken);
+		}
+
+		private sealed class StaticAgent : IAgent
+		{
+			public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
+			{
+				var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+				var resultTask = Task.Run(async () =>
+				{
+					await Task.Yield();
+					channel.Writer.Complete();
+					return new AgentResult { Content = "captured" };
+				}, cancellationToken);
+				return new AgentTask(channel.Reader, resultTask);
+			}
+		}
 	}
 
 	/// <summary>

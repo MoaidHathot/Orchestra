@@ -10,6 +10,12 @@ public class TriggerRegistration
 {
 	public required string Id { get; init; }
 	public required string OrchestrationPath { get; init; }
+
+	/// <summary>
+	/// Original source path for <see cref="OrchestrationPath"/> when it points at a managed copy.
+	/// Relative references are resolved from this path's directory.
+	/// </summary>
+	public string? OrchestrationSourcePath { get; init; }
 	public required TriggerConfig Config { get; set; }
 	public Dictionary<string, string>? Parameters { get; set; }
 

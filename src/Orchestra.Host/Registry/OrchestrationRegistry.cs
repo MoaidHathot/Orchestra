@@ -76,7 +76,7 @@ public partial class OrchestrationRegistry
 			rawJson = OrchestrationParser.IsYamlFile(path) ? OrchestrationParser.ConvertYamlToJson(rawContent) : rawContent;
 		}
 
-		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, GlobalMcps);
+		var orchestration = preloaded ?? OrchestrationParser.ParseOrchestrationFile(path, originalSourcePath, GlobalMcps);
 
 		// Use the original source path for ID generation when available.
 		// This ensures a stable ID when the orchestration file has been copied
@@ -511,7 +511,8 @@ public class PersistedOrchestration
 	/// <summary>
 	/// The original source path used when first registering the orchestration.
 	/// When a managed copy is created, this tracks the original file path so the
-	/// same deterministic ID can be regenerated on reload.
+	/// same deterministic ID can be regenerated on reload and relative file references
+	/// can continue to resolve from the original orchestration directory.
 	/// </summary>
 	public string? SourcePath { get; set; }
 }
@@ -525,7 +526,8 @@ public class OrchestrationEntry
 	public required string Path { get; init; }
 
 	/// <summary>
-	/// The original source path that was used to generate the entry's ID.
+	/// The original source path that was used to generate the entry's ID and resolve
+	/// relative file references.
 	/// Null when the entry was not copied to a managed location (Path == source).
 	/// </summary>
 	public string? SourcePath { get; init; }

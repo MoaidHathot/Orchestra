@@ -12,6 +12,10 @@ public sealed class CommandStepTypeParser : IStepTypeParser
 
 	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
 	{
+		var workingDirectory = root.TryGetProperty("workingDirectory", out var wd)
+			? ResolvePath(wd.GetString()!, context)
+			: null;
+
 		return new CommandOrchestrationStep
 		{
 			Name = root.GetProperty("name").GetString()!,
@@ -24,9 +28,7 @@ public sealed class CommandStepTypeParser : IStepTypeParser
 			Arguments = root.TryGetProperty("arguments", out var args)
 				? args.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
-			WorkingDirectory = root.TryGetProperty("workingDirectory", out var wd)
-				? wd.GetString()
-				: null,
+			WorkingDirectory = workingDirectory,
 			Environment = root.TryGetProperty("environment", out var env)
 				? env.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!)
 				: [],
@@ -45,5 +47,10 @@ public sealed class CommandStepTypeParser : IStepTypeParser
 				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],
 		};
+	}
+
+	private static string ResolvePath(string path, StepParseContext context)
+	{
+		return PromptStepTypeParser.ResolvePathRelativeToBaseDirectory(path, context);
 	}
 }

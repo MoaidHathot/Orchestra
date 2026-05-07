@@ -96,10 +96,12 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		// declared name — YAML authors and external MCP callers typically use the name,
 		// while internal callers (TriggerManager) use the ID.
 		string entryPath;
+		string? entrySourcePath;
 		string resolvedOrchestrationId; // The actual registry ID — what UIs/APIs index by.
 		if (!string.IsNullOrWhiteSpace(request.OrchestrationPath))
 		{
 			entryPath = request.OrchestrationPath;
+			entrySourcePath = request.OrchestrationSourcePath;
 			resolvedOrchestrationId = request.OrchestrationId;
 		}
 		else
@@ -112,6 +114,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 					$"Orchestration '{request.OrchestrationId}' not found.");
 			}
 			entryPath = entry.Path;
+			entrySourcePath = entry.SourcePath;
 			resolvedOrchestrationId = entry.Id;
 		}
 
@@ -119,7 +122,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		Orchestration orchestration;
 		try
 		{
-			orchestration = OrchestrationParser.ParseOrchestrationFile(entryPath, _registry.GlobalMcps);
+			orchestration = OrchestrationParser.ParseOrchestrationFile(entryPath, entrySourcePath, _registry.GlobalMcps);
 		}
 		catch (Exception ex)
 		{

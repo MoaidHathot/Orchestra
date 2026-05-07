@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Orchestra.Engine;
 using Orchestra.Host.Registry;
 using Xunit;
 
@@ -246,6 +247,56 @@ public class ManagedOrchestrationLocationTests : IDisposable
 		var entry = registry2.GetAll().First();
 		entry.Orchestration.Name.Should().Be("reload-test");
 		File.Exists(entry.Path).Should().BeTrue();
+	}
+
+	[Fact]
+	public void LoadFromDisk_WithManagedCopy_ResolvesRelativePromptAndSkillPathsFromSourcePath()
+	{
+		// Arrange
+		var sourceDir = Path.Combine(_orchestrationsDir, "relative-source");
+		var promptsDir = Path.Combine(sourceDir, "prompts");
+		var skillsDir = Path.Combine(sourceDir, "skills");
+		Directory.CreateDirectory(promptsDir);
+		Directory.CreateDirectory(skillsDir);
+		File.WriteAllText(Path.Combine(promptsDir, "system.md"), "Prompt from source directory");
+
+		var sourcePath = Path.Combine(sourceDir, "relative-paths.json");
+		File.WriteAllText(sourcePath, """
+			{
+				"name": "relative-paths",
+				"description": "Test relative paths from managed copy",
+				"variables": {
+					"skillsDir": "./skills"
+				},
+				"steps": [
+					{
+						"name": "prompt",
+						"type": "Prompt",
+						"systemPromptFile": "./prompts/system.md",
+						"userPrompt": "Test prompt",
+						"model": "claude-opus-4.5",
+						"skillDirectories": ["{{vars.skillsDir}}"]
+					}
+				]
+			}
+			""");
+
+		var registry1 = CreateRegistry();
+		registry1.Register(sourcePath, persist: true);
+
+		// Act
+		var registry2 = CreateRegistry();
+		var loaded = registry2.LoadFromDisk();
+
+		// Assert
+		loaded.Should().Be(1);
+		var entry = registry2.GetAll().Single();
+		entry.Path.Should().NotBe(sourcePath);
+		entry.SourcePath.Should().Be(sourcePath);
+
+		var step = entry.Orchestration.Steps.Single().Should().BeOfType<PromptOrchestrationStep>().Subject;
+		step.SystemPrompt.Should().Be("Prompt from source directory");
+		step.SkillDirectories.Should().Contain(Path.GetFullPath(skillsDir));
 	}
 
 	[Fact]

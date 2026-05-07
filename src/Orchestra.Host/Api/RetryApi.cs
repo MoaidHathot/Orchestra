@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
@@ -48,6 +49,7 @@ public static partial class RetryApi
 			EngineToolRegistry engineToolRegistry,
 			McpManager mcpManager,
 			IOrchestrationReporterFactory reporterFactory,
+			IHostApplicationLifetime lifetime,
 			IChildOrchestrationLauncher childLauncher,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
@@ -258,7 +260,10 @@ public static partial class RetryApi
 
 			// Subscribe and stream SSE events to this client
 			var (replay, futureEvents) = reporter.Subscribe();
-			var sseToken = httpContext.RequestAborted;
+			using var sseCts = CancellationTokenSource.CreateLinkedTokenSource(
+				httpContext.RequestAborted,
+				lifetime.ApplicationStopping);
+			var sseToken = sseCts.Token;
 
 			foreach (var evt in replay)
 			{

@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Hosting;
 
 namespace Orchestra.Host.Api;
 
@@ -23,6 +24,7 @@ public static class DashboardEventsApi
 	{
 		endpoints.MapGet("/api/events", async (
 			HttpContext httpContext,
+			IHostApplicationLifetime lifetime,
 			DashboardEventBroadcaster broadcaster) =>
 		{
 			httpContext.Response.ContentType = "text/event-stream";
@@ -49,7 +51,10 @@ public static class DashboardEventsApi
 			await httpContext.Response.WriteAsync("data: {}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
-			var sseToken = httpContext.RequestAborted;
+			using var sseCts = CancellationTokenSource.CreateLinkedTokenSource(
+				httpContext.RequestAborted,
+				lifetime.ApplicationStopping);
+			var sseToken = sseCts.Token;
 
 			// Background task: periodic heartbeats. Cancelled when the request aborts.
 			using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(sseToken);
