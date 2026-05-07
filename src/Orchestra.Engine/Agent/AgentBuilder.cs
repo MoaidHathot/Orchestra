@@ -168,6 +168,11 @@ public abstract class AgentBuilder
 	/// </summary>
 	public virtual string? GetRunScopedClientDiagnostic() => null;
 
+	/// <summary>
+	/// Gets a snapshot of provider-specific runtime resource usage for status endpoints.
+	/// </summary>
+	public virtual AgentRuntimeStatus? GetRuntimeStatus() => null;
+
 	private sealed class NoOpRunScope : IAsyncDisposable
 	{
 		public static readonly NoOpRunScope Instance = new();

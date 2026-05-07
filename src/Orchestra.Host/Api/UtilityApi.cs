@@ -29,9 +29,11 @@ public static class UtilityApi
 			OrchestrationRegistry registry,
 			TriggerManager triggerManager,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
+			AgentBuilder agentBuilder,
 			OrchestrationHostOptions options) =>
 		{
 			var triggers = triggerManager.GetAllTriggers();
+			var agentRuntime = agentBuilder.GetRuntimeStatus();
 			return Results.Json(new
 			{
 				status = "running",
@@ -39,6 +41,7 @@ public static class UtilityApi
 				orchestrationCount = registry.Count,
 				activeTriggers = triggers.Count(t => t.Config.Enabled),
 				runningExecutions = activeExecutions.Count,
+				agentRuntime,
 				dataPath = options.DataPath
 			}, jsonOptions);
 		});

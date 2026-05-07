@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   formatTime,
+  buildRestoredStepStatusUpdates,
   isIncompleteExecution,
   profileFilterMatchesOrchestration,
   getMatchingProfiles,
@@ -8,6 +9,24 @@ import {
   orchestrationMatchesSearch,
 } from './utils';
 import type { Profile, ProfileFilter } from './types';
+
+// ── buildRestoredStepStatusUpdates ───────────────────────────────────────────
+
+describe('buildRestoredStepStatusUpdates', () => {
+  it('marks restored retry steps as completed_restored', () => {
+    expect(buildRestoredStepStatusUpdates(['fetch', 'summarize'])).toEqual({
+      fetch: 'completed_restored',
+      summarize: 'completed_restored',
+    });
+  });
+
+  it('ignores malformed restored step payloads', () => {
+    expect(buildRestoredStepStatusUpdates(undefined)).toEqual({});
+    expect(buildRestoredStepStatusUpdates(['fetch', '', 123, null])).toEqual({
+      fetch: 'completed_restored',
+    });
+  });
+});
 
 // ── formatTime ───────────────────────────────────────────────────────────────
 

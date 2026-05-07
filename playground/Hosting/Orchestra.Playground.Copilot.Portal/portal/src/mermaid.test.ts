@@ -631,6 +631,24 @@ describe('edge cases', () => {
     await assertMermaidParses(mermaidCode);
   });
 
+  it('renders restored retry steps distinctly from pending steps', async () => {
+    const steps: Step[] = [
+      { name: 'fetch-data', type: 'Prompt', model: 'claude-opus-4.6' },
+      { name: 'rerun-failure', type: 'Prompt', model: 'claude-opus-4.6', dependsOn: ['fetch-data'] },
+    ];
+    const statuses: Record<string, string> = {
+      'fetch-data': 'completed_restored',
+      'rerun-failure': 'running',
+    };
+    const { mermaidCode } = generateExecutionDagCode(steps, statuses);
+
+    expect(mermaidCode).toContain('classDef completedRestored');
+    expect(mermaidCode).toContain('class fetch_data completedRestored');
+    expect(mermaidCode).toContain('\u2713\u21BA');
+
+    await assertMermaidParses(mermaidCode);
+  });
+
   it('decorates step nodes with active sub-agent badge when count > 0', async () => {
     const steps: Step[] = [
       {

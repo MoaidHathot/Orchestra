@@ -315,6 +315,30 @@ public class CopilotAgentBuilderTests
 		await builder.DisposeAsync();
 	}
 
+	[Fact]
+	public async Task GetRuntimeStatus_AggregatesActiveRunScopePools()
+	{
+		var factory = new CopilotClientPoolTests.FakeCopilotClientFactory();
+		var builder = new CopilotAgentBuilder(
+			loggerFactory: null,
+			poolOptions: new CopilotAgentPoolOptions(),
+			clientFactory: factory);
+
+		await using var scope = await builder.CreateRunScopeAsync(new AgentPoolConfig
+		{
+			MinInstances = 2,
+			MaxInstances = 4,
+			MaxSessionsPerInstance = 1,
+			IdleTimeoutSeconds = 0,
+		});
+
+		var status = builder.GetRuntimeStatus();
+		status.Provider.Should().Be("copilot");
+		status.ActivePools.Should().Be(1);
+		status.CliInstances.Should().Be(2);
+		status.ActiveSessions.Should().Be(0);
+	}
+
 	/// <summary>
 	/// Regression test for the AsyncLocal-set-inside-async-method bug.
 	///

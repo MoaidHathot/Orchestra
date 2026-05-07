@@ -571,10 +571,12 @@ export function generateExecutionDagCode(
     pending: [],
     running: [],
     completed: [],
+    completedRestored: [],
     completedEarly: [],
     failed: [],
     cancelled: [],
     skipped: [],
+    noaction: [],
   };
 
   const loopEdges: string[] = [];
@@ -602,6 +604,9 @@ export function generateExecutionDagCode(
         break;
       case 'completed':
         statusIcon = ' \u2713'; // ✓
+        break;
+      case 'completed_restored':
+        statusIcon = ' \u2713\u21BA'; // ✓↺
         break;
       case 'failed':
         statusIcon = ' \u2717'; // ✗
@@ -679,7 +684,11 @@ export function generateExecutionDagCode(
     mermaidCode += buildNodeDeclaration(safeId, label);
 
     // Categorize by status
-    const mappedStatus = status === 'completed_early' ? 'completedEarly' : status;
+    const mappedStatus = status === 'completed_early'
+      ? 'completedEarly'
+      : status === 'completed_restored'
+        ? 'completedRestored'
+        : status;
     const group = statusGroups[mappedStatus] || statusGroups.pending;
     group.push(safeId);
 
@@ -713,6 +722,7 @@ export function generateExecutionDagCode(
   mermaidCode += '\n  classDef pending fill:#21262d,stroke:#484f58,color:#8b949e\n';
   mermaidCode += '  classDef running fill:#0d2847,stroke:#58a6ff,color:#58a6ff\n';
   mermaidCode += '  classDef completed fill:#0d331a,stroke:#3fb950,color:#3fb950\n';
+  mermaidCode += '  classDef completedRestored fill:#10291d,stroke:#3fb950,color:#9be9a8\n';
   mermaidCode += '  classDef failed fill:#3d1418,stroke:#f85149,color:#f85149\n';
   mermaidCode += '  classDef cancelled fill:#3d2e0d,stroke:#d29922,color:#d29922\n';
   mermaidCode += '  classDef skipped fill:#21262d,stroke:#484f58,color:#6e7681\n';

@@ -22,6 +22,8 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 	private readonly List<Worker> _workers = [];
 	private readonly Timer? _idleTimer;
 	private int _nextWorkerId;
+	private int _workerCount;
+	private int _activeSessionCount;
 	private int _disposed;
 	private int _shrinkRunning;
 	private IReadOnlyList<AvailableModelInfo>? _cachedAvailableModels;
@@ -53,6 +55,15 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 	}
 
 	public string Diagnostic => $"pool#{_poolId}:workers={Volatile.Read(ref _nextWorkerId)}";
+
+	public CopilotClientPoolSnapshot GetSnapshot()
+	{
+		return Volatile.Read(ref _disposed) == 1
+			? new CopilotClientPoolSnapshot(0, 0)
+			: new CopilotClientPoolSnapshot(
+				Volatile.Read(ref _workerCount),
+				Volatile.Read(ref _activeSessionCount));
+	}
 
 	public async Task PrewarmAsync(CancellationToken cancellationToken)
 	{
@@ -93,6 +104,7 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 				if (worker is not null)
 				{
 					worker.ActiveSessions++;
+					Interlocked.Increment(ref _activeSessionCount);
 					LogLeaseAcquired(_poolId, worker.Id, worker.ActiveSessions, _workers.Count);
 					return new Lease(this, worker);
 				}
@@ -141,6 +153,7 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 			logger: _loggerFactory.CreateLogger<SessionFaultBroker>());
 		var worker = new Worker(workerId, client, broker);
 		_workers.Add(worker);
+		Volatile.Write(ref _workerCount, _workers.Count);
 		LogWorkerStarted(_poolId, workerId, sw.ElapsedMilliseconds, client.DiagnosticHash, _workers.Count);
 		return worker;
 	}
@@ -199,7 +212,10 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 				return;
 
 			if (worker.ActiveSessions > 0)
+			{
 				worker.ActiveSessions--;
+				Interlocked.Decrement(ref _activeSessionCount);
+			}
 
 			worker.LastUsedAt = DateTimeOffset.UtcNow;
 			LogLeaseReleased(_poolId, worker.Id, worker.ActiveSessions);
@@ -261,6 +277,7 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 				break;
 
 			_workers.Remove(worker);
+			Volatile.Write(ref _workerCount, _workers.Count);
 			LogWorkerStopping(_poolId, worker.Id, worker.FaultBroker.IsClientUnhealthy ? "unhealthy" : "idle", _workers.Count);
 			await StopWorkerAsync(worker).ConfigureAwait(false);
 		}
@@ -303,8 +320,10 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 			foreach (var worker in _workers.ToArray())
 			{
 				_workers.Remove(worker);
+				Volatile.Write(ref _workerCount, _workers.Count);
 				await StopWorkerAsync(worker).ConfigureAwait(false);
 			}
+			Volatile.Write(ref _activeSessionCount, 0);
 		}
 		finally
 		{

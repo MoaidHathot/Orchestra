@@ -10,6 +10,8 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	private readonly ILogger<CopilotAgentBuilder> _logger;
 	private readonly CopilotAgentPoolOptions _poolOptions;
 	private readonly ICopilotClientFactory _clientFactory;
+	private readonly object _activePoolsLock = new();
+	private readonly HashSet<CopilotClientPool> _activePools = [];
 	private static int _scopeCounter;
 
 	/// <summary>
@@ -82,6 +84,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			throw;
 		}
 		holder.Pool = pool;
+		RegisterActivePool(pool);
 		LogRunScopeCreated(scopeId, sw.ElapsedMilliseconds, pool.Diagnostic);
 		LogRunScopeAsyncLocalCheck(scopeId, _runScopedClient.Value?.Pool?.Diagnostic ?? "null", Environment.CurrentManagedThreadId);
 		return new RunScope(this, holder, pool, scopeId);
@@ -96,6 +99,33 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	/// </summary>
 	public override string? GetRunScopedClientDiagnostic()
 		=> _runScopedClient.Value?.Pool?.Diagnostic;
+
+	public override AgentRuntimeStatus GetRuntimeStatus()
+	{
+		CopilotClientPool[] pools;
+		lock (_activePoolsLock)
+		{
+			pools = [.. _activePools];
+		}
+
+		var cliInstances = 0;
+		var activeSessions = 0;
+		foreach (var pool in pools)
+		{
+			try
+			{
+				var snapshot = pool.GetSnapshot();
+				cliInstances += snapshot.CliInstances;
+				activeSessions += snapshot.ActiveSessions;
+			}
+			catch (ObjectDisposedException)
+			{
+				// Scope disposal removes pools from the set; tolerate a racing status poll.
+			}
+		}
+
+		return new AgentRuntimeStatus("copilot", pools.Length, cliInstances, activeSessions);
+	}
 
 	/// <summary>
 	/// Gets the active run-scoped client. Throws if no <see cref="CreateRunScopeAsync"/>
@@ -196,6 +226,22 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		return ValueTask.CompletedTask;
 	}
 
+	private void RegisterActivePool(CopilotClientPool pool)
+	{
+		lock (_activePoolsLock)
+		{
+			_activePools.Add(pool);
+		}
+	}
+
+	private void UnregisterActivePool(CopilotClientPool pool)
+	{
+		lock (_activePoolsLock)
+		{
+			_activePools.Remove(pool);
+		}
+	}
+
 	/// <summary>
 	/// Manages the lifecycle of a per-run CopilotClientPool.
 	/// Disposing the scope stops and disposes all clients owned by the pool.
@@ -226,6 +272,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			var sw = System.Diagnostics.Stopwatch.StartNew();
 			try { await _pool.DisposeAsync().ConfigureAwait(false); }
 			catch (Exception ex) { _builder.LogRunScopeDisposeError(ex, _scopeId); }
+			finally { _builder.UnregisterActivePool(_pool); }
 
 			_builder.LogRunScopeDisposed(_scopeId, sw.ElapsedMilliseconds);
 		}

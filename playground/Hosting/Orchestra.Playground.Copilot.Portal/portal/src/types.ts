@@ -329,6 +329,14 @@ export interface ServerStatus {
   orchestrationCount: number;
   activeTriggers: number;
   runningExecutions: number;
+  agentRuntime?: AgentRuntimeStatus | null;
+}
+
+export interface AgentRuntimeStatus {
+  provider: string;
+  activePools: number;
+  cliInstances: number;
+  activeSessions: number;
 }
 
 export interface OutlookStatus {

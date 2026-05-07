@@ -1092,6 +1092,7 @@ export default function ExecutionModal({
                           const svgHeight = ganttData.length * (barHeight + 8) + 30;
                           const statusColor: Record<string, string> = {
                             completed: '#3fb950',
+                            completed_restored: '#9be9a8',
                             success: '#3fb950',
                             completed_early: '#3fb950',
                             failed: '#f85149',
@@ -1198,7 +1199,9 @@ export default function ExecutionModal({
                             className={`step-status-badge ${selectedStepStatus}`}
                             style={{ marginLeft: '8px' }}
                           >
-                            {selectedStepStatus}
+                            {selectedStepStatus === 'completed_restored'
+                              ? 'completed (previous run)'
+                              : selectedStepStatus}
                           </span>
                         )}
                         {/* Loop Iteration Pill */}

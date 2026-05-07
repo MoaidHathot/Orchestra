@@ -1,5 +1,28 @@
 import type { Profile, ProfileFilter } from './types';
 
+export type PortalStepStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'completed_restored'
+  | 'completed_early'
+  | 'failed'
+  | 'cancelled'
+  | 'skipped'
+  | 'noaction';
+
+export function buildRestoredStepStatusUpdates(stepsRestored: unknown): Record<string, PortalStepStatus> {
+  if (!Array.isArray(stepsRestored)) return {};
+
+  const updates: Record<string, PortalStepStatus> = {};
+  for (const stepName of stepsRestored) {
+    if (typeof stepName === 'string' && stepName.length > 0) {
+      updates[stepName] = 'completed_restored';
+    }
+  }
+  return updates;
+}
+
 export function formatTimeAgo(dateStr: string | null | undefined): string {
   if (!dateStr) return 'Unknown';
   const date = new Date(dateStr);

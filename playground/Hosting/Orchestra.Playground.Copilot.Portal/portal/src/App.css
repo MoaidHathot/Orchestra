@@ -1032,6 +1032,7 @@
     .step-status-badge.pending { background: var(--bg-secondary); color: var(--text-dim); }
     .step-status-badge.running { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
     .step-status-badge.completed { background: rgba(63, 185, 80, 0.2); color: var(--success); }
+    .step-status-badge.completed_restored { background: rgba(63, 185, 80, 0.14); color: #9be9a8; }
     .step-status-badge.failed { background: rgba(248, 81, 73, 0.2); color: var(--error); }
     .step-status-badge.cancelled { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
     .step-status-badge.skipped { background: var(--bg-secondary); color: var(--text-muted); }

@@ -111,6 +111,15 @@ export default function StatusBar({ status, onlineStatus }: Props): React.JSX.El
           <span>{status.runningExecutions} running</span>
         </div>
       )}
+      {status.agentRuntime && (
+        <div
+          className="status-bar-item"
+          title={`${status.agentRuntime.activePools} active ${status.agentRuntime.provider} pool(s)`}
+        >
+          <span>{status.agentRuntime.cliInstances} CLI</span>
+          <span>{status.agentRuntime.activeSessions} sessions</span>
+        </div>
+      )}
     </div>
   );
 }

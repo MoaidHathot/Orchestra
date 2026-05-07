@@ -1166,6 +1166,13 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 			"Status response should have 'activeTriggers'");
 		result.TryGetProperty("runningExecutions", out _).Should().BeTrue(
 			"Status response should have 'runningExecutions'");
+		result.TryGetProperty("agentRuntime", out var agentRuntime).Should().BeTrue(
+			"Status response should include agent runtime counters for the footer status bar");
+		agentRuntime.ValueKind.Should().Be(JsonValueKind.Object);
+		agentRuntime.TryGetProperty("provider", out _).Should().BeTrue();
+		agentRuntime.TryGetProperty("activePools", out _).Should().BeTrue();
+		agentRuntime.TryGetProperty("cliInstances", out _).Should().BeTrue();
+		agentRuntime.TryGetProperty("activeSessions", out _).Should().BeTrue();
 	}
 
 	[Fact]

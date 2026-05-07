@@ -54,6 +54,26 @@ public class CopilotClientPoolTests
 	}
 
 	[Fact]
+	public async Task GetSnapshot_ReturnsCurrentCliAndSessionCounts()
+	{
+		var factory = new FakeCopilotClientFactory();
+		await using var pool = CreatePool(factory, maxInstances: 2, maxSessionsPerInstance: 1);
+
+		await using var lease1 = await pool.AcquireAsync(CancellationToken.None);
+		await using var lease2 = await pool.AcquireAsync(CancellationToken.None);
+
+		var busySnapshot = pool.GetSnapshot();
+		busySnapshot.CliInstances.Should().Be(2);
+		busySnapshot.ActiveSessions.Should().Be(2);
+
+		await lease1.DisposeAsync();
+
+		var releasedSnapshot = pool.GetSnapshot();
+		releasedSnapshot.CliInstances.Should().Be(2);
+		releasedSnapshot.ActiveSessions.Should().Be(1);
+	}
+
+	[Fact]
 	public async Task DisposeAsync_StopsAndDisposesAllWorkers()
 	{
 		var factory = new FakeCopilotClientFactory();
@@ -92,7 +112,7 @@ public class CopilotClientPoolTests
 			NullLoggerFactory.Instance);
 	}
 
-	private sealed class FakeCopilotClientFactory : ICopilotClientFactory
+	internal sealed class FakeCopilotClientFactory : ICopilotClientFactory
 	{
 		private int _nextHash;
 		public List<FakeCopilotClient> CreatedClients { get; } = [];
@@ -105,7 +125,7 @@ public class CopilotClientPoolTests
 		}
 	}
 
-	private sealed class FakeCopilotClient : ICopilotClient
+	internal sealed class FakeCopilotClient : ICopilotClient
 	{
 		public FakeCopilotClient(int diagnosticHash)
 		{

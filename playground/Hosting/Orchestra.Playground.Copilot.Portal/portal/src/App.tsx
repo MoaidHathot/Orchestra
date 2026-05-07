@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './App.css';
 import { api } from './api';
 import { Icons } from './icons';
-import { formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch } from './utils';
+import { formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch, buildRestoredStepStatusUpdates } from './utils';
+import type { PortalStepStatus } from './utils';
 import type {
   Orchestration,
   ActiveData,
@@ -145,7 +146,7 @@ interface RuntimeOrchestration extends Orchestration {
   lastExecutionStatus?: string;
 }
 
-type StepStatusValue = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'skipped';
+type StepStatusValue = PortalStepStatus;
 
 interface SSEEventData {
   stepName?: string;
@@ -251,6 +252,7 @@ function App(): React.JSX.Element {
     orchestrationCount: 0,
     activeTriggers: 0,
     runningExecutions: 0,
+    agentRuntime: null,
   });
 
   // Online/offline tracking
@@ -511,6 +513,7 @@ function App(): React.JSX.Element {
           orchestrationCount: status.orchestrationCount || 0,
           activeTriggers: status.activeTriggers || 0,
           runningExecutions: status.runningExecutions || 0,
+          agentRuntime: status.agentRuntime ?? null,
         });
       } catch (err) {
         console.error('Failed to fetch server status:', err);
@@ -1211,9 +1214,12 @@ function App(): React.JSX.Element {
         const data: SSEEventData = JSON.parse(e.data);
         if (data.executionId) {
           trackedExecutionId = data.executionId as string;
+          const restoredStatuses = buildRestoredStepStatusUpdates(data.stepsRestored);
+          Object.assign(stepStatuses, restoredStatuses);
           setExecutionModal(prev => ({
             ...prev,
             executionId: data.executionId as string,
+            stepStatuses: { ...prev.stepStatuses, ...restoredStatuses },
             retriedFromRunId: (data.retriedFromRunId as string | undefined) ?? prev.retriedFromRunId ?? null,
             retryMode: (data.retryMode as string | undefined) ?? prev.retryMode ?? null,
           }));
@@ -1255,7 +1261,10 @@ function App(): React.JSX.Element {
         const updatedStatuses: Record<string, string> = {};
         for (const [stepName, stepData] of Object.entries(data.results as Record<string, { status?: string }>)) {
           if (stepData.status) {
-            updatedStatuses[stepName] = statusMap[stepData.status] || 'completed';
+            const nextStatus = statusMap[stepData.status] || 'completed';
+            updatedStatuses[stepName] = nextStatus === 'completed' && stepStatuses[stepName] === 'completed_restored'
+              ? 'completed_restored'
+              : nextStatus;
           }
         }
         // Mark the step that triggered early completion with a distinct status for DAG visualization
