@@ -424,4 +424,42 @@ public class FileSystemRunStoreTests : IDisposable
 		File.Exists(Path.Combine(runDir, "my-step-outputs.json")).Should().BeTrue();
 		File.Exists(Path.Combine(runDir, "my-step-result.json")).Should().BeTrue();
 	}
+
+	[Fact]
+	public async Task SaveRunAsync_WithSavedFiles_PersistsPaths()
+	{
+		var stepRecord = new StepRunRecord
+		{
+			StepName = "writer",
+			Status = ExecutionStatus.Succeeded,
+			Content = "done",
+			StartedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
+			CompletedAt = DateTimeOffset.UtcNow,
+			SavedFiles = ["C:/orchestra/temp/report.md"],
+		};
+
+		var record = CreateTestRecord(runId: "saved-files", orchestrationName: "saved-files-orch");
+		record = new OrchestrationRunRecord
+		{
+			RunId = record.RunId,
+			OrchestrationName = record.OrchestrationName,
+			OrchestrationVersion = record.OrchestrationVersion,
+			TriggeredBy = record.TriggeredBy,
+			StartedAt = record.StartedAt,
+			CompletedAt = record.CompletedAt,
+			Status = record.Status,
+			FinalContent = record.FinalContent,
+			SavedFiles = ["C:/orchestra/temp/report.md"],
+			HookExecutions = [],
+			StepRecords = new Dictionary<string, StepRunRecord> { ["writer"] = stepRecord },
+			AllStepRecords = new Dictionary<string, StepRunRecord> { ["writer"] = stepRecord },
+		};
+
+		await _store.SaveRunAsync(record, cancellationToken: default);
+
+		var loaded = await _store.GetRunAsync("saved-files-orch", "saved-files", default);
+		loaded.Should().NotBeNull();
+		loaded!.SavedFiles.Should().ContainSingle().Which.Should().Be("C:/orchestra/temp/report.md");
+		loaded.StepRecords["writer"].SavedFiles.Should().ContainSingle().Which.Should().Be("C:/orchestra/temp/report.md");
+	}
 }

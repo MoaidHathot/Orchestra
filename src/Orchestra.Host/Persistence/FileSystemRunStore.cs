@@ -123,7 +123,8 @@ public partial class FileSystemRunStore : IRunStore
 					RequestedModelInfo = stepRecord.RequestedModelInfo,
 					SelectedModelInfo = stepRecord.SelectedModelInfo,
 					ActualModelInfo = stepRecord.ActualModelInfo,
-					Usage = stepRecord.Usage
+					Usage = stepRecord.Usage,
+					SavedFiles = stepRecord.SavedFiles,
 				};
 				var outputsJson = JsonSerializer.Serialize(outputs, _jsonOptions);
 				await File.WriteAllTextAsync(Path.Combine(runDir, $"{stepName}{suffix}-outputs.json"), outputsJson, cancellationToken);
@@ -732,6 +733,7 @@ public class StepOutputsRecord
 	public AvailableModelInfo? SelectedModelInfo { get; init; }
 	public AvailableModelInfo? ActualModelInfo { get; init; }
 	public TokenUsage? Usage { get; init; }
+	public string[] SavedFiles { get; init; } = [];
 }
 
 /// <summary>

@@ -11,7 +11,8 @@ namespace Orchestra.Engine;
 public sealed class OrchestrationTempFileStore
 {
 	private readonly string _directory;
-	private readonly ConcurrentDictionary<string, ConcurrentBag<string>> _stepFiles = new(StringComparer.OrdinalIgnoreCase);
+	private readonly ConcurrentQueue<string> _allFiles = new();
+	private readonly ConcurrentDictionary<string, ConcurrentQueue<string>> _stepFiles = new(StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
 	/// Creates a temp file store for a specific orchestration run.
@@ -45,6 +46,7 @@ public sealed class OrchestrationTempFileStore
 		var filePath = Path.Combine(_directory, fileName);
 
 		File.WriteAllText(filePath, content);
+		_allFiles.Enqueue(filePath);
 
 		return filePath;
 	}
@@ -68,10 +70,15 @@ public sealed class OrchestrationTempFileStore
 	/// Registers a file path as belonging to the specified step.
 	/// Thread-safe for concurrent step execution.
 	/// </summary>
-	public void RegisterFileForStep(string stepName, string filePath)
+	public void RegisterFileForStep(string stepName, string filePath, bool includeInAllFiles = false)
 	{
-		var bag = _stepFiles.GetOrAdd(stepName, _ => []);
-		bag.Add(filePath);
+		if (includeInAllFiles)
+		{
+			_allFiles.Enqueue(filePath);
+		}
+
+		var files = _stepFiles.GetOrAdd(stepName, _ => []);
+		files.Enqueue(filePath);
 	}
 
 	/// <summary>
@@ -80,7 +87,16 @@ public sealed class OrchestrationTempFileStore
 	/// </summary>
 	public string[] GetFilesForStep(string stepName)
 	{
-		return _stepFiles.TryGetValue(stepName, out var bag) ? [.. bag] : [];
+		return _stepFiles.TryGetValue(stepName, out var files) ? [.. files] : [];
+	}
+
+	/// <summary>
+	/// Gets all file paths saved during this orchestration run.
+	/// Returns an empty array if no files were saved.
+	/// </summary>
+	public string[] GetAllFiles()
+	{
+		return [.. _allFiles];
 	}
 
 	/// <summary>

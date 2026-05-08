@@ -150,7 +150,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					_reporter.ReportStepTrace(step.Name, mcpFailTrace);
 					_reporter.ReportStepError(step.Name, errorMessage);
 					LogMcpServersFailed(step.Name, serverList);
-					return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: mcpFailTrace, errorCategory: StepErrorCategory.McpFailure);
+					return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: mcpFailTrace, errorCategory: StepErrorCategory.McpFailure, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name));
 				}
 			}
 
@@ -219,7 +219,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					selectedModel: result.SelectedModel,
 					requestedModelInfo: result.RequestedModelInfo,
 					selectedModelInfo: result.SelectedModelInfo,
-					actualModelInfo: result.ActualModelInfo), engineToolCtx, step.Name);
+					actualModelInfo: result.ActualModelInfo,
+					savedFiles: context.TempFileStore?.GetFilesForStep(step.Name)), engineToolCtx, step.Name);
 			}
 
 			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
@@ -236,7 +237,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					selectedModel: result.SelectedModel,
 					requestedModelInfo: result.RequestedModelInfo,
 					selectedModelInfo: result.SelectedModelInfo,
-					actualModelInfo: result.ActualModelInfo), engineToolCtx, step.Name);
+					actualModelInfo: result.ActualModelInfo,
+					savedFiles: context.TempFileStore?.GetFilesForStep(step.Name)), engineToolCtx, step.Name);
 			}
 
 			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
@@ -256,7 +258,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				selectedModel: result.SelectedModel,
 				requestedModelInfo: result.RequestedModelInfo,
 				selectedModelInfo: result.SelectedModelInfo,
-				actualModelInfo: result.ActualModelInfo), engineToolCtx, step.Name);
+				actualModelInfo: result.ActualModelInfo,
+				savedFiles: context.TempFileStore?.GetFilesForStep(step.Name)), engineToolCtx, step.Name);
 		}
 		catch (OperationCanceledException) when (engineToolCtx.StepCompletionRequested && !cancellationToken.IsCancellationRequested)
 		{
@@ -271,7 +274,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				LogEngineToolStatusOverride(step.Name, reason);
 				_reporter.ReportStepError(step.Name, reason);
 				return WithOrchestrationComplete(ExecutionResult.Failed(
-					reason, rawDependencyOutputs, trace: trace), engineToolCtx, step.Name);
+					reason, rawDependencyOutputs, trace: trace, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name)), engineToolCtx, step.Name);
 			}
 
 			if (engineToolCtx.StatusOverride == ExecutionStatus.NoAction)
@@ -279,14 +282,14 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				var reason = engineToolCtx.StatusReason ?? "No action needed";
 				LogEngineToolNoActionOverride(step.Name, reason);
 				return WithOrchestrationComplete(ExecutionResult.NoAction(
-					reason, rawDependencyOutputs, trace: trace), engineToolCtx, step.Name);
+					reason, rawDependencyOutputs, trace: trace, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name)), engineToolCtx, step.Name);
 			}
 
 			// Default: treat as succeeded
 			var successReason = engineToolCtx.StatusReason ?? "Step completed by LLM";
 			LogEngineToolSuccessOverride(step.Name, successReason);
 			return WithOrchestrationComplete(ExecutionResult.Succeeded(
-				successReason, rawDependencyOutputs: rawDependencyOutputs, trace: trace), engineToolCtx, step.Name);
+				successReason, rawDependencyOutputs: rawDependencyOutputs, trace: trace, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name)), engineToolCtx, step.Name);
 		}
 		catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
 		{
@@ -307,6 +310,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				RawDependencyOutputs = rawDependencyOutputs,
 				PromptSent = userPrompt,
 				Trace = trace,
+				SavedFiles = context.TempFileStore?.GetFilesForStep(step.Name) ?? [],
 			};
 
 			throw new StepExecutionCanceledException("Prompt execution was cancelled.", partialResult, ex, cancellationToken);
@@ -337,7 +341,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				if (probe.InnerException is null) break;
 			}
 
-			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace, errorCategory: category);
+			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace, errorCategory: category, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name));
 		}
 	}
 
@@ -526,8 +530,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	/// </summary>
 	private static ExecutionResult WithOrchestrationComplete(ExecutionResult result, EngineToolContext ctx, string stepName)
 	{
+		var savedFiles = ctx.TempFileStore?.GetFilesForStep(stepName) ?? result.SavedFiles;
+
 		if (!ctx.OrchestrationCompleteRequested)
-			return result;
+			return WithSavedFiles(result, savedFiles);
 
 		return new ExecutionResult
 		{
@@ -544,6 +550,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			ActualModelInfo = result.ActualModelInfo,
 			Usage = result.Usage,
 			Trace = result.Trace,
+			SavedFiles = savedFiles,
 			RetryHistory = result.RetryHistory,
 			ErrorCategory = result.ErrorCategory,
 			OrchestrationCompleteRequested = true,
@@ -552,6 +559,30 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			OrchestrationCompleteStepName = stepName,
 		};
 	}
+
+	private static ExecutionResult WithSavedFiles(ExecutionResult result, string[] savedFiles) => new()
+	{
+		Content = result.Content,
+		Status = result.Status,
+		ErrorMessage = result.ErrorMessage,
+		RawContent = result.RawContent,
+		RawDependencyOutputs = result.RawDependencyOutputs,
+		PromptSent = result.PromptSent,
+		ActualModel = result.ActualModel,
+		SelectedModel = result.SelectedModel,
+		RequestedModelInfo = result.RequestedModelInfo,
+		SelectedModelInfo = result.SelectedModelInfo,
+		ActualModelInfo = result.ActualModelInfo,
+		Usage = result.Usage,
+		Trace = result.Trace,
+		SavedFiles = savedFiles,
+		RetryHistory = result.RetryHistory,
+		ErrorCategory = result.ErrorCategory,
+		OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
+		OrchestrationCompleteStatus = result.OrchestrationCompleteStatus,
+		OrchestrationCompleteReason = result.OrchestrationCompleteReason,
+		OrchestrationCompleteStepName = result.OrchestrationCompleteStepName,
+	};
 
 	#region Source-Generated Logging
 

@@ -184,6 +184,7 @@ public static class RetryService
 				ActualModelInfo = stepRecord.ActualModelInfo,
 				Usage = stepRecord.Usage,
 				Trace = stepRecord.Trace,
+				SavedFiles = stepRecord.SavedFiles,
 				RetryHistory = stepRecord.RetryHistory,
 				ErrorCategory = stepRecord.ErrorCategory,
 			};

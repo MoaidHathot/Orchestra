@@ -257,6 +257,11 @@ public class TerminalOrchestrationReporter : IOrchestrationReporter
 		AddEvent(new ReporterEvent("checkpoint-saved", $"Checkpoint saved after '{stepName}' ({completedSteps}/{totalSteps}) — run {runId}"));
 	}
 
+	public void ReportSavedFile(string stepName, string filePath)
+	{
+		AddEvent(new ReporterEvent("saved-file", $"[{stepName}] Saved file: {filePath}"));
+	}
+
 	public void ReportSessionWarning(string warningType, string message)
 	{
 		AddEvent(new ReporterEvent("session-warning", $"[{warningType}] {message}"));

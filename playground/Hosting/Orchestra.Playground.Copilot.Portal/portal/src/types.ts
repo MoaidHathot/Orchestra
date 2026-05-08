@@ -385,6 +385,10 @@ export interface ExecutionModalState {
   completedByStep: string | null;
   runContext: RunContext | null;
   hookExecutions: HookExecution[];
+  /** Full paths of files saved during this orchestration run. */
+  savedFiles: string[];
+  /** Full saved-file paths grouped by step name. */
+  stepSavedFiles: Record<string, string[]>;
   /** When this run is a retry of an earlier run, the source RunId. */
   retriedFromRunId?: string | null;
   /** Retry mode descriptor when this run is a retry. */

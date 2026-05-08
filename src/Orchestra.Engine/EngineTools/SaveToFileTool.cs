@@ -67,6 +67,11 @@ public sealed class SaveToFileTool : IEngineTool
 				? context.TempFileStore.SaveFile(content, context.StepName, extension)
 				: context.TempFileStore.SaveFile(content, extension);
 
+			if (context.StepName is not null)
+			{
+				context.Reporter?.ReportSavedFile(context.StepName, filePath);
+			}
+
 			return $"File saved successfully. File path: {filePath}";
 		}
 		catch (JsonException)

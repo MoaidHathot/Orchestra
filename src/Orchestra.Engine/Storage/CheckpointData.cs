@@ -116,6 +116,11 @@ public class CheckpointStepResult
 	public StepExecutionTrace? Trace { get; init; }
 
 	/// <summary>
+	/// Full paths of files saved by this step via orchestra_save_file.
+	/// </summary>
+	public string[] SavedFiles { get; init; } = [];
+
+	/// <summary>
 	/// Retry history for this step.
 	/// </summary>
 	public List<RetryAttemptRecord>? RetryHistory { get; init; }
@@ -143,6 +148,7 @@ public class CheckpointStepResult
 		ActualModelInfo = ActualModelInfo,
 		Usage = Usage,
 		Trace = Trace,
+		SavedFiles = SavedFiles,
 		RetryHistory = RetryHistory,
 		ErrorCategory = ErrorCategory,
 	};
@@ -167,6 +173,7 @@ public class CheckpointStepResult
 		ActualModelInfo = result.ActualModelInfo,
 		Usage = result.Usage,
 		Trace = result.Trace,
+		SavedFiles = result.SavedFiles,
 		RetryHistory = result.RetryHistory,
 		ErrorCategory = result.ErrorCategory,
 	};

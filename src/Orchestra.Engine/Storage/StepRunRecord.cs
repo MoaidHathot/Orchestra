@@ -86,6 +86,11 @@ public class StepRunRecord
 	public StepExecutionTrace? Trace { get; init; }
 
 	/// <summary>
+	/// Full paths of files saved by this step via orchestra_save_file.
+	/// </summary>
+	public string[] SavedFiles { get; init; } = [];
+
+	/// <summary>
 	/// History of retry attempts for this step, if retries occurred.
 	/// Each entry records the error, timestamp, and delay for that attempt.
 	/// Only the final (successful or exhausted) attempt is in the main record fields.

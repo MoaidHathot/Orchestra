@@ -88,6 +88,8 @@ function makeProps(overrides: Partial<ExecutionModalState> = {}) {
     completedByStep: null,
     runContext: null,
     hookExecutions: [],
+    savedFiles: [],
+    stepSavedFiles: {},
     onClose: vi.fn(),
     onCancel: vi.fn(),
     ...overrides,
@@ -126,6 +128,23 @@ describe('ExecutionModal model metadata', () => {
     expect(screen.getAllByText('Billing multiplier').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Vision media types').length).toBeGreaterThan(0);
     expect(screen.getByText('image/png, image/jpeg')).toBeInTheDocument();
+  });
+});
+
+describe('ExecutionModal saved files', () => {
+  it('renders orchestration and selected step saved file paths', async () => {
+    render(<ExecutionModal {...makeProps({
+      savedFiles: ['C:\\orchestra\\run\\summary.md'],
+      stepSavedFiles: { analyze: ['C:\\orchestra\\run\\analysis.json'] },
+    })} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Saved Files')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('C:\\orchestra\\run\\summary.md')).toBeInTheDocument();
+    expect(screen.getByText('Saved Files (1)')).toBeInTheDocument();
+    expect(screen.getByText('C:\\orchestra\\run\\analysis.json')).toBeInTheDocument();
   });
 });
 

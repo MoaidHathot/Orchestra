@@ -66,7 +66,8 @@ public class RunsApiHistoryFilterTests : IDisposable
 		ExecutionStatus status = ExecutionStatus.Succeeded,
 		string? completionReason = null,
 		string? completedByStep = null,
-		bool isIncomplete = false)
+		bool isIncomplete = false,
+		string[]? savedFiles = null)
 	{
 		var now = DateTimeOffset.UtcNow;
 		return new OrchestrationRunRecord
@@ -82,6 +83,7 @@ public class RunsApiHistoryFilterTests : IDisposable
 			CompletedByStep = completedByStep,
 			IsIncomplete = isIncomplete,
 			FinalContent = "Test result",
+			SavedFiles = savedFiles ?? [],
 			HookExecutions = [],
 			StepRecords = new Dictionary<string, StepRunRecord>(),
 			AllStepRecords = new Dictionary<string, StepRunRecord>()
@@ -358,6 +360,38 @@ public class RunsApiHistoryFilterTests : IDisposable
 		trace.GetProperty("environment").GetProperty("MODE").GetString().Should().Be("history");
 		trace.GetProperty("stdin").GetString().Should().Be("input text");
 		trace.GetProperty("finalResponse").GetString().Should().Be(string.Empty);
+	}
+
+	[Fact]
+	public async Task HistoryDetail_IncludesSavedFilePaths()
+	{
+		var stepRecord = new StepRunRecord
+		{
+			StepName = "writer",
+			Status = ExecutionStatus.Succeeded,
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+			CompletedAt = DateTimeOffset.UtcNow,
+			Content = "done",
+			SavedFiles = ["C:/orchestra/temp/report.md"],
+		};
+
+		var record = CreateTestRecord(
+			runId: "files-run",
+			orchestrationName: "files-orch",
+			savedFiles: ["C:/orchestra/temp/report.md"]);
+		((Dictionary<string, StepRunRecord>)record.StepRecords)["writer"] = stepRecord;
+		((Dictionary<string, StepRunRecord>)record.AllStepRecords)["writer"] = stepRecord;
+		await _store.SaveRunAsync(record, cancellationToken: default);
+
+		using var host = CreateRunsApiHost(_store);
+		var client = host.GetTestClient();
+
+		var response = await client.GetAsync("/api/history/files-orch/files-run");
+		response.EnsureSuccessStatusCode();
+		using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+		doc.RootElement.GetProperty("savedFiles")[0].GetString().Should().Be("C:/orchestra/temp/report.md");
+		doc.RootElement.GetProperty("steps")[0].GetProperty("savedFiles")[0].GetString().Should().Be("C:/orchestra/temp/report.md");
 	}
 
 	private static IHost CreateRunsApiHost(FileSystemRunStore runStore)

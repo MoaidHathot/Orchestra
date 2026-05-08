@@ -743,5 +743,33 @@ public class OrchestrationResultTests
 		result.IsIncomplete.Should().BeFalse();
 	}
 
+	[Fact]
+	public void From_WhenSavedFilesNotProvided_AggregatesStepSavedFiles()
+	{
+		// Arrange
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "step1", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "step2", Type = OrchestrationStepType.Prompt, DependsOn = ["step1"], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["step1"] = ExecutionResult.Succeeded("Output1", savedFiles: ["C:/temp/a.md"]),
+			["step2"] = ExecutionResult.Succeeded("Output2", savedFiles: ["C:/temp/b.md", "C:/temp/a.md"])
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert
+		result.SavedFiles.Should().Equal("C:/temp/a.md", "C:/temp/b.md");
+	}
+
 	#endregion
 }

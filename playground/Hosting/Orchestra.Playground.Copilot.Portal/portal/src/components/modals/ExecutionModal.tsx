@@ -53,6 +53,7 @@ type TraceSectionKey =
   | 'userPromptProcessed'
   | 'reasoning'
   | 'toolCalls'
+  | 'savedFiles'
   | 'responseSegments'
   | 'finalResponse'
   | 'outputHandlerResult'
@@ -87,6 +88,30 @@ function formatTraceRecord(record?: Record<string, unknown>): string {
 function formatTraceArray(values?: string[]): string {
   if (!values || values.length === 0) return 'No arguments.';
   return values.map((value, index) => `[${index}] ${JSON.stringify(value)}`).join('\n');
+}
+
+function SavedFilesList({ files }: { files: string[] }): React.JSX.Element {
+  return (
+    <div style={{ display: 'grid', gap: '4px' }}>
+      {files.map((filePath, index) => (
+        <code
+          key={`${filePath}-${index}`}
+          style={{
+            display: 'block',
+            padding: '4px 6px',
+            background: 'var(--bg)',
+            borderRadius: '4px',
+            color: 'var(--text-secondary)',
+            fontSize: '11px',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+          }}
+        >
+          {filePath}
+        </code>
+      ))}
+    </div>
+  );
 }
 
 interface StepModelState {
@@ -233,6 +258,8 @@ interface Props {
   completedByStep: string | null;
   runContext: RunContext | null;
   hookExecutions: HookExecution[];
+  savedFiles: string[];
+  stepSavedFiles: Record<string, string[]>;
   /** When this run is a retry, the source RunId. */
   retriedFromRunId?: string | null;
   /** Retry mode descriptor when this run is a retry. */
@@ -267,6 +294,8 @@ export default function ExecutionModal({
   completedByStep,
   runContext,
   hookExecutions,
+  savedFiles,
+  stepSavedFiles,
   retriedFromRunId,
   retryMode,
   historicalRun,
@@ -326,6 +355,15 @@ export default function ExecutionModal({
     const entries = sseEntries.length > 0 ? sseEntries : traceEntries;
     return [...entries].sort((a, b) => a.sequence - b.sequence);
   }, [selectedStep, stepAuditLogs, selectedStepTrace]);
+
+  const selectedStepSavedFiles = useMemo<string[]>(() => {
+    if (!selectedStep) return [];
+    const direct = stepSavedFiles?.[selectedStep] ?? [];
+    if (direct.length > 0) return Array.from(new Set(direct));
+
+    const traceFiles = selectedStepTrace?.accessibleStepData?.[selectedStep]?.files ?? [];
+    return Array.from(new Set(traceFiles));
+  }, [selectedStep, stepSavedFiles, selectedStepTrace]);
 
   // Get selected step data (including MCPs)
   const selectedStepData = useMemo<Step | null>(() => {
@@ -1227,6 +1265,21 @@ export default function ExecutionModal({
               </div>
             </div>
           )}
+          {savedFiles.length > 0 && (
+            <div className="run-context-panel">
+              <div className="run-context-header">
+                <span style={{ fontWeight: 600, color: 'var(--accent)' }}>
+                  Saved Files
+                </span>
+                <span style={{ fontSize: '11px', color: 'var(--text-dim)', marginLeft: '8px' }}>
+                  {savedFiles.length} path{savedFiles.length === 1 ? '' : 's'}
+                </span>
+              </div>
+              <div className="run-context-body">
+                <SavedFilesList files={savedFiles} />
+              </div>
+            </div>
+          )}
           <div className="execution-modal-content">
             {/* DAG Section */}
             <div className="execution-dag-section">
@@ -1533,7 +1586,7 @@ export default function ExecutionModal({
                     </div>
 
                     {/* Step Info: Type, Model, MCPs */}
-                    {(selectedStepData || stepModelInfo) && (
+                    {(selectedStepData || stepModelInfo || selectedStepSavedFiles.length > 0) && (
                       <div
                         className="step-info-section"
                         style={{
@@ -1636,6 +1689,15 @@ export default function ExecutionModal({
                               info={stepModelInfo.actualModelInfo}
                               highlight={!!stepModelInfo.requestedModel && stepModelInfo.actualModel !== stepModelInfo.requestedModel}
                             />
+                          </div>
+                        )}
+
+                        {selectedStepSavedFiles.length > 0 && (
+                          <div style={{ marginBottom: '8px' }}>
+                            <div style={{ color: 'var(--text-dim)', marginBottom: '4px' }}>
+                              Saved Files ({selectedStepSavedFiles.length})
+                            </div>
+                            <SavedFilesList files={selectedStepSavedFiles} />
                           </div>
                         )}
 
@@ -1959,6 +2021,14 @@ export default function ExecutionModal({
                           `${selectedStepTraceLabels.responseSegments} (${selectedStepTrace.responseSegments?.length ?? 0})`,
                           traceStderrText,
                           'var(--success)',
+                        )}
+
+                        {selectedStepSavedFiles.length > 0 && renderTraceSection(
+                          'savedFiles',
+                          `Saved Files (${selectedStepSavedFiles.length})`,
+                          selectedStepSavedFiles.join('\n'),
+                          'var(--accent)',
+                          '120px',
                         )}
 
                         {/* Input Parameters */}

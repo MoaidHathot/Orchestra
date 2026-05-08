@@ -235,6 +235,31 @@ public class RetryServiceTests
 	}
 
 	[Fact]
+	public void BuildCheckpoint_CarriesSavedFilePathsForRestoredSteps()
+	{
+		var orch = Orch(Step("a"), Step("b", "a"));
+		var run = Run(new Dictionary<string, ExecutionStatus>
+		{
+			["a"] = ExecutionStatus.Succeeded,
+			["b"] = ExecutionStatus.Failed,
+		});
+		((Dictionary<string, StepRunRecord>)run.StepRecords)["a"] = new StepRunRecord
+		{
+			StepName = "a",
+			Status = ExecutionStatus.Succeeded,
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+			CompletedAt = DateTimeOffset.UtcNow,
+			Content = "a-output",
+			SavedFiles = ["C:/temp/a.md"],
+		};
+
+		var cp = RetryService.BuildCheckpoint(orch, run, RetryMode.Failed, "newrun123456", DateTimeOffset.UtcNow);
+
+		cp.Should().NotBeNull();
+		cp!.CompletedSteps["a"].SavedFiles.Should().ContainSingle().Which.Should().Be("C:/temp/a.md");
+	}
+
+	[Fact]
 	public void BuildCheckpoint_FromStep_ExcludesTargetAndDescendants_RestoresUpstream()
 	{
 		// a -> b -> c -> d, all succeeded; user wants to retry from c

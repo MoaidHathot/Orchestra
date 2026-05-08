@@ -229,6 +229,10 @@ public partial class OrchestrationExecutor
 			foreach (var (stepName, stepCheckpoint) in checkpoint.CompletedSteps)
 			{
 				var result = stepCheckpoint.ToExecutionResult();
+				foreach (var savedFile in result.SavedFiles)
+				{
+					tempFileStore?.RegisterFileForStep(stepName, savedFile, includeInAllFiles: true);
+				}
 				context.AddResult(stepName, result);
 				stepResults[stepName] = result;
 
@@ -253,6 +257,7 @@ public partial class OrchestrationExecutor
 						RequestedModelInfo = result.RequestedModelInfo,
 						SelectedModelInfo = result.SelectedModelInfo,
 						ActualModelInfo = result.ActualModelInfo,
+						SavedFiles = result.SavedFiles,
 					};
 					stepRecords[stepName] = record;
 					allStepRecords[stepName] = record;
@@ -543,7 +548,7 @@ public partial class OrchestrationExecutor
 					&& existing.Status == ExecutionStatus.Cancelled
 					&& IsDefaultCancelledMessage(existing.ErrorMessage))
 				{
-					var replaced = ExecutionResult.Cancelled(enrichedMessage);
+					var replaced = ExecutionResult.Cancelled(enrichedMessage, existing.SavedFiles);
 					stepResults[name] = replaced;
 					context.AddResult(name, replaced);
 
@@ -560,7 +565,13 @@ public partial class OrchestrationExecutor
 		}
 
 		var orchestrationResult = OrchestrationResult.From(
-			orchestration, stepResults, orchestrationCompleteStatus, orchestrationCompleteReason, orchestrationCompleteStepName, cancellationDetails);
+			orchestration,
+			stepResults,
+			orchestrationCompleteStatus,
+			orchestrationCompleteReason,
+			orchestrationCompleteStepName,
+			cancellationDetails,
+			tempFileStore?.GetAllFiles() ?? []);
 
 		if (orchestrationResult.Status == ExecutionStatus.Succeeded)
 		{
@@ -607,6 +618,7 @@ public partial class OrchestrationExecutor
 			StepRecords = stepRecords,
 			AllStepRecords = allStepRecords,
 			FinalContent = finalContent,
+			SavedFiles = orchestrationResult.SavedFiles,
 			CompletionReason = orchestrationResult.CompletionReason,
 			CompletedByStep = orchestrationResult.CompletedByStep,
 			IsIncomplete = orchestrationResult.IsIncomplete,
@@ -1022,6 +1034,7 @@ public partial class OrchestrationExecutor
 					ActualModelInfo = result.ActualModelInfo,
 					Usage = result.Usage,
 					Trace = result.Trace,
+					SavedFiles = result.SavedFiles,
 					RetryHistory = retryHistory,
 					ErrorCategory = result.ErrorCategory,
 					OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
@@ -1061,6 +1074,7 @@ public partial class OrchestrationExecutor
 			ActualModel = result.ActualModel,
 			Usage = result.Usage,
 			Trace = result.Trace,
+			SavedFiles = result.SavedFiles,
 			RetryHistory = retryHistory,
 			ErrorCategory = result.ErrorCategory,
 		};
@@ -1290,13 +1304,15 @@ public partial class OrchestrationExecutor
 		ActualModelInfo = partialResult?.ActualModelInfo,
 		Usage = partialResult?.Usage,
 		Trace = partialResult?.Trace,
+		SavedFiles = partialResult?.SavedFiles ?? [],
 		RetryHistory = partialResult?.RetryHistory,
 		ErrorCategory = StepErrorCategory.Timeout,
 	};
 
 	private ExecutionResult EnrichResultTrace(OrchestrationStep step, OrchestrationExecutionContext context, ExecutionResult result)
 	{
-		var trace = result.Trace?.WithContext(context, step);
+		var savedFiles = context.TempFileStore?.GetFilesForStep(step.Name) ?? result.SavedFiles;
+		var trace = result.Trace?.WithContext(context, step, savedFiles);
 		if (trace is not null)
 		{
 			_reporter.ReportStepTrace(step.Name, trace);
@@ -1317,6 +1333,7 @@ public partial class OrchestrationExecutor
 			ActualModelInfo = result.ActualModelInfo,
 			Usage = result.Usage,
 			Trace = trace,
+			SavedFiles = savedFiles,
 			RetryHistory = result.RetryHistory,
 			ErrorCategory = result.ErrorCategory,
 			OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
@@ -1363,6 +1380,7 @@ public partial class OrchestrationExecutor
 			ActualModelInfo = result.ActualModelInfo,
 			Usage = result.Usage,
 			Trace = result.Trace,
+			SavedFiles = result.SavedFiles,
 			RetryHistory = result.RetryHistory,
 			ErrorCategory = result.ErrorCategory,
 		};
@@ -1401,6 +1419,7 @@ public partial class OrchestrationExecutor
 		ActualModelInfo = record.ActualModelInfo,
 		Usage = record.Usage,
 		Trace = record.Trace,
+		SavedFiles = record.SavedFiles,
 		RetryHistory = record.RetryHistory,
 		ErrorCategory = record.ErrorCategory,
 	};

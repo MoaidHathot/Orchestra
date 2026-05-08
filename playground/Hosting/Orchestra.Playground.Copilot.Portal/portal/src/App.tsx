@@ -71,6 +71,7 @@ interface ExecutionDetailStep {
   selectedModelInfo?: ModelInfo;
   actualModelInfo?: ModelInfo;
   errorMessage?: string;
+  savedFiles?: string[] | null;
   usage?: {
     inputTokens?: number;
     outputTokens?: number;
@@ -91,6 +92,7 @@ interface ExecutionDetailsResponse {
   completedByStep?: string;
   isIncomplete?: boolean;
   finalContent?: string;
+  savedFiles?: string[] | null;
   steps?: ExecutionDetailStep[];
   context?: RunContext | null;
   hookExecutions?: HookExecution[];
@@ -168,6 +170,8 @@ interface SSEEventData {
   contentPreview?: string;
   error?: string;
   message?: string;
+  filePath?: string;
+  savedFiles?: string[] | null;
   [key: string]: unknown;
 }
 
@@ -175,6 +179,7 @@ interface FinalStepResultData {
   status?: string;
   contentPreview?: string;
   error?: string;
+  savedFiles?: string[] | null;
 }
 
 // ── The App component ───────────────────────────────────────────────────────
@@ -224,6 +229,8 @@ function App(): React.JSX.Element {
     completedByStep: null,
     runContext: null,
     hookExecutions: [],
+    savedFiles: [],
+    stepSavedFiles: {},
     retriedFromRunId: null,
     retryMode: null,
     historicalRun: null,
@@ -725,6 +732,8 @@ function App(): React.JSX.Element {
     const stepTraces: Record<string, TraceData> = {};
     const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
     const hookExecutions: HookExecution[] = [];
+    const stepSavedFiles: Record<string, string[]> = {};
+    const savedFiles: string[] = [];
     let streamingContent = '';
     let finalResult = '';
     // Mutable tracker for execution ID (may be set later by execution-started event)
@@ -825,6 +834,24 @@ function App(): React.JSX.Element {
       setExecutionModal(prev => ({
         ...prev,
         hookExecutions: [...hookExecutions],
+      }));
+    };
+
+    const addSavedFile = (stepName: string | undefined, filePath: string | undefined) => {
+      if (!stepName || !filePath) return;
+      if (!stepSavedFiles[stepName]) {
+        stepSavedFiles[stepName] = [];
+      }
+      if (!stepSavedFiles[stepName].includes(filePath)) {
+        stepSavedFiles[stepName].push(filePath);
+      }
+      if (!savedFiles.includes(filePath)) {
+        savedFiles.push(filePath);
+      }
+      setExecutionModal(prev => ({
+        ...prev,
+        savedFiles: [...savedFiles],
+        stepSavedFiles: { ...stepSavedFiles },
       }));
     };
 
@@ -1243,6 +1270,15 @@ function App(): React.JSX.Element {
       } catch { /* ignore */ }
     });
 
+    // saved-file
+    eventSource.addEventListener('saved-file', (e: MessageEvent) => {
+      try {
+        const data: SSEEventData = JSON.parse(e.data);
+        addSavedFile(data.stepName, data.filePath);
+        addStepEvent(data.stepName, 'saved-file', data as Record<string, unknown>);
+      } catch { /* ignore */ }
+    });
+
     // usage, loop-iteration, model-mismatch
     (['usage', 'loop-iteration', 'model-mismatch'] as const).forEach(eventType => {
       eventSource.addEventListener(eventType, (e: MessageEvent) => {
@@ -1326,6 +1362,16 @@ function App(): React.JSX.Element {
           if (typeof stepData.contentPreview === 'string' && stepData.contentPreview.length > 0 && !stepResults[stepName]) {
             stepResults[stepName] = stepData.contentPreview;
           }
+          if (stepData.savedFiles && stepData.savedFiles.length > 0) {
+            stepSavedFiles[stepName] = [...stepData.savedFiles];
+            for (const filePath of stepData.savedFiles) {
+              if (!savedFiles.includes(filePath)) savedFiles.push(filePath);
+            }
+          }
+        }
+        const orchestrationSavedFiles = Array.isArray(data.savedFiles) ? data.savedFiles : [];
+        for (const filePath of orchestrationSavedFiles) {
+          if (!savedFiles.includes(filePath)) savedFiles.push(filePath);
         }
         // Mark the step that triggered early completion with a distinct status for DAG visualization
         if (data.completedByStep && updatedStatuses[data.completedByStep]) {
@@ -1335,6 +1381,8 @@ function App(): React.JSX.Element {
           ...prev,
           stepStatuses: { ...prev.stepStatuses, ...updatedStatuses },
           stepResults: { ...stepResults },
+          savedFiles: [...savedFiles],
+          stepSavedFiles: { ...stepSavedFiles },
           status: modalStatus,
           completedByStep: data.completedByStep || null,
         }));
@@ -1436,6 +1484,8 @@ function App(): React.JSX.Element {
       completedByStep: null,
       runContext: null,
       hookExecutions: [],
+      savedFiles: [],
+      stepSavedFiles: {},
       retriedFromRunId: null,
       retryMode: null,
       historicalRun: null,
@@ -1497,6 +1547,8 @@ function App(): React.JSX.Element {
       completedByStep: null,
       runContext: null,
       hookExecutions: [],
+      savedFiles: [],
+      stepSavedFiles: {},
       retriedFromRunId: sourceRunId,
       retryMode: mode === 'from-step' ? `from-step:${fromStep ?? ''}` : mode,
       historicalRun: null,
@@ -1612,6 +1664,8 @@ function App(): React.JSX.Element {
       completedByStep: null,
       runContext: null,
       hookExecutions: [],
+      savedFiles: [],
+      stepSavedFiles: {},
     });
 
     try {
@@ -1656,6 +1710,8 @@ function App(): React.JSX.Element {
       completedByStep: null,
       runContext: null,
       hookExecutions: [],
+      savedFiles: [],
+      stepSavedFiles: {},
       retriedFromRunId: null,
       retryMode: null,
       historicalRun: { name: exec.orchestrationName, runId: exec.runId },
@@ -1671,8 +1727,10 @@ function App(): React.JSX.Element {
       const stepResults: Record<string, string> = {};
       const stepTraces: Record<string, TraceData> = {};
       const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
+      const stepSavedFiles: Record<string, string[]> = {};
       const finalResult = details.finalContent || '';
       const hookExecutions = details.hookExecutions || [];
+      const savedFiles = details.savedFiles || [];
 
       if (details.steps) {
         details.steps.forEach((step: ExecutionDetailStep) => {
@@ -1689,6 +1747,10 @@ function App(): React.JSX.Element {
 
           if (step.content !== undefined) {
             stepResults[step.name] = step.content;
+          }
+
+          if (step.savedFiles && step.savedFiles.length > 0) {
+            stepSavedFiles[step.name] = step.savedFiles;
           }
 
           if (step.trace) {
@@ -1800,6 +1862,8 @@ function App(): React.JSX.Element {
         completedByStep: details.completedByStep || null,
         runContext: details.context || null,
         hookExecutions,
+        savedFiles,
+        stepSavedFiles,
         retriedFromRunId: details.retriedFromRunId ?? null,
         retryMode: details.retryMode ?? null,
         historicalRun: { name: exec.orchestrationName, runId: exec.runId },
@@ -2472,6 +2536,8 @@ function App(): React.JSX.Element {
             completedByStep: null,
             runContext: null,
             hookExecutions: [],
+            savedFiles: [],
+            stepSavedFiles: {},
             retriedFromRunId: null,
             retryMode: null,
             historicalRun: null,

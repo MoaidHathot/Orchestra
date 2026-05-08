@@ -377,6 +377,7 @@ public class TriggerTypesTests
 		public void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay) { }
 		public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations) { }
 		public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps) { }
+		public void ReportSavedFile(string stepName, string filePath) { }
 		public void ReportSessionWarning(string warningType, string message) { }
 		public void ReportSessionInfo(string infoType, string message) { }
 		public void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers) { }

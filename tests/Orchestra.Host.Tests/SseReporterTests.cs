@@ -514,6 +514,37 @@ public class SseReporterTests : IDisposable
 	}
 
 	[Fact]
+	public void ReportOrchestrationDone_IncludesSavedFilePaths()
+	{
+		var result = new OrchestrationResult
+		{
+			Status = ExecutionStatus.Succeeded,
+			Results = new Dictionary<string, ExecutionResult>(),
+			StepResults = new Dictionary<string, ExecutionResult>
+			{
+				["step-1"] = ExecutionResult.Succeeded("output", savedFiles: ["C:/temp/output.md"]),
+			},
+			SavedFiles = ["C:/temp/output.md"],
+		};
+
+		_reporter.ReportOrchestrationDone(result);
+
+		var evt = _reporter.AccumulatedEvents.Should().ContainSingle(e => e.Type == "orchestration-done").Subject;
+		evt.Data.Should().Contain("C:/temp/output.md");
+		evt.Data.Should().Contain("savedFiles");
+	}
+
+	[Fact]
+	public void ReportSavedFile_AddsEvent()
+	{
+		_reporter.ReportSavedFile("step-1", "C:/temp/output.md");
+
+		var evt = _reporter.AccumulatedEvents.Should().ContainSingle(e => e.Type == "saved-file").Subject;
+		evt.Data.Should().Contain("step-1");
+		evt.Data.Should().Contain("C:/temp/output.md");
+	}
+
+	[Fact]
 	public void ReportOrchestrationCancelled_AddsEvent()
 	{
 		_reporter.ReportOrchestrationCancelled();
@@ -1173,6 +1204,7 @@ public class DefaultExecutionCallbackTests
 		public void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay) { }
 		public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations) { }
 		public void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps) { }
+		public void ReportSavedFile(string stepName, string filePath) { }
 		public void ReportSessionWarning(string warningType, string message) { }
 		public void ReportSessionInfo(string infoType, string message) { }
 		public void ReportMcpServersLoaded(IReadOnlyList<McpServerStatusInfo> servers) { }

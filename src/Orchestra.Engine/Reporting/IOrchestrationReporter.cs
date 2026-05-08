@@ -20,6 +20,7 @@ public interface IOrchestrationReporter
 	void ReportStepRetry(string stepName, int attempt, int maxRetries, string error, TimeSpan delay);
 	void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations);
 	void ReportCheckpointSaved(string runId, string stepName, int completedSteps, int totalSteps);
+	void ReportSavedFile(string stepName, string filePath);
 
 	// Session diagnostics
 	void ReportSessionWarning(string warningType, string message);

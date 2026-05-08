@@ -5,14 +5,15 @@ internal static class StepExecutionTraceExtensions
 	public static StepExecutionTrace WithContext(
 		this StepExecutionTrace trace,
 		OrchestrationExecutionContext context,
-		OrchestrationStep step)
+		OrchestrationStep step,
+		string[]? currentStepFiles = null)
 	{
 		return new StepExecutionTrace
 		{
 			Parameters = new Dictionary<string, string>(context.Parameters),
 			DependencyOutputs = context.GetDependencyOutputs(step.DependsOn),
 			RawDependencyOutputs = context.GetRawDependencyOutputs(step.DependsOn),
-			AccessibleStepData = BuildAccessibleStepData(context),
+			AccessibleStepData = BuildAccessibleStepData(context, step.Name, currentStepFiles ?? []),
 			Command = trace.Command,
 			CommandArguments = [.. trace.CommandArguments],
 			Shell = trace.Shell,
@@ -35,7 +36,10 @@ internal static class StepExecutionTraceExtensions
 		};
 	}
 
-	private static Dictionary<string, StepTraceStepData> BuildAccessibleStepData(OrchestrationExecutionContext context)
+	private static Dictionary<string, StepTraceStepData> BuildAccessibleStepData(
+		OrchestrationExecutionContext context,
+		string currentStepName,
+		string[] currentStepFiles)
 	{
 		var accessible = new Dictionary<string, StepTraceStepData>(StringComparer.OrdinalIgnoreCase);
 		foreach (var (stepName, result) in context.Results.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
@@ -46,6 +50,14 @@ internal static class StepExecutionTraceExtensions
 				Output = result.Content,
 				RawOutput = result.RawContent ?? result.Content,
 				Files = context.TempFileStore?.GetFilesForStep(stepName) ?? [],
+			};
+		}
+
+		if (currentStepFiles.Length > 0 && !accessible.ContainsKey(currentStepName))
+		{
+			accessible[currentStepName] = new StepTraceStepData
+			{
+				Files = currentStepFiles,
 			};
 		}
 

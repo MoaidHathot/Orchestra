@@ -150,6 +150,11 @@ public class ConsoleOrchestrationReporter : IOrchestrationReporter
 		Console.WriteLine($"  [checkpoint] Saved after '{stepName}' ({completedSteps}/{totalSteps} steps complete) — run {runId}");
 	}
 
+	public void ReportSavedFile(string stepName, string filePath)
+	{
+		Console.WriteLine($"  [{stepName}] Saved file: {filePath}");
+	}
+
 	public void ReportSessionWarning(string warningType, string message)
 	{
 		Console.WriteLine($"  [WARNING] ({warningType}) {message}");

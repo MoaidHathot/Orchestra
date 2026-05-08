@@ -60,6 +60,11 @@ public class ExecutionResult
 	public StepExecutionTrace? Trace { get; init; }
 
 	/// <summary>
+	/// Full paths of files saved by this step via orchestra_save_file.
+	/// </summary>
+	public string[] SavedFiles { get; init; } = [];
+
+	/// <summary>
 	/// History of retry attempts for this step, if retries occurred.
 	/// </summary>
 	public List<RetryAttemptRecord>? RetryHistory { get; init; }
@@ -102,7 +107,8 @@ public class ExecutionResult
 		string? selectedModel = null,
 		AvailableModelInfo? requestedModelInfo = null,
 		AvailableModelInfo? selectedModelInfo = null,
-		AvailableModelInfo? actualModelInfo = null) => new()
+		AvailableModelInfo? actualModelInfo = null,
+		string[]? savedFiles = null) => new()
 	{
 		Content = content,
 		Status = ExecutionStatus.Succeeded,
@@ -117,6 +123,7 @@ public class ExecutionResult
 		Usage = usage,
 		Trace = trace,
 		RetryHistory = retryHistory,
+		SavedFiles = savedFiles ?? [],
 	};
 
 	public static ExecutionResult Failed(
@@ -130,7 +137,8 @@ public class ExecutionResult
 		string? selectedModel = null,
 		AvailableModelInfo? requestedModelInfo = null,
 		AvailableModelInfo? selectedModelInfo = null,
-		AvailableModelInfo? actualModelInfo = null) => new()
+		AvailableModelInfo? actualModelInfo = null,
+		string[]? savedFiles = null) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Failed,
@@ -145,6 +153,7 @@ public class ExecutionResult
 		Trace = trace,
 		ErrorCategory = errorCategory,
 		RetryHistory = retryHistory,
+		SavedFiles = savedFiles ?? [],
 	};
 
 	public static ExecutionResult Skipped(string reason) => new()
@@ -154,11 +163,12 @@ public class ExecutionResult
 		ErrorMessage = reason,
 	};
 
-	public static ExecutionResult Cancelled(string? errorMessage = null) => new()
+	public static ExecutionResult Cancelled(string? errorMessage = null, string[]? savedFiles = null) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Cancelled,
 		ErrorMessage = errorMessage ?? "Cancelled",
+		SavedFiles = savedFiles ?? [],
 	};
 
 	/// <summary>
@@ -175,7 +185,8 @@ public class ExecutionResult
 		string? selectedModel = null,
 		AvailableModelInfo? requestedModelInfo = null,
 		AvailableModelInfo? selectedModelInfo = null,
-		AvailableModelInfo? actualModelInfo = null) => new()
+		AvailableModelInfo? actualModelInfo = null,
+		string[]? savedFiles = null) => new()
 	{
 		Content = reason,
 		Status = ExecutionStatus.NoAction,
@@ -188,5 +199,6 @@ public class ExecutionResult
 		ActualModelInfo = actualModelInfo,
 		Usage = usage,
 		Trace = trace,
+		SavedFiles = savedFiles ?? [],
 	};
 }

@@ -49,6 +49,11 @@ public class OrchestrationRunRecord
 	public required string FinalContent { get; init; }
 
 	/// <summary>
+	/// Full paths of files saved during this orchestration run.
+	/// </summary>
+	public string[] SavedFiles { get; init; } = [];
+
+	/// <summary>
 	/// When set, indicates the orchestration was completed early by the orchestra_complete tool.
 	/// Contains the reason provided by the LLM.
 	/// </summary>

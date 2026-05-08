@@ -311,6 +311,17 @@ public class OrchestrationTempFileStoreTests : IDisposable
 	}
 
 	[Fact]
+	public void GetAllFiles_ReturnsSavedFilePaths()
+	{
+		var store = new OrchestrationTempFileStore(_tempRoot, "orch", "run-1");
+
+		var file1 = store.SaveFile("content1", "research", "txt");
+		var file2 = store.SaveFile("content2", "analysis", "json");
+
+		store.GetAllFiles().Should().Equal(file1, file2);
+	}
+
+	[Fact]
 	public void RegisterFileForStep_ManualRegistration_TracksCorrectly()
 	{
 		var store = new OrchestrationTempFileStore(_tempRoot, "orch", "run-1");

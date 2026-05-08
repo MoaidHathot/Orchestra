@@ -1,4 +1,5 @@
 using FluentAssertions;
+using NSubstitute;
 
 namespace Orchestra.Engine.Tests.EngineTools;
 
@@ -149,7 +150,8 @@ public class SaveToFileToolTests : IDisposable
 	{
 		var tool = new SaveToFileTool();
 		var store = CreateStore();
-		var context = new EngineToolContext { TempFileStore = store, StepName = "research" };
+		var reporter = NSubstitute.Substitute.For<IOrchestrationReporter>();
+		var context = new EngineToolContext { TempFileStore = store, StepName = "research", Reporter = reporter };
 
 		tool.Execute("""{"content": "research data"}""", context);
 
@@ -157,6 +159,7 @@ public class SaveToFileToolTests : IDisposable
 		var files = store.GetFilesForStep("research");
 		files.Should().HaveCount(1);
 		File.ReadAllText(files[0]).Should().Be("research data");
+		reporter.Received(1).ReportSavedFile("research", files[0]);
 	}
 
 	[Fact]

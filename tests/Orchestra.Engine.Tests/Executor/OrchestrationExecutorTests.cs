@@ -870,6 +870,43 @@ public class OrchestrationExecutorTests
 	}
 
 	[Fact]
+	public async Task ExecuteAsync_RunRecordContainsSavedFilePaths()
+	{
+		// Arrange
+		var dataPath = Path.Combine(Path.GetTempPath(), $"orchestra-saved-files-{Guid.NewGuid():N}");
+		try
+		{
+			OrchestrationRunRecord? capturedRecord = null;
+			var runStore = Substitute.For<IRunStore>();
+			runStore.SaveRunAsync(Arg.Do<OrchestrationRunRecord>(r => capturedRecord = r), Arg.Any<CancellationToken>())
+				.Returns(Task.CompletedTask);
+
+			var agentBuilder = new MockAgentBuilder().WithEngineToolCall(
+				"orchestra_save_file",
+				"""{"content":"saved data","extension":"md"}""",
+				"saved");
+			var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory, runStore: runStore, dataPath: dataPath);
+			var orchestration = TestOrchestrations.SingleStep("saved-file-orchestration");
+
+			// Act
+			var result = await executor.ExecuteAsync(orchestration);
+
+			// Assert
+			var savedPath = result.SavedFiles.Should().ContainSingle().Subject;
+			Path.IsPathRooted(savedPath).Should().BeTrue();
+			result.StepResults["step1"].SavedFiles.Should().ContainSingle().Which.Should().Be(savedPath);
+			capturedRecord.Should().NotBeNull();
+			capturedRecord!.SavedFiles.Should().ContainSingle().Which.Should().Be(savedPath);
+			capturedRecord.StepRecords["step1"].SavedFiles.Should().ContainSingle().Which.Should().Be(savedPath);
+		}
+		finally
+		{
+			if (Directory.Exists(dataPath))
+				Directory.Delete(dataPath, recursive: true);
+		}
+	}
+
+	[Fact]
 	public async Task ExecuteAsync_WithTriggerId_IncludesInRunRecord()
 	{
 		// Arrange

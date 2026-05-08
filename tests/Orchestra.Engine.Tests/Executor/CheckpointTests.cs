@@ -566,7 +566,8 @@ public class CheckpointTests
 			rawContent: "Raw content",
 			rawDependencyOutputs: new Dictionary<string, string> { ["dep1"] = "dep1-output" },
 			promptSent: "The prompt",
-			actualModel: "claude-opus-4.5");
+			actualModel: "claude-opus-4.5",
+			savedFiles: ["C:/temp/report.md"]);
 
 		// Act
 		var checkpointResult = CheckpointStepResult.FromExecutionResult(original);
@@ -580,6 +581,7 @@ public class CheckpointTests
 		restored.RawDependencyOutputs["dep1"].Should().Be("dep1-output");
 		restored.PromptSent.Should().Be("The prompt");
 		restored.ActualModel.Should().Be("claude-opus-4.5");
+		restored.SavedFiles.Should().ContainSingle().Which.Should().Be("C:/temp/report.md");
 		restored.ErrorMessage.Should().BeNull();
 	}
 

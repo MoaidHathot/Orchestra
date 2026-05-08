@@ -25,6 +25,7 @@ export function formatLogContent(log: LogEvent): string {
     return 'Completed';
   }
   if (log.type === 'step-error') return log.error || '';
+  if (log.type === 'saved-file') return `Saved file: ${String(log.filePath || '')}`;
   if (log.type === 'tool-started') return `Tool: ${log.toolName}`;
   if (log.type === 'tool-completed') return `Tool ${log.toolName}: ${log.success ? 'success' : 'failed'}`;
   if (log.type === 'usage') {

@@ -15,6 +15,11 @@ public class OrchestrationResult
 	public required IReadOnlyDictionary<string, ExecutionResult> StepResults { get; init; }
 
 	/// <summary>
+	/// Full paths of files saved during this orchestration run.
+	/// </summary>
+	public string[] SavedFiles { get; init; } = [];
+
+	/// <summary>
 	/// When set, indicates the orchestration was completed early by the orchestra_complete tool.
 	/// Contains the reason provided by the LLM.
 	/// </summary>
@@ -48,7 +53,8 @@ public class OrchestrationResult
 		ExecutionStatus? orchestrationCompleteStatus = null,
 		string? orchestrationCompleteReason = null,
 		string? orchestrationCompleteStepName = null,
-		CancellationDetails? cancellation = null)
+		CancellationDetails? cancellation = null,
+		string[]? savedFiles = null)
 	{
 		// Terminal steps are those that no other step depends on
 		var dependedOn = new HashSet<string>(
@@ -97,6 +103,11 @@ public class OrchestrationResult
 		var isIncomplete = orchestrationCompleteStatus is not null
 			|| (status == ExecutionStatus.Succeeded && allTerminalNoActionOrSkipped);
 
+		var runSavedFiles = savedFiles ?? stepResults.Values
+			.SelectMany(result => result.SavedFiles)
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+
 		return new OrchestrationResult
 		{
 			Status = status,
@@ -105,6 +116,7 @@ public class OrchestrationResult
 			CompletionReason = orchestrationCompleteReason,
 			CompletedByStep = orchestrationCompleteStepName,
 			IsIncomplete = isIncomplete,
+			SavedFiles = runSavedFiles,
 			// Only attach cancellation details when the run actually ended Cancelled.
 			// (orchestra_complete may upgrade Cancelled → Succeeded/Failed, in which case
 			// the cancellation cause is irrelevant and would mislead consumers.)

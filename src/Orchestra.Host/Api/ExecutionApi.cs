@@ -343,6 +343,7 @@ public static partial class ExecutionApi
 		var stepsCompleted = new HashSet<string>();
 		var stepsCancelled = new HashSet<string>();
 		var stepErrors = new Dictionary<string, string>();
+		var stepSavedFiles = new Dictionary<string, List<string>>();
 
 		foreach (var evt in reporter.AccumulatedEvents)
 		{
@@ -358,6 +359,10 @@ public static partial class ExecutionApi
 					case "step-completed":
 						if (data.TryGetProperty("stepName", out var completedName))
 							stepsCompleted.Add(completedName.GetString() ?? "");
+						if (data.TryGetProperty("stepName", out completedName) &&
+							data.TryGetProperty("savedFiles", out var completedSavedFiles) &&
+							completedSavedFiles.ValueKind == JsonValueKind.Array)
+							AddSavedFiles(stepSavedFiles, completedName.GetString(), completedSavedFiles);
 						break;
 					case "step-cancelled":
 						if (data.TryGetProperty("stepName", out var cancelledName))
@@ -367,6 +372,20 @@ public static partial class ExecutionApi
 						if (data.TryGetProperty("stepName", out var errorStepName) &&
 							data.TryGetProperty("error", out var errorMsg))
 							stepErrors[errorStepName.GetString() ?? ""] = errorMsg.GetString() ?? "";
+						break;
+					case "saved-file":
+						if (data.TryGetProperty("stepName", out var savedStepName) &&
+							data.TryGetProperty("filePath", out var filePath))
+						{
+							var key = savedStepName.GetString() ?? "";
+							if (!string.IsNullOrWhiteSpace(key) && filePath.GetString() is { } path)
+							{
+								if (!stepSavedFiles.TryGetValue(key, out var paths))
+									stepSavedFiles[key] = paths = [];
+								if (!paths.Contains(path))
+									paths.Add(path);
+							}
+						}
 						break;
 				}
 			}
@@ -415,7 +434,8 @@ public static partial class ExecutionApi
 				StartedAt = stepsStarted.Contains(stepName) ? startTime : completedAt,
 				CompletedAt = completedAt,
 				Content = content,
-				ErrorMessage = errorMessage
+				ErrorMessage = errorMessage,
+				SavedFiles = stepSavedFiles.GetValueOrDefault(stepName)?.ToArray() ?? [],
 			};
 
 			stepRecords[stepName] = stepRecord;
@@ -445,6 +465,7 @@ public static partial class ExecutionApi
 			StepRecords = stepRecords,
 			AllStepRecords = allStepRecords,
 			FinalContent = summary.ToString(),
+			SavedFiles = stepSavedFiles.Values.SelectMany(paths => paths).ToArray(),
 			HookExecutions = [],
 		};
 
@@ -477,6 +498,7 @@ public static partial class ExecutionApi
 		var stepsStarted = new HashSet<string>();
 		var stepsCompleted = new HashSet<string>();
 		var stepErrors = new Dictionary<string, string>();
+		var stepSavedFiles = new Dictionary<string, List<string>>();
 
 		foreach (var evt in reporter.AccumulatedEvents)
 		{
@@ -492,11 +514,29 @@ public static partial class ExecutionApi
 					case "step-completed":
 						if (data.TryGetProperty("stepName", out var completedName))
 							stepsCompleted.Add(completedName.GetString() ?? "");
+						if (data.TryGetProperty("stepName", out completedName) &&
+							data.TryGetProperty("savedFiles", out var completedSavedFiles) &&
+							completedSavedFiles.ValueKind == JsonValueKind.Array)
+							AddSavedFiles(stepSavedFiles, completedName.GetString(), completedSavedFiles);
 						break;
 					case "step-error":
 						if (data.TryGetProperty("stepName", out var errorStepName) &&
 							data.TryGetProperty("error", out var errMsg))
 							stepErrors[errorStepName.GetString() ?? ""] = errMsg.GetString() ?? "";
+						break;
+					case "saved-file":
+						if (data.TryGetProperty("stepName", out var savedStepName) &&
+							data.TryGetProperty("filePath", out var filePath))
+						{
+							var key = savedStepName.GetString() ?? "";
+							if (!string.IsNullOrWhiteSpace(key) && filePath.GetString() is { } path)
+							{
+								if (!stepSavedFiles.TryGetValue(key, out var paths))
+									stepSavedFiles[key] = paths = [];
+								if (!paths.Contains(path))
+									paths.Add(path);
+							}
+						}
 						break;
 				}
 			}
@@ -519,7 +559,8 @@ public static partial class ExecutionApi
 				StartedAt = startTime,
 				CompletedAt = completedAt,
 				Content = status == ExecutionStatus.Failed ? "[Failed]" : status == ExecutionStatus.Cancelled ? "[Cancelled]" : "",
-				ErrorMessage = stepError
+				ErrorMessage = stepError,
+				SavedFiles = stepSavedFiles.GetValueOrDefault(stepName)?.ToArray() ?? [],
 			};
 
 			stepRecords[stepName] = stepRecord;
@@ -544,6 +585,7 @@ public static partial class ExecutionApi
 			StepRecords = stepRecords,
 			AllStepRecords = allStepRecords,
 			FinalContent = summary.ToString(),
+			SavedFiles = stepSavedFiles.Values.SelectMany(paths => paths).ToArray(),
 			HookExecutions = [],
 		};
 
@@ -562,6 +604,21 @@ public static partial class ExecutionApi
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to save failed run record for run '{RunId}'")]
 	private static partial void LogSaveFailedRunFailed(ILogger logger, string runId, Exception ex);
+
+	private static void AddSavedFiles(Dictionary<string, List<string>> stepSavedFiles, string? stepName, JsonElement fileArray)
+	{
+		if (string.IsNullOrWhiteSpace(stepName))
+			return;
+
+		if (!stepSavedFiles.TryGetValue(stepName, out var paths))
+			stepSavedFiles[stepName] = paths = [];
+
+		foreach (var item in fileArray.EnumerateArray())
+		{
+			if (item.GetString() is { } path && !paths.Contains(path))
+				paths.Add(path);
+		}
+	}
 
 	/// <summary>
 	/// Sends periodic heartbeat events on the execution SSE stream to prevent

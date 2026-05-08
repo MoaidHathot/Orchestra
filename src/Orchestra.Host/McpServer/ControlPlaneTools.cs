@@ -438,6 +438,7 @@ public sealed class ControlPlaneTools
 			completedAt = run.CompletedAt,
 			triggeredBy = run.TriggeredBy,
 			parameters = run.Parameters,
+			savedFiles = run.SavedFiles,
 			stepResults = run.StepRecords.ToDictionary(
 				kvp => kvp.Key,
 				kvp => new
@@ -445,6 +446,7 @@ public sealed class ControlPlaneTools
 					status = kvp.Value.Status.ToString().ToLowerInvariant(),
 					content = TruncateContent(kvp.Value.Content, 2000),
 					errorMessage = kvp.Value.ErrorMessage,
+					savedFiles = kvp.Value.SavedFiles,
 				}),
 		});
 	}

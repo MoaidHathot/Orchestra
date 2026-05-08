@@ -479,6 +479,11 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("checkpoint-saved", new { runId, stepName, completedSteps, totalSteps });
 	}
 
+	public void ReportSavedFile(string stepName, string filePath)
+	{
+		Write("saved-file", new { stepName, filePath });
+	}
+
 	public void ReportSessionWarning(string warningType, string message)
 	{
 		Write("session-warning", new { warningType, message });
@@ -678,6 +683,7 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 					? kv.Value.Content[..1000] + "..."
 					: kv.Value.Content,
 				error = kv.Value.ErrorMessage,
+				savedFiles = kv.Value.SavedFiles.Length > 0 ? kv.Value.SavedFiles : null,
 			});
 
 		Write("orchestration-done", new
@@ -695,6 +701,7 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 				reason = cancel.Reason,
 				isTimeout = cancel.IsTimeout,
 			} : null,
+			savedFiles = orchestrationResult.SavedFiles.Length > 0 ? orchestrationResult.SavedFiles : null,
 			results,
 		});
 	}

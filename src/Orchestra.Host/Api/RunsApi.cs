@@ -308,6 +308,7 @@ public static class RunsApi
 				nestingDepth = record.NestingDepth,
 				parameters = record.Parameters,
 				finalContent = record.FinalContent,
+				savedFiles = record.SavedFiles.Length > 0 ? record.SavedFiles : null,
 				totalUsage = record.TotalUsage is { } tu ? new
 				{
 					inputTokens = tu.InputTokens,
@@ -364,6 +365,7 @@ public static class RunsApi
 					requestedModelInfo = kv.Value.RequestedModelInfo,
 					selectedModelInfo = kv.Value.SelectedModelInfo,
 					actualModelInfo = kv.Value.ActualModelInfo,
+					savedFiles = kv.Value.SavedFiles.Length > 0 ? kv.Value.SavedFiles : null,
 					usage = kv.Value.Usage is { } u ? new
 					{
 						inputTokens = u.InputTokens,
@@ -440,12 +442,13 @@ public static class RunsApi
 							name = kv.Value.StepName,
 							status = kv.Value.Status.ToString(),
 							startedAt = kv.Value.StartedAt.ToString("o"),
-							completedAt = kv.Value.CompletedAt.ToString("o"),
-							durationSeconds = Math.Round(kv.Value.Duration.TotalSeconds, 2),
-							content = kv.Value.Content,
-							loopIteration = kv.Value.LoopIteration,
-							errorMessage = kv.Value.ErrorMessage,
-						}).ToArray()
+						completedAt = kv.Value.CompletedAt.ToString("o"),
+						durationSeconds = Math.Round(kv.Value.Duration.TotalSeconds, 2),
+						content = kv.Value.Content,
+						loopIteration = kv.Value.LoopIteration,
+						savedFiles = kv.Value.SavedFiles.Length > 0 ? kv.Value.SavedFiles : null,
+						errorMessage = kv.Value.ErrorMessage,
+					}).ToArray()
 					: null,
 			}, jsonOptions);
 		});
