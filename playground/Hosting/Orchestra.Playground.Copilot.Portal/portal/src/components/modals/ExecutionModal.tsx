@@ -36,10 +36,18 @@ interface TraceToolCall {
  */
 interface RichTraceData extends Omit<TraceData, 'toolCalls' | 'responseSegments'> {
   toolCalls?: TraceToolCall[];
-  responseSegments?: string[];
+  responseSegments?: Array<string | { content?: string }>;
 }
 
 type TraceSectionKey =
+  | 'parameters'
+  | 'dependencyOutputs'
+  | 'rawDependencyOutputs'
+  | 'accessibleStepData'
+  | 'processInvocation'
+  | 'commandArguments'
+  | 'environment'
+  | 'stdin'
   | 'systemPrompt'
   | 'userPromptRaw'
   | 'userPromptProcessed'
@@ -55,6 +63,30 @@ type TraceSectionKey =
 interface DisplayContent {
   content: string;
   source: 'step' | 'final' | 'streaming';
+  emptyMessage?: string;
+}
+
+function responseSegmentText(segment: string | { content?: string }): string {
+  return typeof segment === 'string' ? segment : segment.content ?? '';
+}
+
+function hasRecordEntries(record?: Record<string, unknown>): boolean {
+  return !!record && Object.keys(record).length > 0;
+}
+
+function formatTraceRecord(record?: Record<string, unknown>): string {
+  if (!record) return '';
+  return Object.entries(record)
+    .map(([key, value]) => {
+      if (typeof value === 'string') return `${key}: ${value}`;
+      return `${key}: ${JSON.stringify(value, null, 2)}`;
+    })
+    .join('\n');
+}
+
+function formatTraceArray(values?: string[]): string {
+  if (!values || values.length === 0) return 'No arguments.';
+  return values.map((value, index) => `[${index}] ${JSON.stringify(value)}`).join('\n');
 }
 
 interface StepModelState {
@@ -295,18 +327,148 @@ export default function ExecutionModal({
     return [...entries].sort((a, b) => a.sequence - b.sequence);
   }, [selectedStep, stepAuditLogs, selectedStepTrace]);
 
+  // Get selected step data (including MCPs)
+  const selectedStepData = useMemo<Step | null>(() => {
+    if (!selectedStep || !orchestration?.steps) return null;
+    const step = orchestration.steps.find(
+      (s) => (typeof s === 'string' ? s : s?.name) === selectedStep,
+    );
+    return typeof step === 'object' ? step : null;
+  }, [selectedStep, orchestration]);
+
+  const selectedStepUsesActorCards = useMemo<boolean>(() => {
+    const type = selectedStepData?.type?.toLowerCase();
+    return !type || type === 'prompt';
+  }, [selectedStepData]);
+
+  const selectedStepTraceLabels = useMemo(() => {
+    const type = selectedStepData?.type?.toLowerCase();
+    if (type === 'command') {
+      return {
+        systemPrompt: 'Command Context',
+        userPromptRaw: 'Command',
+        responseSegments: 'Stderr',
+        finalResponse: 'Stdout',
+        finalResponseColor: 'var(--success)',
+      };
+    }
+    if (type === 'script') {
+      return {
+        systemPrompt: 'Script Context',
+        userPromptRaw: 'Script Arguments',
+        responseSegments: 'Stderr',
+        finalResponse: 'Stdout',
+        finalResponseColor: 'var(--success)',
+      };
+    }
+    return {
+      systemPrompt: 'System Prompt',
+      userPromptRaw: 'User Prompt (Raw)',
+      responseSegments: 'Response Segments',
+      finalResponse: 'Final Response (Before Output Handler)',
+      finalResponseColor: 'var(--text)',
+    };
+  }, [selectedStepData]);
+
+  const traceParameterText = useMemo(
+    () => formatTraceRecord(selectedStepTrace?.parameters as Record<string, unknown> | undefined),
+    [selectedStepTrace],
+  );
+
+  const traceDependencyOutputText = useMemo(
+    () => formatTraceRecord(selectedStepTrace?.dependencyOutputs as Record<string, unknown> | undefined),
+    [selectedStepTrace],
+  );
+
+  const traceRawDependencyOutputText = useMemo(
+    () => formatTraceRecord(selectedStepTrace?.rawDependencyOutputs as Record<string, unknown> | undefined),
+    [selectedStepTrace],
+  );
+
+  const traceAccessibleStepDataText = useMemo(
+    () => formatTraceRecord(selectedStepTrace?.accessibleStepData as Record<string, unknown> | undefined),
+    [selectedStepTrace],
+  );
+
+  const traceProcessInvocationText = useMemo(() => {
+    if (!selectedStepTrace) return '';
+    const lines: string[] = [];
+    if (selectedStepTrace.command) lines.push(`Command: ${selectedStepTrace.command}`);
+    if (selectedStepTrace.shell) lines.push(`Shell: ${selectedStepTrace.shell}`);
+    if (selectedStepTrace.scriptSource) lines.push(`Script: ${selectedStepTrace.scriptSource}`);
+    if (selectedStepTrace.workingDirectory) lines.push(`Working Directory: ${selectedStepTrace.workingDirectory}`);
+    return lines.join('\n');
+  }, [selectedStepTrace]);
+
+  const traceCommandArgumentsText = useMemo(
+    () => formatTraceArray(selectedStepTrace?.commandArguments),
+    [selectedStepTrace],
+  );
+
+  const traceStderrText = useMemo(() => {
+    if (!selectedStepTrace?.responseSegments || selectedStepTrace.responseSegments.length === 0) {
+      return 'No stderr output captured.';
+    }
+
+    const text = selectedStepTrace.responseSegments.map(responseSegmentText).join('\n');
+    return text || 'No stderr output captured.';
+  }, [selectedStepTrace]);
+
+  const traceEnvironmentText = useMemo(
+    () => formatTraceRecord(selectedStepTrace?.environment as Record<string, unknown> | undefined),
+    [selectedStepTrace],
+  );
+
+  const hasProcessTrace = !!selectedStepTrace && (
+    !!selectedStepTrace.command ||
+    !!selectedStepTrace.shell ||
+    !!selectedStepTrace.scriptSource ||
+    !!selectedStepTrace.workingDirectory
+  );
+
+  const hasCommandArgumentsTrace = !!selectedStepTrace?.commandArguments;
+  const hasEnvironmentTrace = hasRecordEntries(selectedStepTrace?.environment as Record<string, unknown> | undefined);
+  const hasStdinTrace = selectedStepTrace?.stdin !== undefined && selectedStepTrace.stdin !== null;
+  const isProcessStep = selectedStepData?.type?.toLowerCase() === 'command' || selectedStepData?.type?.toLowerCase() === 'script';
+
+  const selectedStepStatus: string | null =
+    selectedStep && stepStatuses ? stepStatuses[selectedStep] || 'pending' : null;
+
   // Determine what content to show in the output panel
   const displayContent = useMemo<DisplayContent>(() => {
     // If a step is selected and we have its result, show it
     if (selectedStep && stepResults && stepResults[selectedStep]) {
       return { content: stepResults[selectedStep], source: 'step' };
     }
+    if (selectedStep && !selectedStepUsesActorCards) {
+      const streamedStepContent = stepActorStreams?.[selectedStep]?.main?.content;
+      const hasStdoutTrace = selectedStepTrace?.finalResponse !== undefined && selectedStepTrace.finalResponse !== null;
+      const hasStderrTrace = selectedStepTrace?.responseSegments !== undefined;
+      const traceContent = [
+        selectedStepTrace?.finalResponse,
+        ...(selectedStepTrace?.responseSegments ?? []).map(responseSegmentText),
+      ]
+        .filter((part): part is string => part !== undefined && part !== null && part !== '')
+        .join('\n');
+      if (selectedStepStatus === 'failed' && traceContent) {
+        return { content: traceContent, source: 'step' };
+      }
+      if (streamedStepContent) {
+        return { content: streamedStepContent, source: 'streaming' };
+      }
+      if (traceContent) {
+        return { content: traceContent, source: 'step' };
+      }
+      if (selectedStepStatus === 'completed' && (hasStdoutTrace || hasStderrTrace)) {
+        return { content: '', source: 'step', emptyMessage: 'Process completed with no stdout or stderr output.' };
+      }
+    }
     // Otherwise show streaming content or final result
     if (isCompleted && finalResult) {
       return { content: finalResult, source: 'final' };
     }
     return { content: streamingContent || '', source: 'streaming' };
-  }, [selectedStep, stepResults, streamingContent, finalResult, isCompleted]);
+  }, [selectedStep, selectedStepStatus, selectedStepUsesActorCards, stepResults, stepActorStreams, selectedStepTrace, streamingContent, finalResult, isCompleted]);
 
   /**
    * True when the selected step's actor streams contain any actual activity (chunks of
@@ -319,6 +481,7 @@ export default function ExecutionModal({
    * actually carry the step's output.
    */
   const hasStreamActivity = useMemo<boolean>(() => {
+    if (!selectedStepUsesActorCards) return false;
     if (!selectedStep || !stepActorStreams) return false;
     const bucket = stepActorStreams[selectedStep];
     if (!bucket) return false;
@@ -326,7 +489,7 @@ export default function ExecutionModal({
     const mainHasOutput = !!(main?.content || main?.reasoning || main?.errorMessage)
       || (main?.events?.length ?? 0) > 0;
     return mainHasOutput || (bucket.subagents?.length ?? 0) > 0;
-  }, [selectedStep, stepActorStreams]);
+  }, [selectedStep, selectedStepUsesActorCards, stepActorStreams]);
 
   // Copy content to clipboard
   const copyContent = useCallback(() => {
@@ -428,18 +591,6 @@ export default function ExecutionModal({
   // Get events for selected step
   const selectedStepEvents: StepEvent[] =
     selectedStep && stepEvents ? stepEvents[selectedStep] || [] : [];
-  const selectedStepStatus: string | null =
-    selectedStep && stepStatuses ? stepStatuses[selectedStep] || 'pending' : null;
-
-  // Get selected step data (including MCPs)
-  const selectedStepData = useMemo<Step | null>(() => {
-    if (!selectedStep || !orchestration?.steps) return null;
-    const step = orchestration.steps.find(
-      (s) => (typeof s === 'string' ? s : s?.name) === selectedStep,
-    );
-    return typeof step === 'object' ? step : null;
-  }, [selectedStep, orchestration]);
-
   // Extract requested/selected/actual model info from step events.
   const stepModelInfo = useMemo<StepModelState | null>(() => {
     if (!selectedStep || !stepEvents) return null;
@@ -676,6 +827,57 @@ export default function ExecutionModal({
 
   /** Inline error dismiss handler */
   const dismissInlineError = useCallback(() => setInlineError(null), []);
+
+  const renderTraceSection = (
+    key: TraceSectionKey,
+    title: string,
+    content: React.ReactNode,
+    color = 'var(--text-muted)',
+    maxHeight = '150px',
+  ): React.JSX.Element => (
+    <div className="trace-section" style={{ marginBottom: '12px' }}>
+      <div
+        className="trace-section-header"
+        onClick={() => toggleTraceSection(key)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          cursor: 'pointer',
+          padding: '6px 8px',
+          background: 'var(--surface)',
+          borderRadius: '4px',
+          marginBottom: expandedTraceSections[key] ? '4px' : '0',
+        }}
+      >
+        <span
+          style={{
+            transform: expandedTraceSections[key] ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s',
+          }}
+        >
+          &#9654;
+        </span>
+        <span style={{ fontWeight: 500, color }}>{title}</span>
+      </div>
+      {expandedTraceSections[key] && (
+        <pre
+          style={{
+            background: 'var(--bg)',
+            padding: '8px',
+            borderRadius: '4px',
+            whiteSpace: 'pre-wrap',
+            fontSize: '11px',
+            color: 'var(--text-muted)',
+            maxHeight,
+            overflow: 'auto',
+          }}
+        >
+          {content}
+        </pre>
+      )}
+    </div>
+  );
 
   return (
     <div
@@ -1717,6 +1919,304 @@ export default function ExecutionModal({
                         className="trace-panel"
                         style={{ fontSize: '12px', overflow: 'auto', flex: 1 }}
                       >
+                        {hasProcessTrace && renderTraceSection(
+                          'processInvocation',
+                          selectedStepData?.type?.toLowerCase() === 'script' ? 'Script Invocation' : 'Command Invocation',
+                          traceProcessInvocationText,
+                          'var(--purple)',
+                        )}
+
+                        {hasCommandArgumentsTrace && renderTraceSection(
+                          'commandArguments',
+                          selectedStepData?.type?.toLowerCase() === 'script' ? 'Process Arguments' : 'Command Arguments',
+                          traceCommandArgumentsText,
+                          'var(--cyan)',
+                        )}
+
+                        {hasEnvironmentTrace && renderTraceSection(
+                          'environment',
+                          'Environment',
+                          traceEnvironmentText,
+                          'var(--success)',
+                        )}
+
+                        {hasStdinTrace && renderTraceSection(
+                          'stdin',
+                          'Stdin',
+                          selectedStepTrace.stdin === '' ? 'Empty stdin.' : selectedStepTrace.stdin,
+                          'var(--warning)',
+                        )}
+
+                        {isProcessStep && selectedStepTrace.finalResponse !== undefined && selectedStepTrace.finalResponse !== null && renderTraceSection(
+                          'finalResponse',
+                          selectedStepTraceLabels.finalResponse,
+                          selectedStepTrace.finalResponse || 'No stdout output captured.',
+                          selectedStepTraceLabels.finalResponseColor,
+                        )}
+
+                        {isProcessStep && renderTraceSection(
+                          'responseSegments',
+                          `${selectedStepTraceLabels.responseSegments} (${selectedStepTrace.responseSegments?.length ?? 0})`,
+                          traceStderrText,
+                          'var(--success)',
+                        )}
+
+                        {/* Input Parameters */}
+                        {hasRecordEntries(selectedStepTrace.parameters) && (
+                          <div
+                            className="trace-section"
+                            style={{ marginBottom: '12px' }}
+                          >
+                            <div
+                              className="trace-section-header"
+                              onClick={() =>
+                                toggleTraceSection('parameters')
+                              }
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                cursor: 'pointer',
+                                padding: '6px 8px',
+                                background: 'var(--surface)',
+                                borderRadius: '4px',
+                                marginBottom:
+                                  expandedTraceSections.parameters
+                                    ? '4px'
+                                    : '0',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  transform:
+                                    expandedTraceSections.parameters
+                                      ? 'rotate(90deg)'
+                                      : 'rotate(0deg)',
+                                  transition: 'transform 0.15s',
+                                }}
+                              >
+                                &#9654;
+                              </span>
+                              <span
+                                style={{
+                                  fontWeight: 500,
+                                  color: 'var(--accent)',
+                                }}
+                              >
+                                Input Parameters
+                              </span>
+                            </div>
+                            {expandedTraceSections.parameters && (
+                              <pre
+                                style={{
+                                  background: 'var(--bg)',
+                                  padding: '8px',
+                                  borderRadius: '4px',
+                                  whiteSpace: 'pre-wrap',
+                                  fontSize: '11px',
+                                  color: 'var(--text-muted)',
+                                  maxHeight: '150px',
+                                  overflow: 'auto',
+                                }}
+                              >
+                                {traceParameterText}
+                              </pre>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Dependency Outputs */}
+                        {hasRecordEntries(selectedStepTrace.dependencyOutputs) && (
+                          <div
+                            className="trace-section"
+                            style={{ marginBottom: '12px' }}
+                          >
+                            <div
+                              className="trace-section-header"
+                              onClick={() =>
+                                toggleTraceSection('dependencyOutputs')
+                              }
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                cursor: 'pointer',
+                                padding: '6px 8px',
+                                background: 'var(--surface)',
+                                borderRadius: '4px',
+                                marginBottom:
+                                  expandedTraceSections.dependencyOutputs
+                                    ? '4px'
+                                    : '0',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  transform:
+                                    expandedTraceSections.dependencyOutputs
+                                      ? 'rotate(90deg)'
+                                      : 'rotate(0deg)',
+                                  transition: 'transform 0.15s',
+                                }}
+                              >
+                                &#9654;
+                              </span>
+                              <span
+                                style={{
+                                  fontWeight: 500,
+                                  color: 'var(--success)',
+                                }}
+                              >
+                                Dependency Outputs
+                              </span>
+                            </div>
+                            {expandedTraceSections.dependencyOutputs && (
+                              <pre
+                                style={{
+                                  background: 'var(--bg)',
+                                  padding: '8px',
+                                  borderRadius: '4px',
+                                  whiteSpace: 'pre-wrap',
+                                  fontSize: '11px',
+                                  color: 'var(--text-muted)',
+                                  maxHeight: '150px',
+                                  overflow: 'auto',
+                                }}
+                              >
+                                {traceDependencyOutputText}
+                              </pre>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Raw Dependency Outputs */}
+                        {hasRecordEntries(selectedStepTrace.rawDependencyOutputs) && (
+                          <div
+                            className="trace-section"
+                            style={{ marginBottom: '12px' }}
+                          >
+                            <div
+                              className="trace-section-header"
+                              onClick={() =>
+                                toggleTraceSection('rawDependencyOutputs')
+                              }
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                cursor: 'pointer',
+                                padding: '6px 8px',
+                                background: 'var(--surface)',
+                                borderRadius: '4px',
+                                marginBottom:
+                                  expandedTraceSections.rawDependencyOutputs
+                                    ? '4px'
+                                    : '0',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  transform:
+                                    expandedTraceSections.rawDependencyOutputs
+                                      ? 'rotate(90deg)'
+                                      : 'rotate(0deg)',
+                                  transition: 'transform 0.15s',
+                                }}
+                              >
+                                &#9654;
+                              </span>
+                              <span
+                                style={{
+                                  fontWeight: 500,
+                                  color: 'var(--success)',
+                                }}
+                              >
+                                Raw Dependency Outputs
+                              </span>
+                            </div>
+                            {expandedTraceSections.rawDependencyOutputs && (
+                              <pre
+                                style={{
+                                  background: 'var(--bg)',
+                                  padding: '8px',
+                                  borderRadius: '4px',
+                                  whiteSpace: 'pre-wrap',
+                                  fontSize: '11px',
+                                  color: 'var(--text-muted)',
+                                  maxHeight: '150px',
+                                  overflow: 'auto',
+                                }}
+                              >
+                                {traceRawDependencyOutputText}
+                              </pre>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Accessible Step Data */}
+                        {hasRecordEntries(selectedStepTrace.accessibleStepData) && (
+                          <div
+                            className="trace-section"
+                            style={{ marginBottom: '12px' }}
+                          >
+                            <div
+                              className="trace-section-header"
+                              onClick={() =>
+                                toggleTraceSection('accessibleStepData')
+                              }
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                cursor: 'pointer',
+                                padding: '6px 8px',
+                                background: 'var(--surface)',
+                                borderRadius: '4px',
+                                marginBottom:
+                                  expandedTraceSections.accessibleStepData
+                                    ? '4px'
+                                    : '0',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  transform:
+                                    expandedTraceSections.accessibleStepData
+                                      ? 'rotate(90deg)'
+                                      : 'rotate(0deg)',
+                                  transition: 'transform 0.15s',
+                                }}
+                              >
+                                &#9654;
+                              </span>
+                              <span
+                                style={{
+                                  fontWeight: 500,
+                                  color: 'var(--cyan)',
+                                }}
+                              >
+                                Accessible Step Data
+                              </span>
+                            </div>
+                            {expandedTraceSections.accessibleStepData && (
+                              <pre
+                                style={{
+                                  background: 'var(--bg)',
+                                  padding: '8px',
+                                  borderRadius: '4px',
+                                  whiteSpace: 'pre-wrap',
+                                  fontSize: '11px',
+                                  color: 'var(--text-muted)',
+                                  maxHeight: '200px',
+                                  overflow: 'auto',
+                                }}
+                              >
+                                {traceAccessibleStepDataText}
+                              </pre>
+                            )}
+                          </div>
+                        )}
+
                         {/* System Prompt */}
                         {selectedStepTrace.systemPrompt && (
                           <div
@@ -1759,7 +2259,7 @@ export default function ExecutionModal({
                                   color: 'var(--purple)',
                                 }}
                               >
-                                System Prompt
+                                {selectedStepTraceLabels.systemPrompt}
                               </span>
                             </div>
                             {expandedTraceSections.systemPrompt && (
@@ -1823,7 +2323,7 @@ export default function ExecutionModal({
                                   color: 'var(--cyan)',
                                 }}
                               >
-                                User Prompt (Raw)
+                                {selectedStepTraceLabels.userPromptRaw}
                               </span>
                             </div>
                             {expandedTraceSections.userPromptRaw && (
@@ -2172,8 +2672,8 @@ export default function ExecutionModal({
                           )}
 
                         {/* Response Segments */}
-                        {selectedStepTrace.responseSegments &&
-                          selectedStepTrace.responseSegments.length > 0 && (
+                        {!isProcessStep && selectedStepTrace.responseSegments &&
+                          (selectedStepTrace.responseSegments.length > 0 || isProcessStep) && (
                             <div
                               className="trace-section"
                               style={{ marginBottom: '12px' }}
@@ -2214,7 +2714,7 @@ export default function ExecutionModal({
                                     color: 'var(--success)',
                                   }}
                                 >
-                                  Response Segments (
+                                  {selectedStepTraceLabels.responseSegments} (
                                   {selectedStepTrace.responseSegments.length})
                                 </span>
                               </div>
@@ -2226,32 +2726,47 @@ export default function ExecutionModal({
                                     gap: '6px',
                                   }}
                                 >
-                                  {selectedStepTrace.responseSegments.map(
-                                    (seg, i) => (
-                                      <pre
-                                        key={i}
-                                        style={{
-                                          background: 'var(--bg)',
-                                          padding: '8px',
-                                          borderRadius: '4px',
-                                          whiteSpace: 'pre-wrap',
-                                          fontSize: '11px',
-                                          color: 'var(--text-muted)',
-                                          maxHeight: '150px',
-                                          overflow: 'auto',
-                                        }}
-                                      >
-                                        {seg}
-                                      </pre>
-                                    ),
-                                  )}
+                                  {selectedStepTrace.responseSegments.length === 0 ? (
+                                    <pre
+                                      style={{
+                                        background: 'var(--bg)',
+                                        padding: '8px',
+                                        borderRadius: '4px',
+                                        whiteSpace: 'pre-wrap',
+                                        fontSize: '11px',
+                                        color: 'var(--text-dim)',
+                                        maxHeight: '150px',
+                                        overflow: 'auto',
+                                      }}
+                                    >
+                                      No stderr output captured.
+                                    </pre>
+                                  ) : selectedStepTrace.responseSegments.map(
+                                      (seg, i) => (
+                                        <pre
+                                          key={i}
+                                          style={{
+                                            background: 'var(--bg)',
+                                            padding: '8px',
+                                            borderRadius: '4px',
+                                            whiteSpace: 'pre-wrap',
+                                            fontSize: '11px',
+                                            color: 'var(--text-muted)',
+                                            maxHeight: '150px',
+                                            overflow: 'auto',
+                                          }}
+                                        >
+                                          {responseSegmentText(seg) || 'No stderr output captured.'}
+                                        </pre>
+                                      ),
+                                    )}
                                 </div>
                               )}
                             </div>
                           )}
 
                         {/* Final Response (before output handler) */}
-                        {selectedStepTrace.finalResponse && (
+                        {!isProcessStep && selectedStepTrace.finalResponse && (
                           <div
                             className="trace-section"
                             style={{ marginBottom: '12px' }}
@@ -2289,10 +2804,10 @@ export default function ExecutionModal({
                               <span
                                 style={{
                                   fontWeight: 500,
-                                  color: 'var(--text)',
+                                  color: selectedStepTraceLabels.finalResponseColor,
                                 }}
                               >
-                                Final Response (Before Output Handler)
+                                {selectedStepTraceLabels.finalResponse}
                               </span>
                             </div>
                             {expandedTraceSections.finalResponse && (
@@ -2308,7 +2823,7 @@ export default function ExecutionModal({
                                   overflow: 'auto',
                                 }}
                               >
-                                {selectedStepTrace.finalResponse}
+                                {selectedStepTrace.finalResponse || 'No stdout output captured.'}
                               </pre>
                             )}
                           </div>
@@ -2731,11 +3246,11 @@ export default function ExecutionModal({
                     displayContent.content
                   ) : (
                     <span style={{ color: 'var(--text-dim)' }}>
-                      {status === 'running'
+                      {displayContent.emptyMessage ?? (status === 'running'
                         ? selectedStep
                           ? 'No output yet for this step...'
                           : 'Running...'
-                        : 'No output captured'}
+                        : 'No output captured')}
                     </span>
                   )}
                   <div ref={streamingEndRef} />

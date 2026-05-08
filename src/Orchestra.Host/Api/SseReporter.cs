@@ -385,6 +385,17 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("step-trace", new
 		{
 			stepName,
+			parameters = trace.Parameters.Count > 0 ? trace.Parameters : null,
+			dependencyOutputs = trace.DependencyOutputs.Count > 0 ? trace.DependencyOutputs : null,
+			rawDependencyOutputs = trace.RawDependencyOutputs.Count > 0 ? trace.RawDependencyOutputs : null,
+			accessibleStepData = trace.AccessibleStepData.Count > 0 ? trace.AccessibleStepData : null,
+			command = trace.Command,
+			commandArguments = trace.Command is not null || trace.Shell is not null || trace.CommandArguments.Count > 0 ? trace.CommandArguments : null,
+			shell = trace.Shell,
+			scriptSource = trace.ScriptSource,
+			workingDirectory = trace.WorkingDirectory,
+			environment = trace.Environment.Count > 0 ? trace.Environment : null,
+			stdin = trace.Stdin,
 			systemPrompt = trace.SystemPrompt,
 			userPromptRaw = trace.UserPromptRaw,
 			userPromptProcessed = trace.UserPromptProcessed,

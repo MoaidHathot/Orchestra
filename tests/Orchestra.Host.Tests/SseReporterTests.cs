@@ -857,6 +857,62 @@ public class SseReporterTests : IDisposable
 		// WhenWritingNull). The second tool call shows no `actor` key at all.
 		evt.Data.Should().Contain("\"callId\":\"tc-2\",\"toolName\":\"read_file\",\"success\":true}");
 	}
+
+	[Fact]
+	public void StepTrace_IncludesInputAndAccessibleStepData()
+	{
+		var trace = new StepExecutionTrace
+		{
+			Parameters = new Dictionary<string, string> { ["ticket"] = "INC-123" },
+			DependencyOutputs = new Dictionary<string, string> { ["fetch"] = "processed output" },
+			RawDependencyOutputs = new Dictionary<string, string> { ["fetch"] = "raw output" },
+			AccessibleStepData = new Dictionary<string, StepTraceStepData>
+			{
+				["fetch"] = new()
+				{
+					Status = nameof(ExecutionStatus.Succeeded),
+					Output = "processed output",
+					RawOutput = "raw output",
+					Files = ["C:/temp/fetch.txt"],
+				},
+			},
+		};
+
+		_reporter.ReportStepTrace("step-1", trace);
+
+		var evt = _reporter.AccumulatedEvents.Single();
+		evt.Type.Should().Be("step-trace");
+		evt.Data.Should().Contain("\"parameters\":{\"ticket\":\"INC-123\"}");
+		evt.Data.Should().Contain("\"dependencyOutputs\":{\"fetch\":\"processed output\"}");
+		evt.Data.Should().Contain("\"rawDependencyOutputs\":{\"fetch\":\"raw output\"}");
+		evt.Data.Should().Contain("\"accessibleStepData\":{\"fetch\":");
+		evt.Data.Should().Contain("\"files\":[\"C:/temp/fetch.txt\"]");
+	}
+
+	[Fact]
+	public void StepTrace_IncludesProcessDetails()
+	{
+		var trace = new StepExecutionTrace
+		{
+			Command = "pwsh",
+			CommandArguments = ["-NoProfile", "-Command", "Write-Output hello"],
+			WorkingDirectory = "C:/repo",
+			Environment = new Dictionary<string, string> { ["MODE"] = "trace" },
+			Stdin = "input text",
+			FinalResponse = string.Empty,
+		};
+
+		_reporter.ReportStepTrace("step-1", trace);
+
+		var evt = _reporter.AccumulatedEvents.Single();
+		evt.Type.Should().Be("step-trace");
+		evt.Data.Should().Contain("\"command\":\"pwsh\"");
+		evt.Data.Should().Contain("\"commandArguments\":[\"-NoProfile\",\"-Command\",\"Write-Output hello\"]");
+		evt.Data.Should().Contain("\"workingDirectory\":\"C:/repo\"");
+		evt.Data.Should().Contain("\"environment\":{\"MODE\":\"trace\"}");
+		evt.Data.Should().Contain("\"stdin\":\"input text\"");
+		evt.Data.Should().Contain("\"finalResponse\":\"\"");
+	}
 }
 
 /// <summary>

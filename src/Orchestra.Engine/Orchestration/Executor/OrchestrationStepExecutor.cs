@@ -124,11 +124,13 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 		catch (ChildOrchestrationLaunchException ex)
 		{
 			LogLaunchFailed(step.Name, ex.ErrorCode, ex.Message);
+			var trace = BuildTrace(invocationStep, resolvedOrchestrationId, resolvedParameters, executionId: null, errorMessage: ex.Message);
+			_reporter.ReportStepTrace(step.Name, trace);
 			return ExecutionResult.Failed(
 				$"Failed to launch child orchestration '{resolvedOrchestrationId}': {ex.Message}",
 				rawDependencyOutputs,
 				errorCategory: StepErrorCategory.Unknown,
-				trace: BuildTrace(invocationStep, resolvedOrchestrationId, resolvedParameters, executionId: null, errorMessage: ex.Message));
+				trace: trace);
 		}
 
 		LogChildLaunched(step.Name, handle.ExecutionId, handle.OrchestrationName, invocationStep.Mode.ToString());
@@ -147,6 +149,7 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			var dispatchJson = JsonSerializer.Serialize(dispatch, s_jsonOptions);
 
 			var trace = BuildTrace(invocationStep, resolvedOrchestrationId, resolvedParameters, handle.ExecutionId, errorMessage: null);
+			_reporter.ReportStepTrace(step.Name, trace);
 			return ExecutionResult.Succeeded(
 				dispatchJson,
 				rawDependencyOutputs: rawDependencyOutputs,
@@ -163,11 +166,13 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 		{
 			// Defensive: handle.Completion is documented as never throwing, but cover the case.
 			LogChildCompletionThrew(step.Name, handle.ExecutionId, ex);
+			var trace = BuildTrace(invocationStep, resolvedOrchestrationId, resolvedParameters, handle.ExecutionId, ex.Message);
+			_reporter.ReportStepTrace(step.Name, trace);
 			return ExecutionResult.Failed(
 				$"Child orchestration '{handle.OrchestrationName}' (executionId={handle.ExecutionId}) completion threw: {ex.Message}",
 				rawDependencyOutputs,
 				errorCategory: StepErrorCategory.Unknown,
-				trace: BuildTrace(invocationStep, resolvedOrchestrationId, resolvedParameters, handle.ExecutionId, ex.Message));
+				trace: trace);
 		}
 
 		var fullTrace = BuildTrace(
@@ -177,6 +182,7 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			handle.ExecutionId,
 			terminal.ErrorMessage,
 			finalContent: terminal.FinalContent);
+		_reporter.ReportStepTrace(step.Name, fullTrace);
 
 		// Map terminal status to ExecutionResult.
 		switch (terminal.Status)

@@ -431,11 +431,6 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 				}
 				else
 				{
-					foreach (var (stepName, stepResult) in orchResult.StepResults)
-					{
-						if (stepResult.Status == ExecutionStatus.Succeeded)
-							sseDone.ReportStepOutput(stepName, stepResult.Content);
-					}
 					sseDone.ReportOrchestrationDone(orchResult);
 				}
 			}

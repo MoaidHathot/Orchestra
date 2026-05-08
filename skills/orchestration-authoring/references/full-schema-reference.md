@@ -432,7 +432,9 @@ Performs pure string interpolation with no LLM call and no external requests.
 
 **Type value:** `"Command"`
 
-Executes a shell command as a child process and captures stdout.
+Executes a direct executable as a child process and captures stdout. Use this for commands such as `dotnet`, `git`, `dnx`, or `npx`.
+
+Do not use `Command` for shell snippets or wrappers such as `pwsh -Command`, `powershell -Command`, `bash -c`, or `sh -c`. Use a `Script` step instead.
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -449,7 +451,7 @@ Executes a shell command as a child process and captures stdout.
 
 **Type value:** `"Script"`
 
-Executes an inline or file-based script via a shell interpreter. The script's stdout is captured as output.
+Executes an inline or file-based script via a shell interpreter. The script's stdout is captured as output. Use this for shell snippets, pipelines, multi-line scripts, quoting-sensitive values, JSON manipulation, and anything that would otherwise be passed to `pwsh -Command` or `bash -c`.
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
@@ -463,6 +465,8 @@ Executes an inline or file-based script via a shell interpreter. The script's st
 | `stdin` | `string` | No | `null` | Content to pipe to the process's standard input. |
 
 > **\*Mutual exclusion:** Exactly one of `script` or `scriptFile` is required.
+
+Pass values into scripts with `arguments` or `stdin` instead of interpolating large or heavily quoted values into the script body. In PowerShell, `arguments` are available as `$args[0]`, `$args[1]`, and so on.
 
 ---
 

@@ -209,6 +209,62 @@ public enum StepErrorCategory
 public class StepExecutionTrace
 {
 	/// <summary>
+	/// The orchestration parameter values available to this step.
+	/// </summary>
+	public IReadOnlyDictionary<string, string> Parameters { get; init; } = new Dictionary<string, string>();
+
+	/// <summary>
+	/// Processed outputs available via <c>{{stepName.output}}</c> for direct dependencies.
+	/// </summary>
+	public IReadOnlyDictionary<string, string> DependencyOutputs { get; init; } = new Dictionary<string, string>();
+
+	/// <summary>
+	/// Raw outputs available via <c>{{stepName.rawOutput}}</c> for direct dependencies.
+	/// </summary>
+	public IReadOnlyDictionary<string, string> RawDependencyOutputs { get; init; } = new Dictionary<string, string>();
+
+	/// <summary>
+	/// Step output data reachable from this step's dependency graph, including transitive
+	/// dependencies that may be referenced by template expressions.
+	/// </summary>
+	public IReadOnlyDictionary<string, StepTraceStepData> AccessibleStepData { get; init; } = new Dictionary<string, StepTraceStepData>();
+
+	/// <summary>
+	/// Executable used by command-style steps after template resolution.
+	/// </summary>
+	public string? Command { get; init; }
+
+	/// <summary>
+	/// Arguments passed to the command or script process after template resolution.
+	/// </summary>
+	public List<string> CommandArguments { get; init; } = [];
+
+	/// <summary>
+	/// Shell used by script steps after template resolution.
+	/// </summary>
+	public string? Shell { get; init; }
+
+	/// <summary>
+	/// Script source used by script steps, such as "(inline)" or the resolved script path.
+	/// </summary>
+	public string? ScriptSource { get; init; }
+
+	/// <summary>
+	/// Working directory used by command-style steps after template resolution.
+	/// </summary>
+	public string? WorkingDirectory { get; init; }
+
+	/// <summary>
+	/// Environment variable overrides used by command-style steps after template resolution.
+	/// </summary>
+	public IReadOnlyDictionary<string, string> Environment { get; init; } = new Dictionary<string, string>();
+
+	/// <summary>
+	/// Standard input sent to command-style steps after template resolution.
+	/// </summary>
+	public string? Stdin { get; init; }
+
+	/// <summary>
 	/// The system prompt used for this step.
 	/// </summary>
 	public string? SystemPrompt { get; init; }
@@ -272,6 +328,32 @@ public class StepExecutionTrace
 	/// for compliance, debugging, and observability.
 	/// </summary>
 	public List<AuditLogEntry> AuditLog { get; init; } = [];
+}
+
+/// <summary>
+/// Output data for a step that is reachable from another step's template context.
+/// </summary>
+public class StepTraceStepData
+{
+	/// <summary>
+	/// Execution status of the referenced step.
+	/// </summary>
+	public string? Status { get; init; }
+
+	/// <summary>
+	/// Processed step output available as <c>{{stepName.output}}</c>.
+	/// </summary>
+	public string? Output { get; init; }
+
+	/// <summary>
+	/// Raw step output available as <c>{{stepName.rawOutput}}</c>.
+	/// </summary>
+	public string? RawOutput { get; init; }
+
+	/// <summary>
+	/// Files saved by the referenced step, available as <c>{{stepName.files}}</c>.
+	/// </summary>
+	public string[] Files { get; init; } = [];
 }
 
 /// <summary>

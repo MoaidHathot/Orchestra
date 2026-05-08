@@ -1447,6 +1447,108 @@ public class OrchestrationExecutorTests
 	}
 
 	[Fact]
+	public async Task ExecuteAsync_StepSucceeds_ReportsStepOutputImmediately()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("full command output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.SingleStep();
+
+		// Act
+		await executor.ExecuteAsync(orchestration);
+
+		// Assert — Full step output should be emitted when the step completes, not only
+		// after orchestration-done, so Command output is visible while downstream work runs.
+		_reporter.Received().ReportStepOutput("step1", "full command output");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_StepTraceIncludesInputsAndAccessibleStepData()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("processed output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "trace-context",
+			Description = "Trace context test",
+			Steps =
+			[
+				TestOrchestrations.CreatePromptStep("fetch"),
+				TestOrchestrations.CreateStepWithParameterizedPrompt(
+					"judge",
+					"Judge {{fetch.output}} for {{param.ticket}}",
+					["ticket"],
+					dependsOn: ["fetch"]),
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration, new Dictionary<string, string>
+		{
+			["ticket"] = "INC-123",
+		});
+
+		// Assert
+		var trace = result.StepResults["judge"].Trace;
+		trace.Should().NotBeNull();
+		trace!.Parameters.Should().ContainKey("ticket").WhoseValue.Should().Be("INC-123");
+		trace.DependencyOutputs.Should().ContainKey("fetch").WhoseValue.Should().Be("processed output");
+		trace.RawDependencyOutputs.Should().ContainKey("fetch").WhoseValue.Should().Be("processed output");
+		trace.AccessibleStepData.Should().ContainKey("fetch");
+		trace.AccessibleStepData["fetch"].Status.Should().Be(nameof(ExecutionStatus.Succeeded));
+		trace.AccessibleStepData["fetch"].Output.Should().Be("processed output");
+
+		_reporter.Received().ReportStepTrace("judge", Arg.Is<StepExecutionTrace>(t =>
+			t.Parameters.ContainsKey("ticket") &&
+			t.DependencyOutputs.ContainsKey("fetch") &&
+			t.AccessibleStepData.ContainsKey("fetch")));
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_CommandTracePreservesProcessDetailsAfterContextEnrichment()
+	{
+		// Arrange
+		var agentBuilder = new MockAgentBuilder().WithResponse("unused");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "trace-command-process",
+			Description = "Trace command process details",
+			Steps =
+			[
+				new CommandOrchestrationStep
+				{
+					Name = "cmd",
+					Type = OrchestrationStepType.Command,
+					Command = "echo",
+					Arguments = ["{{param.message}}"],
+					Environment = new Dictionary<string, string>
+					{
+						["ORCHESTRA_TRACE_ENV"] = "{{param.envValue}}"
+					},
+					Parameters = ["message", "envValue"],
+				}
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration, new Dictionary<string, string>
+		{
+			["message"] = "resolved argument",
+			["envValue"] = "resolved env",
+		});
+
+		// Assert
+		var trace = result.StepResults["cmd"].Trace;
+		trace.Should().NotBeNull();
+		trace!.Parameters.Should().ContainKey("message").WhoseValue.Should().Be("resolved argument");
+		trace.Command.Should().Be("echo");
+		trace.CommandArguments.Should().Equal("resolved argument");
+		trace.Environment.Should().ContainKey("ORCHESTRA_TRACE_ENV").WhoseValue.Should().Be("resolved env");
+	}
+
+	[Fact]
 	public async Task ExecuteAsync_LinearChainAllSucceed_ReportsStepCompletedForEachStep()
 	{
 		// Arrange

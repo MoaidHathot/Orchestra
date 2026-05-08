@@ -165,9 +165,16 @@ interface SSEEventData {
   executionId?: string;
   chunk?: string;
   content?: string;
+  contentPreview?: string;
   error?: string;
   message?: string;
   [key: string]: unknown;
+}
+
+interface FinalStepResultData {
+  status?: string;
+  contentPreview?: string;
+  error?: string;
 }
 
 // ── The App component ───────────────────────────────────────────────────────
@@ -935,10 +942,8 @@ function App(): React.JSX.Element {
               : new Date().toISOString();
           flushActorStreams();
         }
-        // Backfill stepResults from the server's contentPreview for non-streaming step
-        // types (Orchestration/Transform/Script/Command/Http) that never emit content-delta
-        // events. Without this, the cards UI for those steps shows "No output produced"
-        // until the run finishes (which is when step-output finally fires).
+        // Backfill stepResults from contentPreview for older Hosts that do not yet emit
+        // full step-output immediately when non-streaming steps complete.
         if (data.stepName && typeof data.contentPreview === 'string' && data.contentPreview.length > 0) {
           if (!stepResults[data.stepName]) {
             updateStepResult(data.stepName, data.contentPreview);
@@ -1311,12 +1316,15 @@ function App(): React.JSX.Element {
       };
       if (data.results) {
         const updatedStatuses: Record<string, string> = {};
-        for (const [stepName, stepData] of Object.entries(data.results as Record<string, { status?: string }>)) {
+        for (const [stepName, stepData] of Object.entries(data.results as Record<string, FinalStepResultData>)) {
           if (stepData.status) {
             const nextStatus = statusMap[stepData.status] || 'completed';
             updatedStatuses[stepName] = nextStatus === 'completed' && stepStatuses[stepName] === 'completed_restored'
               ? 'completed_restored'
               : nextStatus;
+          }
+          if (typeof stepData.contentPreview === 'string' && stepData.contentPreview.length > 0 && !stepResults[stepName]) {
+            stepResults[stepName] = stepData.contentPreview;
           }
         }
         // Mark the step that triggered early completion with a distinct status for DAG visualization
@@ -1326,6 +1334,7 @@ function App(): React.JSX.Element {
         setExecutionModal(prev => ({
           ...prev,
           stepStatuses: { ...prev.stepStatuses, ...updatedStatuses },
+          stepResults: { ...stepResults },
           status: modalStatus,
           completedByStep: data.completedByStep || null,
         }));
@@ -1678,7 +1687,7 @@ function App(): React.JSX.Element {
           };
           stepStatuses[step.name] = statusMap[step.status] || 'pending';
 
-          if (step.content) {
+          if (step.content !== undefined) {
             stepResults[step.name] = step.content;
           }
 

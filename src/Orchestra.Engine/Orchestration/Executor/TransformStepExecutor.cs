@@ -10,10 +10,12 @@ namespace Orchestra.Engine;
 public sealed partial class TransformStepExecutor : IStepExecutor
 {
 	private readonly ILogger<TransformStepExecutor> _logger;
+	private readonly IOrchestrationReporter? _reporter;
 
-	public TransformStepExecutor(ILogger<TransformStepExecutor> logger)
+	public TransformStepExecutor(ILogger<TransformStepExecutor> logger, IOrchestrationReporter? reporter = null)
 	{
 		_logger = logger;
+		_reporter = reporter;
 	}
 
 	public OrchestrationStepType StepType => OrchestrationStepType.Transform;
@@ -53,6 +55,8 @@ public sealed partial class TransformStepExecutor : IStepExecutor
 				// Store dependency inputs in McpServers for metadata
 				McpServers = rawDependencyOutputs.Select(kv => $"Dependency '{kv.Key}': {kv.Value.Length} chars").ToList(),
 			};
+
+			_reporter?.ReportStepTrace(step.Name, trace);
 
 			return Task.FromResult(ExecutionResult.Succeeded(
 				output,

@@ -57,7 +57,7 @@ public partial class OrchestrationExecutor
 			_stepExecutorRegistry = new StepExecutorRegistry()
 				.Register(new PromptStepExecutor(promptExecutor))
 				.Register(new HttpStepExecutor(new System.Net.Http.HttpClient(), reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))
-				.Register(new TransformStepExecutor(loggerFactory.CreateLogger<TransformStepExecutor>()))
+				.Register(new TransformStepExecutor(loggerFactory.CreateLogger<TransformStepExecutor>(), reporter))
 				.Register(new CommandStepExecutor(reporter, loggerFactory.CreateLogger<CommandStepExecutor>()))
 				.Register(new ScriptStepExecutor(reporter, loggerFactory.CreateLogger<ScriptStepExecutor>()));
 
@@ -254,6 +254,7 @@ public partial class OrchestrationExecutor
 					};
 					stepRecords[stepName] = record;
 					allStepRecords[stepName] = record;
+					_reporter.ReportStepOutput(stepName, result.Content);
 				}
 			}
 		}
@@ -324,6 +325,13 @@ public partial class OrchestrationExecutor
 				stepRecords[step.Name] = record;
 				allStepRecords[step.Name] = record;
 				await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+
+				// Report full step output as soon as the step completes so non-streaming steps
+				// (especially Command) are viewable while downstream steps are still running.
+				if (result.Status == ExecutionStatus.Succeeded)
+				{
+					_reporter.ReportStepOutput(step.Name, result.Content);
+				}
 
 				// Report step completed/failed/no-action to the reporter so the UI
 				// can update step status immediately (not just at orchestration-done).
@@ -1129,6 +1137,7 @@ public partial class OrchestrationExecutor
 		try
 		{
 			var result = await executor.ExecuteAsync(step, context, effectiveToken);
+			result = EnrichResultTrace(step, context, result);
 
 			if (result.Status == ExecutionStatus.Succeeded)
 			{
@@ -1150,14 +1159,14 @@ public partial class OrchestrationExecutor
 			var message = $"Step timed out after {effectiveStepTimeout} seconds.";
 			LogStepTimedOut(step.Name, effectiveStepTimeout!.Value);
 			_reporter.ReportStepError(step.Name, message);
-			return BuildTimeoutResult(message, ex.PartialResult);
+			return EnrichResultTrace(step, context, BuildTimeoutResult(message, ex.PartialResult));
 		}
 		catch (OperationCanceledException) when (timeoutCts is not null && timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
 			var message = $"Step timed out after {effectiveStepTimeout} seconds.";
 			LogStepTimedOut(step.Name, effectiveStepTimeout!.Value);
 			_reporter.ReportStepError(step.Name, message);
-			return BuildTimeoutResult(message, partialResult: null);
+			return EnrichResultTrace(step, context, BuildTimeoutResult(message, partialResult: null));
 		}
 		finally
 		{
@@ -1214,6 +1223,7 @@ public partial class OrchestrationExecutor
 			var targetStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(loop.Target);
 			var targetResult = await targetExecutor.ExecuteAsync(targetStep, context, cancellationToken);
+			targetResult = EnrichResultTrace(targetStep, context, targetResult);
 
 			context.AddResult(loop.Target, targetResult);
 			stepResults[loop.Target] = targetResult;
@@ -1234,6 +1244,7 @@ public partial class OrchestrationExecutor
 			var checkerStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(checkerStep.Name);
 			var newCheckerResult = await checkerExecutor.ExecuteAsync(checkerStep, context, cancellationToken);
+			newCheckerResult = EnrichResultTrace(checkerStep, context, newCheckerResult);
 
 			context.AddResult(checkerStep.Name, newCheckerResult);
 			stepResults[checkerStep.Name] = newCheckerResult;
@@ -1280,6 +1291,38 @@ public partial class OrchestrationExecutor
 		RetryHistory = partialResult?.RetryHistory,
 		ErrorCategory = StepErrorCategory.Timeout,
 	};
+
+	private ExecutionResult EnrichResultTrace(OrchestrationStep step, OrchestrationExecutionContext context, ExecutionResult result)
+	{
+		var trace = result.Trace?.WithContext(context, step);
+		if (trace is not null)
+		{
+			_reporter.ReportStepTrace(step.Name, trace);
+		}
+
+		return new ExecutionResult
+		{
+			Content = result.Content,
+			Status = result.Status,
+			ErrorMessage = result.ErrorMessage,
+			RawContent = result.RawContent,
+			RawDependencyOutputs = result.RawDependencyOutputs,
+			PromptSent = result.PromptSent,
+			ActualModel = result.ActualModel,
+			SelectedModel = result.SelectedModel,
+			RequestedModelInfo = result.RequestedModelInfo,
+			SelectedModelInfo = result.SelectedModelInfo,
+			ActualModelInfo = result.ActualModelInfo,
+			Usage = result.Usage,
+			Trace = trace,
+			RetryHistory = result.RetryHistory,
+			ErrorCategory = result.ErrorCategory,
+			OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
+			OrchestrationCompleteStatus = result.OrchestrationCompleteStatus,
+			OrchestrationCompleteStepName = result.OrchestrationCompleteStepName,
+			OrchestrationCompleteReason = result.OrchestrationCompleteReason,
+		};
+	}
 
 	private static StepRunRecord BuildStepRecord(
 		OrchestrationStep step,

@@ -70,6 +70,23 @@ public class CommandStepExecutorTests
 		result.Content.Should().Contain("Hello Orchestra");
 	}
 
+	[Fact]
+	public async Task ExecuteAsync_CommandWithOutput_ReportsContentDelta()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var (cmd, args) = GetEchoCommand("live command output");
+		var step = CreateCommandStep(command: cmd, arguments: args);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		_reporter.Received().ReportContentDelta(step.Name, Arg.Is<string>(chunk => chunk.Contains("live command output")));
+	}
+
 	#endregion
 
 	#region Failure Scenarios
@@ -224,6 +241,41 @@ public class CommandStepExecutorTests
 		result.Content.Should().Contain("dynamic-env-resolved");
 	}
 
+	[Fact]
+	public async Task ExecuteAsync_TraceIncludesResolvedProcessDetails()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var step = CreateCommandStep(
+			command: "echo",
+			arguments: ["{{param.message}}"],
+			environment: new Dictionary<string, string>
+			{
+				["ORCHESTRA_TRACE_ENV"] = "{{param.envValue}}"
+			},
+			parameters: ["message", "envValue"]);
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>
+			{
+				["message"] = "resolved argument",
+				["envValue"] = "resolved env",
+			}
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Trace.Should().NotBeNull();
+		result.Trace!.Command.Should().Be("echo");
+		result.Trace.CommandArguments.Should().Equal("resolved argument");
+		result.Trace.Environment.Should().ContainKey("ORCHESTRA_TRACE_ENV").WhoseValue.Should().Be("resolved env");
+		result.Trace.FinalResponse.Should().Contain("resolved argument");
+	}
+
 	#endregion
 
 	#region IncludeStdErr
@@ -247,6 +299,29 @@ public class CommandStepExecutorTests
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
 		result.Content.Should().Contain("stdout-data");
 		result.Content.Should().Contain("stderr-data");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_IncludeStdErr_TraceSeparatesStdoutAndStderr()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var (cmd, args) = GetStdoutAndStderrCommand("stdout-trace", "stderr-trace");
+		var step = CreateCommandStep(
+			command: cmd,
+			arguments: args,
+			includeStdErr: true);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Trace.Should().NotBeNull();
+		result.Trace!.FinalResponse.Should().Contain("stdout-trace");
+		result.Trace.FinalResponse.Should().NotContain("stderr-trace");
+		result.Trace.ResponseSegments.Should().ContainSingle().Which.Should().Contain("stderr-trace");
 	}
 
 	[Fact]

@@ -105,6 +105,10 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			var arguments = scriptStep.Arguments
 				.Select(arg => TemplateResolver.Resolve(arg, context.Parameters, context, step.DependsOn, step))
 				.ToArray();
+			var processArguments = runFileArgs
+				.Append(scriptFilePath)
+				.Concat(arguments)
+				.ToArray();
 
 			// Resolve template expressions in working directory
 			string? workingDirectory = null;
@@ -149,9 +153,11 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			}
 
 			// Set environment variables (resolve templates in values)
+			var resolvedEnvironment = new Dictionary<string, string>(StringComparer.Ordinal);
 			foreach (var (key, value) in scriptStep.Environment)
 			{
 				var resolvedValue = TemplateResolver.Resolve(value, context.Parameters, context, step.DependsOn, step);
+				resolvedEnvironment[key] = resolvedValue;
 				startInfo.Environment[key] = resolvedValue;
 			}
 
@@ -170,13 +176,20 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			process.OutputDataReceived += (_, e) =>
 			{
 				if (e.Data is not null)
+				{
 					stdoutBuilder.AppendLine(e.Data);
+					_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+				}
 			};
 
 			process.ErrorDataReceived += (_, e) =>
 			{
 				if (e.Data is not null)
+				{
 					stderrBuilder.AppendLine(e.Data);
+					if (scriptStep.IncludeStdErr)
+						_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+				}
 			};
 
 			if (!process.Start())
@@ -199,6 +212,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 
 			// Wait for process to exit with cancellation support
 			await process.WaitForExitAsync(cancellationToken);
+			process.WaitForExit();
 
 			var stdout = stdoutBuilder.ToString().TrimEnd();
 			var stderr = stderrBuilder.ToString().TrimEnd();
@@ -212,7 +226,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				LogScriptSuccess(step.Name, process.ExitCode);
 
 				// Build trace data for viewer visibility
-				var trace = BuildTrace(shell, scriptStep.Script is not null ? "(inline)" : scriptFilePath, arguments, workingDirectory, scriptStep.Environment, output, stderr);
+				var trace = BuildTrace(shell, scriptStep.Script is not null ? "(inline)" : scriptFilePath, processArguments, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
 				_reporter.ReportStepTrace(step.Name, trace);
 
 				return ExecutionResult.Succeeded(
@@ -230,7 +244,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				_reporter.ReportStepError(step.Name, errorMessage);
 
 				// Build trace data even on failure
-				var trace = BuildTrace(shell, scriptStep.Script is not null ? "(inline)" : scriptFilePath, arguments, workingDirectory, scriptStep.Environment, stdout, stderr);
+				var trace = BuildTrace(shell, scriptStep.Script is not null ? "(inline)" : scriptFilePath, processArguments, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
 				_reporter.ReportStepTrace(step.Name, trace);
 
 				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: trace);
@@ -271,9 +285,11 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	private static StepExecutionTrace BuildTrace(
 		string shell,
 		string scriptSource,
+		string[] processArguments,
 		string[] arguments,
 		string? workingDirectory,
 		IReadOnlyDictionary<string, string> environment,
+		string? stdin,
 		string stdout,
 		string stderr)
 	{
@@ -295,6 +311,12 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 
 		return new StepExecutionTrace
 		{
+			Shell = shell,
+			ScriptSource = scriptSource,
+			CommandArguments = [.. processArguments],
+			WorkingDirectory = workingDirectory,
+			Environment = new Dictionary<string, string>(environment),
+			Stdin = stdin,
 			SystemPrompt = contextInfo.ToString().TrimEnd(),
 			UserPromptRaw = userPrompt,
 			FinalResponse = stdout,

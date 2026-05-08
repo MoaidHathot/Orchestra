@@ -279,7 +279,9 @@ Pure string interpolation (no LLM, no I/O).
 
 ### Command Step (type: "Command")
 
-Executes a shell command, captures stdout.
+Executes a direct executable as a child process, captures stdout. Use this for commands such as `dotnet`, `git`, `dnx`, or `npx`.
+
+Do not use `Command` for shell snippets or wrappers such as `pwsh -Command`, `powershell -Command`, `bash -c`, or `sh -c`. Use a `Script` step instead so quoting, pipes, multiline logic, and JSON values are handled by the script file invocation.
 
 | Property | Type | Required | Default |
 |---|---|---|---|
@@ -292,7 +294,7 @@ Executes a shell command, captures stdout.
 
 ### Script Step (type: "Script")
 
-Executes an inline or file-based script via a shell interpreter (e.g., `pwsh`, `bash`, `python`, `node`). Captures stdout. Designed for multi-line scripts -- use YAML `|` blocks for best readability.
+Executes an inline or file-based script via a shell interpreter (e.g., `pwsh`, `bash`, `python`, `node`). Captures stdout. Use this for shell snippets, pipelines, multi-line scripts, quoting-sensitive values, JSON manipulation, and anything that would otherwise be passed to `pwsh -Command` or `bash -c`. Use YAML `|` blocks for best readability.
 
 | Property | Type | Required | Default |
 |---|---|---|---|
@@ -306,6 +308,8 @@ Executes an inline or file-based script via a shell interpreter (e.g., `pwsh`, `
 | `stdin` | string | No | null |
 
 *Mutual exclusion: use `script` OR `scriptFile`, not both. `scriptFile` paths resolve relative to the orchestration file's directory.
+
+Pass values into scripts with `arguments` or `stdin` instead of interpolating large or heavily quoted values into the script body. In PowerShell, `arguments` are available as `$args[0]`, `$args[1]`, and so on.
 
 ## Loop Configuration (Checker Pattern)
 
@@ -663,12 +667,13 @@ Orchestrations can be registered in Orchestra via:
 10. **`dependsOn` references step names**, not types or indices.
 11. **`mcps` on steps is an array of strings** (MCP names), not MCP definition objects.
 12. **Script steps require `shell`**. It has no default -- always specify it (e.g., `"pwsh"`, `"bash"`).
-13. **`systemPromptSections` requires `systemPromptMode: "customize"`**. Section overrides are ignored with `append` or `replace`.
-14. **Image attachments require a vision-capable model** (e.g., `claude-opus-4.6`, `gpt-4o`). Non-vision models will not understand the images.
-15. **`infiniteSessions` thresholds are ratios (0.0-1.0)**, not token counts. `0.80` means 80% of context used.
-16. **`hooks` is a top-level array**, not a step-level property.
-17. **Hook actions require exactly one of `script` or `scriptFile`.** Do not specify both.
-18. **Hook `failurePolicy` only supports `warn` or `ignore`** in v1.
+13. **Do NOT use `Command` with `pwsh -Command`, `powershell -Command`, or `bash -c` for script logic.** Use `type: Script`, `shell: pwsh`, and `script: |` instead.
+14. **`systemPromptSections` requires `systemPromptMode: "customize"`**. Section overrides are ignored with `append` or `replace`.
+15. **Image attachments require a vision-capable model** (e.g., `claude-opus-4.6`, `gpt-4o`). Non-vision models will not understand the images.
+16. **`infiniteSessions` thresholds are ratios (0.0-1.0)**, not token counts. `0.80` means 80% of context used.
+17. **`hooks` is a top-level array**, not a step-level property.
+18. **Hook actions require exactly one of `script` or `scriptFile`.** Do not specify both.
+19. **Hook `failurePolicy` only supports `warn` or `ignore`** in v1.
 
 ## Naming Conventions
 

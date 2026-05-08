@@ -293,6 +293,48 @@ public class ScriptStepExecutorTests
 		result.Content.Should().Contain("env-value-script");
 	}
 
+	[Fact]
+	public async Task ExecuteAsync_TraceIncludesResolvedProcessDetails()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "param($Value) Write-Output \"arg=$Value env=$env:ORCHESTRA_SCRIPT_TRACE stdin=$([Console]::In.ReadToEnd())\"",
+			arguments: ["{{param.argValue}}"],
+			environment: new Dictionary<string, string>
+			{
+				["ORCHESTRA_SCRIPT_TRACE"] = "{{param.envValue}}"
+			},
+			stdin: "{{param.stdinValue}}",
+			parameters: ["argValue", "envValue", "stdinValue"]);
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>
+			{
+				["argValue"] = "resolved arg",
+				["envValue"] = "resolved env",
+				["stdinValue"] = "resolved stdin",
+			}
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Trace.Should().NotBeNull();
+		result.Trace!.Shell.Should().Be("pwsh");
+		result.Trace.ScriptSource.Should().Be("(inline)");
+		result.Trace.CommandArguments.Should().Contain("resolved arg");
+		result.Trace.Environment.Should().ContainKey("ORCHESTRA_SCRIPT_TRACE").WhoseValue.Should().Be("resolved env");
+		result.Trace.Stdin.Should().Be("resolved stdin");
+		result.Trace.FinalResponse.Should().Contain("arg=resolved arg");
+		result.Trace.FinalResponse.Should().Contain("env=resolved env");
+		result.Trace.FinalResponse.Should().Contain("stdin=resolved stdin");
+	}
+
 	#endregion
 
 	#region IncludeStdErr
@@ -316,6 +358,28 @@ public class ScriptStepExecutorTests
 		// With -NoProfile -File, Write-Error writes to stderr but doesn't cause non-zero exit
 		// unless $ErrorActionPreference is set to 'Stop'
 		result.Content.Should().Contain("stdout-data");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_TraceSeparatesStdoutAndStderr()
+	{
+		// Arrange
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "Write-Output 'stdout-trace'; [Console]::Error.WriteLine('stderr-trace')",
+			includeStdErr: true);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Trace.Should().NotBeNull();
+		result.Trace!.FinalResponse.Should().Contain("stdout-trace");
+		result.Trace.FinalResponse.Should().NotContain("stderr-trace");
+		result.Trace.ResponseSegments.Should().ContainSingle().Which.Should().Contain("stderr-trace");
 	}
 
 	[Fact]

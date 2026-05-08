@@ -458,11 +458,6 @@ public partial class TriggerManager : BackgroundService
 					}
 					else
 					{
-						foreach (var (stepName, stepResult) in result.StepResults)
-						{
-							if (stepResult.Status == ExecutionStatus.Succeeded)
-								sseReporter.ReportStepOutput(stepName, stepResult.Content);
-						}
 						sseReporter.ReportOrchestrationDone(result);
 					}
 				}

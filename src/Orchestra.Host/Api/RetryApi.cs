@@ -214,12 +214,6 @@ public static partial class RetryApi
 						return;
 					}
 
-					foreach (var (stepName, stepResult) in result.StepResults)
-					{
-						if (stepResult.Status == ExecutionStatus.Succeeded)
-							reporter.ReportStepOutput(stepName, stepResult.Content);
-					}
-
 					reporter.ReportOrchestrationDone(result);
 					executionInfo.Status = HostExecutionStatus.Completed;
 				}

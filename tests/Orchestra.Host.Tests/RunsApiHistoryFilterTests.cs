@@ -1,8 +1,16 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using NSubstitute;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Persistence;
+using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
 using Xunit;
 
@@ -290,5 +298,118 @@ public class RunsApiHistoryFilterTests : IDisposable
 
 		// Assert
 		results.Should().HaveCount(5);
+	}
+
+	[Fact]
+	public async Task HistoryDetail_IncludesTraceInputsAndAccessibleStepData()
+	{
+		var stepRecord = new StepRunRecord
+		{
+			StepName = "judge",
+			Status = ExecutionStatus.Succeeded,
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+			CompletedAt = DateTimeOffset.UtcNow,
+			Content = "judgement",
+			Parameters = new Dictionary<string, string> { ["ticket"] = "INC-123" },
+			RawDependencyOutputs = new Dictionary<string, string> { ["fetch"] = "raw output" },
+			Trace = new StepExecutionTrace
+			{
+				Parameters = new Dictionary<string, string> { ["ticket"] = "INC-123" },
+				DependencyOutputs = new Dictionary<string, string> { ["fetch"] = "processed output" },
+				RawDependencyOutputs = new Dictionary<string, string> { ["fetch"] = "raw output" },
+				Command = "pwsh",
+				CommandArguments = ["-NoProfile", "-Command", "Write-Output hello"],
+				WorkingDirectory = "C:/repo",
+				Environment = new Dictionary<string, string> { ["MODE"] = "history" },
+				Stdin = "input text",
+				FinalResponse = string.Empty,
+				AccessibleStepData = new Dictionary<string, StepTraceStepData>
+				{
+					["fetch"] = new()
+					{
+						Status = nameof(ExecutionStatus.Succeeded),
+						Output = "processed output",
+						RawOutput = "raw output",
+					},
+				},
+			}
+		};
+
+		var record = CreateTestRecord(runId: "trace-run", orchestrationName: "trace-orch");
+		((Dictionary<string, StepRunRecord>)record.StepRecords)["judge"] = stepRecord;
+		((Dictionary<string, StepRunRecord>)record.AllStepRecords)["judge"] = stepRecord;
+		await _store.SaveRunAsync(record, cancellationToken: default);
+
+		using var host = CreateRunsApiHost(_store);
+		var client = host.GetTestClient();
+
+		var response = await client.GetAsync("/api/history/trace-orch/trace-run");
+		response.EnsureSuccessStatusCode();
+		using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+		var trace = doc.RootElement.GetProperty("steps")[0].GetProperty("trace");
+
+		trace.GetProperty("parameters").GetProperty("ticket").GetString().Should().Be("INC-123");
+		trace.GetProperty("dependencyOutputs").GetProperty("fetch").GetString().Should().Be("processed output");
+		trace.GetProperty("rawDependencyOutputs").GetProperty("fetch").GetString().Should().Be("raw output");
+		trace.GetProperty("accessibleStepData").GetProperty("fetch").GetProperty("output").GetString().Should().Be("processed output");
+		trace.GetProperty("command").GetString().Should().Be("pwsh");
+		trace.GetProperty("commandArguments")[2].GetString().Should().Be("Write-Output hello");
+		trace.GetProperty("workingDirectory").GetString().Should().Be("C:/repo");
+		trace.GetProperty("environment").GetProperty("MODE").GetString().Should().Be("history");
+		trace.GetProperty("stdin").GetString().Should().Be("input text");
+		trace.GetProperty("finalResponse").GetString().Should().Be(string.Empty);
+	}
+
+	private static IHost CreateRunsApiHost(FileSystemRunStore runStore)
+	{
+		var jsonOptions = new JsonSerializerOptions
+		{
+			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+			DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+			Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+		};
+
+		var activeExecutionInfos = new ConcurrentDictionary<string, ActiveExecutionInfo>();
+		var triggerManager = CreateTriggerManager(activeExecutionInfos, runStore);
+
+		var host = new HostBuilder()
+			.ConfigureWebHost(webHost =>
+			{
+				webHost.UseTestServer();
+				webHost.ConfigureServices(services =>
+				{
+					services.AddRouting();
+					services.AddSingleton(runStore);
+					services.AddSingleton(activeExecutionInfos);
+					services.AddSingleton(triggerManager);
+					services.AddSingleton(new OrchestrationRegistry());
+				});
+				webHost.Configure(app =>
+				{
+					app.UseRouting();
+					app.UseEndpoints(endpoints => endpoints.MapRunsApi(jsonOptions));
+				});
+			})
+			.Build();
+
+		host.Start();
+		return host;
+	}
+
+	private static TriggerManager CreateTriggerManager(
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		FileSystemRunStore runStore)
+	{
+		return new TriggerManager(
+			new ConcurrentDictionary<string, CancellationTokenSource>(),
+			activeExecutionInfos,
+			agentBuilder: null!,
+			scheduler: new OrchestrationScheduler(),
+			loggerFactory: Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance,
+			logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<TriggerManager>.Instance,
+			runsDir: Path.GetTempPath(),
+			runStore: runStore,
+			checkpointStore: Substitute.For<ICheckpointStore>(),
+			launcher: Substitute.For<IChildOrchestrationLauncher>());
 	}
 }

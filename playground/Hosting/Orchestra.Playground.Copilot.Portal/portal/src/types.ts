@@ -258,6 +258,17 @@ export interface AuditLogEntry {
 }
 
 export interface TraceData {
+  parameters?: Record<string, string>;
+  dependencyOutputs?: Record<string, string>;
+  rawDependencyOutputs?: Record<string, string>;
+  accessibleStepData?: Record<string, StepTraceData>;
+  command?: string;
+  commandArguments?: string[];
+  shell?: string;
+  scriptSource?: string;
+  workingDirectory?: string;
+  environment?: Record<string, string>;
+  stdin?: string;
   systemPrompt?: string;
   userPromptRaw?: string;
   userPromptProcessed?: string;
@@ -270,6 +281,13 @@ export interface TraceData {
   warnings?: string[];
   conversationHistory?: ConversationMessage[];
   auditLog?: AuditLogEntry[];
+}
+
+export interface StepTraceData {
+  status?: string;
+  output?: string;
+  rawOutput?: string;
+  files?: string[];
 }
 
 export interface ToolCallData {

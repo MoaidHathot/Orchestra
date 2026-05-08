@@ -120,9 +120,11 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			}
 
 			// Set environment variables (resolve templates in values)
+			var resolvedEnvironment = new Dictionary<string, string>(StringComparer.Ordinal);
 			foreach (var (key, value) in commandStep.Environment)
 			{
 				var resolvedValue = TemplateResolver.Resolve(value, context.Parameters, context, step.DependsOn, step);
+				resolvedEnvironment[key] = resolvedValue;
 				startInfo.Environment[key] = resolvedValue;
 			}
 
@@ -141,13 +143,20 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			process.OutputDataReceived += (_, e) =>
 			{
 				if (e.Data is not null)
+				{
 					stdoutBuilder.AppendLine(e.Data);
+					_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+				}
 			};
 
 			process.ErrorDataReceived += (_, e) =>
 			{
 				if (e.Data is not null)
+				{
 					stderrBuilder.AppendLine(e.Data);
+					if (commandStep.IncludeStdErr)
+						_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+				}
 			};
 
 			if (!process.Start())
@@ -170,6 +179,7 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 
 			// Wait for process to exit with cancellation support
 			await process.WaitForExitAsync(cancellationToken);
+			process.WaitForExit();
 
 			var stdout = stdoutBuilder.ToString().TrimEnd();
 			var stderr = stderrBuilder.ToString().TrimEnd();
@@ -183,7 +193,7 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				LogCommandSuccess(step.Name, process.ExitCode);
 
 				// Build trace data for viewer visibility
-				var trace = BuildTrace(command, arguments, workingDirectory, commandStep.Environment, output, stderr);
+				var trace = BuildTrace(command, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
 				_reporter.ReportStepTrace(step.Name, trace);
 
 				return ExecutionResult.Succeeded(
@@ -201,7 +211,7 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				_reporter.ReportStepError(step.Name, errorMessage);
 
 				// Build trace data even on failure
-				var trace = BuildTrace(command, arguments, workingDirectory, commandStep.Environment, stdout, stderr);
+				var trace = BuildTrace(command, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
 				_reporter.ReportStepTrace(step.Name, trace);
 
 				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: trace);
@@ -229,6 +239,7 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 		string[] arguments,
 		string? workingDirectory,
 		IReadOnlyDictionary<string, string> environment,
+		string? stdin,
 		string stdout,
 		string stderr)
 	{
@@ -250,6 +261,11 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 
 		return new StepExecutionTrace
 		{
+			Command = command,
+			CommandArguments = [.. arguments],
+			WorkingDirectory = workingDirectory,
+			Environment = new Dictionary<string, string>(environment),
+			Stdin = stdin,
 			SystemPrompt = contextInfo.Length > 0 ? contextInfo.ToString().TrimEnd() : null,
 			UserPromptRaw = commandLine,
 			FinalResponse = stdout,

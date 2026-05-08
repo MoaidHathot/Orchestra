@@ -290,7 +290,7 @@ This example demonstrates: top-level `hooks`, `step.failure` subscriptions, `whe
 
 ## Script Step with Inline PowerShell
 
-Demonstrates the Script step type with inline scripts and YAML block scalars:
+Demonstrates the Script step type with inline scripts and YAML block scalars. Use this pattern instead of wrapping inline PowerShell in a `Command` step with `pwsh -Command`:
 
 ```yaml
 name: script-step-example

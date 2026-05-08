@@ -386,6 +386,17 @@ public static class RunsApi
 					}).ToArray() : null,
 					trace = kv.Value.Trace is { } t ? new
 					{
+						parameters = t.Parameters.Count > 0 ? t.Parameters : kv.Value.Parameters.Count > 0 ? kv.Value.Parameters : null,
+						dependencyOutputs = t.DependencyOutputs.Count > 0 ? t.DependencyOutputs : null,
+						rawDependencyOutputs = t.RawDependencyOutputs.Count > 0 ? t.RawDependencyOutputs : kv.Value.RawDependencyOutputs.Count > 0 ? kv.Value.RawDependencyOutputs : null,
+						accessibleStepData = t.AccessibleStepData.Count > 0 ? t.AccessibleStepData : null,
+						command = t.Command,
+						commandArguments = t.Command is not null || t.Shell is not null || t.CommandArguments.Count > 0 ? t.CommandArguments : null,
+						shell = t.Shell,
+						scriptSource = t.ScriptSource,
+						workingDirectory = t.WorkingDirectory,
+						environment = t.Environment.Count > 0 ? t.Environment : null,
+						stdin = t.Stdin,
 						systemPrompt = t.SystemPrompt,
 						userPromptRaw = t.UserPromptRaw,
 						userPromptProcessed = t.UserPromptProcessed,
