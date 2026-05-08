@@ -50,6 +50,34 @@ public class BundledSchemasTests
 		multiline.GetProperty("type").GetString().Should().Be("boolean");
 	}
 
+	[Fact]
+	public void OrchestrationSchema_AllowsOrchestrationStepInputHandler()
+	{
+		var toolBaseDir = LocateOrchestraToolOutputDirectory();
+		var schemaPath = Path.Combine(toolBaseDir, "schemas", "orchestration.schema.json");
+		using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+
+		var stepTypeEnum = doc.RootElement
+			.GetProperty("$defs")
+			.GetProperty("step")
+			.GetProperty("properties")
+			.GetProperty("type")
+			.GetProperty("enum")
+			.EnumerateArray()
+			.Select(value => value.GetString())
+			.ToArray();
+
+		stepTypeEnum.Should().Contain("Orchestration");
+
+		var orchestrationStepProperties = doc.RootElement
+			.GetProperty("$defs")
+			.GetProperty("orchestrationStepProperties")
+			.GetProperty("properties");
+
+		orchestrationStepProperties.TryGetProperty("inputHandlerPrompt", out _).Should().BeTrue();
+		orchestrationStepProperties.TryGetProperty("inputHandlerModel", out _).Should().BeTrue();
+	}
+
 	private static string LocateOrchestraToolOutputDirectory()
 	{
 		// Walk up from the test assembly location to the repo root, then

@@ -1,6 +1,6 @@
 ---
 name: orchestration-authoring
-description: Creates and validates Orchestra orchestration files (JSON/YAML) that define DAGs of steps (Prompt, Command, Script, Http, Transform) with triggers, hooks, MCPs, subagents, loops, typed inputs, and template expressions. Use when authoring new orchestrations, generating orchestration files from descriptions, reviewing existing orchestrations for correctness, or debugging orchestration issues.
+description: Creates and validates Orchestra orchestration files (JSON/YAML) that define DAGs of steps (Prompt, Command, Script, Http, Transform, Orchestration) with triggers, hooks, MCPs, subagents, loops, typed inputs, and template expressions. Use when authoring new orchestrations, generating orchestration files from descriptions, reviewing existing orchestrations for correctness, or debugging orchestration issues.
 ---
 
 # Orchestra Orchestration Authoring Reference
@@ -164,7 +164,7 @@ Steps form a DAG. Steps with no `dependsOn` run first (in parallel). Downstream 
 | `name` | string | Yes | -- |
 | `type` | string | Yes | -- |
 | `dependsOn` | string[] | No | [] |
-| `parameters` | string[] | No | [] |
+| `parameters` | string[] or object | No | [] |
 | `enabled` | bool | No | true |
 | `timeoutSeconds` | int | No | null |
 | `retry` | RetryPolicy | No | null |
@@ -312,6 +312,24 @@ Executes an inline or file-based script via a shell interpreter (e.g., `pwsh`, `
 Pass values into scripts with `arguments` or `stdin` instead of interpolating large or heavily quoted values into the script body. In PowerShell, `arguments` are available as `$args[0]`, `$args[1]`, and so on.
 
 For file paths that should be relative to the orchestration file, anchor them explicitly with `{{orchestration.sourceDirectory}}`. Do not pass bare relative paths to runtime file-writing code, because process working directories can differ between hosts.
+
+### Orchestration Step (type: "Orchestration")
+
+Invokes another registered orchestration. Use this when a flow should delegate to a reusable child orchestration instead of duplicating its steps.
+
+| Property | Type | Required | Default |
+|---|---|---|---|
+| `orchestration` | string | Yes | -- |
+| `parameters` | object | No | {} |
+| `mode` | string | No | `sync` |
+| `inputHandlerPrompt` | string | No | null |
+| `inputHandlerModel` | string | No | from `defaultModel` |
+
+`mode` is `sync` or `async`. In `sync` mode, the parent waits for the child to finish and uses the child's final output as this step's output. In `async` mode, the parent continues after dispatch.
+
+`parameters` maps child input names to values. Values support template expressions and are passed as strings at runtime.
+
+`inputHandlerPrompt` can reshape child parameters before launch. It must return a JSON object mapping parameter names to string values. If handler parsing fails, runtime falls back to the original parameters, so use Script validation for hard guarantees.
 
 ## Loop Configuration (Checker Pattern)
 
@@ -525,7 +543,7 @@ Pre-process dependency outputs or post-process LLM output.
 ```
 
 ### 6. Multi-Step Pipeline (all 5 step types)
-Command -> Script -> Prompt -> Transform -> Http
+Command -> Script -> Prompt -> Transform -> Http -> Orchestration
 ```yaml
 defaultModel: claude-opus-4.6
 steps:

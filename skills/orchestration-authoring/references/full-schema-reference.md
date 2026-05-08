@@ -16,6 +16,7 @@ This is the complete property-level reference for every field, step type, trigge
   - [Transform Step](#transform-step)
   - [Command Step](#command-step)
   - [Script Step](#script-step)
+  - [Orchestration Step](#orchestration-step)
 - [Loop Configuration](#loop-configuration)
 - [Subagents](#subagents)
 - [Retry Policy](#retry-policy)
@@ -265,9 +266,9 @@ These properties are shared by **all** step types.
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `name` | `string` | **Yes** | -- | Unique name within the orchestration. Used to reference this step in `dependsOn` and template expressions. |
-| `type` | `string` | **Yes** | -- | Step type. One of: `"Prompt"`, `"Http"`, `"Transform"`, `"Command"`, `"Script"` (case-insensitive). |
+| `type` | `string` | **Yes** | -- | Step type. One of: `"Prompt"`, `"Http"`, `"Transform"`, `"Command"`, `"Script"`, `"Orchestration"` (case-insensitive). |
 | `dependsOn` | `string[]` | No | `[]` | Names of steps that must complete before this step runs. Defines the DAG edges. |
-| `parameters` | `string[]` | No | `[]` | Parameter names this step expects. Values are provided at runtime and accessed via `{{param.name}}`. |
+| `parameters` | `string[]` or `object` | No | `[]` | For most step types, parameter names this step expects. For Orchestration steps, child parameter values keyed by child input name. |
 | `enabled` | `bool` | No | `true` | When `false`, the step is skipped during execution. |
 | `timeoutSeconds` | `int` | No | `null` | Per-step timeout in seconds. Falls back to `defaultStepTimeoutSeconds` if not set. Set to `0` to explicitly disable timeout. |
 | `retry` | `RetryPolicy` | No | `null` | Per-step retry policy. Overrides `defaultRetryPolicy`. |
@@ -470,6 +471,24 @@ Pass values into scripts with `arguments` or `stdin` instead of interpolating la
 
 ---
 
+### Orchestration Step
+
+**Type value:** `"Orchestration"`
+
+Invokes another registered orchestration. Use this when a parent flow should delegate to a reusable child orchestration.
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `orchestration` | `string` | **Yes** | -- | Registered child orchestration name or ID. Supports template expressions. |
+| `parameters` | `object` | No | `{}` | Child orchestration parameters. Values support template expressions and are passed as strings at runtime. |
+| `mode` | `string` | No | `sync` | `sync` waits for child completion; `async` dispatches and continues. |
+| `inputHandlerPrompt` | `string` | No | `null` | Optional LLM prompt to transform child parameters before launch. Must return a JSON object mapping parameter names to string values. |
+| `inputHandlerModel` | `string` | No | `null` | Model to use for the input handler. Defaults to the orchestration default model. |
+
+If an Orchestration step input handler returns invalid JSON or an empty object, runtime falls back to the original parameters. Use Script steps for deterministic validation or canonicalization when malformed input must fail or be repaired before child launch.
+
+---
+
 ## Loop Configuration
 
 A loop (or "checker") pattern allows a Prompt step to iteratively refine the output of a target step.
@@ -630,7 +649,7 @@ Runtime file-writing steps should receive absolute paths. Build paths relative t
 ## Enums Reference
 
 ### Step Types
-`Prompt`, `Http`, `Transform`, `Command`, `Script` (case-insensitive)
+`Prompt`, `Http`, `Transform`, `Command`, `Script`, `Orchestration` (case-insensitive)
 
 ### System Prompt Mode
 `Append` (adds to SDK built-in prompts), `Replace` (removes SDK built-in prompts), `Customize` (selectively override individual sections)

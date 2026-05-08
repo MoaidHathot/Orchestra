@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json",
   "title": "Orchestra Orchestration",
-  "description": "Schema for Orchestra orchestration definition files (.json and .yaml). Defines a DAG of steps (Prompt, Http, Transform, Command, Script) with triggers, MCP servers, subagents, retry policies, and template expressions.",
+  "description": "Schema for Orchestra orchestration definition files (.json and .yaml). Defines a DAG of steps (Prompt, Http, Transform, Command, Script, Orchestration) with triggers, MCP servers, subagents, retry policies, and template expressions.",
   "type": "object",
   "required": ["name", "description", "steps"],
   "additionalProperties": false,
@@ -125,7 +125,7 @@
         "type": {
           "type": "string",
           "description": "Step type determining execution behavior.",
-          "enum": ["Prompt", "Http", "Transform", "Command", "Script", "prompt", "http", "transform", "command", "script"]
+          "enum": ["Prompt", "Http", "Transform", "Command", "Script", "Orchestration", "prompt", "http", "transform", "command", "script", "orchestration"]
         },
         "dependsOn": {
           "type": "array",
@@ -136,11 +136,19 @@
           "default": []
         },
         "parameters": {
-          "type": "array",
-          "description": "Parameter names this step requires. Used for legacy parameter collection when 'inputs' is not defined at the orchestration level.",
-          "items": {
-            "type": "string"
-          },
+          "description": "For most step types, parameter names this step requires. For Orchestration steps, child orchestration parameter values.",
+          "oneOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": true
+            }
+          ],
           "default": []
         },
         "enabled": {
@@ -207,6 +215,16 @@
           },
           "then": {
             "$ref": "#/$defs/scriptStepProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["Orchestration", "orchestration"] }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/orchestrationStepProperties"
           }
         }
       ],
@@ -623,6 +641,45 @@
           "not": { "required": ["script"] }
         }
       ]
+    },
+
+    "orchestrationStepProperties": {
+      "type": "object",
+      "description": "Properties specific to Orchestration steps. Invokes another registered orchestration.",
+      "required": ["orchestration"],
+      "properties": {
+        "name": true,
+        "type": true,
+        "dependsOn": true,
+        "parameters": {
+          "type": "object",
+          "description": "Child orchestration parameters. Values support template expressions and are passed as strings at runtime.",
+          "additionalProperties": true,
+          "default": {}
+        },
+        "enabled": true,
+        "timeoutSeconds": true,
+        "retry": true,
+        "orchestration": {
+          "type": "string",
+          "description": "Registered child orchestration name or ID to invoke. Supports template expressions.",
+          "minLength": 1
+        },
+        "mode": {
+          "type": "string",
+          "description": "Invocation mode. sync waits for completion; async dispatches and continues.",
+          "enum": ["sync", "async", "Sync", "Async"],
+          "default": "sync"
+        },
+        "inputHandlerPrompt": {
+          "type": "string",
+          "description": "Optional LLM prompt to transform child parameters before the child orchestration starts. The handler must return a JSON object mapping parameter names to string values."
+        },
+        "inputHandlerModel": {
+          "type": "string",
+          "description": "Model to use for the input handler prompt. Defaults to the orchestration default model."
+        }
+      }
     },
 
     "trigger": {
