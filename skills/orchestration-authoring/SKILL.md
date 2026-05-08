@@ -311,6 +311,8 @@ Executes an inline or file-based script via a shell interpreter (e.g., `pwsh`, `
 
 Pass values into scripts with `arguments` or `stdin` instead of interpolating large or heavily quoted values into the script body. In PowerShell, `arguments` are available as `$args[0]`, `$args[1]`, and so on.
 
+For file paths that should be relative to the orchestration file, anchor them explicitly with `{{orchestration.sourceDirectory}}`. Do not pass bare relative paths to runtime file-writing code, because process working directories can differ between hosts.
+
 ## Loop Configuration (Checker Pattern)
 
 A Prompt step with `loop` acts as a checker for iterative refinement.
@@ -668,12 +670,13 @@ Orchestrations can be registered in Orchestra via:
 11. **`mcps` on steps is an array of strings** (MCP names), not MCP definition objects.
 12. **Script steps require `shell`**. It has no default -- always specify it (e.g., `"pwsh"`, `"bash"`).
 13. **Do NOT use `Command` with `pwsh -Command`, `powershell -Command`, or `bash -c` for script logic.** Use `type: Script`, `shell: pwsh`, and `script: |` instead.
-14. **`systemPromptSections` requires `systemPromptMode: "customize"`**. Section overrides are ignored with `append` or `replace`.
-15. **Image attachments require a vision-capable model** (e.g., `claude-opus-4.6`, `gpt-4o`). Non-vision models will not understand the images.
-16. **`infiniteSessions` thresholds are ratios (0.0-1.0)**, not token counts. `0.80` means 80% of context used.
-17. **`hooks` is a top-level array**, not a step-level property.
-18. **Hook actions require exactly one of `script` or `scriptFile`.** Do not specify both.
-19. **Hook `failurePolicy` only supports `warn` or `ignore`** in v1.
+14. **Do NOT rely on the host process working directory for runtime file paths.** Use `{{orchestration.sourceDirectory}}` to build absolute paths relative to the orchestration file.
+15. **`systemPromptSections` requires `systemPromptMode: "customize"`**. Section overrides are ignored with `append` or `replace`.
+16. **Image attachments require a vision-capable model** (e.g., `claude-opus-4.6`, `gpt-4o`). Non-vision models will not understand the images.
+17. **`infiniteSessions` thresholds are ratios (0.0-1.0)**, not token counts. `0.80` means 80% of context used.
+18. **`hooks` is a top-level array**, not a step-level property.
+19. **Hook actions require exactly one of `script` or `scriptFile`.** Do not specify both.
+20. **Hook `failurePolicy` only supports `warn` or `ignore`** in v1.
 
 ## Naming Conventions
 

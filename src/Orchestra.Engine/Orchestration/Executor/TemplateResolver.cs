@@ -24,7 +24,7 @@ public static partial class TemplateResolver
 	[GeneratedRegex(@"^files\[(\d+)\]$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
 	private static partial Regex FilesIndexPattern();
 
-	private static readonly string[] s_validOrchestrationProperties = ["name", "version", "runid", "startedat", "tempdir"];
+	private static readonly string[] s_validOrchestrationProperties = ["name", "version", "runid", "startedat", "tempdir", "sourcepath", "sourcedirectory"];
 	private static readonly string[] s_validStepProperties = ["name", "type"];
 	private static readonly string[] s_validServerProperties = ["url"];
 
@@ -272,6 +272,10 @@ public static partial class TemplateResolver
 			return info.StartedAt.ToString("o");
 		if (property.Equals("tempDir", StringComparison.OrdinalIgnoreCase))
 			return context.TempFileStore?.TempDirectory ?? "";
+		if (property.Equals("sourcePath", StringComparison.OrdinalIgnoreCase))
+			return info.SourcePath ?? "";
+		if (property.Equals("sourceDirectory", StringComparison.OrdinalIgnoreCase))
+			return info.SourceDirectory ?? "";
 
 		throw new InvalidOperationException(
 			$"Unknown orchestration property '{{{{orchestration.{property}}}}}'. " +

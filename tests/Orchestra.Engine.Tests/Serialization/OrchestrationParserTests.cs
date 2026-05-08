@@ -1199,6 +1199,69 @@ public class OrchestrationParserTests
 	}
 
 	[Fact]
+	public void ParseOrchestrationFile_SetsSourcePathAndDirectory()
+	{
+		var tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-source-path-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempDir);
+		try
+		{
+			var path = Path.Combine(tempDir, "orchestration.yaml");
+			File.WriteAllText(path, """
+				name: source-path-test
+				description: Source path test
+				steps:
+				  - name: report
+				    type: Transform
+				    template: ok
+				""");
+
+			var orchestration = OrchestrationParser.ParseOrchestrationFile(path, []);
+
+			orchestration.SourcePath.Should().Be(Path.GetFullPath(path));
+			orchestration.SourceDirectory.Should().Be(Path.GetFullPath(tempDir));
+		}
+		finally
+		{
+			if (Directory.Exists(tempDir))
+				Directory.Delete(tempDir, recursive: true);
+		}
+	}
+
+	[Fact]
+	public void ParseOrchestrationFile_WithSourcePath_UsesOriginalSourceForSourceMetadata()
+	{
+		var tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-source-path-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempDir);
+		try
+		{
+			var managedDir = Path.Combine(tempDir, "managed");
+			var sourceDir = Path.Combine(tempDir, "source");
+			Directory.CreateDirectory(managedDir);
+			Directory.CreateDirectory(sourceDir);
+			var managedPath = Path.Combine(managedDir, "managed.yaml");
+			var sourcePath = Path.Combine(sourceDir, "original.yaml");
+			File.WriteAllText(managedPath, """
+				name: source-path-test
+				description: Source path test
+				steps:
+				  - name: report
+				    type: Transform
+				    template: ok
+				""");
+
+			var orchestration = OrchestrationParser.ParseOrchestrationFile(managedPath, sourcePath, []);
+
+			orchestration.SourcePath.Should().Be(Path.GetFullPath(sourcePath));
+			orchestration.SourceDirectory.Should().Be(Path.GetFullPath(sourceDir));
+		}
+		finally
+		{
+			if (Directory.Exists(tempDir))
+				Directory.Delete(tempDir, recursive: true);
+		}
+	}
+
+	[Fact]
 	public void ParseOrchestration_WithEmptySkillDirectories_ParsesAsEmptyArray()
 	{
 		// Arrange

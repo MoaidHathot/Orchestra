@@ -63,7 +63,7 @@ public static partial class TemplateExpressionValidator
 	private static partial Regex FilesIndexPattern();
 
 	private static readonly HashSet<string> s_validOrchestrationProperties =
-		new(["name", "version", "runid", "startedat", "tempdir"], StringComparer.OrdinalIgnoreCase);
+		new(["name", "version", "runid", "startedat", "tempdir", "sourcepath", "sourcedirectory"], StringComparer.OrdinalIgnoreCase);
 
 	private static readonly HashSet<string> s_validStepProperties =
 		new(["name", "type"], StringComparer.OrdinalIgnoreCase);

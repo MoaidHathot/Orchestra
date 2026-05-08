@@ -244,6 +244,32 @@ public class OrchestrationStepExecutorTests
 		captured.Parameters!.Should().ContainKey("literal").WhoseValue.Should().Be("static-value");
 	}
 
+	[Fact]
+	public async Task ChildParameters_CanUseOrchestrationSourceDirectory()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		ChildLaunchRequest? captured = null;
+		launcher.LaunchAsync(Arg.Do<ChildLaunchRequest>(r => captured = r), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle());
+
+		var executor = CreateExecutor(launcher);
+		var step = MakeStep(parameters: new Dictionary<string, string>
+		{
+			["outputPath"] = "{{orchestration.sourceDirectory}}/../Ephermal/{{orchestration.runId}}.yaml",
+		});
+		var sourceDirectory = Path.GetFullPath(Path.Combine("workspace", "orchestrations", "System"));
+		var ctx = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_parentInfo with { SourceDirectory = sourceDirectory },
+			Parameters = [],
+		};
+
+		await executor.ExecuteAsync(step, ctx);
+
+		captured!.Parameters.Should().ContainKey("outputPath")
+			.WhoseValue.Should().Be($"{sourceDirectory}/../Ephermal/{s_parentInfo.RunId}.yaml");
+	}
+
 	// ── Parent context lineage ────────────────────────────────────────────────
 
 	[Fact]

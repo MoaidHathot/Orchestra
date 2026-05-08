@@ -9,4 +9,6 @@ public record OrchestrationInfo(
 	string Name,
 	string Version,
 	string RunId,
-	DateTimeOffset StartedAt);
+	DateTimeOffset StartedAt,
+	string? SourcePath = null,
+	string? SourceDirectory = null);

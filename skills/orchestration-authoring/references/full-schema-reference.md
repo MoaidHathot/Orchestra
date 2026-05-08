@@ -616,10 +616,14 @@ Template expressions use `{{expression}}` syntax and are supported in prompts, U
 | `{{orchestration.runId}}` | The current execution's unique run ID. |
 | `{{orchestration.startedAt}}` | Timestamp when the current run started. |
 | `{{orchestration.tempDir}}` | Temp directory for this run. |
+| `{{orchestration.sourcePath}}` | Absolute path to the orchestration source file, when parsed from disk. For managed copies, this points to the original source file. |
+| `{{orchestration.sourceDirectory}}` | Absolute directory containing the orchestration source file. Use this to build orchestration-relative runtime file paths. |
 | `{{step.name}}` | The current step's name. |
 | `{{step.type}}` | The current step's type. |
 | `{{server.url}}` | Orchestra server URL. |
 | `{{workingDirectory}}` | The working directory context. |
+
+Runtime file-writing steps should receive absolute paths. Build paths relative to the orchestration file with `{{orchestration.sourceDirectory}}/relative/path` rather than relying on the process working directory.
 
 ---
 

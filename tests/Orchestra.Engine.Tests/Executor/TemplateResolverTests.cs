@@ -344,23 +344,64 @@ public class TemplateResolverTests
 	}
 
 	[Fact]
-	public void Resolve_OrchestrationAllProperties_ResolvesAll()
+	public void Resolve_OrchestrationSourcePathAndDirectory_ReturnsSourceMetadata()
 	{
 		// Arrange
-		var startedAt = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
-		var info = new OrchestrationInfo("full-test", "5.0.0", "run-full", startedAt);
+		var sourcePath = Path.GetFullPath(Path.Combine("workspace", "orchestrations", "System", "run-ephermal.yaml"));
+		var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
+		var info = new OrchestrationInfo("my-pipeline", "2.0.0", "run-abc", DateTimeOffset.UtcNow, sourcePath, sourceDirectory);
 		var context = new OrchestrationExecutionContext
 		{
 			OrchestrationInfo = info,
 			Parameters = new Dictionary<string, string>()
 		};
-		var template = "{{orchestration.name}} v{{orchestration.version}} [{{orchestration.runId}}] at {{orchestration.startedAt}}";
+		var template = "Source: {{orchestration.sourcePath}} Dir: {{orchestration.sourceDirectory}}";
 
 		// Act
 		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
 
 		// Assert
-		result.Should().Be($"full-test v5.0.0 [run-full] at {startedAt:o}");
+		result.Should().Be($"Source: {sourcePath} Dir: {sourceDirectory}");
+	}
+
+	[Fact]
+	public void Resolve_OrchestrationSourcePathAndDirectory_NoSource_ReturnsEmptyStrings()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = "[{{orchestration.sourcePath}}][{{orchestration.sourceDirectory}}]";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("[][]");
+	}
+
+	[Fact]
+	public void Resolve_OrchestrationAllProperties_ResolvesAll()
+	{
+		// Arrange
+		var startedAt = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
+		var sourcePath = Path.GetFullPath(Path.Combine("workspace", "full-test.yaml"));
+		var sourceDirectory = Path.GetDirectoryName(sourcePath)!;
+		var info = new OrchestrationInfo("full-test", "5.0.0", "run-full", startedAt, sourcePath, sourceDirectory);
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = info,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = "{{orchestration.name}} v{{orchestration.version}} [{{orchestration.runId}}] at {{orchestration.startedAt}} from {{orchestration.sourceDirectory}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be($"full-test v5.0.0 [run-full] at {startedAt:o} from {sourceDirectory}");
 	}
 
 	[Fact]
@@ -1307,6 +1348,31 @@ public class TemplateResolverTests
 
 		// Assert
 		result.Should().Be("Run: test-orchestration v1.0.0");
+	}
+
+	[Fact]
+	public void ResolveStatic_OrchestrationSourceDirectory_ResolvesInsideVariable()
+	{
+		// Arrange
+		var sourceDirectory = Path.GetFullPath(Path.Combine("workspace", "orchestrations", "System"));
+		var info = s_defaultInfo with { SourceDirectory = sourceDirectory };
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = info,
+			Parameters = new Dictionary<string, string>(),
+			Variables = new Dictionary<string, string>
+			{
+				["ephermalDir"] = "{{orchestration.sourceDirectory}}/../Ephermal",
+				["ephermalFile"] = "{{vars.ephermalDir}}/{{orchestration.runId}}.yaml"
+			}
+		};
+		var template = "{{vars.ephermalFile}}";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert
+		result.Should().Be($"{sourceDirectory}/../Ephermal/{info.RunId}.yaml");
 	}
 
 	[Fact]

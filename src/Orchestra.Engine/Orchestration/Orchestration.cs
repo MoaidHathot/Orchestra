@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace Orchestra.Engine;
 
@@ -123,4 +124,19 @@ public class Orchestration
 	/// the contents of this dictionary.
 	/// </remarks>
 	public Dictionary<string, JsonNode?> Metadata { get; init; } = [];
+
+	/// <summary>
+	/// Absolute path to the orchestration source file, when this orchestration was parsed from disk.
+	/// For managed copies, this is the original source file path rather than the managed cache path.
+	/// </summary>
+	[JsonIgnore]
+	public string? SourcePath { get; internal set; }
+
+	/// <summary>
+	/// Absolute directory containing <see cref="SourcePath"/>, when available.
+	/// Exposed at runtime via <c>{{orchestration.sourceDirectory}}</c> for authoring
+	/// absolute paths anchored to the orchestration file location.
+	/// </summary>
+	[JsonIgnore]
+	public string? SourceDirectory { get; internal set; }
 }

@@ -151,7 +151,8 @@ public class TemplateExpressionValidatorTests
 				CreateTransformStep("step1",
 					"Name: {{orchestration.name}}, Version: {{orchestration.version}}, " +
 					"RunId: {{orchestration.runId}}, Started: {{orchestration.startedAt}}, " +
-					"Temp: {{orchestration.tempDir}}"),
+					"Temp: {{orchestration.tempDir}}, Source: {{orchestration.sourcePath}}, " +
+					"SourceDir: {{orchestration.sourceDirectory}}"),
 			]);
 
 		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);

@@ -131,6 +131,7 @@ public static class OrchestrationParser
 
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+		ApplySourcePath(orchestration, path, sourcePath);
 
 		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory);
 		ResolveStepMcps(orchestration, availableMcps);
@@ -174,9 +175,18 @@ public static class OrchestrationParser
 
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+		ApplySourcePath(orchestration, path, sourcePath);
 
 		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory);
 		return orchestration;
+	}
+
+	private static void ApplySourcePath(Orchestration orchestration, string path, string? sourcePath)
+	{
+		var effectivePath = string.IsNullOrWhiteSpace(sourcePath) ? path : sourcePath;
+		var fullPath = Path.GetFullPath(effectivePath);
+		orchestration.SourcePath = fullPath;
+		orchestration.SourceDirectory = Path.GetDirectoryName(fullPath);
 	}
 
 	public static Mcp[] ParseMcps(string json)
