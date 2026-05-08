@@ -1,4 +1,5 @@
 using FluentAssertions;
+using System.Text.Json;
 using Xunit;
 
 namespace Orchestra.Tool.Tests;
@@ -31,6 +32,22 @@ public class BundledSchemasTests
 			File.Exists(path).Should().BeTrue($"schema '{name}' must be copied to '{path}'.");
 			new FileInfo(path).Length.Should().BeGreaterThan(0);
 		}
+	}
+
+	[Fact]
+	public void OrchestrationSchema_AllowsMultilineInputHint()
+	{
+		var toolBaseDir = LocateOrchestraToolOutputDirectory();
+		var schemaPath = Path.Combine(toolBaseDir, "schemas", "orchestration.schema.json");
+		using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+
+		var multiline = doc.RootElement
+			.GetProperty("$defs")
+			.GetProperty("inputDefinition")
+			.GetProperty("properties")
+			.GetProperty("multiline");
+
+		multiline.GetProperty("type").GetString().Should().Be("boolean");
 	}
 
 	private static string LocateOrchestraToolOutputDirectory()

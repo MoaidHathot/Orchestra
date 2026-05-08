@@ -1191,6 +1191,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "multiline": {
+          "type": "boolean",
+          "description": "UI hint for string inputs that should be rendered as a multiline text area. Does not affect validation or execution.",
+          "default": false
         }
       },
       "additionalProperties": false

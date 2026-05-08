@@ -2055,6 +2055,12 @@ public class OrchestrationParserTests
 						"required": false,
 						"default": "false"
 					},
+					"releaseNotes": {
+						"type": "string",
+						"description": "Multiline release notes",
+						"required": false,
+						"multiline": true
+					},
 					"retryCount": {
 						"type": "number",
 						"description": "Number of retries",
@@ -2078,7 +2084,7 @@ public class OrchestrationParserTests
 		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
 
 		orchestration.Inputs.Should().NotBeNull();
-		orchestration.Inputs.Should().HaveCount(4);
+		orchestration.Inputs.Should().HaveCount(5);
 
 		orchestration.Inputs!["serviceName"].Type.Should().Be(InputType.String);
 		orchestration.Inputs["serviceName"].Description.Should().Be("Name of the service to deploy");
@@ -2090,6 +2096,8 @@ public class OrchestrationParserTests
 		orchestration.Inputs["dryRun"].Type.Should().Be(InputType.Boolean);
 		orchestration.Inputs["dryRun"].Required.Should().BeFalse();
 		orchestration.Inputs["dryRun"].Default.Should().Be("false");
+		orchestration.Inputs["releaseNotes"].Type.Should().Be(InputType.String);
+		orchestration.Inputs["releaseNotes"].Multiline.Should().BeTrue();
 
 		orchestration.Inputs["retryCount"].Type.Should().Be(InputType.Number);
 		orchestration.Inputs["retryCount"].Required.Should().BeFalse();

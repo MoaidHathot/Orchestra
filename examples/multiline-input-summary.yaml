@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: multiline-input-summary
+description: Demonstrates a typed string input that asks the UI to render a multiline text area.
+version: "1.0.0"
+defaultModel: claude-opus-4.6
+tags: [example, inputs, multiline]
+
+inputs:
+  notes:
+    type: string
+    description: Paste meeting notes, incident details, or any other long-form text to summarize.
+    required: true
+    multiline: true
+  audience:
+    type: string
+    description: Target audience for the summary.
+    required: false
+    default: team
+
+steps:
+  - name: summarize-notes
+    type: Prompt
+    systemPrompt: |
+      You summarize long-form notes into concise, actionable updates.
+      Preserve important decisions, owners, risks, and follow-up tasks.
+    userPrompt: |
+      Audience: {{param.audience}}
+
+      Notes to summarize:
+      {{param.notes}}
+    model: claude-opus-4.6
+
+  - name: format-summary
+    type: Transform
+    dependsOn: [summarize-notes]
+    template: |
+      # Summary
+
+      {{summarize-notes.output}}
