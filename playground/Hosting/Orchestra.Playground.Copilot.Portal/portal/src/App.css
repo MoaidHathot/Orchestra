@@ -1099,6 +1099,10 @@
       color: var(--text);
       white-space: pre;
     }
+    .markdown-content pre code.language-json {
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
     .markdown-content table {
       display: block;
       width: max-content;
