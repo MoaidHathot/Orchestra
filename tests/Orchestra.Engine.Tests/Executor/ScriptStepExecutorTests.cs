@@ -536,4 +536,124 @@ public class ScriptStepExecutorTests
 	}
 
 	#endregion
+
+	#region ANSI Sanitization
+
+	[Fact]
+	public async Task ExecuteAsync_PwshErrorWithAnsiFormatting_StripsEscapeSequencesFromOutput()
+	{
+		// Arrange — `throw` triggers PowerShell 7's ConciseView error formatter, which
+		// historically emits ANSI escape sequences (red/cyan colors) even on a redirected
+		// stdout. Without sanitization, the captured stderr would contain literal noise
+		// like "[31;1m" and "[0m". After our changes, both NO_COLOR=1 should suppress
+		// the codes at the source AND AnsiSanitizer.Strip should defensively scrub anything
+		// that slips through.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "throw 'ansi-fixture-error-message'",
+			includeStdErr: true);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — the script should fail (non-zero exit because of the throw),
+		// but the captured error text must be ANSI-free.
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("ansi-fixture-error-message");
+		result.ErrorMessage.Should().NotContain("\x1B");
+		result.ErrorMessage.Should().NotContain("[31;1m");
+		result.ErrorMessage.Should().NotContain("[36;1m");
+		result.ErrorMessage.Should().NotContain("[0m");
+
+		// Trace data shown in the viewer must also be clean.
+		result.Trace.Should().NotBeNull();
+		result.Trace!.FinalResponse.Should().NotContain("\x1B");
+		foreach (var segment in result.Trace.ResponseSegments)
+		{
+			segment.Should().NotContain("\x1B");
+			segment.Should().NotContain("[31;1m");
+			segment.Should().NotContain("[0m");
+		}
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshExplicitlyEmittingAnsi_StillSanitizesOutput()
+	{
+		// Arrange — even if a script explicitly writes raw ANSI escape bytes
+		// (some tools do this regardless of NO_COLOR), the defensive sanitizer
+		// must remove them from the captured stdout.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: """
+				$esc = [char]27
+				Write-Output "$esc[31;1mred-text$esc[0m and $esc[32mgreen-text$esc[0m"
+				""");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Contain("red-text");
+		result.Content.Should().Contain("green-text");
+		result.Content.Should().NotContain("\x1B");
+		result.Content.Should().NotContain("[31;1m");
+		result.Content.Should().NotContain("[32m");
+		result.Content.Should().NotContain("[0m");
+
+		// Trace's stdout (FinalResponse) is the same captured buffer — also clean.
+		result.Trace.Should().NotBeNull();
+		result.Trace!.FinalResponse.Should().NotContain("\x1B");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_NoColorEnvironmentVariable_IsSetForChildProcess()
+	{
+		// Arrange — confirm that the child process actually sees NO_COLOR=1 and
+		// TERM=dumb so that downstream tools (git, gh, npm, etc.) honor them.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "Write-Output \"NO_COLOR=$env:NO_COLOR;TERM=$env:TERM\"");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Contain("NO_COLOR=1");
+		result.Content.Should().Contain("TERM=dumb");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_UserOverridesNoColor_RespectsUserValue()
+	{
+		// Arrange — orchestration authors must be able to override NO_COLOR/TERM
+		// via the step's Environment section if they have a tool that needs it.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "Write-Output \"NO_COLOR=$env:NO_COLOR;TERM=$env:TERM\"",
+			environment: new Dictionary<string, string>
+			{
+				["NO_COLOR"] = "",
+				["TERM"] = "xterm-256color",
+			});
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — user values must win over our defaults.
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Contain("NO_COLOR=;");
+		result.Content.Should().Contain("TERM=xterm-256color");
+	}
+
+	#endregion
 }

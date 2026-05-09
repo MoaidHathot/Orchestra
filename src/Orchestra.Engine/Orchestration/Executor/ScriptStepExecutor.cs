@@ -152,6 +152,14 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				startInfo.WorkingDirectory = workingDirectory;
 			}
 
+			// Suppress ANSI color escapes by default. Many shells/tools (PowerShell 7's
+			// ConciseView error formatter, git, gh, npm) honor NO_COLOR=1; TERM=dumb covers
+			// the few that don't. These are set BEFORE the user's environment loop so an
+			// orchestration author can still override them by declaring NO_COLOR / TERM in
+			// the step's Environment section if they truly want raw ANSI bytes.
+			startInfo.Environment["NO_COLOR"] = "1";
+			startInfo.Environment["TERM"] = "dumb";
+
 			// Set environment variables (resolve templates in values)
 			var resolvedEnvironment = new Dictionary<string, string>(StringComparer.Ordinal);
 			foreach (var (key, value) in scriptStep.Environment)
@@ -177,8 +185,11 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			{
 				if (e.Data is not null)
 				{
-					stdoutBuilder.AppendLine(e.Data);
-					_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+					// Defensive: strip ANSI escape sequences for tools that ignore NO_COLOR.
+					// AnsiSanitizer.Strip is a no-op fast-path when no ESC byte is present.
+					var line = AnsiSanitizer.Strip(e.Data) ?? string.Empty;
+					stdoutBuilder.AppendLine(line);
+					_reporter.ReportContentDelta(step.Name, line + Environment.NewLine);
 				}
 			};
 
@@ -186,9 +197,10 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			{
 				if (e.Data is not null)
 				{
-					stderrBuilder.AppendLine(e.Data);
+					var line = AnsiSanitizer.Strip(e.Data) ?? string.Empty;
+					stderrBuilder.AppendLine(line);
 					if (scriptStep.IncludeStdErr)
-						_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+						_reporter.ReportContentDelta(step.Name, line + Environment.NewLine);
 				}
 			};
 
