@@ -65,6 +65,8 @@ public class Program
 				"triggers" => await HandleTriggersCommand(args, client),
 				"profiles" => await HandleProfilesCommand(args, client),
 				"tags" => await HandleTagsCommand(args, client),
+				"pending" => await HandlePendingCommand(args, client),
+				"respond" => await HandleRespondCommand(args, client),
 
 				"server-status" => await client.GetStatusAsync(),
 
@@ -157,6 +159,42 @@ public class Program
 			"remove" when args.Length >= 4 => await client.RemoveTagAsync(args[2], args[3]),
 			_ => throw new ArgumentException($"Unknown tags subcommand: {args[1]}. Use: list, get, add, remove"),
 		};
+	}
+
+	/// <summary>
+	/// Lists pending input requests (runs awaiting human response). Optionally filters by orchestration.
+	/// </summary>
+	private static async Task<JsonElement> HandlePendingCommand(string[] args, OrchestraClient client)
+	{
+		var orchestration = GetFlag(args, "--orchestration");
+		return await client.ListPendingAsync(orchestration);
+	}
+
+	/// <summary>
+	/// Submits a response to a pending input wait. Usage:
+	///   orchestra respond &lt;orchestration-name&gt; &lt;run-id&gt; &lt;step-name&gt; [--choice X] [--reply "..."] [--by name]
+	/// </summary>
+	private static async Task<JsonElement> HandleRespondCommand(string[] args, OrchestraClient client)
+	{
+		if (args.Length < 4)
+		{
+			throw new ArgumentException(
+				"Usage: orchestra respond <orchestration-name> <run-id> <step-name> [--choice X] [--reply \"...\"] [--by name]");
+		}
+
+		var orchestrationName = args[1];
+		var runId = args[2];
+		var stepName = args[3];
+		var choice = GetFlag(args, "--choice");
+		var reply = GetFlag(args, "--reply");
+		var respondedBy = GetFlag(args, "--by");
+
+		if (choice is null && reply is null)
+		{
+			throw new ArgumentException("Must supply at least one of --choice or --reply.");
+		}
+
+		return await client.RespondAsync(orchestrationName, runId, stepName, choice, reply, respondedBy);
 	}
 
 	private static async Task<JsonElement> RunWithArg(string[] args, int index, string argName, Func<string, Task<JsonElement>> action)
@@ -321,6 +359,11 @@ public class Program
 		Console.WriteLine("  tags get <id>                       Get tags for an orchestration");
 		Console.WriteLine("  tags add <id> <tag1,tag2,...>        Add tags to an orchestration");
 		Console.WriteLine("  tags remove <id> <tag>              Remove a tag");
+		Console.WriteLine();
+		Console.WriteLine("Human-in-the-loop:");
+		Console.WriteLine("  pending [--orchestration <name>]                    List runs awaiting human input");
+		Console.WriteLine("  respond <orchestration> <runId> <step>               Respond to a pending wait");
+		Console.WriteLine("    [--choice <value>] [--reply \"text\"] [--by <name>]");
 		Console.WriteLine();
 		Console.WriteLine("Server:");
 		Console.WriteLine("  server-status                       Get server status");

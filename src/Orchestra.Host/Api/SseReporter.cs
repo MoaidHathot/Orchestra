@@ -594,6 +594,48 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("step-status-set", new { stepName, status, reason });
 	}
 
+	// ── Human-in-the-loop ──
+
+	public void ReportAwaitingInput(PendingInputRecord record)
+	{
+		Write("awaiting-input", new
+		{
+			orchestrationName = record.OrchestrationName,
+			runId = record.RunId,
+			stepName = record.StepName,
+			kind = record.Kind.ToString(),
+			prompt = record.Prompt,
+			choices = record.Choices.Length > 0 ? record.Choices : null,
+			createdAt = record.CreatedAt.ToString("o"),
+			expiresAt = record.ExpiresAt?.ToString("o"),
+		});
+	}
+
+	public void ReportInputReceived(string orchestrationName, string runId, string stepName, UserInputResponse response)
+	{
+		Write("input-received", new
+		{
+			orchestrationName,
+			runId,
+			stepName,
+			choice = response.Choice,
+			reply = response.Reply,
+			respondedBy = response.RespondedBy,
+			respondedAt = response.RespondedAt.ToString("o"),
+		});
+	}
+
+	public void ReportInputTimeout(string orchestrationName, string runId, string stepName, ApprovalTimeoutBehavior onTimeout)
+	{
+		Write("input-timeout", new
+		{
+			orchestrationName,
+			runId,
+			stepName,
+			onTimeout = onTimeout.ToString(),
+		});
+	}
+
 	// ── Auto-mode + system notifications + quota (SDK 0.3.0 telemetry) ──
 
 	public void ReportAutoModeSwitchRequested(string stepName, string requestId, string? errorCode)

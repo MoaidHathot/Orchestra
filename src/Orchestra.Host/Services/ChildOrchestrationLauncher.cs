@@ -45,6 +45,8 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 	private readonly McpServerOptions _mcpOptions;
 	private readonly IOrchestrationReporterFactory _reporterFactory;
 	private readonly McpManager _mcpManager;
+	private readonly IPendingInputStore _pendingInputStore;
+	private readonly IHumanInputWaiter _humanInputWaiter;
 	private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExecutions;
 	private readonly ConcurrentDictionary<string, ActiveExecutionInfo> _activeExecutionInfos;
 
@@ -67,7 +69,9 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		IOrchestrationReporterFactory reporterFactory,
 		McpManager mcpManager,
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
-		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos)
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		IPendingInputStore? pendingInputStore = null,
+		IHumanInputWaiter? humanInputWaiter = null)
 	{
 		_registry = registry;
 		_agentBuilder = agentBuilder;
@@ -78,6 +82,8 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		_hostOptions = hostOptions;
 		_engineToolRegistry = engineToolRegistry;
 		_mcpOptions = mcpOptions;
+		_pendingInputStore = pendingInputStore ?? NullPendingInputStore.Instance;
+		_humanInputWaiter = humanInputWaiter ?? NullHumanInputWaiter.Instance;
 		_reporterFactory = reporterFactory;
 		_mcpManager = mcpManager;
 		_activeExecutions = activeExecutions;
@@ -206,7 +212,9 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			childLauncher: this, // Allow nested Orchestration steps to launch their own children
 			globalHooks: _hostOptions.Hooks,
 			dataPath: _hostOptions.DataPath,
-			serverUrl: _hostOptions.HostBaseUrl);
+			serverUrl: _hostOptions.HostBaseUrl,
+			pendingInputStore: _pendingInputStore,
+			humanInputWaiter: _humanInputWaiter);
 
 		// 9. Wrap pre-execution param transform so executionInfo.Parameters reflects the
 		// post-transform values (otherwise the UI keeps showing the pre-transform input).

@@ -14,4 +14,13 @@ public enum OrchestrationStepType
 	/// dispatch JSON containing the child execution ID (async).
 	/// </summary>
 	Orchestration,
+
+	/// <summary>
+	/// Pauses the orchestration and waits for human input. The step persists a pending
+	/// input record, registers a wait, and emits the <c>step.awaitingInput</c> hook event.
+	/// When the user responds via the host's HumanInput API, the step succeeds with the
+	/// reply (or chosen choice) as its output content. Survives host restarts via the
+	/// existing checkpoint/resume mechanism.
+	/// </summary>
+	Approval,
 }

@@ -390,6 +390,107 @@ public sealed class DataPlaneTools
 		}, s_jsonOptions);
 	}
 
+	[McpServerTool(Name = "list_pending_inputs"), Description(
+		"Lists orchestration runs currently awaiting human input (Approval steps and " +
+		"orchestra_request_user_input tool calls). " +
+		"Returns the orchestrationName, runId, stepName, kind (Approval or EngineTool), " +
+		"prompt, choices (when constrained), and timestamps. " +
+		"Use this to discover runs that need a response, then call respond_to_input to " +
+		"unblock them.")]
+	public static async Task<string> ListPendingInputs(
+		IPendingInputStore pendingInputStore,
+		[Description("Optional orchestration name to filter pending records by.")] string? orchestrationName = null)
+	{
+		var records = await pendingInputStore.ListAsync(orchestrationName);
+		return JsonSerializer.Serialize(new
+		{
+			pending = records.Select(r => new
+			{
+				orchestrationName = r.OrchestrationName,
+				runId = r.RunId,
+				stepName = r.StepName,
+				kind = r.Kind.ToString(),
+				prompt = r.Prompt,
+				choices = r.Choices.Length > 0 ? r.Choices : null,
+				createdAt = r.CreatedAt,
+				expiresAt = r.ExpiresAt,
+			}).ToArray(),
+			count = records.Count,
+		}, s_jsonOptions);
+	}
+
+	[McpServerTool(Name = "respond_to_input"), Description(
+		"Submits a response to a pending human-input wait, unblocking the orchestration. " +
+		"Either 'choice' (must match one of the declared choices when present) or 'reply' " +
+		"(free-form text) is required; both may be supplied (reply wins as the step's " +
+		"output content). Returns 404 if no active wait exists for the run/step (the run " +
+		"may have moved on, the host may have restarted, or the step may not yet be " +
+		"executing). For long-lived approval gates that survive host restarts, the wait " +
+		"is preserved across restarts; for engine-tool waits the agent session is volatile " +
+		"and cannot be re-attached.")]
+	public static string RespondToInput(
+		IPendingInputStore pendingInputStore,
+		IHumanInputWaiter humanInputWaiter,
+		[Description("The orchestration name (matches the 'name' field of the registered orchestration).")] string orchestrationName,
+		[Description("The run ID returned by invoke_orchestration or visible via list_pending_inputs.")] string runId,
+		[Description("The step name awaiting input.")] string stepName,
+		[Description("Optional constrained choice value. When the wait declared a 'choices' array, this must be one of the allowed values (case-insensitive).")] string? choice = null,
+		[Description("Optional free-form reply text. Wins over 'choice' as the step's output content when both are supplied.")] string? reply = null,
+		[Description("Optional identifier of the responder (persisted on the run record for audit).")] string? respondedBy = null)
+	{
+		if (string.IsNullOrEmpty(choice) && string.IsNullOrEmpty(reply))
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = "Either 'choice' or 'reply' (or both) is required."
+			}, s_jsonOptions);
+		}
+
+		var pending = pendingInputStore.GetAsync(orchestrationName, runId, stepName).GetAwaiter().GetResult();
+		if (pending is null)
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"No pending input record for orchestration '{orchestrationName}', run '{runId}', step '{stepName}'."
+			}, s_jsonOptions);
+		}
+
+		if (pending.Choices.Length > 0 && !string.IsNullOrEmpty(choice)
+			&& !pending.Choices.Any(c => string.Equals(c, choice, StringComparison.OrdinalIgnoreCase)))
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"Choice '{choice}' is not one of the allowed values: [{string.Join(", ", pending.Choices)}]."
+			}, s_jsonOptions);
+		}
+
+		var response = new UserInputResponse
+		{
+			Choice = choice,
+			Reply = reply,
+			RespondedBy = respondedBy,
+			RespondedAt = DateTimeOffset.UtcNow,
+		};
+
+		var completed = humanInputWaiter.TryComplete(orchestrationName, runId, stepName, response);
+		if (!completed)
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"No active wait found for run '{runId}' step '{stepName}'. The run may have moved on, the host may have restarted (engine-tool waits don't survive restarts), or the step may not yet be executing."
+			}, s_jsonOptions);
+		}
+
+		return JsonSerializer.Serialize(new
+		{
+			accepted = true,
+			orchestrationName,
+			runId,
+			stepName,
+			respondedAt = response.RespondedAt,
+		}, s_jsonOptions);
+	}
+
 	private static string? TruncateContent(string? content, int maxLength)
 	{
 		if (content is null) return null;

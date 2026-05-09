@@ -1,0 +1,26 @@
+$schema: ../schemas/orchestration.schema.json
+name: hitl-engine-tool-clarify
+description: |
+  Demonstrates the LLM-decided HITL tool. The writer agent is given access to
+  orchestra_request_user_input and instructed to use it ONLY when it needs a
+  clarification. If the request topic is unambiguous the agent writes the article
+  end-to-end; if not, it pauses, the user replies via the API, and the agent
+  continues with the answer in hand.
+version: 1.0.0
+inputs:
+  topic:
+    type: string
+    description: The article topic.
+    required: true
+steps:
+  - name: writer
+    type: Prompt
+    systemPrompt: |
+      You write technical articles. Use orchestra_request_user_input when (and only
+      when) the topic is genuinely ambiguous and a clarifying decision from the
+      user would meaningfully improve the article. For unambiguous topics, just
+      write the article. Keep clarifying questions short and focused on a single
+      decision; do not chain multiple questions.
+    userPrompt: "Write a 200-word article about {{param.topic}}."
+    model: claude-opus-4.6
+    enableTools: [request_user_input]

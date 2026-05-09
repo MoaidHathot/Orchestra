@@ -30,6 +30,8 @@ public partial class TriggerManager : BackgroundService
 	private readonly ITriggerExecutionCallback? _executionCallback;
 	private readonly EngineToolRegistry _engineToolRegistry;
 	private readonly IMcpResolver? _mcpResolver;
+	private readonly IPendingInputStore? _pendingInputStore;
+	private readonly IHumanInputWaiter? _humanInputWaiter;
 	private readonly string? _dataPath;
 	private readonly string? _serverUrl;
 	private readonly string? _defaultModel;
@@ -72,7 +74,9 @@ public partial class TriggerManager : BackgroundService
 		string? dataPath = null,
 		string? serverUrl = null,
 		string? defaultModel = null,
-		HookDefinition[]? globalHooks = null)
+		HookDefinition[]? globalHooks = null,
+		IPendingInputStore? pendingInputStore = null,
+		IHumanInputWaiter? humanInputWaiter = null)
 	{
 		_activeExecutions = activeExecutions;
 		_activeExecutionInfos = activeExecutionInfos;
@@ -88,6 +92,8 @@ public partial class TriggerManager : BackgroundService
 		_executionCallback = executionCallback;
 		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 		_mcpResolver = mcpResolver;
+		_pendingInputStore = pendingInputStore;
+		_humanInputWaiter = humanInputWaiter;
 		_dataPath = dataPath;
 		_serverUrl = serverUrl;
 		_defaultModel = defaultModel;
@@ -408,7 +414,7 @@ public partial class TriggerManager : BackgroundService
 		}
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, childLauncher: _launcher, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl);
+		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, childLauncher: _launcher, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl, pendingInputStore: _pendingInputStore, humanInputWaiter: _humanInputWaiter);
 
 		var executionInfo = new ActiveExecutionInfo
 		{

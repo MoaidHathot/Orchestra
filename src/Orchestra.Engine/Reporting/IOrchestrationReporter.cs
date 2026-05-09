@@ -113,4 +113,25 @@ public interface IOrchestrationReporter
 	/// </summary>
 	void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error, ActorContext actor)
 		=> ReportToolExecutionCompleted(stepName, toolName, success, result, error);
+
+	// ── Human-in-the-loop ──
+
+	/// <summary>
+	/// Reports that a step has begun awaiting human input. Fired by the engine when an
+	/// Approval step or an <c>orchestra_request_user_input</c> tool call begins waiting.
+	/// Default implementation is a no-op for back-compat with reporters that don't
+	/// surface HITL events (e.g. <see cref="NullOrchestrationReporter"/>).
+	/// </summary>
+	void ReportAwaitingInput(PendingInputRecord record) { }
+
+	/// <summary>
+	/// Reports that a previously-awaiting wait received the user's response.
+	/// </summary>
+	void ReportInputReceived(string orchestrationName, string runId, string stepName, UserInputResponse response) { }
+
+	/// <summary>
+	/// Reports that a HITL wait expired without a response. <paramref name="onTimeout"/>
+	/// is the configured behavior that's about to take effect (fail / defaultResponse / cancel).
+	/// </summary>
+	void ReportInputTimeout(string orchestrationName, string runId, string stepName, ApprovalTimeoutBehavior onTimeout) { }
 }

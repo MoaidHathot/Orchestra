@@ -109,6 +109,20 @@
       "description": "Free-form metadata for the orchestration. Purely informational - never inspected by the runtime. Use for authorship, datetime, ticket links, environment, SLA, or any other semi-structured data that orchestration authors and managers want to record. Values may be any JSON type (string, number, boolean, object, array).",
       "additionalProperties": true,
       "default": {}
+    },
+    "pauseTimeoutDuringWait": {
+      "type": "boolean",
+      "description": "When true, the orchestration timeout clock pauses while a step (Approval or orchestra_request_user_input) is waiting for human input. Set to false for hard SLAs that include human response latency.",
+      "default": true
+    },
+    "defaultEnableTools": {
+      "type": "array",
+      "description": "Opt-in engine tool names enabled by default for every Prompt step that does not specify its own enableTools. Currently supports 'request_user_input'.",
+      "items": {
+        "type": "string",
+        "enum": ["request_user_input"]
+      },
+      "default": []
     }
   },
   "$defs": {
@@ -125,7 +139,7 @@
         "type": {
           "type": "string",
           "description": "Step type determining execution behavior.",
-          "enum": ["Prompt", "Http", "Transform", "Command", "Script", "Orchestration", "prompt", "http", "transform", "command", "script", "orchestration"]
+          "enum": ["Prompt", "Http", "Transform", "Command", "Script", "Orchestration", "Approval", "prompt", "http", "transform", "command", "script", "orchestration", "approval"]
         },
         "dependsOn": {
           "type": "array",
@@ -225,6 +239,16 @@
           },
           "then": {
             "$ref": "#/$defs/orchestrationStepProperties"
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["Approval", "approval"] }
+            }
+          },
+          "then": {
+            "$ref": "#/$defs/approvalStepProperties"
           }
         }
       ],
@@ -384,8 +408,7 @@
 		  "type": "array",
 		  "description": "Image attachments to send with the prompt. Supports file paths and base64 blob data.",
           "items": {
-            "type": "object",
-            "properties": {
+            "type": "object",            "properties": {
               "type": {
                 "type": "string",
                 "enum": ["file", "blob"],
@@ -419,6 +442,14 @@
                 "then": { "required": ["data", "mimeType"] }
               }
             ]
+          }
+        },
+        "enableTools": {
+          "type": "array",
+          "description": "Opt-in engine tool names this Prompt step grants the agent access to. Currently supports 'request_user_input' (the LLM-decided human-in-the-loop tool). Falls back to the orchestration's defaultEnableTools when null.",
+          "items": {
+            "type": "string",
+            "enum": ["request_user_input"]
           }
         }
       },
@@ -678,6 +709,44 @@
         "inputHandlerModel": {
           "type": "string",
           "description": "Model to use for the input handler prompt. Defaults to the orchestration default model."
+        }
+      }
+    },
+
+    "approvalStepProperties": {
+      "type": "object",
+      "description": "Properties specific to Approval steps. Pauses the orchestration and waits for human input via the host's HumanInput API. The user's response (choice or reply) becomes the step's output content. Survives host restarts.",
+      "required": ["prompt"],
+      "properties": {
+        "name": true,
+        "type": true,
+        "dependsOn": true,
+        "parameters": true,
+        "enabled": true,
+        "timeoutSeconds": true,
+        "retry": true,
+        "prompt": {
+          "type": "string",
+          "description": "Human-readable prompt presented to the user. Supports template expressions resolved at execution time."
+        },
+        "choices": {
+          "type": "array",
+          "description": "Allowed responses. When non-empty, the response endpoint validates that the supplied 'choice' is one of these (case-insensitive). When empty, free-form replies are accepted.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": []
+        },
+        "onTimeout": {
+          "type": "string",
+          "description": "Behavior when timeoutSeconds fires without a response. 'fail' marks the step Failed; 'defaultResponse' uses the configured defaultResponse as the answer; 'cancel' cancels the entire orchestration.",
+          "enum": ["fail", "defaultResponse", "cancel", "Fail", "DefaultResponse", "Cancel"],
+          "default": "fail"
+        },
+        "defaultResponse": {
+          "type": "string",
+          "description": "Required when onTimeout is 'defaultResponse'. The fallback content used as the step's output."
         }
       }
     },

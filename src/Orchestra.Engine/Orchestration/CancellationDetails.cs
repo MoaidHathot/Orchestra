@@ -38,6 +38,21 @@ public enum CancellationCauseKind
 	/// as an interruption, not a user-requested cancellation, so a durable checkpoint can be resumed.
 	/// </summary>
 	HostShutdown = 5,
+
+	/// <summary>
+	/// A human-in-the-loop wait timed out before a response was received. Set on Approval
+	/// steps and engine-tool waits when the configured per-step or per-orchestration
+	/// timeout fired while a <see cref="PendingInputRecord"/> was outstanding.
+	/// </summary>
+	AwaitingInputTimeout = 6,
+
+	/// <summary>
+	/// The host process was shut down while a human-in-the-loop wait was outstanding for
+	/// an engine-tool request (LLM-decided pause). The agent session is in-memory and
+	/// cannot be re-attached, so the run is marked failed; authors retry from the
+	/// previous step's checkpoint.
+	/// </summary>
+	HostShutdownDuringWait = 7,
 }
 
 /// <summary>
@@ -95,6 +110,14 @@ public sealed class CancellationDetails
 					!string.IsNullOrWhiteSpace(Detail)
 						? $"completed early: {Detail}"
 						: "completed early via orchestra_complete",
+				CancellationCauseKind.AwaitingInputTimeout =>
+					TimeoutSeconds is { } s
+						? $"awaiting-input timed out after {s}s without a response"
+						: "awaiting-input timed out without a response",
+				CancellationCauseKind.HostShutdownDuringWait =>
+					!string.IsNullOrWhiteSpace(Detail)
+						? $"host shutdown while awaiting input: {Detail}"
+						: "host shutdown while awaiting input",
 				CancellationCauseKind.Unknown => "cancelled",
 				_ => "cancelled",
 			};
@@ -105,7 +128,8 @@ public sealed class CancellationDetails
 	/// True when <see cref="Kind"/> is any of the timeout variants.
 	/// </summary>
 	public bool IsTimeout => Kind is CancellationCauseKind.OrchestrationTimeout
-		or CancellationCauseKind.SyncInvokeTimeout;
+		or CancellationCauseKind.SyncInvokeTimeout
+		or CancellationCauseKind.AwaitingInputTimeout;
 
 	/// <summary>
 	/// Convenience constructor for an orchestration-level timeout.
@@ -155,6 +179,28 @@ public sealed class CancellationDetails
 		Kind = CancellationCauseKind.OrchestrationComplete,
 		Source = completedByStep is null ? "orchestra_complete" : $"orchestra_complete:{completedByStep}",
 		Detail = reason,
+	};
+
+	/// <summary>
+	/// Convenience constructor for an awaiting-input timeout (Approval step or engine-tool wait).
+	/// </summary>
+	public static CancellationDetails AwaitingInputTimeout(int timeoutSeconds, string? stepName = null) => new()
+	{
+		Kind = CancellationCauseKind.AwaitingInputTimeout,
+		TimeoutSeconds = timeoutSeconds,
+		Source = stepName is null ? "awaiting-input" : $"awaiting-input:{stepName}",
+	};
+
+	/// <summary>
+	/// Convenience constructor for a host shutdown that interrupted an outstanding
+	/// engine-tool human-input wait. The agent session cannot be resumed, so the run
+	/// is marked failed and must be retried from the previous step's checkpoint.
+	/// </summary>
+	public static CancellationDetails HostShutdownDuringWait(string? stepName = null, string? detail = null) => new()
+	{
+		Kind = CancellationCauseKind.HostShutdownDuringWait,
+		Source = stepName is null ? "host-shutdown-during-wait" : $"host-shutdown-during-wait:{stepName}",
+		Detail = detail,
 	};
 
 	public override string ToString() =>

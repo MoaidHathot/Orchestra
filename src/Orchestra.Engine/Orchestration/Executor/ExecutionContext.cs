@@ -48,6 +48,19 @@ public class OrchestrationExecutionContext
 	public int? DefaultStepTimeoutSeconds { get; init; }
 
 	/// <summary>
+	/// Default set of opt-in engine tool names enabled for every Prompt step that does
+	/// not specify its own <see cref="PromptOrchestrationStep.EnableTools"/>. Wired from
+	/// <see cref="Orchestration.DefaultEnableTools"/>.
+	/// </summary>
+	public string[] DefaultEnableTools { get; init; } = [];
+
+	/// <summary>
+	/// When true, the orchestration timeout clock should pause while a step is awaiting
+	/// human input. Wired from <see cref="Orchestration.PauseTimeoutDuringWait"/>.
+	/// </summary>
+	public bool PauseTimeoutDuringWait { get; init; } = true;
+
+	/// <summary>
 	/// The temp file store for this orchestration run, providing file I/O operations
 	/// scoped to a run-specific temp directory. Available via <c>{{orchestration.tempDir}}</c>
 	/// template expressions.
@@ -67,6 +80,21 @@ public class OrchestrationExecutionContext
 	/// the <c>ORCHESTRA_SERVER_URL</c> environment variable.
 	/// </summary>
 	public string? ServerUrl { get; init; }
+
+	/// <summary>
+	/// Callback invoked when a step (Approval or engine-tool) begins waiting for human
+	/// input. Wired up by <see cref="OrchestrationExecutor"/> to fire the
+	/// <c>step.awaitingInput</c> hook event with the supplied <see cref="PendingInputRecord"/>
+	/// and to start the clock-pause timer when configured. Null when neither is needed.
+	/// </summary>
+	public Action<PendingInputRecord>? OnAwaitingInput { get; init; }
+
+	/// <summary>
+	/// Callback invoked when a step's wait completes (response received, timeout, cancellation).
+	/// Wired up by <see cref="OrchestrationExecutor"/> to stop the clock-pause timer.
+	/// Null when no clock-pause is in effect.
+	/// </summary>
+	public Action<string, string>? OnInputResolved { get; init; }
 
 	private readonly ConcurrentDictionary<string, ExecutionResult> _results = new();
 	private readonly ConcurrentDictionary<string, string> _loopFeedback = new();

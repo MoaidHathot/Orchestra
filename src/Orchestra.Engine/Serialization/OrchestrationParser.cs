@@ -15,7 +15,8 @@ public static class OrchestrationParser
 		.Register(new TransformStepTypeParser())
 		.Register(new CommandStepTypeParser())
 		.Register(new ScriptStepTypeParser())
-		.Register(new OrchestrationStepTypeParser());
+		.Register(new OrchestrationStepTypeParser())
+		.Register(new ApprovalStepTypeParser());
 
 	private static readonly StepParseContext s_defaultContext = new(BaseDirectory: null);
 
@@ -33,7 +34,8 @@ public static class OrchestrationParser
 			.Register(new TransformStepTypeParser())
 			.Register(new CommandStepTypeParser())
 			.Register(new ScriptStepTypeParser())
-			.Register(new OrchestrationStepTypeParser());
+			.Register(new OrchestrationStepTypeParser())
+			.Register(new ApprovalStepTypeParser());
 	}
 
 	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry, StepParseContext context)

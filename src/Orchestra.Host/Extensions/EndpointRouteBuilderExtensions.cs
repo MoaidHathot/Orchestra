@@ -66,6 +66,7 @@ public static class EndpointRouteBuilderExtensions
 		endpoints.MapTagsApi(jsonOptions);
 		endpoints.MapUtilityApi(jsonOptions);
 		endpoints.MapDashboardEventsApi(jsonOptions);
+		endpoints.MapHumanInputApi(jsonOptions);
 
 		return endpoints;
 	}

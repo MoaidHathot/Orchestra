@@ -133,6 +133,19 @@ public static class ServiceCollectionExtensions
 		});
 		services.AddSingleton<ICheckpointStore>(sp => sp.GetRequiredService<FileSystemCheckpointStore>());
 
+		// File-based pending input store (for HITL)
+		services.AddSingleton<FileSystemPendingInputStore>(sp =>
+		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			return new FileSystemPendingInputStore(opts.DataPath, sp.GetRequiredService<ILogger<FileSystemPendingInputStore>>());
+		});
+		services.AddSingleton<IPendingInputStore>(sp => sp.GetRequiredService<FileSystemPendingInputStore>());
+
+		// In-memory waiter for HITL responses
+		services.AddSingleton<InMemoryHumanInputWaiter>(sp =>
+			new InMemoryHumanInputWaiter(sp.GetRequiredService<ILogger<InMemoryHumanInputWaiter>>()));
+		services.AddSingleton<IHumanInputWaiter>(sp => sp.GetRequiredService<InMemoryHumanInputWaiter>());
+
 		// Step type parser registry with built-in parsers (stateless, safe as singleton)
 		services.AddSingleton<StepTypeParserRegistry>(_ => OrchestrationParser.CreateDefaultParserRegistry());
 
@@ -241,7 +254,9 @@ public static class ServiceCollectionExtensions
 				dataPath: opts.DataPath,
 				serverUrl: opts.HostBaseUrl,
 				defaultModel: opts.DefaultModel,
-				globalHooks: opts.Hooks);
+				globalHooks: opts.Hooks,
+				pendingInputStore: sp.GetRequiredService<IPendingInputStore>(),
+				humanInputWaiter: sp.GetRequiredService<IHumanInputWaiter>());
 
 			// Apply shutdown timeout from configuration
 			triggerManager.ShutdownTimeout = TimeSpan.FromSeconds(opts.ShutdownTimeoutSeconds);
@@ -528,6 +543,31 @@ public static class ServiceProviderExtensions
 		{
 			var checkpointStore = services.GetRequiredService<ICheckpointStore>();
 			var runStoreForRecovery = services.GetRequiredService<FileSystemRunStore>();
+			var pendingInputStore = services.GetRequiredService<IPendingInputStore>();
+
+			// Step 1: clean up orphaned engine-tool waits. These cannot survive a host
+			// restart (the agent session is volatile), so we delete the persisted record
+			// and let the run fail-fast on resume — authors retry from the previous step's
+			// checkpoint via the existing retry infrastructure.
+			async Task CleanupOrphanedEngineToolWaitsAsync()
+			{
+				try
+				{
+					var pending = await pendingInputStore.ListAsync();
+					foreach (var record in pending.Where(r => r.Kind == PendingInputKind.EngineTool))
+					{
+						initLogger.LogWarning(
+							"Cleaning up orphaned engine-tool wait for orchestration {OrchestrationName}, run {RunId}, step {StepName}: agent session was lost across host restart",
+							record.OrchestrationName, record.RunId, record.StepName);
+						await pendingInputStore.DeleteAsync(record.OrchestrationName, record.RunId, record.StepName);
+					}
+				}
+				catch (Exception ex)
+				{
+					initLogger.LogError(ex, "Failed to clean up orphaned engine-tool waits on startup");
+				}
+			}
+
 			async Task ResumePersistedCheckpointsAsync()
 			{
 				try
@@ -573,7 +613,11 @@ public static class ServiceProviderExtensions
 				}
 			}
 
-			_ = Task.Run(ResumePersistedCheckpointsAsync);
+			_ = Task.Run(async () =>
+			{
+				await CleanupOrphanedEngineToolWaitsAsync();
+				await ResumePersistedCheckpointsAsync();
+			});
 		}
 
 		// Fire-and-forget preload of the run-history index so the first

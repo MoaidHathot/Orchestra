@@ -133,6 +133,25 @@ public class OrchestraClient : IDisposable
 	public async Task<JsonElement> GetStatusAsync()
 		=> await GetAsync("api/status");
 
+	// ── Human-in-the-loop ──
+
+	public async Task<JsonElement> ListPendingAsync(string? orchestration = null)
+	{
+		var url = "api/runs/pending";
+		if (!string.IsNullOrEmpty(orchestration))
+			url += $"?orchestration={Uri.EscapeDataString(orchestration)}";
+		return await GetAsync(url);
+	}
+
+	public async Task<JsonElement> GetPendingAsync(string orchestrationName, string runId, string stepName)
+		=> await GetAsync($"api/orchestrations/{Uri.EscapeDataString(orchestrationName)}/runs/{Uri.EscapeDataString(runId)}/pending/{Uri.EscapeDataString(stepName)}");
+
+	public async Task<JsonElement> RespondAsync(string orchestrationName, string runId, string stepName, string? choice, string? reply, string? respondedBy = null)
+	{
+		var url = $"api/orchestrations/{Uri.EscapeDataString(orchestrationName)}/runs/{Uri.EscapeDataString(runId)}/respond?step={Uri.EscapeDataString(stepName)}";
+		return await PostAsync(url, new { choice, reply, respondedBy });
+	}
+
 	// ── HTTP helpers ──
 
 	private async Task<JsonElement> GetAsync(string url)

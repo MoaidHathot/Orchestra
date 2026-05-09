@@ -9,7 +9,11 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private readonly IPromptFormatter _formatter;
 	private readonly EngineToolRegistry _engineToolRegistry;
 	private readonly IMcpResolver? _mcpResolver;
+	private readonly IPendingInputStore _pendingInputStore;
+	private readonly IHumanInputWaiter _humanInputWaiter;
+	private readonly string? _serverUrl;
 	private readonly ILogger<PromptExecutor> _logger;
+	private readonly RequestUserInputTool _requestUserInputTool = new();
 
 	public PromptExecutor(
 		AgentBuilder agentBuilder,
@@ -17,13 +21,19 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		IPromptFormatter formatter,
 		ILogger<PromptExecutor> logger,
 		EngineToolRegistry? engineToolRegistry = null,
-		IMcpResolver? mcpResolver = null)
+		IMcpResolver? mcpResolver = null,
+		IPendingInputStore? pendingInputStore = null,
+		IHumanInputWaiter? humanInputWaiter = null,
+		string? serverUrl = null)
 	{
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
 		_formatter = formatter;
 		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 		_mcpResolver = mcpResolver;
+		_pendingInputStore = pendingInputStore ?? NullPendingInputStore.Instance;
+		_humanInputWaiter = humanInputWaiter ?? NullHumanInputWaiter.Instance;
+		_serverUrl = serverUrl;
 		_logger = logger;
 	}
 
@@ -82,8 +92,27 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			: null;
 
 		// Create a fresh engine tool context for this execution
-		var engineToolCtx = new EngineToolContext { TempFileStore = context.TempFileStore, StepName = step.Name, Reporter = _reporter };
-		var engineTools = _engineToolRegistry.GetAll();
+		var enabledOptInTools = ResolveEnabledOptInTools(step, context);
+		var respondUrlBuilder = _serverUrl is null
+			? (Func<string, string, string, string?>?)null
+			: (orchestrationName, runId, stepName) =>
+				$"{_serverUrl.TrimEnd('/')}/api/orchestrations/{Uri.EscapeDataString(orchestrationName)}/runs/{Uri.EscapeDataString(runId)}/respond?step={Uri.EscapeDataString(stepName)}";
+
+		var engineToolCtx = new EngineToolContext
+		{
+			TempFileStore = context.TempFileStore,
+			StepName = step.Name,
+			Reporter = _reporter,
+			OrchestrationName = context.OrchestrationInfo.Name,
+			RunId = context.OrchestrationInfo.RunId,
+			HumanInputWaiter = _humanInputWaiter,
+			PendingInputStore = _pendingInputStore,
+			RespondUrlBuilder = respondUrlBuilder,
+			EnabledOptInTools = enabledOptInTools,
+			OnAwaitingInput = context.OnAwaitingInput,
+			OnInputResolved = context.OnInputResolved,
+		};
+		var engineTools = BuildEngineToolsForStep(enabledOptInTools);
 
 		// Create a CTS that engine tools (e.g., set_status) can cancel to signal
 		// that the step is done and the agent should stop immediately.
@@ -359,6 +388,46 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		var loopFeedback = context.ConsumeLoopFeedback(step.Name);
 
 		return _formatter.BuildUserPrompt(userPrompt, dependencyOutputs, loopFeedback, step.InputHandlerPrompt);
+	}
+
+	/// <summary>
+	/// Resolves the effective set of opt-in tool names for a step. Step-level
+	/// <see cref="PromptOrchestrationStep.EnableTools"/> wins over orchestration-level
+	/// <see cref="OrchestrationExecutionContext.DefaultEnableTools"/>. Empty array means
+	/// no opt-in tools (always-on tools still apply).
+	/// </summary>
+	private static IReadOnlyCollection<string> ResolveEnabledOptInTools(PromptOrchestrationStep step, OrchestrationExecutionContext context)
+	{
+		var source = step.EnableTools ?? context.DefaultEnableTools;
+		if (source.Length == 0)
+			return Array.Empty<string>();
+
+		return new HashSet<string>(source, StringComparer.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
+	/// Builds the engine tool collection for a step. Always-on tools come from the
+	/// registry; opt-in tools (currently <c>request_user_input</c>) are appended only
+	/// when the step's <c>enableTools</c> set lists them.
+	/// </summary>
+	private IReadOnlyCollection<IEngineTool> BuildEngineToolsForStep(IReadOnlyCollection<string> enabledOptInTools)
+	{
+		var alwaysOn = _engineToolRegistry.GetAll();
+		if (enabledOptInTools.Count == 0)
+			return alwaysOn;
+
+		var combined = new List<IEngineTool>(alwaysOn);
+
+		if (enabledOptInTools.Contains(RequestUserInputTool.OptInName))
+		{
+			// Avoid duplicate registration if a custom registry already includes the tool.
+			if (!combined.Any(t => string.Equals(t.Name, _requestUserInputTool.Name, StringComparison.OrdinalIgnoreCase)))
+			{
+				combined.Add(_requestUserInputTool);
+			}
+		}
+
+		return combined;
 	}
 
 	private static string InjectParameters(string prompt, string[] parameterNames, Dictionary<string, string> parameters)

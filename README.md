@@ -671,6 +671,8 @@ Orchestra exposes orchestrations to external AI agents via MCP endpoints.
 | `InvokeOrchestration` | Invoke an orchestration (async or sync mode) |
 | `GetOrchestrationStatus` | Check status/result of a running or completed execution |
 | `CancelOrchestration` | Cancel a running execution |
+| `ListPendingInputs` | List orchestration runs awaiting human input (Approval steps + `orchestra_request_user_input` tool calls) |
+| `RespondToInput` | Submit a response to a pending human-input wait, unblocking the orchestration |
 
 ### Control Plane (opt-in)
 

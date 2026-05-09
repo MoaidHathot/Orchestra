@@ -18,6 +18,7 @@ This document is the complete reference for every property, step type, trigger t
     - [Transform Step](#transform-step)
     - [Command Step](#command-step)
     - [Script Step](#script-step)
+    - [Approval Step](#approval-step)
 - [Loop Configuration](#loop-configuration)
 - [Subagents](#subagents)
 - [Retry Policy](#retry-policy)
@@ -74,6 +75,8 @@ Minimal valid orchestration:
 | `defaultRetryPolicy` | `RetryPolicy` | No | `null` | Default retry policy applied to all steps unless overridden at the step level. |
 | `defaultStepTimeoutSeconds` | `int` | No | `null` | Default per-step timeout in seconds. Individual steps can override this. |
 | `timeoutSeconds` | `int` | No | `3600` | Maximum time in seconds for the entire orchestration run. Set to `0` or `null` to disable. |
+| `pauseTimeoutDuringWait` | `bool` | No | `true` | When true, the orchestration timeout clock pauses while a step (Approval or `orchestra_request_user_input`) is waiting for human input. Set to `false` for hard SLAs that include human response latency. |
+| `defaultEnableTools` | `string[]` | No | `[]` | Opt-in engine tool names enabled by default for every Prompt step. Currently supports `"request_user_input"`. Steps can override via their own `enableTools`. |
 | `variables` | `object` | No | `{}` | Key-value pairs of user-defined variables. Values can contain template expressions. Accessed via `{{vars.name}}`. |
 | `tags` | `string[]` | No | `[]` | Tags for categorizing and filtering orchestrations. |
 
@@ -372,6 +375,94 @@ Executes an inline or file-based script using a specified shell interpreter (e.g
   "workingDirectory": "{{vars.projectRoot}}"
 }
 ```
+
+---
+
+#### Approval Step
+
+**Type value:** `"Approval"`
+
+Pauses the orchestration and waits for human input. The step persists a pending input record, transitions to `AwaitingInput` status, fires the `step.awaitingInput` hook event, and blocks until a user responds via the host's HumanInput API (or via the CLI / Portal). The user's response (`reply` or `choice`) becomes the step's output content and can be referenced by downstream steps via `{{stepName.output}}`.
+
+Approval steps survive host restarts: the persisted record is preserved across restarts, and on resume the step re-attaches to the still-outstanding wait.
+
+| Property | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `prompt` | `string` | **Yes** | -- | Human-readable prompt presented to the user. Supports template expressions resolved at execution time. |
+| `choices` | `string[]` | No | `[]` | Allowed responses. When non-empty, the response endpoint validates that the supplied `choice` is one of these (case-insensitive). When empty, free-form replies are accepted. |
+| `timeoutSeconds` | `int` | No | `null` | Per-step timeout. When elapsed without a response, behavior is governed by `onTimeout`. When null, the wait runs indefinitely (subject to the orchestration timeout, which by default pauses during waits — see `pauseTimeoutDuringWait`). |
+| `onTimeout` | `string` | No | `"fail"` | Behavior when `timeoutSeconds` fires. One of: `"fail"` (mark step Failed), `"defaultResponse"` (use `defaultResponse` as the answer), `"cancel"` (cancel the entire orchestration). |
+| `defaultResponse` | `string` | No | `null` | Required when `onTimeout: "defaultResponse"`. The fallback content used as the step's output. |
+
+**Example (declarative deploy gate):**
+
+```yaml
+- name: review-deploy
+  type: Approval
+  prompt: "Approve deploy of {{param.service}} to {{param.env}}?"
+  choices: [approve, reject]
+```
+
+**Example (explicit timeout with default fallback):**
+
+```yaml
+- name: triage-incident
+  type: Approval
+  prompt: "Auto-acknowledge incident? (defaults to acknowledge in 5m)"
+  choices: [acknowledge, escalate]
+  timeoutSeconds: 300
+  onTimeout: defaultResponse
+  defaultResponse: acknowledge
+```
+
+**Responding via API / CLI:**
+
+```bash
+# List runs awaiting input
+orchestra pending
+
+# Respond with a choice
+orchestra respond my-orchestration <runId> review-deploy --choice approve --by alice
+
+# Respond with free-form text
+orchestra respond my-orchestration <runId> review-deploy --reply "ship it but watch staging dashboards"
+```
+
+The same operation as a raw HTTP call:
+
+```http
+POST /api/orchestrations/my-orchestration/runs/{runId}/respond?step=review-deploy
+Content-Type: application/json
+
+{ "choice": "approve", "respondedBy": "alice" }
+```
+
+#### Engine-Tool Variant: `orchestra_request_user_input`
+
+For LLM-decided "ask the human only when needed" pauses inside `Prompt` steps, opt the prompt step into the `request_user_input` engine tool:
+
+```yaml
+- name: writer
+  type: Prompt
+  systemPrompt: |
+    You write articles. If anything is ambiguous, call orchestra_request_user_input
+    to ask the user — they'll respond and you'll get the answer in your tool result.
+    Use it sparingly and only for genuine clarifications.
+  userPrompt: "Write an article about {{param.topic}}"
+  model: claude-opus-4.6
+  enableTools: [request_user_input]
+```
+
+Differences from the declarative `Approval` step:
+
+| | Approval step | `orchestra_request_user_input` |
+|---|---|---|
+| Decided by | Author (always pauses) | LLM (only if needed) |
+| During wait | Step status = `AwaitingInput`; agent session torn down | Step status = `Running`; agent session held in memory |
+| On host restart | Wait persists; resume re-attaches | Run marked `Failed (HostShutdownDuringWait)`; retry from previous checkpoint |
+| Use case | Explicit deploy / compliance gates | Mid-task clarifications the LLM uses to keep working |
+
+Both paths emit the `step.awaitingInput` hook event with the same payload structure, and both route through `POST /api/orchestrations/.../respond`.
 
 ---
 

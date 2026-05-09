@@ -13,7 +13,10 @@ public partial class OrchestrationExecutor
 	private readonly ILogger<OrchestrationExecutor> _logger;
 	private readonly IRunStore _runStore;
 	private readonly ICheckpointStore _checkpointStore;
+	private readonly IPendingInputStore _pendingInputStore;
+	private readonly IHumanInputWaiter _humanInputWaiter;
 	private readonly StepExecutorRegistry _stepExecutorRegistry;
+	private readonly EngineToolRegistry _engineToolRegistry;
 	private readonly string? _dataPath;
 	private readonly string? _serverUrl;
 	private readonly HookDefinition[] _globalHooks;
@@ -32,7 +35,9 @@ public partial class OrchestrationExecutor
 		IChildOrchestrationLauncher? childLauncher = null,
 		HookDefinition[]? globalHooks = null,
 		string? dataPath = null,
-		string? serverUrl = null)
+		string? serverUrl = null,
+		IPendingInputStore? pendingInputStore = null,
+		IHumanInputWaiter? humanInputWaiter = null)
 	{
 		_scheduler = scheduler;
 		_agentBuilder = agentBuilder;
@@ -42,9 +47,12 @@ public partial class OrchestrationExecutor
 		_logger = loggerFactory.CreateLogger<OrchestrationExecutor>();
 			_runStore = runStore ?? NullRunStore.Instance;
 			_checkpointStore = checkpointStore ?? NullCheckpointStore.Instance;
+			_pendingInputStore = pendingInputStore ?? NullPendingInputStore.Instance;
+			_humanInputWaiter = humanInputWaiter ?? NullHumanInputWaiter.Instance;
 			_globalHooks = MarkHookSources(globalHooks ?? [], HookSource.Global);
 			_dataPath = dataPath;
 			_serverUrl = serverUrl;
+			_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 
 		// If no registry is provided, create a default one with all built-in step types
 		if (stepExecutorRegistry is not null)
@@ -53,13 +61,17 @@ public partial class OrchestrationExecutor
 		}
 		else
 		{
-			var promptExecutor = new PromptExecutor(agentBuilder, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>(), engineToolRegistry, mcpResolver);
+			var promptExecutor = new PromptExecutor(agentBuilder, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>(), _engineToolRegistry, mcpResolver,
+				pendingInputStore: _pendingInputStore,
+				humanInputWaiter: _humanInputWaiter,
+				serverUrl: _serverUrl);
 			_stepExecutorRegistry = new StepExecutorRegistry()
 				.Register(new PromptStepExecutor(promptExecutor))
 				.Register(new HttpStepExecutor(new System.Net.Http.HttpClient(), reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))
 				.Register(new TransformStepExecutor(loggerFactory.CreateLogger<TransformStepExecutor>(), reporter))
 				.Register(new CommandStepExecutor(reporter, loggerFactory.CreateLogger<CommandStepExecutor>()))
-				.Register(new ScriptStepExecutor(reporter, loggerFactory.CreateLogger<ScriptStepExecutor>()));
+				.Register(new ScriptStepExecutor(reporter, loggerFactory.CreateLogger<ScriptStepExecutor>()))
+				.Register(new ApprovalStepExecutor(_pendingInputStore, _humanInputWaiter, reporter, loggerFactory.CreateLogger<ApprovalStepExecutor>()));
 
 			// Only register the Orchestration step executor when a launcher is supplied;
 			// without one there is no way to invoke child orchestrations.
@@ -177,6 +189,24 @@ public partial class OrchestrationExecutor
 			tempFileStore = new OrchestrationTempFileStore(_dataPath, orchestration.Name, runId);
 		}
 
+		var hookRuntime = new HookRuntime(_loggerFactory, _serverUrl, _reporter);
+		var hooks = CombineHooks(_globalHooks, orchestration.Hooks);
+		var hookExecutions = new ConcurrentQueue<HookExecutionRecord>();
+		var stepResults = new ConcurrentDictionary<string, ExecutionResult>();
+		var stepRecords = new ConcurrentDictionary<string, StepRunRecord>();
+		var allStepRecords = new ConcurrentDictionary<string, StepRunRecord>();
+
+		// Build the lookup once so the awaiting-input callback can find the step entry.
+		var allSteps = orchestration.Steps.ToDictionary(s => s.Name, s => s);
+
+		// Wire clock-pause: when a step begins waiting we record the start; when it ends
+		// we re-arm the orchestration timeout CTS to compensate for the waited duration.
+		var clockPause = orchestration.PauseTimeoutDuringWait
+			&& orchestrationTimeoutCts is not null
+			&& orchestration.TimeoutSeconds is > 0
+			? new ClockPauseTracker(orchestrationTimeoutCts, orchestration.TimeoutSeconds.Value, runStartedAt)
+			: null;
+
 		var context = new OrchestrationExecutionContext
 		{
 			Parameters = effectiveParams,
@@ -192,15 +222,22 @@ public partial class OrchestrationExecutor
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
 			DefaultModel = orchestration.DefaultModel,
 			DefaultStepTimeoutSeconds = orchestration.DefaultStepTimeoutSeconds,
+			DefaultEnableTools = orchestration.DefaultEnableTools,
+			PauseTimeoutDuringWait = orchestration.PauseTimeoutDuringWait,
 			TempFileStore = tempFileStore,
 			ServerUrl = _serverUrl,
+			OnAwaitingInput = hooks.Length == 0 && clockPause is null ? null : record =>
+			{
+				clockPause?.BeginWait();
+				if (hooks.Length > 0)
+				{
+					_ = FireAwaitingInputHookSafeAsync(
+						hookRuntime, hooks, orchestration, runId, runStartedAt, triggerId,
+						stepRecords, allSteps, record, hookExecutions);
+				}
+			},
+			OnInputResolved = clockPause is null ? null : (_, _) => clockPause.EndWait(),
 		};
-		var hookRuntime = new HookRuntime(_loggerFactory, _serverUrl, _reporter);
-		var hooks = CombineHooks(_globalHooks, orchestration.Hooks);
-		var hookExecutions = new ConcurrentQueue<HookExecutionRecord>();
-		var stepResults = new ConcurrentDictionary<string, ExecutionResult>();
-		var stepRecords = new ConcurrentDictionary<string, StepRunRecord>();
-		var allStepRecords = new ConcurrentDictionary<string, StepRunRecord>();
 
 		// CancellationTokenSource for orchestration-complete signals.
 		// When a step calls orchestra_complete, this CTS is triggered to cancel all remaining steps.
@@ -212,9 +249,7 @@ public partial class OrchestrationExecutor
 		string? orchestrationCompleteReason = null;
 		string? orchestrationCompleteStepName = null;
 
-		// Build step lookup and dependency graph
-		var allSteps = orchestration.Steps
-			.ToDictionary(s => s.Name, s => s);
+		// Step lookup is already built above so the hook callback can find the step entry.
 
 		if (checkpoint is null)
 		{
@@ -1602,6 +1637,74 @@ public partial class OrchestrationExecutor
 			.ToArray();
 	}
 
+	/// <summary>
+	/// Fires the <c>step.awaitingInput</c> hook event for a step that has begun waiting
+	/// for human input. Wired into <see cref="OrchestrationExecutionContext.OnAwaitingInput"/>
+	/// so step executors and engine tools can trigger the notification path. Failures are
+	/// logged and swallowed so they don't propagate into the wait.
+	/// </summary>
+	private async Task FireAwaitingInputHookSafeAsync(
+		HookRuntime hookRuntime,
+		HookDefinition[] hooks,
+		Orchestration orchestration,
+		string runId,
+		DateTimeOffset runStartedAt,
+		string? triggerId,
+		IReadOnlyDictionary<string, StepRunRecord> stepRecords,
+		IReadOnlyDictionary<string, OrchestrationStep> allSteps,
+		PendingInputRecord pending,
+		ConcurrentQueue<HookExecutionRecord> hookExecutions)
+	{
+		try
+		{
+			// Synthesize a StepRunRecord for the in-progress await so the hook payload's
+			// "current step" is meaningful. Status is AwaitingInput.
+			var awaitingRecord = new StepRunRecord
+			{
+				StepName = pending.StepName,
+				Status = ExecutionStatus.AwaitingInput,
+				StartedAt = pending.CreatedAt,
+				CompletedAt = pending.CreatedAt,
+				Content = pending.Prompt,
+				Parameters = new Dictionary<string, string>(),
+				RawDependencyOutputs = new Dictionary<string, string>(),
+			};
+
+			// Build a synthetic context. We don't have an OrchestrationExecutionContext at
+			// hand here, so construct a minimal one for hook payload formatting.
+			var dummyContext = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = new OrchestrationInfo(
+					orchestration.Name,
+					orchestration.Version,
+					runId,
+					runStartedAt,
+					orchestration.SourcePath,
+					orchestration.SourceDirectory),
+			};
+
+			var ctx = new HookExecutionContext
+			{
+				Orchestration = orchestration,
+				ExecutionContext = dummyContext,
+				RunId = runId,
+				RunStartedAt = runStartedAt,
+				TriggerId = triggerId,
+				StepRecords = stepRecords,
+				TerminalStepNames = GetTerminalStepNames(allSteps),
+				CurrentStepRecord = awaitingRecord,
+				FinalContent = pending.Prompt,
+			};
+
+			var executions = await hookRuntime.ExecuteAsync(hooks, HookEventType.StepAwaitingInput, ctx, CancellationToken.None).ConfigureAwait(false);
+			EnqueueHookExecutions(hookExecutions, executions);
+		}
+		catch (Exception ex)
+		{
+			LogAwaitingInputHookFailed(pending.StepName, ex);
+		}
+	}
+
 	private static HookDefinition[] CombineHooks(HookDefinition[] globalHooks, HookDefinition[] orchestrationHooks)
 	{
 		var markedOrchestrationHooks = MarkHookSources(orchestrationHooks, HookSource.Orchestration);
@@ -1802,6 +1905,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Debug, Message = "AsyncLocal diagnostic [{Where}]: runScopedClient={ClientHash} on thread {ThreadId}")]
 	private partial void LogAsyncLocalDiagnostic(string where, string clientHash, int threadId);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Awaiting-input hook for step '{StepName}' failed.")]
+	private partial void LogAwaitingInputHookFailed(string stepName, Exception ex);
 
 	#endregion
 }

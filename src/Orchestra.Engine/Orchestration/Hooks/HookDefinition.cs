@@ -12,6 +12,13 @@ public enum HookEventType
 	StepSuccess,
 	StepFailure,
 	StepAfter,
+
+	/// <summary>
+	/// A step has paused waiting for human input. Fired by the engine when an Approval step
+	/// or an <c>orchestra_request_user_input</c> tool call begins waiting. The hook payload
+	/// carries the prompt, choices, and a <c>respondUrl</c> the recipient can post to.
+	/// </summary>
+	StepAwaitingInput,
 }
 
 public enum HookFailurePolicy
@@ -175,6 +182,7 @@ public sealed class HookEventTypeJsonConverter : JsonConverter<HookEventType>
 			"step.success" => HookEventType.StepSuccess,
 			"step.failure" => HookEventType.StepFailure,
 			"step.after" => HookEventType.StepAfter,
+			"step.awaitinginput" or "step.awaiting-input" or "step.awaiting_input" => HookEventType.StepAwaitingInput,
 			_ => throw new JsonException($"Unknown hook event '{value}'.")
 		};
 	}
@@ -189,6 +197,7 @@ public sealed class HookEventTypeJsonConverter : JsonConverter<HookEventType>
 			HookEventType.StepSuccess => "step.success",
 			HookEventType.StepFailure => "step.failure",
 			HookEventType.StepAfter => "step.after",
+			HookEventType.StepAwaitingInput => "step.awaitingInput",
 			_ => throw new JsonException($"Unknown hook event '{value}'.")
 		});
 	}

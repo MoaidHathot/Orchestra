@@ -68,6 +68,9 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			Attachments = root.TryGetProperty("attachments", out var attachments)
 				? attachments.EnumerateArray().Select(e => DeserializeAttachment(e, context)).ToArray()
 				: [],
+			EnableTools = root.TryGetProperty("enableTools", out var enableTools) && enableTools.ValueKind == JsonValueKind.Array
+				? enableTools.EnumerateArray().Select(e => e.GetString()!).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray()
+				: null,
 		};
 	}
 

@@ -112,6 +112,26 @@ public class Orchestration
 	public HookDefinition[] Hooks { get; init; } = [];
 
 	/// <summary>
+	/// When <c>true</c> (the default), the orchestration-level <see cref="TimeoutSeconds"/>
+	/// clock is paused while a step is waiting for human input (Approval step or
+	/// <c>orchestra_request_user_input</c> tool call). Wait time is not compute time —
+	/// authors expect a 1-hour orchestration to allow long human pauses.
+	/// Set to <c>false</c> for hard SLAs where the wall-clock budget must include human
+	/// response latency.
+	/// </summary>
+	public bool PauseTimeoutDuringWait { get; init; } = true;
+
+	/// <summary>
+	/// Default set of opt-in engine tool names enabled for every Prompt step that does
+	/// not specify its own <see cref="PromptOrchestrationStep.EnableTools"/>. Use this to
+	/// enable e.g. <c>request_user_input</c> across the whole orchestration without
+	/// repeating it on each step. Tools listed here are merged with the always-on
+	/// engine tools (<c>orchestra_set_status</c>, <c>orchestra_complete</c>, file
+	/// save/read).
+	/// </summary>
+	public string[] DefaultEnableTools { get; init; } = [];
+
+	/// <summary>
 	/// Free-form metadata for the orchestration. Values may be any JSON type
 	/// (string, number, boolean, object, array). Metadata is purely informational
 	/// and does not affect execution; it is intended for orchestration authors

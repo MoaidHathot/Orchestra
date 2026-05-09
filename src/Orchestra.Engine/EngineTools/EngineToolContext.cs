@@ -24,6 +24,60 @@ public sealed class EngineToolContext
 	/// Used by engine tools to register artifacts (e.g., saved files) against the correct step.
 	/// </summary>
 	public string? StepName { get; init; }
+
+	/// <summary>
+	/// The orchestration name that owns this run. Required by HITL engine tools so they
+	/// can write a <see cref="PendingInputRecord"/> with the correct routing key.
+	/// May be null when the engine tool registry is invoked outside a run (e.g. tests).
+	/// </summary>
+	public string? OrchestrationName { get; init; }
+
+	/// <summary>
+	/// The unique identifier for the current run. Required by HITL engine tools.
+	/// </summary>
+	public string? RunId { get; init; }
+
+	/// <summary>
+	/// The waiter used to block on a human-in-the-loop response. Wired up by the host.
+	/// When null, HITL engine tools fall back to <see cref="NullHumanInputWaiter.Instance"/>
+	/// which blocks until cancellation (no-op safe).
+	/// </summary>
+	public IHumanInputWaiter? HumanInputWaiter { get; init; }
+
+	/// <summary>
+	/// The store used to persist <see cref="PendingInputRecord"/> entries so the response
+	/// endpoint can route a reply back to the right run/step. When null, HITL engine tools
+	/// still register an in-memory wait but the record is not durable.
+	/// </summary>
+	public IPendingInputStore? PendingInputStore { get; init; }
+
+	/// <summary>
+	/// Optional builder that produces the public URL the user can POST a response to.
+	/// Surfaced through the <c>step.awaitingInput</c> hook payload as <c>respondUrl</c>.
+	/// May be null when no host URL is configured.
+	/// </summary>
+	public Func<string, string, string, string?>? RespondUrlBuilder { get; init; }
+
+	/// <summary>
+	/// Set of engine tool names this step has explicitly opted in to (e.g.,
+	/// <c>request_user_input</c>). Always-on tools are not listed here.
+	/// </summary>
+	public IReadOnlyCollection<string>? EnabledOptInTools { get; init; }
+
+	/// <summary>
+	/// Notifies the HITL hook system that a step has begun awaiting input. Wired by the
+	/// executor; null when no hooks are configured. Engine tools call this before
+	/// awaiting on the waiter so notifications fire promptly.
+	/// </summary>
+	public Action<PendingInputRecord>? OnAwaitingInput { get; init; }
+
+	/// <summary>
+	/// Notifies the executor that the wait has resolved (response received, timeout, or
+	/// cancellation). Wired by the executor to drive clock-pause accounting. Null when
+	/// clock-pause is disabled.
+	/// </summary>
+	public Action<string, string>? OnInputResolved { get; init; }
+
 	/// <summary>
 	/// When set, the prompt step result will be overridden to the specified status
 	/// regardless of the LLM's output content.

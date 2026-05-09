@@ -55,4 +55,13 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// Supports file paths and base64 blob data.
 	/// </summary>
 	public ImageAttachment[] Attachments { get; internal set; } = [];
+
+	/// <summary>
+	/// Optional list of opt-in engine tool names that this Prompt step grants the agent
+	/// access to. Always-on tools (<c>orchestra_set_status</c>, <c>orchestra_complete</c>,
+	/// file save/read) are unaffected. Currently used to opt in to <c>request_user_input</c>
+	/// (the LLM-decided human-in-the-loop tool). Falls back to the orchestration's
+	/// <see cref="Orchestration.DefaultEnableTools"/> when null.
+	/// </summary>
+	public string[]? EnableTools { get; init; }
 }

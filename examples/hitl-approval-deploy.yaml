@@ -1,0 +1,46 @@
+$schema: ../schemas/orchestration.schema.json
+name: hitl-approval-deploy
+description: |
+  Demonstrates the declarative Approval step. The pipeline builds the artifact, then
+  pauses for a human reviewer to approve or reject the deploy. The reviewer's response
+  (choice + optional reply) becomes the Approval step's output and feeds the next step.
+version: 1.0.0
+inputs:
+  service:
+    type: string
+    description: The service to deploy.
+    required: true
+  env:
+    type: string
+    description: Target environment.
+    enum: [staging, production]
+    required: true
+steps:
+  - name: build
+    type: Command
+    command: pwsh
+    arguments:
+      - -NoProfile
+      - -Command
+      - "Write-Host 'Building {{param.service}}...' ; '{{param.service}}-build-id-1234' "
+
+  - name: review-deploy
+    type: Approval
+    dependsOn: [build]
+    prompt: |
+      Approve deploy of {{param.service}} to {{param.env}}?
+      Build output:
+
+      {{build.output}}
+    choices: [approve, reject]
+    # No timeoutSeconds — wait indefinitely. The orchestration timeout (default 1 hour)
+    # is paused while we await per `pauseTimeoutDuringWait: true` (the default).
+
+  - name: announce
+    type: Transform
+    dependsOn: [review-deploy]
+    template: |
+      Decision: {{review-deploy.output}}
+      Service: {{param.service}}
+      Env: {{param.env}}
+      Build: {{build.output}}
