@@ -6,6 +6,7 @@ import { formatLogContent } from '../../formatLogContent';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import ZoomableDag from '../ZoomableDag';
 import SubagentCard from '../SubagentCard';
+import MarkdownContent from '../MarkdownContent';
 
 /** Extract a display name from a step MCP reference (string or object). */
 function mcpDisplayName(ref: StepMcpRef): string {
@@ -3313,7 +3314,7 @@ export default function ExecutionModal({
                       ))}
                     </div>
                   ) : displayContent.content ? (
-                    displayContent.content
+                    <MarkdownContent markdown={displayContent.content} />
                   ) : (
                     <span style={{ color: 'var(--text-dim)' }}>
                       {displayContent.emptyMessage ?? (status === 'running'

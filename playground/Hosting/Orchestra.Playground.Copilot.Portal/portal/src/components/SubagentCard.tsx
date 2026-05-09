@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import type { ActorStream } from '../types';
 import { actorColor, actorBackgroundColor } from '../actorColors';
+import MarkdownContent from './MarkdownContent';
 
 interface Props {
   stream: ActorStream;
@@ -115,7 +116,7 @@ export default function SubagentCard({ stream, depth }: Props): React.JSX.Elemen
           {stream.content && (
             <div className="subagent-section subagent-response">
               <div className="subagent-section-label">Response</div>
-              <pre className="subagent-content">{stream.content}</pre>
+              <MarkdownContent markdown={stream.content} compact className="subagent-content" />
             </div>
           )}
 

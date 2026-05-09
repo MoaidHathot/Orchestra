@@ -58,6 +58,22 @@ describe('SubagentCard', () => {
       expect(screen.getByText('Response')).toBeInTheDocument();
     });
 
+    it('renders response markdown when expanded', () => {
+      render(<SubagentCard stream={makeMainStream({ content: '## Streamed\n\n- **Item:** value' })} />);
+
+      expect(screen.getByRole('heading', { name: 'Streamed', level: 2 })).toBeInTheDocument();
+      expect(screen.getByText('Item:')).toBeInTheDocument();
+    });
+
+    it('does not render raw html in response content', () => {
+      const { container } = render(
+        <SubagentCard stream={makeMainStream({ content: '<img src=x onerror="alert(1)">\n\n**safe**' })} />,
+      );
+
+      expect(container.querySelector('img')).not.toBeInTheDocument();
+      expect(screen.getByText('safe')).toBeInTheDocument();
+    });
+
     it('shows the empty placeholder when there is no output yet', () => {
       render(<SubagentCard stream={makeMainStream()} />);
       expect(screen.getByText('Waiting for output…')).toBeInTheDocument();

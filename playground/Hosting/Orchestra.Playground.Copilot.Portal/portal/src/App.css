@@ -1029,6 +1029,113 @@
       color: var(--text-muted);
     }
 
+    .markdown-content {
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+      font-size: 13px;
+      line-height: 1.65;
+      white-space: normal;
+      word-break: normal;
+      overflow-wrap: anywhere;
+    }
+    .markdown-content > :first-child { margin-top: 0; }
+    .markdown-content > :last-child { margin-bottom: 0; }
+    .markdown-content p,
+    .markdown-content ul,
+    .markdown-content ol,
+    .markdown-content blockquote,
+    .markdown-content pre,
+    .markdown-content table { margin: 0 0 10px; }
+    .markdown-content h1,
+    .markdown-content h2,
+    .markdown-content h3,
+    .markdown-content h4,
+    .markdown-content h5,
+    .markdown-content h6 {
+      color: var(--text);
+      font-weight: 650;
+      line-height: 1.25;
+      margin: 16px 0 8px;
+    }
+    .markdown-content h1 { font-size: 21px; }
+    .markdown-content h2 { font-size: 18px; }
+    .markdown-content h3 { font-size: 16px; }
+    .markdown-content h4,
+    .markdown-content h5,
+    .markdown-content h6 { font-size: 14px; }
+    .markdown-content ul,
+    .markdown-content ol { padding-left: 22px; }
+    .markdown-content li { margin: 2px 0; }
+    .markdown-content li > p { margin: 4px 0; }
+    .markdown-content a { color: var(--accent); text-decoration: none; }
+    .markdown-content a:hover { text-decoration: underline; }
+    .markdown-content blockquote {
+      padding: 6px 10px;
+      color: var(--text-muted);
+      background: rgba(110, 118, 129, 0.08);
+      border-left: 3px solid var(--border-light);
+      border-radius: 0 4px 4px 0;
+    }
+    .markdown-content code {
+      font-family: 'SF Mono', Monaco, Consolas, monospace;
+      font-size: 0.92em;
+      padding: 0.15em 0.35em;
+      border-radius: 4px;
+      background: var(--surface);
+      color: #a5d6ff;
+    }
+    .markdown-content pre {
+      overflow: auto;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      white-space: pre;
+    }
+    .markdown-content pre code {
+      display: block;
+      padding: 0;
+      background: transparent;
+      color: var(--text);
+      white-space: pre;
+    }
+    .markdown-content table {
+      display: block;
+      width: max-content;
+      max-width: 100%;
+      overflow: auto;
+      border-collapse: collapse;
+      border-spacing: 0;
+    }
+    .markdown-content th,
+    .markdown-content td {
+      padding: 6px 10px;
+      border: 1px solid var(--border);
+    }
+    .markdown-content th {
+      color: var(--text);
+      background: var(--surface);
+      font-weight: 600;
+    }
+    .markdown-content tr:nth-child(2n) { background: rgba(110, 118, 129, 0.06); }
+    .markdown-content hr {
+      height: 1px;
+      border: 0;
+      background: var(--border);
+      margin: 14px 0;
+    }
+    .markdown-content input[type="checkbox"] { margin-right: 6px; }
+    .markdown-content--compact {
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .markdown-content--compact p,
+    .markdown-content--compact ul,
+    .markdown-content--compact ol,
+    .markdown-content--compact blockquote,
+    .markdown-content--compact pre,
+    .markdown-content--compact table { margin-bottom: 8px; }
+
     /* Run Context Panel */
     .run-context-panel {
       border-bottom: 1px solid var(--border);
@@ -3134,11 +3241,7 @@
       margin-bottom: 4px;
     }
     .subagent-content {
-      margin: 0;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-size: 12px;
-      line-height: 1.5;
+      color: var(--text, #e6edf3);
     }
     .subagent-reasoning-toggle {
       background: transparent;

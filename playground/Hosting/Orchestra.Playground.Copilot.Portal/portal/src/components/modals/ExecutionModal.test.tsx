@@ -226,6 +226,45 @@ describe('ExecutionModal output panel — empty-stream fall-through', () => {
   });
 });
 
+describe('ExecutionModal markdown output', () => {
+  it('renders selected step markdown output as structured content', async () => {
+    const props = makeProps({
+      stepResults: {
+        analyze: '# Analysis\n\n- **Status:** complete\n\n| Item | Value |\n| --- | --- |\n| Score | 10 |',
+      },
+      finalResult: '# Analysis\n\n- **Status:** complete',
+    });
+
+    render(<ExecutionModal {...props} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Step Output: analyze/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('heading', { name: 'Analysis', level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('table')).toBeInTheDocument();
+    expect(screen.getByText('Status:')).toBeInTheDocument();
+  });
+
+  it('does not render raw html in step output', async () => {
+    const props = makeProps({
+      stepResults: {
+        analyze: '<img src=x onerror="alert(1)">\n\n<script>alert(1)</script>\n\n**safe output**',
+      },
+    });
+
+    const { container } = render(<ExecutionModal {...props} />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Step Output: analyze/i)).toBeInTheDocument();
+    });
+
+    expect(container.querySelector('img')).not.toBeInTheDocument();
+    expect(container.querySelector('script')).not.toBeInTheDocument();
+    expect(screen.getByText('safe output')).toBeInTheDocument();
+  });
+});
+
 describe('ExecutionModal command step output', () => {
   it('shows persisted command output for a completed command step', async () => {
     const props = makeProps({

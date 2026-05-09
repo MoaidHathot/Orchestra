@@ -2063,6 +2063,7 @@ function App(): React.JSX.Element {
             filteredOrchestrations.map(orch => (
               <div
                 key={orch.id}
+                data-orchestration-id={orch.id}
                 className={`orch-item ${selectedOrchId === orch.id ? 'active' : ''}`}
                 role="option"
                 aria-selected={selectedOrchId === orch.id}

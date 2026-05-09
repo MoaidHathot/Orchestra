@@ -7,8 +7,15 @@ export default defineConfig({
   build: {
     outDir: '../wwwroot',
     emptyOutDir: true,
+    // Mermaid emits large lazy-loaded diagram chunks (notably ELK). Keep the
+    // build warning threshold aligned with those known vendor chunks.
+    chunkSizeWarningLimit: 1600,
     rollupOptions: {
       output: {
+        entryFileNames: 'assets/[name].js',
+        chunkFileNames: (chunkInfo) =>
+          chunkInfo.name.startsWith('vendor-') ? 'assets/[name].js' : 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name][extname]',
         manualChunks: {
           // Split large vendor libraries into separate cached chunks so that
           // app code changes don't force Vite to re-process these heavy deps.
