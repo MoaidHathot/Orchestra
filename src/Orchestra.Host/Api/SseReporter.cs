@@ -49,6 +49,19 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	private readonly List<Channel<SseEvent>> _subscribers = [];
 	private bool _isCompleted;
 	private bool _disposed;
+	private readonly DashboardEventBroadcaster? _dashboardBroadcaster;
+
+	/// <summary>
+	/// Creates a new SSE reporter.
+	/// </summary>
+	/// <param name="dashboardBroadcaster">Optional dashboard broadcaster that receives a
+	/// fan-out of HITL lifecycle events (<c>awaiting-input</c>, <c>input-received</c>,
+	/// <c>input-timeout</c>) so the Portal can show pending counts/lists without subscribing
+	/// to every execution stream. Null in unit tests that don't care about dashboard fan-out.</param>
+	public SseReporter(DashboardEventBroadcaster? dashboardBroadcaster = null)
+	{
+		_dashboardBroadcaster = dashboardBroadcaster;
+	}
 
 	/// <summary>
 	/// Gets all accumulated events (for replay to late-joining subscribers).
@@ -609,6 +622,18 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			createdAt = record.CreatedAt.ToString("o"),
 			expiresAt = record.ExpiresAt?.ToString("o"),
 		});
+
+		// Fan-out to the dashboard so the Portal can update its "Waiting Inputs" list
+		// without subscribing to every per-execution SSE stream.
+		_dashboardBroadcaster?.BroadcastAwaitingInput(
+			record.OrchestrationName,
+			record.RunId,
+			record.StepName,
+			record.Kind.ToString(),
+			record.Prompt,
+			record.Choices,
+			record.CreatedAt,
+			record.ExpiresAt);
 	}
 
 	public void ReportInputReceived(string orchestrationName, string runId, string stepName, UserInputResponse response)
@@ -623,6 +648,15 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			respondedBy = response.RespondedBy,
 			respondedAt = response.RespondedAt.ToString("o"),
 		});
+
+		_dashboardBroadcaster?.BroadcastInputReceived(
+			orchestrationName,
+			runId,
+			stepName,
+			response.Choice,
+			response.Reply,
+			response.RespondedBy,
+			response.RespondedAt);
 	}
 
 	public void ReportInputTimeout(string orchestrationName, string runId, string stepName, ApprovalTimeoutBehavior onTimeout)
@@ -634,6 +668,12 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			stepName,
 			onTimeout = onTimeout.ToString(),
 		});
+
+		_dashboardBroadcaster?.BroadcastInputTimeout(
+			orchestrationName,
+			runId,
+			stepName,
+			onTimeout.ToString());
 	}
 
 	// ── Auto-mode + system notifications + quota (SDK 0.3.0 telemetry) ──

@@ -33,6 +33,10 @@ interface Props {
   onToggleTrigger?: (orchestrationId: string, currentlyEnabled: boolean) => void;
   orchestrations?: Orchestration[];
   profiles?: Profile[];
+  /** When set, the card shows a "Waiting" chip next to the status to surface
+   *  that this run is paused on a HITL prompt. The Waiting Inputs modal is the
+   *  canonical place to respond. */
+  awaitingInput?: boolean;
 }
 
 export default function ActiveOrchestrationCard({
@@ -44,6 +48,7 @@ export default function ActiveOrchestrationCard({
   onToggleTrigger,
   orchestrations,
   profiles,
+  awaitingInput,
 }: Props): React.JSX.Element {
   const isRunning = type === 'running';
   const isManual = type === 'manual';
@@ -214,6 +219,11 @@ export default function ActiveOrchestrationCard({
             className="card-version"
             style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
           >
+            {awaitingInput && (
+              <span className="waiting-inputs-chip" title="Waiting for human input — open the Waiting Inputs panel to respond">
+                <Icons.Hand /> Waiting
+              </span>
+            )}
             {getStatusLabel()}
           </div>
         </div>

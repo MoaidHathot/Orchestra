@@ -166,6 +166,81 @@ public sealed partial class DashboardEventBroadcaster : IDisposable
 	}
 
 	/// <summary>
+	/// Broadcasts that an orchestration is awaiting human input. The Portal should add the
+	/// run to its "Waiting Inputs" list (or refresh the list from <c>GET /api/runs/pending</c>).
+	/// Mirrors the per-execution <c>awaiting-input</c> SSE event payload but is fanned out on the
+	/// dashboard stream so the Portal can show pending counts without subscribing to every run.
+	/// </summary>
+	public void BroadcastAwaitingInput(
+		string orchestrationName,
+		string runId,
+		string stepName,
+		string kind,
+		string prompt,
+		IReadOnlyList<string>? choices,
+		DateTimeOffset createdAt,
+		DateTimeOffset? expiresAt)
+	{
+		Publish("awaiting-input", new
+		{
+			orchestrationName,
+			runId,
+			stepName,
+			kind,
+			prompt,
+			choices = choices is { Count: > 0 } ? choices : null,
+			createdAt = createdAt.ToString("o"),
+			expiresAt = expiresAt?.ToString("o"),
+		});
+	}
+
+	/// <summary>
+	/// Broadcasts that a pending human-input wait was resolved (via the respond endpoint or
+	/// the engine completing the wait some other way). The Portal should remove the matching
+	/// record from its "Waiting Inputs" list.
+	/// </summary>
+	public void BroadcastInputReceived(
+		string orchestrationName,
+		string runId,
+		string stepName,
+		string? choice,
+		string? reply,
+		string? respondedBy,
+		DateTimeOffset respondedAt)
+	{
+		Publish("input-received", new
+		{
+			orchestrationName,
+			runId,
+			stepName,
+			choice,
+			reply,
+			respondedBy,
+			respondedAt = respondedAt.ToString("o"),
+		});
+	}
+
+	/// <summary>
+	/// Broadcasts that a pending human-input wait timed out. The Portal should remove the
+	/// matching record from its "Waiting Inputs" list — the run continues per
+	/// <paramref name="onTimeout"/> (typically failing the step or auto-rejecting).
+	/// </summary>
+	public void BroadcastInputTimeout(
+		string orchestrationName,
+		string runId,
+		string stepName,
+		string onTimeout)
+	{
+		Publish("input-timeout", new
+		{
+			orchestrationName,
+			runId,
+			stepName,
+			onTimeout,
+		});
+	}
+
+	/// <summary>
 	/// Broadcasts a heartbeat to keep SSE connections alive through proxies/load balancers.
 	/// </summary>
 	public void SendHeartbeat()

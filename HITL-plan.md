@@ -23,7 +23,7 @@ Add a Human-in-the-Loop capability to Orchestra so that an orchestration can pau
 | 11 | **Engine-tool host crash**: on startup, scan pending records; for any `kind == engine-tool`, mark the run `Failed` with cause `HostShutdownDuringWait`. The previous step's checkpoint stays intact, so author can retry from there. | Agent sessions are in-memory; no LLM SDK lets us re-attach. Best we can do is fail-fast and let the existing retry-from-checkpoint mechanism handle recovery. |
 | 12 | **Approval host crash**: on startup, restore the in-memory waiter from the persisted pending record. The run stays in `AwaitingInput` indefinitely until answered or the orchestration's overall timeout fires. | Approval has no agent session to lose. |
 | 13 | **Engine tool is opt-in** per Prompt step via `enableTools: [request_user_input]`; orchestration default via `defaultEnableTools`. | Existing pipelines see zero behavior change. LLM cannot start asking questions on a previously-deterministic pipeline. |
-| 14 | **CLI v1 ships full**: `orchestra pending`, `orchestra respond`, plus an SSE consumer for `orchestra run` with optional interactive prompting on `awaiting-input`. | Streaming `run` is overdue anyway; HITL needs it. |
+| 14 | **CLI v1 ships full**: `orchestra pending`, `orchestra respond`, plus an SSE consumer for `orchestra run` with interactive prompting on `awaiting-input`, and an `orchestra attach <orchestration> <runId>` command for re-attaching to a live run. Auto-falls back to print-and-exit-2 when stdin is non-interactive. | Streaming `run` is overdue anyway; HITL needs it. |
 
 ---
 
@@ -154,8 +154,10 @@ For Approval-with-restart: the `_totalWaitElapsed` is persisted into the checkpo
 
 | File | Change |
 |---|---|
-| `OrchestraClient.cs` | + `GetPendingAsync`, `RespondAsync`; convert `RunOrchestrationAsync` to consume SSE |
-| `Program.cs` | + `pending`, `respond` commands; streaming `run` with `--interactive` |
+| `OrchestraClient.cs` | + `GetPendingAsync`, `RespondAsync`, `OpenRunStreamAsync`, `OpenAttachStreamAsync`; convert `RunOrchestrationAsync` to consume SSE (now done via `RunSession`) |
+| `Program.cs` | + `pending`, `respond`, `attach` commands; streaming `run` with `--no-interactive`, `--quiet`, `--verbose`, `--by` |
+| `Sse/SseStreamReader.cs` | + spec-compliant SSE frame parser for the CLI |
+| `Run/RunSession.cs` | + dispatch loop with HITL prompting (Spectre `SelectionPrompt` / `TextPrompt`) |
 
 ### Schemas / docs / examples
 
@@ -241,3 +243,46 @@ hooks:
 5. **CLI** — SSE consumer + `pending` + `respond` + tests.
 6. **Schemas + docs + examples**.
 7. **Build + run all tests**. Server is not left running.
+
+---
+
+## Portal UI
+
+Surfaces pending HITL waits in the Portal so users can triage and respond without dropping to the CLI.
+
+### Live updates — push via dashboard SSE
+
+- `DashboardEventBroadcaster` gains `BroadcastAwaitingInput`, `BroadcastInputReceived`, `BroadcastInputTimeout` (mirrors the per-execution event payloads).
+- `SseReporter` calls these alongside its existing `Write(...)` so the same data lands on both the per-run stream (CLI / ExecutionModal) and the dashboard stream (Portal).
+- `SseReporterFactory` resolves the broadcaster from DI; manual construction (unit tests) keeps it null and the fan-out is silently skipped.
+
+### React state
+
+- `usePendingInputs()` hook owns the canonical list. Loads from `GET /api/runs/pending` on mount; mutated by App.tsx forwarding `awaiting-input` / `input-received` / `input-timeout` events from its existing single `useDashboardEvents` subscription. Records are deduped by composite key `orchestrationName|runId|stepName`.
+- `identity.ts` persists a Portal-level `respondedBy` display name in `localStorage` (key `orchestra.portal.respondedBy`). Purely advisory — no auth.
+- `useDashboardEvents` extended with `onAwaitingInput` / `onInputReceived` / `onInputTimeout` handlers.
+
+### UI surfaces
+
+- **Sidebar button + count badge** ("Waiting for Input") next to MCP Tools / Visual Builder. Badge shows live count.
+- **WaitingInputsModal** (modeled on `HistoryModal`): left list of pending records, right pane response form. Choices render as a radio group; reply field is always available; submit posts to `POST /api/orchestrations/{name}/runs/{runId}/respond?step={step}`. 404 is treated as a known race ("already resolved") and removes the record from the list.
+- **`ActiveOrchestrationCard` "Waiting" chip** appears on a running card whose `executionId` is in the pending set (recall `runId == executionId` for active runs).
+
+### Files changed
+
+| Path | Change |
+| --- | --- |
+| `src/Orchestra.Host/Api/DashboardEventBroadcaster.cs` | + `BroadcastAwaitingInput/InputReceived/InputTimeout` |
+| `src/Orchestra.Host/Api/SseReporter.cs` | optional `DashboardEventBroadcaster` ctor + fan-out from HITL methods |
+| `src/Orchestra.Host/Api/SseReporterFactory.cs` | DI ctor wiring broadcaster through |
+| `tests/Orchestra.Server.Tests/DashboardEventsHitlTests.cs` | 7 tests for fan-out + reporter wiring |
+| `playground/.../portal/src/types.ts` | `PendingInputRecord`, `HumanInputResponse`, `HumanInputKind` |
+| `playground/.../portal/src/identity.ts` (+ `.test.ts`) | `respondedBy` localStorage helpers |
+| `playground/.../portal/src/hooks/useDashboardEvents.ts` | HITL handlers |
+| `playground/.../portal/src/hooks/usePendingInputs.ts` (+ `.test.ts`) | canonical waiting-list state |
+| `playground/.../portal/src/components/modals/WaitingInputsModal.tsx` (+ `.test.tsx`) | modal + response form |
+| `playground/.../portal/src/components/ActiveOrchestrationCard.tsx` | new optional `awaitingInput` prop + "Waiting" chip |
+| `playground/.../portal/src/App.tsx` | hook usage, sidebar button, modal render, plumb dashboard SSE → hook |
+| `playground/.../portal/src/icons.tsx` | new `Hand` icon |
+| `playground/.../portal/src/App.css` | `.waiting-inputs-*` styles |
+| `tests/Orchestra.Portal.E2E/WaitingInputsUiTests.cs` | Playwright happy path: register Approval → wait for badge → submit → run resolves |

@@ -176,6 +176,10 @@ public partial class FileSystemRunStore : IRunStore
 			HookExecutionCount = record.HookExecutions.Count,
 			RetriedFromRunId = record.RetriedFromRunId,
 			RetryMode = record.RetryMode,
+			ParentExecutionId = record.ParentExecutionId,
+			ParentStepName = record.ParentStepName,
+			RootExecutionId = record.RootExecutionId,
+			NestingDepth = record.NestingDepth,
 		};
 
 		lock (_indexWriteLock)
@@ -433,6 +437,12 @@ public partial class FileSystemRunStore : IRunStore
 						IsIncomplete = record.IsIncomplete,
 						Cancellation = record.Cancellation,
 						HookExecutionCount = record.HookExecutions.Count,
+						RetriedFromRunId = record.RetriedFromRunId,
+						RetryMode = record.RetryMode,
+						ParentExecutionId = record.ParentExecutionId,
+						ParentStepName = record.ParentStepName,
+						RootExecutionId = record.RootExecutionId,
+						NestingDepth = record.NestingDepth,
 					};
 				}
 				catch (Exception ex)
@@ -708,6 +718,31 @@ public class RunIndex
 	/// Retry mode descriptor (e.g. "failed", "all", "from-step:&lt;name&gt;") when this run is a retry.
 	/// </summary>
 	public string? RetryMode { get; init; }
+
+	/// <summary>
+	/// When this run was launched by a parent orchestration (via MCP <c>invoke_orchestration</c>
+	/// or a step-level child invocation), the parent's <c>RunId</c>. <see langword="null"/> for
+	/// top-level runs (manual, scheduler, loop, webhook, mcp top-level, retry, resume).
+	/// </summary>
+	public string? ParentExecutionId { get; init; }
+
+	/// <summary>
+	/// Name of the parent's step that triggered this child run. <see langword="null"/> for
+	/// top-level runs and for child runs whose parent did not surface a step name.
+	/// </summary>
+	public string? ParentStepName { get; init; }
+
+	/// <summary>
+	/// The root run's ID at the top of the parent chain. Equal to <see cref="RunId"/> when this
+	/// run is itself a root (no parent). Used to group an entire orchestration tree under a single
+	/// identifier without walking the chain on every query.
+	/// </summary>
+	public string? RootExecutionId { get; init; }
+
+	/// <summary>
+	/// Depth in the parent/child tree. <c>0</c> for top-level runs, <c>1</c> for direct children, etc.
+	/// </summary>
+	public int NestingDepth { get; init; }
 }
 
 /// <summary>

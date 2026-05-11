@@ -227,100 +227,146 @@ public static partial class ExecutionApi
 		{
 			if (!activeExecutionInfos.TryGetValue(executionId, out var info))
 			{
-				httpContext.Response.StatusCode = 404;
-				httpContext.Response.ContentType = "application/problem+json";
-				await httpContext.Response.WriteAsJsonAsync(new
-				{
-					type = "https://tools.ietf.org/html/rfc7807",
-					title = "Not Found",
-					status = 404,
-					detail = $"No active execution with ID '{executionId}'.",
-					instance = httpContext.Request.Path.Value,
-				});
+				await WriteProblemAsync(httpContext, 404, "Not Found", $"No active execution with ID '{executionId}'.");
 				return;
 			}
 
-			if (info.Reporter is not SseReporter sseReporter)
+			await StreamAttachedExecutionAsync(httpContext, info, jsonOptions);
+		});
+
+		// GET /api/orchestrations/{orchestrationName}/runs/{runId}/attach - Attach by user-visible
+		// (orchestration, runId) pair. Uses the same SSE transport as /api/execution/.../attach
+		// but lets callers (CLI, Portal, integrations) work with the IDs they already have without
+		// needing to discover the internal executionId. For active runs the runId is the same as
+		// the executionId, so this is just a convenience surface with name verification.
+		endpoints.MapGet("/api/orchestrations/{orchestrationName}/runs/{runId}/attach", async (
+			string orchestrationName,
+			string runId,
+			HttpContext httpContext,
+			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
+		{
+			if (!activeExecutionInfos.TryGetValue(runId, out var info))
 			{
-				httpContext.Response.StatusCode = 500;
-				httpContext.Response.ContentType = "application/problem+json";
-				await httpContext.Response.WriteAsJsonAsync(new
-				{
-					type = "https://tools.ietf.org/html/rfc7807",
-					title = "Internal Server Error",
-					status = 500,
-					detail = "Execution reporter is not an SseReporter.",
-					instance = httpContext.Request.Path.Value,
-				});
+				await WriteProblemAsync(httpContext, 404, "Not Found", $"No active run '{runId}' for orchestration '{orchestrationName}'.");
 				return;
 			}
 
-			// Set up SSE response
-			httpContext.Response.ContentType = "text/event-stream";
-			httpContext.Response.Headers.CacheControl = "no-cache";
-			httpContext.Response.Headers.Connection = "keep-alive";
-			await httpContext.Response.Body.FlushAsync();
-
-			var lifetime = httpContext.RequestServices.GetRequiredService<IHostApplicationLifetime>();
-			using var sseCts = CancellationTokenSource.CreateLinkedTokenSource(
-				httpContext.RequestAborted,
-				lifetime.ApplicationStopping);
-			var cancellationToken = sseCts.Token;
-
-			// Send current execution info
-			await httpContext.Response.WriteAsync($"event: execution-info\n");
-			await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new
+			// Fail fast when the runId belongs to a different orchestration so users don't get
+			// silently confused by mismatched IDs (e.g. copy-pasting a runId across two orchestrations).
+			if (!string.Equals(info.OrchestrationName, orchestrationName, StringComparison.Ordinal))
 			{
-				executionId = info.ExecutionId,
-				orchestrationId = info.OrchestrationId,
-				orchestrationName = info.OrchestrationName,
-				startedAt = info.StartedAt,
-				triggeredBy = info.TriggeredBy,
-				status = info.Status,
-				parameters = info.Parameters
-			}, jsonOptions)}\n\n");
-			await httpContext.Response.Body.FlushAsync();
-
-			// Subscribe to the reporter
-			var (replay, futureEvents) = sseReporter.Subscribe();
-
-			// Replay accumulated events
-			foreach (var evt in replay)
-			{
-				await httpContext.Response.WriteAsync($"event: {evt.Type}\n", cancellationToken);
-				await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", cancellationToken);
-			}
-			await httpContext.Response.Body.FlushAsync(cancellationToken);
-
-			// If already completed, we're done
-			if (sseReporter.IsCompleted)
-			{
+				await WriteProblemAsync(
+					httpContext,
+					404,
+					"Not Found",
+					$"Run '{runId}' belongs to orchestration '{info.OrchestrationName}', not '{orchestrationName}'.");
 				return;
 			}
 
-			// Start heartbeat to keep the SSE connection alive
-			_ = SendHeartbeatsAsync(sseReporter, cancellationToken);
-
-			// Stream future events
-			if (futureEvents is not null)
-			{
-				try
-				{
-					await foreach (var evt in futureEvents.ReadAllAsync(cancellationToken))
-					{
-						await httpContext.Response.WriteAsync($"event: {evt.Type}\n", cancellationToken);
-						await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", cancellationToken);
-						await httpContext.Response.Body.FlushAsync(cancellationToken);
-					}
-				}
-				catch (OperationCanceledException)
-				{
-					sseReporter.Unsubscribe(futureEvents);
-				}
-			}
+			await StreamAttachedExecutionAsync(httpContext, info, jsonOptions);
 		});
 
 		return endpoints;
+	}
+
+	/// <summary>
+	/// Shared SSE-attach implementation: writes the <c>execution-info</c> frame, replays
+	/// accumulated events, then streams future events until the client disconnects or the
+	/// reporter completes.
+	/// </summary>
+	private static async Task StreamAttachedExecutionAsync(
+		HttpContext httpContext,
+		ActiveExecutionInfo info,
+		JsonSerializerOptions jsonOptions)
+	{
+		if (info.Reporter is not SseReporter sseReporter)
+		{
+			await WriteProblemAsync(httpContext, 500, "Internal Server Error", "Execution reporter is not an SseReporter.");
+			return;
+		}
+
+		// Set up SSE response
+		httpContext.Response.ContentType = "text/event-stream";
+		httpContext.Response.Headers.CacheControl = "no-cache";
+		httpContext.Response.Headers.Connection = "keep-alive";
+		await httpContext.Response.Body.FlushAsync();
+
+		var lifetime = httpContext.RequestServices.GetRequiredService<IHostApplicationLifetime>();
+		using var sseCts = CancellationTokenSource.CreateLinkedTokenSource(
+			httpContext.RequestAborted,
+			lifetime.ApplicationStopping);
+		var cancellationToken = sseCts.Token;
+
+		// Send current execution info
+		await httpContext.Response.WriteAsync($"event: execution-info\n");
+		await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new
+		{
+			executionId = info.ExecutionId,
+			orchestrationId = info.OrchestrationId,
+			orchestrationName = info.OrchestrationName,
+			startedAt = info.StartedAt,
+			triggeredBy = info.TriggeredBy,
+			status = info.Status,
+			parameters = info.Parameters
+		}, jsonOptions)}\n\n");
+		await httpContext.Response.Body.FlushAsync();
+
+		// Subscribe to the reporter
+		var (replay, futureEvents) = sseReporter.Subscribe();
+
+		// Replay accumulated events
+		foreach (var evt in replay)
+		{
+			await httpContext.Response.WriteAsync($"event: {evt.Type}\n", cancellationToken);
+			await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", cancellationToken);
+		}
+		await httpContext.Response.Body.FlushAsync(cancellationToken);
+
+		// If already completed, we're done
+		if (sseReporter.IsCompleted)
+		{
+			return;
+		}
+
+		// Start heartbeat to keep the SSE connection alive
+		_ = SendHeartbeatsAsync(sseReporter, cancellationToken);
+
+		// Stream future events
+		if (futureEvents is not null)
+		{
+			try
+			{
+				await foreach (var evt in futureEvents.ReadAllAsync(cancellationToken))
+				{
+					await httpContext.Response.WriteAsync($"event: {evt.Type}\n", cancellationToken);
+					await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", cancellationToken);
+					await httpContext.Response.Body.FlushAsync(cancellationToken);
+				}
+			}
+			catch (OperationCanceledException)
+			{
+				sseReporter.Unsubscribe(futureEvents);
+			}
+		}
+	}
+
+	private static async Task WriteProblemAsync(HttpContext httpContext, int status, string title, string detail)
+	{
+		// Set ContentType AFTER WriteAsJsonAsync so the json extension's default media-type
+		// assignment doesn't overwrite it. WriteAsJsonAsync flushes via SerializeAsync which
+		// reads ContentType when writing the headers; we need it set first, but the header
+		// dictionary is open until the body is flushed.
+		httpContext.Response.StatusCode = status;
+		httpContext.Response.ContentType = "application/problem+json";
+		var payload = new
+		{
+			type = "https://tools.ietf.org/html/rfc7807",
+			title,
+			status,
+			detail,
+			instance = httpContext.Request.Path.Value,
+		};
+		await System.Text.Json.JsonSerializer.SerializeAsync(httpContext.Response.Body, payload);
 	}
 
 	private static async Task SaveCancelledRunAsync(

@@ -544,3 +544,42 @@ export interface TagCount {
   tag: string;
   count: number;
 }
+
+// ── Human-in-the-loop (HITL) ──
+
+/**
+ * Identifies which HITL pause path produced a pending input record. Mirrors the
+ * backend <c>PendingInputKind</c> enum. Strings instead of an enum so the wire
+ * format is human-readable and the UI can render new kinds without a code change.
+ */
+export type HumanInputKind = 'Approval' | 'EngineTool' | string;
+
+/**
+ * A run that is currently paused waiting for human input. Surfaced from
+ * <c>GET /api/runs/pending</c> and pushed live via the dashboard SSE
+ * <c>awaiting-input</c> / <c>input-received</c> / <c>input-timeout</c> events.
+ */
+export interface PendingInputRecord {
+  orchestrationName: string;
+  runId: string;
+  stepName: string;
+  kind: HumanInputKind;
+  prompt: string;
+  /** Constrained set of allowed responses; absent or empty means free-form reply. */
+  choices?: string[];
+  /** ISO-8601 timestamp when the wait began. */
+  createdAt: string;
+  /** ISO-8601 timestamp when the wait will time out (absent = wait indefinitely). */
+  expiresAt?: string;
+}
+
+/**
+ * Body posted to
+ * <c>POST /api/orchestrations/{name}/runs/{runId}/respond?step={step}</c>.
+ * At least one of <c>choice</c> or <c>reply</c> must be set.
+ */
+export interface HumanInputResponse {
+  choice?: string | null;
+  reply?: string | null;
+  respondedBy?: string | null;
+}

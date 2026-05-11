@@ -24,62 +24,52 @@ public static class RunsApi
 		var historyGroup = endpoints.MapGroup("/api/history");
 
 		// GET /api/history - Get recent executions (lightweight summaries)
+		// Optional filters:
+		//   ?origins=manual,scheduler,loop,webhook,mcp,orchestration,retry,resume
+		//   ?roots=true|false        (true = roots only, false = children only, omitted = no scope filter)
+		//   ?statuses=Running,Succeeded,Failed,Cancelled
 		historyGroup.MapGet("", async (
 			FileSystemRunStore runStore,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
-			int? limit) =>
+			int? limit,
+			string? origins,
+			bool? roots,
+			string? statuses) =>
 		{
 			var requestedLimit = limit ?? 15;
+			var filters = HistoryFilterParser.Parse(origins, roots, statuses);
 
-		// Get running orchestrations (these should appear at the top).
-		// Filter out completed/cancelled/failed executions that are still in the dictionary
-		// during the cleanup grace period — they should show up as completed history entries instead.
-		var runningRuns = activeExecutionInfos.Values
-			.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
-			.OrderByDescending(e => e.StartedAt)
-			.Select(e => new
-			{
-				runId = e.ExecutionId,
-				executionId = e.ExecutionId,
-				orchestrationId = e.OrchestrationId,
-				orchestrationName = e.OrchestrationName,
-				version = "1.0.0",
-				triggeredBy = e.TriggeredBy,
-				startedAt = e.StartedAt.ToString("o"),
-				completedAt = (string?)null,
-				durationSeconds = Math.Round((DateTimeOffset.UtcNow - e.StartedAt).TotalSeconds, 2),
-				status = e.Status,
-				isActive = true,
-				parameters = e.Parameters
-			})
-			.ToList();
+			// Build a runId -> orchestrationName lookup so child rows can surface the parent's
+			// orchestration name even when the parent is outside the response window. The lookup
+			// covers BOTH active and stored runs because a child can be launched while the parent
+			// is still running.
+			var allSummariesForLookup = await runStore.GetRunSummariesAsync();
+			var runIdToOrchName = BuildRunIdLookup(allSummariesForLookup, activeExecutionInfos);
 
-			// Get completed runs from store
+			// Get running orchestrations (these should appear at the top).
+			// Filter out completed/cancelled/failed executions that are still in the dictionary
+			// during the cleanup grace period — they should show up as completed history entries instead.
+			var runningRuns = activeExecutionInfos.Values
+				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
+				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters))
+				.OrderByDescending(e => e.StartedAt)
+				.Select(e => ProjectActiveRow(e, runIdToOrchName))
+				.ToList();
+
+			// Get completed runs from store, applying filters server-side. We pull all summaries
+			// (already in memory from the lookup-build step) and filter+take the requested count.
 			var remainingLimit = Math.Max(0, requestedLimit - runningRuns.Count);
-			var completedSummaries = await runStore.GetRunSummariesAsync(remainingLimit);
-			var completedRuns = completedSummaries.Select(s => new
-			{
-				runId = s.RunId,
-				executionId = (string?)null,
-				orchestrationName = s.OrchestrationName,
-				version = s.OrchestrationVersion,
-				triggeredBy = s.TriggeredBy,
-				startedAt = s.StartedAt.ToString("o"),
-				completedAt = s.CompletedAt.ToString("o"),
-				durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
-				status = s.Status.ToString(),
-				completionReason = s.CompletionReason,
-				completedByStep = s.CompletedByStep,
-				cancellation = MapCancellation(s.Cancellation),
-				hookExecutionCount = s.HookExecutionCount,
-				isActive = false,
-				isIncomplete = s.IsIncomplete
-			});
+			IEnumerable<RunIndex> filteredCompleted = filters.HasAnyFilter
+				? allSummariesForLookup.Where(s => HistoryFilterParser.Matches(s, filters))
+				: allSummariesForLookup;
+
+			var completedRuns = filteredCompleted
+				.Take(remainingLimit)
+				.Select(s => ProjectCompletedRow(s, runIdToOrchName));
 
 			// Combine: running first, then completed
 			var allRuns = runningRuns
-				.Cast<object>()
-				.Concat(completedRuns.Cast<object>())
+				.Concat(completedRuns)
 				.Take(requestedLimit)
 				.ToList();
 
@@ -91,39 +81,37 @@ public static class RunsApi
 		});
 
 		// GET /api/history/all - Get all executions (paginated)
+		// Same filter semantics as /api/history.
 		historyGroup.MapGet("/all", async (
 			FileSystemRunStore runStore,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 			int? limit,
-			int? offset) =>
+			int? offset,
+			string? origins,
+			bool? roots,
+			string? statuses) =>
 		{
 			var requestedOffset = offset ?? 0;
 			var requestedLimit = limit ?? 300;
+			var filters = HistoryFilterParser.Parse(origins, roots, statuses);
+
+			var allSummariesForLookup = await runStore.GetRunSummariesAsync();
+			var runIdToOrchName = BuildRunIdLookup(allSummariesForLookup, activeExecutionInfos);
 
 			// Get running orchestrations (filter out completed/cancelled/failed during cleanup grace period)
 			var runningRuns = activeExecutionInfos.Values
 				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
+				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters))
 				.OrderByDescending(e => e.StartedAt)
-				.Select(e => new
-				{
-					runId = e.ExecutionId,
-					executionId = e.ExecutionId,
-					orchestrationName = e.OrchestrationName,
-					version = "1.0.0",
-					triggeredBy = e.TriggeredBy,
-					startedAt = e.StartedAt.ToString("o"),
-					completedAt = (string?)null,
-					durationSeconds = Math.Round((DateTimeOffset.UtcNow - e.StartedAt).TotalSeconds, 2),
-					status = e.Status,
-					isActive = true
-				})
+				.Select(e => ProjectActiveRow(e, runIdToOrchName))
 				.ToList();
 
 			var runningCount = runningRuns.Count;
 
-			// Get all completed runs from store
-			var completedSummaries = await runStore.GetRunSummariesAsync();
-			var completedTotal = completedSummaries.Count;
+			var completedFiltered = filters.HasAnyFilter
+				? allSummariesForLookup.Where(s => HistoryFilterParser.Matches(s, filters)).ToList()
+				: [.. allSummariesForLookup];
+			var completedTotal = completedFiltered.Count;
 			var totalAll = runningCount + completedTotal;
 
 			// Calculate which items to return based on offset
@@ -132,58 +120,25 @@ public static class RunsApi
 			if (requestedOffset < runningCount)
 			{
 				var runningToTake = runningRuns.Skip(requestedOffset).Take(requestedLimit);
-				allItems.AddRange(runningToTake.Cast<object>());
+				allItems.AddRange(runningToTake);
 
 				var remaining = requestedLimit - allItems.Count;
 				if (remaining > 0)
 				{
-				var completedItems = completedSummaries.Take(remaining).Select(s => new
-				{
-					runId = s.RunId,
-					executionId = (string?)null,
-					orchestrationName = s.OrchestrationName,
-					version = s.OrchestrationVersion,
-					triggeredBy = s.TriggeredBy,
-					startedAt = s.StartedAt.ToString("o"),
-					completedAt = s.CompletedAt.ToString("o"),
-					durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
-					status = s.Status.ToString(),
-					completionReason = s.CompletionReason,
-					completedByStep = s.CompletedByStep,
-					cancellation = MapCancellation(s.Cancellation),
-					hookExecutionCount = s.HookExecutionCount,
-					isActive = false,
-				isIncomplete = s.IsIncomplete,
-				retriedFromRunId = s.RetriedFromRunId,
-				retryMode = s.RetryMode,
-			});
-				allItems.AddRange(completedItems.Cast<object>());
+					var completedItems = completedFiltered
+						.Take(remaining)
+						.Select(s => ProjectCompletedRow(s, runIdToOrchName));
+					allItems.AddRange(completedItems);
+				}
 			}
-		}
-		else
-		{
-			var completedOffset = requestedOffset - runningCount;
-			var completedItems = completedSummaries.Skip(completedOffset).Take(requestedLimit).Select(s => new
+			else
 			{
-				runId = s.RunId,
-				executionId = (string?)null,
-				orchestrationName = s.OrchestrationName,
-				version = s.OrchestrationVersion,
-				triggeredBy = s.TriggeredBy,
-				startedAt = s.StartedAt.ToString("o"),
-				completedAt = s.CompletedAt.ToString("o"),
-				durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
-				status = s.Status.ToString(),
-				completionReason = s.CompletionReason,
-				completedByStep = s.CompletedByStep,
-				cancellation = MapCancellation(s.Cancellation),
-				hookExecutionCount = s.HookExecutionCount,
-				isActive = false,
-				isIncomplete = s.IsIncomplete,
-				retriedFromRunId = s.RetriedFromRunId,
-				retryMode = s.RetryMode,
-			});
-			allItems.AddRange(completedItems.Cast<object>());
+				var completedOffset = requestedOffset - runningCount;
+				var completedItems = completedFiltered
+					.Skip(completedOffset)
+					.Take(requestedLimit)
+					.Select(s => ProjectCompletedRow(s, runIdToOrchName));
+				allItems.AddRange(completedItems);
 			}
 
 			return Results.Json(new
@@ -197,71 +152,44 @@ public static class RunsApi
 		});
 
 		// GET /api/history/search - Search across ALL stored executions by name or runId
+		// Same filter semantics as /api/history.
 		historyGroup.MapGet("/search", async (
 			FileSystemRunStore runStore,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 			string? query,
-			int? limit) =>
+			int? limit,
+			string? origins,
+			bool? roots,
+			string? statuses) =>
 		{
 			var searchQuery = query?.Trim() ?? "";
 			var requestedLimit = limit ?? 300;
+			var filters = HistoryFilterParser.Parse(origins, roots, statuses);
 
 			if (string.IsNullOrEmpty(searchQuery))
 				return Results.Json(new { total = 0, count = 0, runs = Array.Empty<object>() }, jsonOptions);
 
-			var lowerQuery = searchQuery.ToLowerInvariant();
+			var allSummaries = await runStore.GetRunSummariesAsync();
+			var runIdToOrchName = BuildRunIdLookup(allSummaries, activeExecutionInfos);
 
 			// Search across active executions (filter out completed/cancelled/failed during cleanup grace period)
 			var matchingActive = activeExecutionInfos.Values
 				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
+				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters))
 				.Where(e => e.OrchestrationName.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
 					|| e.ExecutionId.Contains(searchQuery, StringComparison.OrdinalIgnoreCase))
 				.OrderByDescending(e => e.StartedAt)
-				.Select(e => new
-				{
-					runId = e.ExecutionId,
-					executionId = e.ExecutionId,
-					orchestrationId = e.OrchestrationId,
-					orchestrationName = e.OrchestrationName,
-					version = "1.0.0",
-					triggeredBy = e.TriggeredBy,
-					startedAt = e.StartedAt.ToString("o"),
-					completedAt = (string?)null,
-					durationSeconds = Math.Round((DateTimeOffset.UtcNow - e.StartedAt).TotalSeconds, 2),
-					status = e.Status,
-					isActive = true,
-					isIncomplete = false
-				})
+				.Select(e => ProjectActiveRow(e, runIdToOrchName))
 				.Cast<object>()
 				.ToList();
 
 			// Search across ALL completed runs in the index
-			var allSummaries = await runStore.GetRunSummariesAsync();
 			var matchingCompleted = allSummaries
+				.Where(s => !filters.HasAnyFilter || HistoryFilterParser.Matches(s, filters))
 				.Where(s => s.OrchestrationName.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
 					|| s.RunId.Contains(searchQuery, StringComparison.OrdinalIgnoreCase))
 				.Take(requestedLimit)
-				.Select(s => new
-				{
-					runId = s.RunId,
-					executionId = (string?)null,
-					orchestrationId = (string?)null,
-					orchestrationName = s.OrchestrationName,
-					version = s.OrchestrationVersion,
-					triggeredBy = s.TriggeredBy,
-					startedAt = s.StartedAt.ToString("o"),
-					completedAt = s.CompletedAt.ToString("o"),
-					durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
-					status = s.Status.ToString(),
-					completionReason = s.CompletionReason,
-					completedByStep = s.CompletedByStep,
-					cancellation = MapCancellation(s.Cancellation),
-					hookExecutionCount = s.HookExecutionCount,
-					isActive = false,
-					isIncomplete = s.IsIncomplete,
-					retriedFromRunId = s.RetriedFromRunId,
-					retryMode = s.RetryMode,
-				})
+				.Select(s => ProjectCompletedRow(s, runIdToOrchName))
 				.Cast<object>()
 				.ToList();
 
@@ -631,6 +559,112 @@ public static class RunsApi
 			detail = details.Detail,
 			reason = details.Reason,
 			isTimeout = details.IsTimeout,
+		};
+	}
+
+	/// <summary>
+	/// Builds a one-shot <c>runId -> orchestrationName</c> lookup that combines stored
+	/// <see cref="RunIndex"/> entries and currently-running <see cref="ActiveExecutionInfo"/>
+	/// records. Used to resolve <c>parentOrchestrationName</c> when projecting child rows.
+	/// </summary>
+	/// <remarks>
+	/// On a collision (a run id appears both in the active set and in the persisted index)
+	/// the active set wins because the active record is authoritative for what is currently
+	/// running. Lookups are case-insensitive to mirror <c>FindRunByIdAsync</c>.
+	/// </remarks>
+	private static Dictionary<string, string> BuildRunIdLookup(
+		IEnumerable<RunIndex> summaries,
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos)
+	{
+		var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var s in summaries)
+			lookup[s.RunId] = s.OrchestrationName;
+		foreach (var (id, info) in activeExecutionInfos)
+			lookup[id] = info.OrchestrationName;
+		return lookup;
+	}
+
+	/// <summary>
+	/// Projects an <see cref="ActiveExecutionInfo"/> (a still-running execution) into the
+	/// JSON shape expected by the history list endpoints. Includes the lineage and origin
+	/// fields that the portal needs to render badges/icons for child and retry runs.
+	/// </summary>
+	private static object ProjectActiveRow(
+		ActiveExecutionInfo e,
+		IReadOnlyDictionary<string, string> runIdToOrchName)
+	{
+		var nesting = e.NestingMetadata;
+		var parentExecutionId = nesting?.ParentExecutionId;
+		string? parentOrchName = null;
+		if (parentExecutionId is not null && runIdToOrchName.TryGetValue(parentExecutionId, out var name))
+			parentOrchName = name;
+
+		return new
+		{
+			runId = e.ExecutionId,
+			executionId = e.ExecutionId,
+			orchestrationId = e.OrchestrationId,
+			orchestrationName = e.OrchestrationName,
+			version = "1.0.0",
+			triggeredBy = e.TriggeredBy,
+			origin = RunOriginClassifier.ToWireValue(RunOriginClassifier.Classify(e.TriggeredBy)),
+			startedAt = e.StartedAt.ToString("o"),
+			completedAt = (string?)null,
+			durationSeconds = Math.Round((DateTimeOffset.UtcNow - e.StartedAt).TotalSeconds, 2),
+			status = e.Status,
+			isActive = true,
+			isIncomplete = false,
+			parameters = e.Parameters,
+			// Lineage (running runs do not yet have retry metadata)
+			retriedFromRunId = (string?)null,
+			retryMode = (string?)null,
+			parentExecutionId,
+			parentStepName = nesting?.ParentStepName,
+			parentOrchestrationName = parentOrchName,
+			rootExecutionId = nesting?.RootExecutionId,
+			nestingDepth = nesting?.Depth ?? 0,
+		};
+	}
+
+	/// <summary>
+	/// Projects a stored <see cref="RunIndex"/> (a completed/failed/cancelled run) into the
+	/// JSON shape expected by the history list endpoints.
+	/// </summary>
+	private static object ProjectCompletedRow(
+		RunIndex s,
+		IReadOnlyDictionary<string, string> runIdToOrchName)
+	{
+		string? parentOrchName = null;
+		if (s.ParentExecutionId is not null && runIdToOrchName.TryGetValue(s.ParentExecutionId, out var name))
+			parentOrchName = name;
+
+		return new
+		{
+			runId = s.RunId,
+			executionId = (string?)null,
+			orchestrationId = (string?)null,
+			orchestrationName = s.OrchestrationName,
+			version = s.OrchestrationVersion,
+			triggeredBy = s.TriggeredBy,
+			origin = RunOriginClassifier.ToWireValue(RunOriginClassifier.Classify(s.TriggeredBy)),
+			startedAt = s.StartedAt.ToString("o"),
+			completedAt = s.CompletedAt.ToString("o"),
+			durationSeconds = Math.Round(s.Duration.TotalSeconds, 2),
+			status = s.Status.ToString(),
+			completionReason = s.CompletionReason,
+			completedByStep = s.CompletedByStep,
+			cancellation = MapCancellation(s.Cancellation),
+			hookExecutionCount = s.HookExecutionCount,
+			isActive = false,
+			isIncomplete = s.IsIncomplete,
+			// Lineage
+			retriedFromRunId = s.RetriedFromRunId,
+			retryMode = s.RetryMode,
+			parentExecutionId = s.ParentExecutionId,
+			parentStepName = s.ParentStepName,
+			parentOrchestrationName = parentOrchName,
+			rootExecutionId = s.RootExecutionId,
+			nestingDepth = s.NestingDepth,
 		};
 	}
 }

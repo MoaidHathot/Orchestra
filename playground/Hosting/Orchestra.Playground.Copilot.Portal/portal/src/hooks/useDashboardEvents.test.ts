@@ -178,4 +178,92 @@ describe('useDashboardEvents', () => {
     }).not.toThrow();
     expect(handler).not.toHaveBeenCalled();
   });
+
+  it('invokes onAwaitingInput with parsed PendingInputRecord', () => {
+    const handler = vi.fn();
+    renderHook(() => useDashboardEvents({ onAwaitingInput: handler }));
+    act(() => {
+      MockEventSource.instances[0].dispatch('awaiting-input', {
+        orchestrationName: 'approval-deploy',
+        runId: 'run-abc',
+        stepName: 'review-deploy',
+        kind: 'Approval',
+        prompt: 'Approve deploy?',
+        choices: ['approve', 'reject'],
+        createdAt: '2025-05-09T12:34:56Z',
+      });
+    });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenCalledWith({
+      orchestrationName: 'approval-deploy',
+      runId: 'run-abc',
+      stepName: 'review-deploy',
+      kind: 'Approval',
+      prompt: 'Approve deploy?',
+      choices: ['approve', 'reject'],
+      createdAt: '2025-05-09T12:34:56Z',
+    });
+  });
+
+  it('invokes onInputReceived with parsed payload', () => {
+    const handler = vi.fn();
+    renderHook(() => useDashboardEvents({ onInputReceived: handler }));
+    act(() => {
+      MockEventSource.instances[0].dispatch('input-received', {
+        orchestrationName: 'approval-deploy',
+        runId: 'run-abc',
+        stepName: 'review-deploy',
+        choice: 'approve',
+        reply: null,
+        respondedBy: 'alice',
+        respondedAt: '2025-05-09T12:35:00Z',
+      });
+    });
+    expect(handler).toHaveBeenCalledWith({
+      orchestrationName: 'approval-deploy',
+      runId: 'run-abc',
+      stepName: 'review-deploy',
+      choice: 'approve',
+      reply: null,
+      respondedBy: 'alice',
+      respondedAt: '2025-05-09T12:35:00Z',
+    });
+  });
+
+  it('invokes onInputTimeout with parsed payload', () => {
+    const handler = vi.fn();
+    renderHook(() => useDashboardEvents({ onInputTimeout: handler }));
+    act(() => {
+      MockEventSource.instances[0].dispatch('input-timeout', {
+        orchestrationName: 'approval-deploy',
+        runId: 'run-abc',
+        stepName: 'review-deploy',
+        onTimeout: 'Reject',
+      });
+    });
+    expect(handler).toHaveBeenCalledWith({
+      orchestrationName: 'approval-deploy',
+      runId: 'run-abc',
+      stepName: 'review-deploy',
+      onTimeout: 'Reject',
+    });
+  });
+
+  it('does not throw when HITL handlers are not provided', () => {
+    renderHook(() => useDashboardEvents({}));
+    expect(() => {
+      act(() => {
+        MockEventSource.instances[0].dispatch('awaiting-input', {
+          orchestrationName: 'o', runId: 'r', stepName: 's', kind: 'Approval',
+          prompt: 'p', createdAt: '2025-05-09T12:00:00Z',
+        });
+        MockEventSource.instances[0].dispatch('input-received', {
+          orchestrationName: 'o', runId: 'r', stepName: 's', respondedAt: '2025-05-09T12:01:00Z',
+        });
+        MockEventSource.instances[0].dispatch('input-timeout', {
+          orchestrationName: 'o', runId: 'r', stepName: 's', onTimeout: 'Reject',
+        });
+      });
+    }).not.toThrow();
+  });
 });

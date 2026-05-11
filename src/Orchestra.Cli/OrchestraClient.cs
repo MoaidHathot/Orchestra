@@ -20,7 +20,21 @@ public class OrchestraClient : IDisposable
 	public OrchestraClient(string serverUrl)
 	{
 		_http = new HttpClient { BaseAddress = new Uri(serverUrl.TrimEnd('/') + "/") };
+		_ownsHttp = true;
 	}
+
+	/// <summary>
+	/// Test/integration constructor: use a caller-provided <see cref="HttpClient"/> (for example,
+	/// the one returned by <c>WebApplicationFactory.CreateClient()</c>). The supplied client's
+	/// lifetime is the caller's responsibility.
+	/// </summary>
+	public OrchestraClient(HttpClient httpClient)
+	{
+		_http = httpClient;
+		_ownsHttp = false;
+	}
+
+	private readonly bool _ownsHttp;
 
 	// ── Orchestrations ──
 
@@ -58,6 +72,58 @@ public class OrchestraClient : IDisposable
 
 		// For async execution via the API, use the SSE endpoint but just get initial response
 		return await GetAsync(url);
+	}
+
+	/// <summary>
+	/// Opens a streaming SSE connection that starts a new run of <paramref name="orchestrationId"/>
+	/// and emits every event for that run's lifetime. Caller owns the returned response and
+	/// must dispose it when done; the body stream stays open until the run terminates or the
+	/// caller cancels via <paramref name="cancellationToken"/>.
+	/// </summary>
+	/// <remarks>
+	/// Uses <see cref="HttpCompletionOption.ResponseHeadersRead"/> so the caller can begin reading
+	/// frames immediately rather than waiting for the entire response body to buffer.
+	/// </remarks>
+	public async Task<HttpResponseMessage> OpenRunStreamAsync(
+		string orchestrationId,
+		Dictionary<string, string>? parameters,
+		CancellationToken cancellationToken)
+	{
+		var paramJson = parameters is { Count: > 0 }
+			? Uri.EscapeDataString(JsonSerializer.Serialize(parameters, s_jsonOptions))
+			: null;
+		var url = $"api/orchestrations/{Uri.EscapeDataString(orchestrationId)}/run";
+		if (paramJson is not null)
+		{
+			url += $"?params={paramJson}";
+		}
+
+		using var request = new HttpRequestMessage(HttpMethod.Get, url);
+		request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+		var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+			.ConfigureAwait(false);
+		return response;
+	}
+
+	/// <summary>
+	/// Opens a streaming SSE connection attached to an existing run identified by
+	/// <paramref name="orchestrationName"/> + <paramref name="runId"/>. Caller owns the
+	/// response.
+	/// </summary>
+	public async Task<HttpResponseMessage> OpenAttachStreamAsync(
+		string orchestrationName,
+		string runId,
+		CancellationToken cancellationToken)
+	{
+		var url = $"api/orchestrations/{Uri.EscapeDataString(orchestrationName)}/runs/{Uri.EscapeDataString(runId)}/attach";
+
+		using var request = new HttpRequestMessage(HttpMethod.Get, url);
+		request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
+
+		var response = await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+			.ConfigureAwait(false);
+		return response;
 	}
 
 	// ── Active Executions ──
@@ -230,5 +296,11 @@ public class OrchestraClient : IDisposable
 		}
 	}
 
-	public void Dispose() => _http.Dispose();
+	public void Dispose()
+	{
+		if (_ownsHttp)
+		{
+			_http.Dispose();
+		}
+	}
 }

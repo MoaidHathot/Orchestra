@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import type { PendingInputRecord, HumanInputKind } from '../types';
 
 /**
  * Event payload shapes pushed from the backend DashboardEventBroadcaster.
@@ -33,9 +34,38 @@ export interface DashboardEventHandlers {
     status: string;
   }) => void;
 
+  /** Fired when a run begins waiting for human input. The Portal should show it in
+   *  the "Waiting Inputs" list. The payload matches <see cref="PendingInputRecord"/>. */
+  onAwaitingInput?: (evt: PendingInputRecord) => void;
+
+  /** Fired when a pending wait was satisfied (response posted via the respond endpoint).
+   *  The Portal should remove the matching record from its waiting list. */
+  onInputReceived?: (evt: {
+    orchestrationName: string;
+    runId: string;
+    stepName: string;
+    choice?: string | null;
+    reply?: string | null;
+    respondedBy?: string | null;
+    respondedAt: string;
+  }) => void;
+
+  /** Fired when a pending wait timed out (run continues per the step's onTimeout policy).
+   *  The Portal should remove the matching record from its waiting list. */
+  onInputTimeout?: (evt: {
+    orchestrationName: string;
+    runId: string;
+    stepName: string;
+    /** Backend's timeout-behavior name (e.g. "Reject", "FailStep"). */
+    onTimeout: string;
+  }) => void;
+
   /** Fired once when the stream is first established (useful for triggering a full refresh). */
   onConnected?: () => void;
 }
+
+// Re-export so consumers don't need a separate types import for kind narrowing.
+export type { HumanInputKind };
 
 /**
  * Opens a single long-lived EventSource to /api/events to receive real-time dashboard
@@ -105,6 +135,33 @@ export function useDashboardEvents(handlers: DashboardEventHandlers): void {
           handlersRef.current.onExecutionCompleted?.(data);
         } catch (err) {
           console.error('Failed to parse execution-completed event:', err);
+        }
+      });
+
+      eventSource.addEventListener('awaiting-input', (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data) as PendingInputRecord;
+          handlersRef.current.onAwaitingInput?.(data);
+        } catch (err) {
+          console.error('Failed to parse awaiting-input event:', err);
+        }
+      });
+
+      eventSource.addEventListener('input-received', (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          handlersRef.current.onInputReceived?.(data);
+        } catch (err) {
+          console.error('Failed to parse input-received event:', err);
+        }
+      });
+
+      eventSource.addEventListener('input-timeout', (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          handlersRef.current.onInputTimeout?.(data);
+        } catch (err) {
+          console.error('Failed to parse input-timeout event:', err);
         }
       });
 

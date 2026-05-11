@@ -51,6 +51,8 @@ public static partial class RetryApi
 			IOrchestrationReporterFactory reporterFactory,
 			IHostApplicationLifetime lifetime,
 			IChildOrchestrationLauncher childLauncher,
+			IPendingInputStore pendingInputStore,
+			IHumanInputWaiter humanInputWaiter,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 			DashboardEventBroadcaster dashboardBroadcaster) =>
@@ -166,7 +168,14 @@ public static partial class RetryApi
 				childLauncher: childLauncher,
 				globalHooks: hostOptions.Hooks,
 				dataPath: hostOptions.DataPath,
-				serverUrl: hostOptions.HostBaseUrl);
+				serverUrl: hostOptions.HostBaseUrl,
+				// Wire the HITL store + waiter so retried Approval / engine-tool steps actually
+				// persist a PendingInputRecord and register an in-memory wait. Without these
+				// the executor falls back to NullPendingInputStore (drops saves silently) and
+				// NullHumanInputWaiter (blocks forever and never responds to POST /respond),
+				// leaving any retried run with a human-input step permanently stuck.
+				pendingInputStore: pendingInputStore,
+				humanInputWaiter: humanInputWaiter);
 			var cancellationToken = cts.Token;
 			var startTime = DateTimeOffset.UtcNow;
 			var logger = loggerFactory.CreateLogger(typeof(RetryApi));

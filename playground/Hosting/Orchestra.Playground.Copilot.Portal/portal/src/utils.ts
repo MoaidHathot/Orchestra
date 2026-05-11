@@ -63,6 +63,26 @@ export function formatTime(dateStr: string | null | undefined): string {
 }
 
 /**
+ * Formats a duration in seconds as a compact human-readable string.
+ *
+ * Examples: `0.4s`, `12s`, `2m 5s`, `1h 23m`. Negative or NaN inputs return
+ * an empty string so callers can render unconditionally.
+ */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || Number.isNaN(seconds) || seconds < 0) return '';
+  if (seconds < 1) return `${seconds.toFixed(1)}s`;
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const totalMinutes = Math.floor(seconds / 60);
+  const remSeconds = Math.round(seconds - totalMinutes * 60);
+  if (totalMinutes < 60) {
+    return remSeconds === 0 ? `${totalMinutes}m` : `${totalMinutes}m ${remSeconds}s`;
+  }
+  const hours = Math.floor(totalMinutes / 60);
+  const remMinutes = totalMinutes - hours * 60;
+  return remMinutes === 0 ? `${hours}h` : `${hours}h ${remMinutes}m`;
+}
+
+/**
  * Returns true if a history entry represents an incomplete/early-exit execution.
  * An execution is considered incomplete when:
  * - `isIncomplete` flag is true, OR

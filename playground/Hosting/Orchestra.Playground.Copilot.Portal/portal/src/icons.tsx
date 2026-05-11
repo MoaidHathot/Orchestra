@@ -205,7 +205,78 @@ export const Icons = {
       <line x1="12" y1="20" x2="12.01" y2="20" />
     </svg>
   ),
+  /** Person silhouette — used for the "manual" origin. */
+  User: (): React.JSX.Element => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M8 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-5 6.5C3 12 5 10 8 10s5 2 5 4.5V15H3v-.5Z" />
+    </svg>
+  ),
+  /** Two arrows in a circle — used for the "loop" trigger origin. */
+  Repeat: (): React.JSX.Element => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="13,3 13,7 9,7" />
+      <path d="M13 7A6 6 0 0 0 4 4" />
+      <polyline points="3,13 3,9 7,9" />
+      <path d="M3 9a6 6 0 0 0 9 3" />
+    </svg>
+  ),
+  /** Lightning bolt — used for the "webhook" origin. */
+  Zap: (): React.JSX.Element => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+      <path d="M9.5 1L2 9h5l-1.5 6 7.5-8h-5L9.5 1Z" />
+    </svg>
+  ),
+  /** Curved arrow — used for the "retry" origin. */
+  Refresh: (): React.JSX.Element => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 8a6 6 0 1 1-1.76-4.24" />
+      <polyline points="14,2 14,5.5 10.5,5.5" />
+    </svg>
+  ),
+  /** L-shape pointing down-and-right — used for the "child orchestration" origin. */
+  CornerDownRight: (): React.JSX.Element => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="9,11 13,8 9,5" />
+      <path d="M3 3v3a2 2 0 0 0 2 2h8" />
+    </svg>
+  ),
+  /** Circular help mark — used for the "unknown" origin fallback. */
+  Help: (): React.JSX.Element => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="8" cy="8" r="6.5" />
+      <path d="M6 6a2 2 0 1 1 3.5 1.3c-.5.5-1.5.7-1.5 1.7" />
+      <line x1="8" y1="11.5" x2="8.01" y2="11.5" />
+    </svg>
+  ),
+  /** Raised hand — used for the "Waiting for Input" sidebar button + active-card chip. */
+  Hand: (): React.JSX.Element => (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 8.5V3.5a1 1 0 0 1 2 0V8" />
+      <path d="M7 8V2.5a1 1 0 0 1 2 0V8" />
+      <path d="M9 8V3a1 1 0 0 1 2 0v6" />
+      <path d="M11 9V5.5a1 1 0 0 1 2 0v5.5a3.5 3.5 0 0 1-7 0v-1.5l-2.5-3a1.2 1.2 0 0 1 1.7-1.7L7 7" />
+    </svg>
+  ),
 };
+
+import type { RunOrigin } from './runFilters';
+
+/** Maps a {@link RunOrigin} to the icon used to display it on a history row. */
+export function getOriginIcon(origin: RunOrigin | undefined): React.JSX.Element {
+  switch (origin) {
+    case 'manual': return <Icons.User />;
+    case 'scheduler': return <Icons.Clock />;
+    case 'loop': return <Icons.Repeat />;
+    case 'webhook': return <Icons.Zap />;
+    case 'mcp': return <Icons.Sparkles />;
+    case 'orchestration': return <Icons.CornerDownRight />;
+    case 'retry': return <Icons.Refresh />;
+    case 'resume': return <Icons.Play />;
+    case 'unknown':
+    default:
+      return <Icons.Help />;
+  }
+}
 
 export function getTriggerIcon(triggeredBy: string | undefined): React.JSX.Element {
   switch (triggeredBy) {

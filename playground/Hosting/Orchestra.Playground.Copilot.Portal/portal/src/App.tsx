@@ -3,6 +3,15 @@ import './App.css';
 import { api } from './api';
 import { Icons } from './icons';
 import { activeOrchestrationMatchesSearch, formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch, buildRestoredStepStatusUpdates } from './utils';
+import type { RunOrigin } from './runFilters';
+import {
+  type HistoryFilterState,
+  buildFilterQueryString,
+  loadFilterState,
+  saveFilterState,
+} from './runFilters';
+import HistoryFilterSelector from './components/HistoryFilterSelector';
+import HistoryRow from './components/HistoryRow';
 import type { PortalStepStatus } from './utils';
 import type {
   Orchestration,
@@ -34,10 +43,12 @@ import ExecutionModal from './components/modals/ExecutionModal';
 import McpsModal from './components/modals/McpsModal';
 import BuilderModal from './components/modals/BuilderModal';
 import ProfilesModal from './components/modals/ProfilesModal';
+import WaitingInputsModal from './components/modals/WaitingInputsModal';
 import ProfileSelector from './components/ProfileSelector';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useDashboardEvents } from './hooks/useDashboardEvents';
+import { usePendingInputs } from './hooks/usePendingInputs';
 
 // ── API response types ──────────────────────────────────────────────────────
 
@@ -144,6 +155,18 @@ interface HistoryListEntry {
   startedAt?: string;
   durationSeconds?: number;
   parameters?: Record<string, unknown>;
+  /** Server-classified origin token (manual/scheduler/loop/...). Falls back to client classification of triggeredBy. */
+  origin?: RunOrigin;
+  /** Free-form trigger string from the run record; useful for tooltips and as a classification fallback. */
+  triggeredBy?: string;
+  // ── Lineage (filled in by /api/history projection) ─────────────
+  retriedFromRunId?: string | null;
+  retryMode?: string | null;
+  parentExecutionId?: string | null;
+  parentStepName?: string | null;
+  parentOrchestrationName?: string | null;
+  rootExecutionId?: string | null;
+  nestingDepth?: number;
 }
 
 // ── Helpers for SSE event handling ──────────────────────────────────────────
@@ -240,6 +263,12 @@ function App(): React.JSX.Element {
   const [activeModal, setActiveModal] = useState<ActiveModalState>({ open: false, data: null, loading: false });
   const [builderModal, setBuilderModal] = useState(false);
   const [profilesModal, setProfilesModal] = useState(false);
+  const [waitingInputsModal, setWaitingInputsModal] = useState(false);
+
+  // Tracks orchestration runs paused on human input. State is owned here so the
+  // sidebar count badge, the active-card chip, and the WaitingInputsModal all see
+  // the same canonical list and react to the same SSE events.
+  const pendingInputs = usePendingInputs();
 
   // Profile data for filtering & membership display
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -248,10 +277,32 @@ function App(): React.JSX.Element {
   const [mainPaneProfileFilter, setMainPaneProfileFilter] = useState<string[]>([]); // same logic for main pane
 
   // History filter state (persisted in localStorage)
-  const [hideIncomplete, setHideIncomplete] = useState<boolean>(() => {
-    const stored = localStorage.getItem('orchestra-hide-incomplete');
-    return stored === null ? true : stored === 'true';
-  });
+  // The legacy "Hide incomplete" boolean is now part of the unified filter combo state,
+  // but we still expose a top-level toggle for the empty-state recovery button at the
+  // bottom of the panel.
+  const [historyFilters, setHistoryFilters] = useState<HistoryFilterState>(() => loadFilterState());
+  const updateHistoryFilters = useCallback((next: HistoryFilterState) => {
+    setHistoryFilters(next);
+    saveFilterState(next);
+  }, []);
+  const toggleHideIncomplete = useCallback(() => {
+    setHistoryFilters(prev => {
+      const next = { ...prev, hideIncomplete: !prev.hideIncomplete };
+      saveFilterState(next);
+      return next;
+    });
+  }, []);
+  const hideIncomplete = historyFilters.hideIncomplete;
+
+  // The query string is recomputed whenever the filter state changes; the ref allows
+  // long-lived polling intervals to read the latest URL without tearing down on every
+  // checkbox toggle.
+  const historyUrl = useMemo(
+    () => `/api/history?limit=15${buildFilterQueryString(historyFilters)}`,
+    [historyFilters],
+  );
+  const historyUrlRef = useRef(historyUrl);
+  useEffect(() => { historyUrlRef.current = historyUrl; }, [historyUrl]);
   const [historyCollapsed, setHistoryCollapsed] = useState<boolean>(() => {
     const stored = localStorage.getItem('orchestra-history-collapsed');
     return stored === null ? true : stored === 'true';
@@ -260,13 +311,6 @@ function App(): React.JSX.Element {
     setHistoryCollapsed(prev => {
       const next = !prev;
       localStorage.setItem('orchestra-history-collapsed', String(next));
-      return next;
-    });
-  }, []);
-  const toggleHideIncomplete = useCallback(() => {
-    setHideIncomplete(prev => {
-      const next = !prev;
-      localStorage.setItem('orchestra-hide-incomplete', String(next));
       return next;
     });
   }, []);
@@ -304,7 +348,7 @@ function App(): React.JSX.Element {
     // Load history and active data in parallel (may be slower due to cold index)
     try {
       const [histData, activeDataResult] = await Promise.all([
-        api.get<HistoryResponse>('/api/history?limit=15'),
+        api.get<HistoryResponse>(historyUrlRef.current),
         api.get<ActiveData>('/api/active'),
       ]);
       setHistory(histData.runs || []);
@@ -361,12 +405,23 @@ function App(): React.JSX.Element {
   const refreshHistory = useCallback(async () => {
     if (!serverReachableRef.current) return;
     try {
-      const histData = await api.get<HistoryResponse>('/api/history?limit=15');
+      const histData = await api.get<HistoryResponse>(historyUrlRef.current);
       setHistory(histData.runs || []);
     } catch (err) {
       console.error('Failed to refresh history:', err);
     }
   }, []);
+
+  // Re-fetch history immediately when filters change (instead of waiting for the next poll
+  // tick). The initial mount fetches via loadData(); skip that one to avoid a duplicate request.
+  const initialHistoryFetchRef = useRef(true);
+  useEffect(() => {
+    if (initialHistoryFetchRef.current) {
+      initialHistoryFetchRef.current = false;
+      return;
+    }
+    refreshHistory();
+  }, [historyUrl, refreshHistory]);
 
   const refreshOrchestrations = useCallback(async () => {
     if (!serverReachableRef.current) return;
@@ -387,6 +442,9 @@ function App(): React.JSX.Element {
       // full re-sync of the profile selector so its IsActive flags don't go stale.
       loadProfiles();
       refreshOrchestrations();
+      // Re-sync the pending-input list too: the canonical state lives on the server
+      // and a missed awaiting-input/input-received pair would otherwise leave us stale.
+      void pendingInputs.refresh();
     },
     onProfileActiveSetChanged: () => {
       // A profile's active state flipped (scheduled transition, manual toggle from another
@@ -409,6 +467,17 @@ function App(): React.JSX.Element {
       // An execution finished — move it from Active to Recent Executions.
       refreshActive();
       refreshHistory();
+    },
+    onAwaitingInput: (evt) => {
+      // Forward to the pending-inputs store so the sidebar badge, modal, and any
+      // active-card chips refresh in real time.
+      pendingInputs.applyAwaitingInput(evt);
+    },
+    onInputReceived: (evt) => {
+      pendingInputs.applyInputReceived(evt);
+    },
+    onInputTimeout: (evt) => {
+      pendingInputs.applyInputTimeout(evt);
     },
   });
 
@@ -517,7 +586,7 @@ function App(): React.JSX.Element {
       const interval = setInterval(async () => {
         if (!serverReachableRef.current) return; // Skip when server is down
         try {
-          const histData = await api.get<HistoryResponse>('/api/history?limit=15');
+          const histData = await api.get<HistoryResponse>(historyUrlRef.current);
           setHistory(histData.runs || []);
         } catch (err) {
           console.error('Failed to refresh history:', err);
@@ -682,6 +751,15 @@ function App(): React.JSX.Element {
       ? searchedOrchestrationView.disabled
       : [],
   }), [activeStatusFilter, searchedOrchestrationView]);
+
+  /**
+   * Set of runIds that currently have at least one pending HITL wait. Used to
+   * stamp the "Waiting" chip on running cards. <c>runId === executionId</c> for
+   * active runs, so a card whose <c>executionId</c> is in this set is paused.
+   */
+  const awaitingRunIds = useMemo(() => {
+    return new Set(pendingInputs.list.map(r => r.runId));
+  }, [pendingInputs.list]);
 
   const hasActiveOrchestrationFilters = mainPaneSearchQuery.trim().length > 0
     || mainPaneProfileFilter.length > 0
@@ -2048,6 +2126,22 @@ function App(): React.JSX.Element {
               <Icons.Tool /> MCP Tools
             </button>
           </div>
+          <div className="header-btn-row">
+            <button
+              className="btn"
+              onClick={() => { setWaitingInputsModal(true); setSidebarOpen(false); }}
+              aria-label={pendingInputs.count > 0
+                ? `Waiting for input (${pendingInputs.count} pending)`
+                : 'Waiting for input'}
+            >
+              <Icons.Hand /> Waiting for Input
+              {pendingInputs.count > 0 && (
+                <span className="waiting-inputs-badge" aria-hidden="true">
+                  {pendingInputs.count}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
 
         <div className="orchestrations-list" role="listbox" aria-label="Orchestrations">
@@ -2168,18 +2262,11 @@ function App(): React.JSX.Element {
               )}
             </span>
             <div className="history-header-actions" onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-              <button
-                className={`history-filter-btn${hideIncomplete ? ' active' : ''}`}
-                onClick={toggleHideIncomplete}
-                title={hideIncomplete ? 'Showing completed only — click to show all' : 'Showing all — click to hide incomplete'}
-                aria-label={hideIncomplete ? 'Show incomplete executions' : 'Hide incomplete executions'}
-                aria-pressed={hideIncomplete}
-              >
-                <Icons.Filter />
-              </button>
-              <button className="btn btn-sm" onClick={() => { setHistoryModal({ open: true }); setSidebarOpen(false); }}>
-                Show All
-              </button>
+              <HistoryFilterSelector
+                state={historyFilters}
+                onChange={updateHistoryFilters}
+                onShowAllRequested={() => { setHistoryModal({ open: true }); setSidebarOpen(false); }}
+              />
             </div>
           </div>
           {!historyCollapsed && (
@@ -2201,75 +2288,36 @@ function App(): React.JSX.Element {
               </div>
             ) : (
               filteredHistory.map(exec => (
-                <div
+                <HistoryRow
                   key={exec.runId}
-                  className="history-item"
-                  role="listitem"
-                  tabIndex={0}
-                  onClick={() => {
-                    if (exec.isActive && exec.executionId) {
-                      const orch = orchestrations?.find(o => o.id === exec.orchestrationId);
-                      attachToExecution(exec, orch);
+                  exec={exec}
+                  onSelect={(target) => {
+                    if (target.isActive && target.executionId) {
+                      const orch = orchestrations?.find(o => o.id === target.orchestrationId);
+                      attachToExecution(target as HistoryListEntry, orch);
                     } else {
-                      viewHistoricalExecution(exec);
+                      viewHistoricalExecution(target as HistoryListEntry);
                     }
                     setSidebarOpen(false);
                   }}
-                  onKeyDown={(e: React.KeyboardEvent) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      if (exec.isActive && exec.executionId) {
-                        const orch = orchestrations?.find(o => o.id === exec.orchestrationId);
-                        attachToExecution(exec, orch);
-                      } else {
-                        viewHistoricalExecution(exec);
-                      }
+                  onDelete={(target, e) => deleteHistoryEntry(target as HistoryListEntry, e)}
+                  onViewSourceRun={(sourceRunId) => {
+                    viewHistoricalExecution({
+                      orchestrationName: exec.orchestrationName,
+                      runId: sourceRunId,
+                    } as HistoryListEntry);
+                    setSidebarOpen(false);
+                  }}
+                  onViewParentRun={(parentRunId) => {
+                    if (exec.parentOrchestrationName) {
+                      viewHistoricalExecution({
+                        orchestrationName: exec.parentOrchestrationName,
+                        runId: parentRunId,
+                      } as HistoryListEntry);
                       setSidebarOpen(false);
                     }
                   }}
-                  aria-label={`${exec.orchestrationName} - ${exec.status || 'Running'} - ${formatTime(exec.startedAt)}`}
-                >
-                  <div className={`history-status-icon ${(exec.isIncomplete || exec.completionReason) && exec.status === 'Succeeded' ? 'completed-early' : exec.status?.toLowerCase() || 'running'}`} aria-hidden="true">
-                    {exec.isActive ? (
-                      <span className="spinner" style={{ width: '12px', height: '12px' }}></span>
-                    ) : exec.status === 'Succeeded' && (exec.completionReason || exec.isIncomplete) ? (
-                      <Icons.SkipForward />
-                    ) : exec.status === 'Succeeded' ? (
-                      <Icons.Check />
-                    ) : exec.status === 'Failed' ? (
-                      <Icons.X />
-                    ) : exec.status === 'Cancelled' ? (
-                      <Icons.Ban />
-                    ) : (
-                      '...'
-                    )}
-                  </div>
-                  <div className="history-info">
-                    <div className="history-name">
-                      {exec.orchestrationName}
-                      {exec.isActive && (
-                        <span className="step-status-badge running" style={{
-                          marginLeft: '8px',
-                          fontSize: '10px',
-                          padding: '2px 6px',
-                        }}>
-                          {exec.status === 'Cancelling' ? 'Cancelling' : 'Running'}
-                        </span>
-                      )}
-                    </div>
-                    <div className="history-time">{formatTime(exec.startedAt)}</div>
-                  </div>
-                  {!exec.isActive && (
-                    <button
-                      className="history-delete-btn"
-                      onClick={(e: React.MouseEvent) => deleteHistoryEntry(exec, e)}
-                      title="Delete execution"
-                      aria-label={`Delete ${exec.orchestrationName} execution`}
-                    >
-                      <Icons.X />
-                    </button>
-                  )}
-                </div>
+                />
               ))
             )}
           </div>
@@ -2385,6 +2433,7 @@ function App(): React.JSX.Element {
                         type="running"
                         orchestrations={orchestrations}
                         profiles={profiles}
+                        awaitingInput={!!exec.executionId && awaitingRunIds.has(exec.executionId)}
                         onView={(execution, orch) => {
                           attachToExecution(execution, orch);
                         }}
@@ -2571,6 +2620,15 @@ function App(): React.JSX.Element {
       <McpsModal
         {...mcpsModal}
         onClose={() => setMcpsModal({ open: false })}
+      />
+      <WaitingInputsModal
+        open={waitingInputsModal}
+        onClose={() => setWaitingInputsModal(false)}
+        records={pendingInputs.list}
+        loading={pendingInputs.loading}
+        onResponded={(orchestrationName, runId, stepName) => {
+          pendingInputs.removeLocal(orchestrationName, runId, stepName);
+        }}
       />
       <ActiveModal
         {...activeModal}

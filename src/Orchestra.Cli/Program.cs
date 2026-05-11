@@ -1,4 +1,7 @@
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using Orchestra.Cli.Run;
 using Spectre.Console;
 
 namespace Orchestra.Cli;
@@ -40,6 +43,16 @@ public class Program
 
 		try
 		{
+			// Streaming commands handle their own output and lifecycle (Ctrl+C, exit codes).
+			if (args[0] == "run")
+			{
+				return await HandleRunCommand(args, client);
+			}
+			if (args[0] == "attach")
+			{
+				return await HandleAttachCommand(args, client);
+			}
+
 			var result = args[0] switch
 			{
 				"list" => await client.ListOrchestrationsAsync(),
@@ -53,11 +66,6 @@ public class Program
 				"enable" => await RunWithArg(args, 1, "orchestration ID", id => client.EnableOrchestrationAsync(id)),
 				"disable" => await RunWithArg(args, 1, "orchestration ID", id => client.DisableOrchestrationAsync(id)),
 
-				"run" => await RunWithArg(args, 1, "orchestration ID", id =>
-				{
-					var parameters = ParseParams(args);
-					return client.RunOrchestrationAsync(id, parameters);
-				}),
 				"active" => await client.GetActiveExecutionsAsync(),
 				"cancel" => await RunWithArg(args, 1, "execution ID", id => client.CancelExecutionAsync(id)),
 
@@ -102,6 +110,152 @@ public class Program
 			AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(ex.Message)}");
 			return 1;
 		}
+	}
+
+	/// <summary>
+	/// Streams a fresh run via SSE, rendering events to the console and prompting the user
+	/// inline whenever the orchestration awaits human input. Exit codes:
+	/// 0 = succeeded, 1 = errored, 2 = paused (non-interactive abort), 130 = Ctrl+C disconnect.
+	/// </summary>
+	private static async Task<int> HandleRunCommand(string[] args, OrchestraClient client)
+	{
+		if (args.Length < 2)
+		{
+			throw new ArgumentException("Missing required argument: <orchestration ID>");
+		}
+		var orchestrationId = args[1];
+		var parameters = ParseParams(args);
+
+		var verbose = HasBoolFlag(args, "--verbose", "-V");
+		var quiet = HasBoolFlag(args, "--quiet", "-q");
+		var noInteractive = HasBoolFlag(args, "--no-interactive");
+		var respondedBy = GetFlag(args, "--by");
+
+		using var cts = new CancellationTokenSource();
+		var ctrlCPressed = false;
+		Console.CancelKeyPress += OnCancelKeyPress;
+		void OnCancelKeyPress(object? _, ConsoleCancelEventArgs e)
+		{
+			e.Cancel = true; // Don't kill the process; let us disconnect cleanly
+			ctrlCPressed = true;
+			cts.Cancel();
+		}
+
+		try
+		{
+			using var response = await client.OpenRunStreamAsync(orchestrationId, parameters, cts.Token);
+			var session = BuildRunSession(client, verbose, quiet, noInteractive, respondedBy);
+			var result = await session.RunAsync(response, orchestrationId, cts.Token);
+			return MapOutcomeToExitCode(result, ctrlCPressed);
+		}
+		finally
+		{
+			Console.CancelKeyPress -= OnCancelKeyPress;
+		}
+	}
+
+	/// <summary>
+	/// Attaches to an in-flight run by user-visible (orchestrationName, runId) and streams events.
+	/// </summary>
+	private static async Task<int> HandleAttachCommand(string[] args, OrchestraClient client)
+	{
+		if (args.Length < 3)
+		{
+			throw new ArgumentException("Usage: orchestra attach <orchestration-name> <run-id>");
+		}
+		var orchestrationName = args[1];
+		var runId = args[2];
+
+		var verbose = HasBoolFlag(args, "--verbose", "-V");
+		var quiet = HasBoolFlag(args, "--quiet", "-q");
+		var noInteractive = HasBoolFlag(args, "--no-interactive");
+		var respondedBy = GetFlag(args, "--by");
+
+		using var cts = new CancellationTokenSource();
+		var ctrlCPressed = false;
+		Console.CancelKeyPress += OnCancelKeyPress;
+		void OnCancelKeyPress(object? _, ConsoleCancelEventArgs e)
+		{
+			e.Cancel = true;
+			ctrlCPressed = true;
+			cts.Cancel();
+		}
+
+		try
+		{
+			using var response = await client.OpenAttachStreamAsync(orchestrationName, runId, cts.Token);
+			var session = BuildRunSession(client, verbose, quiet, noInteractive, respondedBy);
+			var result = await session.RunAsync(response, orchestrationName, cts.Token);
+			return MapOutcomeToExitCode(result, ctrlCPressed);
+		}
+		finally
+		{
+			Console.CancelKeyPress -= OnCancelKeyPress;
+		}
+	}
+
+	/// <summary>
+	/// Builds the <see cref="RunSession"/> with the right observer + prompter for the current
+	/// flags and TTY state. We auto-degrade to non-interactive when stdin is redirected
+	/// (CI / pipes) so scripts that previously used <c>orchestra run | jq</c> still get a
+	/// deterministic outcome instead of a hang.
+	/// </summary>
+	private static RunSession BuildRunSession(
+		OrchestraClient client,
+		bool verbose,
+		bool quiet,
+		bool noInteractive,
+		string? respondedBy)
+	{
+		var loggerFactory = NullLoggerFactory.Instance;
+		var ansi = AnsiConsole.Console;
+
+		IRunObserver observer;
+		if (verbose)
+		{
+			var compact = new ConsoleRunObserver(ansi, loggerFactory.CreateLogger<ConsoleRunObserver>());
+			observer = new VerboseRunObserver(ansi, loggerFactory.CreateLogger<VerboseRunObserver>(), compact);
+		}
+		else if (quiet)
+		{
+			observer = new QuietRunObserver(ansi, loggerFactory.CreateLogger<QuietRunObserver>());
+		}
+		else
+		{
+			observer = new ConsoleRunObserver(ansi, loggerFactory.CreateLogger<ConsoleRunObserver>());
+		}
+
+		var stdinIsTty = !Console.IsInputRedirected;
+		IHumanInputPrompter prompter = (noInteractive || !stdinIsTty)
+			? new NonInteractiveHumanInputPrompter(ansi, loggerFactory.CreateLogger<NonInteractiveHumanInputPrompter>())
+			: new InteractiveHumanInputPrompter(ansi, respondedBy, loggerFactory.CreateLogger<InteractiveHumanInputPrompter>());
+
+		var responder = new HumanInputResponder(client, loggerFactory.CreateLogger<HumanInputResponder>());
+		return new RunSession(observer, prompter, responder, loggerFactory.CreateLogger<RunSession>());
+	}
+
+	private static int MapOutcomeToExitCode(RunSessionResult result, bool ctrlCPressed)
+	{
+		if (ctrlCPressed && result.Outcome == RunSessionOutcome.Disconnected)
+		{
+			AnsiConsole.MarkupLine("[grey]Run continues on the server.[/]");
+			if (result.OrchestrationName is not null && result.RunId is not null)
+			{
+				AnsiConsole.MarkupLine(
+					$"[grey]Re-attach with:[/]  orchestra attach {Markup.Escape(result.OrchestrationName)} {Markup.Escape(result.RunId)}");
+			}
+			return 130; // POSIX SIGINT convention
+		}
+
+		return result.Outcome switch
+		{
+			RunSessionOutcome.Succeeded => 0,
+			RunSessionOutcome.NonSuccessfulTerminal => 1,
+			RunSessionOutcome.Errored => 1,
+			RunSessionOutcome.Disconnected => 1,
+			RunSessionOutcome.NonInteractiveAbort => 2,
+			_ => 1,
+		};
 	}
 
 	private static async Task<JsonElement> HandleRunsCommand(string[] args, OrchestraClient client)
@@ -241,6 +395,24 @@ public class Program
 		return false;
 	}
 
+	/// <summary>
+	/// True when any of the given flag names appears as a standalone argument.
+	/// </summary>
+	private static bool HasBoolFlag(string[] args, params string[] flags)
+	{
+		foreach (var arg in args)
+		{
+			foreach (var flag in flags)
+			{
+				if (string.Equals(arg, flag, StringComparison.Ordinal))
+				{
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
 	private static void PrintAsTable(JsonElement result, string command)
 	{
 		var table = new Table();
@@ -332,7 +504,12 @@ public class Program
 		Console.WriteLine("  disable <id>                  Disable orchestration trigger");
 		Console.WriteLine();
 		Console.WriteLine("Execution:");
-		Console.WriteLine("  run <id> [--param k=v ...]    Execute an orchestration");
+		Console.WriteLine("  run <id> [--param k=v ...]    Stream an orchestration run live (interactive HITL)");
+		Console.WriteLine("    [--no-interactive]            Don't prompt; print pending-input message and exit 2");
+		Console.WriteLine("    [--quiet | -q]                Suppress per-step chatter; show only HITL + summary");
+		Console.WriteLine("    [--verbose | -V]              Print every SSE event (firehose)");
+		Console.WriteLine("    [--by <name>]                 Audit identifier for any HITL responses");
+		Console.WriteLine("  attach <orchestration> <runId> Re-attach to an in-flight run (same flags as run)");
 		Console.WriteLine("  active                        List active executions");
 		Console.WriteLine("  cancel <execution-id>         Cancel a running execution");
 		Console.WriteLine();
