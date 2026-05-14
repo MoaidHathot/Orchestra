@@ -62,4 +62,26 @@ public class ScriptOrchestrationStep : OrchestrationStep
 	/// which can exceed OS command-line length limits.
 	/// </summary>
 	public string? Stdin { get; init; }
+
+	/// <summary>
+	/// Controls whether the executor injects a strict-mode prologue at the top
+	/// of the resolved script before launching the interpreter.
+	/// </summary>
+	/// <remarks>
+	/// <para>When <c>null</c> (the default), the executor opts in automatically for
+	/// PowerShell shells (<c>pwsh</c>, <c>powershell</c>) and opts out for every
+	/// other shell.</para>
+	/// <para>For PowerShell the injected prologue is a single line equivalent to:
+	/// <c>$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; trap { Write-Error -ErrorRecord $_; exit 1 };</c>
+	/// This converts non-terminating runtime errors and unbound-variable / missing-property
+	/// access into terminating errors that propagate as a non-zero exit code, so the
+	/// step is reported <see cref="ExecutionStatus.Failed"/> instead of silently
+	/// succeeding with empty stdout.</para>
+	/// <para>Set this explicitly to <c>false</c> to opt a single step out of the
+	/// prologue (for example, when the script intentionally writes to stderr while
+	/// expecting a zero exit code, or when <see cref="Set-StrictMode"/> would break
+	/// existing logic). Set to <c>true</c> to force injection on non-PowerShell shells
+	/// (currently a no-op — only PowerShell has a defined prologue).</para>
+	/// </remarks>
+	public bool? StrictMode { get; init; }
 }

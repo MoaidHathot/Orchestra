@@ -67,6 +67,9 @@ public sealed class ScriptStepTypeParser : IStepTypeParser
 			Stdin = root.TryGetProperty("stdin", out var stdin)
 				? stdin.GetString()
 				: null,
+			StrictMode = root.TryGetProperty("strictMode", out var strictMode) && strictMode.ValueKind is JsonValueKind.True or JsonValueKind.False
+				? strictMode.GetBoolean()
+				: null,
 			TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
 				? ts.GetInt32()
 				: null,

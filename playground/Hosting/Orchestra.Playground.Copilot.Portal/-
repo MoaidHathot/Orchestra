@@ -1,0 +1,709 @@
+{
+  "pipelineType": "cd",
+  "definitionId": 388576,
+  "definitionName": "ZTS-Official-Release",
+  "runs": [
+    {
+      "runId": 163819875,
+      "buildNumber": "20260512.6",
+      "status": "completed",
+      "result": "canceled",
+      "queueTime": "2026-05-12T07:05:58.039Z",
+      "startTime": "2026-05-12T07:06:15.763Z",
+      "finishTime": "2026-05-12T07:09:15.722Z",
+      "requestedFor": {
+        "displayName": "Moaid Hathot",
+        "uniqueName": "moaidhathot@microsoft.com",
+        "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+      },
+      "requestedBy": {
+        "displayName": "Moaid Hathot",
+        "uniqueName": "moaidhathot@microsoft.com",
+        "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+      },
+      "reason": "manual",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "5c190619201ed892b24bf5090d4876899bd93d6b",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15704156,
+          "title": "CloudTest: tolerate missing dcpctrl/dcpproc removed in Aspire.Hosting.Orchestration 13.x",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "uniqueName": "moaidhathot@microsoft.com",
+            "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+          },
+          "sourceRefName": "refs/heads/feature/moaid/dotnet-10",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "5c190619201ed892b24bf5090d4876899bd93d6b",
+          "message": "Merged PR 15704156: CloudTest: tolerate missing dcpctrl/dcpproc removed in Aspire.Hosting.Orchestration 13.x",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "email": "moaid.hathot@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/5c190619201ed892b24bf5090d4876899bd93d6b"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163819875",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 32,
+        "reasonCode": 1,
+        "retainedByRelease": false,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Test",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163818369,
+      "buildNumber": "20260512.5",
+      "status": "completed",
+      "result": "succeeded",
+      "queueTime": "2026-05-12T06:54:43.683Z",
+      "startTime": "2026-05-12T06:54:58.074Z",
+      "finishTime": "2026-05-12T08:33:15.786Z",
+      "requestedFor": {
+        "displayName": "Yair Galinsky",
+        "uniqueName": "yairgalinsky@microsoft.com",
+        "id": "078fa2c4-6ac5-697e-b83c-1b32223d2e54"
+      },
+      "requestedBy": {
+        "displayName": "Yair Galinsky",
+        "uniqueName": "yairgalinsky@microsoft.com",
+        "id": "078fa2c4-6ac5-697e-b83c-1b32223d2e54"
+      },
+      "reason": "manual",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "5c190619201ed892b24bf5090d4876899bd93d6b",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15704156,
+          "title": "CloudTest: tolerate missing dcpctrl/dcpproc removed in Aspire.Hosting.Orchestration 13.x",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "uniqueName": "moaidhathot@microsoft.com",
+            "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+          },
+          "sourceRefName": "refs/heads/feature/moaid/dotnet-10",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "5c190619201ed892b24bf5090d4876899bd93d6b",
+          "message": "Merged PR 15704156: CloudTest: tolerate missing dcpctrl/dcpproc removed in Aspire.Hosting.Orchestration 13.x",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "email": "moaid.hathot@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/5c190619201ed892b24bf5090d4876899bd93d6b"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163818369",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 2,
+        "reasonCode": 1,
+        "retainedByRelease": false,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Test",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163818295,
+      "buildNumber": "20260512.4",
+      "status": "completed",
+      "result": "canceled",
+      "queueTime": "2026-05-12T06:53:11.067Z",
+      "startTime": "2026-05-12T06:53:26.256Z",
+      "finishTime": "2026-05-12T07:06:55.456Z",
+      "requestedFor": {
+        "displayName": "Moaid Hathot",
+        "uniqueName": "moaidhathot@microsoft.com",
+        "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+      },
+      "requestedBy": {
+        "displayName": "Microsoft.VisualStudio.Services.TFS",
+        "uniqueName": "00000002-0000-8888-8000-000000000000@2c895908-04e0-4952-89fd-54b0046d6288",
+        "id": "00000002-0000-8888-8000-000000000000"
+      },
+      "reason": "resourceTrigger",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "5c190619201ed892b24bf5090d4876899bd93d6b",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15704156,
+          "title": "CloudTest: tolerate missing dcpctrl/dcpproc removed in Aspire.Hosting.Orchestration 13.x",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "uniqueName": "moaidhathot@microsoft.com",
+            "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+          },
+          "sourceRefName": "refs/heads/feature/moaid/dotnet-10",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "5c190619201ed892b24bf5090d4876899bd93d6b",
+          "message": "Merged PR 15704156: CloudTest: tolerate missing dcpctrl/dcpproc removed in Aspire.Hosting.Orchestration 13.x",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "email": "moaid.hathot@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/5c190619201ed892b24bf5090d4876899bd93d6b"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163818295",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 32,
+        "reasonCode": 1024,
+        "retainedByRelease": false,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Test",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163794687,
+      "buildNumber": "20260512.3",
+      "status": "completed",
+      "result": "succeeded",
+      "queueTime": "2026-05-12T02:04:49.801Z",
+      "startTime": "2026-05-12T02:05:04.401Z",
+      "finishTime": "2026-05-12T02:17:16.213Z",
+      "requestedFor": {
+        "displayName": "One Build Service (msazure)",
+        "uniqueName": "Build\\b32aa71e-8ed2-41b2-9d77-5bc261222004",
+        "id": "6b42a12b-f971-4934-8317-088f115259a2"
+      },
+      "requestedBy": {
+        "displayName": "One Build Service (msazure)",
+        "uniqueName": "Build\\b32aa71e-8ed2-41b2-9d77-5bc261222004",
+        "id": "6b42a12b-f971-4934-8317-088f115259a2"
+      },
+      "reason": "manual",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "d585da313d587f768d78cedd50f586831836b940",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15701626,
+          "title": "Upgrade the Dockerfile templates",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "uniqueName": "moaidhathot@microsoft.com",
+            "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+          },
+          "sourceRefName": "refs/heads/feature/moaid/dotnet-10",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "d585da313d587f768d78cedd50f586831836b940",
+          "message": "Merged PR 15701626: Upgrade the Dockerfile templates",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "email": "moaid.hathot@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/d585da313d587f768d78cedd50f586831836b940"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163794687",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 2,
+        "reasonCode": 1,
+        "retainedByRelease": false,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Test",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163787334,
+      "buildNumber": "20260512.2",
+      "status": "completed",
+      "result": "failed",
+      "queueTime": "2026-05-12T00:46:51.401Z",
+      "startTime": "2026-05-12T00:47:21.414Z",
+      "finishTime": "2026-05-12T02:16:51.191Z",
+      "requestedFor": {
+        "displayName": "Moaid Hathot",
+        "uniqueName": "moaidhathot@microsoft.com",
+        "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+      },
+      "requestedBy": {
+        "displayName": "Microsoft.VisualStudio.Services.TFS",
+        "uniqueName": "00000002-0000-8888-8000-000000000000@2c895908-04e0-4952-89fd-54b0046d6288",
+        "id": "00000002-0000-8888-8000-000000000000"
+      },
+      "reason": "resourceTrigger",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "d585da313d587f768d78cedd50f586831836b940",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15701626,
+          "title": "Upgrade the Dockerfile templates",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "uniqueName": "moaidhathot@microsoft.com",
+            "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+          },
+          "sourceRefName": "refs/heads/feature/moaid/dotnet-10",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "d585da313d587f768d78cedd50f586831836b940",
+          "message": "Merged PR 15701626: Upgrade the Dockerfile templates",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "email": "moaid.hathot@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/d585da313d587f768d78cedd50f586831836b940"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163787334",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 8,
+        "reasonCode": 1024,
+        "retainedByRelease": false,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Test",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163782718,
+      "buildNumber": "20260512.1",
+      "status": "completed",
+      "result": "succeeded",
+      "queueTime": "2026-05-12T00:07:55.413Z",
+      "startTime": "2026-05-12T00:10:01.403Z",
+      "finishTime": "2026-05-12T04:57:57.405Z",
+      "requestedFor": {
+        "displayName": "One Build Service (msazure)",
+        "uniqueName": "Build\\b32aa71e-8ed2-41b2-9d77-5bc261222004",
+        "id": "6b42a12b-f971-4934-8317-088f115259a2"
+      },
+      "requestedBy": {
+        "displayName": "One Build Service (msazure)",
+        "uniqueName": "Build\\b32aa71e-8ed2-41b2-9d77-5bc261222004",
+        "id": "6b42a12b-f971-4934-8317-088f115259a2"
+      },
+      "reason": "manual",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "d585da313d587f768d78cedd50f586831836b940",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15701626,
+          "title": "Upgrade the Dockerfile templates",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "uniqueName": "moaidhathot@microsoft.com",
+            "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+          },
+          "sourceRefName": "refs/heads/feature/moaid/dotnet-10",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "d585da313d587f768d78cedd50f586831836b940",
+          "message": "Merged PR 15701626: Upgrade the Dockerfile templates",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "email": "moaid.hathot@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/d585da313d587f768d78cedd50f586831836b940"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163782718",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 2,
+        "reasonCode": 1,
+        "retainedByRelease": false,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Test",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163756288,
+      "buildNumber": "20260511.4",
+      "status": "completed",
+      "result": "failed",
+      "queueTime": "2026-05-11T21:10:36.183Z",
+      "startTime": "2026-05-11T21:11:58.316Z",
+      "finishTime": "2026-05-11T22:29:31.152Z",
+      "requestedFor": {
+        "displayName": "Moaid Hathot",
+        "uniqueName": "moaidhathot@microsoft.com",
+        "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+      },
+      "requestedBy": {
+        "displayName": "Microsoft.VisualStudio.Services.TFS",
+        "uniqueName": "00000002-0000-8888-8000-000000000000@2c895908-04e0-4952-89fd-54b0046d6288",
+        "id": "00000002-0000-8888-8000-000000000000"
+      },
+      "reason": "resourceTrigger",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "a6ceee20e35e6cb72433ee89a13d981a3231e842",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 14508359,
+          "title": "Upgrading ZTS to .NET 10",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "uniqueName": "moaidhathot@microsoft.com",
+            "id": "2e2f5d05-65a4-6e59-9121-99cc2618e0be"
+          },
+          "sourceRefName": "refs/heads/feature/moaid/dotnet-10",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "a6ceee20e35e6cb72433ee89a13d981a3231e842",
+          "message": "Merged PR 14508359: Upgrading ZTS to .NET 10",
+          "author": {
+            "displayName": "Moaid Hathot",
+            "email": "moaid.hathot@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/a6ceee20e35e6cb72433ee89a13d981a3231e842"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163756288",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 8,
+        "reasonCode": 1024,
+        "retainedByRelease": false,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Test",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163696952,
+      "buildNumber": "20260511.3",
+      "status": "completed",
+      "result": "succeeded",
+      "queueTime": "2026-05-11T14:12:14.820Z",
+      "startTime": "2026-05-11T14:13:11.559Z",
+      "finishTime": "2026-05-11T15:23:48.039Z",
+      "requestedFor": {
+        "displayName": "Ruslan Gasanbekov",
+        "uniqueName": "rgasanbekov@microsoft.com",
+        "id": "4f56940c-ae23-654c-9f13-c72ba1188218"
+      },
+      "requestedBy": {
+        "displayName": "Ruslan Gasanbekov",
+        "uniqueName": "rgasanbekov@microsoft.com",
+        "id": "4f56940c-ae23-654c-9f13-c72ba1188218"
+      },
+      "reason": "manual",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "5ed9e0eda1a60780b64ad91fa4c73c21365dc258",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15689025,
+          "title": "upgrade azure linux image version in dotnet containers ",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Yair Galinsky",
+            "uniqueName": "yairgalinsky@microsoft.com",
+            "id": "078fa2c4-6ac5-697e-b83c-1b32223d2e54"
+          },
+          "sourceRefName": "refs/heads/feature/ygalinsky/upgrade_azurelinux_image",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "5ed9e0eda1a60780b64ad91fa4c73c21365dc258",
+          "message": "Merged PR 15689025: upgrade azure linux image version in dotnet containers",
+          "author": {
+            "displayName": "Yair Galinsky",
+            "email": "yairgalinsky@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/5ed9e0eda1a60780b64ad91fa4c73c21365dc258"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163696952",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 2,
+        "reasonCode": 1,
+        "retainedByRelease": true,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Production",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          "onebranch_release_ev2_sbom_validation",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163692003,
+      "buildNumber": "20260511.2",
+      "status": "completed",
+      "result": "succeeded",
+      "queueTime": "2026-05-11T13:19:15.791Z",
+      "startTime": "2026-05-11T13:20:02.936Z",
+      "finishTime": "2026-05-11T20:22:09.703Z",
+      "requestedFor": {
+        "displayName": "David Fineboym",
+        "uniqueName": "dfineboym@microsoft.com",
+        "id": "a8dfefe8-a22a-6ca7-9383-b3afa76e2987"
+      },
+      "requestedBy": {
+        "displayName": "David Fineboym",
+        "uniqueName": "dfineboym@microsoft.com",
+        "id": "a8dfefe8-a22a-6ca7-9383-b3afa76e2987"
+      },
+      "reason": "manual",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "5ed9e0eda1a60780b64ad91fa4c73c21365dc258",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15689025,
+          "title": "upgrade azure linux image version in dotnet containers ",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Yair Galinsky",
+            "uniqueName": "yairgalinsky@microsoft.com",
+            "id": "078fa2c4-6ac5-697e-b83c-1b32223d2e54"
+          },
+          "sourceRefName": "refs/heads/feature/ygalinsky/upgrade_azurelinux_image",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "5ed9e0eda1a60780b64ad91fa4c73c21365dc258",
+          "message": "Merged PR 15689025: upgrade azure linux image version in dotnet containers",
+          "author": {
+            "displayName": "Yair Galinsky",
+            "email": "yairgalinsky@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/5ed9e0eda1a60780b64ad91fa4c73c21365dc258"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163692003",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 2,
+        "reasonCode": 1,
+        "retainedByRelease": true,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Production",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          "onebranch_release_ev2_sbom_validation",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    },
+    {
+      "runId": 163674584,
+      "buildNumber": "20260511.1",
+      "status": "completed",
+      "result": "succeeded",
+      "queueTime": "2026-05-11T09:52:06.075Z",
+      "startTime": "2026-05-11T11:53:33.530Z",
+      "finishTime": "2026-05-11T13:01:27.738Z",
+      "requestedFor": {
+        "displayName": "Yair Galinsky",
+        "uniqueName": "yairgalinsky@microsoft.com",
+        "id": "078fa2c4-6ac5-697e-b83c-1b32223d2e54"
+      },
+      "requestedBy": {
+        "displayName": "Microsoft.VisualStudio.Services.TFS",
+        "uniqueName": "00000002-0000-8888-8000-000000000000@2c895908-04e0-4952-89fd-54b0046d6288",
+        "id": "00000002-0000-8888-8000-000000000000"
+      },
+      "reason": "resourceTrigger",
+      "sourceBranch": "refs/heads/main",
+      "sourceVersion": "5ed9e0eda1a60780b64ad91fa4c73c21365dc258",
+      "triggeredByBuild": null,
+      "triggeredByRelease": null,
+      "pullRequests": [
+        {
+          "pullRequestId": 15689025,
+          "title": "upgrade azure linux image version in dotnet containers ",
+          "status": "completed",
+          "mergeStatus": "succeeded",
+          "author": {
+            "displayName": "Yair Galinsky",
+            "uniqueName": "yairgalinsky@microsoft.com",
+            "id": "078fa2c4-6ac5-697e-b83c-1b32223d2e54"
+          },
+          "sourceRefName": "refs/heads/feature/ygalinsky/upgrade_azurelinux_image",
+          "targetRefName": "refs/heads/main"
+        }
+      ],
+      "commits": [
+        {
+          "commitId": "5ed9e0eda1a60780b64ad91fa4c73c21365dc258",
+          "message": "Merged PR 15689025: upgrade azure linux image version in dotnet containers",
+          "author": {
+            "displayName": "Yair Galinsky",
+            "email": "yairgalinsky@microsoft.com"
+          },
+          "url": "https://msazure.visualstudio.com/One/_git/ZTS/commit/5ed9e0eda1a60780b64ad91fa4c73c21365dc258"
+        }
+      ],
+      "webUrl": "https://msazure.visualstudio.com/b32aa71e-8ed2-41b2-9d77-5bc261222004/_build/results?buildId=163674584",
+      "rawEvidence": {
+        "statusCode": 2,
+        "resultCode": 2,
+        "reasonCode": 1024,
+        "retainedByRelease": false,
+        "repository": {
+          "id": "a8ec10fe-3ccb-40b2-8de6-96253c1ca802",
+          "name": "ZTS",
+          "type": "TfsGit"
+        },
+        "tags": [
+          "onebranch_build_type_official",
+          "onebranch_release_yaml",
+          "onebranch_release_Test",
+          "onebranch_service_tree_id_e573be8e-d2ff-4330-90c6-410b3f77f449",
+          "onebranch_release_category_standard",
+          ",,onebranch_1es_disabled,"
+        ]
+      }
+    }
+  ]
+}

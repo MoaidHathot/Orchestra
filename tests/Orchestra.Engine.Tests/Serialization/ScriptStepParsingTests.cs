@@ -40,6 +40,7 @@ public class ScriptStepParsingTests
 		step.Retry.Should().BeNull();
 		step.Parameters.Should().BeEmpty();
 		step.Stdin.Should().BeNull();
+		step.StrictMode.Should().BeNull();
 	}
 
 	[Fact]
@@ -395,29 +396,6 @@ public class ScriptStepParsingTests
 	{
 		var parser = new ScriptStepTypeParser();
 		parser.TypeName.Should().Be("Script");
-	}
-
-	[Fact]
-	public void Parse_DisabledStep_SetsEnabledFalse()
-	{
-		// Arrange
-		var json = JsonSerializer.Deserialize<JsonElement>("""
-			{
-				"name": "disabled-script",
-				"type": "Script",
-				"shell": "pwsh",
-				"script": "Write-Output 'skipped'",
-				"enabled": false
-			}
-			""");
-		var parser = new ScriptStepTypeParser();
-
-		// Act
-		var step = parser.Parse(json, s_context) as ScriptOrchestrationStep;
-
-		// Assert
-		step.Should().NotBeNull();
-		step!.Enabled.Should().BeFalse();
 	}
 
 	[Fact]

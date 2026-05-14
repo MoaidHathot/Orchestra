@@ -660,6 +660,10 @@
         "stdin": {
           "type": "string",
           "description": "Content to pipe to the script's standard input. Supports template expressions."
+        },
+        "strictMode": {
+          "type": "boolean",
+          "description": "Controls whether the executor injects a strict-mode prologue at the top of PowerShell scripts. When unset, the prologue is injected automatically for shell=pwsh|powershell so that non-terminating runtime errors and unbound variable / missing property access raise terminating errors (the script exits non-zero and the step is reported Failed instead of silently succeeding). Set to false to opt a step out (useful when the script intentionally writes to stderr and expects a zero exit code, or when Set-StrictMode breaks existing logic). Setting to true on non-PowerShell shells is currently a no-op."
         }
       },
       "oneOf": [

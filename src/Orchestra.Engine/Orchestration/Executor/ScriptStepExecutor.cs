@@ -35,7 +35,22 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		["node"] = new("node", ".js", []),
 	}.ToFrozenDictionary(StringComparer.OrdinalIgnoreCase);
 
-	public ScriptStepExecutor(
+	/// <summary>
+	/// Shells that opt in to strict-mode prologue injection by default.
+	/// </summary>
+	private static readonly FrozenSet<string> s_strictByDefaultShells = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+	{
+		"pwsh",
+		"powershell",
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	/// <summary>
+	/// PowerShell prologue injected at the very top of the resolved script when strict mode is active.
+	/// Kept to a single physical line so the user's script preserves its original line numbers in
+	/// runtime error messages (PowerShell reports line numbers from the .ps1 file as written).
+	/// </summary>
+	internal const string PowerShellStrictPrologue =
+		"$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; trap { Write-Error -ErrorRecord $_; exit 1 };";	public ScriptStepExecutor(
 		IOrchestrationReporter reporter,
 		ILogger<ScriptStepExecutor> logger)
 	{
@@ -74,8 +89,16 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 
 			if (scriptStep.Script is not null)
 			{
-				// Inline script: resolve templates, write to temp file
+				// Inline script: resolve templates, optionally prepend a strict-mode prologue,
+				// then write to a temp file.
 				var resolvedScript = TemplateResolver.Resolve(scriptStep.Script, context.Parameters, context, step.DependsOn, step);
+
+				if (ShouldInjectStrictPrologue(shell, scriptStep.StrictMode))
+				{
+					resolvedScript = InjectPowerShellStrictPrologue(resolvedScript);
+					LogStrictPrologueInjected(step.Name, shell);
+				}
+
 				tempScriptPath = Path.Combine(Path.GetTempPath(), $"orchestra-{Guid.NewGuid():N}{fileExtension}");
 				await File.WriteAllTextAsync(tempScriptPath, resolvedScript, cancellationToken);
 				scriptFilePath = tempScriptPath;
@@ -291,6 +314,258 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	}
 
 	/// <summary>
+	/// Determines whether a strict-mode prologue should be injected for the resolved script.
+	/// </summary>
+	/// <remarks>
+	/// When <paramref name="explicitOptIn"/> is non-null, the caller's choice always wins.
+	/// Otherwise the executor opts in by default for known PowerShell shells so that
+	/// non-terminating script errors no longer surface as silent successes (exit 0 + empty stdout).
+	/// </remarks>
+	internal static bool ShouldInjectStrictPrologue(string shell, bool? explicitOptIn)
+	{
+		if (explicitOptIn is bool decided)
+			return decided && s_strictByDefaultShells.Contains(shell);
+
+		return s_strictByDefaultShells.Contains(shell);
+	}
+
+	/// <summary>
+	/// Injects the PowerShell strict-mode prologue at the first valid statement-level
+	/// position in the script.
+	/// </summary>
+	/// <remarks>
+	/// <para>PowerShell requires that <c>#requires</c>, <c>using</c>, attribute declarations,
+	/// and the <c>param(...)</c> block come before any other statements. Injecting the
+	/// prologue at the literal top of the file would invalidate such scripts, so this
+	/// method scans past any leading prologue-incompatible elements and inserts the prologue
+	/// at the first safe position.</para>
+	/// <para>Scanning rules:</para>
+	/// <list type="bullet">
+	///   <item>Whitespace and line comments are skipped.</item>
+	///   <item><c>&lt;# ... #&gt;</c> block comments are skipped.</item>
+	///   <item><c>#requires</c> lines are skipped (whole line).</item>
+	///   <item><c>using namespace|module|assembly|type ...</c> lines are skipped (whole line).</item>
+	///   <item>Attribute declarations like <c>[CmdletBinding(...)]</c> / <c>[Alias(...)]</c> are skipped (matching brackets).</item>
+	///   <item><c>param(...)</c> blocks are skipped past their matching close paren.</item>
+	/// </list>
+	/// <para>If none of these are present at the top, the prologue is injected at offset 0.</para>
+	/// </remarks>
+	internal static string InjectPowerShellStrictPrologue(string userScript)
+	{
+		var insertOffset = FindPowerShellPrologueInsertOffset(userScript);
+
+		if (insertOffset == 0)
+			return PowerShellStrictPrologue + Environment.NewLine + userScript;
+
+		// Place the prologue on its own line. If we landed mid-line (rare), prefix with a newline
+		// so we don't fuse with the previous token.
+		var needsLeadingNewline = insertOffset > 0 && userScript[insertOffset - 1] != '\n';
+		var prefix = needsLeadingNewline ? Environment.NewLine : string.Empty;
+		var suffix = Environment.NewLine;
+
+		return userScript[..insertOffset] + prefix + PowerShellStrictPrologue + suffix + userScript[insertOffset..];
+	}
+
+	/// <summary>
+	/// Scans the script and returns the character offset at which the strict-mode
+	/// prologue can be safely inserted (i.e., after any leading <c>#requires</c>,
+	/// <c>using</c>, attribute, or <c>param(...)</c> block).
+	/// </summary>
+	private static int FindPowerShellPrologueInsertOffset(string script)
+	{
+		var i = 0;
+		var len = script.Length;
+		var lastSafeOffset = 0;
+
+		while (i < len)
+		{
+			// Skip whitespace and CRLF.
+			while (i < len && char.IsWhiteSpace(script[i]))
+				i++;
+
+			if (i >= len)
+				break;
+
+			// Line comment: # ... \n  (but not #requires, which is handled below).
+			if (script[i] == '#' && !IsRequiresDirective(script, i))
+			{
+				// Skip to end of line.
+				while (i < len && script[i] != '\n')
+					i++;
+
+				lastSafeOffset = i;
+				continue;
+			}
+
+			// Block comment: <# ... #>.
+			if (i + 1 < len && script[i] == '<' && script[i + 1] == '#')
+			{
+				i += 2;
+				while (i + 1 < len && !(script[i] == '#' && script[i + 1] == '>'))
+					i++;
+
+				if (i + 1 < len)
+					i += 2; // skip past '#>'
+
+				lastSafeOffset = i;
+				continue;
+			}
+
+			// #requires directive: skip the whole line.
+			if (IsRequiresDirective(script, i))
+			{
+				while (i < len && script[i] != '\n')
+					i++;
+
+				lastSafeOffset = i;
+				continue;
+			}
+
+			// using statement: 'using <kind> ...' — skip the whole line.
+			if (MatchesKeywordAt(script, i, "using"))
+			{
+				while (i < len && script[i] != '\n')
+					i++;
+
+				lastSafeOffset = i;
+				continue;
+			}
+
+			// Attribute or attribute-decorated param: '[...]'.
+			if (script[i] == '[')
+			{
+				var closeIndex = FindMatchingBracket(script, i, '[', ']');
+				if (closeIndex < 0)
+					break;
+
+				i = closeIndex + 1;
+				lastSafeOffset = i;
+				continue;
+			}
+
+			// param(...) block.
+			if (MatchesKeywordAt(script, i, "param"))
+			{
+				// Walk to the opening paren.
+				var parenStart = i + "param".Length;
+				while (parenStart < len && char.IsWhiteSpace(script[parenStart]))
+					parenStart++;
+
+				if (parenStart < len && script[parenStart] == '(')
+				{
+					var parenEnd = FindMatchingBracket(script, parenStart, '(', ')');
+					if (parenEnd < 0)
+						break;
+
+					i = parenEnd + 1;
+
+					// Consume the rest of the line that holds the closing paren so the
+					// injected prologue lands on its own physical line.
+					while (i < len && script[i] != '\n')
+						i++;
+
+					lastSafeOffset = i;
+					continue;
+				}
+
+				// 'param' keyword without an open paren — bail out and treat current
+				// position as the body start.
+				break;
+			}
+
+			// Anything else: this is the start of the script body. Stop here.
+			break;
+		}
+
+		return lastSafeOffset;
+	}
+
+	/// <summary>
+	/// Returns true if the script at the given offset begins the <c>#requires</c> directive.
+	/// </summary>
+	private static bool IsRequiresDirective(string script, int offset)
+	{
+		const string requires = "#requires";
+		if (offset + requires.Length > script.Length)
+			return false;
+
+		return string.Compare(script, offset, requires, 0, requires.Length, StringComparison.OrdinalIgnoreCase) == 0
+			&& (offset + requires.Length == script.Length
+				|| char.IsWhiteSpace(script[offset + requires.Length]));
+	}
+
+	/// <summary>
+	/// Returns true if the script matches <paramref name="keyword"/> at the given offset
+	/// followed by a whitespace, paren, or end of input.
+	/// </summary>
+	private static bool MatchesKeywordAt(string script, int offset, string keyword)
+	{
+		if (offset + keyword.Length > script.Length)
+			return false;
+
+		if (string.Compare(script, offset, keyword, 0, keyword.Length, StringComparison.OrdinalIgnoreCase) != 0)
+			return false;
+
+		if (offset + keyword.Length == script.Length)
+			return true;
+
+		var nextChar = script[offset + keyword.Length];
+		return char.IsWhiteSpace(nextChar) || nextChar == '(';
+	}
+
+	/// <summary>
+	/// Finds the offset of the bracket that closes the bracket at <paramref name="openIndex"/>.
+	/// Tracks string literals (both <c>"..."</c> and <c>'...'</c>) so brackets inside strings are
+	/// ignored. Returns -1 if no match is found.
+	/// </summary>
+	private static int FindMatchingBracket(string script, int openIndex, char open, char close)
+	{
+		var depth = 0;
+		var i = openIndex;
+		var len = script.Length;
+
+		while (i < len)
+		{
+			var c = script[i];
+
+			// Skip strings to avoid counting brackets inside them.
+			if (c == '"' || c == '\'')
+			{
+				var quote = c;
+				i++;
+				while (i < len)
+				{
+					if (script[i] == '`' && i + 1 < len)
+					{
+						i += 2; // backtick-escaped char
+						continue;
+					}
+					if (script[i] == quote)
+					{
+						i++;
+						break;
+					}
+					i++;
+				}
+				continue;
+			}
+
+			if (c == open)
+				depth++;
+			else if (c == close)
+			{
+				depth--;
+				if (depth == 0)
+					return i;
+			}
+
+			i++;
+		}
+
+		return -1;
+	}
+
+	/// <summary>
 	/// Builds a trace record for the script step so the viewer can display
 	/// the shell, script source, arguments, and output.
 	/// </summary>
@@ -373,6 +648,12 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		Level = LogLevel.Error,
 		Message = "Step '{StepName}' script file not found: '{ScriptFile}'")]
 	private partial void LogScriptFileNotFound(string stepName, string scriptFile);
+
+	[LoggerMessage(
+		EventId = 7,
+		Level = LogLevel.Debug,
+		Message = "Step '{StepName}' strict-mode prologue injected for shell '{Shell}'")]
+	private partial void LogStrictPrologueInjected(string stepName, string shell);
 
 	#endregion
 }

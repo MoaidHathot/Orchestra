@@ -24,7 +24,8 @@ public class ScriptStepExecutorTests
 		bool includeStdErr = false,
 		string? stdin = null,
 		string[]? dependsOn = null,
-		string[]? parameters = null) => new()
+		string[]? parameters = null,
+		bool? strictMode = null) => new()
 	{
 		Name = name,
 		Type = OrchestrationStepType.Script,
@@ -38,6 +39,7 @@ public class ScriptStepExecutorTests
 		Environment = environment ?? [],
 		IncludeStdErr = includeStdErr,
 		Stdin = stdin,
+		StrictMode = strictMode,
 	};
 
 	#region Success Scenarios
@@ -342,33 +344,43 @@ public class ScriptStepExecutorTests
 	[Fact]
 	public async Task ExecuteAsync_IncludeStdErr_CapturesBothStreams()
 	{
-		// Arrange
+		// Arrange — opt out of the strict-mode prologue so that pwsh's default
+		// non-terminating Write-Error behaviour is preserved (the script keeps
+		// running after Write-Error and pwsh exits 0). With strict mode (the
+		// default for pwsh) Write-Error would be promoted to a terminating
+		// error and exit non-zero; that scenario is exercised separately.
 		var executor = CreateExecutor();
 		var step = CreateScriptStep(
 			shell: "pwsh",
 			script: "Write-Output 'stdout-data'; Write-Error 'stderr-data'",
-			includeStdErr: true);
+			includeStdErr: true,
+			strictMode: false);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
 
-		// Assert — pwsh Write-Error causes non-zero exit so this may fail;
-		// adjust based on actual behavior (pwsh treats Write-Error as non-terminating)
-		// With -NoProfile -File, Write-Error writes to stderr but doesn't cause non-zero exit
-		// unless $ErrorActionPreference is set to 'Stop'
+		// Assert — with strictMode opt-out, pwsh emits the Write-Error record to
+		// stderr but exits 0, so the step succeeds and the captured content
+		// contains stdout.
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
 		result.Content.Should().Contain("stdout-data");
 	}
 
 	[Fact]
 	public async Task ExecuteAsync_TraceSeparatesStdoutAndStderr()
 	{
-		// Arrange
+		// Arrange — opt out of strict mode so writing to stderr directly via
+		// [Console]::Error.WriteLine doesn't trigger the trap (it doesn't write
+		// to the PowerShell error stream, but the trap injection still affects
+		// downstream behaviour, so we keep the opt-out for parity with the
+		// historical test contract).
 		var executor = CreateExecutor();
 		var step = CreateScriptStep(
 			shell: "pwsh",
 			script: "Write-Output 'stdout-trace'; [Console]::Error.WriteLine('stderr-trace')",
-			includeStdErr: true);
+			includeStdErr: true,
+			strictMode: false);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
@@ -385,12 +397,13 @@ public class ScriptStepExecutorTests
 	[Fact]
 	public async Task ExecuteAsync_ExcludeStdErr_OnlyCapturesStdout()
 	{
-		// Arrange
+		// Arrange — opt out of strict mode (see ExecuteAsync_IncludeStdErr_CapturesBothStreams).
 		var executor = CreateExecutor();
 		var step = CreateScriptStep(
 			shell: "pwsh",
 			script: "Write-Output 'visible'; [Console]::Error.WriteLine('hidden')",
-			includeStdErr: false);
+			includeStdErr: false,
+			strictMode: false);
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
 		// Act
@@ -653,6 +666,322 @@ public class ScriptStepExecutorTests
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
 		result.Content.Should().Contain("NO_COLOR=;");
 		result.Content.Should().Contain("TERM=xterm-256color");
+	}
+
+	#endregion
+
+	#region Strict-Mode Prologue (pwsh / powershell)
+
+	[Fact]
+	public void ShouldInjectStrictPrologue_PwshShell_Default_OptsIn()
+	{
+		ScriptStepExecutor.ShouldInjectStrictPrologue("pwsh", explicitOptIn: null).Should().BeTrue();
+		ScriptStepExecutor.ShouldInjectStrictPrologue("PWSH", explicitOptIn: null).Should().BeTrue();
+		ScriptStepExecutor.ShouldInjectStrictPrologue("powershell", explicitOptIn: null).Should().BeTrue();
+	}
+
+	[Fact]
+	public void ShouldInjectStrictPrologue_NonPowerShellShell_Default_OptsOut()
+	{
+		ScriptStepExecutor.ShouldInjectStrictPrologue("bash", explicitOptIn: null).Should().BeFalse();
+		ScriptStepExecutor.ShouldInjectStrictPrologue("python", explicitOptIn: null).Should().BeFalse();
+		ScriptStepExecutor.ShouldInjectStrictPrologue("node", explicitOptIn: null).Should().BeFalse();
+		ScriptStepExecutor.ShouldInjectStrictPrologue("unknown-shell", explicitOptIn: null).Should().BeFalse();
+	}
+
+	[Fact]
+	public void ShouldInjectStrictPrologue_ExplicitFalse_AlwaysOptsOut()
+	{
+		// Explicit opt-out must work even for the shells that would otherwise
+		// auto-opt-in. This is the documented escape hatch for legacy scripts.
+		ScriptStepExecutor.ShouldInjectStrictPrologue("pwsh", explicitOptIn: false).Should().BeFalse();
+		ScriptStepExecutor.ShouldInjectStrictPrologue("powershell", explicitOptIn: false).Should().BeFalse();
+		ScriptStepExecutor.ShouldInjectStrictPrologue("bash", explicitOptIn: false).Should().BeFalse();
+	}
+
+	[Fact]
+	public void ShouldInjectStrictPrologue_ExplicitTrue_NonPowerShell_NoOp()
+	{
+		// strictMode: true on bash/python is currently a no-op because the
+		// engine does not ship a prologue for those interpreters.
+		ScriptStepExecutor.ShouldInjectStrictPrologue("bash", explicitOptIn: true).Should().BeFalse();
+		ScriptStepExecutor.ShouldInjectStrictPrologue("python", explicitOptIn: true).Should().BeFalse();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshWriteError_StrictByDefault_ReturnsFailed()
+	{
+		// Arrange — by default for pwsh, the executor injects
+		//   $ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; trap { Write-Error -ErrorRecord $_; exit 1 };
+		// so Write-Error is promoted to a terminating error and pwsh exits 1.
+		// Previously the same script would silently exit 0 because Write-Error
+		// is non-terminating under default $ErrorActionPreference='Continue'.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "Write-Output 'before-error'; Write-Error 'strict-mode-error'");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("strict-mode-error");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshWriteError_StrictModeFalse_StillSucceeds()
+	{
+		// Arrange — opting out of strict mode restores the historical lenient behaviour.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "Write-Output 'before-error'; Write-Error 'should-be-non-terminating'",
+			strictMode: false);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Contain("before-error");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshGenericListInArraySubexpression_StrictByDefault_ReturnsFailed()
+	{
+		// Arrange — exact repro of the bug from production run 89e8cb96b915:
+		// PowerShell 7.6.1 on .NET 10 throws
+		//   "Argument types do not match"
+		// when evaluating @(<System.Collections.Generic.List[object]>). Under the
+		// pre-strict default pwsh exited 0 with empty stdout (silent failure);
+		// under strict mode the trap converts the error to a non-zero exit so
+		// the engine reports Failed and downstream steps are skipped.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: """
+				$L = New-Object System.Collections.Generic.List[object]
+				$L.Add('alpha')
+				$L.Add('beta')
+				$wrapped = @($L)
+				Write-Output "wrapped count: $($wrapped.Count)"
+				""");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — the failing line must surface as a Failed status with the
+		// PowerShell error text included in the ErrorMessage.
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("Argument types do not match");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshHealthyScript_StrictByDefault_Succeeds()
+	{
+		// Arrange — confirm the auto-prologue does not regress healthy scripts.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "Write-Output 'healthy'; @(1, 2, 3) | ForEach-Object { $_ * 2 }");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Contain("healthy");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshStrictMode_UserOverrideAtTopOfScript_RestoresContinue()
+	{
+		// Arrange — the prologue is injected before the user's script. The user can
+		// re-assert $ErrorActionPreference='Continue' and `Set-StrictMode -Off` to
+		// restore lenient behaviour for the remainder of the script. Since Write-Error
+		// is non-terminating under 'Continue', the trap from the prologue is never
+		// triggered and pwsh exits 0.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: """
+				$ErrorActionPreference = 'Continue'
+				Set-StrictMode -Off
+				Write-Output 'user-restored'
+				Write-Error 'user-allowed-stderr'
+				""");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Contain("user-restored");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_BashShell_NoPrologueInjected()
+	{
+		// Arrange — non-PowerShell shells must not receive the prologue. We assert
+		// this by running a bash script that echoes the file contents back to us;
+		// the first line should be the user's own first line, not a $-prefixed
+		// PowerShell statement.
+		if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS())
+			return; // bash isn't a guaranteed PATH entry on Windows CI hosts.
+
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "bash",
+			script: "head -n 1 \"$0\"");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Contain("head -n 1");
+		result.Content.Should().NotContain("$ErrorActionPreference");
+		result.Content.Should().NotContain("Set-StrictMode");
+	}
+
+	[Fact]
+	public void InjectPowerShellStrictPrologue_PlainScript_PrologueAtTop()
+	{
+		// Arrange
+		var input = "Write-Output 'hello'\nWrite-Output 'world'\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellStrictPrologue(input);
+
+		// Assert — prologue is the first non-empty line, user content follows untouched.
+		var lines = output.Split('\n', StringSplitOptions.None)
+			.Select(l => l.TrimEnd('\r'))
+			.ToArray();
+		lines[0].Should().Be(ScriptStepExecutor.PowerShellStrictPrologue);
+		lines[1].Should().Be("Write-Output 'hello'");
+		lines[2].Should().Be("Write-Output 'world'");
+	}
+
+	[Fact]
+	public void InjectPowerShellStrictPrologue_ParamBlock_PrologueAfterParam()
+	{
+		// Arrange — param(...) must be the first statement in a PowerShell script.
+		var input = "param($Name, $Greeting)\nWrite-Output \"$Greeting $Name\"\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellStrictPrologue(input);
+
+		// Assert — the param line is preserved at the top; prologue comes immediately after.
+		output.Should().StartWith("param($Name, $Greeting)");
+		output.Should().Contain(ScriptStepExecutor.PowerShellStrictPrologue);
+
+		var paramIndex = output.IndexOf("param(", StringComparison.Ordinal);
+		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellStrictPrologue, StringComparison.Ordinal);
+		var bodyIndex = output.IndexOf("Write-Output", StringComparison.Ordinal);
+
+		paramIndex.Should().BeLessThan(prologueIndex, "param() must precede the prologue");
+		prologueIndex.Should().BeLessThan(bodyIndex, "prologue must precede the script body");
+	}
+
+	[Fact]
+	public void InjectPowerShellStrictPrologue_ParamBlock_NestedParensInDefaults_HandledCorrectly()
+	{
+		// Arrange — defaults can contain nested parens. The bracket matcher must
+		// count depth so the prologue lands after the outermost ')'.
+		var input = "param($A = @(1, 2, 3), $B = (Get-Date))\nWrite-Output $A\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellStrictPrologue(input);
+
+		// Assert
+		output.Should().StartWith("param($A = @(1, 2, 3), $B = (Get-Date))");
+		var paramEnd = output.IndexOf("(Get-Date))", StringComparison.Ordinal) + "(Get-Date))".Length;
+		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellStrictPrologue, StringComparison.Ordinal);
+		prologueIndex.Should().BeGreaterThan(paramEnd);
+	}
+
+	[Fact]
+	public void InjectPowerShellStrictPrologue_CmdletBindingAttributeThenParam_PrologueAfterParam()
+	{
+		// Arrange — attribute decorations like [CmdletBinding()] precede param().
+		var input = "[CmdletBinding()]\nparam($X)\nWrite-Output $X\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellStrictPrologue(input);
+
+		// Assert
+		var attrIndex = output.IndexOf("[CmdletBinding()]", StringComparison.Ordinal);
+		var paramIndex = output.IndexOf("param(", StringComparison.Ordinal);
+		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellStrictPrologue, StringComparison.Ordinal);
+
+		attrIndex.Should().Be(0);
+		attrIndex.Should().BeLessThan(paramIndex);
+		paramIndex.Should().BeLessThan(prologueIndex);
+	}
+
+	[Fact]
+	public void InjectPowerShellStrictPrologue_RequiresAndUsing_PrologueAfterBoth()
+	{
+		// Arrange — #requires and using statements must precede other statements.
+		var input = "#requires -Version 7.0\nusing namespace System.Text.RegularExpressions\nWrite-Output 'body'\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellStrictPrologue(input);
+
+		// Assert
+		var requiresIndex = output.IndexOf("#requires", StringComparison.Ordinal);
+		var usingIndex = output.IndexOf("using namespace", StringComparison.Ordinal);
+		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellStrictPrologue, StringComparison.Ordinal);
+		var bodyIndex = output.IndexOf("Write-Output", StringComparison.Ordinal);
+
+		requiresIndex.Should().Be(0);
+		requiresIndex.Should().BeLessThan(usingIndex);
+		usingIndex.Should().BeLessThan(prologueIndex);
+		prologueIndex.Should().BeLessThan(bodyIndex);
+	}
+
+	[Fact]
+	public void InjectPowerShellStrictPrologue_LeadingComments_PrologueAfterComments()
+	{
+		// Arrange — comments before any executable statement must be preserved.
+		var input = "# License header\n# Copyright 2026\nWrite-Output 'body'\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellStrictPrologue(input);
+
+		// Assert
+		output.Should().StartWith("# License header");
+		output.IndexOf("# Copyright 2026", StringComparison.Ordinal).Should().BeGreaterThan(0);
+		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellStrictPrologue, StringComparison.Ordinal);
+		var bodyIndex = output.IndexOf("Write-Output", StringComparison.Ordinal);
+		prologueIndex.Should().BeLessThan(bodyIndex);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshScriptWithParamBlock_StrictByDefault_ParamStillBinds()
+	{
+		// Arrange — confirms that param() bindings still work end-to-end when
+		// the strict-mode prologue is auto-injected for pwsh.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: "param($Name, $Greeting) Write-Output \"$Greeting $Name\"",
+			arguments: ["World", "Hello"]);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Contain("Hello World");
 	}
 
 	#endregion
