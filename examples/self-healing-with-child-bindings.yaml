@@ -1,0 +1,127 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: self-healing-with-child-bindings
+description: >
+  Demonstrates the in-process self-healing pattern. A parent orchestration invokes a child
+  build-and-test orchestration via a `type: Orchestration` step in sync mode, then a
+  subsequent Prompt step inspects the child's per-step results using template bindings
+  (no MCP call required) to generate a repair prompt. Showcases the orchestration-step
+  accessors: {{stepName.executionId}}, {{stepName.status}}, {{stepName.errorMessage}},
+  {{stepName.steps.<childStep>.output}}, and {{stepName.steps.<childStep>.error}}.
+
+  Key takeaways:
+    1. Sync-mode Orchestration steps populate ChildOrchestrationInfo on every terminal
+       branch — including failed and cancelled child runs — so the parent can drill into
+       partial progress even when the child didn't fully succeed.
+    2. Templates access the child's step content IN-PROCESS, untruncated, with no MCP
+       round-trip. Ideal for short feedback loops.
+    3. The same bindings are available for both successful and failed child runs; the
+       error case is what makes self-healing controllers useful.
+version: "1.0.0"
+tags: ["example", "child-bindings", "self-healing", "orchestration-step"]
+defaultModel: claude-opus-4.6
+timeoutSeconds: 1800
+
+inputs:
+  task:
+    type: string
+    description: Natural-language description of what attempt-1 should produce.
+    required: true
+    multiline: true
+  projectPath:
+    type: string
+    description: Absolute path to the target project. Forwarded to the child orchestration.
+    required: true
+
+steps:
+  # Attempt 1: invoke the child orchestration synchronously. The parent step's result
+  # will carry ChildOrchestrationInfo regardless of the child's terminal status, so the
+  # downstream Prompt step can always drill in via template bindings.
+  - name: attempt-1
+    type: Orchestration
+    dependsOn: []
+    orchestration: build-and-test
+    mode: sync
+    timeoutSeconds: 600
+    parameters:
+      projectPath: "{{param.projectPath}}"
+      task: "{{param.task}}"
+
+  # Repair prompt: looks at the child's per-step data WITHOUT calling any MCP tool.
+  # All bindings here resolve from the in-memory ChildOrchestrationInfo populated by
+  # attempt-1 — content is untruncated, available for both succeeded and failed
+  # child runs, and works for every child step name we know about.
+  - name: build-repair-context
+    type: Prompt
+    dependsOn:
+      - attempt-1
+    model: claude-opus-4.6
+    parameters: []
+    systemPrompt: |
+      You are a code repair assistant. The previous attempt at the user's task has finished;
+      your job is to analyze what worked, what didn't, and produce a precise repair description
+      that a follow-up orchestration can act on.
+
+      Treat completed-but-failed steps as evidence (their outputs are still useful context).
+      Treat the failing step's error as the proximate cause unless the conversation history
+      reveals a deeper root cause.
+    userPrompt: |
+      ## Original task
+      {{param.task}}
+
+      ## Previous attempt summary
+
+      Child execution id: {{attempt-1.executionId}}
+      Child run status:   {{attempt-1.status}}
+      Top-level error:    {{attempt-1.errorMessage}}
+
+      ## Per-step evidence from the child run
+
+      Each block below is drilled directly from the child's step records via in-process
+      templates — no MCP call, no truncation.
+
+      ### Build step output (whatever the child's `build` step emitted)
+      ```
+      {{attempt-1.steps.build.output}}
+      ```
+
+      ### Test step error (whatever caused `test` to fail, if it did)
+      ```
+      {{attempt-1.steps.test.error}}
+      ```
+
+      ### Test step output (partial test results may still be present even on failure)
+      ```
+      {{attempt-1.steps.test.output}}
+      ```
+
+      ## Your output
+
+      Produce a JSON object with these fields:
+        - rootCause: one-sentence diagnosis of why the attempt failed
+        - reusableArtifacts: list of child-step outputs we can carry forward
+        - repairInstructions: ordered list of corrective actions for the next attempt
+
+      Do not invent steps that the child didn't run. Stick to evidence visible above.
+
+  # Final formatted summary suitable for surfacing in Portal / SSE / CLI. Also uses the
+  # child-result accessor to embed the full child structure as JSON for downstream tools.
+  - name: format-summary
+    type: Transform
+    dependsOn:
+      - build-repair-context
+    parameters: []
+    template: |
+      # Self-healing analysis — run {{orchestration.runId}}
+
+      **Child run:** {{attempt-1.executionId}} ({{attempt-1.status}})
+      **Top-level error:** {{attempt-1.errorMessage}}
+
+      ## Repair plan (from the analysis step)
+
+      {{build-repair-context.output}}
+
+      ## Raw child run (full JSON snapshot, for downstream tooling)
+
+      ```json
+      {{attempt-1.childResult}}
+      ```

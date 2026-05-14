@@ -1,0 +1,98 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: mcp-detail-modes-and-paging
+description: >
+  Demonstrates the data-plane MCP's response detail levels (summary / compact / full) and the
+  get_orchestration_step pagination interface. A single Prompt step makes three calls against
+  the SAME previously-executed run to illustrate the trade-offs and explain when to use each.
+
+  Key takeaways:
+    1. detail="summary" returns metadata only (no content). Use when you're scanning runs
+       for a specific error pattern and don't yet know which step you need.
+    2. detail="compact" (default) truncates per-step content to ~8000 chars and the run summary
+       to ~16000 chars. Marks truncation explicitly via `truncated: true` and `contentLength`.
+    3. detail="full" returns everything untruncated. Use sparingly — responses can exceed
+       100 KB easily.
+    4. When a step's content was truncated, get_orchestration_step lets you fetch the full
+       body in chunks (offset + length) or in one shot (length: -1).
+version: "1.0.0"
+tags: ["example", "mcp", "detail-modes", "paging"]
+defaultModel: claude-opus-4.6
+timeoutSeconds: 600
+
+mcps:
+  - name: orchestra
+    type: remote
+    endpoint: "{{server.url}}/mcp/data"
+
+inputs:
+  targetExecutionId:
+    type: string
+    description: >
+      Execution id of a previously-completed run to inspect. Find one via
+      `list_runs` (control plane) or `list_child_runs` (data plane, scoped to your subtree).
+    required: true
+  largeStepName:
+    type: string
+    description: >
+      Name of a step in the target run whose content you expect to be large (this is what
+      the demo will fetch with paging).
+    required: true
+
+steps:
+  - name: tour
+    type: Prompt
+    dependsOn: []
+    model: claude-opus-4.6
+    mcps:
+      - orchestra
+    parameters: []
+    timeoutSeconds: 300
+    systemPrompt: |
+      You are a documentation assistant. Your job is to demonstrate the three response detail
+      levels of `get_orchestration_status` and the paginated `get_orchestration_step` tool,
+      then produce a human-readable comparison of the three approaches.
+
+      Use these tool calls IN THIS ORDER against the supplied execution id:
+
+      Step 1 — Summary view:
+        get_orchestration_status(executionId, detail="summary")
+        Observations to record:
+          - `stepResults[*].content` is null / omitted (the WhenWritingNull serializer drops it).
+          - `stepResults[*].contentLength` and `truncated` ARE present, so you know which steps
+            have meaningful content without paying for it.
+          - `summary` (the run's finalContent) is also omitted.
+        When to use: scanning many runs to find ones that match a pattern in errorMessage
+        or failedStepName, without paying the bandwidth for content.
+
+      Step 2 — Compact view (default):
+        get_orchestration_status(executionId, detail="compact")
+        Observations to record:
+          - `stepResults[*].content` is truncated at ~8000 chars per step.
+          - `truncated: true` and a `... (truncated)` marker are present when truncation occurred.
+          - Top-level `summary` (finalContent) truncates at ~16000 chars.
+        When to use: default for human-readable inspection in chat/CLI/Portal.
+
+      Step 3 — Full view:
+        get_orchestration_status(executionId, detail="full")
+        Observations to record:
+          - `stepResults[*].content` is the full untruncated text. `truncated: false`.
+          - Response payload can be very large. Includes a `responseHint` field warning the
+            consumer.
+        When to use: when you need everything in one shot and your context can absorb it.
+
+      Step 4 — Paged single-step read:
+        get_orchestration_step(executionId, stepName="{{param.largeStepName}}", offset=0, length=8000)
+        Then call again with offset=8000, length=8000 if `truncated: true`.
+        Eventually call with length=-1 to read whatever remains.
+        Observations to record:
+          - The `slice` object reports `totalLength` so you know how many bytes remain.
+          - The active-runs path: if the targeted run is still in flight, the response carries
+            `source: "active"` and `runStatus: "running"`. If the step itself is in flight you
+            get a structured `error: "step-in-flight"` response with `completedStepNames` so
+            you can pick a different sibling to drill into.
+
+      Finally, produce a comparison table summarizing when to reach for each approach.
+    userPrompt: |
+      Inspect run {{param.targetExecutionId}} and demonstrate the three detail levels plus
+      the paginated step read for step `{{param.largeStepName}}`. Produce a markdown report
+      with a comparison table and concrete recommendations.

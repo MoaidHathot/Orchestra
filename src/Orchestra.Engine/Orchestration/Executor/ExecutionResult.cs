@@ -75,6 +75,15 @@ public class ExecutionResult
 	public StepErrorCategory? ErrorCategory { get; init; }
 
 	/// <summary>
+	/// Set only for steps of type <see cref="OrchestrationStepType.Orchestration"/>.
+	/// Carries the child run's execution id, per-step results, error message, and
+	/// cancellation details, enabling parent templates to drill into the child's data
+	/// via <c>{{stepName.executionId}}</c>, <c>{{stepName.steps.&lt;childStep&gt;.output}}</c>,
+	/// etc. Null for all other step types.
+	/// </summary>
+	public ChildOrchestrationInfo? ChildOrchestrationInfo { get; init; }
+
+	/// <summary>
 	/// When true, signals that the entire orchestration should complete immediately.
 	/// Set by the orchestra_complete engine tool.
 	/// </summary>
@@ -108,7 +117,8 @@ public class ExecutionResult
 		AvailableModelInfo? requestedModelInfo = null,
 		AvailableModelInfo? selectedModelInfo = null,
 		AvailableModelInfo? actualModelInfo = null,
-		string[]? savedFiles = null) => new()
+		string[]? savedFiles = null,
+		ChildOrchestrationInfo? childOrchestrationInfo = null) => new()
 	{
 		Content = content,
 		Status = ExecutionStatus.Succeeded,
@@ -124,6 +134,7 @@ public class ExecutionResult
 		Trace = trace,
 		RetryHistory = retryHistory,
 		SavedFiles = savedFiles ?? [],
+		ChildOrchestrationInfo = childOrchestrationInfo,
 	};
 
 	public static ExecutionResult Failed(
@@ -138,7 +149,8 @@ public class ExecutionResult
 		AvailableModelInfo? requestedModelInfo = null,
 		AvailableModelInfo? selectedModelInfo = null,
 		AvailableModelInfo? actualModelInfo = null,
-		string[]? savedFiles = null) => new()
+		string[]? savedFiles = null,
+		ChildOrchestrationInfo? childOrchestrationInfo = null) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Failed,
@@ -154,6 +166,7 @@ public class ExecutionResult
 		ErrorCategory = errorCategory,
 		RetryHistory = retryHistory,
 		SavedFiles = savedFiles ?? [],
+		ChildOrchestrationInfo = childOrchestrationInfo,
 	};
 
 	public static ExecutionResult Skipped(string reason) => new()

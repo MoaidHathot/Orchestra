@@ -3,6 +3,7 @@
   "$id": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json",
   "title": "Orchestra Orchestration",
   "description": "Schema for Orchestra orchestration definition files (.json and .yaml). Defines a DAG of steps (Prompt, Http, Transform, Command, Script, Orchestration) with triggers, MCP servers, subagents, retry policies, and template expressions.",
+  "$comment": "Template expressions use the {{namespace.property}} syntax. Recognized namespaces: param.<name>, vars.<name>, env.<VAR>, orchestration.{name|version|runId|startedAt|tempDir|sourcePath|sourceDirectory}, step.{name|type}, server.url, and <stepName>.{output|rawOutput|files|files[N]}. For steps of type Orchestration the referenced step additionally supports: <stepName>.{executionId|status|errorMessage|completionReason|childResult|steps} and <stepName>.steps.<childStepName>.{output|rawOutput|error|status|files|files[N]}. This schema cannot semantically validate template targets (e.g., that the referenced step exists or is reachable via DependsOn); the C# TemplateExpressionValidator does that at orchestration registration time. See docs/engine.md#template-expressions for the authoritative reference.",
   "type": "object",
   "required": ["name", "description", "steps"],
   "additionalProperties": false,
@@ -295,7 +296,11 @@
         "retry": true,
         "systemPrompt": {
           "type": "string",
-          "description": "System prompt text sent to the LLM. Mutually exclusive with systemPromptFile."
+          "description": "System prompt text sent to the LLM. Mutually exclusive with systemPromptFile. Supports template expressions: {{param.X}}, {{vars.X}}, {{env.X}}, {{orchestration.X}}, {{server.url}}, {{step.name}}, {{stepName.output|rawOutput|files|files[N]}}. For Orchestration step dependencies additionally: {{stepName.executionId|status|errorMessage|completionReason|childResult|steps|steps.<childStep>.{output|rawOutput|error|status|files|files[N]}}.",
+          "examples": [
+            "You are an expert reviewer for {{param.repoName}}.",
+            "Use the context from {{fetch-data.output}} to answer."
+          ]
         },
         "systemPromptFile": {
           "type": "string",
@@ -303,7 +308,11 @@
         },
         "userPrompt": {
           "type": "string",
-          "description": "User prompt text sent to the LLM. Supports template expressions like {{stepName.output}} and {{param.name}}. Mutually exclusive with userPromptFile."
+          "description": "User prompt text sent to the LLM. Supports template expressions: {{param.X}}, {{vars.X}}, {{env.X}}, {{orchestration.X}}, {{server.url}}, {{step.name}}, {{stepName.output|rawOutput|files|files[N]}}. For Orchestration step dependencies additionally: {{stepName.executionId|status|errorMessage|completionReason|childResult|steps|steps.<childStep>.{output|rawOutput|error|status|files|files[N]}}. Mutually exclusive with userPromptFile.",
+          "examples": [
+            "Process this content: {{fetch.output}}",
+            "Previous attempt {{attempt-1.executionId}} failed with: {{attempt-1.steps.build.error}}"
+          ]
         },
         "userPromptFile": {
           "type": "string",
@@ -547,8 +556,12 @@
         "retry": true,
         "template": {
           "type": "string",
-          "description": "Template string with {{...}} expressions that are replaced at runtime. Supports {{stepName.output}}, {{param.name}}, {{vars.name}}, etc.",
-          "minLength": 1
+          "description": "Template string with {{...}} expressions resolved at runtime. Supports {{param.X}}, {{vars.X}}, {{env.X}}, {{orchestration.X}}, {{server.url}}, {{step.name}}, {{stepName.output|rawOutput|files|files[N]}}. For Orchestration step dependencies additionally: {{stepName.executionId|status|errorMessage|completionReason|childResult|steps|steps.<childStep>.{output|rawOutput|error|status|files|files[N]}}.",
+          "minLength": 1,
+          "examples": [
+            "# Summary\n\n{{analyze.output}}",
+            "Child run: {{invoke.executionId}} ({{invoke.status}})\nFailed step error: {{invoke.steps.build.error}}"
+          ]
         },
         "contentType": {
           "type": "string",
@@ -688,17 +701,26 @@
         "dependsOn": true,
         "parameters": {
           "type": "object",
-          "description": "Child orchestration parameters. Values support template expressions and are passed as strings at runtime.",
+          "description": "Child orchestration parameters. Values support template expressions resolved against the PARENT run's context: {{param.X}}, {{vars.X}}, {{env.X}}, {{orchestration.X}}, {{stepName.output|rawOutput|files|files[N]}}, and (for Orchestration step dependencies) {{stepName.executionId|status|errorMessage|completionReason|childResult|steps|steps.<childStep>.<leaf>}}. Values are passed to the child as strings at runtime.",
           "additionalProperties": true,
-          "default": {}
+          "default": {},
+          "examples": [
+            { "projectPath": "{{param.projectPath}}", "dryRun": "true" },
+            { "previousError": "{{attempt-1.steps.build.error}}", "previousOutput": "{{attempt-1.steps.codegen.output}}" }
+          ]
         },
         "enabled": true,
         "timeoutSeconds": true,
         "retry": true,
         "orchestration": {
           "type": "string",
-          "description": "Registered child orchestration name or ID to invoke. Supports template expressions.",
-          "minLength": 1
+          "description": "Registered child orchestration name or ID to invoke. Supports template expressions for dynamic selection: {{param.X}}, {{vars.X}}, {{env.X}}, {{orchestration.X}}, {{stepName.output|rawOutput}}, {{server.url}}.",
+          "minLength": 1,
+          "examples": [
+            "code-review-pipeline",
+            "{{param.targetOrchestration}}",
+            "ephermal-{{orchestration.runId}}-attempt-1"
+          ]
         },
         "mode": {
           "type": "string",

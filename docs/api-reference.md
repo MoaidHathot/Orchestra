@@ -444,10 +444,24 @@ GET /api/history/{orchestrationName}/{runId}
         "finalResponse": "Research results...",
         "outputHandlerResult": null
       }
+    },
+    {
+      "name": "invoke-child",
+      "status": "Succeeded",
+      "content": "Child final output",
+      "childExecutionId": "child-exec-id-99",
+      "childOrchestrationName": "child-orch",
+      "childStatus": "succeeded"
     }
   ]
 }
 ```
+
+> **Note on `childExecutionId` / `childOrchestrationName` / `childStatus`**: these
+> fields are only present on steps of type `Orchestration` (steps that invoked
+> another orchestration). Portal renders them as a clickable badge that navigates
+> to the child run's history view. They are omitted entirely for steps that did
+> not launch a child orchestration.
 
 ### Delete Run
 
@@ -480,7 +494,11 @@ GET /api/active
       "parameters": {"topic": "AI"},
       "totalSteps": 3,
       "completedSteps": 1,
-      "currentStep": "analyze"
+      "currentStep": "analyze",
+      "parentExecutionId": "root-exec-id-xyz",
+      "parentStepName": "invoke-research",
+      "rootExecutionId": "root-exec-id-xyz",
+      "nestingDepth": 1
     }
   ],
   "pending": [
@@ -497,6 +515,12 @@ GET /api/active
   "totalPending": 1
 }
 ```
+
+> **Lineage fields** (`parentExecutionId`, `parentStepName`, `rootExecutionId`, `nestingDepth`)
+> are present only for nested executions (i.e., when a parent orchestration launched
+> this run via an `Orchestration` step or via the `invoke_orchestration` MCP tool).
+> Top-level executions omit them. Observers can use these to render "running inside
+> chain X" or to scope the data-plane `list_child_runs` tool to the caller's tree.
 
 ### Cancel Execution
 

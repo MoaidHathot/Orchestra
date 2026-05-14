@@ -78,6 +78,20 @@ public static partial class TemplateExpressionValidator
 		new(["output", "rawoutput", "files"], StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
+	/// Accessors that are only meaningful on steps of type <see cref="OrchestrationStepType.Orchestration"/>.
+	/// They drill into a child run's data (executionId, status, errorMessage, etc.) via the
+	/// <see cref="ExecutionResult.ChildOrchestrationInfo"/> populated by <c>OrchestrationStepExecutor</c>.
+	/// </summary>
+	private static readonly HashSet<string> s_validOrchestrationStepAccessors =
+		new(["executionId", "status", "errorMessage", "completionReason", "childResult", "steps"], StringComparer.OrdinalIgnoreCase);
+
+	/// <summary>
+	/// Leaves accepted at the end of <c>{{stepName.steps.&lt;childStepName&gt;.&lt;leaf&gt;}}</c>.
+	/// </summary>
+	private static readonly HashSet<string> s_validChildStepLeaves =
+		new(["output", "rawoutput", "error", "status", "files"], StringComparer.OrdinalIgnoreCase);
+
+	/// <summary>
 	/// Parse-time validation: checks all template expressions for structural correctness.
 	/// Does NOT require runtime context (no parameters, no environment).
 	/// </summary>
@@ -85,6 +99,13 @@ public static partial class TemplateExpressionValidator
 	{
 		var result = new TemplateValidationResult();
 		var stepNames = new HashSet<string>(orchestration.Steps.Select(s => s.Name), StringComparer.OrdinalIgnoreCase);
+
+		// Map step name -> step type so we can gate orchestration-step accessors
+		// (executionId, steps.*, etc.) to only steps of type Orchestration.
+		var stepTypes = orchestration.Steps.ToDictionary(
+			s => s.Name,
+			s => s.Type,
+			StringComparer.OrdinalIgnoreCase);
 
 		// Collect all declared parameter names:
 		// - From orchestration-level Inputs (if defined, this is the authoritative source)
@@ -107,7 +128,7 @@ public static partial class TemplateExpressionValidator
 		foreach (var (varName, varValue) in orchestration.Variables)
 		{
 			ValidateExpressionsInField(result, varValue, null, $"Variables[{varName}]",
-				allParamNames, orchestration.Variables, stepNames, reachability,
+				allParamNames, orchestration.Variables, stepNames, stepTypes, reachability,
 				isStaticOnlyContext: true);
 		}
 
@@ -115,14 +136,14 @@ public static partial class TemplateExpressionValidator
 		for (var i = 0; i < orchestration.Mcps.Length; i++)
 		{
 			ValidateMcpExpressions(result, orchestration.Mcps[i], null,
-				$"Mcps[{i}]", allParamNames, orchestration.Variables, stepNames, reachability);
+				$"Mcps[{i}]", allParamNames, orchestration.Variables, stepNames, stepTypes, reachability);
 		}
 
 		// 3. Validate each step's resolvable fields
 		foreach (var step in orchestration.Steps)
 		{
 			ValidateStepExpressions(result, step, allParamNames, orchestration.Variables,
-				stepNames, reachability);
+				stepNames, stepTypes, reachability);
 		}
 
 		// 4. Detect circular variable references
@@ -217,6 +238,7 @@ public static partial class TemplateExpressionValidator
 		HashSet<string> allParamNames,
 		Dictionary<string, string> variables,
 		HashSet<string> stepNames,
+		Dictionary<string, OrchestrationStepType> stepTypes,
 		Dictionary<string, HashSet<string>> reachability,
 		bool isStaticOnlyContext)
 	{
@@ -227,7 +249,7 @@ public static partial class TemplateExpressionValidator
 		{
 			var expr = match.Groups["expr"].Value.Trim();
 			ValidateSingleExpression(result, expr, stepName, fieldName,
-				allParamNames, variables, stepNames, reachability, isStaticOnlyContext);
+				allParamNames, variables, stepNames, stepTypes, reachability, isStaticOnlyContext);
 		}
 	}
 
@@ -242,6 +264,7 @@ public static partial class TemplateExpressionValidator
 		HashSet<string> allParamNames,
 		Dictionary<string, string> variables,
 		HashSet<string> stepNames,
+		Dictionary<string, OrchestrationStepType> stepTypes,
 		Dictionary<string, HashSet<string>> reachability,
 		bool isStaticOnlyContext)
 	{
@@ -336,7 +359,11 @@ public static partial class TemplateExpressionValidator
 			var isStepOutput = s_validStepOutputSuffixes.Contains(property)
 				|| FilesIndexPattern().IsMatch(property);
 
-			if (isStepOutput)
+			// Orchestration-step accessors: only valid on Orchestration steps
+			var isOrchestrationStepAccessor = s_validOrchestrationStepAccessors.Contains(property)
+				|| property.StartsWith("steps.", StringComparison.OrdinalIgnoreCase);
+
+			if (isStepOutput || isOrchestrationStepAccessor)
 			{
 				if (isStaticOnlyContext)
 				{
@@ -363,6 +390,45 @@ public static partial class TemplateExpressionValidator
 						$"Step '{refStepName}' is not reachable via DependsOn from step '{stepName}'. " +
 						$"Add it as a direct or transitive dependency.",
 						stepName, fieldName, fullExpr));
+					return;
+				}
+
+				if (isOrchestrationStepAccessor)
+				{
+					// Orchestration-step accessors require that the target step is of type
+					// Orchestration; on any other step type, the parent-step's ChildOrchestrationInfo
+					// would be null and the binding would silently fail. Catch that here.
+					if (stepTypes.TryGetValue(refStepName, out var refType)
+						&& refType != OrchestrationStepType.Orchestration)
+					{
+						result.Errors.Add(new TemplateValidationError(
+							$"Accessor '{property}' is only available on steps of type 'Orchestration'. " +
+							$"Step '{refStepName}' is of type '{refType}'. " +
+							$"Valid accessors for non-orchestration steps: output, rawOutput, files, files[N].",
+							stepName, fieldName, fullExpr));
+						return;
+					}
+
+					// Validate the {{stepName.steps.<childStep>.<leaf>}} shape's leaf.
+					if (property.StartsWith("steps.", StringComparison.OrdinalIgnoreCase))
+					{
+						var tail = property["steps.".Length..];
+						var nextDot = tail.IndexOf('.');
+						if (nextDot >= 0)
+						{
+							var leaf = tail[(nextDot + 1)..];
+							var isValidLeaf = s_validChildStepLeaves.Contains(leaf)
+								|| FilesIndexPattern().IsMatch(leaf);
+							if (!isValidLeaf)
+							{
+								result.Errors.Add(new TemplateValidationError(
+									$"Unknown child-step accessor '{leaf}'. " +
+									$"Valid leaves: output, rawOutput, error, status, files, files[N].",
+									stepName, fieldName, fullExpr));
+								return;
+							}
+						}
+					}
 				}
 				return;
 			}
@@ -370,9 +436,13 @@ public static partial class TemplateExpressionValidator
 			// Unknown property on a step name — could be a typo
 			if (stepNames.Contains(refStepName))
 			{
+				var stepType = stepTypes.TryGetValue(refStepName, out var t) ? t : (OrchestrationStepType?)null;
+				var validList = stepType == OrchestrationStepType.Orchestration
+					? "output, rawOutput, files, files[N], executionId, status, errorMessage, completionReason, childResult, steps, steps.<childStepName>.{output|rawOutput|error|status|files|files[N]}"
+					: "output, rawOutput, files, files[N]";
 				result.Errors.Add(new TemplateValidationError(
 					$"Unknown output property '{property}' on step '{refStepName}'. " +
-					$"Valid properties: output, rawOutput, files, files[N].",
+					$"Valid properties: {validList}.",
 					stepName, fieldName, fullExpr));
 				return;
 			}
@@ -410,12 +480,13 @@ public static partial class TemplateExpressionValidator
 		HashSet<string> allParamNames,
 		Dictionary<string, string> variables,
 		HashSet<string> stepNames,
+		Dictionary<string, OrchestrationStepType> stepTypes,
 		Dictionary<string, HashSet<string>> reachability)
 	{
 		foreach (var (fieldName, value) in GetStepFields(step))
 		{
 			ValidateExpressionsInField(result, value, step.Name, fieldName,
-				allParamNames, variables, stepNames, reachability,
+				allParamNames, variables, stepNames, stepTypes, reachability,
 				isStaticOnlyContext: false);
 		}
 
@@ -425,7 +496,7 @@ public static partial class TemplateExpressionValidator
 			for (var i = 0; i < promptStep.Mcps.Length; i++)
 			{
 				ValidateMcpExpressions(result, promptStep.Mcps[i], step.Name,
-					$"Mcps[{i}]", allParamNames, variables, stepNames, reachability);
+					$"Mcps[{i}]", allParamNames, variables, stepNames, stepTypes, reachability);
 			}
 
 			// Validate subagent MCPs (static-only context)
@@ -435,7 +506,7 @@ public static partial class TemplateExpressionValidator
 				for (var mi = 0; mi < subagent.Mcps.Length; mi++)
 				{
 					ValidateMcpExpressions(result, subagent.Mcps[mi], step.Name,
-						$"Subagents[{si}].Mcps[{mi}]", allParamNames, variables, stepNames, reachability);
+						$"Subagents[{si}].Mcps[{mi}]", allParamNames, variables, stepNames, stepTypes, reachability);
 				}
 			}
 		}
@@ -452,12 +523,13 @@ public static partial class TemplateExpressionValidator
 		HashSet<string> allParamNames,
 		Dictionary<string, string> variables,
 		HashSet<string> stepNames,
+		Dictionary<string, OrchestrationStepType> stepTypes,
 		Dictionary<string, HashSet<string>> reachability)
 	{
 		foreach (var (fieldName, value) in GetMcpFields(mcp))
 		{
 			ValidateExpressionsInField(result, value, stepName, $"{fieldPrefix}.{fieldName}",
-				allParamNames, variables, stepNames, reachability,
+				allParamNames, variables, stepNames, stepTypes, reachability,
 				isStaticOnlyContext: true);
 		}
 	}

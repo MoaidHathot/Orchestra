@@ -1767,4 +1767,63 @@ public class OrchestrationExecutorTests
 	}
 
 	#endregion
+
+	#region Mid-run step publication
+
+	[Fact]
+	public async Task ExecuteAsync_PublishesEachCompletedStepRecord_ViaReporter()
+	{
+		// Verifies the engine-side wiring that makes mid-run get_orchestration_step work:
+		// every time the executor finalizes a step's StepRunRecord it must call
+		// reporter.PublishStepRecord(key, record) so host-side surfaces can expose the
+		// record before the orchestration's run.json is written. Without this, the
+		// data-plane MCP tool would still only see completed runs.
+		var published = new List<(string Key, StepRunRecord Record)>();
+		var capturingReporter = Substitute.For<IOrchestrationReporter>();
+		capturingReporter
+			.When(r => r.PublishStepRecord(Arg.Any<string>(), Arg.Any<StepRunRecord>()))
+			.Do(call => published.Add((call.ArgAt<string>(0), call.ArgAt<StepRunRecord>(1))));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("output");
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, capturingReporter, _loggerFactory);
+
+		var result = await executor.ExecuteAsync(TestOrchestrations.LinearChain());
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		// LinearChain has steps A → B → C; each must have a published record under its
+		// canonical step-name key.
+		var publishedKeys = published.Select(p => p.Key).ToHashSet();
+		publishedKeys.Should().Contain("A");
+		publishedKeys.Should().Contain("B");
+		publishedKeys.Should().Contain("C",
+			"every completed step must publish its record so mid-run consumers can drill in");
+		published.Should().OnlyContain(
+			p => p.Record.Status == ExecutionStatus.Succeeded,
+			"each published record's status must match the step's terminal outcome");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PublishesFailedStepRecord_SoMidRunConsumersSeeTheError()
+	{
+		// Same wiring on the failure path. A self-healing controller polling a sibling
+		// orchestration via get_orchestration_step needs to see the failure record AS
+		// SOON AS the step records it — not after the whole orchestration terminates.
+		var published = new List<StepRunRecord>();
+		var capturingReporter = Substitute.For<IOrchestrationReporter>();
+		capturingReporter
+			.When(r => r.PublishStepRecord(Arg.Any<string>(), Arg.Any<StepRunRecord>()))
+			.Do(call => published.Add(call.ArgAt<StepRunRecord>(1)));
+
+		var agentBuilder = new MockAgentBuilder().WithHandler((_, ct) =>
+			throw new InvalidOperationException("intentional test failure"));
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, capturingReporter, _loggerFactory);
+
+		var result = await executor.ExecuteAsync(TestOrchestrations.SingleStep());
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		published.Should().Contain(p => p.Status == ExecutionStatus.Failed,
+			"the failed step's record must be published so live drill-in shows the failure");
+	}
+
+	#endregion
 }

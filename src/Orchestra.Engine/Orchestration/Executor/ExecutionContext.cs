@@ -13,6 +13,16 @@ public class OrchestrationExecutionContext
 	public required OrchestrationInfo OrchestrationInfo { get; init; }
 
 	/// <summary>
+	/// Root execution id of the nesting chain this orchestration is part of. Equals
+	/// <see cref="OrchestrationInfo.RunId"/> when the orchestration is top-level, or the
+	/// id of the outermost ancestor when nested. Threaded through to outbound MCP
+	/// connections via <see cref="ParentExecutionAnnotation.RootExecutionId"/> so that
+	/// data-plane tools like <c>list_child_runs</c> can auto-scope queries to the caller's
+	/// execution tree.
+	/// </summary>
+	public string? RootExecutionId { get; init; }
+
+	/// <summary>
 	/// User-defined variables declared in the orchestration JSON.
 	/// Accessible via <c>{{vars.name}}</c> template expressions.
 	/// Values may contain template expressions that are resolved lazily.

@@ -217,6 +217,9 @@ public partial class OrchestrationExecutor
 				runStartedAt,
 				orchestration.SourcePath,
 				orchestration.SourceDirectory),
+			RootExecutionId = parentContext is null
+				? runId
+				: (parentContext.RootExecutionId ?? parentContext.ParentExecutionId),
 			Variables = orchestration.Variables,
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
@@ -296,6 +299,9 @@ public partial class OrchestrationExecutor
 					};
 					stepRecords[stepName] = record;
 					allStepRecords[stepName] = record;
+					// Publish restored checkpoint records so resumed runs surface their
+					// completed steps via mid-run drill-in too (not just freshly-executed ones).
+					_reporter.PublishStepRecord(stepName, record);
 					_reporter.ReportStepOutput(stepName, result.Content);
 				}
 			}
@@ -366,6 +372,9 @@ public partial class OrchestrationExecutor
 				var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
 				stepRecords[step.Name] = record;
 				allStepRecords[step.Name] = record;
+				// Publish so data-plane MCP tools (get_orchestration_step) can serve this
+				// step's content mid-run, before the orchestration finalizes its run.json.
+				_reporter.PublishStepRecord(step.Name, record);
 				await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
 				// Report full step output as soon as the step completes so non-streaming steps
@@ -430,6 +439,7 @@ public partial class OrchestrationExecutor
 								var cancelRecord = BuildStepRecord(allSteps[name], cancelledResult, effectiveParams, DateTimeOffset.UtcNow);
 								stepRecords[name] = cancelRecord;
 								allStepRecords[name] = cancelRecord;
+								_reporter.PublishStepRecord(name, cancelRecord);
 
 								_reporter.ReportStepCancelled(name);
 								tcs.TrySetResult(cancelledResult);
@@ -447,6 +457,7 @@ public partial class OrchestrationExecutor
 					var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
 					stepRecords[step.Name] = record;
 					allStepRecords[step.Name] = record;
+					_reporter.PublishStepRecord(step.Name, record);
 					await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 					_reporter.ReportStepCancelled(step.Name);
 					completionSources[step.Name].TrySetResult(cancelled);
@@ -459,6 +470,7 @@ public partial class OrchestrationExecutor
 					var record = BuildStepRecord(step, failed, effectiveParams, stepStartedAt);
 					stepRecords[step.Name] = record;
 					allStepRecords[step.Name] = record;
+					_reporter.PublishStepRecord(step.Name, record);
 					await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 					_reporter.ReportStepError(step.Name, ex.Message);
 					completionSources[step.Name].TrySetResult(failed);
@@ -496,6 +508,7 @@ public partial class OrchestrationExecutor
 							var cancelRecord = BuildStepRecord(allSteps[name], cancelledResult, effectiveParams, DateTimeOffset.UtcNow);
 							stepRecords[name] = cancelRecord;
 							allStepRecords[name] = cancelRecord;
+							_reporter.PublishStepRecord(name, cancelRecord);
 
 						_reporter.ReportStepCancelled(name);
 						tcs.TrySetResult(cancelledResult);
@@ -596,11 +609,17 @@ public partial class OrchestrationExecutor
 
 					if (stepRecords.TryGetValue(name, out var record))
 					{
-						stepRecords[name] = CloneRecordWithError(record, enrichedMessage);
+						var enriched = CloneRecordWithError(record, enrichedMessage);
+						stepRecords[name] = enriched;
+						// Republish so any in-flight readers see the enriched error message
+						// (the prior publish carried the bare "Cancelled" string).
+						_reporter.PublishStepRecord(name, enriched);
 					}
 					if (allStepRecords.TryGetValue(name, out var allRecord))
 					{
-						allStepRecords[name] = CloneRecordWithError(allRecord, enrichedMessage);
+						var enrichedAll = CloneRecordWithError(allRecord, enrichedMessage);
+						allStepRecords[name] = enrichedAll;
+						_reporter.PublishStepRecord(name, enrichedAll);
 					}
 				}
 			}
@@ -1289,6 +1308,10 @@ public partial class OrchestrationExecutor
 			var targetRecord = BuildStepRecord(targetStep, targetResult, effectiveParams, targetStartedAt, iteration);
 			stepRecords[loop.Target] = targetRecord;
 			allStepRecords[$"{loop.Target}:iteration-{iteration}"] = targetRecord;
+			// Publish under BOTH keys so callers can drill into either the canonical
+			// (latest-iteration) record or a specific iteration by its iteration suffix.
+			_reporter.PublishStepRecord(loop.Target, targetRecord);
+			_reporter.PublishStepRecord($"{loop.Target}:iteration-{iteration}", targetRecord);
 
 			if (targetResult.Status != ExecutionStatus.Succeeded)
 			{
@@ -1310,6 +1333,8 @@ public partial class OrchestrationExecutor
 			var checkerRecord = BuildStepRecord(checkerStep, newCheckerResult, effectiveParams, checkerStartedAt, iteration);
 			stepRecords[checkerStep.Name] = checkerRecord;
 			allStepRecords[$"{checkerStep.Name}:iteration-{iteration}"] = checkerRecord;
+			_reporter.PublishStepRecord(checkerStep.Name, checkerRecord);
+			_reporter.PublishStepRecord($"{checkerStep.Name}:iteration-{iteration}", checkerRecord);
 
 			if (newCheckerResult.Status != ExecutionStatus.Succeeded)
 			{
@@ -1425,6 +1450,11 @@ public partial class OrchestrationExecutor
 			SavedFiles = result.SavedFiles,
 			RetryHistory = result.RetryHistory,
 			ErrorCategory = result.ErrorCategory,
+			// Persist only the minimal child reference; the child's full per-step content
+			// lives on its own run.json (avoid bloating the parent's record).
+			ChildExecutionId = result.ChildOrchestrationInfo?.ExecutionId,
+			ChildOrchestrationName = result.ChildOrchestrationInfo?.OrchestrationName,
+			ChildStatus = result.ChildOrchestrationInfo?.Status,
 		};
 	}
 

@@ -1,0 +1,117 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: list-child-runs-fan-out-controller
+description: >
+  Fan-out controller that spawns N child orchestrations and tracks them through the
+  data-plane `list_child_runs` MCP tool. Demonstrates the auto-scoped header lookup,
+  the active-vs-persisted source markers, and status-based filtering.
+
+  Key takeaways:
+    1. `list_child_runs` with no arguments returns the caller's whole execution subtree
+       (auto-resolved from the X-Orchestra-Root-Execution-Id header). External callers
+       (no headers) get an explicit error rather than the entire history.
+    2. The result merges active in-flight runs (source="active") with persisted terminal
+       runs (source="persisted"). status="running" filters to in-flight only;
+       status="failed" / "succeeded" / "cancelled" filter to persisted terminal records.
+    3. Active records carry totalSteps / completedSteps / currentStep for live progress.
+       Persisted records carry durationSeconds / failedStepName / errorMessage.
+version: "1.0.0"
+tags: ["example", "fan-out", "list-child-runs", "controller"]
+defaultModel: claude-opus-4.6
+timeoutSeconds: 3600
+
+mcps:
+  - name: orchestra
+    type: remote
+    endpoint: "{{server.url}}/mcp/data"
+
+inputs:
+  task:
+    type: string
+    description: Task description forwarded to each child orchestration.
+    required: true
+    multiline: true
+  childOrchestrationName:
+    type: string
+    description: Registered orchestration name to dispatch N copies of.
+    required: true
+  fanOut:
+    type: number
+    description: How many child orchestrations to dispatch in parallel.
+    required: false
+    default: "3"
+
+steps:
+  # The controller is a single Prompt step that owns the entire dispatch + observe cycle.
+  # We use a Prompt step (not multiple Orchestration steps) because the fan-out width is
+  # parameterized — we can't know it at orchestration-author time.
+  - name: dispatch-and-track
+    type: Prompt
+    dependsOn: []
+    model: claude-opus-4.6
+    mcps:
+      - orchestra
+    parameters: []
+    timeoutSeconds: 1800
+    systemPrompt: |
+      You are a fan-out controller. Your job is to dispatch N child orchestrations and
+      track them through completion using the Orchestra data-plane MCP.
+
+      Step-by-step procedure:
+
+      1. **Dispatch N children in parallel:**
+         For i in 1..N:
+           call `invoke_orchestration` with:
+             orchestrationId = "{{param.childOrchestrationName}}"
+             mode = "async"
+             parameters = { ... your task-specific payload ... }
+           Record the returned `executionId` for each child.
+
+      2. **Poll until all children terminate:**
+         Loop:
+           Call `list_child_runs` with no arguments. The header-stamped
+           X-Orchestra-Root-Execution-Id auto-scopes the response to runs spawned by
+           THIS orchestration's chain — you do NOT need to pass parentExecutionId
+           or rootExecutionId. The response includes BOTH active and persisted runs.
+
+           Look at each run's `source` and `status` fields:
+             - source="active",    status="running"  → still in flight, wait and re-poll
+             - source="active",    status="cancelling" → cancel was requested, wait briefly
+             - source="persisted", status="succeeded|failed|cancelled" → terminal
+
+           Active records carry: totalSteps, completedSteps, currentStep (live progress).
+           Persisted records carry: durationSeconds, failedStepName, errorMessage, cancellation.
+
+           When every run reports source="persisted" with a terminal status, exit the loop.
+
+      3. **Drill into specific children for detail:**
+         For any child whose status is "failed" or you otherwise want full info:
+           call `get_orchestration_status(executionId, detail="compact")` to inspect per-step
+           data. Per-step results carry status + errorMessage + truncated content (~8000 chars).
+
+      4. **Optionally mid-run drill-in:**
+         If you want to peek into a sibling step of an in-flight child without waiting for
+         the child to complete, call `get_orchestration_step(executionId, stepName)`.
+         The response carries source="active" and runStatus="running" so you know the
+         overall child is still going. If the targeted step is currently executing you'll
+         get a structured `error: "step-in-flight"` with `completedStepNames` listing the
+         siblings you CAN drill into right now.
+
+      5. **Produce a summary** mapping each child executionId to (status, durationSeconds,
+         failedStepName, errorMessage) plus a brief synthesis of what they collectively
+         accomplished.
+
+      Filtering tips:
+        - `status="running"`  → returns ONLY active runs (terminal runs are excluded).
+        - `status="failed"`   → returns ONLY persisted failures (good for the final reconciliation).
+        - Omit `status`       → returns BOTH active and terminal (default; what you want most of the time).
+
+      Pagination:
+        - `limit` (default 50) and `offset` (default 0) work over the combined active+persisted list.
+        - Active runs are always listed FIRST (newest started first), then persisted (newest started first).
+    userPrompt: |
+      Dispatch {{param.fanOut}} copies of orchestration `{{param.childOrchestrationName}}` and
+      track them through completion. Task forwarded to each child:
+
+      {{param.task}}
+
+      Report the final outcome of each child plus an overall synthesis.

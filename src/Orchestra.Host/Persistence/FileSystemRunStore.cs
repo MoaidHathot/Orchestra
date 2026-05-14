@@ -386,6 +386,67 @@ public partial class FileSystemRunStore : IRunStore
 		}
 	}
 
+	/// <summary>
+	/// Scans persisted run records for entries matching the supplied parent or root execution
+	/// id. Used by the data-plane <c>list_child_runs</c> tool to scope the listing to the
+	/// caller's execution tree without exposing global history.
+	/// </summary>
+	/// <param name="parentExecutionId">When non-null, only returns runs whose
+	/// <see cref="RunIndex.ParentExecutionId"/> equals this id (direct children only).</param>
+	/// <param name="rootExecutionId">When non-null and <paramref name="parentExecutionId"/> is
+	/// null, only returns runs whose <see cref="RunIndex.RootExecutionId"/> equals this id
+	/// (whole subtree, including transitive descendants).</param>
+	/// <param name="statusFilter">When non-null, only returns runs whose
+	/// <see cref="RunIndex.Status"/> equals this value.</param>
+	public async Task<IReadOnlyList<RunIndex>> FindChildRunsAsync(
+		string? parentExecutionId,
+		string? rootExecutionId,
+		ExecutionStatus? statusFilter,
+		int? limit = null,
+		int? offset = null,
+		CancellationToken cancellationToken = default)
+	{
+		await EnsureIndexLoadedAsync(cancellationToken);
+
+		lock (_indexWriteLock)
+		{
+			IEnumerable<RunIndex> query = _indexByOrchestration.Values.SelectMany(v => v);
+
+			if (!string.IsNullOrWhiteSpace(parentExecutionId))
+			{
+				query = query.Where(i => string.Equals(i.ParentExecutionId, parentExecutionId, StringComparison.OrdinalIgnoreCase));
+			}
+			else if (!string.IsNullOrWhiteSpace(rootExecutionId))
+			{
+				query = query.Where(i => string.Equals(i.RootExecutionId, rootExecutionId, StringComparison.OrdinalIgnoreCase));
+			}
+			else
+			{
+				// No scope supplied — return empty rather than the entire history.
+				return [];
+			}
+
+			if (statusFilter is not null)
+			{
+				query = query.Where(i => i.Status == statusFilter);
+			}
+
+			query = query.OrderByDescending(i => i.StartedAt);
+
+			if (offset is > 0)
+			{
+				query = query.Skip(offset.Value);
+			}
+
+			if (limit is > 0)
+			{
+				query = query.Take(limit.Value);
+			}
+
+			return query.ToList();
+		}
+	}
+
 	private async Task EnsureIndexLoadedAsync(CancellationToken cancellationToken)
 	{
 		if (_indexLoaded) return;

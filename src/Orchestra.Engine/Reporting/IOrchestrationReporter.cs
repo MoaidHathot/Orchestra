@@ -134,4 +134,21 @@ public interface IOrchestrationReporter
 	/// is the configured behavior that's about to take effect (fail / defaultResponse / cancel).
 	/// </summary>
 	void ReportInputTimeout(string orchestrationName, string runId, string stepName, ApprovalTimeoutBehavior onTimeout) { }
+
+	// ── Mid-run step record publication ──
+
+	/// <summary>
+	/// Publishes a fully-built <see cref="StepRunRecord"/> as soon as the engine assigns it
+	/// into the run's accumulator dictionaries. Lets host-side surfaces (e.g. data-plane
+	/// MCP tools, REST endpoints) serve completed-step content BEFORE the run finalizes its
+	/// <c>run.json</c>. Default implementation is a no-op for back-compat with reporters
+	/// that don't need mid-run drill-in.
+	/// </summary>
+	/// <param name="key">Canonical key used in <see cref="OrchestrationRunRecord.AllStepRecords"/>:
+	/// the step's name for non-loop steps, or <c>stepName:iteration-N</c> for loop iterations.
+	/// Re-publishing the same key overwrites the prior entry (loops update the canonical
+	/// record at <c>stepName</c> and add per-iteration records under <c>stepName:iteration-N</c>).</param>
+	/// <param name="record">The fully-built step record. References the same instance the
+	/// run will eventually persist, so reading via the reporter exposes identical data.</param>
+	void PublishStepRecord(string key, StepRunRecord record) { }
 }

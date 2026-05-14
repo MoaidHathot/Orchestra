@@ -435,4 +435,181 @@ public class OrchestrationStepExecutorTests
 		var transformed = await captured!.PreExecutionParameterTransform!(CancellationToken.None);
 		transformed.Should().BeNull("invalid JSON should fall back to null so the original parameters are used");
 	}
+
+	// ── ChildOrchestrationInfo population ──────────────────────────────────────
+
+	[Fact]
+	public async Task SyncSuccess_PopulatesChildOrchestrationInfo_WithAllStepResults()
+	{
+		// A successful child run must expose its executionId, status, and per-step results on
+		// the parent step's ExecutionResult so templates like {{stepName.steps.X.output}} and
+		// {{stepName.executionId}} can drill into the child without going through MCP.
+		var stepResults = new Dictionary<string, ExecutionResult>(StringComparer.OrdinalIgnoreCase)
+		{
+			["validate"] = ExecutionResult.Succeeded("validate-content", rawContent: "validate-raw"),
+			["build"] = ExecutionResult.Succeeded("build-output", savedFiles: ["/tmp/build.log"]),
+		};
+		var orchResult = new OrchestrationResult
+		{
+			Status = ExecutionStatus.Succeeded,
+			Results = stepResults,
+			StepResults = stepResults,
+		};
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle(executionId: "child-success-id", terminal: new ChildOrchestrationResult
+			{
+				ExecutionId = "child-success-id",
+				OrchestrationId = "child-orch",
+				OrchestrationName = "child-orch",
+				Status = ExecutionStatus.Succeeded,
+				FinalContent = "build-output",
+				OrchestrationResult = orchResult,
+				StartedAt = DateTimeOffset.UtcNow,
+				CompletedAt = DateTimeOffset.UtcNow,
+			}));
+
+		var executor = CreateExecutor(launcher);
+		var result = await executor.ExecuteAsync(MakeStep(), MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.ChildOrchestrationInfo.Should().NotBeNull();
+		result.ChildOrchestrationInfo!.ExecutionId.Should().Be("child-success-id");
+		result.ChildOrchestrationInfo.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.ChildOrchestrationInfo.StepResults.Should().ContainKeys("validate", "build");
+		result.ChildOrchestrationInfo.StepResults["validate"].Content.Should().Be("validate-content");
+		result.ChildOrchestrationInfo.StepResults["validate"].RawContent.Should().Be("validate-raw");
+		result.ChildOrchestrationInfo.StepResults["build"].SavedFiles.Should().Contain("/tmp/build.log");
+	}
+
+	[Fact]
+	public async Task SyncFailed_PopulatesChildOrchestrationInfo_WithPartialStepResults_AndPreservesSucceededSiblings()
+	{
+		// Self-healing scenario: a child run fails on step 'failing' but step 'succeeded-before'
+		// completed first. The parent must see BOTH so it can incorporate the partial progress
+		// into the next attempt's repair prompt.
+		var stepResults = new Dictionary<string, ExecutionResult>(StringComparer.OrdinalIgnoreCase)
+		{
+			["succeeded-before"] = ExecutionResult.Succeeded("good-content"),
+			["failing"] = ExecutionResult.Failed("this is why it failed"),
+		};
+		var orchResult = new OrchestrationResult
+		{
+			Status = ExecutionStatus.Failed,
+			Results = stepResults,
+			StepResults = stepResults,
+		};
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle(executionId: "child-failed-id", terminal: new ChildOrchestrationResult
+			{
+				ExecutionId = "child-failed-id",
+				OrchestrationId = "child-orch",
+				OrchestrationName = "child-orch",
+				Status = ExecutionStatus.Failed,
+				ErrorMessage = "overall child failure",
+				OrchestrationResult = orchResult,
+				StartedAt = DateTimeOffset.UtcNow,
+				CompletedAt = DateTimeOffset.UtcNow,
+			}));
+
+		var executor = CreateExecutor(launcher);
+		var result = await executor.ExecuteAsync(MakeStep(), MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ChildOrchestrationInfo.Should().NotBeNull();
+		result.ChildOrchestrationInfo!.Status.Should().Be(ExecutionStatus.Failed);
+		result.ChildOrchestrationInfo.ErrorMessage.Should().Be("overall child failure");
+		result.ChildOrchestrationInfo.StepResults.Should().ContainKeys("succeeded-before", "failing");
+		result.ChildOrchestrationInfo.StepResults.Should()
+			.HaveCount(2, "the parent needs visibility into both succeeded siblings AND the failing step to repair");
+		result.ChildOrchestrationInfo.StepResults["succeeded-before"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.ChildOrchestrationInfo.StepResults["failing"].Status.Should().Be(ExecutionStatus.Failed);
+		result.ChildOrchestrationInfo.StepResults["failing"].ErrorMessage.Should().Be("this is why it failed");
+	}
+
+	[Fact]
+	public async Task SyncCancelled_PopulatesChildOrchestrationInfo_WithCancellationDetails()
+	{
+		var cancellation = new CancellationDetails
+		{
+			Kind = CancellationCauseKind.External,
+			Detail = "user-initiated cancel",
+			Source = "caller",
+		};
+		var stepResults = new Dictionary<string, ExecutionResult>(StringComparer.OrdinalIgnoreCase)
+		{
+			["before-cancel"] = ExecutionResult.Succeeded("happened first"),
+		};
+		var orchResult = new OrchestrationResult
+		{
+			Status = ExecutionStatus.Cancelled,
+			Results = stepResults,
+			StepResults = stepResults,
+			Cancellation = cancellation,
+		};
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle(executionId: "child-cancel-id", terminal: new ChildOrchestrationResult
+			{
+				ExecutionId = "child-cancel-id",
+				OrchestrationId = "child-orch",
+				OrchestrationName = "child-orch",
+				Status = ExecutionStatus.Cancelled,
+				ErrorMessage = "cancelled",
+				OrchestrationResult = orchResult,
+				StartedAt = DateTimeOffset.UtcNow,
+				CompletedAt = DateTimeOffset.UtcNow,
+			}));
+
+		var executor = CreateExecutor(launcher);
+		var result = await executor.ExecuteAsync(MakeStep(), MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Failed); // mapped from Cancelled
+		result.ChildOrchestrationInfo.Should().NotBeNull();
+		result.ChildOrchestrationInfo!.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.ChildOrchestrationInfo.Cancellation.Should().NotBeNull();
+		result.ChildOrchestrationInfo.Cancellation!.Detail.Should().Be("user-initiated cancel");
+		result.ChildOrchestrationInfo.StepResults.Should().ContainKey("before-cancel");
+	}
+
+	[Fact]
+	public async Task AsyncMode_PopulatesChildOrchestrationInfo_WithDispatchedStatus()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle(executionId: "async-id-99"));
+
+		var executor = CreateExecutor(launcher);
+		var step = MakeStep(mode: OrchestrationInvocationMode.Async);
+
+		var result = await executor.ExecuteAsync(step, MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.ChildOrchestrationInfo.Should().NotBeNull();
+		result.ChildOrchestrationInfo!.ExecutionId.Should().Be("async-id-99");
+		// Async dispatch is "Pending" — surfaced as "pending" in templates ("dispatched but
+		// not yet known to a terminal state").
+		result.ChildOrchestrationInfo.Status.Should().Be(ExecutionStatus.Pending);
+		result.ChildOrchestrationInfo.StepResults.Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task LaunchException_PopulatesMinimalChildOrchestrationInfo()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.ThrowsAsyncForAnyArgs(new ChildOrchestrationLaunchException(
+				ChildOrchestrationLaunchException.OrchestrationNotFound,
+				"missing"));
+
+		var executor = CreateExecutor(launcher);
+		var result = await executor.ExecuteAsync(MakeStep("missing-orch"), MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ChildOrchestrationInfo.Should().NotBeNull();
+		result.ChildOrchestrationInfo!.OrchestrationName.Should().Be("missing-orch");
+		result.ChildOrchestrationInfo.Status.Should().Be(ExecutionStatus.Failed);
+		result.ChildOrchestrationInfo.ErrorMessage.Should().Contain("missing");
+	}
 }

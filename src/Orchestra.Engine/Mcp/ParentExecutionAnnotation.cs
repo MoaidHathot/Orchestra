@@ -28,6 +28,15 @@ public sealed class ParentExecutionAnnotation
 	/// Name of the step inside the orchestration whose agent owns the connection.
 	/// </summary>
 	public required string StepName { get; init; }
+
+	/// <summary>
+	/// Root execution id of the nesting chain that this orchestration is part of.
+	/// When the orchestration is top-level this equals <see cref="ExecutionId"/>.
+	/// Used by data-plane MCP tools (e.g. <c>list_child_runs</c>) to scope queries to
+	/// the caller's execution tree without requiring the caller to remember its own
+	/// root id.
+	/// </summary>
+	public string? RootExecutionId { get; init; }
 }
 
 /// <summary>
@@ -45,4 +54,7 @@ public static class OrchestraHeaders
 
 	/// <summary>Name of the step whose agent opened the connection. Maps to <see cref="ParentExecutionAnnotation.StepName"/>.</summary>
 	public const string ParentStepName = "X-Orchestra-Parent-Step-Name";
+
+	/// <summary>Root execution id of the caller's nesting chain. Maps to <see cref="ParentExecutionAnnotation.RootExecutionId"/>.</summary>
+	public const string RootExecutionId = "X-Orchestra-Root-Execution-Id";
 }

@@ -158,18 +158,35 @@ app.MapOrchestraMcpEndpoints(); // Maps /mcp/data
 
 #### Data-Plane Tools
 
-The data-plane MCP server provides four tools:
+The data-plane MCP server provides the following tools:
 
 | Tool | Description |
 |------|-------------|
 | `ListOrchestrations` | List and filter orchestrations by tags or name pattern. Returns IDs, names, descriptions, parameter schemas. |
-| `InvokeOrchestration` | Invoke an orchestration by ID with parameters. Supports `async` (default) and `sync` modes. |
-| `GetOrchestrationStatus` | Check the status and result of an execution by execution ID. |
+| `InvokeOrchestration` | Invoke an orchestration by ID with parameters. Supports `async` (default) and `sync` modes. Sync mode accepts a `detail` parameter (`summary`/`compact`/`full`) controlling per-step content size. |
+| `GetOrchestrationStatus` | Check the status and result of an execution by execution ID. Accepts a `detail` parameter; per-step results include `errorMessage`, `contentLength`, `truncated`, and `hasRawContent` metadata. |
+| `GetOrchestrationStep` | Fetch full (or paginated, via `offset`/`length`) content of one step. Use after `GetOrchestrationStatus` reports `truncated: true`, or to drill into a failed child step's raw output. |
+| `ListChildRuns` | List runs scoped to the caller's execution chain (auto-resolved from stamped headers when invoked from inside an orchestration; external callers must pass `parentExecutionId` or `rootExecutionId`). Supports `status` filter and `limit`/`offset` pagination. |
 | `CancelOrchestration` | Cancel a running execution by execution ID. |
+| `ListPendingInputs` / `RespondToInput` | Discover and respond to runs awaiting human input. |
 
 `InvokeOrchestration` supports two modes:
 - **`async`** (default): Returns immediately with an `executionId`. Use `GetOrchestrationStatus` to poll for results.
-- **`sync`**: Blocks until the orchestration completes or the timeout is reached (default: 300 seconds).
+- **`sync`**: Blocks until the orchestration completes or the timeout is reached (default: 300 seconds). The sync response includes `stepResults` keyed by step name, each carrying `status`, truncated `content`, `errorMessage`, `savedFiles`, and truncation metadata.
+
+##### Response detail levels
+
+`GetOrchestrationStatus` and the sync `InvokeOrchestration` response both accept a `detail` parameter:
+
+- `summary` — Step `content` and the top-level `summary` are omitted entirely; metadata (`contentLength`, `truncated`, `hasRawContent`, `errorMessage`, `savedFiles`) is preserved so the caller can decide whether to drill in.
+- `compact` (default) — Content is truncated at ~8000 chars per step (16000 for the top-level summary) with the `... (truncated)` marker appended for human readability, plus the structured metadata fields.
+- `full` — No truncation. Responses may be very large (a single run's step content can exceed 100 KB).
+
+For runs whose content exceeds even `full`'s practical token budget, use `GetOrchestrationStep` with `offset`/`length` to page through the content of a specific step.
+
+##### Header-based scope for `ListChildRuns`
+
+The engine stamps `X-Orchestra-Parent-Execution-Id`, `X-Orchestra-Parent-Orchestration-Name`, `X-Orchestra-Parent-Step-Name`, and `X-Orchestra-Root-Execution-Id` on outbound MCP connections that target Orchestra's own endpoints. `ListChildRuns` auto-resolves its scope from those headers (preferring `Root-Execution-Id`, falling back to `Parent-Execution-Id` when the root isn't stamped) so a self-healing controller can enumerate its own attempts without needing to remember its own execution id. External callers (no headers) must pass `parentExecutionId` or `rootExecutionId` explicitly — the tool refuses to enumerate without a scope to avoid leaking unrelated runs.
 
 ### Orchestrations
 
@@ -418,6 +435,11 @@ builder.Services.AddTriggerExecutionCallback<MyExecutionCallback>();
             ├── {step-name}-result.json
             └── result.md              # Human-readable final output
 ```
+
+For a deep-dive on `run.json`'s structure, what each field contains, sizes you can expect,
+and the design decisions behind how parent → child orchestration links are persisted (and
+why we DON'T inline child step content into the parent's run record), see the
+[run storage reference](run-storage.md).
 
 ## Selective Endpoint Mapping
 

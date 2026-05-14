@@ -95,6 +95,12 @@ interface ExecutionDetailStep {
       startedAt?: string;
     }>;
   };
+  /** For steps of type Orchestration: child run's execution id (clickable in history view). */
+  childExecutionId?: string | null;
+  /** For steps of type Orchestration: child orchestration name (used to load the child run). */
+  childOrchestrationName?: string | null;
+  /** For steps of type Orchestration: lowercase terminal status of the child run. */
+  childStatus?: string | null;
 }
 
 interface ExecutionDetailsResponse {
@@ -1806,6 +1812,7 @@ function App(): React.JSX.Element {
       const stepTraces: Record<string, TraceData> = {};
       const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
       const stepSavedFiles: Record<string, string[]> = {};
+      const stepChildRuns: Record<string, { executionId: string; orchestrationName: string; status?: string | null }> = {};
       const finalResult = details.finalContent || '';
       const hookExecutions = details.hookExecutions || [];
       const savedFiles = details.savedFiles || [];
@@ -1829,6 +1836,16 @@ function App(): React.JSX.Element {
 
           if (step.savedFiles && step.savedFiles.length > 0) {
             stepSavedFiles[step.name] = step.savedFiles;
+          }
+
+          // For Orchestration steps the API surfaces the child run lineage so we can
+          // render a clickable "view child run" badge next to the step name.
+          if (step.childExecutionId && step.childOrchestrationName) {
+            stepChildRuns[step.name] = {
+              executionId: step.childExecutionId,
+              orchestrationName: step.childOrchestrationName,
+              status: step.childStatus ?? null,
+            };
           }
 
           if (step.trace) {
@@ -1945,6 +1962,7 @@ function App(): React.JSX.Element {
         retriedFromRunId: details.retriedFromRunId ?? null,
         retryMode: details.retryMode ?? null,
         historicalRun: { name: exec.orchestrationName, runId: exec.runId },
+        stepChildRuns,
       });
     } catch (err) {
       console.error('Failed to load execution details:', err);
@@ -2615,6 +2633,15 @@ function App(): React.JSX.Element {
               runId: sourceRunId,
             });
           }
+        }}
+        onViewChildRun={(orchestrationName, executionId) => {
+          // Navigate from a parent step's child-run badge into the child run's
+          // historical detail view. Mirrors the inverse parent→child navigation
+          // already exposed on HistoryRow.
+          viewHistoricalExecution({
+            orchestrationName,
+            runId: executionId,
+          });
         }}
       />
       <McpsModal

@@ -229,6 +229,12 @@ internal sealed partial class HookRuntime
 				trace = step.Trace,
 				errorMessage = step.ErrorMessage,
 				errorCategory = step.ErrorCategory?.ToString(),
+				// For Orchestration steps: surface the child run's executionId / name / status
+				// so hooks reacting to step.completed can correlate to the child run record
+				// without re-parsing step.content. Null for non-orchestration steps.
+				childExecutionId = step.ChildExecutionId,
+				childOrchestrationName = step.ChildOrchestrationName,
+				childStatus = step.ChildStatus?.ToString(),
 			}
 		};
 	}

@@ -102,6 +102,26 @@ public class StepRunRecord
 	/// Enables filtering and aggregation by error type.
 	/// </summary>
 	public StepErrorCategory? ErrorCategory { get; init; }
+
+	/// <summary>
+	/// For steps of type <c>Orchestration</c>: the execution id of the child run this step
+	/// invoked. Null for all other step types. Use this to follow the parent → child chain
+	/// in history views or to request the child's per-step content via
+	/// <c>get_orchestration_step</c>.
+	/// </summary>
+	public string? ChildExecutionId { get; init; }
+
+	/// <summary>
+	/// For steps of type <c>Orchestration</c>: the name of the child orchestration that was
+	/// invoked. Null for all other step types.
+	/// </summary>
+	public string? ChildOrchestrationName { get; init; }
+
+	/// <summary>
+	/// For steps of type <c>Orchestration</c>: the terminal status of the child run, projected
+	/// from <see cref="ChildOrchestrationInfo.Status"/>. Null for all other step types.
+	/// </summary>
+	public ExecutionStatus? ChildStatus { get; init; }
 }
 
 /// <summary>

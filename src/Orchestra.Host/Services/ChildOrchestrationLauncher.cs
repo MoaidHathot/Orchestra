@@ -351,6 +351,14 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 				info.CurrentStep = null;
 			};
 		}
+		// Publish the engine's completed step records into the live-active map so
+		// data-plane MCP tools can serve mid-run step content (get_orchestration_step
+		// reads from PartialStepRecords first, falling back to the persisted run.json
+		// only after the run terminates and is removed from activeExecutionInfos).
+		if (sse.OnStepRecorded is null)
+		{
+			sse.OnStepRecorded = (key, record) => info.PublishStepRecord(key, record);
+		}
 	}
 
 	private async Task<ChildOrchestrationResult> RunCompletionAsync(

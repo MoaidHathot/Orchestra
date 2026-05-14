@@ -131,6 +131,16 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	public Action<string>? OnStepCompleted { get; set; }
 
 	/// <summary>
+	/// Callback invoked when the engine publishes a completed step record (via
+	/// <see cref="IOrchestrationReporter.PublishStepRecord"/>). Parameters: canonical key
+	/// (step name or <c>stepName:iteration-N</c>) + the record. Wired by
+	/// <see cref="ChildOrchestrationLauncher"/> to populate
+	/// <c>ActiveExecutionInfo.PartialStepRecords</c>, enabling the data-plane
+	/// <c>get_orchestration_step</c> MCP tool to serve mid-run step content.
+	/// </summary>
+	public Action<string, StepRunRecord>? OnStepRecorded { get; set; }
+
+	/// <summary>
 	/// Creates a new subscriber channel that will receive future events.
 	/// Call this to attach a new SSE client to the execution.
 	/// Returns null for Future if the maximum subscriber limit has been reached.
@@ -495,6 +505,18 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	public void ReportSavedFile(string stepName, string filePath)
 	{
 		Write("saved-file", new { stepName, filePath });
+	}
+
+	/// <summary>
+	/// Forwards engine-published step records to the <see cref="OnStepRecorded"/> callback
+	/// (which <see cref="Triggers.ChildOrchestrationLauncher"/> uses to populate the active
+	/// execution's <c>PartialStepRecords</c>). Intentionally does NOT write an SSE event:
+	/// the per-step deltas are already streamed via <c>step-completed</c>, and the full
+	/// record would be too large for SSE clients.
+	/// </summary>
+	public void PublishStepRecord(string key, StepRunRecord record)
+	{
+		OnStepRecorded?.Invoke(key, record);
 	}
 
 	public void ReportSessionWarning(string warningType, string message)

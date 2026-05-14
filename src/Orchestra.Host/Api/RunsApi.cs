@@ -361,7 +361,14 @@ public static partial class RunsApi
 							toolName = m.ToolName,
 							timestamp = m.Timestamp.ToString("o"),
 						}).ToArray() : null,
-					} : null
+					} : null,
+					// When the step invoked another orchestration, surface the child run's
+					// executionId/name/status so consumers (Portal, external API clients) can
+					// render parent → child navigation. Null on non-orchestration steps and
+					// omitted from JSON by the ignore-null serializer policy.
+					childExecutionId = kv.Value.ChildExecutionId,
+					childOrchestrationName = kv.Value.ChildOrchestrationName,
+					childStatus = kv.Value.ChildStatus?.ToString().ToLowerInvariant(),
 				}).ToArray(),
 				allStepRecords = record.AllStepRecords.Count != record.StepRecords.Count
 					? record.AllStepRecords
@@ -378,6 +385,9 @@ public static partial class RunsApi
 						loopIteration = kv.Value.LoopIteration,
 						savedFiles = kv.Value.SavedFiles.Length > 0 ? kv.Value.SavedFiles : null,
 						errorMessage = kv.Value.ErrorMessage,
+						childExecutionId = kv.Value.ChildExecutionId,
+						childOrchestrationName = kv.Value.ChildOrchestrationName,
+						childStatus = kv.Value.ChildStatus?.ToString().ToLowerInvariant(),
 					}).ToArray()
 					: null,
 			}, jsonOptions);
@@ -423,7 +433,14 @@ public static partial class RunsApi
 					parameters = info.Parameters,
 					totalSteps = info.TotalSteps,
 					completedSteps = info.CompletedSteps,
-					currentStep = info.CurrentStep
+					currentStep = info.CurrentStep,
+					// Surface lineage so Portal and external clients can follow active
+					// parent → child chains without needing a separate per-active lookup.
+					// Null for top-level executions (NestingMetadata is null in that case).
+					parentExecutionId = info.NestingMetadata?.ParentExecutionId,
+					parentStepName = info.NestingMetadata?.ParentStepName,
+					rootExecutionId = info.NestingMetadata?.RootExecutionId,
+					nestingDepth = info.NestingMetadata?.Depth,
 				});
 			}
 

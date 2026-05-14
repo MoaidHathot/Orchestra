@@ -1800,4 +1800,240 @@ public class TemplateResolverTests
 	}
 
 	#endregion
+
+	#region OrchestrationStep ChildOrchestrationInfo accessors
+
+	private static ExecutionResult MakeOrchestrationStepResult(
+		string executionId = "child-1",
+		string orchestrationName = "child-orch",
+		ExecutionStatus status = ExecutionStatus.Succeeded,
+		string finalContent = "child-final",
+		string? errorMessage = null,
+		string? completionReason = null,
+		CancellationDetails? cancellation = null,
+		Dictionary<string, ChildStepInfo>? steps = null)
+	{
+		var info = new ChildOrchestrationInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationName = orchestrationName,
+			OrchestrationId = orchestrationName,
+			Status = status,
+			ErrorMessage = errorMessage,
+			FinalContent = finalContent,
+			CompletionReason = completionReason,
+			Cancellation = cancellation,
+			StepResults = steps ?? new Dictionary<string, ChildStepInfo>(StringComparer.OrdinalIgnoreCase),
+			StartedAt = DateTimeOffset.UtcNow,
+			CompletedAt = DateTimeOffset.UtcNow,
+		};
+		return status == ExecutionStatus.Succeeded
+			? ExecutionResult.Succeeded(finalContent, childOrchestrationInfo: info)
+			: ExecutionResult.Failed(errorMessage ?? "", childOrchestrationInfo: info);
+	}
+
+	[Fact]
+	public void Resolve_ChildExecutionIdAccessor_ReturnsExecutionId()
+	{
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("invoke-child", MakeOrchestrationStepResult(executionId: "child-exec-42"));
+
+		var result = TemplateResolver.Resolve(
+			"Spawned child {{invoke-child.executionId}} successfully",
+			context.Parameters, context, ["invoke-child"], s_defaultStep);
+
+		result.Should().Be("Spawned child child-exec-42 successfully");
+	}
+
+	[Fact]
+	public void Resolve_ChildStatusAccessor_ReturnsLowercaseStatus()
+	{
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("invoke-child", MakeOrchestrationStepResult(status: ExecutionStatus.Succeeded));
+
+		var result = TemplateResolver.Resolve(
+			"Status: {{invoke-child.status}}",
+			context.Parameters, context, ["invoke-child"], s_defaultStep);
+
+		result.Should().Be("Status: succeeded");
+	}
+
+	[Fact]
+	public void Resolve_ChildStepAccessor_DrillsIntoChildStepOutput_NoTruncation()
+	{
+		// Self-healing controllers need full untruncated access to child step outputs so
+		// they can incorporate previous attempts' content into repair prompts. A 100 KB
+		// payload should round-trip verbatim.
+		var bigContent = new string('A', 100_000);
+		var childSteps = new Dictionary<string, ChildStepInfo>(StringComparer.OrdinalIgnoreCase)
+		{
+			["big-step"] = new ChildStepInfo { Status = ExecutionStatus.Succeeded, Content = bigContent },
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("attempt-1", MakeOrchestrationStepResult(steps: childSteps));
+
+		var result = TemplateResolver.Resolve(
+			"{{attempt-1.steps.big-step.output}}",
+			context.Parameters, context, ["attempt-1"], s_defaultStep);
+
+		result.Length.Should().Be(100_000, "child step content must not be truncated by the in-process binding path");
+		result.Should().Be(bigContent);
+	}
+
+	[Fact]
+	public void Resolve_ChildStepAccessor_SurfacesErrorOfFailingStep_EvenWhenSiblingSucceeded()
+	{
+		// Even when the overall child run failed, the parent must be able to drill into
+		// EACH child step independently. This is what makes the self-healing pattern work:
+		// the controller can see step-by-step what worked and what didn't.
+		var childSteps = new Dictionary<string, ChildStepInfo>(StringComparer.OrdinalIgnoreCase)
+		{
+			["good"] = new ChildStepInfo { Status = ExecutionStatus.Succeeded, Content = "yay" },
+			["bad"] = new ChildStepInfo { Status = ExecutionStatus.Failed, ErrorMessage = "compiler error: missing semicolon" },
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("attempt-1",
+			MakeOrchestrationStepResult(status: ExecutionStatus.Failed, errorMessage: "child overall failed", steps: childSteps));
+
+		var goodOutput = TemplateResolver.Resolve("{{attempt-1.steps.good.output}}",
+			context.Parameters, context, ["attempt-1"], s_defaultStep);
+		var badError = TemplateResolver.Resolve("{{attempt-1.steps.bad.error}}",
+			context.Parameters, context, ["attempt-1"], s_defaultStep);
+		var badStatus = TemplateResolver.Resolve("{{attempt-1.steps.bad.status}}",
+			context.Parameters, context, ["attempt-1"], s_defaultStep);
+
+		goodOutput.Should().Be("yay");
+		badError.Should().Be("compiler error: missing semicolon");
+		badStatus.Should().Be("failed");
+	}
+
+	[Fact]
+	public void Resolve_StepsAccessor_ReturnsValidJsonOfAllChildSteps()
+	{
+		var childSteps = new Dictionary<string, ChildStepInfo>(StringComparer.OrdinalIgnoreCase)
+		{
+			["one"] = new ChildStepInfo { Status = ExecutionStatus.Succeeded, Content = "alpha" },
+			["two"] = new ChildStepInfo { Status = ExecutionStatus.Failed, ErrorMessage = "kaboom" },
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("invoke-child", MakeOrchestrationStepResult(steps: childSteps));
+
+		var json = TemplateResolver.Resolve("{{invoke-child.steps}}",
+			context.Parameters, context, ["invoke-child"], s_defaultStep);
+
+		using var doc = System.Text.Json.JsonDocument.Parse(json);
+		doc.RootElement.GetProperty("one").GetProperty("status").GetString().Should().Be("succeeded");
+		doc.RootElement.GetProperty("one").GetProperty("output").GetString().Should().Be("alpha");
+		doc.RootElement.GetProperty("two").GetProperty("error").GetString().Should().Be("kaboom");
+	}
+
+	[Fact]
+	public void Resolve_ChildResultAccessor_ReturnsFullJsonBlob()
+	{
+		var childSteps = new Dictionary<string, ChildStepInfo>(StringComparer.OrdinalIgnoreCase)
+		{
+			["s1"] = new ChildStepInfo { Status = ExecutionStatus.Succeeded, Content = "out1" },
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("invoke-child",
+			MakeOrchestrationStepResult(executionId: "exec-77", finalContent: "final", steps: childSteps));
+
+		var json = TemplateResolver.Resolve("{{invoke-child.childResult}}",
+			context.Parameters, context, ["invoke-child"], s_defaultStep);
+
+		using var doc = System.Text.Json.JsonDocument.Parse(json);
+		doc.RootElement.GetProperty("executionId").GetString().Should().Be("exec-77");
+		doc.RootElement.GetProperty("status").GetString().Should().Be("succeeded");
+		doc.RootElement.GetProperty("finalContent").GetString().Should().Be("final");
+		doc.RootElement.GetProperty("stepResults").GetProperty("s1").GetProperty("output").GetString().Should().Be("out1");
+	}
+
+	[Fact]
+	public void Resolve_ChildExecutionIdAccessor_OnNonOrchestrationStep_LeavesUnresolved()
+	{
+		// Prompt/Transform/etc. step doesn't have a ChildOrchestrationInfo; the binding
+		// must leave the expression literal so the user sees a clear diagnostic via the
+		// resolution tracker rather than getting an empty string silently.
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("not-orch", ExecutionResult.Succeeded("plain content"));
+
+		var result = TemplateResolver.Resolve("{{not-orch.executionId}}",
+			context.Parameters, context, ["not-orch"], s_defaultStep);
+
+		result.Should().Be("{{not-orch.executionId}}");
+	}
+
+	[Fact]
+	public void Resolve_ChildStepAccessor_UnknownChildStep_LeavesUnresolved()
+	{
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("invoke-child", MakeOrchestrationStepResult());
+
+		var result = TemplateResolver.Resolve("{{invoke-child.steps.missing.output}}",
+			context.Parameters, context, ["invoke-child"], s_defaultStep);
+
+		result.Should().Be("{{invoke-child.steps.missing.output}}");
+	}
+
+	[Fact]
+	public void Resolve_ChildStepFilesIndex_ReturnsIndexedFilePath()
+	{
+		var childSteps = new Dictionary<string, ChildStepInfo>(StringComparer.OrdinalIgnoreCase)
+		{
+			["s"] = new ChildStepInfo
+			{
+				Status = ExecutionStatus.Succeeded,
+				Content = "c",
+				SavedFiles = new[] { "/tmp/a.log", "/tmp/b.log" },
+			},
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("invoke-child", MakeOrchestrationStepResult(steps: childSteps));
+
+		var first = TemplateResolver.Resolve("{{invoke-child.steps.s.files[0]}}",
+			context.Parameters, context, ["invoke-child"], s_defaultStep);
+		var second = TemplateResolver.Resolve("{{invoke-child.steps.s.files[1]}}",
+			context.Parameters, context, ["invoke-child"], s_defaultStep);
+
+		first.Should().Be("/tmp/a.log");
+		second.Should().Be("/tmp/b.log");
+	}
+
+	#endregion
 }

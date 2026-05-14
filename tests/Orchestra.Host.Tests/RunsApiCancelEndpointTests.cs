@@ -122,6 +122,94 @@ public sealed class RunsApiCancelEndpointTests : IDisposable
 			"the pre-set HostShutdown override must NOT be overwritten by the REST cancel");
 	}
 
+	[Fact]
+	public async Task GetActive_NestedExecution_ExposesLineageFields()
+	{
+		// /api/active is the canonical live-progress endpoint for Portal and external
+		// observers. A child run must surface its parent/root/depth so observers can render
+		// "running inside chain X" instead of treating each active run as orphaned.
+		using var cts = new CancellationTokenSource();
+		var execId = "active-child-1";
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = execId,
+			OrchestrationId = "child-orch",
+			OrchestrationName = "child-orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "orchestration:root-AA",
+			CancellationTokenSource = cts,
+			Reporter = NullOrchestrationReporter.Instance,
+			NestingMetadata = new Orchestra.Host.McpServer.ExecutionMetadata
+			{
+				ParentExecutionId = "root-AA",
+				ParentStepName = "invoke",
+				RootExecutionId = "root-AA",
+				Depth = 1,
+			},
+		};
+		var infos = new ConcurrentDictionary<string, ActiveExecutionInfo>();
+		infos[execId] = info;
+
+		using var host = await BuildHostAsync(infos);
+		using var client = host.GetTestClient();
+
+		var response = await client.GetAsync("/api/active");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+		var body = await response.Content.ReadAsStringAsync();
+		using var doc = JsonDocument.Parse(body);
+		var array = doc.RootElement.GetProperty("running");
+
+		var entry = array.EnumerateArray()
+			.First(e => e.GetProperty("executionId").GetString() == execId);
+		entry.GetProperty("parentExecutionId").GetString().Should().Be("root-AA");
+		entry.GetProperty("rootExecutionId").GetString().Should().Be("root-AA");
+		entry.GetProperty("nestingDepth").GetInt32().Should().Be(1);
+		entry.GetProperty("parentStepName").GetString().Should().Be("invoke");
+
+		cts.Dispose();
+	}
+
+	[Fact]
+	public async Task GetActive_TopLevelExecution_OmitsLineageFields()
+	{
+		// Top-level executions have NestingMetadata = null; the lineage fields must be
+		// elided so observers see "no parent" rather than literal null entries.
+		using var cts = new CancellationTokenSource();
+		var execId = "top-level-1";
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = execId,
+			OrchestrationId = "orch",
+			OrchestrationName = "orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = NullOrchestrationReporter.Instance,
+			// NestingMetadata intentionally null.
+		};
+		var infos = new ConcurrentDictionary<string, ActiveExecutionInfo>();
+		infos[execId] = info;
+
+		using var host = await BuildHostAsync(infos);
+		using var client = host.GetTestClient();
+
+		var response = await client.GetAsync("/api/active");
+		var body = await response.Content.ReadAsStringAsync();
+		using var doc = JsonDocument.Parse(body);
+		var array = doc.RootElement.GetProperty("running");
+
+		var entry = array.EnumerateArray()
+			.First(e => e.GetProperty("executionId").GetString() == execId);
+		// JSON serializer default options for this endpoint emit nulls as `null` rather than
+		// omitting them, so the assertion accommodates both shapes.
+		var hasParent = entry.TryGetProperty("parentExecutionId", out var parentEl)
+			&& parentEl.ValueKind != JsonValueKind.Null;
+		hasParent.Should().BeFalse("top-level runs must not fabricate a parent id");
+
+		cts.Dispose();
+	}
+
 	private async Task<IHost> BuildHostAsync(ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos)
 	{
 		var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };

@@ -70,6 +70,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				ExecutionId = context.OrchestrationInfo.RunId,
 				OrchestrationName = context.OrchestrationInfo.Name,
 				StepName = step.Name,
+				RootExecutionId = context.RootExecutionId,
 			};
 			resolvedMcps = _mcpResolver.Resolve(resolvedMcps, parentAnnotation);
 		}

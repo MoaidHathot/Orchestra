@@ -395,6 +395,13 @@ export interface ExecutionModalState {
   retryMode?: string | null;
   /** When viewing a historical (terminal) run, holds the run's name+id so retry buttons can build URLs. */
   historicalRun?: { name: string; runId: string } | null;
+  /**
+   * For Orchestration steps in this run: child run lineage (executionId / orchestrationName / status)
+   * keyed by parent step name. Sourced from the /api/history projection's per-step
+   * ChildExecutionId/ChildOrchestrationName/ChildStatus fields and used by the modal to
+   * render a clickable "view child run" badge.
+   */
+  stepChildRuns?: Record<string, { executionId: string; orchestrationName: string; status?: string | null }>;
 }
 
 export interface RunContext {

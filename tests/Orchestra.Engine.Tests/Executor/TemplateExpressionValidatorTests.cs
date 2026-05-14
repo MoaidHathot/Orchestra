@@ -1121,4 +1121,153 @@ public class TemplateExpressionValidatorTests
 	}
 
 	#endregion
+
+	#region Orchestration-step accessors (executionId / status / steps.*)
+
+	private static OrchestrationInvocationStep CreateOrchestrationStep(
+		string name,
+		string orchestrationName = "child-orch",
+		string[]? dependsOn = null,
+		Dictionary<string, string>? childParameters = null)
+	{
+		return new OrchestrationInvocationStep
+		{
+			Name = name,
+			Type = OrchestrationStepType.Orchestration,
+			DependsOn = dependsOn ?? [],
+			Parameters = [],
+			OrchestrationName = orchestrationName,
+			ChildParameters = childParameters ?? [],
+		};
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ChildAccessorOnNonOrchestrationStep_ReportsError()
+	{
+		// A Prompt step has no ChildOrchestrationInfo; using {{p1.executionId}} on its
+		// content would silently fail at runtime. The validator catches it at parse time
+		// so authors discover the mistake before invocation.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreatePromptStep("p1", "do work"),
+				CreateTransformStep("consume", "child id was {{p1.executionId}}", dependsOn: ["p1"]),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.StepName == "consume" &&
+			e.Expression == "{{p1.executionId}}" &&
+			e.Message.Contains("Orchestration", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ChildAccessorOnOrchestrationStep_IsValid()
+	{
+		// Same accessor on a step of type Orchestration — must validate cleanly.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateOrchestrationStep("inv"),
+				CreateTransformStep("after", "child id = {{inv.executionId}}", dependsOn: ["inv"]),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ChildStepsUnknownLeaf_ReportsError()
+	{
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateOrchestrationStep("inv"),
+				CreateTransformStep("after", "{{inv.steps.codegen.bogusLeaf}}", dependsOn: ["inv"]),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.StepName == "after" &&
+			e.Expression == "{{inv.steps.codegen.bogusLeaf}}" &&
+			e.Message.Contains("Unknown child-step accessor", StringComparison.OrdinalIgnoreCase) &&
+			e.Message.Contains("output", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Theory]
+	[InlineData("output")]
+	[InlineData("rawOutput")]
+	[InlineData("error")]
+	[InlineData("status")]
+	[InlineData("files")]
+	[InlineData("files[0]")]
+	[InlineData("files[42]")]
+	public void ValidateOrchestration_ChildStepsValidLeaves_AreAccepted(string leaf)
+	{
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateOrchestrationStep("inv"),
+				CreateTransformStep("after", $"{{{{inv.steps.codegen.{leaf}}}}}", dependsOn: ["inv"]),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ChildAccessorInVarsStaticContext_ReportsStaticOnlyError()
+	{
+		// vars values are resolved in a static-only context (no step outputs reachable).
+		// The orchestration-step accessors must follow the same gate as {{stepName.output}}.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateOrchestrationStep("inv"),
+				CreateTransformStep("after", "ok", dependsOn: ["inv"]),
+			],
+			variables: new Dictionary<string, string>
+			{
+				["embedded"] = "exec id = {{inv.executionId}}",
+			});
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.FieldName == "Variables[embedded]" &&
+			e.Expression == "{{inv.executionId}}" &&
+			e.Message.Contains("static-only", StringComparison.OrdinalIgnoreCase));
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ChildAccessorOnUnreachableStep_ReportsReachabilityError()
+	{
+		// {{inv.executionId}} is valid syntax on an Orchestration step BUT the target step
+		// must be reachable via DependsOn. The reachability rule applies to the new
+		// accessors just like it does to {{stepName.output}}.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateOrchestrationStep("inv"),
+				// `after` does NOT depend on `inv`; the accessor is unreachable.
+				CreateTransformStep("after", "{{inv.executionId}}"),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.StepName == "after" &&
+			e.Expression == "{{inv.executionId}}" &&
+			e.Message.Contains("not reachable", StringComparison.OrdinalIgnoreCase));
+	}
+
+	#endregion
 }

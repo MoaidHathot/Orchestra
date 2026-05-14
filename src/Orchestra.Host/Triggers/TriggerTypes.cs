@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using System.Collections.Concurrent;
 using Orchestra.Engine;
 
 namespace Orchestra.Host.Triggers;
@@ -188,4 +189,31 @@ public class ActiveExecutionInfo
 	/// Null for legacy executions that predate nesting support.
 	/// </summary>
 	public McpServer.ExecutionMetadata? NestingMetadata { get; init; }
+
+	/// <summary>
+	/// Per-step records published by the engine as each step reaches a terminal state.
+	/// Lets the data-plane <c>get_orchestration_step</c> tool serve mid-run step content
+	/// without waiting for the run to persist its <c>run.json</c>. Keyed by step name;
+	/// for loops the key follows the same convention as <c>OrchestrationRunRecord.AllStepRecords</c>
+	/// (<c>stepName</c> or <c>stepName:iteration-N</c>).
+	/// </summary>
+	/// <remarks>
+	/// Populated by <c>OrchestrationExecutor</c> via <see cref="PublishStepRecord"/>. Memory
+	/// cost is negligible: the records are the same objects the executor accumulates locally
+	/// — we just expose them by reference so external readers can drill in mid-run.
+	/// After the run completes, <c>FileSystemRunStore.SaveRunAsync</c> persists the same
+	/// records and the active entry is removed by the host shortly after, so the persisted
+	/// path takes over without any data gap.
+	/// </remarks>
+	public ConcurrentDictionary<string, Engine.StepRunRecord> PartialStepRecords { get; } = new();
+
+	/// <summary>
+	/// Publishes a completed step's record so that data-plane consumers can read it before
+	/// the run finalizes. Idempotent: re-publishing the same step name overwrites the entry
+	/// (used by loops where each iteration updates the canonical record).
+	/// </summary>
+	public void PublishStepRecord(string key, Engine.StepRunRecord record)
+	{
+		PartialStepRecords[key] = record;
+	}
 }

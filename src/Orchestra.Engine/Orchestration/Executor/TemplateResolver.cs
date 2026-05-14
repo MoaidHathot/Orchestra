@@ -15,6 +15,23 @@ namespace Orchestra.Engine;
 ///   {{stepName.rawOutput}} — raw output from a completed dependency step
 ///   {{stepName.files}}     — JSON array of file paths saved by a step via orchestra_save_file
 ///   {{stepName.files[N]}}  — Nth file path (0-based) saved by a step via orchestra_save_file
+///
+/// For steps of type Orchestration, the following additional accessors drill into the
+/// child run's data (populated by <see cref="OrchestrationStepExecutor"/>):
+///   {{stepName.executionId}}             — execution ID of the child run
+///   {{stepName.status}}                  — lowercase status of the child run
+///   {{stepName.errorMessage}}            — top-level error message from the child run
+///   {{stepName.completionReason}}        — early-completion reason (orchestra_complete)
+///   {{stepName.childResult}}             — full JSON of the child run (executionId, status,
+///                                          errorMessage, finalContent, completionReason,
+///                                          cancellation, stepResults)
+///   {{stepName.steps}}                   — JSON map of all child-step results
+///   {{stepName.steps.&lt;name&gt;.output}}     — content of one child step (untruncated)
+///   {{stepName.steps.&lt;name&gt;.rawOutput}}  — pre-output-handler content of one child step
+///   {{stepName.steps.&lt;name&gt;.error}}      — errorMessage of one child step
+///   {{stepName.steps.&lt;name&gt;.status}}     — status of one child step
+///   {{stepName.steps.&lt;name&gt;.files}}      — JSON array of one child step's saved files
+///   {{stepName.steps.&lt;name&gt;.files[N]}}   — indexed access to one child step's saved files
 /// </summary>
 public static partial class TemplateResolver
 {
@@ -27,6 +44,13 @@ public static partial class TemplateResolver
 	private static readonly string[] s_validOrchestrationProperties = ["name", "version", "runid", "startedat", "tempdir", "sourcepath", "sourcedirectory"];
 	private static readonly string[] s_validStepProperties = ["name", "type"];
 	private static readonly string[] s_validServerProperties = ["url"];
+
+	private static readonly System.Text.Json.JsonSerializerOptions s_childResultJsonOptions = new()
+	{
+		PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+		WriteIndented = false,
+	};
 
 	/// <summary>
 	/// Resolves all template expressions in the input string.
@@ -179,6 +203,11 @@ public static partial class TemplateResolver
 				{
 					return ResolveStepFiles(stepName, property, context);
 				}
+
+				// Orchestration-step accessors: drill into the child run's data.
+				var orchProperty = ResolveOrchestrationStepProperty(stepName, property, context);
+				if (orchProperty is not null)
+					return orchProperty;
 
 				// Also check non-dependency steps by getting direct result
 				var result = context.TryGetResult(stepName);
@@ -388,5 +417,158 @@ public static partial class TemplateResolver
 		}
 
 		return string.Empty;
+	}
+
+	/// <summary>
+	/// Resolves orchestration-step accessors that drill into a child run's data.
+	/// Returns <c>null</c> when the expression is not an orchestration-step accessor
+	/// (so the caller can fall through to the generic unresolved-tracking path), or when
+	/// the referenced step has no <see cref="ChildOrchestrationInfo"/> attached (e.g. the
+	/// step is not an orchestration step, or it failed before the launcher returned).
+	/// </summary>
+	/// <remarks>
+	/// Recognized accessor shapes:
+	/// <list type="bullet">
+	///   <item><c>{{stepName.executionId|status|errorMessage|completionReason|childResult|steps}}</c></item>
+	///   <item><c>{{stepName.steps.&lt;childStepName&gt;}}</c> — JSON of one child step</item>
+	///   <item><c>{{stepName.steps.&lt;childStepName&gt;.output|rawOutput|error|status|files|files[N]}}</c></item>
+	/// </list>
+	/// </remarks>
+	private static string? ResolveOrchestrationStepProperty(string stepName, string property, OrchestrationExecutionContext context)
+	{
+		var result = context.TryGetResult(stepName);
+		if (result is null)
+		{
+			return null;
+		}
+
+		var info = result.ChildOrchestrationInfo;
+		if (info is null)
+		{
+			// Not an orchestration step or no child info attached. Leave for the outer
+			// fall-through to handle (e.g. output/rawOutput path).
+			return null;
+		}
+
+		// Top-level child accessors.
+		if (property.Equals("executionId", StringComparison.OrdinalIgnoreCase))
+			return info.ExecutionId;
+		if (property.Equals("status", StringComparison.OrdinalIgnoreCase))
+			return info.Status.ToString().ToLowerInvariant();
+		if (property.Equals("errorMessage", StringComparison.OrdinalIgnoreCase))
+			return info.ErrorMessage ?? string.Empty;
+		if (property.Equals("completionReason", StringComparison.OrdinalIgnoreCase))
+			return info.CompletionReason ?? string.Empty;
+		if (property.Equals("childResult", StringComparison.OrdinalIgnoreCase))
+			return SerializeChildResult(info);
+		if (property.Equals("steps", StringComparison.OrdinalIgnoreCase))
+			return SerializeStepResults(info.StepResults);
+
+		// {{stepName.steps.<childStepName>...}}
+		if (property.StartsWith("steps.", StringComparison.OrdinalIgnoreCase))
+		{
+			var tail = property["steps.".Length..];
+			var nextDot = tail.IndexOf('.');
+			var childStepName = nextDot < 0 ? tail : tail[..nextDot];
+			var leaf = nextDot < 0 ? null : tail[(nextDot + 1)..];
+
+			if (!info.StepResults.TryGetValue(childStepName, out var childStep))
+			{
+				// Child step name not found. Returning null lets the outer caller mark it
+				// as unresolved, which surfaces as a diagnostic to the user.
+				return null;
+			}
+
+			if (leaf is null)
+			{
+				return SerializeChildStep(childStep);
+			}
+
+			if (leaf.Equals("output", StringComparison.OrdinalIgnoreCase))
+				return childStep.Content;
+			if (leaf.Equals("rawOutput", StringComparison.OrdinalIgnoreCase))
+				return childStep.RawContent ?? childStep.Content;
+			if (leaf.Equals("error", StringComparison.OrdinalIgnoreCase))
+				return childStep.ErrorMessage ?? string.Empty;
+			if (leaf.Equals("status", StringComparison.OrdinalIgnoreCase))
+				return childStep.Status.ToString().ToLowerInvariant();
+			if (leaf.Equals("files", StringComparison.OrdinalIgnoreCase))
+				return System.Text.Json.JsonSerializer.Serialize(childStep.SavedFiles);
+			var indexMatch = FilesIndexPattern().Match(leaf);
+			if (indexMatch.Success && int.TryParse(indexMatch.Groups[1].Value, out var index))
+			{
+				if (index >= 0 && index < childStep.SavedFiles.Count)
+				{
+					return childStep.SavedFiles[index];
+				}
+				return string.Empty;
+			}
+
+			// Unknown leaf — return null so the outer caller flags it as unresolved.
+			return null;
+		}
+
+		return null;
+	}
+
+	private static string SerializeChildResult(ChildOrchestrationInfo info)
+	{
+		var payload = new
+		{
+			executionId = info.ExecutionId,
+			orchestrationId = info.OrchestrationId,
+			orchestrationName = info.OrchestrationName,
+			status = info.Status.ToString().ToLowerInvariant(),
+			errorMessage = info.ErrorMessage,
+			finalContent = info.FinalContent,
+			completionReason = info.CompletionReason,
+			cancellation = info.Cancellation is null ? null : new
+			{
+				kind = info.Cancellation.Kind.ToString(),
+				detail = info.Cancellation.Detail,
+				reason = info.Cancellation.Reason,
+				source = info.Cancellation.Source,
+				isTimeout = info.Cancellation.IsTimeout,
+			},
+			startedAt = info.StartedAt,
+			completedAt = info.CompletedAt,
+			stepResults = ProjectStepResultsForJson(info.StepResults),
+		};
+		return System.Text.Json.JsonSerializer.Serialize(payload, s_childResultJsonOptions);
+	}
+
+	private static string SerializeStepResults(IReadOnlyDictionary<string, ChildStepInfo> stepResults)
+	{
+		return System.Text.Json.JsonSerializer.Serialize(ProjectStepResultsForJson(stepResults), s_childResultJsonOptions);
+	}
+
+	private static string SerializeChildStep(ChildStepInfo step)
+	{
+		var payload = new
+		{
+			status = step.Status.ToString().ToLowerInvariant(),
+			output = step.Content,
+			rawOutput = step.RawContent,
+			error = step.ErrorMessage,
+			files = step.SavedFiles,
+		};
+		return System.Text.Json.JsonSerializer.Serialize(payload, s_childResultJsonOptions);
+	}
+
+	private static Dictionary<string, object> ProjectStepResultsForJson(IReadOnlyDictionary<string, ChildStepInfo> stepResults)
+	{
+		var projected = new Dictionary<string, object>(stepResults.Count, StringComparer.OrdinalIgnoreCase);
+		foreach (var (name, step) in stepResults)
+		{
+			projected[name] = new
+			{
+				status = step.Status.ToString().ToLowerInvariant(),
+				output = step.Content,
+				rawOutput = step.RawContent,
+				error = step.ErrorMessage,
+				files = step.SavedFiles,
+			};
+		}
+		return projected;
 	}
 }

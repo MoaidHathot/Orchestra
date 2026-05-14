@@ -99,6 +99,7 @@ public sealed partial class DataPlaneTools
 		[Description("Maximum seconds to wait in sync mode. Default: 300 (5 minutes). Ignored in async mode.")] int timeoutSeconds = 300,
 		[Description("Optional metadata JSON object with key-value pairs for tracking (e.g., correlation IDs, ticket numbers).")] string? metadata = null,
 		[Description("Parent execution ID for nested invocations. Set automatically when called from within an orchestration.")] string? parentExecutionId = null,
+		[Description("Response detail level for sync mode: 'summary' (status + metadata only, no content), 'compact' (default, truncated content with metadata), 'full' (untruncated content; responses may be large).")] string detail = "compact",
 		CancellationToken cancellationToken = default)
 	{
 		// Parse parameters
@@ -127,6 +128,14 @@ public sealed partial class DataPlaneTools
 		}
 
 		var isSync = string.Equals(mode, "sync", StringComparison.OrdinalIgnoreCase);
+
+		if (!TryParseDetailLevel(detail, out var detailParsed))
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"Invalid detail level '{detail}'. Valid values: 'summary', 'compact', 'full'."
+			}, s_jsonOptions);
+		}
 
 		// Sync-timeout vs transport-timeout sanity check.
 		// The host applies a default transport timeout (DefaultOrchestraInvokeTimeoutSeconds)
@@ -274,6 +283,9 @@ public sealed partial class DataPlaneTools
 		}
 
 		var orch = result.OrchestrationResult;
+		var (summaryText, summaryLength, summaryTruncated) = TruncateWithStats(
+			result.FinalContent, detailParsed == DetailLevel.Full ? -1 : (detailParsed == DetailLevel.Summary ? 0 : 16000));
+
 		return JsonSerializer.Serialize(new
 		{
 			executionId = handle.ExecutionId,
@@ -285,27 +297,51 @@ public sealed partial class DataPlaneTools
 			cancellation = MapCancellation(orch.Cancellation),
 			stepResults = orch.StepResults.ToDictionary(
 				kvp => kvp.Key,
-				kvp => new
-				{
-					status = kvp.Value.Status.ToString().ToLowerInvariant(),
-					content = TruncateContent(kvp.Value.Content, 4000),
-				}),
-			summary = TruncateContent(result.FinalContent, 8000),
+				kvp => BuildStepProjection(
+					kvp.Value.Status,
+					kvp.Value.Content,
+					kvp.Value.RawContent,
+					kvp.Value.ErrorMessage,
+					kvp.Value.SavedFiles,
+					detailParsed,
+					perStepLimitChars: 8000)),
+			summary = detailParsed == DetailLevel.Summary ? null : summaryText,
+			summaryLength,
+			summaryTruncated,
+			detail = detailParsed.ToString().ToLowerInvariant(),
+			responseHint = detailParsed == DetailLevel.Full
+				? "detail=full returned untruncated content; responses may be large."
+				: null,
 			metadata = parsedMetadata,
 		}, s_jsonOptions);
 	}
 
 	[McpServerTool(Name = "get_orchestration_status"), Description(
 		"Gets the status and result of an orchestration execution by its execution ID. " +
-		"Use this to check the progress of async invocations or to retrieve results after completion.")]
+		"Use this to check the progress of async invocations or to retrieve results after completion. " +
+		"For large step outputs, prefer detail='summary' or use get_orchestration_step for paginated content access.")]
 	public static async Task<string> GetOrchestrationStatus(
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 		FileSystemRunStore runStore,
-		[Description("The execution ID returned by invoke_orchestration.")] string executionId)
+		[Description("The execution ID returned by invoke_orchestration.")] string executionId,
+		[Description("Response detail level: 'summary' (status + metadata only, no per-step content), 'compact' (default, content truncated to ~8000 chars per step), 'full' (untruncated; responses may be large).")] string detail = "compact")
 	{
+		if (!TryParseDetailLevel(detail, out var detailParsed))
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"Invalid detail level '{detail}'. Valid values: 'summary', 'compact', 'full'."
+			}, s_jsonOptions);
+		}
+
 		// Check active executions first
 		if (activeExecutionInfos.TryGetValue(executionId, out var info))
 		{
+			// Surface the canonical keys of completed step records that the engine has
+			// already published. Callers can read these by name via get_orchestration_step
+			// without polling for completion. Sorted for stable output.
+			var completedStepNames = info.PartialStepRecords.Keys.OrderBy(k => k).ToArray();
+
 			return JsonSerializer.Serialize(new
 			{
 				executionId = info.ExecutionId,
@@ -317,6 +353,7 @@ public sealed partial class DataPlaneTools
 				totalSteps = info.TotalSteps,
 				completedSteps = info.CompletedSteps,
 				currentStep = info.CurrentStep,
+				completedStepNames,
 				parameters = info.Parameters,
 				nesting = info.NestingMetadata is not null ? new
 				{
@@ -324,6 +361,7 @@ public sealed partial class DataPlaneTools
 					rootExecutionId = info.NestingMetadata.RootExecutionId,
 					depth = info.NestingMetadata.Depth,
 				} : null,
+				detail = detailParsed.ToString().ToLowerInvariant(),
 			}, s_jsonOptions);
 		}
 
@@ -335,6 +373,9 @@ public sealed partial class DataPlaneTools
 			var run = await runStore.GetRunAsync(runIndex.OrchestrationName, runIndex.RunId);
 			if (run is not null)
 			{
+				var (summaryText, summaryLength, summaryTruncated) = TruncateWithStats(
+					run.FinalContent, detailParsed == DetailLevel.Full ? -1 : (detailParsed == DetailLevel.Summary ? 0 : 16000));
+
 				return JsonSerializer.Serialize(new
 				{
 					executionId = run.RunId,
@@ -346,13 +387,17 @@ public sealed partial class DataPlaneTools
 					parameters = run.Parameters,
 					stepResults = run.StepRecords.ToDictionary(
 						kvp => kvp.Key,
-						kvp => new
-						{
-							status = kvp.Value.Status.ToString().ToLowerInvariant(),
-							content = TruncateContent(kvp.Value.Content, 2000),
-							errorMessage = kvp.Value.ErrorMessage,
-						}),
-					summary = TruncateContent(run.FinalContent, 4000),
+						kvp => BuildStepProjection(
+							kvp.Value.Status,
+							kvp.Value.Content,
+							kvp.Value.RawContent,
+							kvp.Value.ErrorMessage,
+							kvp.Value.SavedFiles,
+							detailParsed,
+							perStepLimitChars: 8000)),
+					summary = detailParsed == DetailLevel.Summary ? null : summaryText,
+					summaryLength,
+					summaryTruncated,
 					nesting = run.ParentExecutionId is not null || run.NestingDepth > 0 ? new
 					{
 						parentExecutionId = run.ParentExecutionId,
@@ -360,6 +405,10 @@ public sealed partial class DataPlaneTools
 						rootExecutionId = run.RootExecutionId,
 						depth = run.NestingDepth,
 					} : null,
+					detail = detailParsed.ToString().ToLowerInvariant(),
+					responseHint = detailParsed == DetailLevel.Full
+						? "detail=full returned untruncated content; responses may be large."
+						: null,
 				}, s_jsonOptions);
 			}
 
@@ -380,6 +429,212 @@ public sealed partial class DataPlaneTools
 		{
 			error = $"No execution found with ID '{executionId}'. It may have expired or never existed."
 		}, s_jsonOptions);
+	}
+
+	[McpServerTool(Name = "get_orchestration_step"), Description(
+		"Fetches the full (or paginated) content of a single step from an orchestration run. " +
+		"Works for both ACTIVE (in-flight) runs whose step records the engine has published " +
+		"into the host's active-execution table, and PERSISTED runs whose run.json has been " +
+		"saved. Use this after get_orchestration_status reports `truncated: true` on a step, " +
+		"or whenever you need the complete output of one specific step. " +
+		"Returns the content slice plus metadata so the caller can stitch multi-page reads.")]
+	public static async Task<string> GetOrchestrationStep(
+		FileSystemRunStore runStore,
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		[Description("Execution ID returned by invoke_orchestration (or surfaced via {{orch-step.executionId}} in templates).")] string executionId,
+		[Description("Step name within the orchestration run. For loops, use the canonical name for the latest iteration or 'stepName:iteration-N' for a specific iteration.")] string stepName,
+		[Description("Which part of the step to return: 'content' (default, the step output), 'rawContent' (pre-output-handler), 'errorMessage', or 'all' (all three).")] string part = "content",
+		[Description("Character offset to start reading from. Default 0.")] int offset = 0,
+		[Description("Maximum number of characters to return. Default 50000. Pass -1 to read until end (no cap; responses may be very large).")] int length = 50000)
+	{
+		// Parameter validation upfront (cheap fail-fast).
+		var normalizedPart = (part ?? "content").Trim().ToLowerInvariant();
+		if (normalizedPart is not ("content" or "rawcontent" or "errormessage" or "all"))
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"Invalid part '{part}'. Valid values: 'content', 'rawContent', 'errorMessage', 'all'."
+			}, s_jsonOptions);
+		}
+		if (offset < 0)
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"offset must be >= 0. Received: {offset}."
+			}, s_jsonOptions);
+		}
+
+		// Step 1: prefer the ACTIVE path. If the run is in flight and the requested step has
+		// already published its record into PartialStepRecords, serve it directly. This is
+		// the self-healing controller's primary drill-in point — it can read sibling steps
+		// of the still-running attempt without polling the persisted store.
+		if (activeExecutionInfos.TryGetValue(executionId, out var activeInfo))
+		{
+			var runStatus = activeInfo.Status.ToString().ToLowerInvariant();
+			if (activeInfo.PartialStepRecords.TryGetValue(stepName, out var liveStep))
+			{
+				return BuildStepResponse(
+					executionId: activeInfo.ExecutionId,
+					orchestrationName: activeInfo.OrchestrationName,
+					step: liveStep,
+					normalizedPart: normalizedPart,
+					offset: offset,
+					length: length,
+					source: "active",
+					runStatus: runStatus);
+			}
+
+			// The run is active but the requested step hasn't completed yet (or doesn't exist
+			// at all). Return a structured "in-flight" response that tells the caller exactly
+			// what's running and which sibling steps they CAN drill into right now. This is
+			// the canonical "is the orchestration still running?" signal — runStatus + the
+			// completedStepNames list let the caller decide whether to wait or move on.
+			var completedStepNames = activeInfo.PartialStepRecords.Keys.OrderBy(k => k).ToArray();
+			return JsonSerializer.Serialize(new
+			{
+				error = "step-in-flight",
+				executionId = activeInfo.ExecutionId,
+				orchestrationName = activeInfo.OrchestrationName,
+				stepName,
+				runStatus,                                  // overall RUN status (e.g. "running", "cancelling")
+				stepStatus = activeInfo.CurrentStep == stepName ? "running" : "pending",
+				currentStep = activeInfo.CurrentStep,
+				completedStepNames,                         // siblings you CAN drill into now
+				totalSteps = activeInfo.TotalSteps,
+				completedSteps = activeInfo.CompletedSteps,
+				hint = activeInfo.CurrentStep == stepName
+					? "This step is currently executing. Its content will become available here once it completes; in the meantime use get_orchestration_status to monitor progress."
+					: completedStepNames.Length > 0
+						? $"Step '{stepName}' has not produced a record yet. Completed siblings you can drill into: [{string.Join(", ", completedStepNames)}]."
+						: $"Step '{stepName}' has not produced a record yet. No siblings have completed; poll get_orchestration_status to track progress.",
+			}, s_jsonOptions);
+		}
+
+		// Step 2: fall back to the PERSISTED path. The run isn't active so it must have either
+		// completed (run.json present) or never existed.
+		var runIndex = await runStore.FindRunByIdAsync(executionId);
+		if (runIndex is null)
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"No run found with execution ID '{executionId}'. It may have expired, been deleted, or never existed.",
+			}, s_jsonOptions);
+		}
+
+		var run = await runStore.GetRunAsync(runIndex.OrchestrationName, runIndex.RunId);
+		if (run is null)
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = $"Run record for execution ID '{executionId}' could not be loaded. The run.json file may be missing or corrupt."
+			}, s_jsonOptions);
+		}
+
+		if (!run.StepRecords.TryGetValue(stepName, out var step))
+		{
+			var available = string.Join(", ", run.StepRecords.Keys);
+			return JsonSerializer.Serialize(new
+			{
+				error = $"Step '{stepName}' not found in run '{executionId}'. Available steps: [{available}].",
+				executionId = run.RunId,
+				orchestrationName = run.OrchestrationName,
+			}, s_jsonOptions);
+		}
+
+		return BuildStepResponse(
+			executionId: run.RunId,
+			orchestrationName: run.OrchestrationName,
+			step: step,
+			normalizedPart: normalizedPart,
+			offset: offset,
+			length: length,
+			source: "persisted",
+			runStatus: run.Status.ToString().ToLowerInvariant());
+	}
+
+	/// <summary>
+	/// Shared response shape for both the active and persisted paths. Always carries the
+	/// <paramref name="source"/> ("active" or "persisted") and <paramref name="runStatus"/>
+	/// so callers can unambiguously tell where the data came from and whether the overall
+	/// run is still in flight.
+	/// </summary>
+	private static string BuildStepResponse(
+		string executionId,
+		string orchestrationName,
+		StepRunRecord step,
+		string normalizedPart,
+		int offset,
+		int length,
+		string source,
+		string runStatus)
+	{
+		if (normalizedPart == "all")
+		{
+			return JsonSerializer.Serialize(new
+			{
+				executionId,
+				orchestrationName,
+				stepName = step.StepName,
+				status = step.Status.ToString().ToLowerInvariant(),
+				runStatus,
+				source,
+				startedAt = step.StartedAt,
+				completedAt = step.CompletedAt,
+				content = SliceWithStats(step.Content, offset, length, "content"),
+				rawContent = step.RawContent is null ? null : SliceWithStats(step.RawContent, offset, length, "rawContent"),
+				errorMessage = step.ErrorMessage is null ? null : SliceWithStats(step.ErrorMessage, offset, length, "errorMessage"),
+				savedFiles = step.SavedFiles is { Length: > 0 } ? step.SavedFiles : null,
+			}, s_jsonOptions);
+		}
+
+		var (sourceText, partLabel) = normalizedPart switch
+		{
+			"content" => (step.Content, "content"),
+			"rawcontent" => (step.RawContent, "rawContent"),
+			"errormessage" => (step.ErrorMessage, "errorMessage"),
+			_ => (step.Content, "content"),
+		};
+
+		return JsonSerializer.Serialize(new
+		{
+			executionId,
+			orchestrationName,
+			stepName = step.StepName,
+			status = step.Status.ToString().ToLowerInvariant(),
+			runStatus,
+			source,
+			startedAt = step.StartedAt,
+			completedAt = step.CompletedAt,
+			part = partLabel,
+			slice = SliceWithStats(sourceText, offset, length, partLabel),
+			savedFiles = step.SavedFiles is { Length: > 0 } ? step.SavedFiles : null,
+		}, s_jsonOptions);
+	}
+
+	/// <summary>
+	/// Returns a JSON-friendly slice descriptor for <paramref name="sourceText"/> with the
+	/// requested <paramref name="offset"/> and <paramref name="length"/>. <c>length == -1</c>
+	/// means "read until the end" (no cap). Out-of-range offsets return an empty content slice
+	/// with <c>truncated=false</c>.
+	/// </summary>
+	internal static object SliceWithStats(string? sourceText, int offset, int length, string part)
+	{
+		var totalLength = sourceText?.Length ?? 0;
+		if (sourceText is null)
+		{
+			return new { part, offset, length, totalLength, content = (string?)null, truncated = false };
+		}
+
+		if (offset >= totalLength)
+		{
+			return new { part, offset, length, totalLength, content = string.Empty, truncated = false };
+		}
+
+		var available = totalLength - offset;
+		var take = length < 0 ? available : Math.Min(available, length);
+		var content = sourceText.Substring(offset, take);
+		var truncated = offset + take < totalLength;
+		return new { part, offset, length, totalLength, content, truncated };
 	}
 
 	[McpServerTool(Name = "cancel_orchestration"), Description(
@@ -447,6 +702,207 @@ public sealed partial class DataPlaneTools
 	[LoggerMessage(Level = LogLevel.Information,
 		Message = "Run cancel requested: executionId={ExecutionId}, source={Source}, detail={Detail}")]
 	private static partial void LogRunCancelRequested(ILogger logger, string executionId, string source, string? detail);
+
+	[McpServerTool(Name = "list_child_runs"), Description(
+		"Lists orchestration runs spawned within the caller's execution chain. " +
+		"Scope is auto-resolved from request headers when invoked from inside an orchestration " +
+		"(defaults to the caller's whole subtree). External callers must pass parentExecutionId " +
+		"or rootExecutionId explicitly. Includes BOTH active (in-flight) and persisted (completed) " +
+		"runs by default; use status='running' to limit to in-flight runs. Returns lightweight " +
+		"summaries; use get_orchestration_status or get_orchestration_step for per-run detail.")]
+	public static async Task<string> ListChildRuns(
+		FileSystemRunStore runStore,
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		IHttpContextAccessor httpContextAccessor,
+		[Description("Direct-children filter: when supplied, returns only runs whose ParentExecutionId matches.")] string? parentExecutionId = null,
+		[Description("Subtree filter: when supplied (and parentExecutionId is not), returns every run whose RootExecutionId matches.")] string? rootExecutionId = null,
+		[Description("Status filter: 'succeeded', 'failed', 'cancelled', 'running', 'awaitingInput', 'pending', 'skipped', 'noAction'. Case-insensitive.")] string? status = null,
+		[Description("Maximum number of runs to return. Default 50.")] int limit = 50,
+		[Description("Number of runs to skip (for pagination). Default 0.")] int offset = 0)
+	{
+		// Scope resolution: explicit args > stamped headers > error.
+		// Source attribution lets the response surface why a particular scope was applied,
+		// which is useful for self-healing controllers to confirm they're filtering against
+		// their own subtree and not some unrelated chain.
+		string scopeSource;
+		string? resolvedParent = parentExecutionId;
+		string? resolvedRoot = rootExecutionId;
+		if (!string.IsNullOrWhiteSpace(resolvedParent))
+		{
+			scopeSource = "argument:parent";
+		}
+		else if (!string.IsNullOrWhiteSpace(resolvedRoot))
+		{
+			scopeSource = "argument:root";
+		}
+		else if (httpContextAccessor.HttpContext is { } httpContext
+			&& httpContext.Request.Headers.TryGetValue(OrchestraHeaders.RootExecutionId, out var headerRoot)
+			&& !string.IsNullOrWhiteSpace(headerRoot))
+		{
+			resolvedRoot = headerRoot.ToString();
+			scopeSource = "header:root";
+		}
+		else if (httpContextAccessor.HttpContext is { } httpContext2
+			&& httpContext2.Request.Headers.TryGetValue(OrchestraHeaders.ParentExecutionId, out var headerParent)
+			&& !string.IsNullOrWhiteSpace(headerParent))
+		{
+			// Fallback: older clients (or first hop before X-Orchestra-Root-Execution-Id
+			// rollout) only stamp the parent id. Treat the caller's parent as their root and
+			// scope to that subtree.
+			resolvedRoot = headerParent.ToString();
+			scopeSource = "header:parent-as-root";
+		}
+		else
+		{
+			return JsonSerializer.Serialize(new
+			{
+				error = "No scope provided. Pass parentExecutionId or rootExecutionId, or invoke this tool from inside an orchestration so the engine can stamp X-Orchestra-Root-Execution-Id automatically.",
+				hint = "External MCP clients must pin a scope to avoid leaking unrelated runs. To enumerate everything, use the control-plane list_runs tool (admin-only).",
+			}, s_jsonOptions);
+		}
+
+		ExecutionStatus? statusFilter = null;
+		if (!string.IsNullOrWhiteSpace(status))
+		{
+			if (!Enum.TryParse<ExecutionStatus>(status, ignoreCase: true, out var parsed))
+			{
+				return JsonSerializer.Serialize(new
+				{
+					error = $"Invalid status filter '{status}'. Valid values: pending, running, succeeded, failed, skipped, cancelled, noAction, awaitingInput.",
+				}, s_jsonOptions);
+			}
+			statusFilter = parsed;
+		}
+
+		if (limit < 1)
+		{
+			return JsonSerializer.Serialize(new { error = $"limit must be >= 1. Received: {limit}." }, s_jsonOptions);
+		}
+		if (offset < 0)
+		{
+			return JsonSerializer.Serialize(new { error = $"offset must be >= 0. Received: {offset}." }, s_jsonOptions);
+		}
+
+		// Step 1: collect active in-flight runs matching the scope. These come from the
+		// in-memory active executions table; they have no completedAt / duration / error
+		// fields yet but DO have lineage via NestingMetadata. Active runs map to the
+		// "running" status by convention (the host status `Cancelling` also maps here so
+		// callers see runs that are stopping but not yet stopped).
+		var activeMatches = new List<object>();
+		var activeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var info in activeExecutionInfos.Values)
+		{
+			// Skip terminal states — those will be picked up by the persisted scan once
+			// the run is saved. Including them here would double-count.
+			if (info.Status is HostExecutionStatus.Completed
+				or HostExecutionStatus.Cancelled
+				or HostExecutionStatus.Failed)
+			{
+				continue;
+			}
+
+			var infoParent = info.NestingMetadata?.ParentExecutionId;
+			var infoRoot = info.NestingMetadata?.RootExecutionId;
+
+			var scopeMatches = !string.IsNullOrWhiteSpace(resolvedParent)
+				? string.Equals(infoParent, resolvedParent, StringComparison.OrdinalIgnoreCase)
+				: string.Equals(infoRoot, resolvedRoot, StringComparison.OrdinalIgnoreCase);
+
+			if (!scopeMatches)
+			{
+				continue;
+			}
+
+			// Active runs always map to ExecutionStatus.Running. When a caller filters for
+			// a different status they expect persisted runs only, so skip active.
+			if (statusFilter is not null && statusFilter != ExecutionStatus.Running)
+			{
+				continue;
+			}
+
+			activeIds.Add(info.ExecutionId);
+			activeMatches.Add(new
+			{
+				executionId = info.ExecutionId,
+				orchestrationName = info.OrchestrationName,
+				orchestrationVersion = (string?)null,
+				status = "running",
+				startedAt = info.StartedAt,
+				completedAt = (DateTimeOffset?)null,
+				durationSeconds = (double?)null,
+				triggeredBy = info.TriggeredBy,
+				parentExecutionId = infoParent,
+				parentStepName = info.NestingMetadata?.ParentStepName,
+				rootExecutionId = infoRoot,
+				nestingDepth = info.NestingMetadata?.Depth ?? 0,
+				failedStepName = (string?)null,
+				errorMessage = (string?)null,
+				cancellation = (object?)null,
+				source = "active",
+				totalSteps = info.TotalSteps > 0 ? info.TotalSteps : (int?)null,
+				completedSteps = info.CompletedSteps > 0 ? info.CompletedSteps : (int?)null,
+				currentStep = info.CurrentStep,
+			});
+		}
+
+		// Step 2: collect persisted runs matching the scope. The store filter already
+		// excludes anything outside the requested subtree; we additionally apply the
+		// status filter here. When a run appears in BOTH (race during finalization), the
+		// active entry wins because it carries live progress.
+		// Over-fetch so we can apply pagination across the combined ordered list.
+		var persisted = await runStore.FindChildRunsAsync(resolvedParent, resolvedRoot, statusFilter, limit: limit + offset + activeMatches.Count);
+		var persistedMatches = persisted
+			.Where(r => !activeIds.Contains(r.RunId))
+			.Select(r => (object)new
+			{
+				executionId = r.RunId,
+				orchestrationName = r.OrchestrationName,
+				orchestrationVersion = r.OrchestrationVersion,
+				status = r.Status.ToString().ToLowerInvariant(),
+				startedAt = (DateTimeOffset?)r.StartedAt,
+				completedAt = (DateTimeOffset?)r.CompletedAt,
+				durationSeconds = (double?)r.Duration.TotalSeconds,
+				triggeredBy = r.TriggeredBy,
+				parentExecutionId = r.ParentExecutionId,
+				parentStepName = r.ParentStepName,
+				rootExecutionId = r.RootExecutionId,
+				nestingDepth = r.NestingDepth,
+				failedStepName = r.FailedStepName,
+				errorMessage = r.ErrorMessage,
+				cancellation = r.Cancellation is null ? null : new
+				{
+					kind = r.Cancellation.Kind.ToString(),
+					detail = r.Cancellation.Detail,
+				},
+				source = "persisted",
+				totalSteps = (int?)null,
+				completedSteps = (int?)null,
+				currentStep = (string?)null,
+			});
+
+		// Step 3: combine. Active first (running runs are typically what the caller cares
+		// about most — "what am I waiting on?"), then persisted in newest-first order.
+		// Both lists are already ordered by StartedAt descending internally.
+		var combined = activeMatches.Concat(persistedMatches)
+			.Skip(offset)
+			.Take(limit)
+			.ToArray();
+
+		return JsonSerializer.Serialize(new
+		{
+			scope = new
+			{
+				parentExecutionId = resolvedParent,
+				rootExecutionId = resolvedRoot,
+				statusFilter = statusFilter?.ToString().ToLowerInvariant(),
+				source = scopeSource,
+			},
+			count = combined.Length,
+			limit,
+			offset,
+			runs = combined,
+		}, s_jsonOptions);
+	}
 
 	[McpServerTool(Name = "list_pending_inputs"), Description(
 		"Lists orchestration runs currently awaiting human input (Approval steps and " +
@@ -554,6 +1010,97 @@ public sealed partial class DataPlaneTools
 		if (content is null) return null;
 		if (content.Length <= maxLength) return content;
 		return content[..maxLength] + "... (truncated)";
+	}
+
+	/// <summary>
+	/// Truncates content while reporting structured metadata about the original size and
+	/// whether truncation occurred. Pass <paramref name="maxLength"/> of <c>-1</c> for
+	/// untruncated, or <c>0</c> to omit content entirely (used by detail="summary").
+	/// </summary>
+	internal static (string? Content, int OriginalLength, bool Truncated) TruncateWithStats(string? content, int maxLength)
+	{
+		if (content is null) return (null, 0, false);
+		var originalLength = content.Length;
+		if (maxLength < 0)
+		{
+			// Full mode: no truncation.
+			return (content, originalLength, false);
+		}
+		if (maxLength == 0)
+		{
+			// Summary mode: omit content entirely.
+			return (null, originalLength, originalLength > 0);
+		}
+		if (originalLength <= maxLength)
+		{
+			return (content, originalLength, false);
+		}
+		return (content[..maxLength] + "... (truncated)", originalLength, true);
+	}
+
+	internal enum DetailLevel { Summary, Compact, Full }
+
+	internal static bool TryParseDetailLevel(string? value, out DetailLevel level)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+		{
+			level = DetailLevel.Compact;
+			return true;
+		}
+		switch (value.Trim().ToLowerInvariant())
+		{
+			case "summary":
+				level = DetailLevel.Summary;
+				return true;
+			case "compact":
+			case "default":
+				level = DetailLevel.Compact;
+				return true;
+			case "full":
+				level = DetailLevel.Full;
+				return true;
+			default:
+				level = DetailLevel.Compact;
+				return false;
+		}
+	}
+
+	/// <summary>
+	/// Builds the JSON-serializable projection for a single step record, honoring the
+	/// requested <see cref="DetailLevel"/>. Always emits structured metadata (contentLength,
+	/// truncated, hasRawContent) so callers can decide whether to fetch the full content
+	/// via <c>get_orchestration_step</c>. Belt-and-suspenders: the literal
+	/// <c>... (truncated)</c> suffix is preserved on the content string in <c>compact</c>
+	/// mode for human readability of the JSON.
+	/// </summary>
+	internal static object BuildStepProjection(
+		ExecutionStatus status,
+		string? content,
+		string? rawContent,
+		string? errorMessage,
+		string[]? savedFiles,
+		DetailLevel detail,
+		int perStepLimitChars)
+	{
+		var effectiveLimit = detail switch
+		{
+			DetailLevel.Full => -1,
+			DetailLevel.Summary => 0,
+			_ => perStepLimitChars,
+		};
+		var (truncatedContent, contentLength, contentTruncated) = TruncateWithStats(content, effectiveLimit);
+		var hasRawContent = !string.IsNullOrEmpty(rawContent) && rawContent != content;
+
+		return new
+		{
+			status = status.ToString().ToLowerInvariant(),
+			content = truncatedContent,
+			contentLength,
+			truncated = contentTruncated,
+			hasRawContent,
+			errorMessage,
+			savedFiles = savedFiles is { Length: > 0 } ? savedFiles : null,
+		};
 	}
 
 	/// <summary>

@@ -236,6 +236,11 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 					[OrchestraHeaders.ParentStepName] = parent.StepName,
 				};
 
+				// The root id lets server-side tools auto-scope queries to the caller's
+				// whole execution tree (e.g. list_child_runs). Falls back to the parent
+				// id when the engine didn't supply one (top-level orchestrations).
+				headers[OrchestraHeaders.RootExecutionId] = parent.RootExecutionId ?? parent.ExecutionId;
+
 				current = new RemoteMcp
 				{
 					Name = remoteForParent.Name,

@@ -270,12 +270,21 @@ interface Props {
    * Retry buttons in the header and per-step rows.
    */
   historicalRun?: { name: string; runId: string } | null;
+  /**
+   * For steps of type Orchestration in historical runs: child run lineage
+   * (executionId / orchestrationName / status) keyed by parent step name. When
+   * a step has an entry, the selected-step header renders a clickable child-run
+   * badge that calls <see cref="onViewChildRun"/> when activated.
+   */
+  stepChildRuns?: Record<string, { executionId: string; orchestrationName: string; status?: string | null }>;
   onClose: () => void;
   onCancel: (executionId: string) => void;
   /** Invoked from the Retry buttons. Required to enable retry UI. */
   onRetry?: (mode: 'failed' | 'all' | 'from-step', fromStep?: string) => void;
   /** Invoked when the user clicks the "Retried from" badge to navigate to the source run. */
   onViewSourceRun?: (sourceRunId: string) => void;
+  /** Invoked when the user clicks the child-run badge next to a step name. */
+  onViewChildRun?: (orchestrationName: string, executionId: string) => void;
 }
 
 export default function ExecutionModal({
@@ -300,10 +309,12 @@ export default function ExecutionModal({
   retriedFromRunId,
   retryMode,
   historicalRun,
+  stepChildRuns,
   onClose,
   onCancel,
   onRetry,
   onViewSourceRun,
+  onViewChildRun,
 }: Props): React.JSX.Element {
   const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
   const dagRef = useRef<HTMLDivElement | null>(null);
@@ -1460,6 +1471,38 @@ export default function ExecutionModal({
                               : selectedStepStatus}
                           </span>
                         )}
+                        {/* Child-run badge: when this step invoked another orchestration,
+                            render a clickable link to navigate to the child run. The data
+                            is populated by App.tsx from the /api/history step projection
+                            (ChildExecutionId / ChildOrchestrationName / ChildStatus) so
+                            this only appears on Orchestration steps. */}
+                        {selectedStep && stepChildRuns?.[selectedStep] && onViewChildRun && (() => {
+                          const child = stepChildRuns[selectedStep];
+                          const label = `\u21B3 ${child.orchestrationName}${child.status ? ` (${child.status})` : ''}`;
+                          return (
+                            <button
+                              type="button"
+                              className="child-run-badge"
+                              data-testid="child-run-badge"
+                              title={`View child run ${child.executionId}`}
+                              aria-label={`View child run ${child.orchestrationName} ${child.executionId}`}
+                              onClick={() => onViewChildRun(child.orchestrationName, child.executionId)}
+                              style={{
+                                marginLeft: '8px',
+                                background: 'transparent',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: '12px',
+                                padding: '2px 10px',
+                                fontSize: '11px',
+                                color: 'var(--accent)',
+                                cursor: 'pointer',
+                                fontWeight: 500,
+                              }}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })()}
                         {/* Loop Iteration Pill */}
                         {selectedStep && loopIterations[selectedStep] && (
                           <span

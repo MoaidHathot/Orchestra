@@ -344,6 +344,77 @@ public class RunsApiHistoryProjectionTests : IDisposable
 			"unresolved parents leave the name absent instead of fabricating one");
 	}
 
+	[Fact]
+	public async Task History_OrchestrationStep_SurfacesChildExecutionIdAndName()
+	{
+		// A run whose step records include both an Orchestration step (with child lineage
+		// fields populated) and a non-orchestration step (with the fields null) must surface
+		// childExecutionId/Name/Status on the former and omit them on the latter — letting
+		// Portal render parent → child navigation without inferring lineage from triggeredBy.
+		var now = DateTimeOffset.UtcNow;
+		var record = new OrchestrationRunRecord
+		{
+			RunId = "parent-run",
+			OrchestrationName = "parent-orch",
+			OrchestrationVersion = "1.0.0",
+			TriggeredBy = "manual",
+			StartedAt = now.AddMinutes(-1),
+			CompletedAt = now,
+			Status = ExecutionStatus.Succeeded,
+			IsIncomplete = false,
+			FinalContent = string.Empty,
+			SavedFiles = [],
+			HookExecutions = [],
+			StepRecords = new Dictionary<string, StepRunRecord>(StringComparer.OrdinalIgnoreCase)
+			{
+				["invoke-child"] = new StepRunRecord
+				{
+					StepName = "invoke-child",
+					Status = ExecutionStatus.Succeeded,
+					StartedAt = now.AddSeconds(-30),
+					CompletedAt = now.AddSeconds(-25),
+					Content = "child final content",
+					ChildExecutionId = "child-exec-id-99",
+					ChildOrchestrationName = "child-orch",
+					ChildStatus = ExecutionStatus.Failed,
+				},
+				["plain-prompt"] = new StepRunRecord
+				{
+					StepName = "plain-prompt",
+					Status = ExecutionStatus.Succeeded,
+					StartedAt = now.AddSeconds(-20),
+					CompletedAt = now.AddSeconds(-15),
+					Content = "agent output",
+				},
+			},
+			AllStepRecords = new Dictionary<string, StepRunRecord>(),
+		};
+		await _store.SaveRunAsync(record, cancellationToken: default);
+
+		using var host = CreateHost();
+		var client = host.GetTestClient();
+		var response = await client.GetAsync("/api/history/parent-orch/parent-run");
+		response.EnsureSuccessStatusCode();
+		using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+		var steps = doc.RootElement.GetProperty("steps").EnumerateArray()
+			.ToDictionary(s => s.GetProperty("name").GetString()!, s => s);
+
+		// Orchestration step: child fields surfaced
+		var invokeChild = steps["invoke-child"];
+		invokeChild.GetProperty("childExecutionId").GetString().Should().Be("child-exec-id-99");
+		invokeChild.GetProperty("childOrchestrationName").GetString().Should().Be("child-orch");
+		invokeChild.GetProperty("childStatus").GetString().Should().Be("failed",
+			"child status must be lowercased for symmetry with the rest of the projection");
+
+		// Non-orchestration step: null fields elided by the WhenWritingNull serializer
+		var plainPrompt = steps["plain-prompt"];
+		plainPrompt.TryGetProperty("childExecutionId", out _).Should().BeFalse(
+			"plain steps must not carry a childExecutionId property when ChildExecutionId is null");
+		plainPrompt.TryGetProperty("childOrchestrationName", out _).Should().BeFalse();
+		plainPrompt.TryGetProperty("childStatus", out _).Should().BeFalse();
+	}
+
 	private IHost CreateHost()
 	{
 		var jsonOptions = new JsonSerializerOptions

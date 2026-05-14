@@ -185,6 +185,36 @@ The engine uses `{{expression}}` syntax for dynamic values in prompts, URLs, hea
 | Step files | `{{stepName.files}}` | Replaced with a JSON array of all file paths saved by the named step via `orchestra_save_file`. |
 | Step file (indexed) | `{{stepName.files[N]}}` | Replaced with the path of the Nth file (0-based) saved by the named step via `orchestra_save_file`. |
 
+##### Orchestration-step accessors
+
+For steps of type `Orchestration` (steps that invoke another orchestration), the following
+additional accessors drill into the child run's data via the `ChildOrchestrationInfo` that
+`OrchestrationStepExecutor` populates on every terminal branch — including failed and
+cancelled child runs. Self-healing controllers rely on this to inspect partial child
+progress before generating a repair.
+
+| Accessor | Resolution |
+|----------|------------|
+| `{{stepName.executionId}}` | The child run's execution id. Useful for follow-up MCP calls (`get_orchestration_status`, `get_orchestration_step`). |
+| `{{stepName.status}}` | Lowercase child status: `succeeded`, `failed`, `cancelled`, `pending` (async dispatch). |
+| `{{stepName.errorMessage}}` | Top-level error message from the child run (empty when succeeded). |
+| `{{stepName.completionReason}}` | `orchestra_complete` reason, if any. |
+| `{{stepName.childResult}}` | JSON blob with `executionId`, `status`, `errorMessage`, `finalContent`, `completionReason`, `cancellation`, `stepResults`. |
+| `{{stepName.steps}}` | JSON map of all child-step results keyed by child step name. |
+| `{{stepName.steps.<childStepName>}}` | JSON of one child step (`status`, `output`, `rawOutput`, `error`, `files`). |
+| `{{stepName.steps.<childStepName>.output}}` | Untruncated content of one child step. |
+| `{{stepName.steps.<childStepName>.rawOutput}}` | Pre-output-handler content of one child step. |
+| `{{stepName.steps.<childStepName>.error}}` | Error message of one child step (empty when succeeded). |
+| `{{stepName.steps.<childStepName>.status}}` | Lowercase status of one child step. |
+| `{{stepName.steps.<childStepName>.files}}` | JSON array of one child step's saved files. |
+| `{{stepName.steps.<childStepName>.files[N]}}` | Indexed access to one child step's saved files. |
+
+Resolution is in-process (no MCP, no truncation). The parent persists only the child's
+`executionId`/`orchestrationName`/`status`/`errorMessage` on its own `run.json`; the rich
+per-step data is consumed via templates during the parent's run. Use the data-plane
+`get_orchestration_step` MCP tool to re-fetch child step content after restart or from
+agents that lack access to the parent's in-memory state.
+
 #### Orchestration Metadata
 
 Available via `{{orchestration.property}}`:

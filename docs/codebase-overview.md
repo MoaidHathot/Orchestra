@@ -74,6 +74,13 @@ Orchestra/
 - **Orchestra.Copilot** — thin adapter between the GitHub Copilot SDK and the orchestration engine.
 - **Playground** — three runnable surfaces (Console, Terminal, Portal) for experimentation; not intended for production deployment.
 
+For deep-dives on specific subsystems:
+
+- [Orchestration step semantics + template bindings](orchestration-step-deep-dive.md) —
+  the `type: Orchestration` step, child run drill-in via templates, self-healing patterns.
+- [Run storage reference](run-storage.md) — what `run.json` contains, on-disk layout, and
+  how parent → child orchestration links are persisted.
+
 ### Entry Points
 
 | Surface | Project | Type |

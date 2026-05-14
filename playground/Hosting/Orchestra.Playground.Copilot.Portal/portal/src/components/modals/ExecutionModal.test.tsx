@@ -538,3 +538,66 @@ describe('ExecutionModal command step output', () => {
     expect(screen.getByText(/processed output/)).toBeInTheDocument();
   });
 });
+
+describe('ExecutionModal child-run badge', () => {
+  it('renders a clickable child-run badge on Orchestration steps when stepChildRuns provides the child id', async () => {
+    // A parent Orchestration step with persisted child lineage must surface a clickable
+    // badge in the selected-step header. This is the entry point from a parent's run
+    // history into the child run's detail view.
+    const onViewChildRun = vi.fn();
+    const orchestration: Orchestration = {
+      id: 'orch-parent',
+      name: 'Parent Orchestration',
+      steps: [
+        {
+          name: 'invoke-child',
+          type: 'Orchestration',
+        },
+      ],
+    };
+    const props = makeProps({
+      orchestration,
+      stepStatuses: { 'invoke-child': 'completed' },
+      stepEvents: { 'invoke-child': [makeStepCompletedEvent()] },
+      stepResults: { 'invoke-child': 'child final content' },
+      stepChildRuns: {
+        'invoke-child': {
+          executionId: 'child-exec-id-99',
+          orchestrationName: 'child-orch',
+          status: 'failed',
+        },
+      },
+    }) as Parameters<typeof ExecutionModal>[0];
+    (props as { onViewChildRun: typeof onViewChildRun }).onViewChildRun = onViewChildRun;
+
+    render(<ExecutionModal {...props} />);
+
+    const badge = await screen.findByTestId('child-run-badge');
+    expect(badge).toBeInTheDocument();
+    // Label contains the child orchestration name and its lowercased status.
+    expect(badge.textContent).toContain('child-orch');
+    expect(badge.textContent).toContain('failed');
+
+    fireEvent.click(badge);
+    expect(onViewChildRun).toHaveBeenCalledWith('child-orch', 'child-exec-id-99');
+  });
+
+  it('does not render the badge when the selected step has no child entry', async () => {
+    // A plain Prompt step with no child orchestration must omit the badge entirely so
+    // non-orchestration steps look unchanged from the pre-feature behaviour.
+    const onViewChildRun = vi.fn();
+    const props = makeProps({
+      // No stepChildRuns map at all.
+    }) as Parameters<typeof ExecutionModal>[0];
+    (props as { onViewChildRun: typeof onViewChildRun }).onViewChildRun = onViewChildRun;
+
+    render(<ExecutionModal {...props} />);
+
+    // Wait for the modal to fully render and select the first step.
+    await waitFor(() => {
+      expect(screen.getByText('analyze')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('child-run-badge')).not.toBeInTheDocument();
+  });
+});

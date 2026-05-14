@@ -384,14 +384,23 @@ public sealed class ControlPlaneTools
 
 	[McpServerTool(Name = "list_runs"), Description(
 		"Lists recent orchestration runs from history. " +
-		"Returns run summaries with status, duration, and error information.")]
+		"Returns run summaries with status, duration, lineage (parent/root/depth), and error information. " +
+		"Optionally filter by orchestration name, parent execution id (direct children only), or root execution id (whole subtree).")]
 	public static async Task<string> ListRuns(
 		FileSystemRunStore runStore,
 		[Description("Maximum number of runs to return. Default: 20.")] int limit = 20,
-		[Description("Optional orchestration name to filter runs.")] string? orchestrationName = null)
+		[Description("Optional orchestration name to filter runs.")] string? orchestrationName = null,
+		[Description("Optional parent execution id. When set, returns only direct children of that execution. Mutually exclusive with rootExecutionId.")] string? parentExecutionId = null,
+		[Description("Optional root execution id. When set (and parentExecutionId is not), returns every run in the named execution subtree.")] string? rootExecutionId = null)
 	{
 		IReadOnlyList<RunIndex> runs;
-		if (!string.IsNullOrWhiteSpace(orchestrationName))
+		if (!string.IsNullOrWhiteSpace(parentExecutionId) || !string.IsNullOrWhiteSpace(rootExecutionId))
+		{
+			// Delegate to the same scan path the data-plane list_child_runs tool uses so
+			// both surfaces stay consistent in their parent/root semantics.
+			runs = await runStore.FindChildRunsAsync(parentExecutionId, rootExecutionId, statusFilter: null, limit);
+		}
+		else if (!string.IsNullOrWhiteSpace(orchestrationName))
 		{
 			runs = await runStore.GetRunSummariesAsync(orchestrationName, limit);
 		}
@@ -407,6 +416,7 @@ public sealed class ControlPlaneTools
 			{
 				runId = r.RunId,
 				orchestrationName = r.OrchestrationName,
+				orchestrationVersion = r.OrchestrationVersion,
 				status = r.Status.ToString().ToLowerInvariant(),
 				startedAt = r.StartedAt,
 				completedAt = r.CompletedAt,
@@ -414,6 +424,20 @@ public sealed class ControlPlaneTools
 				triggeredBy = r.TriggeredBy,
 				errorMessage = r.ErrorMessage,
 				failedStepName = r.FailedStepName,
+				// Lineage fields are persisted on RunIndex but were previously elided from
+				// this projection — surface them so admin views and follow-up calls can
+				// walk parent → child chains without separate lookups.
+				parentExecutionId = r.ParentExecutionId,
+				parentStepName = r.ParentStepName,
+				rootExecutionId = r.RootExecutionId,
+				nestingDepth = r.NestingDepth,
+				isIncomplete = r.IsIncomplete ? true : (bool?)null,
+				completionReason = r.CompletionReason,
+				cancellation = r.Cancellation is null ? null : new
+				{
+					kind = r.Cancellation.Kind.ToString(),
+					detail = r.Cancellation.Detail,
+				},
 			}).ToArray(),
 		});
 	}
@@ -423,11 +447,17 @@ public sealed class ControlPlaneTools
 	public static async Task<string> GetRun(
 		FileSystemRunStore runStore,
 		[Description("The orchestration name.")] string orchestrationName,
-		[Description("The run ID.")] string runId)
+		[Description("The run ID.")] string runId,
+		[Description("Response detail level: 'summary' (status + metadata only, no per-step content), 'compact' (default, content truncated to ~8000 chars per step), 'full' (untruncated; responses may be large).")] string detail = "compact")
 	{
 		var run = await runStore.GetRunAsync(orchestrationName, runId);
 		if (run is null)
 			return Error($"Run '{runId}' not found for orchestration '{orchestrationName}'.");
+
+		if (!DataPlaneTools.TryParseDetailLevel(detail, out var detailParsed))
+		{
+			return Error($"Invalid detail level '{detail}'. Valid values: 'summary', 'compact', 'full'.");
+		}
 
 		return Json(new
 		{
@@ -441,13 +471,18 @@ public sealed class ControlPlaneTools
 			savedFiles = run.SavedFiles,
 			stepResults = run.StepRecords.ToDictionary(
 				kvp => kvp.Key,
-				kvp => new
-				{
-					status = kvp.Value.Status.ToString().ToLowerInvariant(),
-					content = TruncateContent(kvp.Value.Content, 2000),
-					errorMessage = kvp.Value.ErrorMessage,
-					savedFiles = kvp.Value.SavedFiles,
-				}),
+				kvp => DataPlaneTools.BuildStepProjection(
+					kvp.Value.Status,
+					kvp.Value.Content,
+					kvp.Value.RawContent,
+					kvp.Value.ErrorMessage,
+					kvp.Value.SavedFiles,
+					detailParsed,
+					perStepLimitChars: 8000)),
+			detail = detailParsed.ToString().ToLowerInvariant(),
+			responseHint = detailParsed == DataPlaneTools.DetailLevel.Full
+				? "detail=full returned untruncated content; responses may be large."
+				: null,
 		});
 	}
 

@@ -1,0 +1,106 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: orchestration-step-async-dispatch
+description: >
+  Demonstrates async-mode `type: Orchestration` step dispatch combined with the MCP-driven
+  observation pattern: fire three child orchestrations in parallel, capture their execution
+  ids via {{stepName.executionId}}, then use the data-plane `list_child_runs` MCP tool
+  (auto-scoped to the caller's execution tree) to poll status and `get_orchestration_status`
+  (with the new completedStepNames signal) and `get_orchestration_step` (for full per-step
+  content) to gather their results.
+
+  Key takeaways:
+    1. Async dispatch makes parallel fan-out trivial. Each Orchestration step returns
+       immediately with the child's executionId surfaced via the new template accessor.
+    2. The X-Orchestra-Root-Execution-Id header is stamped automatically on outbound MCP
+       connections, so `list_child_runs` (no-args) returns the caller's subtree by default.
+    3. Mid-run drill-in: get_orchestration_step now reads from active runs too. The response
+       carries source="active" + runStatus="running" so the consumer can distinguish live
+       data from terminal records.
+version: "1.0.0"
+tags: ["example", "async-dispatch", "fan-out", "list-child-runs"]
+defaultModel: claude-opus-4.6
+timeoutSeconds: 3600
+
+mcps:
+  - name: orchestra
+    type: remote
+    endpoint: "{{server.url}}/mcp/data"
+
+inputs:
+  topic:
+    type: string
+    description: Topic the three research children should investigate in parallel.
+    required: true
+
+steps:
+  # Three identical research orchestrations dispatched asynchronously. Each returns
+  # immediately; we then use list_child_runs / get_orchestration_status to track them.
+  - name: research-A
+    type: Orchestration
+    dependsOn: []
+    orchestration: research-pipeline
+    mode: async
+    parameters:
+      topic: "{{param.topic}} — angle: technical"
+
+  - name: research-B
+    type: Orchestration
+    dependsOn: []
+    orchestration: research-pipeline
+    mode: async
+    parameters:
+      topic: "{{param.topic}} — angle: economic"
+
+  - name: research-C
+    type: Orchestration
+    dependsOn: []
+    orchestration: research-pipeline
+    mode: async
+    parameters:
+      topic: "{{param.topic}} — angle: social"
+
+  # Fan-in: a single Prompt step uses the data-plane MCP to poll the three children
+  # and aggregate their outputs once they all complete (or fail).
+  - name: aggregate-results
+    type: Prompt
+    dependsOn:
+      - research-A
+      - research-B
+      - research-C
+    model: claude-opus-4.6
+    mcps:
+      - orchestra
+    parameters: []
+    timeoutSeconds: 1800
+    systemPrompt: |
+      You are a research aggregator. Three child orchestrations were dispatched in parallel
+      for the same topic; your job is to poll them to completion and produce a single
+      synthesized brief.
+
+      You have access to the Orchestra data-plane MCP. Use these tools in this order:
+
+      1. `list_child_runs` (no arguments needed — the header-stamped X-Orchestra-Root-Execution-Id
+         scopes this automatically to MY execution tree). Returns BOTH active runs (source="active")
+         and persisted ones (source="persisted"). Iterate until every child shows runStatus in
+         (succeeded, failed, cancelled).
+         - If any child shows source="active" with runStatus="running", wait a few seconds and
+           re-list. Active records include totalSteps / completedSteps / currentStep for progress.
+         - Active mid-run drill-in: if you want to peek at a sibling step that has already
+           completed inside an active child, call `get_orchestration_step` with the child's
+           executionId and stepName. The response will carry source="active" and runStatus="running"
+           so you know the overall run is still going.
+      2. Once all three are terminal, call `get_orchestration_status` for each (use detail="compact"
+         which is the default and includes per-step status + errorMessage + metadata).
+      3. For any step you want the full untruncated output of, call `get_orchestration_step`
+         with `length: -1` to read the entire content.
+      4. Produce a single markdown brief synthesizing the three angles.
+
+      Required child execution ids (capture these into your context):
+        - technical:  {{research-A.executionId}}
+        - economic:   {{research-B.executionId}}
+        - social:     {{research-C.executionId}}
+    userPrompt: |
+      Topic: {{param.topic}}
+
+      Three asynchronous research children were just dispatched. Poll them to completion
+      via the Orchestra MCP and produce a 3-section synthesis brief. Cite each angle.

@@ -130,7 +130,15 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 				$"Failed to launch child orchestration '{resolvedOrchestrationId}': {ex.Message}",
 				rawDependencyOutputs,
 				errorCategory: StepErrorCategory.Unknown,
-				trace: trace);
+				trace: trace,
+				childOrchestrationInfo: new ChildOrchestrationInfo
+				{
+					ExecutionId = string.Empty,
+					OrchestrationName = resolvedOrchestrationId,
+					Status = ExecutionStatus.Failed,
+					ErrorMessage = ex.Message,
+					StartedAt = DateTimeOffset.UtcNow,
+				});
 		}
 
 		LogChildLaunched(step.Name, handle.ExecutionId, handle.OrchestrationName, invocationStep.Mode.ToString());
@@ -153,7 +161,17 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			return ExecutionResult.Succeeded(
 				dispatchJson,
 				rawDependencyOutputs: rawDependencyOutputs,
-				trace: trace);
+				trace: trace,
+				childOrchestrationInfo: new ChildOrchestrationInfo
+				{
+					ExecutionId = handle.ExecutionId,
+					OrchestrationId = handle.OrchestrationId,
+					OrchestrationName = handle.OrchestrationName,
+					// Pending = "dispatched but not yet known to a terminal state". Templates
+					// surface this as the lowercase status string "pending".
+					Status = ExecutionStatus.Pending,
+					StartedAt = handle.StartedAt,
+				});
 		}
 
 		// Sync: await the child to terminal state.
@@ -172,7 +190,17 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 				$"Child orchestration '{handle.OrchestrationName}' (executionId={handle.ExecutionId}) completion threw: {ex.Message}",
 				rawDependencyOutputs,
 				errorCategory: StepErrorCategory.Unknown,
-				trace: trace);
+				trace: trace,
+				childOrchestrationInfo: new ChildOrchestrationInfo
+				{
+					ExecutionId = handle.ExecutionId,
+					OrchestrationId = handle.OrchestrationId,
+					OrchestrationName = handle.OrchestrationName,
+					Status = ExecutionStatus.Failed,
+					ErrorMessage = ex.Message,
+					StartedAt = handle.StartedAt,
+					CompletedAt = DateTimeOffset.UtcNow,
+				});
 		}
 
 		var fullTrace = BuildTrace(
@@ -184,6 +212,13 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			finalContent: terminal.FinalContent);
 		_reporter.ReportStepTrace(step.Name, fullTrace);
 
+		// Build the structured ChildOrchestrationInfo. This is populated on EVERY terminal
+		// branch (success, failed, cancelled) so the parent's templates can drill into the
+		// child's per-step outputs/errors via {{stepName.steps.X.output|error|status}},
+		// even when the overall child run failed. Self-healing controllers rely on this
+		// to inspect partial progress before generating a repair.
+		var childInfo = BuildChildOrchestrationInfo(handle, terminal);
+
 		// Map terminal status to ExecutionResult.
 		switch (terminal.Status)
 		{
@@ -191,22 +226,67 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 				return ExecutionResult.Succeeded(
 					terminal.FinalContent ?? string.Empty,
 					rawDependencyOutputs: rawDependencyOutputs,
-					trace: fullTrace);
+					trace: fullTrace,
+					childOrchestrationInfo: childInfo);
 
 			case ExecutionStatus.Cancelled:
 				return ExecutionResult.Failed(
 					terminal.ErrorMessage ?? "Child orchestration was cancelled.",
 					rawDependencyOutputs,
 					errorCategory: StepErrorCategory.Unknown,
-					trace: fullTrace);
+					trace: fullTrace,
+					childOrchestrationInfo: childInfo);
 
 			default:
 				return ExecutionResult.Failed(
 					terminal.ErrorMessage ?? $"Child orchestration ended with status '{terminal.Status}'.",
 					rawDependencyOutputs,
 					errorCategory: StepErrorCategory.Unknown,
-					trace: fullTrace);
+					trace: fullTrace,
+					childOrchestrationInfo: childInfo);
 		}
+	}
+
+	/// <summary>
+	/// Projects a terminal <see cref="ChildOrchestrationResult"/> into the
+	/// <see cref="ChildOrchestrationInfo"/> structure consumed by parent-step templates.
+	/// Preserves per-step content / errorMessage / saved files so the parent can drill in
+	/// via <c>{{stepName.steps.&lt;childStep&gt;.&lt;property&gt;}}</c> — including for
+	/// failed and cancelled child runs (the whole point of this projection).
+	/// </summary>
+	private static ChildOrchestrationInfo BuildChildOrchestrationInfo(
+		ChildOrchestrationHandle handle,
+		ChildOrchestrationResult terminal)
+	{
+		var orchestrationResult = terminal.OrchestrationResult;
+		var stepResults = orchestrationResult is null
+			? (IReadOnlyDictionary<string, ChildStepInfo>)new Dictionary<string, ChildStepInfo>(StringComparer.OrdinalIgnoreCase)
+			: orchestrationResult.StepResults.ToDictionary(
+				kvp => kvp.Key,
+				kvp => new ChildStepInfo
+				{
+					Status = kvp.Value.Status,
+					Content = kvp.Value.Content,
+					RawContent = kvp.Value.RawContent,
+					ErrorMessage = kvp.Value.ErrorMessage,
+					SavedFiles = kvp.Value.SavedFiles ?? [],
+				},
+				StringComparer.OrdinalIgnoreCase);
+
+		return new ChildOrchestrationInfo
+		{
+			ExecutionId = handle.ExecutionId,
+			OrchestrationId = handle.OrchestrationId,
+			OrchestrationName = handle.OrchestrationName,
+			Status = terminal.Status,
+			ErrorMessage = terminal.ErrorMessage,
+			FinalContent = terminal.FinalContent,
+			CompletionReason = orchestrationResult?.CompletionReason,
+			Cancellation = orchestrationResult?.Cancellation,
+			StepResults = stepResults,
+			StartedAt = terminal.StartedAt,
+			CompletedAt = terminal.CompletedAt,
+		};
 	}
 
 	private async Task<Dictionary<string, string>?> RunInputHandlerAsync(
