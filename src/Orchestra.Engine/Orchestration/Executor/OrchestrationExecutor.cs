@@ -296,6 +296,13 @@ public partial class OrchestrationExecutor
 						SelectedModelInfo = result.SelectedModelInfo,
 						ActualModelInfo = result.ActualModelInfo,
 						SavedFiles = result.SavedFiles,
+						// Preserve child-orchestration lineage through restore so the
+						// retry's own run.json carries the pointer triple — symmetric
+						// with how OrchestrationStepExecutor populates these on fresh
+						// runs.
+						ChildExecutionId = stepCheckpoint.ChildExecutionId,
+						ChildOrchestrationName = stepCheckpoint.ChildOrchestrationName,
+						ChildStatus = stepCheckpoint.ChildStatus,
 					};
 					stepRecords[stepName] = record;
 					allStepRecords[stepName] = record;
@@ -303,6 +310,68 @@ public partial class OrchestrationExecutor
 					// completed steps via mid-run drill-in too (not just freshly-executed ones).
 					_reporter.PublishStepRecord(stepName, record);
 					_reporter.ReportStepOutput(stepName, result.Content);
+				}
+			}
+
+			// Rehydrate ChildOrchestrationInfo for any restored Orchestration step.
+			//
+			// The checkpoint persists ONLY the pointer triple (child executionId / name /
+			// status) — not the child's full per-step content — to keep checkpoints small
+			// even for deeply-nested orchestration trees. Here we load each child's own
+			// run.json via IRunStore and reconstruct the ChildOrchestrationInfo so that
+			// downstream steps in this retry can resolve template bindings like
+			// {{stepName.steps.<childStep>.output}} and {{stepName.executionId}}, exactly
+			// as they would in a fresh run.
+			//
+			// Failure modes degrade gracefully:
+			//   - No IRunStore wired                  → skip; bindings stay unresolved (today's behavior).
+			//   - Child's run.json deleted / missing  → skip that step; other steps unaffected.
+			//   - Pointer triple null (legacy ckpt)   → skip that step.
+			//
+			// One disk read per Orchestration step in the parent's lineage — typically
+			// a handful per parent, well below 100ms total even for deeply nested cases.
+			if (_runStore is not null)
+			{
+				foreach (var (stepName, stepCheckpoint) in checkpoint.CompletedSteps)
+				{
+					if (stepCheckpoint.ChildExecutionId is null
+						|| stepCheckpoint.ChildOrchestrationName is null)
+					{
+						continue;
+					}
+
+					OrchestrationRunRecord? childRecord;
+					try
+					{
+						childRecord = await _runStore.GetRunAsync(
+							stepCheckpoint.ChildOrchestrationName,
+							stepCheckpoint.ChildExecutionId,
+							cancellationToken).ConfigureAwait(false);
+					}
+					catch (Exception ex)
+					{
+						LogChildRehydrationFailed(stepName, stepCheckpoint.ChildExecutionId, ex);
+						continue;
+					}
+
+					if (childRecord is null)
+					{
+						LogChildRehydrationMissing(stepName, stepCheckpoint.ChildExecutionId);
+						continue;
+					}
+
+					var rehydrated = ProjectRehydratedChildInfo(stepCheckpoint, childRecord);
+
+					// Overwrite the previously-restored result with one that carries the
+					// rehydrated ChildOrchestrationInfo. The execution shape is otherwise
+					// unchanged — only the child-info side-channel is populated.
+					if (!stepResults.TryGetValue(stepName, out var restored))
+					{
+						continue;
+					}
+					var enriched = CloneResultWithChildInfo(restored, rehydrated);
+					context.AddResult(stepName, enriched);  // overwrites
+					stepResults[stepName] = enriched;
 				}
 			}
 		}
@@ -1459,6 +1528,87 @@ public partial class OrchestrationExecutor
 	}
 
 	/// <summary>
+	/// Projects a child run's persisted <see cref="OrchestrationRunRecord"/> into the
+	/// <see cref="ChildOrchestrationInfo"/> shape consumed by parent-step template bindings.
+	/// Mirrors the projection in <c>OrchestrationStepExecutor.BuildChildOrchestrationInfo</c>
+	/// but reads from <see cref="StepRunRecord"/> entries (persisted shape) rather than
+	/// <c>ChildOrchestrationResult</c> (in-process shape).
+	/// </summary>
+	/// <param name="checkpoint">The parent step's checkpoint, used as the canonical
+	/// source for the executionId / orchestrationName / status pointer triple. The child's
+	/// run record may report a different (more recent) terminal status if the child was
+	/// retried independently — we prefer the parent's snapshot for consistency with what
+	/// downstream templates saw at original-run time.</param>
+	/// <param name="childRecord">The child run's persisted record as loaded from
+	/// <see cref="IRunStore.GetRunAsync"/>.</param>
+	private static ChildOrchestrationInfo ProjectRehydratedChildInfo(
+		CheckpointStepResult checkpoint,
+		OrchestrationRunRecord childRecord)
+	{
+		var stepResults = childRecord.StepRecords.ToDictionary(
+			kvp => kvp.Key,
+			kvp => new ChildStepInfo
+			{
+				Status = kvp.Value.Status,
+				Content = kvp.Value.Content,
+				RawContent = kvp.Value.RawContent,
+				ErrorMessage = kvp.Value.ErrorMessage,
+				SavedFiles = kvp.Value.SavedFiles ?? [],
+			},
+			StringComparer.OrdinalIgnoreCase);
+
+		return new ChildOrchestrationInfo
+		{
+			ExecutionId = checkpoint.ChildExecutionId ?? childRecord.RunId,
+			OrchestrationName = checkpoint.ChildOrchestrationName ?? childRecord.OrchestrationName,
+			Status = checkpoint.ChildStatus ?? childRecord.Status,
+			ErrorMessage = null,                                 // Top-level error is captured on the parent step's ErrorMessage.
+			FinalContent = childRecord.FinalContent,
+			CompletionReason = childRecord.CompletionReason,
+			Cancellation = childRecord.Cancellation,
+			StepResults = stepResults,
+			StartedAt = childRecord.StartedAt,
+			CompletedAt = childRecord.CompletedAt,
+		};
+	}
+
+	/// <summary>
+	/// Returns a copy of <paramref name="source"/> with its <see cref="ExecutionResult.ChildOrchestrationInfo"/>
+	/// replaced by <paramref name="childInfo"/>. Used by the checkpoint-restore path to
+	/// attach a rehydrated <see cref="ChildOrchestrationInfo"/> onto the restored result
+	/// after <see cref="CheckpointStepResult.ToExecutionResult"/> produced one without it.
+	/// </summary>
+	private static ExecutionResult CloneResultWithChildInfo(
+		ExecutionResult source,
+		ChildOrchestrationInfo childInfo)
+	{
+		return new ExecutionResult
+		{
+			Status = source.Status,
+			Content = source.Content,
+			RawContent = source.RawContent,
+			ErrorMessage = source.ErrorMessage,
+			RawDependencyOutputs = source.RawDependencyOutputs,
+			PromptSent = source.PromptSent,
+			ActualModel = source.ActualModel,
+			SelectedModel = source.SelectedModel,
+			RequestedModelInfo = source.RequestedModelInfo,
+			SelectedModelInfo = source.SelectedModelInfo,
+			ActualModelInfo = source.ActualModelInfo,
+			Usage = source.Usage,
+			Trace = source.Trace,
+			SavedFiles = source.SavedFiles,
+			RetryHistory = source.RetryHistory,
+			ErrorCategory = source.ErrorCategory,
+			OrchestrationCompleteRequested = source.OrchestrationCompleteRequested,
+			OrchestrationCompleteStatus = source.OrchestrationCompleteStatus,
+			OrchestrationCompleteStepName = source.OrchestrationCompleteStepName,
+			OrchestrationCompleteReason = source.OrchestrationCompleteReason,
+			ChildOrchestrationInfo = childInfo,
+		};
+	}
+
+	/// <summary>
 	/// Returns true when <paramref name="errorMessage"/> is the bare default emitted by
 	/// <see cref="ExecutionResult.Cancelled(string?)"/> with no caller-supplied detail.
 	/// Used to decide whether the post-run cancellation-cause enricher may rewrite it.
@@ -2014,6 +2164,12 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Resuming orchestration '{Name}', run '{RunId}', restoring {CompletedSteps} completed step(s) from checkpoint.")]
 	private partial void LogResumingFromCheckpoint(string name, string runId, int completedSteps);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Child orchestration rehydration failed for restored step '{StepName}' (child executionId '{ChildExecutionId}'); downstream templates may not resolve {{stepName.steps.*}} bindings.")]
+	private partial void LogChildRehydrationFailed(string stepName, string childExecutionId, Exception exception);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Child orchestration run.json missing for restored step '{StepName}' (child executionId '{ChildExecutionId}'); skipping ChildOrchestrationInfo rehydration. Downstream templates {{stepName.steps.*}} will not resolve in this retry.")]
+	private partial void LogChildRehydrationMissing(string stepName, string childExecutionId);
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' requested orchestration completion: {Reason}")]
 	private partial void LogOrchestrationCompleteRequested(string stepName, string reason);

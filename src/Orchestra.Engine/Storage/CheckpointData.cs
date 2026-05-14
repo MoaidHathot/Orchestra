@@ -130,6 +130,37 @@ public class CheckpointStepResult
 	/// </summary>
 	public StepErrorCategory? ErrorCategory { get; init; }
 
+	// ── Child orchestration pointer (Orchestration steps only) ──
+	//
+	// We persist ONLY the pointer triple — not the child's full StepResults map —
+	// to keep checkpoints small even for deeply-nested orchestration trees. At
+	// resume time the executor reads the child's own run.json via IRunStore and
+	// reconstructs a ChildOrchestrationInfo on demand, so downstream steps in a
+	// retry can still resolve template bindings like
+	// {{stepName.steps.<childStep>.output}} and {{stepName.executionId}}.
+	// Older checkpoints (predating these fields) have nulls here — they deserialize
+	// cleanly and the executor simply skips rehydration for those steps.
+
+	/// <summary>
+	/// For Orchestration-step checkpoints: execution id of the child run. Null on
+	/// all other step types and on legacy checkpoints.
+	/// </summary>
+	public string? ChildExecutionId { get; init; }
+
+	/// <summary>
+	/// For Orchestration-step checkpoints: the child orchestration's name.
+	/// Required (alongside <see cref="ChildExecutionId"/>) to look up the child's
+	/// run.json at rehydration time.
+	/// </summary>
+	public string? ChildOrchestrationName { get; init; }
+
+	/// <summary>
+	/// For Orchestration-step checkpoints: the child's terminal status as seen by
+	/// the parent. Used by rehydration to short-circuit when the child's persisted
+	/// record disagrees (which would indicate the child was retried or deleted).
+	/// </summary>
+	public ExecutionStatus? ChildStatus { get; init; }
+
 	/// <summary>
 	/// Converts this checkpoint step result to an <see cref="ExecutionResult"/>.
 	/// </summary>
@@ -151,6 +182,10 @@ public class CheckpointStepResult
 		SavedFiles = SavedFiles,
 		RetryHistory = RetryHistory,
 		ErrorCategory = ErrorCategory,
+		// NOTE: ChildOrchestrationInfo is intentionally NOT reconstructed here.
+		// The full per-step data lives in the child's own run.json; the parent's
+		// retry/resume path rehydrates it via IRunStore.GetRunAsync after this
+		// restore completes. See OrchestrationExecutor's rehydration pass.
 	};
 
 	/// <summary>
@@ -176,5 +211,11 @@ public class CheckpointStepResult
 		SavedFiles = result.SavedFiles,
 		RetryHistory = result.RetryHistory,
 		ErrorCategory = result.ErrorCategory,
+		// Capture just the pointer triple from ChildOrchestrationInfo (if any).
+		// The child's per-step content lives on its own run.json — we don't
+		// inline it here, mirroring the parent run.json's storage decision.
+		ChildExecutionId = result.ChildOrchestrationInfo?.ExecutionId,
+		ChildOrchestrationName = result.ChildOrchestrationInfo?.OrchestrationName,
+		ChildStatus = result.ChildOrchestrationInfo?.Status,
 	};
 }

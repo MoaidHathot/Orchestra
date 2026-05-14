@@ -601,6 +601,51 @@ public class CheckpointTests
 		restored.ErrorMessage.Should().Be("Something went wrong");
 	}
 
+	[Fact]
+	public void CheckpointStepResult_FromExecutionResult_CapturesChildPointerTripleOnly()
+	{
+		// Arrange — an Orchestration-step result with a full ChildOrchestrationInfo
+		// (executionId + per-step results). We persist ONLY the pointer triple in
+		// the checkpoint to keep file size small even for deeply-nested chains; the
+		// child's per-step content stays in the child's own run.json and is
+		// rehydrated by the executor at resume time.
+		var childInfo = new ChildOrchestrationInfo
+		{
+			ExecutionId = "child-exec-77",
+			OrchestrationName = "child-orch",
+			OrchestrationId = "child-orch",
+			Status = ExecutionStatus.Succeeded,
+			FinalContent = "child-final",
+			StepResults = new Dictionary<string, ChildStepInfo>(StringComparer.OrdinalIgnoreCase)
+			{
+				["build"] = new ChildStepInfo { Status = ExecutionStatus.Succeeded, Content = "build-output" },
+				["test"]  = new ChildStepInfo { Status = ExecutionStatus.Failed, ErrorMessage = "boom" },
+			},
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+			CompletedAt = DateTimeOffset.UtcNow,
+		};
+		var original = ExecutionResult.Succeeded(
+			content: "summary",
+			childOrchestrationInfo: childInfo);
+
+		// Act
+		var checkpoint = CheckpointStepResult.FromExecutionResult(original);
+
+		// Assert — the three pointer fields are captured.
+		checkpoint.ChildExecutionId.Should().Be("child-exec-77");
+		checkpoint.ChildOrchestrationName.Should().Be("child-orch");
+		checkpoint.ChildStatus.Should().Be(ExecutionStatus.Succeeded);
+
+		// And — critically — ToExecutionResult does NOT reconstruct the full
+		// ChildOrchestrationInfo. That's the executor's rehydration pass's job;
+		// here we should only have the pointers persisted, not the full data.
+		var restored = checkpoint.ToExecutionResult();
+		restored.ChildOrchestrationInfo.Should().BeNull(
+			"the full child info is rehydrated by the executor from the child's run.json — " +
+			"ToExecutionResult intentionally returns a result without ChildOrchestrationInfo so " +
+			"the rehydration pass owns this side-channel and the on-disk shape stays minimal");
+	}
+
 	#endregion
 
 	#region NullCheckpointStore
@@ -636,6 +681,302 @@ public class CheckpointTests
 		var store = NullCheckpointStore.Instance;
 		var result = await store.ListCheckpointsAsync();
 		result.Should().BeEmpty();
+	}
+
+	#endregion
+
+	#region ChildOrchestrationInfo rehydration on resume
+
+	[Fact]
+	public async Task ResumeAsync_RehydratesChildOrchestrationInfo_FromRunStore()
+	{
+		// Arrange — checkpoint persists an Orchestration step that points at a child
+		// run. Set up an IRunStore stub that returns the child's persisted record so
+		// the executor's rehydration pass can reconstruct ChildOrchestrationInfo and
+		// make it available to downstream template bindings.
+		var childRunId = "child-exec-rehydrate-1";
+		var childRecord = new OrchestrationRunRecord
+		{
+			RunId = childRunId,
+			OrchestrationName = "child-orch",
+			OrchestrationVersion = "1.0.0",
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
+			CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+			Status = ExecutionStatus.Succeeded,
+			FinalContent = "child-final",
+			StepRecords = new Dictionary<string, StepRunRecord>(StringComparer.OrdinalIgnoreCase)
+			{
+				["build"] = new StepRunRecord
+				{
+					StepName = "build",
+					Status = ExecutionStatus.Succeeded,
+					StartedAt = DateTimeOffset.UtcNow.AddMinutes(-2),
+					CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+					Content = "build-output-bytes",
+				},
+				["test"] = new StepRunRecord
+				{
+					StepName = "test",
+					Status = ExecutionStatus.Failed,
+					StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+					CompletedAt = DateTimeOffset.UtcNow.AddSeconds(-30),
+					Content = string.Empty,
+					ErrorMessage = "test step blew up",
+				},
+			},
+			AllStepRecords = new Dictionary<string, StepRunRecord>(StringComparer.OrdinalIgnoreCase),
+		};
+
+		var runStore = Substitute.For<IRunStore>();
+		runStore.GetRunAsync("child-orch", childRunId, Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<OrchestrationRunRecord?>(childRecord));
+
+		// Capture step-b's prompt to confirm the rehydrated template binding resolves.
+		string? capturedPrompt = null;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			capturedPrompt = prompt;
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			channel.Writer.Complete();
+			return new AgentTask(channel.Reader, Task.FromResult(new AgentResult { Content = "B" }));
+		});
+
+		// step-a is an Orchestration step whose ChildOrchestrationInfo must be rehydrated.
+		// step-b is a Prompt step downstream that references {{step-a.steps.build.output}}.
+		var orchestration = CreateOrchestration(
+		[
+			new OrchestrationInvocationStep
+			{
+				Name = "step-a",
+				Type = OrchestrationStepType.Orchestration,
+				DependsOn = [],
+				OrchestrationName = "child-orch",
+				ChildParameters = [],
+			},
+			new PromptOrchestrationStep
+			{
+				Name = "step-b",
+				Type = OrchestrationStepType.Prompt,
+				DependsOn = ["step-a"],
+				Parameters = [],
+				SystemPrompt = "System",
+				UserPrompt = "Drill: {{step-a.steps.build.output}}",
+				Model = "claude-opus-4.5",
+			},
+		]);
+
+		var checkpoint = new CheckpointData
+		{
+			RunId = "resume-rehydrate-test",
+			OrchestrationName = "checkpoint-test",
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+			CheckpointedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+			CompletedSteps = new Dictionary<string, CheckpointStepResult>
+			{
+				["step-a"] = new()
+				{
+					Status = ExecutionStatus.Succeeded,
+					Content = "child-final",
+					// Pointer triple — exactly what FromExecutionResult would have captured.
+					ChildExecutionId = childRunId,
+					ChildOrchestrationName = "child-orch",
+					ChildStatus = ExecutionStatus.Succeeded,
+				},
+			},
+		};
+
+		var executor = new OrchestrationExecutor(
+			_scheduler, agentBuilder, NullOrchestrationReporter.Instance, _loggerFactory,
+			runStore: runStore);
+
+		// Act
+		var result = await executor.ResumeAsync(orchestration, checkpoint);
+
+		// Assert — the rehydration must have read the child's record AND step-b's prompt
+		// must reflect the resolved {{step-a.steps.build.output}} binding.
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		await runStore.Received(1).GetRunAsync("child-orch", childRunId, Arg.Any<CancellationToken>());
+		capturedPrompt.Should().NotBeNull();
+		capturedPrompt!.Should().Contain("build-output-bytes",
+			"after rehydration, the parent's restored step-a result should carry " +
+			"ChildOrchestrationInfo.StepResults['build'].Content so downstream templates resolve");
+	}
+
+	[Fact]
+	public async Task ResumeAsync_NoRunStore_SkipsRehydrationGracefully()
+	{
+		// Arrange — orchestrator wired without an IRunStore. The rehydration block is
+		// gated by `_runStore is not null` so the resume must complete cleanly and the
+		// downstream template binding simply stays unresolved (today's behavior).
+		string? capturedPrompt = null;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			capturedPrompt = prompt;
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			channel.Writer.Complete();
+			return new AgentTask(channel.Reader, Task.FromResult(new AgentResult { Content = "B" }));
+		});
+
+		var orchestration = CreateOrchestration(
+		[
+			new OrchestrationInvocationStep
+			{
+				Name = "step-a",
+				Type = OrchestrationStepType.Orchestration,
+				DependsOn = [],
+				OrchestrationName = "child-orch",
+				ChildParameters = [],
+			},
+			new PromptOrchestrationStep
+			{
+				Name = "step-b",
+				Type = OrchestrationStepType.Prompt,
+				DependsOn = ["step-a"],
+				Parameters = [],
+				SystemPrompt = "System",
+				UserPrompt = "Drill: {{step-a.steps.build.output}}",
+				Model = "claude-opus-4.5",
+			},
+		]);
+
+		var checkpoint = new CheckpointData
+		{
+			RunId = "resume-no-store-test",
+			OrchestrationName = "checkpoint-test",
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+			CheckpointedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+			CompletedSteps = new Dictionary<string, CheckpointStepResult>
+			{
+				["step-a"] = new()
+				{
+					Status = ExecutionStatus.Succeeded,
+					Content = "child-final",
+					ChildExecutionId = "child-exec-unused",
+					ChildOrchestrationName = "child-orch",
+					ChildStatus = ExecutionStatus.Succeeded,
+				},
+			},
+		};
+
+		var executor = new OrchestrationExecutor(
+			_scheduler, agentBuilder, NullOrchestrationReporter.Instance, _loggerFactory);
+		// Intentionally no runStore parameter.
+
+		// Act
+		var result = await executor.ResumeAsync(orchestration, checkpoint);
+
+		// Assert — resume succeeded; the unresolved binding is left literal (the
+		// validator would have flagged it earlier in real use, but at runtime an
+		// unresolved {{stepName.steps.X.output}} stays as the literal expression).
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		capturedPrompt.Should().NotBeNull();
+		capturedPrompt!.Should().Contain("{{step-a.steps.build.output}}",
+			"without a run store the rehydration pass is skipped and the template " +
+			"binding falls through to the unresolved-tracking path, leaving the literal text");
+	}
+
+	[Fact]
+	public async Task ResumeAsync_ChildRunDeleted_SkipsRehydrationWithoutThrowing()
+	{
+		// Arrange — IRunStore returns null for the requested child (e.g., the child's
+		// run.json was deleted between the parent's original run and this retry).
+		// The executor must skip rehydration silently and the resume must complete.
+		var runStore = Substitute.For<IRunStore>();
+		runStore.GetRunAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<OrchestrationRunRecord?>(null));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("B");
+
+		var orchestration = CreateOrchestration(
+		[
+			new OrchestrationInvocationStep
+			{
+				Name = "step-a",
+				Type = OrchestrationStepType.Orchestration,
+				DependsOn = [],
+				OrchestrationName = "child-orch",
+				ChildParameters = [],
+			},
+			CreateStep("step-b", dependsOn: ["step-a"]),
+		]);
+
+		var checkpoint = new CheckpointData
+		{
+			RunId = "resume-missing-child-test",
+			OrchestrationName = "checkpoint-test",
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+			CheckpointedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+			CompletedSteps = new Dictionary<string, CheckpointStepResult>
+			{
+				["step-a"] = new()
+				{
+					Status = ExecutionStatus.Succeeded,
+					Content = "child-final",
+					ChildExecutionId = "child-deleted",
+					ChildOrchestrationName = "child-orch",
+					ChildStatus = ExecutionStatus.Succeeded,
+				},
+			},
+		};
+
+		var executor = new OrchestrationExecutor(
+			_scheduler, agentBuilder, NullOrchestrationReporter.Instance, _loggerFactory,
+			runStore: runStore);
+
+		// Act — must not throw
+		var result = await executor.ResumeAsync(orchestration, checkpoint);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		await runStore.Received(1).GetRunAsync("child-orch", "child-deleted", Arg.Any<CancellationToken>());
+	}
+
+	[Fact]
+	public async Task ResumeAsync_LegacyCheckpointWithoutChildPointer_NoRehydrationAttempted()
+	{
+		// Arrange — older checkpoints (predating the pointer triple) have null
+		// ChildExecutionId. The executor must skip those entries entirely without
+		// even calling GetRunAsync (no unnecessary disk I/O).
+		var runStore = Substitute.For<IRunStore>();
+		var agentBuilder = new MockAgentBuilder().WithResponse("B");
+
+		var orchestration = CreateOrchestration(
+		[
+			CreateStep("step-a"),                            // not an Orchestration step
+			CreateStep("step-b", dependsOn: ["step-a"]),
+		]);
+
+		var checkpoint = new CheckpointData
+		{
+			RunId = "resume-legacy-test",
+			OrchestrationName = "checkpoint-test",
+			StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+			CheckpointedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+			CompletedSteps = new Dictionary<string, CheckpointStepResult>
+			{
+				["step-a"] = new()
+				{
+					Status = ExecutionStatus.Succeeded,
+					Content = "A content",
+					// No ChildExecutionId — this is a non-orchestration step OR a
+					// legacy checkpoint.
+				},
+			},
+		};
+
+		var executor = new OrchestrationExecutor(
+			_scheduler, agentBuilder, NullOrchestrationReporter.Instance, _loggerFactory,
+			runStore: runStore);
+
+		// Act
+		var result = await executor.ResumeAsync(orchestration, checkpoint);
+
+		// Assert — resume succeeded AND no GetRunAsync call was made (the rehydration
+		// loop short-circuits before any disk I/O when the pointer triple is null).
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		await runStore.DidNotReceive().GetRunAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
 	}
 
 	#endregion
