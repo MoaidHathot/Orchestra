@@ -128,6 +128,33 @@ app.MapOrchestraMcpEndpoints(); // Maps /mcp/data
 | `DataPlaneRoute` | `string` | `"/mcp/data"` | Route path for the data-plane endpoint |
 | `ControlPlaneEnabled` | `bool` | `false` | Enable the control-plane MCP endpoint (opt-in) |
 | `ControlPlaneRoute` | `string` | `"/mcp/control"` | Route path for the control-plane endpoint |
+| `MaxNestingDepth` | `int` | `5` | Maximum orchestration-to-orchestration nesting depth |
+| `DefaultOrchestraInvokeTimeoutSeconds` | `int` | `0` | Client-side transport timeout (seconds) applied to MCP requests targeting `/mcp/data` when the calling orchestration's `mcps[]` entry doesn't override it. **`0` = no transport timeout — server-side timeouts are authoritative**. Set to a positive value only if you want a belt-and-suspenders client-side cap; in that case make sure it is `>=` the largest sync `timeoutSeconds` your orchestrations use, or `invoke_orchestration` will return a `timeout-mismatch` error. |
+
+> **Cancellation taxonomy.** Cancelled runs are recorded with a structured
+> `CancellationDetails` (`cancellation` field on the run record + JSON projections).
+> The `kind` enum distinguishes:
+> - `External` — caller cancelled (REST `/api/active/{id}/cancel`, MCP
+>   `cancel_orchestration` tool, or a parent run propagating cancel via the linked CTS).
+>   The `detail` field carries the source string (`"REST /api/active/{id}/cancel"`,
+>   `"mcp:cancel_orchestration: <reason>"`, `"propagated from parent <id> (step: <step>)"`).
+> - `OrchestrationTimeout` — the orchestration's own `timeoutSeconds` fired.
+> - `SyncInvokeTimeout` — the `request.timeoutSeconds` passed to a sync
+>   `invoke_orchestration` call fired (server-side wrapper).
+> - `McpRequestAborted` — the upstream MCP transport aborted its request to
+>   `/mcp/data` before the engine completed (typically a stale `mcps[].timeoutSeconds`
+>   smaller than the requested sync `timeoutSeconds`). Counted as a timeout
+>   (`isTimeout: true`).
+> - `OrchestrationComplete` — a step invoked the `orchestra_complete` engine tool.
+> - `HostShutdown` — the host process was stopping.
+> - `AwaitingInputTimeout` / `HostShutdownDuringWait` — outstanding human-in-the-loop wait.
+> - `ConfigReload` — orchestration definition reloaded on disk while the run was active
+>   (reserved; not yet wired by the file watcher).
+>
+> Every cancelled run also carries a `progress` summary inside `cancellation`:
+> total/completed/cancelled/failed/skipped step counts, the most-recently-completed
+> step name and timestamp, and the list of cancelled step names. Use it to answer
+> "how far along was this run?" without scanning per-step records.
 
 #### Data-Plane Tools
 

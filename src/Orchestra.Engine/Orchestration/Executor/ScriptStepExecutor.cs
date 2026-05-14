@@ -45,10 +45,39 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
-	/// PowerShell prologue injected at the very top of the resolved script when strict mode is active.
-	/// Kept to a single physical line so the user's script preserves its original line numbers in
-	/// runtime error messages (PowerShell reports line numbers from the .ps1 file as written).
+	/// PowerShell prologue injected at the top of the resolved script for the default
+	/// (auto) <see cref="ScriptOrchestrationStep.StrictMode"/> setting.
 	/// </summary>
+	/// <remarks>
+	/// <para>Kept to a single physical line so the user's script preserves its original line numbers
+	/// in runtime error messages.</para>
+	/// <para>This prologue promotes non-terminating PowerShell errors to terminating ones via
+	/// <c>$ErrorActionPreference='Stop'</c> and ensures any unhandled error causes pwsh to exit
+	/// with a non-zero code via <c>trap { Write-Error -ErrorRecord $_; exit 1 }</c>. It deliberately
+	/// does NOT include <c>Set-StrictMode -Version Latest</c> because most production scripts read
+	/// optional properties off <c>ConvertFrom-Json</c> output (a pattern that throws under strict
+	/// mode v3+). Authors who want the additional strict-mode checks set
+	/// <c>strictMode: true</c> on the step.</para>
+	/// </remarks>
+	internal const string PowerShellDefaultPrologue =
+		"$ErrorActionPreference='Stop'; trap { Write-Error -ErrorRecord $_; exit 1 };";
+
+	/// <summary>
+	/// PowerShell prologue injected when the step opts in via <c>strictMode: true</c>.
+	/// Adds <c>Set-StrictMode -Version Latest</c> on top of the default prologue.
+	/// </summary>
+	/// <remarks>
+	/// <para>Set-StrictMode-Version-Latest enforces (in addition to the default prologue):</para>
+	/// <list type="bullet">
+	///   <item>Uninitialized variable references throw.</item>
+	///   <item>Reading a property that does not exist on an object throws.</item>
+	///   <item>Out-of-bounds array indexing throws.</item>
+	///   <item>Calling a function as if it were a method (with parentheses) throws.</item>
+	/// </list>
+	/// <para>Useful for new scripts written with strict-mode discipline in mind. Existing scripts
+	/// that rely on <c>$obj.MissingProperty</c> returning <c>$null</c> must use a strict-safe accessor
+	/// (e.g., <c>$obj.PSObject.Properties['Name']?.Value</c>) before enabling this.</para>
+	/// </remarks>
 	internal const string PowerShellStrictPrologue =
 		"$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; trap { Write-Error -ErrorRecord $_; exit 1 };";	public ScriptStepExecutor(
 		IOrchestrationReporter reporter,
@@ -93,9 +122,9 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				// then write to a temp file.
 				var resolvedScript = TemplateResolver.Resolve(scriptStep.Script, context.Parameters, context, step.DependsOn, step);
 
-				if (ShouldInjectStrictPrologue(shell, scriptStep.StrictMode))
+				if (GetPowerShellPrologue(shell, scriptStep.StrictMode) is { } prologue)
 				{
-					resolvedScript = InjectPowerShellStrictPrologue(resolvedScript);
+					resolvedScript = InjectPowerShellPrologue(resolvedScript, prologue);
 					LogStrictPrologueInjected(step.Name, shell);
 				}
 
@@ -314,24 +343,34 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	}
 
 	/// <summary>
-	/// Determines whether a strict-mode prologue should be injected for the resolved script.
+	/// Returns the PowerShell prologue to inject for the given shell and explicit
+	/// <see cref="ScriptOrchestrationStep.StrictMode"/> setting, or <c>null</c> if no prologue should be injected.
 	/// </summary>
 	/// <remarks>
-	/// When <paramref name="explicitOptIn"/> is non-null, the caller's choice always wins.
-	/// Otherwise the executor opts in by default for known PowerShell shells so that
-	/// non-terminating script errors no longer surface as silent successes (exit 0 + empty stdout).
+	/// <para>Decision table (for <c>pwsh</c>/<c>powershell</c> only — every other shell returns <c>null</c>):</para>
+	/// <list type="table">
+	///   <listheader><term><c>strictMode</c></term><description>Prologue</description></listheader>
+	///   <item><term><c>null</c> (auto)</term><description><see cref="PowerShellDefaultPrologue"/> — <c>$ErrorActionPreference='Stop'</c> + <c>trap</c>. Catches the silent-terminating-error class without breaking idiomatic JSON shape handling.</description></item>
+	///   <item><term><c>true</c></term><description><see cref="PowerShellStrictPrologue"/> — adds <c>Set-StrictMode -Version Latest</c>.</description></item>
+	///   <item><term><c>false</c></term><description><c>null</c> — the user script runs verbatim, with no engine-injected error-handling guardrails.</description></item>
+	/// </list>
 	/// </remarks>
-	internal static bool ShouldInjectStrictPrologue(string shell, bool? explicitOptIn)
+	internal static string? GetPowerShellPrologue(string shell, bool? explicitOptIn)
 	{
-		if (explicitOptIn is bool decided)
-			return decided && s_strictByDefaultShells.Contains(shell);
+		if (!s_strictByDefaultShells.Contains(shell))
+			return null;
 
-		return s_strictByDefaultShells.Contains(shell);
+		return explicitOptIn switch
+		{
+			true => PowerShellStrictPrologue,
+			false => null,
+			null => PowerShellDefaultPrologue,
+		};
 	}
 
 	/// <summary>
-	/// Injects the PowerShell strict-mode prologue at the first valid statement-level
-	/// position in the script.
+	/// Injects <paramref name="prologue"/> at the first valid statement-level position in the
+	/// user's PowerShell script.
 	/// </summary>
 	/// <remarks>
 	/// <para>PowerShell requires that <c>#requires</c>, <c>using</c>, attribute declarations,
@@ -350,12 +389,12 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	/// </list>
 	/// <para>If none of these are present at the top, the prologue is injected at offset 0.</para>
 	/// </remarks>
-	internal static string InjectPowerShellStrictPrologue(string userScript)
+	internal static string InjectPowerShellPrologue(string userScript, string prologue)
 	{
 		var insertOffset = FindPowerShellPrologueInsertOffset(userScript);
 
 		if (insertOffset == 0)
-			return PowerShellStrictPrologue + Environment.NewLine + userScript;
+			return prologue + Environment.NewLine + userScript;
 
 		// Place the prologue on its own line. If we landed mid-line (rare), prefix with a newline
 		// so we don't fuse with the previous token.
@@ -363,7 +402,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		var prefix = needsLeadingNewline ? Environment.NewLine : string.Empty;
 		var suffix = Environment.NewLine;
 
-		return userScript[..insertOffset] + prefix + PowerShellStrictPrologue + suffix + userScript[insertOffset..];
+		return userScript[..insertOffset] + prefix + prologue + suffix + userScript[insertOffset..];
 	}
 
 	/// <summary>

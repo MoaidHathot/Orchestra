@@ -53,6 +53,66 @@ public enum CancellationCauseKind
 	/// previous step's checkpoint.
 	/// </summary>
 	HostShutdownDuringWait = 7,
+
+	/// <summary>
+	/// The MCP transport layer aborted the request that launched (or was awaiting) this run.
+	/// This is effectively a transport-layer timeout: the engine's own <c>timeoutSeconds</c>
+	/// and <see cref="SyncInvokeTimeout"/> did not fire, but the upstream MCP client closed
+	/// its HTTP/SSE request to <c>/mcp/data</c> (usually because <c>mcps[].timeoutSeconds</c>
+	/// on the calling orchestration is smaller than the sync <c>timeoutSeconds</c> argument
+	/// passed to <c>invoke_orchestration</c>). Distinct from <see cref="External"/> so
+	/// authors can recognise a structural transport mismatch instead of treating the cancel
+	/// as a user action.
+	/// </summary>
+	McpRequestAborted = 8,
+
+	/// <summary>
+	/// The orchestration YAML/JSON file backing this run was changed on disk while it was
+	/// running, and the host's file-watcher cancelled the in-flight execution so the new
+	/// definition can be loaded. Distinct from <see cref="External"/> so dashboards can
+	/// surface a hot-reload separately from a user-driven cancel.
+	/// </summary>
+	ConfigReload = 9,
+}
+
+/// <summary>
+/// Summary of the orchestration's progress at the moment cancellation was applied.
+/// Persisted on cancelled run records so callers can immediately see whether the run was
+/// "almost complete" without having to inspect every per-step record.
+/// </summary>
+public sealed class CancellationProgressSummary
+{
+	/// <summary>Total number of steps declared on the orchestration.</summary>
+	public required int TotalSteps { get; init; }
+
+	/// <summary>Number of steps that finished with <see cref="ExecutionStatus.Succeeded"/>.</summary>
+	public required int StepsCompleted { get; init; }
+
+	/// <summary>Number of steps that ended in <see cref="ExecutionStatus.Cancelled"/>.</summary>
+	public required int StepsCancelled { get; init; }
+
+	/// <summary>Number of steps that ended in <see cref="ExecutionStatus.Failed"/>.</summary>
+	public required int StepsFailed { get; init; }
+
+	/// <summary>Number of steps that ended in <see cref="ExecutionStatus.Skipped"/> or <see cref="ExecutionStatus.NoAction"/>.</summary>
+	public required int StepsSkippedOrNoAction { get; init; }
+
+	/// <summary>Number of steps that have no execution record at all (never reached).</summary>
+	public required int StepsNotStarted { get; init; }
+
+	/// <summary>The name of the most recently completed step, or null if none.</summary>
+	public string? LastCompletedStep { get; init; }
+
+	/// <summary>The completion timestamp of <see cref="LastCompletedStep"/>, or null.</summary>
+	public DateTimeOffset? LastCompletedAt { get; init; }
+
+	/// <summary>
+	/// Names of steps that ended in <see cref="ExecutionStatus.Cancelled"/>. Includes both
+	/// steps that were actively running when cancellation hit and steps that cascaded
+	/// (their dependency cancelled, so they never produced their own success). Both are
+	/// useful diagnostic signals for "what did not complete".
+	/// </summary>
+	public IReadOnlyList<string> CancelledSteps { get; init; } = [];
 }
 
 /// <summary>
@@ -83,6 +143,21 @@ public sealed class CancellationDetails
 	/// Optional caller-supplied detail (e.g. the reason passed to <c>orchestra_complete</c>).
 	/// </summary>
 	public string? Detail { get; init; }
+
+	/// <summary>
+	/// When set, the wall-clock moment at which cancellation was requested by the source
+	/// (e.g. the moment <c>cts.Cancel()</c> was called by an API handler or MCP tool).
+	/// Distinct from when the engine actually observed the token and stopped, which is
+	/// reflected in <see cref="OrchestrationRunRecord.CompletedAt"/>. Null on legacy
+	/// records where the source did not capture it.
+	/// </summary>
+	public DateTimeOffset? RequestedAt { get; init; }
+
+	/// <summary>
+	/// Snapshot of step progress at the moment cancellation was applied. Helps diagnostics
+	/// distinguish "cancelled almost immediately" from "cancelled with N of M steps done".
+	/// </summary>
+	public CancellationProgressSummary? Progress { get; init; }
 
 	/// <summary>
 	/// A short human-readable summary (e.g. <c>"timed out after 1800s (sync-invoke)"</c>).
@@ -118,6 +193,18 @@ public sealed class CancellationDetails
 					!string.IsNullOrWhiteSpace(Detail)
 						? $"host shutdown while awaiting input: {Detail}"
 						: "host shutdown while awaiting input",
+				CancellationCauseKind.McpRequestAborted =>
+					TimeoutSeconds is { } mcpSecs
+						? !string.IsNullOrWhiteSpace(Detail)
+							? $"MCP transport request aborted after {mcpSecs}s: {Detail}"
+							: $"MCP transport request aborted after {mcpSecs}s"
+						: !string.IsNullOrWhiteSpace(Detail)
+							? $"MCP transport request aborted: {Detail}"
+							: "MCP transport request aborted",
+				CancellationCauseKind.ConfigReload =>
+					!string.IsNullOrWhiteSpace(Detail)
+						? $"orchestration definition reloaded: {Detail}"
+						: "orchestration definition reloaded",
 				CancellationCauseKind.Unknown => "cancelled",
 				_ => "cancelled",
 			};
@@ -129,7 +216,8 @@ public sealed class CancellationDetails
 	/// </summary>
 	public bool IsTimeout => Kind is CancellationCauseKind.OrchestrationTimeout
 		or CancellationCauseKind.SyncInvokeTimeout
-		or CancellationCauseKind.AwaitingInputTimeout;
+		or CancellationCauseKind.AwaitingInputTimeout
+		or CancellationCauseKind.McpRequestAborted;
 
 	/// <summary>
 	/// Convenience constructor for an orchestration-level timeout.
@@ -200,6 +288,32 @@ public sealed class CancellationDetails
 	{
 		Kind = CancellationCauseKind.HostShutdownDuringWait,
 		Source = stepName is null ? "host-shutdown-during-wait" : $"host-shutdown-during-wait:{stepName}",
+		Detail = detail,
+	};
+
+	/// <summary>
+	/// Convenience constructor for cancellation caused by the MCP transport aborting the
+	/// request that owned this run. Use this when the engine observes external cancellation
+	/// originating from the <see cref="CancellationToken"/> parameter on a server-side MCP
+	/// tool handler (typically because <c>mcps[].timeoutSeconds</c> on the calling
+	/// orchestration is smaller than the sync <c>timeoutSeconds</c> argument).
+	/// </summary>
+	public static CancellationDetails McpRequestAborted(int? transportTimeoutSeconds = null, string? source = null, string? detail = null) => new()
+	{
+		Kind = CancellationCauseKind.McpRequestAborted,
+		TimeoutSeconds = transportTimeoutSeconds,
+		Source = source ?? "mcp-transport",
+		Detail = detail,
+	};
+
+	/// <summary>
+	/// Convenience constructor for cancellation caused by the orchestration's definition
+	/// being reloaded on disk while the run was in flight.
+	/// </summary>
+	public static CancellationDetails ConfigReload(string? source = null, string? detail = null) => new()
+	{
+		Kind = CancellationCauseKind.ConfigReload,
+		Source = source ?? "config-reload",
 		Detail = detail,
 	};
 

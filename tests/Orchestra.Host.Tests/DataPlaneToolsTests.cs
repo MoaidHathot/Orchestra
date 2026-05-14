@@ -1,8 +1,10 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Orchestra.Engine;
 using Orchestra.Host.McpServer;
+using Orchestra.Host.Triggers;
 using Xunit;
 
 namespace Orchestra.Host.Tests;
@@ -17,6 +19,8 @@ namespace Orchestra.Host.Tests;
 /// </summary>
 public class DataPlaneToolsTests
 {
+	private static readonly McpServerOptions DefaultOptions = new();
+
 	private static IHttpContextAccessor HttpContextWith(params (string Name, string Value)[] headers)
 	{
 		var ctx = new DefaultHttpContext();
@@ -29,7 +33,8 @@ public class DataPlaneToolsTests
 		return accessor;
 	}
 
-	private static (IChildOrchestrationLauncher Launcher, Func<ChildLaunchRequest?> Captured) FakeLauncher()
+	private static (IChildOrchestrationLauncher Launcher, Func<ChildLaunchRequest?> Captured) FakeLauncher(
+		bool completeImmediately = false)
 	{
 		ChildLaunchRequest? captured = null;
 		var launcher = Substitute.For<IChildOrchestrationLauncher>();
@@ -38,6 +43,29 @@ public class DataPlaneToolsTests
 			.Returns(callInfo =>
 			{
 				var req = callInfo.ArgAt<ChildLaunchRequest>(0);
+				Task<ChildOrchestrationResult> completion;
+				if (completeImmediately)
+				{
+					completion = Task.FromResult(new ChildOrchestrationResult
+					{
+						ExecutionId = "child-exec-1",
+						OrchestrationId = req.OrchestrationId,
+						OrchestrationName = req.OrchestrationId,
+						Status = ExecutionStatus.Succeeded,
+						OrchestrationResult = null,
+						ErrorMessage = null,
+						FinalContent = "test",
+						StartedAt = DateTimeOffset.UtcNow,
+						CompletedAt = DateTimeOffset.UtcNow,
+						TimedOut = false,
+					});
+				}
+				else
+				{
+					// Async mode in the tests below — the tool returns the dispatch JSON without
+					// awaiting Completion, so we just need a never-completing placeholder.
+					completion = new TaskCompletionSource<ChildOrchestrationResult>().Task;
+				}
 				return Task.FromResult(new ChildOrchestrationHandle
 				{
 					ExecutionId = "child-exec-1",
@@ -45,9 +73,7 @@ public class DataPlaneToolsTests
 					OrchestrationName = req.OrchestrationId,
 					Reporter = NullOrchestrationReporter.Instance,
 					StartedAt = DateTimeOffset.UtcNow,
-					// Async mode in the tests below — the tool returns the dispatch JSON without
-					// awaiting Completion, so we just need a never-completing placeholder.
-					Completion = new TaskCompletionSource<ChildOrchestrationResult>().Task,
+					Completion = completion,
 				});
 			});
 		return (launcher, () => captured);
@@ -66,7 +92,7 @@ public class DataPlaneToolsTests
 		var (launcher, captured) = FakeLauncher();
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(launcher, accessor, "child-orchestration");
+		await DataPlaneTools.InvokeOrchestration(launcher, accessor, DefaultOptions, "child-orchestration");
 
 		// Assert
 		var req = captured();
@@ -98,6 +124,7 @@ public class DataPlaneToolsTests
 		await DataPlaneTools.InvokeOrchestration(
 			launcher,
 			accessor,
+			DefaultOptions,
 			"child-orchestration",
 			parentExecutionId: "explicit-parent");
 
@@ -117,7 +144,7 @@ public class DataPlaneToolsTests
 		var (launcher, captured) = FakeLauncher();
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(launcher, accessor, "child-orchestration");
+		await DataPlaneTools.InvokeOrchestration(launcher, accessor, DefaultOptions, "child-orchestration");
 
 		// Assert
 		var req = captured();
@@ -135,11 +162,160 @@ public class DataPlaneToolsTests
 		var (launcher, captured) = FakeLauncher();
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(launcher, accessor, "child-orchestration");
+		await DataPlaneTools.InvokeOrchestration(launcher, accessor, DefaultOptions, "child-orchestration");
 
 		// Assert
 		var req = captured();
 		req!.ParentContext.Should().BeNull();
 		req.TriggeredBy.Should().Be("mcp");
+	}
+
+	[Fact]
+	public async Task InvokeOrchestration_Sync_TimeoutLargerThanTransport_ReturnsTimeoutMismatchError()
+	{
+		// Arrange — host has a 60s transport timeout, agent asks for 600s sync. The tool must
+		// refuse and explain. No child is launched.
+		var accessor = HttpContextWith();
+		var (launcher, captured) = FakeLauncher();
+		var options = new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 60 };
+
+		// Act
+		var json = await DataPlaneTools.InvokeOrchestration(
+			launcher,
+			accessor,
+			options,
+			"child-orchestration",
+			mode: "sync",
+			timeoutSeconds: 600);
+
+		// Assert
+		captured().Should().BeNull("launcher must not be invoked when validation fails");
+		json.Should().Contain("timeout-mismatch");
+		json.Should().Contain("600");
+		json.Should().Contain("60");
+		json.Should().Contain("transportTimeoutSeconds");
+	}
+
+	[Fact]
+	public async Task InvokeOrchestration_Sync_TransportUnbounded_NoValidation()
+	{
+		// Arrange — host has DefaultOrchestraInvokeTimeoutSeconds = 0 (unbounded transport).
+		// The validation must be skipped even for very large sync timeouts.
+		var accessor = HttpContextWith();
+		var (launcher, captured) = FakeLauncher(completeImmediately: true);
+		var options = new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 0 };
+
+		// Act
+		await DataPlaneTools.InvokeOrchestration(
+			launcher,
+			accessor,
+			options,
+			"child-orchestration",
+			mode: "sync",
+			timeoutSeconds: 999999);
+
+		// Assert
+		captured().Should().NotBeNull("with transport timeout 0, the call should launch");
+		captured()!.TimeoutSeconds.Should().Be(999999);
+	}
+
+	[Fact]
+	public async Task InvokeOrchestration_Async_TimeoutMismatchValidation_DoesNotApply()
+	{
+		// Arrange — async invocations don't wait for completion; the transport timeout
+		// mismatch is irrelevant. Validation must NOT block them.
+		var accessor = HttpContextWith();
+		var (launcher, captured) = FakeLauncher();
+		var options = new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 60 };
+
+		// Act
+		await DataPlaneTools.InvokeOrchestration(
+			launcher,
+			accessor,
+			options,
+			"child-orchestration",
+			mode: "async",
+			timeoutSeconds: 600);
+
+		// Assert
+		captured().Should().NotBeNull("async mode ignores timeoutSeconds; validation must be skipped");
+	}
+
+	[Fact]
+	public void CancelOrchestration_SetsExternalCauseOverrideWithMcpDetail_BeforeCancelling()
+	{
+		// Verify the cancel_orchestration MCP tool attributes the cancel by setting
+		// CancellationCauseOverride on the ActiveExecutionInfo BEFORE calling .Cancel().
+		// Without this, the engine's probe would fall back to the generic External record
+		// with no detail, producing "cancelled by caller" with no source attribution.
+		var execId = "exec-attribution-test";
+		var cts = new CancellationTokenSource();
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = execId,
+			OrchestrationId = "orch",
+			OrchestrationName = "orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = NullOrchestrationReporter.Instance,
+		};
+
+		var executions = new System.Collections.Concurrent.ConcurrentDictionary<string, CancellationTokenSource>();
+		executions[execId] = cts;
+		var infos = new System.Collections.Concurrent.ConcurrentDictionary<string, ActiveExecutionInfo>();
+		infos[execId] = info;
+
+		var loggerFactory = NullLoggerFactory.Instance;
+
+		// Act — cancel without an explicit reason
+		var json1 = DataPlaneTools.CancelOrchestration(executions, infos, loggerFactory, execId);
+
+		// Assert — override populated, cancel requested, status updated
+		json1.Should().Contain("cancelling");
+		info.CancellationCauseOverride.Should().NotBeNull();
+		info.CancellationCauseOverride!.Kind.Should().Be(CancellationCauseKind.External);
+		info.CancellationCauseOverride.Source.Should().Be("caller");
+		info.CancellationCauseOverride.Detail.Should().Be("mcp:cancel_orchestration");
+		info.CancellationCauseOverride.RequestedAt.Should().NotBeNull();
+		cts.IsCancellationRequested.Should().BeTrue();
+
+		cts.Dispose();
+	}
+
+	[Fact]
+	public void CancelOrchestration_WithReason_PropagatesReasonIntoDetail()
+	{
+		// The new `reason` parameter on cancel_orchestration must end up in the run record's
+		// cancellation.detail field. This is the primary mechanism for the self-healing
+		// pattern to record WHY it cancelled an attempt (e.g., "winning attempt succeeded").
+		var execId = "exec-reason-test";
+		var cts = new CancellationTokenSource();
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = execId,
+			OrchestrationId = "orch",
+			OrchestrationName = "orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = NullOrchestrationReporter.Instance,
+		};
+
+		var executions = new System.Collections.Concurrent.ConcurrentDictionary<string, CancellationTokenSource>();
+		executions[execId] = cts;
+		var infos = new System.Collections.Concurrent.ConcurrentDictionary<string, ActiveExecutionInfo>();
+		infos[execId] = info;
+
+		// Act
+		var json = DataPlaneTools.CancelOrchestration(
+			executions, infos, NullLoggerFactory.Instance, execId,
+			reason: "winning attempt succeeded");
+
+		// Assert
+		json.Should().Contain("winning attempt succeeded");
+		info.CancellationCauseOverride!.Detail.Should().Be("mcp:cancel_orchestration: winning attempt succeeded");
+
+		cts.Dispose();
 	}
 }

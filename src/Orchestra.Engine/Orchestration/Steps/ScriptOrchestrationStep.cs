@@ -64,24 +64,39 @@ public class ScriptOrchestrationStep : OrchestrationStep
 	public string? Stdin { get; init; }
 
 	/// <summary>
-	/// Controls whether the executor injects a strict-mode prologue at the top
-	/// of the resolved script before launching the interpreter.
+	/// Controls how the executor wraps the resolved script with an error-handling prologue
+	/// before launching the interpreter.
 	/// </summary>
 	/// <remarks>
-	/// <para>When <c>null</c> (the default), the executor opts in automatically for
-	/// PowerShell shells (<c>pwsh</c>, <c>powershell</c>) and opts out for every
-	/// other shell.</para>
-	/// <para>For PowerShell the injected prologue is a single line equivalent to:
-	/// <c>$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; trap { Write-Error -ErrorRecord $_; exit 1 };</c>
-	/// This converts non-terminating runtime errors and unbound-variable / missing-property
-	/// access into terminating errors that propagate as a non-zero exit code, so the
-	/// step is reported <see cref="ExecutionStatus.Failed"/> instead of silently
-	/// succeeding with empty stdout.</para>
-	/// <para>Set this explicitly to <c>false</c> to opt a single step out of the
-	/// prologue (for example, when the script intentionally writes to stderr while
-	/// expecting a zero exit code, or when <see cref="Set-StrictMode"/> would break
-	/// existing logic). Set to <c>true</c> to force injection on non-PowerShell shells
-	/// (currently a no-op — only PowerShell has a defined prologue).</para>
+	/// <para>For PowerShell shells (<c>pwsh</c>, <c>powershell</c>), the prologue is injected
+	/// at the first valid statement-level position (after any <c>#requires</c>, <c>using</c>,
+	/// attribute, or <c>param(...)</c> block). Non-PowerShell shells are unaffected.</para>
+	/// <list type="table">
+	///   <listheader><term>Value</term><description>Effect on PowerShell scripts</description></listheader>
+	///   <item>
+	///     <term><c>null</c> (default)</term>
+	///     <description>Injects <c>$ErrorActionPreference='Stop'; trap { Write-Error -ErrorRecord $_; exit 1 };</c>.
+	///     Promotes non-terminating errors to terminating ones and ensures any unhandled error
+	///     causes pwsh to exit non-zero (so the step is reported <see cref="ExecutionStatus.Failed"/>).
+	///     Does NOT enable <c>Set-StrictMode</c>, so idiomatic <c>$obj.MaybeMissingProperty</c>
+	///     reads on <c>ConvertFrom-Json</c> output continue to return <c>$null</c>.</description>
+	///   </item>
+	///   <item>
+	///     <term><c>true</c></term>
+	///     <description>Injects the default prologue PLUS <c>Set-StrictMode -Version Latest</c>.
+	///     Use this for scripts written with strict-mode discipline (i.e., that already use
+	///     strict-safe property access such as <c>$obj.PSObject.Properties['Name']?.Value</c>
+	///     and explicit array bounds checks). Catches uninitialized variables, missing
+	///     properties, and out-of-bounds indexing.</description>
+	///   </item>
+	///   <item>
+	///     <term><c>false</c></term>
+	///     <description>No prologue is injected. The script runs verbatim with PowerShell's
+	///     default <c>$ErrorActionPreference='Continue'</c>. Use this only for scripts that
+	///     intentionally write to stderr but expect a zero exit code, or that explicitly
+	///     manage their own preference settings.</description>
+	///   </item>
+	/// </list>
 	/// </remarks>
 	public bool? StrictMode { get; init; }
 }

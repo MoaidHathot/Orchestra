@@ -95,6 +95,69 @@ public class CancellationCauseTests
 	}
 
 	[Fact]
+	public async Task ExecuteAsync_CancelledMidRun_RecordsAccurateProgressSummary()
+	{
+		// Build a linear chain A -> B -> C where:
+		//   A completes quickly,
+		//   B hangs until external cancellation,
+		//   C never starts.
+		// The recorded CancellationDetails.Progress must report 1 completed (A), 1 cancelled (B),
+		// 1 not-started (C), and identify A as the most-recently-completed step.
+		var bStarted = new TaskCompletionSource();
+		var invocations = 0;
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var index = Interlocked.Increment(ref invocations);
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run(async () =>
+			{
+				if (index == 2)
+				{
+					// Second invocation == step B (steps run in declaration order for a linear chain).
+					bStarted.TrySetResult();
+					await Task.Delay(Timeout.Infinite, ct);
+					return new AgentResult { Content = "unreachable" };
+				}
+				await channel.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.MessageDelta,
+					Content = "ok",
+				}, ct);
+				channel.Writer.Complete();
+				return new AgentResult { Content = "ok" };
+			}, ct);
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = TestOrchestrations.LinearChain("progress-cancel");
+		using var cts = new CancellationTokenSource();
+
+		// Act
+		var executeTask = executor.ExecuteAsync(orchestration, cancellationToken: cts.Token);
+		await bStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+		cts.Cancel();
+		var result = await executeTask;
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.Cancellation.Should().NotBeNull();
+		result.Cancellation!.Progress.Should().NotBeNull("progress summary must be populated on every cancellation");
+
+		var p = result.Cancellation.Progress!;
+		p.TotalSteps.Should().Be(3);
+		p.StepsCompleted.Should().Be(1, "step A completed before cancellation");
+		// B was hanging when the cancel hit; C cascaded as Cancelled because B was its dependency.
+		p.StepsCancelled.Should().Be(2, "both B (hanging) and C (cascaded) end in Cancelled");
+		p.StepsFailed.Should().Be(0);
+		p.LastCompletedStep.Should().Be("A");
+		p.LastCompletedAt.Should().NotBeNull();
+		p.CancelledSteps.Should().BeEquivalentTo(["B", "C"],
+			"CancelledSteps lists every step that ended in Cancelled, in declaration order");
+	}
+
+	[Fact]
 	public async Task ExecuteAsync_OrchestrationTimeoutFires_RecordsOrchestrationTimeoutCause()
 	{
 		// Arrange — orchestration's own timeoutSeconds elapses while the step is still running.
@@ -377,6 +440,97 @@ public class CancellationCauseTests
 		details.Reason.Should().Contain("nothing-to-do");
 		details.Source.Should().Contain("validate-step");
 		await Task.CompletedTask;
+	}
+
+	[Fact]
+	public void CancellationDetails_McpRequestAborted_ReportsTransportTimeoutAndIsTimeout()
+	{
+		// The transport layer aborting the MCP request that owns this run is effectively a
+		// transport timeout — IsTimeout must be true so dashboards and self-healing logic can
+		// classify it as "ran out of time" rather than "user cancelled".
+		var details = CancellationDetails.McpRequestAborted(
+			transportTimeoutSeconds: 1800,
+			source: "mcp-transport",
+			detail: "upstream MCP client closed the request (parent: abc123, step: my-step)");
+
+		details.Kind.Should().Be(CancellationCauseKind.McpRequestAborted);
+		details.Source.Should().Be("mcp-transport");
+		details.IsTimeout.Should().BeTrue();
+		details.TimeoutSeconds.Should().Be(1800);
+		details.Reason.Should().Contain("1800s");
+		details.Reason.Should().Contain("parent: abc123");
+	}
+
+	[Fact]
+	public void CancellationDetails_McpRequestAborted_WithoutTimeoutSeconds_StillReportsAbort()
+	{
+		// Common case: the launcher does not know the transport timeout value (it's caller-side).
+		// The reason text must still be informative.
+		var details = CancellationDetails.McpRequestAborted(
+			transportTimeoutSeconds: null,
+			source: null,
+			detail: "upstream MCP client closed the request");
+
+		details.Kind.Should().Be(CancellationCauseKind.McpRequestAborted);
+		details.Source.Should().Be("mcp-transport"); // default when caller passes null
+		details.IsTimeout.Should().BeTrue();
+		details.TimeoutSeconds.Should().BeNull();
+		details.Reason.Should().Be("MCP transport request aborted: upstream MCP client closed the request");
+	}
+
+	[Fact]
+	public void CancellationDetails_ConfigReload_ReportsDefinitionReload()
+	{
+		var details = CancellationDetails.ConfigReload(detail: "P:/orch/my.yaml");
+
+		details.Kind.Should().Be(CancellationCauseKind.ConfigReload);
+		details.Source.Should().Be("config-reload");
+		details.IsTimeout.Should().BeFalse();
+		details.Reason.Should().Be("orchestration definition reloaded: P:/orch/my.yaml");
+	}
+
+	[Fact]
+	public void CancellationDetails_RequestedAt_RoundTripsOnCallerInit()
+	{
+		// RequestedAt is set by API/MCP handlers before .Cancel(). Verify it survives.
+		var stamp = DateTimeOffset.UtcNow;
+		var details = new CancellationDetails
+		{
+			Kind = CancellationCauseKind.External,
+			Source = "caller",
+			Detail = "REST",
+			RequestedAt = stamp,
+		};
+
+		details.RequestedAt.Should().Be(stamp);
+		// And it must round-trip through the Reason getter without throwing.
+		_ = details.Reason;
+	}
+
+	[Fact]
+	public void CancellationProgressSummary_DefaultsAndRequiredFields_AreEnforced()
+	{
+		// The summary is `required` for the counters but list/optional fields have defaults
+		// so dashboards don't need to defend against null.
+		var summary = new CancellationProgressSummary
+		{
+			TotalSteps = 5,
+			StepsCompleted = 3,
+			StepsCancelled = 1,
+			StepsFailed = 0,
+			StepsSkippedOrNoAction = 0,
+			StepsNotStarted = 1,
+		};
+
+		summary.TotalSteps.Should().Be(5);
+		summary.StepsCompleted.Should().Be(3);
+		summary.StepsCancelled.Should().Be(1);
+		summary.StepsFailed.Should().Be(0);
+		summary.StepsSkippedOrNoAction.Should().Be(0);
+		summary.StepsNotStarted.Should().Be(1);
+		summary.LastCompletedStep.Should().BeNull();
+		summary.LastCompletedAt.Should().BeNull();
+		summary.CancelledSteps.Should().BeEmpty();
 	}
 
 	private sealed class CapturingRunStore(List<OrchestrationRunRecord> sink) : IRunStore

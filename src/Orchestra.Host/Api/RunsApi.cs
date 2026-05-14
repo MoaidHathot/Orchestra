@@ -3,6 +3,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Registry;
@@ -13,7 +15,7 @@ namespace Orchestra.Host.Api;
 /// <summary>
 /// API endpoints for run history and active executions.
 /// </summary>
-public static class RunsApi
+public static partial class RunsApi
 {
 	/// <summary>
 	/// Maps run management endpoints.
@@ -521,15 +523,31 @@ public static class RunsApi
 		});
 
 		// POST /api/active/{executionId}/cancel - Cancel a running execution
-		activeGroup.MapPost("/{executionId}/cancel", (
-			string executionId,
-			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
+		activeGroup.MapPost("/{executionId}/cancel", (HttpContext httpContext, string executionId) =>
 		{
+			var activeExecutionInfos = httpContext.RequestServices
+				.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
+			var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
 			if (activeExecutionInfos.TryGetValue(executionId, out var info))
 			{
 				info.Status = HostExecutionStatus.Cancelling;
 				if (info.Reporter is SseReporter sseReporter)
 					sseReporter.ReportStatusChange(HostExecutionStatus.Cancelling);
+
+				// Attribute the cancel before triggering it so the engine's probe records a
+				// precise CancellationDetails on the run record instead of a generic "caller".
+				// Use ??= so explicit overrides (e.g. HostShutdown from TriggerManager) win.
+				info.CancellationCauseOverride ??= new CancellationDetails
+				{
+					Kind = CancellationCauseKind.External,
+					Source = "caller",
+					Detail = "REST /api/active/{id}/cancel",
+					RequestedAt = DateTimeOffset.UtcNow,
+				};
+
+				var logger = loggerFactory.CreateLogger(typeof(RunsApi));
+				LogRunCancelRequested(logger, executionId, "rest-api", "REST /api/active/{id}/cancel");
+
 				info.CancellationTokenSource.Cancel();
 				return Results.Ok(new { cancelled = true, executionId, status = HostExecutionStatus.Cancelling });
 			}
@@ -538,6 +556,10 @@ public static class RunsApi
 
 		return endpoints;
 	}
+
+	[LoggerMessage(Level = LogLevel.Information,
+		Message = "Run cancel requested: executionId={ExecutionId}, source={Source}, detail={Detail}")]
+	private static partial void LogRunCancelRequested(ILogger logger, string executionId, string source, string? detail);
 
 	/// <summary>
 	/// Projects a <see cref="CancellationDetails"/> into a stable JSON shape for API responses.
@@ -559,6 +581,19 @@ public static class RunsApi
 			detail = details.Detail,
 			reason = details.Reason,
 			isTimeout = details.IsTimeout,
+			requestedAt = details.RequestedAt,
+			progress = details.Progress is null ? null : new
+			{
+				totalSteps = details.Progress.TotalSteps,
+				stepsCompleted = details.Progress.StepsCompleted,
+				stepsCancelled = details.Progress.StepsCancelled,
+				stepsFailed = details.Progress.StepsFailed,
+				stepsSkippedOrNoAction = details.Progress.StepsSkippedOrNoAction,
+				stepsNotStarted = details.Progress.StepsNotStarted,
+				lastCompletedStep = details.Progress.LastCompletedStep,
+				lastCompletedAt = details.Progress.LastCompletedAt,
+				cancelledSteps = details.Progress.CancelledSteps,
+			},
 		};
 	}
 

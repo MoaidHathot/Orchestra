@@ -566,6 +566,13 @@ public partial class OrchestrationExecutor
 				cancellationDetails = resolveExternalCancellationCause?.Invoke()
 					?? CancellationDetails.External();
 			}
+
+			// Compute a progress summary at the moment of cancellation so diagnostics show
+			// how far along the run got without forcing consumers to scan per-step records.
+			if (cancellationDetails is not null)
+			{
+				cancellationDetails = AttachProgressSummary(cancellationDetails, orchestration, stepResults, stepRecords);
+			}
 		}
 
 		// Enrich each Cancelled step's ErrorMessage with the determined cause so
@@ -1428,6 +1435,102 @@ public partial class OrchestrationExecutor
 	/// </summary>
 	private static bool IsDefaultCancelledMessage(string? errorMessage) =>
 		errorMessage is null || errorMessage == "Cancelled";
+
+	/// <summary>
+	/// Returns a new <see cref="CancellationDetails"/> with <see cref="CancellationDetails.Progress"/>
+	/// populated from <paramref name="stepResults"/> and <paramref name="stepRecords"/>. The summary
+	/// is computed against the steps DECLARED on the orchestration. The semantics are:
+	///   <list type="bullet">
+	///     <item>StepsCompleted: ended <c>Succeeded</c>.</item>
+	///     <item>StepsCancelled: ended <c>Cancelled</c> (covers both interrupted-in-flight and cascade-cancelled).</item>
+	///     <item>StepsFailed: ended <c>Failed</c>.</item>
+	///     <item>StepsSkippedOrNoAction: ended <c>Skipped</c> or <c>NoAction</c>.</item>
+	///     <item>StepsNotStarted: no record at all (computed as a residual).</item>
+	///     <item>CancelledSteps: names of steps that ended <c>Cancelled</c>, in declaration order.</item>
+	///   </list>
+	/// </summary>
+	private static CancellationDetails AttachProgressSummary(
+		CancellationDetails details,
+		Orchestration orchestration,
+		IReadOnlyDictionary<string, ExecutionResult> stepResults,
+		IReadOnlyDictionary<string, StepRunRecord> stepRecords)
+	{
+		var totalSteps = orchestration.Steps.Length;
+		var stepsCompleted = 0;
+		var stepsCancelled = 0;
+		var stepsFailed = 0;
+		var stepsSkippedOrNoAction = 0;
+		var cancelledSteps = new List<string>();
+
+		foreach (var step in orchestration.Steps)
+		{
+			if (!stepResults.TryGetValue(step.Name, out var result))
+			{
+				// No execution record at all — step never reached. Counted as not-started below.
+				continue;
+			}
+
+			switch (result.Status)
+			{
+				case ExecutionStatus.Succeeded:
+					stepsCompleted++;
+					break;
+				case ExecutionStatus.Cancelled:
+					stepsCancelled++;
+					cancelledSteps.Add(step.Name);
+					break;
+				case ExecutionStatus.Failed:
+					stepsFailed++;
+					break;
+				case ExecutionStatus.Skipped:
+				case ExecutionStatus.NoAction:
+					stepsSkippedOrNoAction++;
+					break;
+			}
+		}
+
+		var stepsNotStarted = Math.Max(
+			0,
+			totalSteps - (stepsCompleted + stepsCancelled + stepsFailed + stepsSkippedOrNoAction));
+
+		// Find the most-recently-completed step by looking at successful step records' CompletedAt.
+		string? lastCompletedStep = null;
+		DateTimeOffset? lastCompletedAt = null;
+		foreach (var (name, record) in stepRecords)
+		{
+			if (record.Status != ExecutionStatus.Succeeded)
+				continue;
+
+			if (lastCompletedAt is null || record.CompletedAt > lastCompletedAt)
+			{
+				lastCompletedAt = record.CompletedAt;
+				lastCompletedStep = name;
+			}
+		}
+
+		var progress = new CancellationProgressSummary
+		{
+			TotalSteps = totalSteps,
+			StepsCompleted = stepsCompleted,
+			StepsCancelled = stepsCancelled,
+			StepsFailed = stepsFailed,
+			StepsSkippedOrNoAction = stepsSkippedOrNoAction,
+			StepsNotStarted = stepsNotStarted,
+			LastCompletedStep = lastCompletedStep,
+			LastCompletedAt = lastCompletedAt,
+			CancelledSteps = cancelledSteps,
+		};
+
+		return new CancellationDetails
+		{
+			Kind = details.Kind,
+			TimeoutSeconds = details.TimeoutSeconds,
+			Source = details.Source,
+			Detail = details.Detail,
+			RequestedAt = details.RequestedAt,
+			Progress = progress,
+		};
+	}
 
 	/// <summary>
 	/// Returns a copy of <paramref name="record"/> with only its <see cref="StepRunRecord.ErrorMessage"/> replaced.

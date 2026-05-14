@@ -663,7 +663,7 @@
         },
         "strictMode": {
           "type": "boolean",
-          "description": "Controls whether the executor injects a strict-mode prologue at the top of PowerShell scripts. When unset, the prologue is injected automatically for shell=pwsh|powershell so that non-terminating runtime errors and unbound variable / missing property access raise terminating errors (the script exits non-zero and the step is reported Failed instead of silently succeeding). Set to false to opt a step out (useful when the script intentionally writes to stderr and expects a zero exit code, or when Set-StrictMode breaks existing logic). Setting to true on non-PowerShell shells is currently a no-op."
+          "description": "Controls how the executor wraps a PowerShell script (shell=pwsh|powershell) with an error-handling prologue. When unset (auto), the executor injects `$ErrorActionPreference='Stop'; trap { Write-Error -ErrorRecord $_; exit 1 };` so terminating errors cause the step to be reported Failed instead of silently succeeding. When set to true, the executor additionally injects `Set-StrictMode -Version Latest` (catches uninitialized variables, missing properties, and out-of-bounds indexing) — use this for scripts written with strict-mode discipline. When set to false, no prologue is injected and the script runs verbatim. Non-PowerShell shells ignore this setting."
         }
       },
       "oneOf": [

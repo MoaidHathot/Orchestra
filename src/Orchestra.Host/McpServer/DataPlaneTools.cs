@@ -21,7 +21,7 @@ namespace Orchestra.Host.McpServer;
 /// Provides orchestration discovery and invocation capabilities to external AI agents.
 /// </summary>
 [McpServerToolType]
-public sealed class DataPlaneTools
+public sealed partial class DataPlaneTools
 {
 	[McpServerTool(Name = "list_orchestrations"), Description(
 		"Lists orchestrations registered in Orchestra. " +
@@ -92,6 +92,7 @@ public sealed class DataPlaneTools
 	public static async Task<string> InvokeOrchestration(
 		IChildOrchestrationLauncher launcher,
 		IHttpContextAccessor httpContextAccessor,
+		McpServerOptions mcpServerOptions,
 		[Description("The orchestration ID to invoke.")] string orchestrationId,
 		[Description("JSON object with parameter key-value pairs. All values must be strings.")] string? parameters = null,
 		[Description("Execution mode: 'async' (default, returns immediately with execution ID) or 'sync' (blocks until completion).")] string mode = "async",
@@ -126,6 +127,38 @@ public sealed class DataPlaneTools
 		}
 
 		var isSync = string.Equals(mode, "sync", StringComparison.OrdinalIgnoreCase);
+
+		// Sync-timeout vs transport-timeout sanity check.
+		// The host applies a default transport timeout (DefaultOrchestraInvokeTimeoutSeconds)
+		// to the MCP request to /mcp/data when the caller's orchestration `mcps[]` entry does
+		// not override it. If the caller asks for a sync `timeoutSeconds` that is larger than
+		// that default, the transport layer would abort this request long before the engine's
+		// own sync-invoke timeout fires, producing a generic "cancelled by caller" record
+		// even though the child made real progress (the classic 30-minute cliff).
+		// We can't see the caller's per-mcps[] override here, but we CAN see the host default,
+		// which is the most common source of this mismatch.
+		var transportTimeoutSeconds = mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds;
+		if (isSync
+			&& transportTimeoutSeconds > 0
+			&& timeoutSeconds > transportTimeoutSeconds - 60)
+		{
+			var minimumSafe = timeoutSeconds + 60;
+			return JsonSerializer.Serialize(new
+			{
+				error = "timeout-mismatch",
+				message =
+					$"Requested sync timeoutSeconds ({timeoutSeconds}) exceeds the configured MCP transport timeout " +
+					$"({transportTimeoutSeconds}) by more than the 60s safety margin. The child run would be aborted " +
+					$"by the MCP transport long before the engine's sync-invoke timeout fires, producing a generic " +
+					$"\"cancelled by caller\" record. To fix: either lower timeoutSeconds to <= {transportTimeoutSeconds - 60}, " +
+					$"or set `mcps[].timeoutSeconds` on the calling orchestration to at least {minimumSafe}, or set the " +
+					$"host's `mcpServer.defaultOrchestraInvokeTimeoutSeconds` to 0 to disable the transport timeout entirely " +
+					$"(server-side timeouts remain authoritative).",
+				transportTimeoutSeconds,
+				requestedSyncTimeoutSeconds = timeoutSeconds,
+				minimumSafeTransportTimeoutSeconds = minimumSafe,
+			}, s_jsonOptions);
+		}
 
 		// Auto-populate parentExecutionId from headers stamped by the engine when this MCP
 		// tool was reached from inside an orchestration's prompt step. The LLM cannot pass
@@ -351,11 +384,14 @@ public sealed class DataPlaneTools
 
 	[McpServerTool(Name = "cancel_orchestration"), Description(
 		"Cancels a running orchestration execution. " +
-		"Only active (in-progress) executions can be cancelled.")]
+		"Only active (in-progress) executions can be cancelled. " +
+		"Optionally pass a `reason` so the run record carries the cause (visible in /api/history and MCP responses).")]
 	public static string CancelOrchestration(
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
-		[Description("The execution ID to cancel.")] string executionId)
+		ILoggerFactory loggerFactory,
+		[Description("The execution ID to cancel.")] string executionId,
+		[Description("Optional reason for the cancellation. Persisted on the run record's cancellation.detail field so consumers can distinguish why it was cancelled.")] string? reason = null)
 	{
 		if (!activeExecutions.TryGetValue(executionId, out var cts))
 		{
@@ -375,20 +411,42 @@ public sealed class DataPlaneTools
 			}, s_jsonOptions);
 		}
 
-		cts.Cancel();
+		// Attribute the cancel before triggering it so the engine's probe records a precise
+		// CancellationDetails on the run record. Use ??= so explicit overrides set elsewhere
+		// (e.g. HostShutdown from TriggerManager) win.
+		var detail = string.IsNullOrWhiteSpace(reason)
+			? "mcp:cancel_orchestration"
+			: $"mcp:cancel_orchestration: {reason}";
 
 		if (activeExecutionInfos.TryGetValue(executionId, out var info))
 		{
+			info.CancellationCauseOverride ??= new CancellationDetails
+			{
+				Kind = CancellationCauseKind.External,
+				Source = "caller",
+				Detail = detail,
+				RequestedAt = DateTimeOffset.UtcNow,
+			};
 			info.Status = HostExecutionStatus.Cancelled;
 		}
+
+		var logger = loggerFactory.CreateLogger(typeof(DataPlaneTools));
+		LogRunCancelRequested(logger, executionId, "mcp:cancel_orchestration", detail);
+
+		cts.Cancel();
 
 		return JsonSerializer.Serialize(new
 		{
 			executionId,
 			status = "cancelling",
-			message = "Cancellation requested. The orchestration will stop at the next safe point."
+			message = "Cancellation requested. The orchestration will stop at the next safe point.",
+			reason,
 		}, s_jsonOptions);
 	}
+
+	[LoggerMessage(Level = LogLevel.Information,
+		Message = "Run cancel requested: executionId={ExecutionId}, source={Source}, detail={Detail}")]
+	private static partial void LogRunCancelRequested(ILogger logger, string executionId, string source, string? detail);
 
 	[McpServerTool(Name = "list_pending_inputs"), Description(
 		"Lists orchestration runs currently awaiting human input (Approval steps and " +
@@ -517,6 +575,19 @@ public sealed class DataPlaneTools
 			detail = details.Detail,
 			reason = details.Reason,
 			isTimeout = details.IsTimeout,
+			requestedAt = details.RequestedAt,
+			progress = details.Progress is null ? null : new
+			{
+				totalSteps = details.Progress.TotalSteps,
+				stepsCompleted = details.Progress.StepsCompleted,
+				stepsCancelled = details.Progress.StepsCancelled,
+				stepsFailed = details.Progress.StepsFailed,
+				stepsSkippedOrNoAction = details.Progress.StepsSkippedOrNoAction,
+				stepsNotStarted = details.Progress.StepsNotStarted,
+				lastCompletedStep = details.Progress.LastCompletedStep,
+				lastCompletedAt = details.Progress.LastCompletedAt,
+				cancelledSteps = details.Progress.CancelledSteps,
+			},
 		};
 	}
 

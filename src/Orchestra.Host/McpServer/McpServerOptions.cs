@@ -43,15 +43,24 @@ public class McpServerOptions
 	/// own data-plane MCP endpoint when the orchestration YAML/JSON does not specify
 	/// a <c>timeoutSeconds</c> on the matching <c>mcps[]</c> entry.
 	/// <para>
-	/// Long-running tools such as <c>invoke_orchestration</c> in sync mode commonly
-	/// exceed the Copilot SDK's ~3-minute default MCP request timeout, so this default
-	/// is intentionally generous. Authors can still override per call by setting
-	/// <c>timeoutSeconds</c> on the <c>mcps[]</c> entry (any non-null value wins),
-	/// and per-invocation deadlines on the data-plane <c>invoke_orchestration</c> tool
-	/// itself (<c>request.timeoutSeconds</c>) continue to apply on the server side.
+	/// Set to <c>0</c> (the default) to disable any client-side transport timeout for the
+	/// Orchestra data plane. The server-side engine already enforces its own deadlines
+	/// (orchestration <c>timeoutSeconds</c>, step <c>timeoutSeconds</c>, and the sync-invoke
+	/// timeout passed to <c>invoke_orchestration</c>); a separate transport timeout adds
+	/// nothing but creates the well-known failure mode where a long-running sync invoke is
+	/// aborted by the MCP transport with a generic <c>"cancelled by caller"</c> reason
+	/// before the engine's own timeout fires.
 	/// </para>
-	/// <para>Default: 1800 (30 minutes). Set to 0 or a negative value to disable the
-	/// default and fall back to the Copilot SDK's built-in default.</para>
+	/// <para>
+	/// Authors who want belt-and-suspenders client-side limits can still set
+	/// <c>mcps[].timeoutSeconds</c> per orchestration; that value always wins. When this
+	/// option is non-zero and a sync <c>invoke_orchestration</c> call requests a
+	/// <c>timeoutSeconds</c> larger than the configured transport limit,
+	/// <c>DataPlaneTools.InvokeOrchestration</c> returns a structured error explaining the
+	/// mismatch instead of letting the transport abort silently.
+	/// </para>
+	/// <para>Default: 0 (no client-side transport timeout — server-side timeouts are
+	/// authoritative).</para>
 	/// </summary>
-	public int DefaultOrchestraInvokeTimeoutSeconds { get; set; } = 1800;
+	public int DefaultOrchestraInvokeTimeoutSeconds { get; set; } = 0;
 }

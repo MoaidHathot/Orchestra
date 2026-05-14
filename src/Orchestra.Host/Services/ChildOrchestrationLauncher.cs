@@ -156,12 +156,18 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		var reporter = request.Reporter ?? _reporterFactory.Create();
 		var startedAt = DateTimeOffset.UtcNow;
 
-		// 5. Create cancellation token source (linked to parent's CTS when nested)
+		// 5. Create cancellation token source (linked to parent's CTS when nested).
+		//    We capture the underlying source tokens separately so step 7b can register
+		//    pre-fire callbacks that record WHICH source actually triggered the linked CTS.
 		CancellationTokenSource cts;
+		CancellationToken parentCtsToken = default;
+		var hasParentCts = false;
 		if (request.ParentContext is not null &&
 			_activeExecutions.TryGetValue(request.ParentContext.ParentExecutionId, out var parentCts))
 		{
 			cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, parentCts.Token);
+			parentCtsToken = parentCts.Token;
+			hasParentCts = true;
 		}
 		else
 		{
@@ -194,6 +200,52 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 
 		_activeExecutions[executionId] = cts;
 		_activeExecutionInfos[executionId] = executionInfo;
+
+		// 7a. Pre-fire callbacks on the SOURCE tokens that feed the linked CTS, so the
+		//     engine's cancellation-cause probe can later distinguish which source actually
+		//     triggered the cancel. First writer wins (??=) — if a host layer like
+		//     TriggerManager already set an explicit HostShutdown override before calling
+		//     Cancel(), we don't clobber it.
+		//
+		//     Parent CTS firing ⇒ propagated-from-parent (record External with lineage).
+		//     External token firing ⇒ the upstream caller's CancellationToken was triggered.
+		//       For sync MCP-tool calls that token IS the MCP request's cancellation token,
+		//       and its firing here means the MCP transport aborted the request — record
+		//       McpRequestAborted. For other launch paths (e.g. retries with a caller token)
+		//       the same token may not represent an MCP transport; we still record it as
+		//       External with the best-available detail so the run record is never anonymous.
+		var parentExecutionIdForCb = request.ParentContext?.ParentExecutionId;
+		var parentStepNameForCb = request.ParentContext?.ParentStepName;
+		var isMcpTriggered = request.TriggeredBy is { Length: > 0 } tb
+			&& (tb.StartsWith("orchestration:", StringComparison.OrdinalIgnoreCase)
+				|| tb.Equals("mcp", StringComparison.OrdinalIgnoreCase));
+		var capturedExecutionInfo = executionInfo;
+
+		var externalTokenRegistration = cancellationToken.Register(() =>
+		{
+			if (capturedExecutionInfo.CancellationCauseOverride is not null)
+				return;
+			capturedExecutionInfo.CancellationCauseOverride = isMcpTriggered
+				? CancellationDetails.McpRequestAborted(
+					transportTimeoutSeconds: null,
+					source: "mcp-transport",
+					detail: parentExecutionIdForCb is null
+						? "upstream MCP client closed the request"
+						: $"upstream MCP client closed the request (parent: {parentExecutionIdForCb}{(parentStepNameForCb is null ? "" : $", step: {parentStepNameForCb}")})")
+				: CancellationDetails.External(detail: "external token");
+		});
+
+		var parentTokenRegistration = default(CancellationTokenRegistration);
+		if (hasParentCts)
+		{
+			parentTokenRegistration = parentCtsToken.Register(() =>
+			{
+				if (capturedExecutionInfo.CancellationCauseOverride is not null)
+					return;
+				capturedExecutionInfo.CancellationCauseOverride = CancellationDetails.External(
+					detail: $"propagated from parent {parentExecutionIdForCb}{(parentStepNameForCb is null ? "" : $" (step: {parentStepNameForCb})")}");
+			});
+		}
 
 		// 7. Wire progress callbacks if reporter is an SseReporter (the host-default).
 		// External callers may have already wired their own callbacks; we only set ours
@@ -242,7 +294,9 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			reporter,
 			cts,
 			wrappedTransform,
-			startedAt);
+			startedAt,
+			externalTokenRegistration,
+			parentTokenRegistration);
 
 		var handle = new ChildOrchestrationHandle
 		{
@@ -307,7 +361,9 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		IOrchestrationReporter reporter,
 		CancellationTokenSource cts,
 		Func<CancellationToken, Task<Dictionary<string, string>?>>? preExecutionParameterTransform,
-		DateTimeOffset startedAt)
+		DateTimeOffset startedAt,
+		CancellationTokenRegistration externalTokenRegistration,
+		CancellationTokenRegistration parentTokenRegistration)
 	{
 		// In sync mode, apply an optional caller-specified hard timeout. Async mode honors
 		// only the orchestration's own timeoutSeconds (handled inside the executor) and the
@@ -486,6 +542,13 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			{
 				try { sseFinal.Complete(); } catch { /* best-effort */ }
 			}
+
+			// Dispose source-token registrations to detach them from the source CTSs. This
+			// is important when the parent's CTS outlives this child (which it normally
+			// does for sync invokes): otherwise the parent CTS would hold a closure over
+			// our executionInfo for the parent's lifetime.
+			try { externalTokenRegistration.Dispose(); } catch { /* best-effort */ }
+			try { parentTokenRegistration.Dispose(); } catch { /* best-effort */ }
 
 			syncTimeoutCts?.Dispose();
 

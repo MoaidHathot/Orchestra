@@ -687,6 +687,133 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 	}
 
 	[Fact]
+	public async Task LaunchAsync_ExternalTokenCancelMidRun_RecordsMcpRequestAbortedWhenInvokedFromMcp()
+	{
+		// Simulates the production scenario: the agent calls invoke_orchestration via MCP
+		// (TriggeredBy = "orchestration:..."), the launcher links the child to the MCP request's
+		// CancellationToken, that token fires (e.g., transport timeout), and the child must be
+		// recorded with kind=McpRequestAborted (not the generic "External") so authors can
+		// distinguish a structural transport failure from a user-driven cancel.
+		var entry = RegisterPromptOrchestration("mcp-abort-flow");
+		var launcher = CreateLauncher(new HangingAgentBuilder());
+
+		using var externalCts = new CancellationTokenSource();
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+			TimeoutSeconds = 30, // server-side sync timeout (won't fire — we cancel first)
+			TriggeredBy = "orchestration:parent-orch:parent-exec-id", // marks this as MCP-driven
+		}, externalCts.Token);
+
+		// Give the engine a moment to start the hanging step then cancel the external token.
+		await Task.Delay(150);
+		externalCts.Cancel();
+
+		var result = await handle.Completion;
+
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.OrchestrationResult.Should().NotBeNull();
+		result.OrchestrationResult!.Cancellation.Should().NotBeNull();
+		result.OrchestrationResult.Cancellation!.Kind.Should().Be(
+			CancellationCauseKind.McpRequestAborted,
+			"a sync MCP-triggered child cancelled by its caller's token must record McpRequestAborted, not External");
+		result.OrchestrationResult.Cancellation.IsTimeout.Should().BeTrue(
+			"McpRequestAborted is conceptually a transport timeout");
+		result.OrchestrationResult.Cancellation.Detail.Should().Contain("upstream");
+	}
+
+	[Fact]
+	public async Task LaunchAsync_ParentCtsCancel_RecordsExternalWithLineageDetail()
+	{
+		// When a parent run's CTS fires (e.g., because the parent itself was cancelled), the
+		// linked child CTS fires too. The child's record must say External with a detail string
+		// indicating it was propagated from the parent — not McpRequestAborted, because the
+		// upstream MCP request didn't fail; the parent did.
+		// Register a fake parent execution in _activeExecutions so the launcher sees it.
+		var parentExecId = "fake-parent-exec";
+		var parentCts = new CancellationTokenSource();
+		_activeExecutions[parentExecId] = parentCts;
+		_activeExecutionInfos[parentExecId] = new ActiveExecutionInfo
+		{
+			ExecutionId = parentExecId,
+			OrchestrationId = "parent-orch",
+			OrchestrationName = "parent-orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = parentCts,
+			Reporter = NullOrchestrationReporter.Instance,
+		};
+
+		var entry = RegisterPromptOrchestration("parent-cancel-flow");
+		var launcher = CreateLauncher(new HangingAgentBuilder());
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+			TimeoutSeconds = 30,
+			TriggeredBy = "orchestration:parent-orch:" + parentExecId,
+			ParentContext = new ParentExecutionContext
+			{
+				ParentExecutionId = parentExecId,
+				ParentStepName = "outer-step",
+			},
+		});
+
+		await Task.Delay(150);
+		parentCts.Cancel();
+
+		var result = await handle.Completion;
+
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.OrchestrationResult.Should().NotBeNull();
+		result.OrchestrationResult!.Cancellation.Should().NotBeNull();
+		result.OrchestrationResult.Cancellation!.Kind.Should().Be(
+			CancellationCauseKind.External,
+			"propagated-from-parent cancel is External, not McpRequestAborted");
+		result.OrchestrationResult.Cancellation.Detail.Should()
+			.Contain("propagated from parent")
+			.And.Contain(parentExecId);
+
+		parentCts.Dispose();
+	}
+
+	[Fact]
+	public async Task LaunchAsync_CancelledRun_PersistsProgressSummary()
+	{
+		// Verify the new CancellationProgressSummary is populated on the run record.
+		var entry = RegisterPromptOrchestration("progress-summary-flow");
+		var launcher = CreateLauncher(new HangingAgentBuilder());
+
+		using var externalCts = new CancellationTokenSource();
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+			TimeoutSeconds = 30,
+			TriggeredBy = "test",
+		}, externalCts.Token);
+
+		await Task.Delay(150);
+		externalCts.Cancel();
+
+		var result = await handle.Completion;
+		result.OrchestrationResult.Should().NotBeNull();
+		result.OrchestrationResult!.Cancellation.Should().NotBeNull();
+		result.OrchestrationResult.Cancellation!.Progress.Should().NotBeNull(
+			"every cancelled run should carry a CancellationProgressSummary");
+
+		var p = result.OrchestrationResult.Cancellation.Progress!;
+		p.TotalSteps.Should().Be(1);
+		p.StepsCancelled.Should().Be(1);
+		p.StepsCompleted.Should().Be(0);
+		p.CancelledSteps.Should().Contain("wait");
+	}
+
+	[Fact]
 	public async Task LaunchAsync_HandleExecutionId_AppearsInActiveExecutions_BeforeCompletion()
 	{
 		var entry = RegisterTransformOrchestration("registration-timing", template: "v");

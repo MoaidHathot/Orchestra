@@ -812,6 +812,19 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 				detail = cancellation.Detail,
 				reason = cancellation.Reason,
 				isTimeout = cancellation.IsTimeout,
+				requestedAt = cancellation.RequestedAt,
+				progress = cancellation.Progress is null ? null : new
+				{
+					totalSteps = cancellation.Progress.TotalSteps,
+					stepsCompleted = cancellation.Progress.StepsCompleted,
+					stepsCancelled = cancellation.Progress.StepsCancelled,
+					stepsFailed = cancellation.Progress.StepsFailed,
+					stepsSkippedOrNoAction = cancellation.Progress.StepsSkippedOrNoAction,
+					stepsNotStarted = cancellation.Progress.StepsNotStarted,
+					lastCompletedStep = cancellation.Progress.LastCompletedStep,
+					lastCompletedAt = cancellation.Progress.LastCompletedAt,
+					cancelledSteps = cancellation.Progress.CancelledSteps,
+				},
 			},
 		});
 	}
