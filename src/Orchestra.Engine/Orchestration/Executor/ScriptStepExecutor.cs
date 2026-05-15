@@ -53,14 +53,22 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	/// in runtime error messages.</para>
 	/// <para>This prologue promotes non-terminating PowerShell errors to terminating ones via
 	/// <c>$ErrorActionPreference='Stop'</c> and ensures any unhandled error causes pwsh to exit
-	/// with a non-zero code via <c>trap { Write-Error -ErrorRecord $_; exit 1 }</c>. It deliberately
-	/// does NOT include <c>Set-StrictMode -Version Latest</c> because most production scripts read
-	/// optional properties off <c>ConvertFrom-Json</c> output (a pattern that throws under strict
-	/// mode v3+). Authors who want the additional strict-mode checks set
-	/// <c>strictMode: true</c> on the step.</para>
+	/// with a non-zero code. It deliberately does NOT include <c>Set-StrictMode -Version Latest</c>
+	/// because most production scripts read optional properties off <c>ConvertFrom-Json</c> output
+	/// (a pattern that throws under strict mode v3+). Authors who want the additional strict-mode
+	/// checks set <c>strictMode: true</c> on the step.</para>
+	/// <para><b>Diagnostic output.</b> When the trap fires the prologue writes a structured,
+	/// machine-parseable line to stderr in the form
+	/// <c>ORCHESTRA-PWSH-ERROR: &lt;script&gt;:&lt;line&gt;:&lt;col&gt;: &lt;message&gt;</c> followed
+	/// by the source line and the PowerShell script stack trace. This is intentionally written
+	/// directly to <c>[Console]::Error</c> rather than via <c>Write-Error -ErrorRecord</c> so that:
+	/// (a) the location pointer reflects the actual failing line in the user's script, not the trap
+	/// statement on line 1; (b) the standard pwsh error renderer does not truncate long source lines
+	/// with <c>U+2026</c> ellipses that captured stderr cannot represent reliably; and (c) downstream
+	/// log consumers can grep for <c>ORCHESTRA-PWSH-ERROR:</c> to extract structured failure data.</para>
 	/// </remarks>
 	internal const string PowerShellDefaultPrologue =
-		"$ErrorActionPreference='Stop'; trap { Write-Error -ErrorRecord $_; exit 1 };";
+		"$ErrorActionPreference='Stop'; trap { $r=$_; [Console]::Error.WriteLine(\"ORCHESTRA-PWSH-ERROR: $($r.InvocationInfo.ScriptName):$($r.InvocationInfo.ScriptLineNumber):$($r.InvocationInfo.OffsetInLine): $($r.Exception.Message)\"); if ($r.InvocationInfo.Line) { [Console]::Error.WriteLine('  | ' + $r.InvocationInfo.Line.TrimEnd()) }; if ($r.ScriptStackTrace) { [Console]::Error.WriteLine($r.ScriptStackTrace) }; exit 1 };";
 
 	/// <summary>
 	/// PowerShell prologue injected when the step opts in via <c>strictMode: true</c>.
@@ -79,7 +87,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	/// (e.g., <c>$obj.PSObject.Properties['Name']?.Value</c>) before enabling this.</para>
 	/// </remarks>
 	internal const string PowerShellStrictPrologue =
-		"$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; trap { Write-Error -ErrorRecord $_; exit 1 };";	public ScriptStepExecutor(
+		"$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; trap { $r=$_; [Console]::Error.WriteLine(\"ORCHESTRA-PWSH-ERROR: $($r.InvocationInfo.ScriptName):$($r.InvocationInfo.ScriptLineNumber):$($r.InvocationInfo.OffsetInLine): $($r.Exception.Message)\"); if ($r.InvocationInfo.Line) { [Console]::Error.WriteLine('  | ' + $r.InvocationInfo.Line.TrimEnd()) }; if ($r.ScriptStackTrace) { [Console]::Error.WriteLine($r.ScriptStackTrace) }; exit 1 };";	public ScriptStepExecutor(
 		IOrchestrationReporter reporter,
 		ILogger<ScriptStepExecutor> logger)
 	{

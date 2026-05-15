@@ -29,6 +29,7 @@ import type {
   ActorContext,
   ActorStream,
   StepActorStreams,
+  ExecutionStateSnapshot,
 } from './types';
 import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
 import type { CardExecution } from './components/ActiveOrchestrationCard';
@@ -994,6 +995,75 @@ function App(): React.JSX.Element {
         if (data.status === 'Cancelling') {
           setExecutionModal(prev => ({ ...prev, status: 'cancelling' }));
         }
+      } catch { /* ignore */ }
+    });
+
+    // execution-snapshot (sent as the FIRST frame of every /run and /attach response).
+    //
+    // The server's authoritative per-step state is folded into the snapshot in parallel
+    // with the circular event-log replay, so a Portal user who reopens the modal mid-run
+    // — even on a very long DAG where the earliest step-started/step-completed events
+    // have rolled off the buffer — sees correctly colored nodes and per-step trace/output
+    // immediately. Subsequent replay/live events for the same steps are idempotent: they
+    // overwrite the same map keys, so the snapshot priming never conflicts with later
+    // updates.
+    eventSource.addEventListener('execution-snapshot', (e: MessageEvent) => {
+      try {
+        const snapshot = JSON.parse(e.data) as ExecutionStateSnapshot;
+        if (!snapshot) return;
+
+        // Hydrate the local mutable state used by subsequent handlers so they see the
+        // primed values rather than the empty initial dictionaries.
+        if (snapshot.steps && typeof snapshot.steps === 'object') {
+          for (const [stepName, step] of Object.entries(snapshot.steps)) {
+            if (!step) continue;
+            stepStatuses[stepName] = step.status;
+            if (typeof step.output === 'string' && step.output.length > 0) {
+              stepResults[stepName] = step.output;
+            } else if (typeof step.contentPreview === 'string' && step.contentPreview.length > 0 && !stepResults[stepName]) {
+              stepResults[stepName] = step.contentPreview;
+            }
+            if (step.trace) {
+              stepTraces[stepName] = step.trace as unknown as TraceData;
+            }
+            if (Array.isArray(step.savedFiles) && step.savedFiles.length > 0) {
+              stepSavedFiles[stepName] = [...step.savedFiles];
+            }
+            if (Array.isArray(step.auditEntries) && step.auditEntries.length > 0) {
+              stepAuditLogs[stepName] = step.auditEntries as unknown as AuditLogEntry[];
+            }
+          }
+        }
+
+        // Push the hydrated state to React in a single batched update.
+        setExecutionModal(prev => ({
+          ...prev,
+          stepStatuses: { ...stepStatuses },
+          stepResults: { ...stepResults },
+          stepTraces: { ...stepTraces },
+          stepSavedFiles: { ...stepSavedFiles },
+          stepAuditLogs: { ...stepAuditLogs },
+          ...(snapshot.runContext ? { runContext: snapshot.runContext as unknown as RunContext } : {}),
+          ...(snapshot.status === 'Cancelling' ? { status: 'cancelling' as const } : {}),
+        }));
+
+        if (snapshot.executionId && !trackedExecutionId) {
+          trackedExecutionId = snapshot.executionId;
+        }
+      } catch { /* ignore */ }
+    });
+
+    // replay-truncated (sent when the client's Last-Event-Id is older than the server's
+    // replay buffer). The snapshot still gives us authoritative state for every step; this
+    // banner just lets the user know that intermediate streaming events from before the
+    // truncation point are not available to scroll back through.
+    eventSource.addEventListener('replay-truncated', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as { requestedLastEventId: number | null; resumeFromSequence: number };
+        console.warn(
+          `Orchestra SSE: replay truncated (requested ${data.requestedLastEventId}, resuming from ${data.resumeFromSequence}). ` +
+          'Authoritative state from snapshot is still in use.',
+        );
       } catch { /* ignore */ }
     });
 

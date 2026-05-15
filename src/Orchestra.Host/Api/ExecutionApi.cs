@@ -137,6 +137,16 @@ public static partial class ExecutionApi
 			await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new { executionId }, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
+			// Capture execution-started metadata on the reporter so the authoritative snapshot
+			// (served on attach and via /state) reflects it without needing to scan the event log.
+			reporter.SetExecutionContext(
+				executionId,
+				id,
+				entry.Orchestration.Name,
+				handle.StartedAt,
+				"manual",
+				parameters);
+
 			// Notify dashboard subscribers so the Portal can refresh Active/Recent lists
 			// without polling.
 			dashboardBroadcaster.BroadcastExecutionStarted(
@@ -177,18 +187,34 @@ public static partial class ExecutionApi
 					dashboardStatus);
 			}, CancellationToken.None);
 
-			// Subscribe and stream SSE events to this client
-			var (replay, futureEvents) = reporter.Subscribe();
+			// Subscribe and stream SSE events to this client.
+			// /run is a fresh subscribe (no Last-Event-Id) so we always send the full
+			// snapshot+replay sequence — for /run there's nothing prior to replay but the
+			// snapshot frame still primes the client's state map atomically.
+			var lastEventId = SseEventWriter.ParseLastEventId(httpContext.Request);
+			var subscription = reporter.SubscribeWithSnapshot(lastEventId);
 			using var sseCts = CancellationTokenSource.CreateLinkedTokenSource(
 				httpContext.RequestAborted,
 				lifetime.ApplicationStopping);
 			var sseToken = sseCts.Token;
 
-			// Replay any events that happened before we subscribed
-			foreach (var evt in replay)
+			// 1. Emit the authoritative snapshot first so the UI has a complete state map
+			//    even if some events were evicted from the circular buffer before this client
+			//    attached. The snapshot is followed by the replay so any deltas/streaming
+			//    text since the snapshot is still delivered.
+			await WriteSnapshotFrameAsync(httpContext.Response, subscription.Snapshot, jsonOptions, sseToken);
+
+			// 2. If the requested Last-Event-Id is older than the buffer, surface a
+			//    "replay-truncated" frame so the Portal can show a banner.
+			if (subscription.ReplayTruncated)
 			{
-				await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-				await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+				await WriteReplayTruncatedAsync(httpContext.Response, lastEventId, subscription.Snapshot.LastEventSequence, sseToken);
+			}
+
+			// 3. Replay any events that happened before we subscribed (or since lastEventId).
+			foreach (var evt in subscription.Replay)
+			{
+				await SseEventWriter.WriteAsync(httpContext.Response, evt, sseToken);
 			}
 			await httpContext.Response.Body.FlushAsync(sseToken);
 
@@ -196,20 +222,19 @@ public static partial class ExecutionApi
 			_ = SendHeartbeatsAsync(reporter, sseToken);
 
 			// Stream future events until client disconnects OR orchestration completes
-			if (futureEvents is not null)
+			if (subscription.Future is not null)
 			{
 				try
 				{
-					await foreach (var evt in futureEvents.ReadAllAsync(sseToken))
+					await foreach (var evt in subscription.Future.ReadAllAsync(sseToken))
 					{
-						await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-						await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+						await SseEventWriter.WriteAsync(httpContext.Response, evt, sseToken);
 						await httpContext.Response.Body.FlushAsync(sseToken);
 					}
 				}
 				catch (OperationCanceledException)
 				{
-					reporter.Unsubscribe(futureEvents);
+					reporter.Unsubscribe(subscription.Future);
 				}
 			}
 
@@ -266,7 +291,87 @@ public static partial class ExecutionApi
 			await StreamAttachedExecutionAsync(httpContext, info, jsonOptions);
 		});
 
+		// GET /api/execution/{executionId}/state - Return the reporter's authoritative
+		// snapshot of orchestration + per-step state for the given active execution.
+		// Useful for tooling (CLI, integrations, tests) that wants a one-shot view of
+		// the current state without consuming an SSE stream, and as a fallback when the
+		// SSE subscriber cap has been reached.
+		endpoints.MapGet("/api/execution/{executionId}/state", async (
+			string executionId,
+			HttpContext httpContext,
+			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
+		{
+			if (!activeExecutionInfos.TryGetValue(executionId, out var info))
+			{
+				await WriteProblemAsync(httpContext, 404, "Not Found", $"No active execution with ID '{executionId}'.");
+				return;
+			}
+
+			await WriteSnapshotJsonAsync(httpContext, info, jsonOptions);
+		});
+
+		// GET /api/orchestrations/{orchestrationName}/runs/{runId}/state - Friendly alias
+		// that takes (orchestrationName, runId) instead of the internal executionId.
+		// For active runs the runId is the same as the executionId, so this is just a
+		// convenience surface with name verification.
+		endpoints.MapGet("/api/orchestrations/{orchestrationName}/runs/{runId}/state", async (
+			string orchestrationName,
+			string runId,
+			HttpContext httpContext,
+			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
+		{
+			if (!activeExecutionInfos.TryGetValue(runId, out var info))
+			{
+				await WriteProblemAsync(httpContext, 404, "Not Found", $"No active run '{runId}' for orchestration '{orchestrationName}'.");
+				return;
+			}
+
+			if (!string.Equals(info.OrchestrationName, orchestrationName, StringComparison.Ordinal))
+			{
+				await WriteProblemAsync(
+					httpContext,
+					404,
+					"Not Found",
+					$"Run '{runId}' belongs to orchestration '{info.OrchestrationName}', not '{orchestrationName}'.");
+				return;
+			}
+
+			await WriteSnapshotJsonAsync(httpContext, info, jsonOptions);
+		});
+
 		return endpoints;
+	}
+
+	/// <summary>
+	/// Serializes the reporter's current authoritative <see cref="ExecutionStateSnapshot"/>
+	/// to the response as JSON. Falls back to a 500 problem response when the active
+	/// execution's reporter is not an <see cref="SseReporter"/> (which shouldn't happen
+	/// in production because <see cref="SseReporterFactory"/> is the only registered factory).
+	/// </summary>
+	private static async Task WriteSnapshotJsonAsync(
+		HttpContext httpContext,
+		ActiveExecutionInfo info,
+		JsonSerializerOptions jsonOptions)
+	{
+		if (info.Reporter is not SseReporter sseReporter)
+		{
+			await WriteProblemAsync(httpContext, 500, "Internal Server Error", "Execution reporter is not an SseReporter.");
+			return;
+		}
+
+		// Make sure execution-level metadata is captured on the snapshot even when this is
+		// the very first read (no one has attached yet) — same fold the SSE attach path does.
+		sseReporter.SetExecutionContext(
+			info.ExecutionId,
+			info.OrchestrationId,
+			info.OrchestrationName,
+			info.StartedAt,
+			info.TriggeredBy,
+			info.Parameters);
+
+		var snapshot = sseReporter.GetCurrentSnapshot();
+		httpContext.Response.ContentType = "application/json";
+		await httpContext.Response.WriteAsync(JsonSerializer.Serialize(snapshot, jsonOptions));
 	}
 
 	/// <summary>
@@ -297,6 +402,17 @@ public static partial class ExecutionApi
 			lifetime.ApplicationStopping);
 		var cancellationToken = sseCts.Token;
 
+		// Mirror execution-info to the reporter's snapshot so the authoritative state is
+		// complete even for clients that connect via /attach (the engine itself never
+		// emits execution-info because it doesn't know about HTTP attach semantics).
+		sseReporter.SetExecutionContext(
+			info.ExecutionId,
+			info.OrchestrationId,
+			info.OrchestrationName,
+			info.StartedAt,
+			info.TriggeredBy,
+			info.Parameters);
+
 		// Send current execution info
 		await httpContext.Response.WriteAsync($"event: execution-info\n");
 		await httpContext.Response.WriteAsync($"data: {JsonSerializer.Serialize(new
@@ -311,14 +427,25 @@ public static partial class ExecutionApi
 		}, jsonOptions)}\n\n");
 		await httpContext.Response.Body.FlushAsync();
 
-		// Subscribe to the reporter
-		var (replay, futureEvents) = sseReporter.Subscribe();
+		// Subscribe to the reporter, optionally resuming from the client's Last-Event-Id
+		// header so reconnects don't refire events the client already saw.
+		var lastEventId = SseEventWriter.ParseLastEventId(httpContext.Request);
+		var subscription = sseReporter.SubscribeWithSnapshot(lastEventId);
 
-		// Replay accumulated events
-		foreach (var evt in replay)
+		// 1. Authoritative snapshot first — primes DAG colors + per-step details even when
+		//    earlier step-started/step-completed events have rolled off the replay buffer.
+		await WriteSnapshotFrameAsync(httpContext.Response, subscription.Snapshot, jsonOptions, cancellationToken);
+
+		// 2. Replay-truncated banner when applicable.
+		if (subscription.ReplayTruncated)
 		{
-			await httpContext.Response.WriteAsync($"event: {evt.Type}\n", cancellationToken);
-			await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", cancellationToken);
+			await WriteReplayTruncatedAsync(httpContext.Response, lastEventId, subscription.Snapshot.LastEventSequence, cancellationToken);
+		}
+
+		// 3. Replay accumulated events newer than the cursor.
+		foreach (var evt in subscription.Replay)
+		{
+			await SseEventWriter.WriteAsync(httpContext.Response, evt, cancellationToken);
 		}
 		await httpContext.Response.Body.FlushAsync(cancellationToken);
 
@@ -332,22 +459,59 @@ public static partial class ExecutionApi
 		_ = SendHeartbeatsAsync(sseReporter, cancellationToken);
 
 		// Stream future events
-		if (futureEvents is not null)
+		if (subscription.Future is not null)
 		{
 			try
 			{
-				await foreach (var evt in futureEvents.ReadAllAsync(cancellationToken))
+				await foreach (var evt in subscription.Future.ReadAllAsync(cancellationToken))
 				{
-					await httpContext.Response.WriteAsync($"event: {evt.Type}\n", cancellationToken);
-					await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", cancellationToken);
+					await SseEventWriter.WriteAsync(httpContext.Response, evt, cancellationToken);
 					await httpContext.Response.Body.FlushAsync(cancellationToken);
 				}
 			}
 			catch (OperationCanceledException)
 			{
-				sseReporter.Unsubscribe(futureEvents);
+				sseReporter.Unsubscribe(subscription.Future);
 			}
 		}
+	}
+
+	/// <summary>
+	/// Writes the <c>execution-snapshot</c> frame containing the reporter's authoritative
+	/// state at attach time. This is the cornerstone of the recovery path: even if the
+	/// circular replay buffer evicted earlier <c>step-completed</c> / <c>step-trace</c>
+	/// events, the snapshot still carries the latest known status, trace, and output for
+	/// each step, so the UI can render the DAG correctly and show per-step details on click.
+	/// </summary>
+	private static async Task WriteSnapshotFrameAsync(
+		HttpResponse response,
+		ExecutionStateSnapshot snapshot,
+		JsonSerializerOptions jsonOptions,
+		CancellationToken cancellationToken)
+	{
+		var snapshotJson = JsonSerializer.Serialize(snapshot, jsonOptions);
+		// The snapshot itself is not part of the resumable sequence — its sequence number
+		// is embedded in the payload (lastEventSequence) so clients know what cursor to
+		// resume from after consuming it.
+		await response.WriteAsync($"event: execution-snapshot\n", cancellationToken);
+		await response.WriteAsync($"data: {snapshotJson}\n\n", cancellationToken);
+	}
+
+	/// <summary>
+	/// Writes a <c>replay-truncated</c> frame when the requested <c>Last-Event-Id</c>
+	/// is older than the oldest event still in the reporter's replay buffer. Clients
+	/// should treat the snapshot frame as authoritative and use the included
+	/// <c>fromSequence</c> as the new resume cursor.
+	/// </summary>
+	private static async Task WriteReplayTruncatedAsync(
+		HttpResponse response,
+		long? lastEventId,
+		long currentSequence,
+		CancellationToken cancellationToken)
+	{
+		var payload = $"{{\"requestedLastEventId\":{lastEventId?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "null"},\"resumeFromSequence\":{currentSequence.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}";
+		await response.WriteAsync($"event: replay-truncated\n", cancellationToken);
+		await response.WriteAsync($"data: {payload}\n\n", cancellationToken);
 	}
 
 	private static async Task WriteProblemAsync(HttpContext httpContext, int status, string title, string detail)
@@ -669,14 +833,16 @@ public static partial class ExecutionApi
 	/// <summary>
 	/// Sends periodic heartbeat events on the execution SSE stream to prevent
 	/// proxies, load balancers, and idle TCP timeouts from silently closing the connection.
+	/// Uses the reporter's configured <see cref="SseReporter.HeartbeatInterval"/>.
 	/// </summary>
 	private static async Task SendHeartbeatsAsync(SseReporter reporter, CancellationToken cancellationToken)
 	{
 		try
 		{
+			var interval = reporter.HeartbeatInterval;
 			while (!cancellationToken.IsCancellationRequested && !reporter.IsCompleted)
 			{
-				await Task.Delay(TimeSpan.FromSeconds(20), cancellationToken);
+				await Task.Delay(interval, cancellationToken);
 				reporter.SendHeartbeat();
 			}
 		}

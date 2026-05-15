@@ -1,25 +1,36 @@
 using System.Text.Json;
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
+using Orchestra.Host.Hosting;
 using Orchestra.Host.Triggers;
 
 namespace Orchestra.Host.Api;
 
 /// <summary>
-/// Represents an SSE event with type and JSON data.
+/// Represents an SSE event with type, JSON data, and a monotonically increasing sequence
+/// number. The sequence number is written as the SSE <c>id:</c> field so clients can
+/// supply <c>Last-Event-Id</c> on reconnect and resume from the exact point they left off
+/// (subject to the replay buffer still containing it).
 /// </summary>
-public record SseEvent(string Type, string Data);
+public record SseEvent(long Sequence, string Type, string Data);
 
 /// <summary>
 /// An IOrchestrationReporter that writes structured SSE events to multiple subscribers.
-/// Supports late-joining subscribers by replaying accumulated events.
+/// Supports late-joining subscribers via:
+///   - Replaying accumulated events from a circular buffer.
+///   - Serving an authoritative per-step state snapshot that survives buffer eviction.
+///   - Honoring a <c>Last-Event-Id</c> cursor to resume after the most recently
+///     consumed sequence number.
+///
 /// Each execution creates its own instance tied to a specific orchestration run.
-/// 
-/// Memory-bounded: uses a circular buffer for accumulated events (max 10,000)
-/// and bounded channels for subscribers (1,000 capacity with DropOldest).
-/// Limits subscribers to 50 max and implements IDisposable for cleanup.
+/// Memory-bounded: uses a circular buffer for accumulated events (default 50,000)
+/// and bounded channels for subscribers (default 5,000 capacity with DropOldest).
+/// Limits subscribers to 50 max by default and implements IDisposable for cleanup.
+/// All caps are configurable via <see cref="SseOptions"/>.
 /// </summary>
-public sealed class SseReporter : IOrchestrationReporter, IDisposable
+public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 {
 	private static readonly JsonSerializerOptions s_jsonOptions = new()
 	{
@@ -27,29 +38,103 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
 	};
 
-	/// <summary>
-	/// Maximum number of events to keep in the circular buffer for replay.
-	/// </summary>
-	public const int MaxAccumulatedEvents = 10_000;
+	private static readonly JsonSerializerOptions s_snapshotJsonOptions = new()
+	{
+		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+	};
 
 	/// <summary>
-	/// Maximum number of events that can be buffered per subscriber channel.
+	/// Default maximum number of events to keep in the circular buffer for replay.
+	/// Used when the reporter is constructed without explicit <see cref="SseOptions"/>
+	/// (e.g. in unit tests that call <c>new SseReporter()</c>).
 	/// </summary>
-	public const int MaxChannelCapacity = 1_000;
+	public const int MaxAccumulatedEvents = 50_000;
 
 	/// <summary>
-	/// Maximum number of concurrent subscribers.
+	/// Default maximum number of events that can be buffered per subscriber channel.
+	/// </summary>
+	public const int MaxChannelCapacity = 5_000;
+
+	/// <summary>
+	/// Default maximum number of concurrent subscribers.
 	/// </summary>
 	public const int MaxSubscribers = 50;
 
+	/// <summary>
+	/// Hard upper bound for per-step <see cref="StepStateSnapshot.Output"/>. Snapshot
+	/// payloads must stay reasonable in size even when the step produced megabytes of
+	/// content; full content is still available via the <c>step-output</c> replay event.
+	/// </summary>
+	public const int MaxSnapshotStepOutputLength = 64 * 1024;
+
+	/// <summary>
+	/// Hard upper bound for the number of audit entries retained per step in the
+	/// snapshot. Beyond this, oldest entries are dropped to keep the snapshot bounded.
+	/// </summary>
+	public const int MaxSnapshotAuditEntriesPerStep = 200;
+
+	/// <summary>
+	/// Set of event types whose loss from the replay buffer materially degrades the
+	/// UI's ability to render a "done" step (status + trace + output + audit). When
+	/// eviction discards one of these types, the reporter logs a warning so operators
+	/// can tune <see cref="SseOptions.MaxAccumulatedEvents"/>. The reporter's separate
+	/// per-step snapshot is the safety net so the UI keeps working regardless.
+	/// </summary>
+	private static readonly HashSet<string> s_importantEventTypes = new(StringComparer.Ordinal)
+	{
+		"execution-started",
+		"run-context",
+		"status-changed",
+		"step-started",
+		"step-completed",
+		"step-error",
+		"step-cancelled",
+		"step-skipped",
+		"step-status-set",
+		"step-retry",
+		"step-trace",
+		"step-output",
+		"saved-file",
+		"audit-log",
+		"orchestration-done",
+		"orchestration-cancelled",
+		"orchestration-error",
+	};
+
 	private readonly Lock _lock = new();
-	private readonly SseEvent[] _eventBuffer = new SseEvent[MaxAccumulatedEvents];
+	private readonly SseEvent[] _eventBuffer;
+	private readonly int _maxAccumulatedEvents;
+	private readonly int _maxChannelCapacity;
+	private readonly int _maxSubscribers;
+	private readonly TimeSpan _heartbeatInterval;
 	private int _eventCount;
 	private int _eventHead; // Index of the oldest event in the circular buffer
+	private long _nextSequence; // Monotonically increasing event sequence number
+	private long _firstAvailableSequence; // Sequence of the oldest event still in the buffer
 	private readonly List<Channel<SseEvent>> _subscribers = [];
 	private bool _isCompleted;
 	private bool _disposed;
 	private readonly DashboardEventBroadcaster? _dashboardBroadcaster;
+	private readonly ILogger<SseReporter> _logger;
+
+	// Authoritative state — survives circular-buffer eviction.
+	private readonly Dictionary<string, MutableStepState> _stepStates = new(StringComparer.Ordinal);
+	private string? _executionId;
+	private string? _orchestrationId;
+	private string? _orchestrationName;
+	private DateTimeOffset? _startedAt;
+	private string? _runStatus;
+	private string? _triggeredBy;
+	private Dictionary<string, string>? _parameters;
+	private JsonElement? _runContext;
+
+	/// <summary>
+	/// Creates a new SSE reporter with default options.
+	/// </summary>
+	public SseReporter() : this(null, new SseOptions(), NullLogger<SseReporter>.Instance)
+	{
+	}
 
 	/// <summary>
 	/// Creates a new SSE reporter.
@@ -58,10 +143,40 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	/// fan-out of HITL lifecycle events (<c>awaiting-input</c>, <c>input-received</c>,
 	/// <c>input-timeout</c>) so the Portal can show pending counts/lists without subscribing
 	/// to every execution stream. Null in unit tests that don't care about dashboard fan-out.</param>
-	public SseReporter(DashboardEventBroadcaster? dashboardBroadcaster = null)
+	public SseReporter(DashboardEventBroadcaster? dashboardBroadcaster)
+		: this(dashboardBroadcaster, new SseOptions(), NullLogger<SseReporter>.Instance)
 	{
-		_dashboardBroadcaster = dashboardBroadcaster;
 	}
+
+	/// <summary>
+	/// Creates a new SSE reporter with explicit options and logger. Used by
+	/// <see cref="SseReporterFactory"/> when constructed via DI.
+	/// </summary>
+	public SseReporter(
+		DashboardEventBroadcaster? dashboardBroadcaster,
+		SseOptions options,
+		ILogger<SseReporter> logger)
+	{
+		ArgumentNullException.ThrowIfNull(options);
+		_dashboardBroadcaster = dashboardBroadcaster;
+		_logger = logger ?? NullLogger<SseReporter>.Instance;
+		_maxAccumulatedEvents = options.MaxAccumulatedEvents > 0 ? options.MaxAccumulatedEvents : MaxAccumulatedEvents;
+		_maxChannelCapacity = options.MaxChannelCapacity > 0 ? options.MaxChannelCapacity : MaxChannelCapacity;
+		_maxSubscribers = options.MaxSubscribers > 0 ? options.MaxSubscribers : MaxSubscribers;
+		_heartbeatInterval = options.HeartbeatInterval > TimeSpan.Zero ? options.HeartbeatInterval : TimeSpan.FromSeconds(20);
+		_eventBuffer = new SseEvent[_maxAccumulatedEvents];
+	}
+
+	/// <summary>
+	/// Maximum number of events in the circular buffer for this instance (resolved from
+	/// <see cref="SseOptions.MaxAccumulatedEvents"/>).
+	/// </summary>
+	public int InstanceMaxAccumulatedEvents => _maxAccumulatedEvents;
+
+	/// <summary>
+	/// Heartbeat interval configured for this instance.
+	/// </summary>
+	public TimeSpan HeartbeatInterval => _heartbeatInterval;
 
 	/// <summary>
 	/// Gets all accumulated events (for replay to late-joining subscribers).
@@ -88,6 +203,20 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			lock (_lock)
 			{
 				return _eventCount;
+			}
+		}
+	}
+
+	/// <summary>
+	/// Highest sequence number written to the reporter so far (0 if none yet).
+	/// </summary>
+	public long LastEventSequence
+	{
+		get
+		{
+			lock (_lock)
+			{
+				return _nextSequence;
 			}
 		}
 	}
@@ -141,15 +270,28 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	public Action<string, StepRunRecord>? OnStepRecorded { get; set; }
 
 	/// <summary>
-	/// Creates a new subscriber channel that will receive future events.
-	/// Call this to attach a new SSE client to the execution.
-	/// Returns null for Future if the maximum subscriber limit has been reached.
+	/// Result of a subscription, including the authoritative state snapshot taken atomically
+	/// with the replay capture so clients have a complete picture even if events were evicted.
 	/// </summary>
-	/// <returns>A tuple of (accumulated events to replay, channel for future events)</returns>
-	public (IReadOnlyList<SseEvent> Replay, ChannelReader<SseEvent>? Future) Subscribe()
+	public readonly record struct SubscriptionResult(
+		ExecutionStateSnapshot Snapshot,
+		IReadOnlyList<SseEvent> Replay,
+		ChannelReader<SseEvent>? Future,
+		bool ReplayTruncated);
+
+	/// <summary>
+	/// Subscribes a new client. Returns the authoritative snapshot, the replay of events
+	/// the client has not yet seen, and a future-events channel (null if the subscriber cap
+	/// has been reached).
+	/// </summary>
+	/// <param name="lastEventId">If provided, only events with a higher sequence number are
+	/// returned in <see cref="SubscriptionResult.Replay"/>. If the requested cursor is older
+	/// than the oldest event still in the circular buffer, <see cref="SubscriptionResult.ReplayTruncated"/>
+	/// is true and the client should rely on the snapshot for authoritative state.</param>
+	public SubscriptionResult SubscribeWithSnapshot(long? lastEventId = null)
 	{
 		var channel = Channel.CreateBounded<SseEvent>(
-			new BoundedChannelOptions(MaxChannelCapacity)
+			new BoundedChannelOptions(_maxChannelCapacity)
 			{
 				SingleReader = true,
 				SingleWriter = false,
@@ -158,24 +300,47 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 
 		lock (_lock)
 		{
-			var replay = GetAccumulatedEventsLocked();
+			var snapshot = GetCurrentSnapshotLocked();
+			var (replay, truncated) = GetReplaySinceLocked(lastEventId);
 
 			if (_isCompleted)
 			{
-				// Already done - just return accumulated events and a completed channel
 				channel.Writer.TryComplete();
-				return (replay, channel.Reader);
+				return new SubscriptionResult(snapshot, replay, channel.Reader, truncated);
 			}
 
-			if (_subscribers.Count >= MaxSubscribers)
+			if (_subscribers.Count >= _maxSubscribers)
 			{
-				// Too many subscribers - return replay but no future channel
+				LogSubscriberLimitReached(_logger, _executionId ?? "(unknown)", _subscribers.Count, _maxSubscribers);
 				channel.Writer.TryComplete();
-				return (replay, null);
+				return new SubscriptionResult(snapshot, replay, null, truncated);
 			}
 
 			_subscribers.Add(channel);
-			return (replay, channel.Reader);
+			return new SubscriptionResult(snapshot, replay, channel.Reader, truncated);
+		}
+	}
+
+	/// <summary>
+	/// Legacy subscription overload returning (replay, future) without the snapshot.
+	/// Retained for backward compatibility with existing callers and tests; new code
+	/// should prefer <see cref="SubscribeWithSnapshot"/>.
+	/// </summary>
+	public (IReadOnlyList<SseEvent> Replay, ChannelReader<SseEvent>? Future) Subscribe()
+	{
+		var result = SubscribeWithSnapshot();
+		return (result.Replay, result.Future);
+	}
+
+	/// <summary>
+	/// Returns the current authoritative snapshot of orchestration + per-step state.
+	/// Safe to call at any time, including after the reporter has completed.
+	/// </summary>
+	public ExecutionStateSnapshot GetCurrentSnapshot()
+	{
+		lock (_lock)
+		{
+			return GetCurrentSnapshotLocked();
 		}
 	}
 
@@ -206,7 +371,8 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 	/// </summary>
 	public void SendHeartbeat()
 	{
-		var evt = new SseEvent("heartbeat", "{}");
+		// Heartbeats use sequence 0 to indicate they are not retained / cannot be resumed from.
+		var evt = new SseEvent(0, "heartbeat", "{}");
 
 		lock (_lock)
 		{
@@ -264,6 +430,7 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 			Array.Clear(_eventBuffer);
 			_eventCount = 0;
 			_eventHead = 0;
+			_stepStates.Clear();
 		}
 	}
 
@@ -867,33 +1034,77 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		Write("status-changed", new { status });
 	}
 
+	/// <summary>
+	/// Records execution-started metadata on the reporter. Called by
+	/// <see cref="ExecutionApi"/> when the SSE <c>execution-started</c> frame is emitted
+	/// outside the reporter (the reporter doesn't naturally see that event). The data is
+	/// folded into the authoritative snapshot so attach clients see it without
+	/// depending on the replay buffer.
+	/// </summary>
+	public void SetExecutionContext(
+		string executionId,
+		string? orchestrationId,
+		string? orchestrationName,
+		DateTimeOffset? startedAt,
+		string? triggeredBy,
+		Dictionary<string, string>? parameters)
+	{
+		lock (_lock)
+		{
+			_executionId = executionId;
+			_orchestrationId = orchestrationId;
+			_orchestrationName = orchestrationName;
+			_startedAt = startedAt;
+			_triggeredBy = triggeredBy;
+			_parameters = parameters is null ? null : new Dictionary<string, string>(parameters);
+			_runStatus ??= "Running";
+		}
+	}
+
 	private void Write(string eventType, object data)
 	{
 		var json = JsonSerializer.Serialize(data, s_jsonOptions);
-		var evt = new SseEvent(eventType, json);
 
 		lock (_lock)
 		{
 			if (_isCompleted || _disposed)
 				return;
 
-			// Add to circular buffer
-			var writeIndex = (_eventHead + _eventCount) % MaxAccumulatedEvents;
-			_eventBuffer[writeIndex] = evt;
+			var sequence = ++_nextSequence;
+			var evt = new SseEvent(sequence, eventType, json);
 
-			if (_eventCount < MaxAccumulatedEvents)
+			// Update authoritative state BEFORE evicting from the buffer so the snapshot
+			// always reflects the latest event even if the buffer overwrites the oldest one.
+			ApplyEventToStateLocked(eventType, json);
+
+			// Add to circular buffer (oldest is overwritten on wrap)
+			var writeIndex = (_eventHead + _eventCount) % _maxAccumulatedEvents;
+
+			if (_eventCount < _maxAccumulatedEvents)
 			{
+				_eventBuffer[writeIndex] = evt;
 				_eventCount++;
+				if (_eventCount == 1)
+					_firstAvailableSequence = sequence;
 			}
 			else
 			{
-				// Buffer is full — advance head (oldest event is discarded)
-				_eventHead = (_eventHead + 1) % MaxAccumulatedEvents;
+				// Buffer is full — the slot we're about to overwrite holds the current oldest event.
+				var evicted = _eventBuffer[_eventHead];
+				if (evicted is not null && s_importantEventTypes.Contains(evicted.Type))
+				{
+					LogImportantEventEvicted(_logger, _executionId ?? "(unknown)", evicted.Type, evicted.Sequence, _maxAccumulatedEvents);
+				}
+				_eventBuffer[_eventHead] = evt;
+				_eventHead = (_eventHead + 1) % _maxAccumulatedEvents;
+				_firstAvailableSequence = _eventBuffer[_eventHead]!.Sequence;
 			}
 
 			foreach (var channel in _subscribers)
 			{
-				// TryWrite on bounded channel with DropOldest will always succeed
+				// TryWrite on bounded channel with DropOldest will always succeed.
+				// We don't log per-event drops because that itself can spam under load —
+				// the snapshot recovery path makes per-event drops survivable.
 				channel.Writer.TryWrite(evt);
 			}
 		}
@@ -907,9 +1118,404 @@ public sealed class SseReporter : IOrchestrationReporter, IDisposable
 		var result = new List<SseEvent>(_eventCount);
 		for (var i = 0; i < _eventCount; i++)
 		{
-			var index = (_eventHead + i) % MaxAccumulatedEvents;
+			var index = (_eventHead + i) % _maxAccumulatedEvents;
 			result.Add(_eventBuffer[index]);
 		}
 		return result;
+	}
+
+	/// <summary>
+	/// Returns events with sequence number greater than <paramref name="lastEventId"/>,
+	/// or all accumulated events when null. Also reports whether the requested cursor
+	/// fell off the buffer (truncated = client missed events that aren't in the buffer
+	/// anymore; they must rely on the snapshot for state).
+	/// </summary>
+	private (List<SseEvent> Replay, bool Truncated) GetReplaySinceLocked(long? lastEventId)
+	{
+		if (lastEventId is null || _eventCount == 0)
+		{
+			return (GetAccumulatedEventsLocked(), false);
+		}
+
+		var cursor = lastEventId.Value;
+
+		// If the requested cursor is older than the oldest event still in the buffer,
+		// we can't faithfully resume — flag truncated.
+		var truncated = cursor < _firstAvailableSequence - 1;
+
+		var result = new List<SseEvent>();
+		for (var i = 0; i < _eventCount; i++)
+		{
+			var index = (_eventHead + i) % _maxAccumulatedEvents;
+			var evt = _eventBuffer[index];
+			if (evt!.Sequence > cursor)
+				result.Add(evt);
+		}
+		return (result, truncated);
+	}
+
+	private ExecutionStateSnapshot GetCurrentSnapshotLocked()
+	{
+		var steps = new Dictionary<string, StepStateSnapshot>(_stepStates.Count, StringComparer.Ordinal);
+		foreach (var (name, mutable) in _stepStates)
+		{
+			steps[name] = mutable.ToImmutable();
+		}
+
+		return new ExecutionStateSnapshot
+		{
+			ExecutionId = _executionId,
+			OrchestrationId = _orchestrationId,
+			OrchestrationName = _orchestrationName,
+			StartedAt = _startedAt,
+			Status = _runStatus,
+			TriggeredBy = _triggeredBy,
+			Parameters = _parameters is null
+				? null
+				: new Dictionary<string, string>(_parameters),
+			RunContext = _runContext,
+			Steps = steps,
+			LastEventSequence = _nextSequence,
+			IsCompleted = _isCompleted,
+		};
+	}
+
+	/// <summary>
+	/// Updates the authoritative state for the given event. Must be called under _lock.
+	/// Designed to be idempotent: applying the same event twice yields the same state.
+	/// </summary>
+	private void ApplyEventToStateLocked(string eventType, string json)
+	{
+		// Parse lazily — many event types we don't fold into the snapshot.
+		// Importantly, we never throw out of this method (failures must not break Write()).
+		try
+		{
+			switch (eventType)
+			{
+				case "run-context":
+					{
+						using var doc = JsonDocument.Parse(json);
+						_runContext = doc.RootElement.Clone();
+					}
+					break;
+
+				case "status-changed":
+					{
+						using var doc = JsonDocument.Parse(json);
+						if (doc.RootElement.TryGetProperty("status", out var s))
+							_runStatus = s.ValueKind == JsonValueKind.String ? s.GetString() : s.ToString();
+					}
+					break;
+
+				case "step-started":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Status = "running";
+						state.StartedAt ??= TryGetDateTime(doc.RootElement, "startedAt") ?? DateTimeOffset.UtcNow;
+					}
+					break;
+
+				case "step-completed":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Status = "completed";
+						state.CompletedAt = TryGetDateTime(doc.RootElement, "completedAt") ?? DateTimeOffset.UtcNow;
+						state.ContentPreview = GetString(doc.RootElement, "contentPreview");
+						state.ActualModel = GetString(doc.RootElement, "actualModel");
+						state.SelectedModel = GetString(doc.RootElement, "selectedModel");
+					}
+					break;
+
+				case "step-error":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Status = "failed";
+						state.Error = GetString(doc.RootElement, "error");
+						state.CompletedAt = TryGetDateTime(doc.RootElement, "completedAt") ?? DateTimeOffset.UtcNow;
+					}
+					break;
+
+				case "step-cancelled":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Status = "cancelled";
+						state.CompletedAt = TryGetDateTime(doc.RootElement, "completedAt") ?? DateTimeOffset.UtcNow;
+					}
+					break;
+
+				case "step-skipped":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Status = "skipped";
+					}
+					break;
+
+				case "step-status-set":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var status = GetString(doc.RootElement, "status");
+						if (status is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Status = status.ToLowerInvariant();
+					}
+					break;
+
+				case "step-retry":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.RetryCount++;
+					}
+					break;
+
+				case "step-trace":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Trace = doc.RootElement.Clone();
+					}
+					break;
+
+				case "step-output":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var content = GetString(doc.RootElement, "content");
+						if (content is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Output = content.Length > MaxSnapshotStepOutputLength
+							? content[..MaxSnapshotStepOutputLength]
+							: content;
+					}
+					break;
+
+				case "saved-file":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						var filePath = GetString(doc.RootElement, "filePath");
+						if (stepName is null || filePath is null) break;
+						var state = GetOrAddStep(stepName);
+						if (!state.SavedFiles.Contains(filePath))
+							state.SavedFiles.Add(filePath);
+					}
+					break;
+
+				case "audit-log":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.AuditEntries.Add(doc.RootElement.Clone());
+						if (state.AuditEntries.Count > MaxSnapshotAuditEntriesPerStep)
+							state.AuditEntries.RemoveAt(0);
+					}
+					break;
+
+				case "usage":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.ActualModel ??= GetString(doc.RootElement, "model");
+					}
+					break;
+
+				case "model-mismatch":
+					{
+						using var doc = JsonDocument.Parse(json);
+						// model-mismatch doesn't carry a step name; ignore for snapshot.
+					}
+					break;
+
+				case "subagent-started":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.ActiveSubagents++;
+					}
+					break;
+
+				case "subagent-completed":
+				case "subagent-failed":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						if (state.ActiveSubagents > 0)
+							state.ActiveSubagents--;
+					}
+					break;
+
+				case "orchestration-done":
+					{
+						using var doc = JsonDocument.Parse(json);
+						_runStatus = GetString(doc.RootElement, "status") ?? _runStatus;
+
+						// Reconcile per-step statuses from the final result so steps that
+						// haven't been individually reported land in the snapshot.
+						if (doc.RootElement.TryGetProperty("results", out var results)
+							&& results.ValueKind == JsonValueKind.Object)
+						{
+							foreach (var entry in results.EnumerateObject())
+							{
+								var stepName = entry.Name;
+								if (string.IsNullOrEmpty(stepName)) continue;
+								var state = GetOrAddStep(stepName);
+								var status = GetString(entry.Value, "status");
+								if (status is not null)
+									state.Status = NormalizeFinalStatus(status);
+								state.Error ??= GetString(entry.Value, "error");
+								state.ContentPreview ??= GetString(entry.Value, "contentPreview");
+							}
+						}
+					}
+					break;
+
+				case "orchestration-cancelled":
+					_runStatus = "Cancelled";
+					break;
+
+				case "orchestration-error":
+					_runStatus = "Failed";
+					break;
+			}
+		}
+		catch (JsonException)
+		{
+			// Be defensive: a malformed event must never break the reporter.
+		}
+	}
+
+	private MutableStepState GetOrAddStep(string stepName)
+	{
+		if (!_stepStates.TryGetValue(stepName, out var state))
+		{
+			state = new MutableStepState { StepName = stepName, Status = "pending" };
+			_stepStates[stepName] = state;
+		}
+		return state;
+	}
+
+	private static string? GetString(JsonElement el, string property)
+	{
+		return el.TryGetProperty(property, out var p) && p.ValueKind == JsonValueKind.String
+			? p.GetString()
+			: null;
+	}
+
+	private static DateTimeOffset? TryGetDateTime(JsonElement el, string property)
+	{
+		if (!el.TryGetProperty(property, out var p) || p.ValueKind != JsonValueKind.String)
+			return null;
+		var s = p.GetString();
+		if (s is null) return null;
+		return DateTimeOffset.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
+			System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
+			out var parsed) ? parsed : null;
+	}
+
+	/// <summary>
+	/// Maps engine ExecutionStatus strings to the lower-case status strings the UI uses.
+	/// </summary>
+	private static string NormalizeFinalStatus(string status) => status switch
+	{
+		"Succeeded" => "completed",
+		"Failed" => "failed",
+		"Cancelled" => "cancelled",
+		"Skipped" => "skipped",
+		"NoAction" => "noaction",
+		"CompletedEarly" => "completed_early",
+		_ => status.ToLowerInvariant(),
+	};
+
+	// ── Logging (LoggerMessage codegen) ──
+
+	[LoggerMessage(
+		EventId = 9101,
+		Level = LogLevel.Warning,
+		Message = "SSE replay buffer evicted important event '{EventType}' (seq {Sequence}) for execution '{ExecutionId}'. Consider raising Sse:MaxAccumulatedEvents (currently {MaxAccumulatedEvents}). Snapshot recovery keeps the UI correct but streaming history before this point is lost.")]
+	private static partial void LogImportantEventEvicted(
+		ILogger logger,
+		string executionId,
+		string eventType,
+		long sequence,
+		int maxAccumulatedEvents);
+
+	[LoggerMessage(
+		EventId = 9102,
+		Level = LogLevel.Warning,
+		Message = "SSE subscriber limit reached for execution '{ExecutionId}': {CurrentSubscribers}/{MaxSubscribers}. New subscriber received snapshot+replay but no future events.")]
+	private static partial void LogSubscriberLimitReached(
+		ILogger logger,
+		string executionId,
+		int currentSubscribers,
+		int maxSubscribers);
+
+	// ── Internal mutable state object for per-step bookkeeping ──
+
+	private sealed class MutableStepState
+	{
+		public required string StepName { get; init; }
+		public string Status { get; set; } = "pending";
+		public DateTimeOffset? StartedAt { get; set; }
+		public DateTimeOffset? CompletedAt { get; set; }
+		public string? Error { get; set; }
+		public string? Output { get; set; }
+		public string? ContentPreview { get; set; }
+		public JsonElement? Trace { get; set; }
+		public List<string> SavedFiles { get; } = [];
+		public List<JsonElement> AuditEntries { get; } = [];
+		public string? RequestedModel { get; set; }
+		public string? SelectedModel { get; set; }
+		public string? ActualModel { get; set; }
+		public int ActiveSubagents { get; set; }
+		public int RetryCount { get; set; }
+
+		public StepStateSnapshot ToImmutable() => new()
+		{
+			StepName = StepName,
+			Status = Status,
+			StartedAt = StartedAt,
+			CompletedAt = CompletedAt,
+			Error = Error,
+			Output = Output,
+			ContentPreview = ContentPreview,
+			Trace = Trace,
+			SavedFiles = SavedFiles.ToArray(),
+			AuditEntries = AuditEntries.ToArray(),
+			RequestedModel = RequestedModel,
+			SelectedModel = SelectedModel,
+			ActualModel = ActualModel,
+			ActiveSubagents = ActiveSubagents,
+			RetryCount = RetryCount,
+		};
 	}
 }

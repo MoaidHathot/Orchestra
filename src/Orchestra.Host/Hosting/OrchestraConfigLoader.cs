@@ -316,6 +316,21 @@ public static class OrchestraConfigLoader
 			HookDefinitionResolver.ApplyBaseDirectory(config.Hooks, configDirectory);
 			options.Hooks = config.Hooks;
 		}
+
+		if (config.Sse is not null)
+		{
+			if (config.Sse.MaxAccumulatedEvents.HasValue)
+				options.Sse.MaxAccumulatedEvents = config.Sse.MaxAccumulatedEvents.Value;
+
+			if (config.Sse.MaxChannelCapacity.HasValue)
+				options.Sse.MaxChannelCapacity = config.Sse.MaxChannelCapacity.Value;
+
+			if (config.Sse.MaxSubscribers.HasValue)
+				options.Sse.MaxSubscribers = config.Sse.MaxSubscribers.Value;
+
+			if (config.Sse.HeartbeatIntervalSeconds.HasValue && config.Sse.HeartbeatIntervalSeconds.Value > 0)
+				options.Sse.HeartbeatInterval = TimeSpan.FromSeconds(config.Sse.HeartbeatIntervalSeconds.Value);
+		}
 	}
 
 	/// <summary>
@@ -422,6 +437,11 @@ public class OrchestraConfigFile
 	/// Global hooks applied to all orchestrations executed by the host.
 	/// </summary>
 	public HookDefinition[]? Hooks { get; set; }
+
+	/// <summary>
+	/// SSE event-streaming pipeline configuration (replay buffer / channel / subscriber caps).
+	/// </summary>
+	public SseConfig? Sse { get; set; }
 }
 
 /// <summary>
@@ -467,6 +487,33 @@ public class RetentionPolicyConfig
 	/// 0 or null means no age limit (keep forever).
 	/// </summary>
 	public int? MaxRunAgeDays { get; set; }
+}
+
+/// <summary>
+/// SSE pipeline configuration section of the config file. All fields are nullable —
+/// only non-null values override defaults in <see cref="SseOptions"/>.
+/// </summary>
+public class SseConfig
+{
+	/// <summary>
+	/// Maximum events kept in the per-execution circular replay buffer.
+	/// </summary>
+	public int? MaxAccumulatedEvents { get; set; }
+
+	/// <summary>
+	/// Maximum events buffered per attached subscriber's outbound channel.
+	/// </summary>
+	public int? MaxChannelCapacity { get; set; }
+
+	/// <summary>
+	/// Maximum number of concurrent SSE subscribers per execution.
+	/// </summary>
+	public int? MaxSubscribers { get; set; }
+
+	/// <summary>
+	/// Heartbeat interval (seconds) for keepalive frames on active SSE streams.
+	/// </summary>
+	public int? HeartbeatIntervalSeconds { get; set; }
 }
 
 /// <summary>

@@ -738,10 +738,44 @@ public class ScriptStepExecutorTests
 	}
 
 	[Fact]
+	public void PowerShellPrologues_AreSinglePhysicalLine()
+	{
+		// Regression guard: the prologue must stay on one physical line so the user
+		// script's original line numbers shift by exactly 1, preserving operator
+		// muscle-memory for line:col references between source and resolved scripts.
+		ScriptStepExecutor.PowerShellDefaultPrologue.Should().NotContain("\n");
+		ScriptStepExecutor.PowerShellDefaultPrologue.Should().NotContain("\r");
+		ScriptStepExecutor.PowerShellStrictPrologue.Should().NotContain("\n");
+		ScriptStepExecutor.PowerShellStrictPrologue.Should().NotContain("\r");
+	}
+
+	[Fact]
+	public void PowerShellPrologues_EmitStructuredDiagnosticMarker()
+	{
+		// Regression guard for run dbbadcb778b8: the previous trap (Write-Error -ErrorRecord)
+		// pointed operators at the engine-injected prologue rather than the user's failing
+		// line, because pwsh's standard error renderer attributes the location to the trap
+		// statement itself (always line 1 in the resolved file) and truncated long source
+		// lines with U+2026 markers that captured stderr could not represent. The current
+		// prologue writes a structured ORCHESTRA-PWSH-ERROR: <file>:<line>:<col>: <msg>
+		// line directly to stderr so the inner script location is preserved verbatim.
+		ScriptStepExecutor.PowerShellDefaultPrologue.Should().Contain("ORCHESTRA-PWSH-ERROR:");
+		ScriptStepExecutor.PowerShellDefaultPrologue.Should().Contain("[Console]::Error.WriteLine");
+		ScriptStepExecutor.PowerShellDefaultPrologue.Should().Contain("$($r.InvocationInfo.ScriptLineNumber)");
+		ScriptStepExecutor.PowerShellDefaultPrologue.Should().NotContain("Write-Error -ErrorRecord",
+			"the misleading pwsh error renderer prefix must not be reintroduced");
+
+		ScriptStepExecutor.PowerShellStrictPrologue.Should().Contain("ORCHESTRA-PWSH-ERROR:");
+		ScriptStepExecutor.PowerShellStrictPrologue.Should().Contain("[Console]::Error.WriteLine");
+		ScriptStepExecutor.PowerShellStrictPrologue.Should().Contain("$($r.InvocationInfo.ScriptLineNumber)");
+		ScriptStepExecutor.PowerShellStrictPrologue.Should().NotContain("Write-Error -ErrorRecord");
+	}
+
+	[Fact]
 	public async Task ExecuteAsync_PwshWriteError_ByDefault_ReturnsFailed()
 	{
 		// Arrange — by default for pwsh, the executor injects
-		//   $ErrorActionPreference='Stop'; trap { Write-Error -ErrorRecord $_; exit 1 };
+		//   $ErrorActionPreference='Stop'; trap { ...diagnostic stderr...; exit 1 };
 		// so Write-Error is promoted to a terminating error and pwsh exits 1.
 		// Previously (no prologue) the same script would silently exit 0 because
 		// Write-Error is non-terminating under default $ErrorActionPreference='Continue'.
@@ -810,6 +844,71 @@ public class ScriptStepExecutorTests
 		// PowerShell error text included in the ErrorMessage.
 		result.Status.Should().Be(ExecutionStatus.Failed);
 		result.ErrorMessage.Should().Contain("Argument types do not match");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshTerminatingError_ByDefault_DiagnosticSurfacesInnerScriptLine()
+	{
+		// Arrange — regression guard for the prologue's diagnostic output. The previous
+		// trap `trap { Write-Error -ErrorRecord $_; exit 1 }` re-emitted the error via the
+		// standard pwsh error renderer, which pointed at the *trap statement* on line 1
+		// and rendered the source line with U+2026 truncation markers that captured
+		// stderr could not represent. The current prologue must instead write a
+		// structured diagnostic that surfaces the inner script line and the failing
+		// source line so production investigations are not misled into thinking the
+		// engine-injected prologue itself is corrupt.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: """
+				$L = New-Object System.Collections.Generic.List[object]
+				$L.Add('alpha')
+				$wrapped = @($L)
+				""");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("ORCHESTRA-PWSH-ERROR:",
+			"the structured diagnostic marker is what downstream log consumers grep for");
+		result.ErrorMessage.Should().Contain("Argument types do not match",
+			"the original PowerShell error message must survive the trap");
+		result.ErrorMessage.Should().Contain("$wrapped = @($L)",
+			"the failing source line must be echoed back so operators can see the offending statement without diffing the resolved script");
+		result.ErrorMessage.Should().NotContain("Write-Error -ErrorRecord",
+			"the new prologue writes directly to [Console]::Error and must not reintroduce the misleading pwsh error renderer prefix");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshTerminatingError_StrictMode_DiagnosticSurfacesInnerScriptLine()
+	{
+		// Arrange — strict-mode prologue must carry the same diagnostic improvements
+		// as the default prologue. We trigger a strict-mode-only failure (reading a
+		// non-existent property under Set-StrictMode -Version Latest) and verify the
+		// diagnostic surfaces the property name and the failing source line.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: """
+				$obj = '{"a":1}' | ConvertFrom-Json
+				$value = $obj.MissingProp
+				""",
+			strictMode: true);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("ORCHESTRA-PWSH-ERROR:");
+		result.ErrorMessage.Should().Contain("MissingProp",
+			"the property name from the strict-mode error must survive the trap");
+		result.ErrorMessage.Should().Contain("$value = $obj.MissingProp",
+			"the failing source line must be echoed back even under the strict prologue");
 	}
 
 	[Fact]

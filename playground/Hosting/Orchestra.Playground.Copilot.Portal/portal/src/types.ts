@@ -590,3 +590,62 @@ export interface HumanInputResponse {
   reply?: string | null;
   respondedBy?: string | null;
 }
+
+/**
+ * Authoritative per-step state served by the server's <c>execution-snapshot</c> SSE
+ * frame (and the REST <c>GET /api/execution/{id}/state</c> endpoint). Mirrors the
+ * <c>StepStateSnapshot</c> C# record. Survives circular-buffer eviction on the server
+ * so the Portal can render the DAG and per-step details correctly even when the
+ * earliest <c>step-started</c> / <c>step-completed</c> events have been overwritten.
+ */
+export interface SnapshotStepState {
+  stepName: string;
+  /**
+   * Lower-case status string matching the values the UI already maps:
+   * <c>pending</c> | <c>running</c> | <c>completed</c> | <c>failed</c> |
+   * <c>cancelled</c> | <c>skipped</c> | <c>noaction</c> | <c>completed_early</c>.
+   */
+  status: string;
+  startedAt?: string | null;
+  completedAt?: string | null;
+  error?: string | null;
+  /** Full step output (server caps the size; long content can still arrive via step-output). */
+  output?: string | null;
+  /** Short content preview emitted by <c>step-completed</c>. */
+  contentPreview?: string | null;
+  /** Raw <c>step-trace</c> JSON payload kept as an opaque object for the trace panel. */
+  trace?: unknown;
+  savedFiles?: string[];
+  /** Raw <c>audit-log</c> JSON payloads in arrival order. */
+  auditEntries?: unknown[];
+  requestedModel?: string | null;
+  selectedModel?: string | null;
+  actualModel?: string | null;
+  activeSubagents?: number;
+  retryCount?: number;
+}
+
+/**
+ * Authoritative orchestration-level snapshot. Sent as the first SSE frame on every
+ * <c>/api/orchestrations/{id}/run</c>, <c>/api/execution/{id}/attach</c>, and
+ * <c>/api/orchestrations/{name}/runs/{runId}/attach</c> response, and also returned
+ * by the REST <c>GET /api/execution/{id}/state</c> endpoint.
+ */
+export interface ExecutionStateSnapshot {
+  executionId?: string | null;
+  orchestrationId?: string | null;
+  orchestrationName?: string | null;
+  startedAt?: string | null;
+  status?: string | null;
+  triggeredBy?: string | null;
+  parameters?: Record<string, string> | null;
+  /** Raw <c>run-context</c> JSON payload if the engine has emitted one yet. */
+  runContext?: unknown;
+  steps: Record<string, SnapshotStepState>;
+  /**
+   * Highest sequence number written to the reporter at the time of the snapshot.
+   * Clients can use this as the resume cursor for <c>Last-Event-Id</c> on reconnect.
+   */
+  lastEventSequence: number;
+  isCompleted: boolean;
+}

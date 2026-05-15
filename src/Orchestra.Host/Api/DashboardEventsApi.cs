@@ -75,8 +75,7 @@ public static class DashboardEventsApi
 			{
 				await foreach (var evt in reader.ReadAllAsync(sseToken))
 				{
-					await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-					await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+					await SseEventWriter.WriteAsync(httpContext.Response, evt, sseToken);
 					await httpContext.Response.Body.FlushAsync(sseToken);
 				}
 			}

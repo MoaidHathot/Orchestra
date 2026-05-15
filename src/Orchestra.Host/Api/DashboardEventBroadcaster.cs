@@ -245,7 +245,7 @@ public sealed partial class DashboardEventBroadcaster : IDisposable
 	/// </summary>
 	public void SendHeartbeat()
 	{
-		var evt = new SseEvent("heartbeat", "{}");
+		var evt = new SseEvent(0, "heartbeat", "{}");
 		lock (_lock)
 		{
 			if (_disposed) return;
@@ -259,7 +259,8 @@ public sealed partial class DashboardEventBroadcaster : IDisposable
 	private void Publish(string eventType, object data)
 	{
 		var json = JsonSerializer.Serialize(data, s_jsonOptions);
-		var evt = new SseEvent(eventType, json);
+		// Dashboard stream doesn't retain history; sequence 0 indicates "no resume point".
+		var evt = new SseEvent(0, eventType, json);
 
 		lock (_lock)
 		{

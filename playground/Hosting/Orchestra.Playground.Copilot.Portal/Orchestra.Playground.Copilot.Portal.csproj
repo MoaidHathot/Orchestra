@@ -12,6 +12,15 @@
     <ProjectReference Include="..\..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
   </ItemGroup>
 
+  <!-- Exclude unrelated sample/reference checkouts that may be cloned into the project
+       directory by developers. These are not part of the Portal project; the Sdk.Web
+       default Compile glob would otherwise pick them up and break the build. -->
+  <ItemGroup>
+    <Compile Remove="zts-pr*\**" />
+    <Content Remove="zts-pr*\**" />
+    <None Remove="zts-pr*\**" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="Orchestra.Tool" />
   </ItemGroup>

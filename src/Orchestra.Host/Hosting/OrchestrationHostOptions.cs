@@ -104,6 +104,12 @@ public class OrchestrationHostOptions
 	/// Optional global lifecycle hooks applied to all orchestrations executed by this host.
 	/// </summary>
 	public HookDefinition[] Hooks { get; set; } = [];
+
+	/// <summary>
+	/// Options controlling the SSE event-streaming pipeline (replay buffer size,
+	/// per-subscriber channel capacity, subscriber limit, heartbeat interval).
+	/// </summary>
+	public SseOptions Sse { get; set; } = new();
 }
 
 /// <summary>

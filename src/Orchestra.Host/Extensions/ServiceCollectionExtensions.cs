@@ -113,6 +113,12 @@ public static class ServiceCollectionExtensions
 		// SSE clients so the UI can update in real time instead of polling.
 		services.TryAddSingleton<DashboardEventBroadcaster>();
 
+		// SseOptions: derived from OrchestrationHostOptions.Sse so SSE pipeline caps
+		// (replay buffer / channel capacity / subscriber limit / heartbeat) are configurable
+		// via orchestra.json or programmatic overrides. Resolved through the options
+		// singleton above, which means test ConfigureAppConfiguration callbacks apply.
+		services.AddSingleton(sp => sp.GetRequiredService<OrchestrationHostOptions>().Sse);
+
 		// Reporter factory: creates SseReporter instances for all execution paths.
 		// Tests can override this with NullOrchestrationReporterFactory via DI.
 		services.TryAddSingleton<IOrchestrationReporterFactory, SseReporterFactory>();

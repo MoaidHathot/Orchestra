@@ -139,6 +139,71 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.Retention.MaxRunAgeDays.Should().Be(30);
 	}
 
+	[Fact]
+	public void ApplyConfig_SseSection_OverridesAllFields()
+	{
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile
+		{
+			Sse = new SseConfig
+			{
+				MaxAccumulatedEvents = 123456,
+				MaxChannelCapacity = 7890,
+				MaxSubscribers = 42,
+				HeartbeatIntervalSeconds = 15,
+			},
+		};
+
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		options.Sse.MaxAccumulatedEvents.Should().Be(123456);
+		options.Sse.MaxChannelCapacity.Should().Be(7890);
+		options.Sse.MaxSubscribers.Should().Be(42);
+		options.Sse.HeartbeatInterval.Should().Be(TimeSpan.FromSeconds(15));
+	}
+
+	[Fact]
+	public void ApplyConfig_SseSection_PartialOverride_KeepsDefaults()
+	{
+		var options = new OrchestrationHostOptions();
+		var defaultSubscribers = options.Sse.MaxSubscribers;
+		var defaultHeartbeat = options.Sse.HeartbeatInterval;
+
+		var config = new OrchestraConfigFile
+		{
+			Sse = new SseConfig
+			{
+				MaxAccumulatedEvents = 99999,
+				// other fields null — defaults preserved
+			},
+		};
+
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		options.Sse.MaxAccumulatedEvents.Should().Be(99999);
+		options.Sse.MaxSubscribers.Should().Be(defaultSubscribers);
+		options.Sse.HeartbeatInterval.Should().Be(defaultHeartbeat);
+	}
+
+	[Fact]
+	public void ApplyConfig_SseSection_Null_LeavesDefaultsUntouched()
+	{
+		var options = new OrchestrationHostOptions();
+		var defaults = (
+			options.Sse.MaxAccumulatedEvents,
+			options.Sse.MaxChannelCapacity,
+			options.Sse.MaxSubscribers,
+			options.Sse.HeartbeatInterval);
+
+		var config = new OrchestraConfigFile { Sse = null };
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		(options.Sse.MaxAccumulatedEvents,
+			options.Sse.MaxChannelCapacity,
+			options.Sse.MaxSubscribers,
+			options.Sse.HeartbeatInterval).Should().Be(defaults);
+	}
+
 	// ── LoadAndApply tests ──
 
 	[Fact]

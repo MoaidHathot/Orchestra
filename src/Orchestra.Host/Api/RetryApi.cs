@@ -270,8 +270,7 @@ public static partial class RetryApi
 
 			foreach (var evt in replay)
 			{
-				await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-				await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+				await SseEventWriter.WriteAsync(httpContext.Response, evt, sseToken);
 			}
 			await httpContext.Response.Body.FlushAsync(sseToken);
 
@@ -281,8 +280,7 @@ public static partial class RetryApi
 				{
 					await foreach (var evt in futureEvents.ReadAllAsync(sseToken))
 					{
-						await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-						await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+						await SseEventWriter.WriteAsync(httpContext.Response, evt, sseToken);
 						await httpContext.Response.Body.FlushAsync(sseToken);
 					}
 				}

@@ -256,8 +256,7 @@ public static class CheckpointApi
 			// Replay any events that happened before we subscribed
 			foreach (var evt in replay)
 			{
-				await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-				await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+				await SseEventWriter.WriteAsync(httpContext.Response, evt, sseToken);
 			}
 			await httpContext.Response.Body.FlushAsync(sseToken);
 
@@ -268,8 +267,7 @@ public static class CheckpointApi
 				{
 					await foreach (var evt in futureEvents.ReadAllAsync(sseToken))
 					{
-						await httpContext.Response.WriteAsync($"event: {evt.Type}\n", sseToken);
-						await httpContext.Response.WriteAsync($"data: {evt.Data}\n\n", sseToken);
+						await SseEventWriter.WriteAsync(httpContext.Response, evt, sseToken);
 						await httpContext.Response.Body.FlushAsync(sseToken);
 					}
 				}
