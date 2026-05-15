@@ -77,9 +77,14 @@ public class OrchestrationResultTests
 	}
 
 	[Fact]
-	public void From_TerminalStepSkipped_ReturnsCancelledStatus()
+	public void From_TerminalStepSkipped_WithoutFailureOrCancellation_ReturnsSucceededIncomplete()
 	{
-		// Arrange
+		// Arrange — a synthetic case where the only terminal step ended Skipped and
+		// nothing Failed or Cancelled. Under the documented contract (see
+		// docs/run-storage.md → isIncomplete) this is a Succeeded + Incomplete run,
+		// not a Cancelled one. A Skipped step can only exist as a consequence of a
+		// Failed/Cancelled/Skipped/NoAction dep; with no Failed or Cancelled anywhere,
+		// the cascade must be NoAction-rooted, so the run did not actually cancel.
 		var orchestration = new Orchestration
 		{
 			Name = "test",
@@ -100,14 +105,15 @@ public class OrchestrationResultTests
 
 		var stepResults = new Dictionary<string, ExecutionResult>
 		{
-			["step1"] = ExecutionResult.Skipped("Dependency failed")
+			["step1"] = ExecutionResult.Skipped("Dependency had no action")
 		};
 
 		// Act
 		var result = OrchestrationResult.From(orchestration, stepResults);
 
-		// Assert — Skipped without any Failed step yields Cancelled at orchestration level
-		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.IsIncomplete.Should().BeTrue();
 	}
 
 	[Fact]
@@ -568,7 +574,10 @@ public class OrchestrationResultTests
 	[Fact]
 	public void From_AllTerminalSkipped_IsIncompleteTrue()
 	{
-		// Arrange — single terminal step is skipped (without any failures)
+		// Arrange — A returned NoAction; B depends on A and was Skipped because of
+		// that NoAction. No step Failed and no step was Cancelled. This is the
+		// "gate said no_action" cascade: the run did real evaluation but had
+		// nothing more to do.
 		var orchestration = new Orchestration
 		{
 			Name = "test",
@@ -576,23 +585,66 @@ public class OrchestrationResultTests
 			Steps =
 			[
 				new PromptOrchestrationStep { Name = "A", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
-				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = ["A"], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
 			]
 		};
 
 		var stepResults = new Dictionary<string, ExecutionResult>
 		{
 			["A"] = ExecutionResult.NoAction("Nothing to do"),
-			["B"] = ExecutionResult.Skipped("Dependency had no action")
+			["B"] = ExecutionResult.Skipped("Skipped because dependencies required no action: [A]")
 		};
 
 		// Act
 		var result = OrchestrationResult.From(orchestration, stepResults);
 
-		// Assert — Cancelled because terminal has Skipped, not incomplete
-		// (Skipped terminal = Cancelled status which doesn't qualify as Succeeded + incomplete)
-		result.Status.Should().Be(ExecutionStatus.Cancelled);
-		result.IsIncomplete.Should().BeFalse();
+		// Assert — Succeeded (no failures, no cancellations) and IsIncomplete
+		// because every terminal step ended in NoAction/Skipped.
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.IsIncomplete.Should().BeTrue();
+	}
+
+	[Fact]
+	public void From_GateNoAction_PropagatedThroughChain_IsSucceededIncomplete()
+	{
+		// Arrange — reproduces the zts-official-pipeline-tracker scenario:
+		//   A: Succeeded
+		//   B: NoAction (the gate that decided "nothing to do")
+		//   C..E: Skipped (cascade through multiple layers)
+		// Only E is terminal (nothing depends on it).
+		var orchestration = new Orchestration
+		{
+			Name = "test",
+			Description = "test",
+			Steps =
+			[
+				new PromptOrchestrationStep { Name = "A", Type = OrchestrationStepType.Prompt, DependsOn = [], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "B", Type = OrchestrationStepType.Prompt, DependsOn = ["A"], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "C", Type = OrchestrationStepType.Prompt, DependsOn = ["B"], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "D", Type = OrchestrationStepType.Prompt, DependsOn = ["C"], SystemPrompt = "s", UserPrompt = "u", Model = "m" },
+				new PromptOrchestrationStep { Name = "E", Type = OrchestrationStepType.Prompt, DependsOn = ["D"], SystemPrompt = "s", UserPrompt = "u", Model = "m" }
+			]
+		};
+
+		var stepResults = new Dictionary<string, ExecutionResult>
+		{
+			["A"] = ExecutionResult.Succeeded("ok"),
+			["B"] = ExecutionResult.NoAction("No active tracked pipeline runs"),
+			["C"] = ExecutionResult.Skipped("Skipped because dependencies required no action: [B]"),
+			["D"] = ExecutionResult.Skipped("Skipped because dependencies required no action: [B]"),
+			["E"] = ExecutionResult.Skipped("Skipped because dependencies required no action: [B]")
+		};
+
+		// Act
+		var result = OrchestrationResult.From(orchestration, stepResults);
+
+		// Assert — Succeeded + Incomplete. The run did real evaluation but
+		// the gate determined there was nothing more to do; nothing failed
+		// and nothing was cancelled.
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.IsIncomplete.Should().BeTrue();
+		result.Results.Should().ContainKey("E");
+		result.Results["E"].Status.Should().Be(ExecutionStatus.Skipped);
 	}
 
 	[Fact]

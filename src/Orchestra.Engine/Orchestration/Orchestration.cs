@@ -73,9 +73,11 @@ public class Orchestration
 	/// <summary>
 	/// Maximum time in seconds for the entire orchestration to complete.
 	/// When elapsed, all running steps are cancelled via CancellationToken.
-	/// Default is 3600 seconds (1 hour). Set to null or 0 to disable.
+	/// Default is <c>0</c>, which disables the orchestration-level timeout entirely
+	/// (also accepts <see langword="null"/> for the same effect). Set to a positive
+	/// value to enforce a wall-clock cap on the run.
 	/// </summary>
-	public int? TimeoutSeconds { get; init; } = 3600;
+	public int? TimeoutSeconds { get; init; } = 0;
 
 	/// <summary>
 	/// User-defined variables available to all steps via <c>{{vars.name}}</c> template expressions.

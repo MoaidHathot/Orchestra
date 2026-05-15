@@ -333,11 +333,52 @@ public static class OrchestrationParser
 			// Optional per-server timeout (seconds). Allows YAML authors to configure long
 			// timeouts for MCP servers that host long-running tools (e.g., orchestra MCP's
 			// invoke_orchestration in sync mode).
+			//
+			// Two forms are accepted:
+			//   - Numeric literal: `timeoutSeconds: 3600` — parsed directly into Mcp.Timeout.
+			//   - Template string: `timeoutSeconds: "{{param.x}}"` or
+			//     `"{{validate-inputs.output.controllerMcpTimeoutSeconds}}"` — captured in
+			//     Mcp.TimeoutTemplate and resolved per-step at execution time by
+			//     TemplateResolver.ResolveStaticMcp. This is the path that lets a step
+			//     compute the MCP transport budget at runtime (e.g. when a preceding
+			//     Script step emits the derived budget after input validation).
 			TimeSpan? timeout = null;
-			if (root.TryGetProperty("timeoutSeconds", out var ts) && ts.ValueKind == JsonValueKind.Number)
+			string? timeoutTemplate = null;
+			if (root.TryGetProperty("timeoutSeconds", out var ts))
 			{
-				var seconds = ts.GetDouble();
-				if (seconds > 0) timeout = TimeSpan.FromSeconds(seconds);
+				if (ts.ValueKind == JsonValueKind.Number)
+				{
+					var seconds = ts.GetDouble();
+					if (seconds > 0) timeout = TimeSpan.FromSeconds(seconds);
+				}
+				else if (ts.ValueKind == JsonValueKind.String)
+				{
+					var raw = ts.GetString();
+					if (!string.IsNullOrWhiteSpace(raw))
+					{
+						// If the string is a plain integer literal (e.g. "300"), eagerly parse
+						// it as a number so we behave identically to the numeric form. Otherwise
+						// treat it as a template expression to be resolved at step execution.
+						if (int.TryParse(raw, System.Globalization.NumberStyles.Integer,
+								System.Globalization.CultureInfo.InvariantCulture, out var literal)
+							&& literal > 0
+							&& !raw!.Contains("{{", StringComparison.Ordinal))
+						{
+							timeout = TimeSpan.FromSeconds(literal);
+						}
+						else
+						{
+							timeoutTemplate = raw;
+						}
+					}
+				}
+				else if (ts.ValueKind != JsonValueKind.Null && ts.ValueKind != JsonValueKind.Undefined)
+				{
+					throw new JsonException(
+						$"MCP entry '{name}' has an invalid 'timeoutSeconds' value. Expected a positive number " +
+						$"or a template-string expression (e.g. \"{{{{param.foo}}}}\" or " +
+						$"\"{{{{stepName.output.foo}}}}\").");
+				}
 			}
 
 			return type switch
@@ -352,6 +393,7 @@ public static class OrchestrationParser
 						: [],
 					WorkingDirectory = ResolveWorkingDirectory(root, _context),
 					Timeout = timeout,
+					TimeoutTemplate = timeoutTemplate,
 				},
 				McpType.Remote => new RemoteMcp
 				{
@@ -362,6 +404,7 @@ public static class OrchestrationParser
 						? headers.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!)
 						: [],
 					Timeout = timeout,
+					TimeoutTemplate = timeoutTemplate,
 				},
 				_ => throw new JsonException($"Unknown MCP type: '{type}'."),
 			};

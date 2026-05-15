@@ -84,12 +84,100 @@ public static partial class TemplateResolver
 	/// static/orchestration-level template expressions (param, env, vars, orchestration).
 	/// The <see cref="Mcp.Name"/> and <see cref="Mcp.Type"/> are preserved as-is since
 	/// they are identity/structural fields used for lookup and matching.
+	/// <para>
+	/// This overload performs static-only resolution and does NOT have access to step
+	/// outputs. Use <see cref="ResolveStaticMcp(Mcp, Dictionary{string, string}, OrchestrationExecutionContext, string[], OrchestrationStep)"/>
+	/// from a step-execution context when the MCP's <see cref="Mcp.TimeoutTemplate"/>
+	/// may reference completed dependency outputs.
+	/// </para>
 	/// </summary>
 	public static Mcp ResolveStaticMcp(
 		Mcp mcp,
 		Dictionary<string, string> parameters,
 		OrchestrationExecutionContext context)
 	{
+		return ResolveStaticMcpCore(mcp, parameters, context, dependsOn: null, currentStep: null);
+	}
+
+	/// <summary>
+	/// Step-aware overload of <see cref="ResolveStaticMcp(Mcp, Dictionary{string, string}, OrchestrationExecutionContext)"/>.
+	/// When <see cref="Mcp.TimeoutTemplate"/> is present, it is resolved with FULL template
+	/// resolution semantics — including <c>{{stepName.output.foo}}</c> references against
+	/// the supplied <paramref name="dependsOn"/> set — and the resulting integer count of
+	/// seconds replaces <see cref="Mcp.Timeout"/> on the returned clone.
+	/// <para>
+	/// String fields other than the timeout template (Endpoint, Command, Arguments, etc.)
+	/// continue to use static-only resolution per the MCP configuration contract
+	/// documented in <see cref="TemplateExpressionValidator"/>.
+	/// </para>
+	/// </summary>
+	public static Mcp ResolveStaticMcp(
+		Mcp mcp,
+		Dictionary<string, string> parameters,
+		OrchestrationExecutionContext context,
+		string[] dependsOn,
+		OrchestrationStep currentStep)
+	{
+		return ResolveStaticMcpCore(mcp, parameters, context, dependsOn, currentStep);
+	}
+
+	private static Mcp ResolveStaticMcpCore(
+		Mcp mcp,
+		Dictionary<string, string> parameters,
+		OrchestrationExecutionContext context,
+		string[]? dependsOn,
+		OrchestrationStep? currentStep)
+	{
+		// Resolve the per-server timeout template, if any. We materialize this once into
+		// either an updated Timeout (winning over any prior value, since the template form
+		// and the numeric form are mutually exclusive at parse time) or a clear runtime
+		// exception that names the offending MCP entry.
+		TimeSpan? resolvedTimeout = mcp.Timeout;
+		if (!string.IsNullOrWhiteSpace(mcp.TimeoutTemplate))
+		{
+			string resolvedRaw;
+			if (dependsOn is not null && currentStep is not null)
+			{
+				// Full resolution: step output references such as {{validate-inputs.output.foo}}
+				// are honored. This is what lets a preceding Script step emit a derived
+				// MCP transport budget after input validation.
+				resolvedRaw = Resolve(mcp.TimeoutTemplate!, parameters, context, dependsOn, currentStep);
+			}
+			else
+			{
+				// Static-only resolution: this path is reached only when ResolveStaticMcp
+				// is called without a step context (e.g. early orchestration-level use).
+				// Step output references cannot be honored here and will be left as-is,
+				// causing the int.Parse below to throw with a clear diagnostic.
+				resolvedRaw = ResolveStatic(mcp.TimeoutTemplate!, parameters, context);
+			}
+
+			if (string.IsNullOrWhiteSpace(resolvedRaw))
+			{
+				throw new InvalidOperationException(
+					$"MCP entry '{mcp.Name}' has 'timeoutSeconds' template '{mcp.TimeoutTemplate}' " +
+					$"that resolved to an empty string. The template must produce a positive integer " +
+					$"count of seconds.");
+			}
+
+			if (!int.TryParse(resolvedRaw.Trim(), System.Globalization.NumberStyles.Integer,
+					System.Globalization.CultureInfo.InvariantCulture, out var seconds))
+			{
+				throw new InvalidOperationException(
+					$"MCP entry '{mcp.Name}' has 'timeoutSeconds' template '{mcp.TimeoutTemplate}' " +
+					$"that resolved to '{resolvedRaw}', which is not a valid integer count of seconds.");
+			}
+
+			if (seconds <= 0)
+			{
+				throw new InvalidOperationException(
+					$"MCP entry '{mcp.Name}' has 'timeoutSeconds' template '{mcp.TimeoutTemplate}' " +
+					$"that resolved to {seconds}. The value must be a positive integer count of seconds.");
+			}
+
+			resolvedTimeout = TimeSpan.FromSeconds(seconds);
+		}
+
 		return mcp switch
 		{
 			LocalMcp local => new LocalMcp
@@ -103,7 +191,12 @@ public static partial class TemplateResolver
 				WorkingDirectory = local.WorkingDirectory is not null
 					? ResolveStatic(local.WorkingDirectory, parameters, context)
 					: null,
-				Timeout = local.Timeout,
+				Timeout = resolvedTimeout,
+				// Once resolved, drop the template — downstream code should consume the
+				// concrete Timeout. Keeping the template around invites double-resolution
+				// from any callers that re-run ResolveStaticMcp on the already-resolved
+				// instance (e.g. McpManager cloning).
+				TimeoutTemplate = null,
 			},
 			RemoteMcp remote => new RemoteMcp
 			{
@@ -112,7 +205,8 @@ public static partial class TemplateResolver
 				Endpoint = ResolveStatic(remote.Endpoint, parameters, context),
 				Headers = remote.Headers
 					.ToDictionary(h => h.Key, h => ResolveStatic(h.Value, parameters, context)),
-				Timeout = remote.Timeout,
+				Timeout = resolvedTimeout,
+				TimeoutTemplate = null,
 			},
 			_ => mcp, // Unknown subtype — return as-is
 		};
@@ -198,6 +292,32 @@ public static partial class TemplateResolver
 					if (outputs.TryGetValue(stepName, out var output))
 						return output;
 				}
+				else if (property.StartsWith("output.", StringComparison.OrdinalIgnoreCase))
+				{
+					// {{stepName.output.dotted.path}} — drill into the step's JSON output.
+					// Lets a Script step emit a single JSON object that downstream consumers
+					// can pluck individual fields from. Used by run-self-healing.yaml so the
+					// validate-inputs Script can emit the full validated runtime configuration
+					// AND the orchestra MCP entry's `timeoutSeconds` template can extract just
+					// `controllerMcpTimeoutSeconds` from the same blob.
+					var jsonPath = property["output.".Length..];
+					var outputs = context.GetDependencyOutputs(dependsOn);
+					if (outputs.TryGetValue(stepName, out var jsonOutput))
+					{
+						var extracted = TryExtractJsonPath(jsonOutput, jsonPath);
+						if (extracted is not null)
+							return extracted;
+					}
+					// Also support non-dependency direct lookup for parity with the
+					// non-pathed `output` branch below.
+					var directResult = context.TryGetResult(stepName);
+					if (directResult is not null)
+					{
+						var extracted = TryExtractJsonPath(directResult.Content, jsonPath);
+						if (extracted is not null)
+							return extracted;
+					}
+				}
 				else if (property.Equals("files", StringComparison.OrdinalIgnoreCase) ||
 						 FilesIndexPattern().IsMatch(property))
 				{
@@ -226,6 +346,71 @@ public static partial class TemplateResolver
 			// Not resolvable — leave as-is
 			return match.Value;
 		});
+	}
+
+	/// <summary>
+	/// Walks a dotted JSON path into the given output string, returning the leaf value as a
+	/// string. The output is expected to be a single top-level JSON object whose property
+	/// names match the path segments (case-insensitive). Returns <c>null</c> if the output
+	/// is not valid JSON, the path does not resolve to a value, or the leaf is a complex
+	/// object/array (which would not be useful as a string-substituted leaf).
+	/// <para>
+	/// Leaf scalars are stringified with invariant culture: numbers and booleans round-trip
+	/// to their canonical JSON form, strings are returned without surrounding quotes,
+	/// and <c>null</c> resolves to the empty string.
+	/// </para>
+	/// </summary>
+	private static string? TryExtractJsonPath(string output, string dottedPath)
+	{
+		if (string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(dottedPath))
+			return null;
+
+		System.Text.Json.JsonDocument doc;
+		try
+		{
+			doc = System.Text.Json.JsonDocument.Parse(output);
+		}
+		catch (System.Text.Json.JsonException)
+		{
+			return null;
+		}
+
+		using (doc)
+		{
+			var current = doc.RootElement;
+			var segments = dottedPath.Split('.', StringSplitOptions.RemoveEmptyEntries);
+			foreach (var segment in segments)
+			{
+				if (current.ValueKind != System.Text.Json.JsonValueKind.Object)
+					return null;
+
+				System.Text.Json.JsonElement next = default;
+				var matched = false;
+				foreach (var prop in current.EnumerateObject())
+				{
+					if (string.Equals(prop.Name, segment, StringComparison.OrdinalIgnoreCase))
+					{
+						next = prop.Value;
+						matched = true;
+						break;
+					}
+				}
+				if (!matched)
+					return null;
+
+				current = next;
+			}
+
+			return current.ValueKind switch
+			{
+				System.Text.Json.JsonValueKind.String => current.GetString(),
+				System.Text.Json.JsonValueKind.Number => current.GetRawText(),
+				System.Text.Json.JsonValueKind.True => "true",
+				System.Text.Json.JsonValueKind.False => "false",
+				System.Text.Json.JsonValueKind.Null => string.Empty,
+				_ => null, // objects/arrays not stringifiable as a substitution leaf
+			};
+		}
 	}
 
 	/// <summary>

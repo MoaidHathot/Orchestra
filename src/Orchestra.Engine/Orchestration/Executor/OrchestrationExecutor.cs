@@ -330,7 +330,7 @@ public partial class OrchestrationExecutor
 			//
 			// One disk read per Orchestration step in the parent's lineage — typically
 			// a handful per parent, well below 100ms total even for deeply nested cases.
-			if (_runStore is not null)
+			if (_runStore is not NullRunStore)
 			{
 				foreach (var (stepName, stepCheckpoint) in checkpoint.CompletedSteps)
 				{
@@ -1244,15 +1244,34 @@ public partial class OrchestrationExecutor
 
 		if (shouldSkip)
 		{
-			// Distinguish between NoAction-based skips and failure-based skips
-			var noActionDeps = failedDeps.Where(dep =>
-				stepResults.TryGetValue(dep, out var r) && r.Status == ExecutionStatus.NoAction).ToArray();
-			var failureDeps = failedDeps.Except(noActionDeps).ToArray();
+			// Distinguish between NoAction-based skips and failure-based skips.
+			//
+			// A dependency contributes a "no-action" cause when either:
+			//   (a) its own status is NoAction (the direct case), or
+			//   (b) its status is Skipped AND its skip reason was itself driven entirely
+			//       by NoAction roots (the transitive case, e.g. a gate set no_action and
+			//       multiple layers of dependents got skipped because of it).
+			//
+			// We treat the entire run as a "nothing to do" skip only when ALL failed deps
+			// trace back to NoAction roots — otherwise the skip is rooted in a real
+			// failure/cancellation and we preserve the generic message.
+			var noActionRoots = new HashSet<string>(StringComparer.Ordinal);
+			var allDepsAreNoActionRooted = failedDeps.Length > 0;
+			foreach (var dep in failedDeps)
+			{
+				if (!TryCollectNoActionRoots(dep, stepResults, noActionRoots, visited: []))
+				{
+					allDepsAreNoActionRooted = false;
+				}
+			}
 
 			string reason;
-			if (noActionDeps.Length > 0 && failureDeps.Length == 0)
+			if (allDepsAreNoActionRooted && noActionRoots.Count > 0)
 			{
-				reason = $"Skipped because dependencies required no action: [{string.Join(", ", noActionDeps)}]";
+				// Stable, deterministic ordering for diagnostics and tests.
+				var orderedRoots = noActionRoots.OrderBy(n => n, StringComparer.Ordinal).ToArray();
+				reason = $"{NoActionSkipReasonPrefix} [{string.Join(", ", orderedRoots)}]";
+				LogStepSkippedDueToNoActionRoots(step.Name, string.Join(", ", orderedRoots));
 			}
 			else
 			{
@@ -1615,6 +1634,88 @@ public partial class OrchestrationExecutor
 	/// </summary>
 	private static bool IsDefaultCancelledMessage(string? errorMessage) =>
 		errorMessage is null || errorMessage == "Cancelled";
+
+	/// <summary>
+	/// Prefix used when a step is skipped because <em>all</em> of its dependency failures
+	/// trace back to one or more <see cref="ExecutionStatus.NoAction"/> roots. Kept as a
+	/// constant so both the producer (the skip-reason builder) and the consumer
+	/// (<see cref="TryCollectNoActionRoots"/>) agree on the marker.
+	/// </summary>
+	private const string NoActionSkipReasonPrefix = "Skipped because dependencies required no action:";
+
+	/// <summary>
+	/// Walks back through <paramref name="depName"/>'s ancestry in <paramref name="stepResults"/>
+	/// and accumulates the original <see cref="ExecutionStatus.NoAction"/> step names that
+	/// caused the cascade.
+	/// </summary>
+	/// <param name="depName">A direct dependency name of the step being evaluated.</param>
+	/// <param name="stepResults">Map of step name → execution result for steps that have completed.</param>
+	/// <param name="roots">Accumulator that receives the originating NoAction step names.</param>
+	/// <param name="visited">Cycle guard for the recursion.</param>
+	/// <returns>
+	/// <c>true</c> if <paramref name="depName"/> is rooted (directly or transitively) in a
+	/// NoAction step — in which case at least one entry is added to <paramref name="roots"/>.
+	/// <c>false</c> if the dep failed, was cancelled, or was skipped for any non-NoAction
+	/// reason (or simply is not present in <paramref name="stepResults"/>).
+	/// </returns>
+	private static bool TryCollectNoActionRoots(
+		string depName,
+		IReadOnlyDictionary<string, ExecutionResult> stepResults,
+		HashSet<string> roots,
+		HashSet<string> visited)
+	{
+		if (!visited.Add(depName))
+		{
+			// Cycle guard. DAGs shouldn't loop, but be defensive: a previously visited
+			// node already contributed (or failed to contribute) its roots; don't recount.
+			return true;
+		}
+
+		if (!stepResults.TryGetValue(depName, out var result))
+		{
+			return false;
+		}
+
+		if (result.Status == ExecutionStatus.NoAction)
+		{
+			roots.Add(depName);
+			return true;
+		}
+
+		if (result.Status == ExecutionStatus.Skipped
+			&& result.ErrorMessage is { } msg
+			&& msg.StartsWith(NoActionSkipReasonPrefix, StringComparison.Ordinal))
+		{
+			// Parse out the names from the bracketed list "...: [a, b, c]". Each name
+			// must itself be present in stepResults so we can recurse and collect its
+			// own NoAction roots (which will normalize the chain to true originators).
+			var open = msg.IndexOf('[', StringComparison.Ordinal);
+			var close = msg.LastIndexOf(']');
+			if (open >= 0 && close > open)
+			{
+				var inner = msg.Substring(open + 1, close - open - 1);
+				var anyResolved = false;
+				foreach (var raw in inner.Split(','))
+				{
+					var name = raw.Trim();
+					if (name.Length == 0)
+					{
+						continue;
+					}
+					if (TryCollectNoActionRoots(name, stepResults, roots, visited))
+					{
+						anyResolved = true;
+					}
+				}
+				if (anyResolved)
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
 
 	/// <summary>
 	/// Returns a new <see cref="CancellationDetails"/> with <see cref="CancellationDetails.Progress"/>
@@ -2089,6 +2190,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Skipping step '{StepName}': {Reason}")]
 	private partial void LogSkippingStep(string stepName, string reason);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' skipped because all dependency failures trace back to NoAction root(s): {Roots}")]
+	private partial void LogStepSkippedDueToNoActionRoots(string stepName, string roots);
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Running step '{StepName}'...")]
 	private partial void LogRunningStep(string stepName);

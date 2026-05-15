@@ -348,7 +348,7 @@ public static partial class TemplateExpressionValidator
 			return;
 		}
 
-		// {{stepName.output|rawOutput|files|files[N]}} — step output reference
+		// {{stepName.output|rawOutput|files|files[N]|output.json.path}} — step output reference
 		var dotIndex = expr.IndexOf('.');
 		if (dotIndex > 0)
 		{
@@ -357,7 +357,13 @@ public static partial class TemplateExpressionValidator
 
 			// Check if it's a valid step output reference
 			var isStepOutput = s_validStepOutputSuffixes.Contains(property)
-				|| FilesIndexPattern().IsMatch(property);
+				|| FilesIndexPattern().IsMatch(property)
+				// {{stepName.output.<dotted.path>}} — JSON path access into the step output.
+				// We can't validate the JSON path itself without running the step (its shape
+				// is data, not schema), but we ACCEPT the prefix as a valid step output
+				// reference so authors can extract a single field from a Script step's JSON
+				// blob without separate output channels.
+				|| property.StartsWith("output.", StringComparison.OrdinalIgnoreCase);
 
 			// Orchestration-step accessors: only valid on Orchestration steps
 			var isOrchestrationStepAccessor = s_validOrchestrationStepAccessors.Contains(property)
@@ -513,7 +519,25 @@ public static partial class TemplateExpressionValidator
 	}
 
 	/// <summary>
-	/// Validates template expressions in MCP fields (static-only context).
+	/// Validates template expressions in MCP fields. Most MCP fields (Endpoint, Command,
+	/// Arguments, WorkingDirectory, Headers) are static-only — they cannot reference step
+	/// outputs — because the MCP definition may be reused across multiple steps with
+	/// different reachability sets. The <see cref="Mcp.TimeoutTemplate"/> is the one
+	/// exception: when it is attached to a step-level MCP entry (<paramref name="stepName"/>
+	/// is non-null), step output references are honored against the step's
+	/// <c>DependsOn</c> set, so a preceding <c>validate-inputs</c> Script step can
+	/// emit a derived MCP transport budget.
+	/// <para>
+	/// Orchestration-level MCP definitions are looked up by name when a step references
+	/// them (see <c>OrchestrationParser.ResolveMcpNames</c>); the SAME instance is then
+	/// present in both <c>orchestration.Mcps</c> and any consuming step's <c>step.Mcps</c>.
+	/// To avoid double-rejecting a valid step-aware <c>TimeoutTemplate</c>, the
+	/// orchestration-level pass (<paramref name="stepName"/> is null) restricts itself to
+	/// the static-only string fields and SKIPS <c>TimeoutTemplate</c>. Per-step validation
+	/// then catches reachability errors at the consuming step. A <c>TimeoutTemplate</c> on
+	/// an orchestration-level MCP that is never referenced by any step is harmless — the
+	/// engine never resolves it.
+	/// </para>
 	/// </summary>
 	private static void ValidateMcpExpressions(
 		TemplateValidationResult result,
@@ -531,6 +555,16 @@ public static partial class TemplateExpressionValidator
 			ValidateExpressionsInField(result, value, stepName, $"{fieldPrefix}.{fieldName}",
 				allParamNames, variables, stepNames, stepTypes, reachability,
 				isStaticOnlyContext: true);
+		}
+
+		// TimeoutTemplate is validated only in the per-step pass, where reachability is
+		// well-defined. The orchestration-level pass deliberately skips it to avoid
+		// double-rejecting a valid step-aware expression on a shared MCP definition.
+		if (stepName is not null && !string.IsNullOrWhiteSpace(mcp.TimeoutTemplate))
+		{
+			ValidateExpressionsInField(result, mcp.TimeoutTemplate, stepName, $"{fieldPrefix}.TimeoutTemplate",
+				allParamNames, variables, stepNames, stepTypes, reachability,
+				isStaticOnlyContext: false);
 		}
 	}
 

@@ -81,20 +81,31 @@ public class OrchestrationResult
 		{
 			// Determine overall status from ALL step results (not just terminal).
 			// A failed step may be non-terminal (with dependents that got skipped),
-			// so checking only terminal results could miss it.
+			// so checking only terminal results could miss it. The same is true for a
+			// Cancelled step mid-DAG whose dependents end up Skipped.
 			var hasAnyFailed = stepResults.Values.Any(r => r.Status == ExecutionStatus.Failed);
-			var hasAnyCancelledOrSkipped = terminalResults.Values.Any(
-				r => r.Status is ExecutionStatus.Cancelled or ExecutionStatus.Skipped);
+			var hasAnyCancelled = stepResults.Values.Any(r => r.Status == ExecutionStatus.Cancelled);
 
-			// Failed takes priority over Cancelled; Cancelled over Succeeded.
-			// NoAction steps are not failures — they just mean the step found nothing to do.
+			// Precedence:
+			//   1. Failed    — any step failure dominates the entire run.
+			//   2. Cancelled — any step Cancelled (terminal or not) marks the run as
+			//                  Cancelled. A Skipped step alone is NOT enough to call
+			//                  the run Cancelled because Skipped is also the cascade
+			//                  status produced by a benign NoAction gate.
+			//   3. Succeeded — everything else. If every terminal step ended in
+			//                  NoAction/Skipped the run is additionally marked as
+			//                  IsIncomplete (a "nothing to do" run).
+			//
+			// NOTE: a Skipped step only exists as a consequence of one of
+			// {Failed, Cancelled, Skipped, NoAction} dependencies (see
+			// OrchestrationExecutor.ExecuteOrSkipStepAsync). When neither Failed nor
+			// Cancelled appears anywhere in stepResults, every Skipped is rooted in a
+			// NoAction step — so it is correct to treat the run as Succeeded.
 			status = hasAnyFailed
 				? ExecutionStatus.Failed
-				: hasAnyCancelledOrSkipped
+				: hasAnyCancelled
 					? ExecutionStatus.Cancelled
-					: allTerminalNoActionOrSkipped
-						? ExecutionStatus.Succeeded // All terminal steps had nothing to do — that's a valid success
-						: ExecutionStatus.Succeeded;
+					: ExecutionStatus.Succeeded;
 		}
 
 		// An orchestration is considered "incomplete" when it succeeded technically

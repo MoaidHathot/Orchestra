@@ -530,6 +530,145 @@ public class TemplateExpressionValidatorTests
 			e.FieldName!.Contains("Subagents[0].Mcps[0]"));
 	}
 
+	/// <summary>
+	/// <see cref="Mcp.TimeoutTemplate"/> on a step-level MCP accepts step-output
+	/// references against the parent step's <c>DependsOn</c> set — that is the whole
+	/// reason the field exists separately from the static-only string fields.
+	/// </summary>
+	[Fact]
+	public void ValidateOrchestration_StepLevelMcp_TimeoutTemplateReferencingReachableStep_IsValid()
+	{
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			TimeoutTemplate = "{{validate-inputs.output}}",
+		};
+		var step = CreatePromptStep("controller", "Run.", mcps: [mcp], dependsOn: ["validate-inputs"]);
+		var orchestration = CreateOrchestration(
+			steps: [CreateTransformStep("validate-inputs", "21660"), step]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	/// <summary>
+	/// A step-level MCP's <see cref="Mcp.TimeoutTemplate"/> referencing a step that is
+	/// NOT in the owning step's <c>DependsOn</c> (direct or transitive) is rejected with
+	/// a clear reachability error — the same contract as other step-aware fields.
+	/// </summary>
+	[Fact]
+	public void ValidateOrchestration_StepLevelMcp_TimeoutTemplateReferencingUnreachableStep_ReturnsError()
+	{
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			TimeoutTemplate = "{{validate-inputs.output}}",
+		};
+		// Note: no dependsOn on the prompt step.
+		var step = CreatePromptStep("controller", "Run.", mcps: [mcp]);
+		var orchestration = CreateOrchestration(
+			steps: [CreateTransformStep("validate-inputs", "21660"), step]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().Contain(e =>
+			e.Message.Contains("not reachable via DependsOn") &&
+			e.StepName == "controller" &&
+			e.FieldName!.Contains("TimeoutTemplate"));
+	}
+
+	/// <summary>
+	/// An orchestration-level MCP definition is reused-by-reference whenever a step
+	/// names it via <c>mcps: [...]</c>. To avoid double-rejecting a valid step-aware
+	/// <c>TimeoutTemplate</c>, the orchestration-level validator pass SKIPS the timeout
+	/// template (per-step validation catches reachability errors). A step output
+	/// reference on an orchestration-level MCP that is also consumed by a step with the
+	/// referenced step in its <c>DependsOn</c> set must therefore pass overall
+	/// validation.
+	/// </summary>
+	[Fact]
+	public void ValidateOrchestration_OrchestrationLevelMcp_TimeoutTemplateStepOutput_PassesWhenConsumingStepHasReachability()
+	{
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			TimeoutTemplate = "{{validate-inputs.output}}",
+		};
+		var controller = CreatePromptStep("controller", "Run.", mcps: [mcp], dependsOn: ["validate-inputs"]);
+		var orchestration = CreateOrchestration(
+			steps: [CreateTransformStep("validate-inputs", "21660"), controller],
+			mcps: [mcp]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	/// <summary>
+	/// An orchestration-level MCP definition whose <c>TimeoutTemplate</c> references a
+	/// step output, that is also consumed by a step WITHOUT reachability to the
+	/// referenced step, still fails the per-step pass — so reachability bugs are caught.
+	/// </summary>
+	[Fact]
+	public void ValidateOrchestration_OrchestrationLevelMcp_TimeoutTemplateUnreachableInConsumer_ReturnsError()
+	{
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			TimeoutTemplate = "{{validate-inputs.output}}",
+		};
+		// Note: no dependsOn on the prompt step.
+		var controller = CreatePromptStep("controller", "Run.", mcps: [mcp]);
+		var orchestration = CreateOrchestration(
+			steps: [CreateTransformStep("validate-inputs", "21660"), controller],
+			mcps: [mcp]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().Contain(e =>
+			e.Message.Contains("not reachable via DependsOn") &&
+			e.StepName == "controller" &&
+			e.FieldName!.Contains("TimeoutTemplate"));
+	}
+
+	/// <summary>
+	/// <see cref="Mcp.TimeoutTemplate"/> on an orchestration-level MCP can still use
+	/// param/vars/env/orchestration references — those resolve without step context.
+	/// </summary>
+	[Fact]
+	public void ValidateOrchestration_OrchestrationLevelMcp_TimeoutTemplateParam_IsValid()
+	{
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			TimeoutTemplate = "{{param.childTimeoutSeconds}}",
+		};
+		var step = CreatePromptStep("controller", "Run.", parameters: ["childTimeoutSeconds"]);
+		var orchestration = CreateOrchestration(steps: [step], mcps: [mcp]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
 	#endregion
 
 	#region ValidateOrchestration — Unreachable Step References

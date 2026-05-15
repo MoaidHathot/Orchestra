@@ -642,11 +642,16 @@ public class McpManagerTests : IAsyncLifetime
 	}
 
 	/// <summary>
-	/// Setting <c>DefaultOrchestraInvokeTimeoutSeconds = 0</c> disables the host
-	/// default entirely so authors can opt out (e.g. to fall back to the SDK default).
+	/// Setting <c>DefaultOrchestraInvokeTimeoutSeconds = 0</c> means "no host-side
+	/// transport timeout" — Orchestra must NOT let the Copilot SDK's built-in ~3-minute
+	/// default kick in (the well-known "180-second cliff"). To honor the contract
+	/// documented on <see cref="McpServerOptions.DefaultOrchestraInvokeTimeoutSeconds"/>,
+	/// the resolver stamps an effectively-infinite transport timeout
+	/// (<see cref="McpManager.EffectivelyInfiniteTransportTimeout"/>) onto the
+	/// data-plane MCP entry. Server-side engine deadlines remain authoritative.
 	/// </summary>
 	[Fact]
-	public async Task Resolve_DataPlaneRemoteMcp_DefaultDisabled_NoTimeoutApplied()
+	public async Task Resolve_DataPlaneRemoteMcp_DefaultDisabled_AppliesInfiniteTimeout()
 	{
 		// Arrange
 		var options = new McpServerOptions
@@ -663,15 +668,96 @@ public class McpManagerTests : IAsyncLifetime
 			Type = McpType.Remote,
 			Endpoint = "http://localhost:5001/mcp/data",
 			Headers = [],
+			// Timeout deliberately null — caller didn't override.
 		};
 
 		// Act
 		var result = manager.Resolve([inline]);
 
-		// Assert — entry passes through unchanged; SDK default will apply
+		// Assert — entry is replaced with one carrying the effectively-infinite timeout.
+		result.Should().HaveCount(1);
+		var resolved = result[0].Should().BeOfType<RemoteMcp>().Subject;
+		resolved.Name.Should().Be("orchestra");
+		resolved.Endpoint.Should().Be("http://localhost:5001/mcp/data");
+		resolved.Timeout.Should().Be(McpManager.EffectivelyInfiniteTransportTimeout,
+			"DefaultOrchestraInvokeTimeoutSeconds == 0 must not silently fall back to the " +
+			"Copilot SDK's ~3-minute default; the resolver stamps a sentinel value so the " +
+			"transport layer has no opinion and server-side deadlines remain authoritative.");
+	}
+
+	/// <summary>
+	/// When the host default is disabled (<c>0</c>) but the caller's <c>mcps[]</c> entry
+	/// supplies an explicit per-server <c>timeoutSeconds</c>, the per-entry override wins
+	/// over the "no transport timeout" sentinel. This preserves the per-orchestration
+	/// belt-and-suspenders contract described on
+	/// <see cref="McpServerOptions.DefaultOrchestraInvokeTimeoutSeconds"/>.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_DataPlaneRemoteMcp_DefaultDisabled_YamlOverrideWins()
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 0,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var inline = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+			Timeout = TimeSpan.FromSeconds(900),
+		};
+
+		// Act
+		var result = manager.Resolve([inline]);
+
+		// Assert — caller's 900s wins; resolver does not overwrite it with the sentinel.
 		result.Should().HaveCount(1);
 		result[0].Should().BeSameAs(inline);
+		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(900));
+	}
+
+	/// <summary>
+	/// When the host default is disabled (<c>0</c>), non-data-plane MCPs MUST NOT receive
+	/// the effectively-infinite sentinel — the sentinel is reserved for Orchestra's own
+	/// data plane where the engine guarantees server-side deadlines. External MCPs are
+	/// left alone and continue to use whatever timeout the YAML supplied (including null,
+	/// which falls back to the SDK default — the appropriate behavior for foreign tools).
+	/// </summary>
+	[Fact]
+	public async Task Resolve_DataPlaneRemoteMcp_DefaultDisabled_NonDataPlaneUnaffected()
+	{
+		// Arrange
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 0,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var localTool = CreateLocalMcp("filesystem");
+		var unrelatedRemote = new RemoteMcp
+		{
+			Name = "github",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com/mcp",
+			Headers = [],
+		};
+		var input = new Engine.Mcp[] { localTool, unrelatedRemote };
+
+		// Act
+		var result = manager.Resolve(input);
+
+		// Assert — no transformation; same reference returned and timeouts unchanged.
+		result.Should().BeSameAs(input);
 		result[0].Timeout.Should().BeNull();
+		result[1].Timeout.Should().BeNull();
 	}
 
 	/// <summary>

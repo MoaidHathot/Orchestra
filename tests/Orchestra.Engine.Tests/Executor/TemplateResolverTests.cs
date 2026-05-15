@@ -214,6 +214,157 @@ public class TemplateResolverTests
 		result.Should().Be("Use fallback content and fallback raw");
 	}
 
+	#region Step Output JSON-Path
+
+	/// <summary>
+	/// <c>{{stepName.output.field}}</c> extracts a scalar field from a step's JSON output.
+	/// String fields are returned without surrounding quotes; numeric/boolean fields are
+	/// returned in their canonical JSON form. This lets a Script step emit a single JSON
+	/// object that downstream consumers can pluck individual fields from without needing
+	/// separate output channels (used by <c>run-self-healing.yaml</c>'s
+	/// <c>controllerMcpTimeoutSeconds</c> extraction).
+	/// </summary>
+	[Fact]
+	public void Resolve_StepOutputJsonPath_NumericField_ResolvesToCanonicalForm()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("validate-inputs", ExecutionResult.Succeeded(
+			"{\"childWaitTimeoutSeconds\":21660,\"controllerMcpTimeoutSeconds\":21960}"));
+		var template = "Budget: {{validate-inputs.output.controllerMcpTimeoutSeconds}}s";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, ["validate-inputs"], s_defaultStep);
+
+		// Assert
+		result.Should().Be("Budget: 21960s");
+	}
+
+	[Fact]
+	public void Resolve_StepOutputJsonPath_StringField_ReturnedWithoutQuotes()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("setup", ExecutionResult.Succeeded(
+			"{\"endpoint\":\"http://example.com\",\"mode\":\"sync\"}"));
+		var template = "Endpoint: {{setup.output.endpoint}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, ["setup"], s_defaultStep);
+
+		// Assert
+		result.Should().Be("Endpoint: http://example.com");
+	}
+
+	[Fact]
+	public void Resolve_StepOutputJsonPath_BooleanField_ResolvesToCanonicalForm()
+	{
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("config", ExecutionResult.Succeeded("{\"enabled\":true,\"verbose\":false}"));
+		var template = "{{config.output.enabled}}, {{config.output.verbose}}";
+
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, ["config"], s_defaultStep);
+
+		result.Should().Be("true, false");
+	}
+
+	[Fact]
+	public void Resolve_StepOutputJsonPath_NestedField_WalksDottedPath()
+	{
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("data", ExecutionResult.Succeeded(
+			"{\"runtime\":{\"limits\":{\"timeoutSeconds\":21960}}}"));
+		var template = "{{data.output.runtime.limits.timeoutSeconds}}";
+
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, ["data"], s_defaultStep);
+
+		result.Should().Be("21960");
+	}
+
+	[Fact]
+	public void Resolve_StepOutputJsonPath_MissingField_LeavesTemplateAsLiteral()
+	{
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("data", ExecutionResult.Succeeded("{\"a\":1,\"b\":2}"));
+		var template = "X={{data.output.missing}}";
+
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, ["data"], s_defaultStep);
+
+		result.Should().Be("X={{data.output.missing}}");
+	}
+
+	[Fact]
+	public void Resolve_StepOutputJsonPath_NonJsonOutput_LeavesTemplateAsLiteral()
+	{
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("data", ExecutionResult.Succeeded("not json at all"));
+		var template = "X={{data.output.field}}";
+
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, ["data"], s_defaultStep);
+
+		result.Should().Be("X={{data.output.field}}");
+	}
+
+	[Fact]
+	public void Resolve_StepOutputJsonPath_FieldIsObject_LeavesTemplateAsLiteral()
+	{
+		// A complex object is not a usable substitution leaf — substituting raw JSON into
+		// a template position is rarely what authors mean, so we treat it as unresolved.
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("data", ExecutionResult.Succeeded("{\"nested\":{\"a\":1}}"));
+		var template = "X={{data.output.nested}}";
+
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, ["data"], s_defaultStep);
+
+		result.Should().Be("X={{data.output.nested}}");
+	}
+
+	[Fact]
+	public void Resolve_StepOutputJsonPath_CaseInsensitiveFieldNames()
+	{
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("data", ExecutionResult.Succeeded("{\"controllerMcpTimeoutSeconds\":21960}"));
+		var template = "{{data.output.CONTROLLERMCPTIMEOUTSECONDS}}";
+
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, ["data"], s_defaultStep);
+
+		result.Should().Be("21960");
+	}
+
+	#endregion
+
 	#region Orchestration Namespace
 
 	[Fact]
@@ -1696,6 +1847,194 @@ public class TemplateResolverTests
 		// Assert — step output left as-is since MCP uses static resolution
 		var remote = resolved.Should().BeOfType<RemoteMcp>().Subject;
 		remote.Endpoint.Should().Be("{{setup.output}}/mcp");
+	}
+
+	/// <summary>
+	/// <see cref="Mcp.TimeoutTemplate"/> is resolved at step-execution time using the
+	/// step-aware overload of <c>ResolveStaticMcp</c>. References to step outputs from
+	/// the step's <c>DependsOn</c> set are honored, and the resolved integer count of
+	/// seconds materialises in <see cref="Mcp.Timeout"/> on the returned clone.
+	/// This is the primary mechanism for letting a preceding Script step emit a derived
+	/// MCP transport budget after input validation.
+	/// </summary>
+	[Fact]
+	public void ResolveStaticMcp_TimeoutTemplate_StepOutput_ResolvedToTimeoutWithStepContext()
+	{
+		// Arrange
+		var step = new PromptOrchestrationStep
+		{
+			Name = "controller",
+			Type = OrchestrationStepType.Prompt,
+			DependsOn = ["validate-inputs"],
+			Model = "test-model",
+			SystemPrompt = "",
+			UserPrompt = "",
+			Mcps = [],
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("validate-inputs", ExecutionResult.Succeeded("21660"));
+
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = new Dictionary<string, string>(),
+			TimeoutTemplate = "{{validate-inputs.output}}",
+		};
+
+		// Act
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context, step.DependsOn, step);
+
+		// Assert
+		var remote = resolved.Should().BeOfType<RemoteMcp>().Subject;
+		remote.Timeout.Should().Be(TimeSpan.FromSeconds(21660),
+			"the template must resolve through the step's DependsOn outputs");
+		remote.TimeoutTemplate.Should().BeNull(
+			"once resolved the template is consumed so re-running the resolver " +
+			"on the result is a no-op");
+	}
+
+	/// <summary>
+	/// A <see cref="Mcp.TimeoutTemplate"/> using JSON-path access into a step's JSON
+	/// output (<c>{{stepName.output.foo}}</c>) extracts the named scalar field. This is
+	/// the shape used by <c>run-self-healing.yaml</c>: the <c>validate-inputs</c> Script
+	/// emits a single JSON object with all validated runtime values, and the orchestra
+	/// MCP entry plucks just <c>controllerMcpTimeoutSeconds</c> from it.
+	/// </summary>
+	[Fact]
+	public void ResolveStaticMcp_TimeoutTemplate_JsonPathOnStepOutput_ResolvedFromScalarField()
+	{
+		// Arrange
+		var step = new PromptOrchestrationStep
+		{
+			Name = "controller",
+			Type = OrchestrationStepType.Prompt,
+			DependsOn = ["validate-inputs"],
+			Model = "test-model",
+			SystemPrompt = "",
+			UserPrompt = "",
+			Mcps = [],
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+		};
+		context.AddResult("validate-inputs", ExecutionResult.Succeeded(
+			"{\"childWaitTimeoutSeconds\":21660,\"controllerMcpTimeoutSeconds\":21960}"));
+
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = new Dictionary<string, string>(),
+			TimeoutTemplate = "{{validate-inputs.output.controllerMcpTimeoutSeconds}}",
+		};
+
+		// Act
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context, step.DependsOn, step);
+
+		// Assert
+		resolved.Should().BeOfType<RemoteMcp>().Which.Timeout.Should().Be(TimeSpan.FromSeconds(21960));
+	}
+
+	/// <summary>
+	/// A <see cref="Mcp.TimeoutTemplate"/> referencing a parameter resolves identically
+	/// in both the static-only overload and the step-aware overload — params/vars/env/
+	/// orchestration references do not require a step context.
+	/// </summary>
+	[Fact]
+	public void ResolveStaticMcp_TimeoutTemplate_ParamReference_ResolvedInStaticOverload()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["childTimeoutSeconds"] = "7200" },
+		};
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = new Dictionary<string, string>(),
+			TimeoutTemplate = "{{param.childTimeoutSeconds}}",
+		};
+
+		// Act — use the static-only overload deliberately
+		var resolved = TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert
+		resolved.Should().BeOfType<RemoteMcp>().Which.Timeout.Should().Be(TimeSpan.FromSeconds(7200));
+		resolved.TimeoutTemplate.Should().BeNull();
+	}
+
+	/// <summary>
+	/// A <see cref="Mcp.TimeoutTemplate"/> that resolves to something non-numeric must
+	/// surface a clear, named runtime error rather than silently producing a zero/null
+	/// timeout that would then let the SDK's default kick in.
+	/// </summary>
+	[Fact]
+	public void ResolveStaticMcp_TimeoutTemplate_NonNumeric_Throws()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["bogus"] = "not-a-number" },
+		};
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = new Dictionary<string, string>(),
+			TimeoutTemplate = "{{param.bogus}}",
+		};
+
+		// Act
+		var act = () => TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert
+		act.Should().Throw<InvalidOperationException>()
+			.WithMessage("*orchestra*timeoutSeconds*not a valid integer*");
+	}
+
+	/// <summary>
+	/// A <see cref="Mcp.TimeoutTemplate"/> that resolves to a non-positive integer must
+	/// throw, mirroring the historical numeric-form contract that non-positive values
+	/// are treated as configuration errors.
+	/// </summary>
+	[Fact]
+	public void ResolveStaticMcp_TimeoutTemplate_NonPositive_Throws()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["zero"] = "0" },
+		};
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = new Dictionary<string, string>(),
+			TimeoutTemplate = "{{param.zero}}",
+		};
+
+		// Act
+		var act = () => TemplateResolver.ResolveStaticMcp(mcp, context.Parameters, context);
+
+		// Assert
+		act.Should().Throw<InvalidOperationException>()
+			.WithMessage("*orchestra*positive integer*");
 	}
 
 	#endregion

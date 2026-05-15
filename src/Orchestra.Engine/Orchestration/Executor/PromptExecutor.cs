@@ -52,10 +52,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Create event processor to handle agent events and collect trace data
 		var eventProcessor = new AgentEventProcessor(_reporter, step.Name);
 
-		// Resolve template expressions in MCP configurations (param, env, vars, orchestration)
-		// before building diagnostics or the agent config, so resolved values are visible.
+		// Resolve template expressions in MCP configurations (param, env, vars, orchestration,
+		// AND — for `mcps[].timeoutSeconds` only — step-output references such as
+		// {{validate-inputs.output.controllerMcpTimeoutSeconds}}) before building diagnostics
+		// or the agent config, so resolved values are visible.
 		var resolvedMcps = step.Mcps
-			.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context))
+			.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context, step.DependsOn, step))
 			.ToArray();
 
 		// Replace globally shared MCPs with remote proxy endpoints, and stamp parent-execution
@@ -74,7 +76,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			};
 			resolvedMcps = _mcpResolver.Resolve(resolvedMcps, parentAnnotation);
 		}
-		var resolvedSubagents = ResolveSubagentMcps(step.Subagents, context);
+		var resolvedSubagents = ResolveSubagentMcps(step.Subagents, context, step.DependsOn, step);
 
 		// Build MCP server descriptions for trace diagnostics (using resolved values)
 		var mcpServerDescriptions = BuildMcpServerDescriptions(resolvedMcps);
@@ -466,12 +468,16 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 	/// <summary>
 	/// Creates copies of subagents with their MCP configurations resolved using
-	/// static/orchestration-level template expressions (param, env, vars, orchestration).
+	/// static/orchestration-level template expressions (param, env, vars, orchestration),
+	/// and — for <c>mcps[].timeoutSeconds</c> only — step-output references such as
+	/// <c>{{validate-inputs.output.foo}}</c> against the parent step's dependencies.
 	/// Returns the original array if no subagents have MCPs to resolve.
 	/// </summary>
 	private static Subagent[] ResolveSubagentMcps(
 		Subagent[] subagents,
-		OrchestrationExecutionContext context)
+		OrchestrationExecutionContext context,
+		string[] parentDependsOn,
+		OrchestrationStep parentStep)
 	{
 		if (subagents.Length == 0)
 			return subagents;
@@ -496,7 +502,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				Infer = s.Infer,
 			};
 			resolved.Mcps = s.Mcps
-				.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context))
+				.Select(m => TemplateResolver.ResolveStaticMcp(m, context.Parameters, context, parentDependsOn, parentStep))
 				.ToArray();
 			return resolved;
 		}).ToArray();

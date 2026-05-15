@@ -33,8 +33,9 @@ steps:
 
       {{build.output}}
     choices: [approve, reject]
-    # No timeoutSeconds — wait indefinitely. The orchestration timeout (default 1 hour)
-    # is paused while we await per `pauseTimeoutDuringWait: true` (the default).
+    # No timeoutSeconds — wait indefinitely. The orchestration-level timeout
+    # is disabled by default (timeoutSeconds: 0), and even when set it is
+    # paused while we await per `pauseTimeoutDuringWait: true` (the default).
 
   - name: announce
     type: Transform

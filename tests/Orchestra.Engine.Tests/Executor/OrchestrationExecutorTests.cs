@@ -1288,6 +1288,187 @@ public class OrchestrationExecutorTests
 
 	#endregion
 
+	#region Skip Reason With NoAction Dependencies
+
+	[Fact]
+	public async Task ExecuteAsync_GateNoAction_PropagatesNoActionSkipReasonTransitively()
+	{
+		// Arrange — A succeeds, B (the gate) calls orchestra_set_status no_action.
+		// C depends on B; D depends on C. Both C and D should be Skipped with the
+		// "Skipped because dependencies required no action: [B]" reason — including
+		// D, whose immediate dep was a Skipped step (not a NoAction step). The skip
+		// reason must walk back to the original NoAction root (B).
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var stepName = agentBuilder.CapturedConfig?.EngineToolCtx?.StepName;
+			var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+
+			if (stepName == "B")
+			{
+				// Execute orchestra_set_status no_action against the captured engine tool context
+				// to drive the real PromptExecutor → EngineToolContext.SetStatus(NoAction) path.
+				var engineToolCtx = agentBuilder.CapturedConfig?.EngineToolCtx;
+				if (engineToolCtx is not null)
+				{
+					foreach (var tool in agentBuilder.CapturedConfig?.EngineTools ?? [])
+					{
+						if (string.Equals(tool.Name, "orchestra_set_status", StringComparison.OrdinalIgnoreCase))
+						{
+							tool.Execute("""{"status":"no_action","reason":"gate decided no work"}""", engineToolCtx);
+							break;
+						}
+					}
+				}
+
+				var resultTask = Task.Run(async () =>
+				{
+					await channel.Writer.WriteAsync(new AgentEvent { Type = AgentEventType.MessageDelta, Content = "no work" }, ct);
+					channel.Writer.Complete();
+					return new AgentResult { Content = "no work" };
+				}, ct);
+				return new AgentTask(channel.Reader, resultTask);
+			}
+			else
+			{
+				var resultTask = Task.Run(async () =>
+				{
+					await channel.Writer.WriteAsync(new AgentEvent { Type = AgentEventType.MessageDelta, Content = "ok" }, ct);
+					channel.Writer.Complete();
+					return new AgentResult { Content = "ok" };
+				}, ct);
+				return new AgentTask(channel.Reader, resultTask);
+			}
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "no-action-chain",
+			Description = "linear chain with NoAction gate at B",
+			Steps =
+			[
+				TestOrchestrations.CreatePromptStep("A"),
+				TestOrchestrations.CreatePromptStep("B", dependsOn: ["A"]),
+				TestOrchestrations.CreatePromptStep("C", dependsOn: ["B"]),
+				TestOrchestrations.CreatePromptStep("D", dependsOn: ["C"]),
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert — per-step statuses
+		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.NoAction);
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Skipped);
+		result.StepResults["D"].Status.Should().Be(ExecutionStatus.Skipped);
+
+		// C is a direct dependent of NoAction step B — must be tagged accordingly.
+		result.StepResults["C"].ErrorMessage.Should().StartWith("Skipped because dependencies required no action");
+		result.StepResults["C"].ErrorMessage.Should().Contain("B");
+
+		// D's immediate dep is C (Skipped, not NoAction). The reason must still walk
+		// back through C → B and surface "required no action" + the original NoAction
+		// root "B". It must NOT degrade to the generic "failed, were cancelled, or
+		// were skipped" message.
+		result.StepResults["D"].ErrorMessage.Should().StartWith("Skipped because dependencies required no action");
+		result.StepResults["D"].ErrorMessage.Should().Contain("B");
+		result.StepResults["D"].ErrorMessage.Should().NotContain("failed, were cancelled, or were skipped");
+
+		// Overall run: Succeeded + IsIncomplete (matches docs/run-storage.md contract).
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.IsIncomplete.Should().BeTrue();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_MixedFailureAndNoAction_KeepsGenericSkipReason()
+	{
+		// Arrange — D depends on B (NoAction) AND C (Failed). The skip reason for D
+		// must be the generic one because not all of D's failed deps trace back to
+		// NoAction roots. This guards against the propagation logic over-claiming
+		// "no action" when a real failure is also at play.
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var stepName = agentBuilder.CapturedConfig?.EngineToolCtx?.StepName;
+			var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
+
+			if (stepName == "B")
+			{
+				var engineToolCtx = agentBuilder.CapturedConfig?.EngineToolCtx;
+				if (engineToolCtx is not null)
+				{
+					foreach (var tool in agentBuilder.CapturedConfig?.EngineTools ?? [])
+					{
+						if (string.Equals(tool.Name, "orchestra_set_status", StringComparison.OrdinalIgnoreCase))
+						{
+							tool.Execute("""{"status":"no_action","reason":"no work"}""", engineToolCtx);
+							break;
+						}
+					}
+				}
+
+				var resultTask = Task.Run(async () =>
+				{
+					await channel.Writer.WriteAsync(new AgentEvent { Type = AgentEventType.MessageDelta, Content = "no work" }, ct);
+					channel.Writer.Complete();
+					return new AgentResult { Content = "no work" };
+				}, ct);
+				return new AgentTask(channel.Reader, resultTask);
+			}
+			else if (stepName == "C")
+			{
+				// C fails outright.
+				channel.Writer.Complete();
+				var resultTask = Task.FromException<AgentResult>(new InvalidOperationException("kaboom"));
+				return new AgentTask(channel.Reader, resultTask);
+			}
+			else
+			{
+				var resultTask = Task.Run(async () =>
+				{
+					await channel.Writer.WriteAsync(new AgentEvent { Type = AgentEventType.MessageDelta, Content = "ok" }, ct);
+					channel.Writer.Complete();
+					return new AgentResult { Content = "ok" };
+				}, ct);
+				return new AgentTask(channel.Reader, resultTask);
+			}
+		});
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
+		var orchestration = new Orchestration
+		{
+			Name = "mixed-cause",
+			Description = "mixed NoAction + Failed deps for D",
+			Steps =
+			[
+				TestOrchestrations.CreatePromptStep("A"),
+				TestOrchestrations.CreatePromptStep("B", dependsOn: ["A"]),
+				TestOrchestrations.CreatePromptStep("C", dependsOn: ["A"]),
+				TestOrchestrations.CreatePromptStep("D", dependsOn: ["B", "C"]),
+			]
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(orchestration);
+
+		// Assert
+		result.StepResults["B"].Status.Should().Be(ExecutionStatus.NoAction);
+		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["D"].Status.Should().Be(ExecutionStatus.Skipped);
+
+		// D's skip reason must remain the generic form because C contributes a real
+		// failure, not a NoAction. We must not advertise "required no action" here.
+		result.StepResults["D"].ErrorMessage.Should().StartWith("Skipped because dependencies failed, were cancelled, or were skipped");
+
+		// And the overall run is Failed (C failed).
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.IsIncomplete.Should().BeFalse();
+	}
+
+	#endregion
+
 	#region Disabled Steps
 
 	[Fact]

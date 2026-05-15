@@ -50,7 +50,9 @@ public class CopilotSessionHandlerActorContextTests
 		{
 			MessageId = "msg-id",
 			DeltaContent = content,
+#pragma warning disable CS0618 // ParentToolCallId is obsolete in SDK 0.3.0 but no replacement yet; see CopilotSessionHandler.cs:322-339.
 			ParentToolCallId = parentToolCallId!,
+#pragma warning restore CS0618
 		},
 	};
 
@@ -60,7 +62,9 @@ public class CopilotSessionHandlerActorContextTests
 		{
 			MessageId = "msg-id",
 			Content = content,
+#pragma warning disable CS0618 // ParentToolCallId is obsolete in SDK 0.3.0 but no replacement yet; see CopilotSessionHandler.cs:322-339.
 			ParentToolCallId = parentToolCallId!,
+#pragma warning restore CS0618
 		},
 	};
 
@@ -88,7 +92,9 @@ public class CopilotSessionHandlerActorContextTests
 		{
 			ToolCallId = toolCallId,
 			ToolName = toolName,
+#pragma warning disable CS0618 // ParentToolCallId is obsolete in SDK 0.3.0 but no replacement yet; see CopilotSessionHandler.cs:322-339.
 			ParentToolCallId = parentToolCallId!,
+#pragma warning restore CS0618
 		},
 	};
 
@@ -98,7 +104,9 @@ public class CopilotSessionHandlerActorContextTests
 		{
 			ToolCallId = toolCallId,
 			Success = true,
+#pragma warning disable CS0618 // ParentToolCallId is obsolete in SDK 0.3.0 but no replacement yet; see CopilotSessionHandler.cs:322-339.
 			ParentToolCallId = parentToolCallId!,
+#pragma warning restore CS0618
 		},
 	};
 

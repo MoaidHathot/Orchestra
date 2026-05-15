@@ -348,7 +348,7 @@ public class RetryPolicyParsingTests
 	}
 
 	[Fact]
-	public void ParseOrchestration_WithoutTimeoutSeconds_DefaultsTo3600()
+	public void ParseOrchestration_WithoutTimeoutSeconds_DefaultsToZero()
 	{
 		// Arrange
 		var json = """
@@ -362,8 +362,9 @@ public class RetryPolicyParsingTests
 		// Act
 		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
 
-		// Assert
-		orchestration.TimeoutSeconds.Should().Be(3600);
+		// Assert — default is 0 (disabled). The engine treats <= 0 / null identically
+		// (see OrchestrationExecutor.cs: `if (orchestration.TimeoutSeconds is > 0)`).
+		orchestration.TimeoutSeconds.Should().Be(0);
 	}
 
 	[Fact]

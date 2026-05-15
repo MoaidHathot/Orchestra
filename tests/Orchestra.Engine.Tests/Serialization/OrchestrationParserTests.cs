@@ -784,6 +784,171 @@ public class OrchestrationParserTests
 		local.Timeout!.Value.Should().Be(TimeSpan.FromMinutes(10));
 	}
 
+	/// <summary>
+	/// `timeoutSeconds` may also be supplied as a template-string expression that resolves
+	/// to an integer count of seconds at step-execution time. In that case the parser
+	/// captures the raw template in <see cref="Mcp.TimeoutTemplate"/> and leaves
+	/// <see cref="Mcp.Timeout"/> null until the template is resolved by
+	/// <see cref="TemplateResolver.ResolveStaticMcp"/>.
+	/// </summary>
+	[Fact]
+	public void ParseMcps_RemoteMcp_TimeoutSecondsAsTemplate_CapturedAsTemplate()
+	{
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "orchestra",
+						"type": "remote",
+						"endpoint": "http://localhost:5001/mcp/data",
+						"timeoutSeconds": "{{validate-inputs.output.controllerMcpTimeoutSeconds}}"
+					}
+				]
+			}
+			""";
+
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		var remote = mcps.OfType<RemoteMcp>().Single();
+		remote.Timeout.Should().BeNull("the template form leaves Timeout unresolved at parse time");
+		remote.TimeoutTemplate.Should().Be("{{validate-inputs.output.controllerMcpTimeoutSeconds}}");
+	}
+
+	/// <summary>
+	/// A param/vars-only template is also valid; it does not require a step context to resolve.
+	/// </summary>
+	[Fact]
+	public void ParseMcps_LocalMcp_TimeoutSecondsAsParamTemplate_CapturedAsTemplate()
+	{
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "local-tool",
+						"type": "local",
+						"command": "node",
+						"arguments": ["server.js"],
+						"timeoutSeconds": "{{param.childTimeoutSeconds}}"
+					}
+				]
+			}
+			""";
+
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		var local = mcps.OfType<LocalMcp>().Single();
+		local.Timeout.Should().BeNull();
+		local.TimeoutTemplate.Should().Be("{{param.childTimeoutSeconds}}");
+	}
+
+	/// <summary>
+	/// A string that happens to be a plain integer literal (e.g. <c>"3600"</c>) is treated
+	/// as the numeric form for ergonomic parity. The string-form is reserved for actual
+	/// template expressions (containing <c>{{</c>).
+	/// </summary>
+	[Fact]
+	public void ParseMcps_RemoteMcp_TimeoutSecondsAsNumericString_ParsedAsNumber()
+	{
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "orchestra",
+						"type": "remote",
+						"endpoint": "http://localhost:5001/mcp/data",
+						"timeoutSeconds": "3600"
+					}
+				]
+			}
+			""";
+
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		var remote = mcps.OfType<RemoteMcp>().Single();
+		remote.Timeout.Should().Be(TimeSpan.FromSeconds(3600));
+		remote.TimeoutTemplate.Should().BeNull();
+	}
+
+	/// <summary>
+	/// A non-positive integer (zero or negative) is treated as "absent" — both legs of the
+	/// timeout fields stay null — matching the historical numeric behavior.
+	/// </summary>
+	[Fact]
+	public void ParseMcps_RemoteMcp_TimeoutSecondsZero_IsTreatedAsAbsent()
+	{
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "orchestra",
+						"type": "remote",
+						"endpoint": "http://localhost:5001/mcp/data",
+						"timeoutSeconds": 0
+					}
+				]
+			}
+			""";
+
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		var remote = mcps.OfType<RemoteMcp>().Single();
+		remote.Timeout.Should().BeNull();
+		remote.TimeoutTemplate.Should().BeNull();
+	}
+
+	/// <summary>
+	/// Empty/whitespace string is treated as absent, not as an invalid template — keeps
+	/// the field optional under JSON shape variations.
+	/// </summary>
+	[Fact]
+	public void ParseMcps_RemoteMcp_TimeoutSecondsEmptyString_IsTreatedAsAbsent()
+	{
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "orchestra",
+						"type": "remote",
+						"endpoint": "http://localhost:5001/mcp/data",
+						"timeoutSeconds": "   "
+					}
+				]
+			}
+			""";
+
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		var remote = mcps.OfType<RemoteMcp>().Single();
+		remote.Timeout.Should().BeNull();
+		remote.TimeoutTemplate.Should().BeNull();
+	}
+
+	/// <summary>
+	/// A non-string, non-number value for <c>timeoutSeconds</c> is a structural error
+	/// that the parser surfaces with a clear diagnostic.
+	/// </summary>
+	[Fact]
+	public void ParseMcps_RemoteMcp_TimeoutSecondsInvalidShape_ThrowsJsonException()
+	{
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "orchestra",
+						"type": "remote",
+						"endpoint": "http://localhost:5001/mcp/data",
+						"timeoutSeconds": true
+					}
+				]
+			}
+			""";
+
+		var act = () => OrchestrationParser.ParseMcps(json);
+
+		act.Should().Throw<System.Text.Json.JsonException>()
+			.WithMessage("*orchestra*timeoutSeconds*");
+	}
+
 	#endregion
 
 	#region Metadata-Only Parsing

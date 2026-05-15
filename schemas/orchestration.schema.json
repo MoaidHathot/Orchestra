@@ -70,8 +70,8 @@
     },
     "timeoutSeconds": {
       "type": "integer",
-      "description": "Maximum time in seconds for the entire orchestration to complete. When elapsed, all running steps are cancelled. Set to 0 to disable.",
-      "default": 3600,
+      "description": "Maximum time in seconds for the entire orchestration to complete. When elapsed, all running steps are cancelled. Default is 0 (disabled — no orchestration-level timeout). Set to a positive value to enforce a wall-clock cap.",
+      "default": 0,
       "minimum": 0
     },
     "variables": {
@@ -1155,9 +1155,11 @@
 		        "description": "Working directory for the MCP server process. Relative paths are resolved from the orchestration file directory."
 		      },
               "timeoutSeconds": {
-                "type": "number",
-                "description": "Optional per-server tool-call timeout in seconds. Overrides the Copilot SDK's ~3-minute default MCP request timeout for this server. Use larger values for MCP servers that host long-running tools. For Orchestra's data-plane MCP (endpoints ending with /mcp/data), the host applies a 30-minute default automatically when this field is omitted; set this field to override that default per orchestration.",
-                "exclusiveMinimum": 0
+                "oneOf": [
+                  { "type": "number", "exclusiveMinimum": 0 },
+                  { "type": "string", "minLength": 1 }
+                ],
+                "description": "Optional per-server tool-call timeout in seconds. Accepts either a positive numeric literal or a template-string expression resolved at step execution time (e.g. \"{{param.foo}}\" or \"{{validate-inputs.output.controllerMcpTimeoutSeconds}}\"). Overrides the Copilot SDK's ~3-minute default MCP request timeout for this server. Use larger values for MCP servers that host long-running tools. For Orchestra's data-plane MCP (endpoints ending with /mcp/data), the host applies a default automatically when this field is omitted (see mcpServer.defaultOrchestraInvokeTimeoutSeconds); set this field to override that default per orchestration."
               }
             },
             "required": ["command", "arguments"],
@@ -1187,9 +1189,11 @@
                 }
               },
               "timeoutSeconds": {
-                "type": "number",
-                "description": "Optional per-server tool-call timeout in seconds. Overrides the Copilot SDK's ~3-minute default MCP request timeout for this server. Use larger values for remote MCPs that host long-running tools (e.g., Orchestra's invoke_orchestration in sync mode). For Orchestra's data-plane MCP (endpoints ending with /mcp/data), the host applies a 30-minute default automatically when this field is omitted; set this field to override that default per orchestration.",
-                "exclusiveMinimum": 0
+                "oneOf": [
+                  { "type": "number", "exclusiveMinimum": 0 },
+                  { "type": "string", "minLength": 1 }
+                ],
+                "description": "Optional per-server tool-call timeout in seconds. Accepts either a positive numeric literal or a template-string expression resolved at step execution time (e.g. \"{{param.foo}}\" or \"{{validate-inputs.output.controllerMcpTimeoutSeconds}}\"). Overrides the Copilot SDK's ~3-minute default MCP request timeout for this server. Use larger values for remote MCPs that host long-running tools (e.g., Orchestra's invoke_orchestration in sync mode). For Orchestra's data-plane MCP (endpoints ending with /mcp/data), the host applies a default automatically when this field is omitted (see mcpServer.defaultOrchestraInvokeTimeoutSeconds); set this field to override that default per orchestration."
               }
             },
             "required": ["endpoint"],

@@ -146,6 +146,11 @@ public sealed partial class DataPlaneTools
 		// even though the child made real progress (the classic 30-minute cliff).
 		// We can't see the caller's per-mcps[] override here, but we CAN see the host default,
 		// which is the most common source of this mismatch.
+		// When DefaultOrchestraInvokeTimeoutSeconds == 0, McpManager.Resolve stamps an
+		// effectively-infinite transport timeout (TimeSpan.FromMilliseconds(int.MaxValue))
+		// onto the MCP entry so the Copilot SDK's ~3-minute built-in default does NOT
+		// silently kick in. In that case there is no cliff to protect against and this
+		// guardrail correctly stays dormant.
 		var transportTimeoutSeconds = mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds;
 		if (isSync
 			&& transportTimeoutSeconds > 0

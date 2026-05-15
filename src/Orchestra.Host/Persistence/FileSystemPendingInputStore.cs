@@ -57,8 +57,13 @@ public sealed partial class FileSystemPendingInputStore : IPendingInputStore
 
 		try
 		{
-			var json = await File.ReadAllTextAsync(filePath, cancellationToken).ConfigureAwait(false);
+			var json = await ReadAllTextShareDeleteAsync(filePath, cancellationToken).ConfigureAwait(false);
 			return JsonSerializer.Deserialize<PendingInputRecord>(json, _jsonOptions);
+		}
+		catch (FileNotFoundException)
+		{
+			// Record was deleted between File.Exists and the open; treat as not-found.
+			return null;
 		}
 		catch (Exception ex)
 		{
@@ -73,6 +78,12 @@ public sealed partial class FileSystemPendingInputStore : IPendingInputStore
 		if (!Directory.Exists(_rootPath))
 			return result;
 
+		// EnumerationOptions.IgnoreInaccessible = true silently skips directory entries that
+		// disappear (or become inaccessible) between when they were enumerated and when we
+		// open them. This matters because concurrent DeleteAsync calls remove empty
+		// {orchestration}/{run} directories while we may still be reading them.
+		var enumerationOptions = new EnumerationOptions { IgnoreInaccessible = true };
+
 		IEnumerable<string> orchestrationDirs;
 		if (orchestrationName is not null)
 		{
@@ -81,23 +92,31 @@ public sealed partial class FileSystemPendingInputStore : IPendingInputStore
 		}
 		else
 		{
-			orchestrationDirs = Directory.EnumerateDirectories(_rootPath);
+			orchestrationDirs = SafeEnumerateDirectories(_rootPath, enumerationOptions);
 		}
 
 		foreach (var orchestrationDir in orchestrationDirs)
 		{
-			foreach (var runDir in Directory.EnumerateDirectories(orchestrationDir))
+			foreach (var runDir in SafeEnumerateDirectories(orchestrationDir, enumerationOptions))
 			{
-				foreach (var file in Directory.EnumerateFiles(runDir, "*.json"))
+				foreach (var file in SafeEnumerateFiles(runDir, "*.json", enumerationOptions))
 				{
 					if (file.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
 						continue;
 					try
 					{
-						var json = await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false);
+						var json = await ReadAllTextShareDeleteAsync(file, cancellationToken).ConfigureAwait(false);
 						var record = JsonSerializer.Deserialize<PendingInputRecord>(json, _jsonOptions);
 						if (record is not null)
 							result.Add(record);
+					}
+					catch (FileNotFoundException)
+					{
+						// Record was deleted while we were enumerating; skip it.
+					}
+					catch (DirectoryNotFoundException)
+					{
+						// Containing directory was removed concurrently; skip it.
 					}
 					catch (Exception ex)
 					{
@@ -110,20 +129,47 @@ public sealed partial class FileSystemPendingInputStore : IPendingInputStore
 		return result;
 	}
 
-	public Task DeleteAsync(string orchestrationName, string runId, string stepName, CancellationToken cancellationToken = default)
+	/// <summary>
+	/// Wraps <see cref="Directory.EnumerateDirectories(string, string, EnumerationOptions)"/>
+	/// so that a concurrent removal of <paramref name="path"/> itself (vs. an entry inside it)
+	/// is treated as "no entries" rather than thrown back at the caller.
+	/// <see cref="EnumerationOptions.IgnoreInaccessible"/> only suppresses errors on inner
+	/// entries; the root not existing still throws <see cref="DirectoryNotFoundException"/>.
+	/// </summary>
+	private static IEnumerable<string> SafeEnumerateDirectories(string path, EnumerationOptions options)
+	{
+		try
+		{
+			return Directory.EnumerateDirectories(path, "*", options);
+		}
+		catch (DirectoryNotFoundException)
+		{
+			return [];
+		}
+	}
+
+	/// <summary>
+	/// Wraps <see cref="Directory.EnumerateFiles(string, string, EnumerationOptions)"/> with
+	/// the same "root-disappeared" guard as <see cref="SafeEnumerateDirectories"/>.
+	/// </summary>
+	private static IEnumerable<string> SafeEnumerateFiles(string path, string searchPattern, EnumerationOptions options)
+	{
+		try
+		{
+			return Directory.EnumerateFiles(path, searchPattern, options);
+		}
+		catch (DirectoryNotFoundException)
+		{
+			return [];
+		}
+	}
+
+	public async Task DeleteAsync(string orchestrationName, string runId, string stepName, CancellationToken cancellationToken = default)
 	{
 		var filePath = GetRecordFilePath(orchestrationName, runId, stepName);
 		if (File.Exists(filePath))
 		{
-			try
-			{
-				File.Delete(filePath);
-				LogPendingDeleted(orchestrationName, runId, stepName);
-			}
-			catch (Exception ex)
-			{
-				LogPendingDeleteFailed(ex, orchestrationName, runId, stepName);
-			}
+			await TryDeleteWithRetryAsync(filePath, orchestrationName, runId, stepName, cancellationToken).ConfigureAwait(false);
 		}
 
 		// Clean up empty run + orchestration directories.
@@ -131,8 +177,83 @@ public sealed partial class FileSystemPendingInputStore : IPendingInputStore
 		TryRemoveEmptyDirectory(runDir);
 		var orchestrationDir = Path.Combine(_rootPath, SanitizePath(orchestrationName));
 		TryRemoveEmptyDirectory(orchestrationDir);
+	}
 
-		return Task.CompletedTask;
+	/// <summary>
+	/// Reads a file's contents using <see cref="FileShare.ReadWrite"/> | <see cref="FileShare.Delete"/>
+	/// so that a concurrent <see cref="File.Delete(string)"/> from this process is not blocked by
+	/// the read handle. <see cref="File.ReadAllTextAsync(string, CancellationToken)"/> defaults to
+	/// <see cref="FileShare.Read"/>, which on Windows denies the delete with
+	/// <c>"the process cannot access the file because it is being used by another process"</c>.
+	/// </summary>
+	private static async Task<string> ReadAllTextShareDeleteAsync(string path, CancellationToken cancellationToken)
+	{
+		await using var stream = new FileStream(
+			path,
+			FileMode.Open,
+			FileAccess.Read,
+			FileShare.ReadWrite | FileShare.Delete,
+			bufferSize: 4096,
+			useAsync: true);
+		using var reader = new StreamReader(stream);
+		return await reader.ReadToEndAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	/// <summary>
+	/// Deletes <paramref name="filePath"/> with a short bounded retry loop. On Windows,
+	/// <see cref="File.Delete(string)"/> can transiently fail with <see cref="IOException"/>
+	/// or <see cref="UnauthorizedAccessException"/> when another process (antivirus, indexer,
+	/// or an in-flight reader that opened the file with <see cref="FileShare.Read"/>) is
+	/// holding a non-share-delete handle. Total retry budget is ~620ms across 5 backoffs.
+	/// </summary>
+	private async Task TryDeleteWithRetryAsync(string filePath, string orchestrationName, string runId, string stepName, CancellationToken cancellationToken)
+	{
+		int[] backoffMs = [20, 40, 80, 160, 320];
+		Exception? lastException = null;
+
+		for (var attempt = 0; attempt <= backoffMs.Length; attempt++)
+		{
+			cancellationToken.ThrowIfCancellationRequested();
+
+			try
+			{
+				File.Delete(filePath);
+				LogPendingDeleted(orchestrationName, runId, stepName);
+				return;
+			}
+			catch (FileNotFoundException)
+			{
+				// Another agent deleted the file between our File.Exists check and now.
+				return;
+			}
+			catch (DirectoryNotFoundException)
+			{
+				// Containing directory removed concurrently; nothing left to delete.
+				return;
+			}
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+			{
+				lastException = ex;
+				if (attempt >= backoffMs.Length)
+					break;
+
+				await Task.Delay(backoffMs[attempt], cancellationToken).ConfigureAwait(false);
+			}
+			catch (Exception ex)
+			{
+				// Unexpected failure kind (e.g. PathTooLong). Log once and stop — retrying
+				// won't help.
+				LogPendingDeleteFailed(ex, orchestrationName, runId, stepName);
+				return;
+			}
+		}
+
+		// We exhausted the retry budget without succeeding. Only surface the warning when
+		// the file is still present — another agent may have deleted it concurrently.
+		if (lastException is not null && File.Exists(filePath))
+		{
+			LogPendingDeleteFailed(lastException, orchestrationName, runId, stepName);
+		}
 	}
 
 	private static void TryRemoveEmptyDirectory(string dir)

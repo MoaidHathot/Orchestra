@@ -21,6 +21,21 @@ namespace Orchestra.Host.Mcp;
 /// </summary>
 public partial class McpManager : IMcpResolver, IAsyncDisposable
 {
+	/// <summary>
+	/// Effective "no transport timeout" value used when
+	/// <see cref="McpServerOptions.DefaultOrchestraInvokeTimeoutSeconds"/> is <c>0</c>.
+	/// The Copilot MCP SDK takes <c>Timeout</c> as <see cref="int"/> milliseconds and ships
+	/// with a built-in default of roughly three minutes when the value is <c>null</c>; that
+	/// default is what causes the "180-second cliff" on long-running sync
+	/// <c>invoke_orchestration</c> calls. To honor <see cref="McpServerOptions"/>'s documented
+	/// contract that <c>0 = no transport timeout</c>, we stamp this large but finite value
+	/// (<c>int.MaxValue</c> ms ≈ 24.8 days) onto Orchestra data-plane MCPs that have no
+	/// explicit per-entry override. The engine's own server-side deadlines (orchestration
+	/// timeout, step timeout, sync-invoke timeout) remain authoritative.
+	/// </summary>
+	internal static readonly TimeSpan EffectivelyInfiniteTransportTimeout =
+		TimeSpan.FromMilliseconds(int.MaxValue);
+
 	private readonly ILogger<McpManager> _logger;
 	private readonly McpServerOptions _mcpServerOptions;
 
@@ -178,12 +193,22 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 				changed = true;
 			}
 
-			// Step 2 — for the Orchestra data-plane MCP specifically, apply the configured
-			// default timeout when neither the orchestration nor a global definition supplied
-			// one. Detection considers both the inline MCP (current.Endpoint == /mcp/data)
-			// and global MCPs whose original definition pointed at /mcp/data, since by step 1
+			// Step 2 — for the Orchestra data-plane MCP specifically, apply a transport
+			// timeout when neither the orchestration nor a global definition supplied one.
+			// Detection considers both the inline MCP (current.Endpoint == /mcp/data) and
+			// global MCPs whose original definition pointed at /mcp/data, since by step 1
 			// the endpoint has already been rewritten to the proxy URL for global ones.
-			if (current.Timeout is null && _mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds > 0)
+			//
+			// Two sub-cases:
+			//   2a. DefaultOrchestraInvokeTimeoutSeconds > 0: stamp the configured default.
+			//   2b. DefaultOrchestraInvokeTimeoutSeconds == 0: stamp the
+			//       EffectivelyInfiniteTransportTimeout sentinel so the Copilot MCP SDK's
+			//       built-in ~3-minute default does NOT silently kick in. The docs on
+			//       McpServerOptions.DefaultOrchestraInvokeTimeoutSeconds promise that 0
+			//       disables the client-side transport timeout entirely; leaving Timeout
+			//       null would break that promise (the SDK's 180s default applies and
+			//       aborts long sync invokes — the well-known "180-second cliff").
+			if (current.Timeout is null)
 			{
 				var originalGlobal = _globalMcpNames.Contains(mcp.Name)
 					? _globalMcpList.FirstOrDefault(g =>
@@ -192,7 +217,11 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 				if (TargetsOrchestraDataPlane(mcp) || TargetsOrchestraDataPlane(originalGlobal))
 				{
-					var defaultTimeout = TimeSpan.FromSeconds(_mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds);
+					var configured = _mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds;
+					var applyingInfinite = configured <= 0;
+					var defaultTimeout = applyingInfinite
+						? EffectivelyInfiniteTransportTimeout
+						: TimeSpan.FromSeconds(configured);
 
 					current = current switch
 					{
@@ -216,7 +245,14 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 						_ => current,
 					};
 
-					LogAppliedDataPlaneDefaultTimeout(mcp.Name, _mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds);
+					if (applyingInfinite)
+					{
+						LogAppliedDataPlaneInfiniteTimeout(mcp.Name);
+					}
+					else
+					{
+						LogAppliedDataPlaneDefaultTimeout(mcp.Name, configured);
+					}
 					changed = true;
 				}
 			}
@@ -477,6 +513,12 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		Level = LogLevel.Information,
 		Message = "Applied default Orchestra data-plane MCP timeout {DefaultTimeoutSeconds}s to MCP entry '{McpName}' (no timeoutSeconds set on the orchestration's mcps[] entry).")]
 	private partial void LogAppliedDataPlaneDefaultTimeout(string mcpName, int defaultTimeoutSeconds);
+
+	[LoggerMessage(
+		EventId = 9,
+		Level = LogLevel.Information,
+		Message = "Applied effectively-infinite transport timeout to Orchestra data-plane MCP entry '{McpName}' (mcpServer.defaultOrchestraInvokeTimeoutSeconds is 0, so no client-side transport timeout applies; server-side engine deadlines remain authoritative).")]
+	private partial void LogAppliedDataPlaneInfiniteTimeout(string mcpName);
 
 	#endregion
 }
