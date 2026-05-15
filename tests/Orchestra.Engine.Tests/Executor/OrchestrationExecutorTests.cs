@@ -250,7 +250,9 @@ public class OrchestrationExecutorTests
 
 		// Assert — Failed steps should emit a step-error event so the UI
 		// can update the step status immediately (not only at orchestration-done).
-		_reporter.Received().ReportStepError("step1", "Something broke");
+		// PromptExecutor uses the structured ReportStepError overload; details are null
+		// for a plain Exception because it does not implement IAgentSessionFailedException.
+		_reporter.Received().ReportStepError("step1", "Something broke", Arg.Is<AgentSessionErrorDetails?>(d => d == null));
 	}
 
 	[Fact]
@@ -264,8 +266,9 @@ public class OrchestrationExecutorTests
 		// Act
 		await executor.ExecuteAsync(orchestration);
 
-		// Assert — step-error for the failed step, step-skipped for downstream
-		_reporter.Received().ReportStepError("A", "Boom");
+		// Assert — step-error for the failed step (via PromptExecutor's structured
+		// overload), step-skipped for downstream.
+		_reporter.Received().ReportStepError("A", "Boom", Arg.Is<AgentSessionErrorDetails?>(d => d == null));
 		_reporter.Received().ReportStepSkipped("B", Arg.Any<string>());
 		_reporter.Received().ReportStepSkipped("C", Arg.Any<string>());
 	}

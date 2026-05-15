@@ -41,6 +41,10 @@ public static class McpServerExtensions
 				options.MaxNestingDepth = mcpConfig.MaxNestingDepth.Value;
 			if (mcpConfig.DefaultOrchestraInvokeTimeoutSeconds.HasValue)
 				options.DefaultOrchestraInvokeTimeoutSeconds = mcpConfig.DefaultOrchestraInvokeTimeoutSeconds.Value;
+			if (mcpConfig.DefaultMcpToolCallTimeoutSeconds.HasValue)
+				options.DefaultMcpToolCallTimeoutSeconds = mcpConfig.DefaultMcpToolCallTimeoutSeconds.Value;
+			if (mcpConfig.DefaultInvokeOrchestrationSyncTimeoutSeconds.HasValue)
+				options.DefaultInvokeOrchestrationSyncTimeoutSeconds = mcpConfig.DefaultInvokeOrchestrationSyncTimeoutSeconds.Value;
 		}
 
 		// Then let programmatic overrides win

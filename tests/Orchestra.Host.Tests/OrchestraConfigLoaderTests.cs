@@ -656,6 +656,87 @@ public class OrchestraConfigLoaderTests : IDisposable
 		result.Retention.MaxRunAgeDays.Should().Be(7);
 	}
 
+	[Fact]
+	public void Load_WithMcpServerTimeouts_ReturnsAllThreeTimeoutFields()
+	{
+		// Arrange — exercise the three configurable MCP timeout knobs that the host
+		// surfaces in orchestra.json:
+		//   - defaultOrchestraInvokeTimeoutSeconds (existing; Orchestra data-plane transport)
+		//   - defaultMcpToolCallTimeoutSeconds      (catch-all for non-data-plane MCPs)
+		//   - defaultInvokeOrchestrationSyncTimeoutSeconds (default for invoke_orchestration sync mode)
+		var configPath = Path.Combine(_tempDir, "mcp-server-load.json");
+		File.WriteAllText(configPath, """
+		{
+			"mcpServer": {
+				"dataPlaneEnabled": true,
+				"dataPlaneRoute": "/mcp/data",
+				"controlPlaneEnabled": false,
+				"controlPlaneRoute": "/mcp/control",
+				"maxNestingDepth": 5,
+				"defaultOrchestraInvokeTimeoutSeconds": 86400,
+				"defaultMcpToolCallTimeoutSeconds": 1800,
+				"defaultInvokeOrchestrationSyncTimeoutSeconds": 600
+			}
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		// Act
+		var result = OrchestraConfigLoader.Load();
+
+		// Assert
+		result.Should().NotBeNull();
+		result!.McpServer.Should().NotBeNull();
+		result.McpServer!.DataPlaneEnabled.Should().BeTrue();
+		result.McpServer.MaxNestingDepth.Should().Be(5);
+		result.McpServer.DefaultOrchestraInvokeTimeoutSeconds.Should().Be(86400);
+		result.McpServer.DefaultMcpToolCallTimeoutSeconds.Should().Be(1800);
+		result.McpServer.DefaultInvokeOrchestrationSyncTimeoutSeconds.Should().Be(600);
+	}
+
+	[Fact]
+	public void Load_McpServerWithCatchAllZero_DeserializesAsZeroNotNull()
+	{
+		// `0` for the catch-all has special semantics (= effectively infinite). Confirm
+		// the serializer distinguishes between "absent" (null) and "explicitly zero" (0).
+		var configPath = Path.Combine(_tempDir, "mcp-server-zero.json");
+		File.WriteAllText(configPath, """
+		{
+			"mcpServer": {
+				"defaultMcpToolCallTimeoutSeconds": 0
+			}
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var result = OrchestraConfigLoader.Load();
+
+		result!.McpServer!.DefaultMcpToolCallTimeoutSeconds.Should().Be(0,
+			"explicit 0 must round-trip as 0, not null — they have different runtime semantics");
+	}
+
+	[Fact]
+	public void Load_McpServerOmittingTimeouts_LeavesAllTimeoutFieldsNull()
+	{
+		// Backward-compat: a config file that doesn't mention the new fields must
+		// deserialize them as null so the host falls back to defaults.
+		var configPath = Path.Combine(_tempDir, "mcp-server-minimal.json");
+		File.WriteAllText(configPath, """
+		{
+			"mcpServer": {
+				"dataPlaneEnabled": true
+			}
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var result = OrchestraConfigLoader.Load();
+
+		result!.McpServer!.DefaultMcpToolCallTimeoutSeconds.Should().BeNull();
+		result.McpServer.DefaultInvokeOrchestrationSyncTimeoutSeconds.Should().BeNull();
+		result.McpServer.DefaultOrchestraInvokeTimeoutSeconds.Should().BeNull();
+	}
+
 	// ── Scan config tests ──
 
 	[Fact]

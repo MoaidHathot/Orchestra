@@ -1538,6 +1538,7 @@ public partial class OrchestrationExecutor
 			SavedFiles = result.SavedFiles,
 			RetryHistory = result.RetryHistory,
 			ErrorCategory = result.ErrorCategory,
+			ErrorDetails = result.ErrorDetails,
 			// Persist only the minimal child reference; the child's full per-step content
 			// lives on its own run.json (avoid bloating the parent's record).
 			ChildExecutionId = result.ChildOrchestrationInfo?.ExecutionId,

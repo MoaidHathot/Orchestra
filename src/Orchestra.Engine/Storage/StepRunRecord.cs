@@ -104,6 +104,16 @@ public class StepRunRecord
 	public StepErrorCategory? ErrorCategory { get; init; }
 
 	/// <summary>
+	/// Structured details from the underlying agent session error, when the step failed
+	/// because of a Copilot SDK <c>session.error</c> event. Carries the upstream
+	/// <c>ErrorType</c>, HTTP status code, GitHub <c>x-github-request-id</c>, optional
+	/// URL, and CLI stack so support escalations have the data the SDK actually
+	/// delivered (the legacy <see cref="ErrorMessage"/> alone collapses this away).
+	/// Null for non-Copilot failures and for non-failed steps.
+	/// </summary>
+	public AgentSessionErrorDetails? ErrorDetails { get; init; }
+
+	/// <summary>
 	/// For steps of type <c>Orchestration</c>: the execution id of the child run this step
 	/// invoked. Null for all other step types. Use this to follow the parent → child chain
 	/// in history views or to request the child's per-step content via

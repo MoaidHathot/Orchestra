@@ -83,8 +83,107 @@ public class PromptExecutorTests
 		// Act
 		await executor.ExecuteAsync(step, context);
 
+		// Assert — PromptExecutor now uses the structured ReportStepError overload that
+		// also accepts AgentSessionErrorDetails (null here because the underlying error
+		// is a plain Exception with no IAgentSessionFailedException marker).
+		reporter.Received().ReportStepError(
+			"test-step",
+			Arg.Is<string>(s => s.Contains("Agent error")),
+			Arg.Is<AgentSessionErrorDetails?>(d => d == null));
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithAgentSessionFailedException_PopulatesErrorDetailsOnResult()
+	{
+		// Arrange — When the underlying agent (Copilot SDK) raises an exception that
+		// implements IAgentSessionFailedException with structured Details, the executor
+		// must:
+		//   1. Carry those details into ExecutionResult.ErrorDetails so they land in run.json.
+		//   2. Pass them through to the reporter's structured ReportStepError overload so
+		//      live SSE consumers (Portal) can surface them.
+		// This guarantees the upstream ErrorType/StatusCode/ProviderCallId/Url/Stack survive
+		// the trip from the SDK boundary into the engine's result/persistence layer.
+		var details = new AgentSessionErrorDetails
+		{
+			ErrorType = "query",
+			StatusCode = 502,
+			ProviderCallId = "abcd-efgh-1234",
+			Url = "https://example.invalid/troubleshoot",
+			Stack = "at Provider.send (cli.js:42)",
+		};
+		var sessionException = new TestSessionFailedException("Copilot session failed: boom", details);
+		var agentBuilder = new MockAgentBuilder().WithException(sessionException);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — Result surface
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.ModelError);
+		result.ErrorDetails.Should().NotBeNull("session-error exceptions must propagate Details into ExecutionResult so run.json carries them");
+		result.ErrorDetails!.ErrorType.Should().Be("query");
+		result.ErrorDetails.StatusCode.Should().Be(502);
+		result.ErrorDetails.ProviderCallId.Should().Be("abcd-efgh-1234");
+		result.ErrorDetails.Url.Should().Be("https://example.invalid/troubleshoot");
+		result.ErrorDetails.Stack.Should().Contain("at Provider.send");
+
+		// Assert — Structured reporter overload was called with the details
+		reporter.Received().ReportStepError(
+			"test-step",
+			Arg.Is<string>(s => s.Contains("boom")),
+			Arg.Is<AgentSessionErrorDetails>(d =>
+				d.ErrorType == "query"
+				&& d.StatusCode == 502
+				&& d.ProviderCallId == "abcd-efgh-1234"));
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_WithPlainException_ErrorDetailsAreNull()
+	{
+		// Arrange — A non-session exception (no IAgentSessionFailedException marker)
+		// must not synthesize fake details; ErrorDetails stays null and the structured
+		// reporter overload is still invoked (with null details) so consumers see a
+		// consistent shape.
+		var agentBuilder = new MockAgentBuilder().WithException(new InvalidOperationException("not a session error"));
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
 		// Assert
-		reporter.Received().ReportStepError("test-step", Arg.Is<string>(s => s.Contains("Agent error")));
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorDetails.Should().BeNull();
+
+		reporter.Received().ReportStepError(
+			"test-step",
+			Arg.Is<string>(s => s.Contains("not a session error")),
+			Arg.Is<AgentSessionErrorDetails?>(d => d == null));
+	}
+
+	/// <summary>
+	/// Test-only exception that implements <see cref="IAgentSessionFailedException"/>
+	/// so PromptExecutor catch tests can drive the marker-interface code path without
+	/// taking a dependency on Orchestra.Copilot (where the production implementation
+	/// <c>CopilotSessionFailedException</c> lives).
+	/// </summary>
+	private sealed class TestSessionFailedException : Exception, IAgentSessionFailedException
+	{
+		public TestSessionFailedException(string message, AgentSessionErrorDetails? details)
+			: base(message)
+		{
+			Details = details;
+		}
+
+		public AgentSessionErrorDetails? Details { get; }
 	}
 
 	#endregion

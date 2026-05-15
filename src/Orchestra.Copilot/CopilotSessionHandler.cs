@@ -46,6 +46,31 @@ internal sealed partial class CopilotSessionHandler
 	private string? _actualModel;
 	private AgentUsage? _usage;
 
+	// ── Turn-progress tracking (Phase 3.1) ──
+	//
+	// Tracks the wall-clock start of the current assistant turn plus the content-length
+	// snapshot taken at TurnStart, so HandleTurnEnd can log how much the LLM produced
+	// during the turn and how long the turn took. Without this, an in-flight Prompt step
+	// that streams hundreds of KB of content over an hour leaves no trace until the
+	// session finally completes (or, as we recently observed, fails with no final event).
+	//
+	// Per-turn counters are reset at each TurnStart and reset to 0 if a TurnEnd arrives
+	// without a matching TurnStart (defensive: SDK is documented to emit them in pairs).
+	private DateTimeOffset? _currentTurnStartedAt;
+	private int _currentTurnStartContentLength;
+	private int _currentTurnReasoningDeltaCount;
+	private int _currentTurnMessageDeltaCount;
+	private string? _currentTurnId;
+
+	// ── Session start tracking for usage-info heartbeats (Phase 3.2) ──
+	//
+	// The CLI emits SessionUsageInfo roughly every ~10 minutes during a long generation.
+	// Logging the elapsed-since-session-start alongside the token counters gives a
+	// timeline of "model is alive and growing context" that is invaluable when triaging
+	// long-running prompt steps that never reach a completion event.
+	private DateTimeOffset? _sessionStartedAt;
+	private int _sessionUsageInfoCount;
+
 	public CopilotSessionHandler(
 		ChannelWriter<AgentEvent> writer,
 		IOrchestrationReporter reporter,
@@ -276,6 +301,7 @@ internal sealed partial class CopilotSessionHandler
 	private void HandleSessionStart(SessionStartEvent start)
 	{
 		_selectedModel = start.Data.SelectedModel;
+		_sessionStartedAt = DateTimeOffset.UtcNow;
 		_reporter.ReportSessionStarted(_requestedModel, _selectedModel);
 		EmitEvent(new AgentEvent
 		{
@@ -523,6 +549,7 @@ internal sealed partial class CopilotSessionHandler
 	private void HandleMessageDelta(AssistantMessageDeltaEvent delta)
 	{
 		_accumulatedContent.Append(delta.Data.DeltaContent);
+		_currentTurnMessageDeltaCount++;
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.MessageDelta,
@@ -532,6 +559,7 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleReasoningDelta(AssistantReasoningDeltaEvent reasoningDelta)
 	{
+		_currentTurnReasoningDeltaCount++;
 		// Reasoning deltas have no SDK linkage to the originating sub-agent;
 		// the active sub-agent stack is the only attribution signal available.
 		EmitEvent(new AgentEvent
@@ -775,6 +803,14 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleTurnStart(AssistantTurnStartEvent turnStart)
 	{
+		// Snapshot per-turn counters so HandleTurnEnd can report deltas-since-start
+		// and elapsed wall time. See _currentTurnStartedAt comment for context.
+		_currentTurnStartedAt = DateTimeOffset.UtcNow;
+		_currentTurnStartContentLength = _accumulatedContent.Length;
+		_currentTurnReasoningDeltaCount = 0;
+		_currentTurnMessageDeltaCount = 0;
+		_currentTurnId = turnStart.Data.TurnId;
+
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.TurnStart,
@@ -784,6 +820,26 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleSessionUsageInfo(SessionUsageInfoEvent usageInfo)
 	{
+		_sessionUsageInfoCount++;
+		var elapsedSinceSessionStartMs = _sessionStartedAt is { } sessionStart
+			? (long)(DateTimeOffset.UtcNow - sessionStart).TotalMilliseconds
+			: -1L;
+		var elapsedSinceTurnStartMs = _currentTurnStartedAt is { } turnStart
+			? (long)(DateTimeOffset.UtcNow - turnStart).TotalMilliseconds
+			: -1L;
+
+		// Heartbeat-style log: the SDK fires SessionUsageInfo roughly every ~10 minutes
+		// during a long generation. Capturing tokenLimit/currentTokens here gives a
+		// growth-over-time signal that surfaces in the host log even when the step never
+		// reaches a completion event. Verbose level keeps it cheap.
+		LogSessionUsageInfo(
+			_requestedModel,
+			_sessionUsageInfoCount,
+			usageInfo.Data.TokenLimit,
+			usageInfo.Data.CurrentTokens,
+			elapsedSinceSessionStartMs,
+			elapsedSinceTurnStartMs);
+
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SessionUsageInfo,
@@ -827,6 +883,30 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleTurnEnd(AssistantTurnEndEvent turnEnd)
 	{
+		// Per-turn accumulator log (Phase 3.1): captures elapsed time, content streamed,
+		// and per-delta-type counts so a post-mortem can quickly see "this turn took 56
+		// minutes and streamed 594KB of content" without re-reading the full event tape.
+		var elapsedMs = _currentTurnStartedAt is { } start
+			? (long)(DateTimeOffset.UtcNow - start).TotalMilliseconds
+			: -1L;
+		var contentGrowth = _accumulatedContent.Length - _currentTurnStartContentLength;
+
+		LogTurnEnded(
+			_requestedModel,
+			turnEnd.Data.TurnId ?? _currentTurnId ?? "(unknown)",
+			elapsedMs,
+			Math.Max(0, contentGrowth),
+			_currentTurnMessageDeltaCount,
+			_currentTurnReasoningDeltaCount);
+
+		// Reset per-turn state; counters re-initialize on the next TurnStart anyway,
+		// but clearing here keeps stray late events from being attributed to a finished turn.
+		_currentTurnStartedAt = null;
+		_currentTurnStartContentLength = 0;
+		_currentTurnReasoningDeltaCount = 0;
+		_currentTurnMessageDeltaCount = 0;
+		_currentTurnId = null;
+
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.TurnEnd,
@@ -860,8 +940,30 @@ internal sealed partial class CopilotSessionHandler
 	{
 		var message = err.Data.Message ?? "(no message)";
 
+		// Capture every field the SDK gave us in SessionErrorData. Historically only
+		// Message was retained which collapsed the upstream ErrorType / StatusCode /
+		// ProviderCallId / Url / Stack into nothing — making real failures (e.g. a
+		// 56-minute query that died with "Unknown error") essentially un-triable.
+		var details = new AgentSessionErrorDetails
+		{
+			ErrorType = err.Data.ErrorType,
+			StatusCode = err.Data.StatusCode,
+			ProviderCallId = err.Data.ProviderCallId,
+			Url = err.Data.Url,
+			Stack = err.Data.Stack,
+		};
+
 		// Loud ERROR log: a fatal session-level error from the CLI MUST be visible.
-		LogSessionError(_requestedModel, message);
+		// All five SDK fields are emitted as structured properties on the log event so
+		// log shippers can filter/aggregate on category, request id, HTTP status, etc.
+		LogSessionError(
+			_requestedModel,
+			message,
+			details.ErrorType ?? "(none)",
+			details.StatusCode,
+			details.ProviderCallId ?? "(none)",
+			details.Url ?? "(none)",
+			details.Stack ?? "(none)");
 
 		EmitEvent(new AgentEvent
 		{
@@ -874,7 +976,8 @@ internal sealed partial class CopilotSessionHandler
 		_done.TrySetException(new CopilotSessionFailedException(
 			CopilotSessionFailureKind.SessionError,
 			_requestedModel,
-			$"Copilot session failed: {message}"));
+			$"Copilot session failed: {message}",
+			details: details));
 	}
 
 	private void HandleShutdown(SessionShutdownEvent shutdown)
@@ -950,8 +1053,15 @@ internal sealed partial class CopilotSessionHandler
 	[LoggerMessage(
 		EventId = 1,
 		Level = LogLevel.Error,
-		Message = "Copilot session failed (model={Model}): {Message}")]
-	private partial void LogSessionError(string model, string message);
+		Message = "Copilot session failed (model={Model}): {Message} [errorType={ErrorType}, statusCode={StatusCode}, providerCallId={ProviderCallId}, url={Url}, stack={Stack}]")]
+	private partial void LogSessionError(
+		string model,
+		string message,
+		string errorType,
+		long? statusCode,
+		string providerCallId,
+		string url,
+		string stack);
 
 	[LoggerMessage(
 		EventId = 2,
@@ -988,6 +1098,34 @@ internal sealed partial class CopilotSessionHandler
 		Level = LogLevel.Warning,
 		Message = "SDK ParentToolCallId={ParentToolCallId} not found in active sub-agent frames; falling back to current actor.")]
 	private partial void LogParentToolCallIdNotFound(string parentToolCallId);
+
+	// EventId 8: per-turn accumulator (Phase 3.1). Information-level so a long-running
+	// turn is visible in default-verbosity host logs without enabling Debug.
+	[LoggerMessage(
+		EventId = 8,
+		Level = LogLevel.Information,
+		Message = "Turn ended (model={Model}, turnId={TurnId}): elapsed={ElapsedMs}ms, contentGrowth={ContentGrowthChars} chars, messageDeltas={MessageDeltaCount}, reasoningDeltas={ReasoningDeltaCount}")]
+	private partial void LogTurnEnded(
+		string model,
+		string turnId,
+		long elapsedMs,
+		int contentGrowthChars,
+		int messageDeltaCount,
+		int reasoningDeltaCount);
+
+	// EventId 9: per-heartbeat session-usage info (Phase 3.2). Debug-level so the noise
+	// stays out of default logs but is one switch away when triaging long sessions.
+	[LoggerMessage(
+		EventId = 9,
+		Level = LogLevel.Debug,
+		Message = "Session usage heartbeat #{HeartbeatNumber} (model={Model}): tokenLimit={TokenLimit}, currentTokens={CurrentTokens}, sessionElapsed={SessionElapsedMs}ms, turnElapsed={TurnElapsedMs}ms")]
+	private partial void LogSessionUsageInfo(
+		string model,
+		int heartbeatNumber,
+		double tokenLimit,
+		double currentTokens,
+		long sessionElapsedMs,
+		long turnElapsedMs);
 
 	#endregion
 }

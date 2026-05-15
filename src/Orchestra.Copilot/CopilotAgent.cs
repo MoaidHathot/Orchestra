@@ -185,7 +185,13 @@ public partial class CopilotAgent : IAgent
 
 			try
 			{
+				// Bracket the SDK SendAsync call with structured logs so the success path
+				// has timing/visibility instead of being silent. Pairs with LogSessionError
+				// in the handler to give a complete picture of the SDK call's outcome.
+				LogSessionSendStarting(session.SessionId, _model, prompt.Length, _attachments.Length);
+				var sendSw = System.Diagnostics.Stopwatch.StartNew();
 				await session.SendAsync(messageOptions, cancellationToken).ConfigureAwait(false);
+				LogSessionSendCompleted(session.SessionId, _model, sendSw.ElapsedMilliseconds);
 			}
 			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 			{
@@ -193,6 +199,7 @@ public partial class CopilotAgent : IAgent
 			}
 			catch (Exception ex)
 			{
+				LogSessionSendFailed(ex, session.SessionId, _model);
 				await ProbeAfterSdkFailureAsync(
 					faultBroker,
 					failedSessionId: session.SessionId,
@@ -792,6 +799,22 @@ public partial class CopilotAgent : IAgent
 	[LoggerMessage(EventId = 12, Level = LogLevel.Error,
 		Message = "Session: skipped on client#{ClientHash} — broker latched unhealthy by session '{TriggeringSessionId}'. Reason: {Reason}")]
 	private partial void LogSessionSkippedClientUnhealthy(int clientHash, string triggeringSessionId, string reason);
+
+	// EventId 13-15: SendAsync brackets (Phase 3.4). Today the success path is silent;
+	// these give a timing/visibility pair so a long-running step's progress through the
+	// SDK SendAsync call is captured in the host log alongside the per-turn accumulator
+	// logs emitted by CopilotSessionHandler.
+	[LoggerMessage(EventId = 13, Level = LogLevel.Information,
+		Message = "Session '{SessionId}': SendAsync starting (model={Model}, promptChars={PromptChars}, attachments={AttachmentCount})")]
+	private partial void LogSessionSendStarting(string sessionId, string model, int promptChars, int attachmentCount);
+
+	[LoggerMessage(EventId = 14, Level = LogLevel.Information,
+		Message = "Session '{SessionId}': SendAsync completed (model={Model}, elapsed={ElapsedMs}ms)")]
+	private partial void LogSessionSendCompleted(string sessionId, string model, long elapsedMs);
+
+	[LoggerMessage(EventId = 15, Level = LogLevel.Error,
+		Message = "Session '{SessionId}': SendAsync FAILED (model={Model})")]
+	private partial void LogSessionSendFailed(Exception ex, string sessionId, string model);
 
 	#endregion
 }

@@ -96,7 +96,7 @@ public sealed partial class DataPlaneTools
 		[Description("The orchestration ID to invoke.")] string orchestrationId,
 		[Description("JSON object with parameter key-value pairs. All values must be strings.")] string? parameters = null,
 		[Description("Execution mode: 'async' (default, returns immediately with execution ID) or 'sync' (blocks until completion).")] string mode = "async",
-		[Description("Maximum seconds to wait in sync mode. Default: 300 (5 minutes). Ignored in async mode.")] int timeoutSeconds = 300,
+		[Description("Maximum seconds to wait in sync mode. When omitted, the host's configured default applies (configured via mcpServer.defaultInvokeOrchestrationSyncTimeoutSeconds in orchestra.json; ships with 300 = 5 minutes). Ignored in async mode.")] int? timeoutSeconds = null,
 		[Description("Optional metadata JSON object with key-value pairs for tracking (e.g., correlation IDs, ticket numbers).")] string? metadata = null,
 		[Description("Parent execution ID for nested invocations. Set automatically when called from within an orchestration.")] string? parentExecutionId = null,
 		[Description("Response detail level for sync mode: 'summary' (status + metadata only, no content), 'compact' (default, truncated content with metadata), 'full' (untruncated content; responses may be large).")] string detail = "compact",
@@ -129,6 +129,16 @@ public sealed partial class DataPlaneTools
 
 		var isSync = string.Equals(mode, "sync", StringComparison.OrdinalIgnoreCase);
 
+		// Resolve the effective sync-mode wait. The C# parameter default cannot pull from
+		// runtime configuration, so we use `null` as a sentinel meaning "the LLM didn't
+		// specify a timeoutSeconds — apply the host-configured default". An explicit value
+		// from the caller (any positive integer, or even 0) wins. Negative values are
+		// treated as the configured default too (defensive: avoids weird negative-deadline
+		// behavior downstream if a poorly-behaved caller passes -1 etc.).
+		var effectiveSyncTimeoutSeconds = timeoutSeconds is { } provided && provided > 0
+			? provided
+			: mcpServerOptions.DefaultInvokeOrchestrationSyncTimeoutSeconds;
+
 		if (!TryParseDetailLevel(detail, out var detailParsed))
 		{
 			return JsonSerializer.Serialize(new
@@ -154,14 +164,14 @@ public sealed partial class DataPlaneTools
 		var transportTimeoutSeconds = mcpServerOptions.DefaultOrchestraInvokeTimeoutSeconds;
 		if (isSync
 			&& transportTimeoutSeconds > 0
-			&& timeoutSeconds > transportTimeoutSeconds - 60)
+			&& effectiveSyncTimeoutSeconds > transportTimeoutSeconds - 60)
 		{
-			var minimumSafe = timeoutSeconds + 60;
+			var minimumSafe = effectiveSyncTimeoutSeconds + 60;
 			return JsonSerializer.Serialize(new
 			{
 				error = "timeout-mismatch",
 				message =
-					$"Requested sync timeoutSeconds ({timeoutSeconds}) exceeds the configured MCP transport timeout " +
+					$"Requested sync timeoutSeconds ({effectiveSyncTimeoutSeconds}) exceeds the configured MCP transport timeout " +
 					$"({transportTimeoutSeconds}) by more than the 60s safety margin. The child run would be aborted " +
 					$"by the MCP transport long before the engine's sync-invoke timeout fires, producing a generic " +
 					$"\"cancelled by caller\" record. To fix: either lower timeoutSeconds to <= {transportTimeoutSeconds - 60}, " +
@@ -169,7 +179,7 @@ public sealed partial class DataPlaneTools
 					$"host's `mcpServer.defaultOrchestraInvokeTimeoutSeconds` to 0 to disable the transport timeout entirely " +
 					$"(server-side timeouts remain authoritative).",
 				transportTimeoutSeconds,
-				requestedSyncTimeoutSeconds = timeoutSeconds,
+				requestedSyncTimeoutSeconds = effectiveSyncTimeoutSeconds,
 				minimumSafeTransportTimeoutSeconds = minimumSafe,
 			}, s_jsonOptions);
 		}
@@ -226,7 +236,7 @@ public sealed partial class DataPlaneTools
 			OrchestrationId = orchestrationId,
 			Parameters = parsedParams,
 			Mode = isSync ? ChildLaunchMode.Sync : ChildLaunchMode.Async,
-			TimeoutSeconds = isSync ? timeoutSeconds : null,
+			TimeoutSeconds = isSync ? effectiveSyncTimeoutSeconds : null,
 			TriggeredBy = triggeredBy,
 			ParentContext = parentContext,
 			UserMetadata = parsedMetadata,
@@ -269,7 +279,7 @@ public sealed partial class DataPlaneTools
 				orchestrationId = handle.OrchestrationId,
 				mode = "sync",
 				status = "timeout",
-				error = result.ErrorMessage ?? $"Orchestration did not complete within {timeoutSeconds} seconds.",
+				error = result.ErrorMessage ?? $"Orchestration did not complete within {effectiveSyncTimeoutSeconds} seconds.",
 				cancellation = MapCancellation(timeoutCancellation),
 			}, s_jsonOptions);
 		}

@@ -527,12 +527,44 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 	{
 		// completedAt stamp: clients use this on replay to compute the actual elapsed time of
 		// the step. Without it they default to Date.now() and the duration appears reset to ~0
-		// each time the user opens the execution view.
+		// each time the user opened the execution view.
 		Write("step-error", new
 		{
 			stepName,
 			error = errorMessage,
 			completedAt = DateTimeOffset.UtcNow.ToString("o"),
+		});
+	}
+
+	/// <summary>
+	/// Reports a step error with structured details from the agent's session-error
+	/// payload (ErrorType / StatusCode / ProviderCallId / Url / Stack). When
+	/// <paramref name="errorDetails"/> is non-null the details are emitted as a nested
+	/// <c>errorDetails</c> object on the <c>step-error</c> SSE event so the Portal and
+	/// any other consumer can render them (e.g. the GitHub request id for support
+	/// escalations).
+	/// </summary>
+	public void ReportStepError(string stepName, string errorMessage, AgentSessionErrorDetails? errorDetails)
+	{
+		if (errorDetails is null)
+		{
+			ReportStepError(stepName, errorMessage);
+			return;
+		}
+
+		Write("step-error", new
+		{
+			stepName,
+			error = errorMessage,
+			completedAt = DateTimeOffset.UtcNow.ToString("o"),
+			errorDetails = new
+			{
+				errorType = errorDetails.ErrorType,
+				statusCode = errorDetails.StatusCode,
+				providerCallId = errorDetails.ProviderCallId,
+				url = errorDetails.Url,
+				stack = errorDetails.Stack,
+			},
 		});
 	}
 

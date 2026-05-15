@@ -138,6 +138,31 @@ public class CopilotSessionHandlerTests
 		}
 	};
 
+	/// <summary>
+	/// Builds a SessionErrorEvent populated with every field that maps to
+	/// <see cref="AgentSessionErrorDetails"/>. Used by the structured-error-propagation
+	/// tests that assert <see cref="CopilotSessionFailedException.Details"/> carries the
+	/// SDK payload through to the engine layer instead of collapsing it into the message.
+	/// </summary>
+	private static SessionErrorEvent CreateDetailedErrorEvent(
+		string message,
+		string? errorType = null,
+		long? statusCode = null,
+		string? providerCallId = null,
+		string? url = null,
+		string? stack = null) => new()
+	{
+		Data = new SessionErrorData
+		{
+			Message = message,
+			ErrorType = errorType!,
+			StatusCode = statusCode,
+			ProviderCallId = providerCallId!,
+			Url = url!,
+			Stack = stack!,
+		}
+	};
+
 	private static SessionIdleEvent CreateIdleEvent() => new()
 	{
 		Data = new SessionIdleData()
@@ -1406,6 +1431,85 @@ public class CopilotSessionHandlerTests
 		act.Should().NotThrow();
 		_done.Task.IsCompleted.Should().BeTrue();
 		_done.Task.IsFaulted.Should().BeTrue("error fault must not be overridden by a later idle event");
+	}
+
+	[Fact]
+	public void HandleEvent_Error_PopulatesAllStructuredFieldsOnException()
+	{
+		// Arrange — All five SDK SessionErrorData fields must round-trip through to
+		// CopilotSessionFailedException.Details so the run record and structured logs
+		// retain the upstream classification, HTTP status, request id, URL, and stack
+		// instead of silently dropping everything but Message.
+		var errorEvent = CreateDetailedErrorEvent(
+			message: "Execution failed: Error: Failed to get response from the AI model; retried 5 times (total retry wait time: 5.62 seconds) Last error: Unknown error",
+			errorType: "query",
+			statusCode: 502,
+			providerCallId: "abcd-efgh-1234",
+			url: "https://docs.github.com/copilot/troubleshooting",
+			stack: "at Provider.send (/cli/index.js:42)\n  at Session.run (/cli/index.js:99)");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		_done.Task.IsFaulted.Should().BeTrue();
+		var ex = _done.Task.Exception!.Flatten().InnerException;
+		ex.Should().BeOfType<CopilotSessionFailedException>();
+
+		var sessionEx = (CopilotSessionFailedException)ex!;
+		sessionEx.Kind.Should().Be(CopilotSessionFailureKind.SessionError);
+		sessionEx.Message.Should().Contain("Failed to get response from the AI model");
+
+		sessionEx.Details.Should().NotBeNull(
+			"session-error events must produce structured Details on the exception so the engine layer can persist them in run.json");
+		sessionEx.Details!.ErrorType.Should().Be("query");
+		sessionEx.Details.StatusCode.Should().Be(502);
+		sessionEx.Details.ProviderCallId.Should().Be("abcd-efgh-1234");
+		sessionEx.Details.Url.Should().Be("https://docs.github.com/copilot/troubleshooting");
+		sessionEx.Details.Stack.Should().Contain("at Provider.send");
+	}
+
+	[Fact]
+	public void HandleEvent_Error_WithOnlyMessage_StillProducesEmptyDetails()
+	{
+		// Arrange — When the SDK delivers a SessionErrorEvent with only the Message
+		// populated, Details must still be non-null (so consumers don't need a
+		// null-check for the common case) but all five fields are null/zero.
+		var errorEvent = CreateDetailedErrorEvent(message: "Bare error");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		var ex = (CopilotSessionFailedException)_done.Task.Exception!.Flatten().InnerException!;
+		ex.Details.Should().NotBeNull();
+		ex.Details!.ErrorType.Should().BeNull();
+		ex.Details.StatusCode.Should().BeNull();
+		ex.Details.ProviderCallId.Should().BeNull();
+		ex.Details.Url.Should().BeNull();
+		ex.Details.Stack.Should().BeNull();
+	}
+
+	[Fact]
+	public void CopilotSessionFailedException_ImplementsAgentSessionFailedMarker()
+	{
+		// Arrange — PromptExecutor walks the exception chain looking for the marker
+		// IAgentSessionFailedException so it can extract structured details without
+		// taking a hard reference on Orchestra.Copilot. If the implements relationship
+		// is broken, the engine layer will silently fall back to "Unknown" categorization.
+		_handler.HandleEvent(CreateDetailedErrorEvent(
+			message: "boom",
+			errorType: "rate_limit",
+			statusCode: 429));
+
+		// Act
+		var ex = _done.Task.Exception!.Flatten().InnerException;
+
+		// Assert
+		ex.Should().BeAssignableTo<IAgentSessionFailedException>(
+			"the engine's PromptExecutor relies on this marker to extract Details across the Engine/Copilot project boundary");
+		((IAgentSessionFailedException)ex!).Details!.ErrorType.Should().Be("rate_limit");
+		((IAgentSessionFailedException)ex!).Details!.StatusCode.Should().Be(429);
 	}
 
 	#endregion

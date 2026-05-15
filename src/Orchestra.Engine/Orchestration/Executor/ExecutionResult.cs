@@ -75,6 +75,15 @@ public class ExecutionResult
 	public StepErrorCategory? ErrorCategory { get; init; }
 
 	/// <summary>
+	/// Structured details from the underlying agent session error, when the failure
+	/// came from a Copilot SDK <c>session.error</c> event (HTTP status, request id,
+	/// upstream URL, stack). Null when the failure had no corresponding SDK payload
+	/// (e.g. cancellation, validation, command exit code, no-action override).
+	/// Persisted into <c>run.json</c> via <see cref="StepRunRecord.ErrorDetails"/>.
+	/// </summary>
+	public AgentSessionErrorDetails? ErrorDetails { get; init; }
+
+	/// <summary>
 	/// Set only for steps of type <see cref="OrchestrationStepType.Orchestration"/>.
 	/// Carries the child run's execution id, per-step results, error message, and
 	/// cancellation details, enabling parent templates to drill into the child's data
@@ -150,7 +159,8 @@ public class ExecutionResult
 		AvailableModelInfo? selectedModelInfo = null,
 		AvailableModelInfo? actualModelInfo = null,
 		string[]? savedFiles = null,
-		ChildOrchestrationInfo? childOrchestrationInfo = null) => new()
+		ChildOrchestrationInfo? childOrchestrationInfo = null,
+		AgentSessionErrorDetails? errorDetails = null) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Failed,
@@ -164,6 +174,7 @@ public class ExecutionResult
 		ActualModelInfo = actualModelInfo,
 		Trace = trace,
 		ErrorCategory = errorCategory,
+		ErrorDetails = errorDetails,
 		RetryHistory = retryHistory,
 		SavedFiles = savedFiles ?? [],
 		ChildOrchestrationInfo = childOrchestrationInfo,

@@ -355,25 +355,34 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			// Report the partial trace for live trace viewing
 			_reporter.ReportStepTrace(step.Name, trace);
 
-			_reporter.ReportStepError(step.Name, ex.Message);
-
 			// Detect agent-client-unhealthy faults via the marker interface so the engine
 			// can categorize the failure as ClientUnhealthy and the executor's retry loop
 			// can short-circuit (retries on a dead client are guaranteed to fail).
-			// Walk inner exceptions in case a wrapper (AggregateException, etc.) hides it.
+			// Also capture structured agent-session-error details (HTTP status, request id,
+			// upstream URL, stack) via the IAgentSessionFailedException marker so they
+			// land in run.json instead of being collapsed into ex.Message.
+			// Walk inner exceptions in case a wrapper (AggregateException, etc.) hides them.
 			var category = StepErrorCategory.ModelError;
+			AgentSessionErrorDetails? errorDetails = null;
 			for (var probe = ex; probe is not null; probe = probe.InnerException!)
 			{
 				if (probe is IAgentClientUnhealthyException unhealthy)
 				{
 					category = StepErrorCategory.ClientUnhealthy;
 					LogStepFailedClientUnhealthy(step.Name, unhealthy.TriggeringSessionId, unhealthy.TriggeringFailureReason);
-					break;
+				}
+				if (probe is IAgentSessionFailedException sessionFailed && sessionFailed.Details is not null && errorDetails is null)
+				{
+					// Capture the first details payload we encounter; outer wrappers
+					// (AggregateException, etc.) typically don't carry one of their own.
+					errorDetails = sessionFailed.Details;
 				}
 				if (probe.InnerException is null) break;
 			}
 
-			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace, errorCategory: category, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name));
+			_reporter.ReportStepError(step.Name, ex.Message, errorDetails);
+
+			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace, errorCategory: category, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name), errorDetails: errorDetails);
 		}
 	}
 

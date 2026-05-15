@@ -242,6 +242,114 @@ public class DataPlaneToolsTests
 	}
 
 	[Fact]
+	public async Task InvokeOrchestration_Sync_OmittedTimeout_UsesConfiguredDefault()
+	{
+		// Arrange — host configures the default sync timeout. When the LLM doesn't pass
+		// `timeoutSeconds`, the tool must resolve the host default and apply it to the
+		// ChildLaunchRequest, not the legacy hardcoded 300.
+		var accessor = HttpContextWith();
+		var (launcher, captured) = FakeLauncher(completeImmediately: true);
+		var options = new McpServerOptions
+		{
+			DefaultInvokeOrchestrationSyncTimeoutSeconds = 1800,
+			DefaultOrchestraInvokeTimeoutSeconds = 0,
+		};
+
+		// Act — note: NO timeoutSeconds argument
+		await DataPlaneTools.InvokeOrchestration(
+			launcher,
+			accessor,
+			options,
+			"child-orchestration",
+			mode: "sync");
+
+		// Assert
+		var req = captured();
+		req.Should().NotBeNull();
+		req!.TimeoutSeconds.Should().Be(1800,
+			"the host-configured default must apply when the LLM omits timeoutSeconds");
+	}
+
+	[Fact]
+	public async Task InvokeOrchestration_Sync_ExplicitTimeout_OverridesConfiguredDefault()
+	{
+		// Arrange — host has a default of 1800, caller asks for 120. The explicit value wins.
+		var accessor = HttpContextWith();
+		var (launcher, captured) = FakeLauncher(completeImmediately: true);
+		var options = new McpServerOptions
+		{
+			DefaultInvokeOrchestrationSyncTimeoutSeconds = 1800,
+			DefaultOrchestraInvokeTimeoutSeconds = 0,
+		};
+
+		// Act
+		await DataPlaneTools.InvokeOrchestration(
+			launcher,
+			accessor,
+			options,
+			"child-orchestration",
+			mode: "sync",
+			timeoutSeconds: 120);
+
+		// Assert
+		captured()!.TimeoutSeconds.Should().Be(120,
+			"an explicit timeoutSeconds argument must always win over the host-configured default");
+	}
+
+	[Fact]
+	public async Task InvokeOrchestration_Async_TimeoutDefault_NotPropagated()
+	{
+		// Async invocations don't wait for completion; the resolved timeoutSeconds (even
+		// if it came from the host default) must NOT land on ChildLaunchRequest.
+		var accessor = HttpContextWith();
+		var (launcher, captured) = FakeLauncher();
+		var options = new McpServerOptions
+		{
+			DefaultInvokeOrchestrationSyncTimeoutSeconds = 1800,
+		};
+
+		// Act
+		await DataPlaneTools.InvokeOrchestration(
+			launcher,
+			accessor,
+			options,
+			"child-orchestration",
+			mode: "async");
+
+		// Assert
+		captured()!.TimeoutSeconds.Should().BeNull("async mode never carries a sync timeout");
+	}
+
+	[Fact]
+	public async Task InvokeOrchestration_Sync_TimeoutMismatch_UsesResolvedValueInError()
+	{
+		// When the LLM doesn't supply `timeoutSeconds`, the timeout-mismatch guard must
+		// report the resolved host default in its error payload, not a stale 300.
+		var accessor = HttpContextWith();
+		var (launcher, captured) = FakeLauncher();
+		var options = new McpServerOptions
+		{
+			DefaultOrchestraInvokeTimeoutSeconds = 60,         // transport: 60s
+			DefaultInvokeOrchestrationSyncTimeoutSeconds = 600, // resolved sync wait: 600s
+		};
+
+		// Act — no explicit timeoutSeconds, so the resolved default is 600 which exceeds 60-60.
+		var json = await DataPlaneTools.InvokeOrchestration(
+			launcher,
+			accessor,
+			options,
+			"child-orchestration",
+			mode: "sync");
+
+		// Assert
+		captured().Should().BeNull("launcher must not be invoked when validation fails");
+		json.Should().Contain("timeout-mismatch");
+		json.Should().Contain("\"requestedSyncTimeoutSeconds\":600",
+			"the error must surface the RESOLVED sync timeout, not a hardcoded value");
+		json.Should().Contain("\"transportTimeoutSeconds\":60");
+	}
+
+	[Fact]
 	public void CancelOrchestration_SetsExternalCauseOverrideWithMcpDetail_BeforeCancelling()
 	{
 		// Verify the cancel_orchestration MCP tool attributes the cancel by setting

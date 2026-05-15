@@ -559,6 +559,23 @@ public class McpServerConfig
 	/// calls in sync mode. Default: 1800 (30 minutes). Set to 0 or negative to disable.
 	/// </summary>
 	public int? DefaultOrchestraInvokeTimeoutSeconds { get; set; }
+
+	/// <summary>
+	/// Catch-all default transport timeout (seconds) applied to MCP tool calls for
+	/// servers that are NOT the Orchestra data plane, when the orchestration's
+	/// <c>mcps[]</c> entry does not specify a <c>timeoutSeconds</c>. <c>null</c> /
+	/// missing leaves the Copilot SDK's built-in ~3-minute default in place;
+	/// <c>0</c> applies an effectively-infinite transport timeout; a positive number
+	/// applies that many seconds. Per-<c>mcps[]</c> overrides always win.
+	/// </summary>
+	public int? DefaultMcpToolCallTimeoutSeconds { get; set; }
+
+	/// <summary>
+	/// Default value for the <c>timeoutSeconds</c> argument of the
+	/// <c>invoke_orchestration</c> MCP tool when the LLM caller doesn't supply one,
+	/// in sync mode. Default: 300 seconds (5 minutes).
+	/// </summary>
+	public int? DefaultInvokeOrchestrationSyncTimeoutSeconds { get; set; }
 }
 
 /// <summary>

@@ -63,4 +63,40 @@ public class McpServerOptions
 	/// authoritative).</para>
 	/// </summary>
 	public int DefaultOrchestraInvokeTimeoutSeconds { get; set; } = 0;
+
+	/// <summary>
+	/// Catch-all default transport timeout (seconds) for MCP tool calls to servers that
+	/// are NOT the Orchestra data plane (see <see cref="DefaultOrchestraInvokeTimeoutSeconds"/>
+	/// for the data-plane-specific knob). Applied by <c>McpManager.Resolve</c> to any MCP
+	/// whose <c>Timeout</c> is still <c>null</c> after orchestration-level and global-MCP-level
+	/// resolution.
+	/// <para>
+	/// <c>null</c> (the default) means: do not stamp any default — the Copilot MCP SDK's
+	/// built-in ~3-minute timeout remains in effect. This preserves backward-compatible
+	/// behavior for existing orchestrations.<br/>
+	/// <c>0</c> means: stamp an effectively-infinite transport timeout
+	/// (<c>TimeSpan.FromMilliseconds(int.MaxValue)</c>) so the SDK's 180-second cliff is
+	/// bypassed entirely. Use this when server-side and orchestration-side deadlines should
+	/// be the only authority. Mirrors the semantics of
+	/// <see cref="DefaultOrchestraInvokeTimeoutSeconds"/>.<br/>
+	/// A positive number means: stamp that many seconds onto every non-data-plane MCP that
+	/// doesn't already carry an override from the orchestration's <c>mcps[].timeoutSeconds</c>.
+	/// </para>
+	/// <para>
+	/// A per-orchestration <c>mcps[].timeoutSeconds</c> always wins over this catch-all default,
+	/// just like for the data-plane knob.
+	/// </para>
+	/// </summary>
+	public int? DefaultMcpToolCallTimeoutSeconds { get; set; } = null;
+
+	/// <summary>
+	/// Default value used by <c>invoke_orchestration</c>'s sync-mode <c>timeoutSeconds</c>
+	/// argument when the LLM caller doesn't supply one. Has no effect on async invocations
+	/// (which don't wait for completion) or on calls that explicitly pass <c>timeoutSeconds</c>.
+	/// <para>
+	/// Default: <c>300</c> seconds (5 minutes) — matches the prior hardcoded value so
+	/// existing orchestrations keep working without configuration changes.
+	/// </para>
+	/// </summary>
+	public int DefaultInvokeOrchestrationSyncTimeoutSeconds { get; set; } = 300;
 }

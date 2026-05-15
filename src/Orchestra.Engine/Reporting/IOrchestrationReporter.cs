@@ -10,6 +10,16 @@ public interface IOrchestrationReporter
 	void ReportToolExecutionStarted(string stepName, string toolName, string? arguments, string? mcpServer);
 	void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error);
 	void ReportStepError(string stepName, string errorMessage);
+
+	/// <summary>
+	/// Reports a step error with optional structured details from the underlying agent
+	/// session (Copilot SDK <c>SessionErrorData</c>: ErrorType / StatusCode /
+	/// ProviderCallId / Url / Stack). The default implementation drops the details and
+	/// forwards to the legacy <see cref="ReportStepError(string,string)"/> for
+	/// back-compat with reporters that don't surface structured error metadata.
+	/// </summary>
+	void ReportStepError(string stepName, string errorMessage, AgentSessionErrorDetails? errorDetails)
+		=> ReportStepError(stepName, errorMessage);
 	void ReportStepCancelled(string stepName);
 	void ReportStepCompleted(string stepName, AgentResult result, OrchestrationStepType stepType);
 	void ReportStepTrace(string stepName, StepExecutionTrace trace);

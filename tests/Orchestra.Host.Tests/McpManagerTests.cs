@@ -995,6 +995,212 @@ public class McpManagerTests : IAsyncLifetime
 		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(45));
 	}
 
+	// ── Catch-all default for non-Orchestra-data-plane MCPs ──
+
+	/// <summary>
+	/// When <c>DefaultMcpToolCallTimeoutSeconds</c> is null (the default), non-Orchestra
+	/// MCPs that don't carry a per-orchestration <c>timeoutSeconds</c> override must
+	/// keep <c>Timeout = null</c>. This preserves backward-compatible behavior: the
+	/// Copilot SDK's built-in ~3-minute default takes over for everyone who hasn't opted
+	/// in to the catch-all.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_NonDataPlaneMcp_CatchAllNull_LeavesTimeoutNull()
+	{
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultMcpToolCallTimeoutSeconds = null,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var external = new RemoteMcp
+		{
+			Name = "github",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com/mcp",
+			Headers = [],
+		};
+		var localTool = CreateLocalMcp("filesystem");
+		var input = new Engine.Mcp[] { external, localTool };
+
+		var result = manager.Resolve(input);
+
+		result.Should().BeSameAs(input);
+		result[0].Timeout.Should().BeNull();
+		result[1].Timeout.Should().BeNull();
+	}
+
+	/// <summary>
+	/// When <c>DefaultMcpToolCallTimeoutSeconds</c> is a positive number, non-Orchestra
+	/// MCPs without a per-orchestration override receive that many seconds as their
+	/// transport timeout. This is the primary path by which an operator removes the
+	/// Copilot SDK's 180-second cliff for ALL their MCPs at once.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_NonDataPlaneMcp_CatchAllPositive_AppliesValue()
+	{
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultMcpToolCallTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var external = new RemoteMcp
+		{
+			Name = "github",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com/mcp",
+			Headers = [],
+		};
+		var localTool = CreateLocalMcp("filesystem");
+
+		var result = manager.Resolve([external, localTool]);
+
+		result.Should().HaveCount(2);
+		var resolvedRemote = result[0].Should().BeOfType<RemoteMcp>().Subject;
+		resolvedRemote.Timeout.Should().Be(TimeSpan.FromSeconds(1800));
+		resolvedRemote.Endpoint.Should().Be("https://api.example.com/mcp", "endpoint must be unchanged");
+
+		var resolvedLocal = result[1].Should().BeOfType<LocalMcp>().Subject;
+		resolvedLocal.Timeout.Should().Be(TimeSpan.FromSeconds(1800));
+		resolvedLocal.Command.Should().Be("test-command", "command must be unchanged");
+	}
+
+	/// <summary>
+	/// Setting <c>DefaultMcpToolCallTimeoutSeconds = 0</c> means "no client-side
+	/// transport timeout for any MCP" — mirror of the data-plane knob's <c>0</c> semantics.
+	/// The resolver must stamp <see cref="McpManager.EffectivelyInfiniteTransportTimeout"/>
+	/// so the Copilot SDK's ~3-minute default does NOT silently kick in.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_NonDataPlaneMcp_CatchAllZero_AppliesInfiniteTimeout()
+	{
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultMcpToolCallTimeoutSeconds = 0,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var external = new RemoteMcp
+		{
+			Name = "github",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com/mcp",
+			Headers = [],
+		};
+
+		var result = manager.Resolve([external]);
+
+		result[0].Timeout.Should().Be(McpManager.EffectivelyInfiniteTransportTimeout);
+	}
+
+	/// <summary>
+	/// A per-orchestration <c>mcps[].timeoutSeconds</c> (already populated on the
+	/// inbound entry) must take precedence over the catch-all host default.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_NonDataPlaneMcp_PerMcpsTimeoutWinsOverCatchAll()
+	{
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultMcpToolCallTimeoutSeconds = 1800,
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var external = new RemoteMcp
+		{
+			Name = "github",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com/mcp",
+			Headers = [],
+			Timeout = TimeSpan.FromSeconds(60), // YAML override
+		};
+
+		var result = manager.Resolve([external]);
+
+		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(60),
+			"per-orchestration mcps[].timeoutSeconds must always win over the host catch-all default");
+	}
+
+	/// <summary>
+	/// The two knobs are independent: the catch-all must not leak into Orchestra
+	/// data-plane handling and vice versa. When BOTH are set, the data-plane MCP gets
+	/// the data-plane knob, and non-data-plane MCPs get the catch-all knob.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_BothKnobsSet_EachAppliesToItsOwnEndpoint()
+	{
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 7200,  // data-plane: 2h
+			DefaultMcpToolCallTimeoutSeconds = 600,       // catch-all: 10min
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var dataPlane = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+		};
+		var external = new RemoteMcp
+		{
+			Name = "github",
+			Type = McpType.Remote,
+			Endpoint = "https://api.example.com/mcp",
+			Headers = [],
+		};
+
+		var result = manager.Resolve([dataPlane, external]);
+
+		result[0].Timeout.Should().Be(TimeSpan.FromSeconds(7200),
+			"Orchestra data-plane uses defaultOrchestraInvokeTimeoutSeconds, not the catch-all");
+		result[1].Timeout.Should().Be(TimeSpan.FromSeconds(600),
+			"Non-data-plane MCPs use defaultMcpToolCallTimeoutSeconds");
+	}
+
+	/// <summary>
+	/// The data-plane knob being set to 0 (effectively infinite) MUST NOT be overridden
+	/// by the catch-all default for data-plane MCPs — the data-plane endpoint always
+	/// takes the data-plane knob.
+	/// </summary>
+	[Fact]
+	public async Task Resolve_DataPlaneZero_CatchAllPositive_DataPlaneStaysInfinite()
+	{
+		var options = new McpServerOptions
+		{
+			DataPlaneRoute = "/mcp/data",
+			DefaultOrchestraInvokeTimeoutSeconds = 0,     // data-plane: infinite
+			DefaultMcpToolCallTimeoutSeconds = 600,       // catch-all: 10min
+		};
+		await using var manager = new TestableMcpManager(options);
+		await manager.InitializeAsync([]);
+
+		var dataPlane = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "http://localhost:5001/mcp/data",
+			Headers = [],
+		};
+
+		var result = manager.Resolve([dataPlane]);
+
+		result[0].Timeout.Should().Be(McpManager.EffectivelyInfiniteTransportTimeout,
+			"data-plane stays governed by its own knob even when the catch-all is set");
+	}
+
 	#endregion
 
 	#region Resolve(Mcps, ParentExecutionAnnotation) — parent-execution header injection

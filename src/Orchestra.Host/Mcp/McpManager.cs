@@ -257,6 +257,66 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 				}
 			}
 
+			// Step 2c — catch-all default for any MCP that is NOT the Orchestra data plane
+			// and that still has no Timeout after steps 1+2. When the host sets
+			// `mcpServer.defaultMcpToolCallTimeoutSeconds`, stamp it onto these MCPs so the
+			// Copilot SDK's ~3-minute built-in default doesn't silently apply. Semantics:
+			//   - null  → leave as-is (SDK 180s default remains; backward-compatible).
+			//   - 0     → stamp EffectivelyInfiniteTransportTimeout (mirror of step 2 above).
+			//   - > 0   → stamp TimeSpan.FromSeconds(value).
+			// A per-mcps[] timeoutSeconds on the orchestration always wins because it was
+			// already populated into Timeout before this step runs.
+			if (current.Timeout is null && _mcpServerOptions.DefaultMcpToolCallTimeoutSeconds is { } catchAllSeconds)
+			{
+				// Skip Orchestra data-plane MCPs — they're already handled in step 2 above
+				// (and even if they fell through there, the contract is that the data-plane
+				// knob is the authoritative one for that endpoint).
+				var originalGlobalForCatchAll = _globalMcpNames.Contains(mcp.Name)
+					? _globalMcpList.FirstOrDefault(g =>
+						string.Equals(g.Name, mcp.Name, StringComparison.OrdinalIgnoreCase))
+					: null;
+
+				if (!TargetsOrchestraDataPlane(mcp) && !TargetsOrchestraDataPlane(originalGlobalForCatchAll))
+				{
+					var applyingInfinite = catchAllSeconds <= 0;
+					var defaultTimeout = applyingInfinite
+						? EffectivelyInfiniteTransportTimeout
+						: TimeSpan.FromSeconds(catchAllSeconds);
+
+					current = current switch
+					{
+						RemoteMcp r => new RemoteMcp
+						{
+							Name = r.Name,
+							Type = r.Type,
+							Endpoint = r.Endpoint,
+							Headers = r.Headers,
+							Timeout = defaultTimeout,
+						},
+						LocalMcp l => new LocalMcp
+						{
+							Name = l.Name,
+							Type = l.Type,
+							Command = l.Command,
+							Arguments = l.Arguments,
+							WorkingDirectory = l.WorkingDirectory,
+							Timeout = defaultTimeout,
+						},
+						_ => current,
+					};
+
+					if (applyingInfinite)
+					{
+						LogAppliedCatchAllInfiniteTimeout(mcp.Name);
+					}
+					else
+					{
+						LogAppliedCatchAllDefaultTimeout(mcp.Name, catchAllSeconds);
+					}
+					changed = true;
+				}
+			}
+
 			// Step 3 — when a parent annotation is supplied, stamp parent-execution headers
 			// on any RemoteMcp whose endpoint targets this Orchestra host. Headers are
 			// overwritten (not merged with caller-supplied values) so the orchestration YAML
@@ -519,6 +579,18 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		Level = LogLevel.Information,
 		Message = "Applied effectively-infinite transport timeout to Orchestra data-plane MCP entry '{McpName}' (mcpServer.defaultOrchestraInvokeTimeoutSeconds is 0, so no client-side transport timeout applies; server-side engine deadlines remain authoritative).")]
 	private partial void LogAppliedDataPlaneInfiniteTimeout(string mcpName);
+
+	[LoggerMessage(
+		EventId = 10,
+		Level = LogLevel.Information,
+		Message = "Applied catch-all MCP tool-call timeout {DefaultTimeoutSeconds}s to MCP entry '{McpName}' (no timeoutSeconds set on the orchestration's mcps[] entry; using configured mcpServer.defaultMcpToolCallTimeoutSeconds).")]
+	private partial void LogAppliedCatchAllDefaultTimeout(string mcpName, int defaultTimeoutSeconds);
+
+	[LoggerMessage(
+		EventId = 11,
+		Level = LogLevel.Information,
+		Message = "Applied effectively-infinite catch-all transport timeout to MCP entry '{McpName}' (mcpServer.defaultMcpToolCallTimeoutSeconds is 0, so no client-side transport timeout applies; orchestration and server-side deadlines remain authoritative).")]
+	private partial void LogAppliedCatchAllInfiniteTimeout(string mcpName);
 
 	#endregion
 }

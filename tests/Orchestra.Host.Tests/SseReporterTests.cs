@@ -131,6 +131,50 @@ public class SseReporterTests : IDisposable
 	}
 
 	[Fact]
+	public void ReportStepError_WithDetails_EmitsAllStructuredFields()
+	{
+		// Arrange — The structured overload must surface every AgentSessionErrorDetails
+		// field in the SSE payload so the Portal (or any other consumer) can render the
+		// GitHub request id for support escalations, the upstream HTTP status, and the
+		// SDK error category. Today the legacy overload drops all of this.
+		var details = new AgentSessionErrorDetails
+		{
+			ErrorType = "rate_limit",
+			StatusCode = 429,
+			ProviderCallId = "abcd-efgh-1234",
+			Url = "https://docs.github.com/copilot/rate-limits",
+			Stack = "at Provider.send (/cli/index.js:42)",
+		};
+
+		_reporter.ReportStepError("step-1", "Too many requests", details);
+
+		var evt = _reporter.AccumulatedEvents[0];
+		evt.Type.Should().Be("step-error");
+		evt.Data.Should().Contain("\"error\":\"Too many requests\"");
+		evt.Data.Should().Contain("\"errorDetails\":");
+		evt.Data.Should().Contain("\"errorType\":\"rate_limit\"");
+		evt.Data.Should().Contain("\"statusCode\":429");
+		evt.Data.Should().Contain("\"providerCallId\":\"abcd-efgh-1234\"");
+		evt.Data.Should().Contain("\"url\":\"https://docs.github.com/copilot/rate-limits\"");
+		evt.Data.Should().Contain("\"stack\":\"at Provider.send (/cli/index.js:42)\"");
+	}
+
+	[Fact]
+	public void ReportStepError_WithNullDetails_DoesNotEmitErrorDetailsKey()
+	{
+		// Arrange — When the failure had no SDK-side details to surface (e.g. a command
+		// exit code, validation error), the structured overload must degrade cleanly to
+		// the legacy shape so consumers that already understood the old event don't
+		// suddenly see an empty errorDetails object.
+		_reporter.ReportStepError("step-1", "exit code 1", errorDetails: null);
+
+		var evt = _reporter.AccumulatedEvents[0];
+		evt.Type.Should().Be("step-error");
+		evt.Data.Should().NotContain("errorDetails");
+		evt.Data.Should().Contain("\"error\":\"exit code 1\"");
+	}
+
+	[Fact]
 	public void ReportStepCancelled_StampsCompletedAt_ForReplayCorrectness()
 	{
 		var before = DateTimeOffset.UtcNow;
