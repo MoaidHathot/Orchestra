@@ -71,6 +71,30 @@ internal sealed partial class CopilotSessionHandler
 	private DateTimeOffset? _sessionStartedAt;
 	private int _sessionUsageInfoCount;
 
+	// ── Resume metadata exposed for CopilotAgent's swap-and-resume path ──
+	//
+	// When the CLI emits SessionResumeEvent (only on ResumeSessionAsync paths), we capture
+	// the SDK's payload so the agent can decide whether to honor the resume or fall back
+	// to a cold restart (AlreadyInUse=true means another client still owns the session lock).
+	// A TaskCompletionSource lets the agent await the first resume event with a grace window
+	// rather than busy-polling. NOT signalled on CreateSessionAsync paths.
+	private readonly TaskCompletionSource<SessionResumeData> _resumeEventReceived =
+		new(TaskCreationOptions.RunContinuationsAsynchronously);
+	private SessionResumeData? _lastResumeData;
+
+	/// <summary>
+	/// Resolves with the first <c>SessionResumeEvent</c> payload received from the SDK, or
+	/// never completes if the session was created via <c>CreateSessionAsync</c> (which does
+	/// not emit a resume event). Use with a timeout / WhenAny to bound the wait.
+	/// </summary>
+	public Task<SessionResumeData> ResumeEventReceived => _resumeEventReceived.Task;
+
+	/// <summary>
+	/// Last <c>SessionResumeData</c> seen on this handler, or null if no resume event has
+	/// arrived yet. Snapshot accessor for tests / diagnostics.
+	/// </summary>
+	public SessionResumeData? LastResumeData => _lastResumeData;
+
 	public CopilotSessionHandler(
 		ChannelWriter<AgentEvent> writer,
 		IOrchestrationReporter reporter,
@@ -260,7 +284,6 @@ internal sealed partial class CopilotSessionHandler
 		case SessionModeChangedEvent:
 		case SessionPlanChangedEvent:
 		case SessionRemoteSteerableChangedEvent:
-		case SessionResumeEvent:
 		case SessionSkillsLoadedEvent:
 		case SessionSnapshotRewindEvent:
 		case SessionTitleChangedEvent:
@@ -274,6 +297,10 @@ internal sealed partial class CopilotSessionHandler
 		case UserInputCompletedEvent:
 		case UserInputRequestedEvent:
 		case AbortEvent:
+			break;
+
+		case SessionResumeEvent resumeEvt:
+			HandleSessionResume(resumeEvt);
 			break;
 
 		case SessionErrorEvent err:
@@ -469,6 +496,13 @@ internal sealed partial class CopilotSessionHandler
 			NotificationKind = evt.NotificationKind,
 			NotificationMessage = evt.NotificationMessage,
 			QuotaSnapshots = evt.QuotaSnapshots,
+			SwapAttempt = evt.SwapAttempt,
+			SwapBudget = evt.SwapBudget,
+			SwapReason = evt.SwapReason,
+			SwapMode = evt.SwapMode,
+			PriorSessionId = evt.PriorSessionId,
+			ResumedEventCount = evt.ResumedEventCount,
+			ResumeAlreadyInUse = evt.ResumeAlreadyInUse,
 			ActorAgentName = ctx.AgentName,
 			ActorAgentDisplayName = ctx.AgentDisplayName,
 			ActorToolCallId = ctx.ToolCallId,
@@ -936,9 +970,42 @@ internal sealed partial class CopilotSessionHandler
 		});
 	}
 
+	private void HandleSessionResume(SessionResumeEvent resumeEvt)
+	{
+		_lastResumeData = resumeEvt.Data;
+		// Resolve the awaitable so CopilotAgent's swap-and-resume path can react to
+		// AlreadyInUse=true within its grace window without polling.
+		_resumeEventReceived.TrySetResult(resumeEvt.Data);
+
+		var alreadyInUse = resumeEvt.Data.AlreadyInUse ?? false;
+		LogSessionResumed(
+			_requestedModel,
+			alreadyInUse,
+			resumeEvt.Data.EventCount,
+			resumeEvt.Data.SelectedModel ?? "(unchanged)",
+			resumeEvt.Data.ResumeTime.ToString("O"));
+
+		EmitEvent(new AgentEvent
+		{
+			Type = AgentEventType.SessionResumed,
+			Model = resumeEvt.Data.SelectedModel,
+			ResumedEventCount = (int)Math.Min(int.MaxValue, resumeEvt.Data.EventCount),
+			ResumeAlreadyInUse = alreadyInUse,
+		});
+	}
+
 	private void HandleError(SessionErrorEvent err)
 	{
 		var message = err.Data.Message ?? "(no message)";
+
+		// Detect the CLI's "I exhausted my internal retries" pattern. The bundled
+		// copilot.exe retries upstream model API calls internally and surfaces a
+		// session.error with a message like:
+		//   "Failed to get response from the AI model; retried 5 times (total retry wait time: ...)"
+		// When that happens the CLI is about to exit. A fresh CLI process re-rolls
+		// upstream provider routing / connection pool so swapping the CLI usually
+		// clears it. Flag the details record so CopilotAgent's swap loop can react.
+		var exhaustedCliRetries = LooksLikeCliExhaustedRetries(message);
 
 		// Capture every field the SDK gave us in SessionErrorData. Historically only
 		// Message was retained which collapsed the upstream ErrorType / StatusCode /
@@ -951,6 +1018,7 @@ internal sealed partial class CopilotSessionHandler
 			ProviderCallId = err.Data.ProviderCallId,
 			Url = err.Data.Url,
 			Stack = err.Data.Stack,
+			ExhaustedCliRetries = exhaustedCliRetries,
 		};
 
 		// Loud ERROR log: a fatal session-level error from the CLI MUST be visible.
@@ -1048,6 +1116,34 @@ internal sealed partial class CopilotSessionHandler
 		_done.TrySetResult();
 	}
 
+	/// <summary>
+	/// Recognises the bundled CLI's "I exhausted my internal retries" error message so
+	/// the agent can route this error class to the swap loop instead of failing the step.
+	/// The CLI emits messages of the form:
+	///   "Failed to get response from the AI model; retried N times (total retry wait time: ...)"
+	/// We match the substring "retried .* times" case-insensitively and also accept the
+	/// shorter form "Failed to get response from the AI model" for forward compatibility
+	/// since the surrounding text has shifted between CLI versions.
+	/// </summary>
+	internal static bool LooksLikeCliExhaustedRetries(string? message)
+	{
+		if (string.IsNullOrEmpty(message))
+			return false;
+
+		// "retried N times" is the strong signal — CLI's own retry loop emitted it.
+		if (System.Text.RegularExpressions.Regex.IsMatch(
+				message,
+				@"retried\s+\d+\s+times",
+				System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+		{
+			return true;
+		}
+
+		// Fallback: the surrounding "Failed to get response from the AI model" phrase
+		// has been stable across CLI versions even when the retry-count format shifted.
+		return message.Contains("Failed to get response from the AI model", StringComparison.OrdinalIgnoreCase);
+	}
+
 	#region Source-Generated Logging
 
 	[LoggerMessage(
@@ -1126,6 +1222,19 @@ internal sealed partial class CopilotSessionHandler
 		double currentTokens,
 		long sessionElapsedMs,
 		long turnElapsedMs);
+
+	// EventId 10: session resumed on a fresh CLI worker. Information-level — this is a
+	// notable recovery event that operators want visible in default-verbosity logs.
+	[LoggerMessage(
+		EventId = 10,
+		Level = LogLevel.Information,
+		Message = "Session resumed (model={Model}, alreadyInUse={AlreadyInUse}, eventCount={EventCount}, selectedModel={SelectedModel}, resumeTime={ResumeTime})")]
+	private partial void LogSessionResumed(
+		string model,
+		bool alreadyInUse,
+		double eventCount,
+		string selectedModel,
+		string resumeTime);
 
 	#endregion
 }

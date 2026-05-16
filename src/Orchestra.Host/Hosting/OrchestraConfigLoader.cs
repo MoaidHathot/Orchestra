@@ -311,6 +311,21 @@ public static class OrchestraConfigLoader
 				options.AgentPool.IdleTimeoutSeconds = config.AgentPool.IdleTimeoutSeconds.Value;
 		}
 
+		if (config.Copilot?.Swap is { } swapConfig)
+		{
+			if (swapConfig.BudgetPerStep.HasValue)
+				options.Copilot.Swap.BudgetPerStep = swapConfig.BudgetPerStep.Value;
+
+			if (swapConfig.ResumeOnSwap.HasValue)
+				options.Copilot.Swap.ResumeOnSwap = swapConfig.ResumeOnSwap.Value;
+
+			if (swapConfig.ResumeAlreadyInUseWaitSeconds.HasValue)
+				options.Copilot.Swap.ResumeAlreadyInUseWaitSeconds = swapConfig.ResumeAlreadyInUseWaitSeconds.Value;
+
+			if (swapConfig.ResumeAlreadyInUsePollIntervalMs.HasValue)
+				options.Copilot.Swap.ResumeAlreadyInUsePollIntervalMs = swapConfig.ResumeAlreadyInUsePollIntervalMs.Value;
+		}
+
 		if (config.Hooks is { Length: > 0 })
 		{
 			HookDefinitionResolver.ApplyBaseDirectory(config.Hooks, configDirectory);
@@ -427,6 +442,13 @@ public class OrchestraConfigFile
 	/// Default agent worker pool settings for orchestration runs.
 	/// </summary>
 	public AgentPoolConfig? AgentPool { get; set; }
+
+	/// <summary>
+	/// Copilot-provider-specific runtime settings (swap budget, session-resume policy).
+	/// See <see cref="CopilotProviderOptions"/> for the schema. Leaving this null uses
+	/// the built-in defaults defined in <c>CopilotAgentPoolOptions</c>.
+	/// </summary>
+	public CopilotProviderConfig? Copilot { get; set; }
 
 	/// <summary>
 	/// MCP server endpoint configuration.
@@ -599,6 +621,51 @@ public class ScanConfigFile
 	/// If true, scan subdirectories recursively within <c>orchestrations/</c> and <c>profiles/</c>.
 	/// </summary>
 	public bool? Recursive { get; set; }
+}
+
+/// <summary>
+/// Copilot-provider-specific configuration section of the orchestra.json file.
+/// All fields are nullable — only non-null values override the built-in defaults
+/// captured in <see cref="CopilotProviderOptions"/>.
+/// </summary>
+public class CopilotProviderConfig
+{
+	/// <summary>
+	/// Settings for the CLI-swap-and-resume recovery loop in <c>CopilotAgent</c>.
+	/// </summary>
+	public CopilotSwapConfig? Swap { get; set; }
+}
+
+/// <summary>
+/// CLI swap policy section of the config file. See <see cref="CopilotSwapOptions"/>
+/// for full semantics.
+/// </summary>
+public class CopilotSwapConfig
+{
+	/// <summary>
+	/// Maximum number of CLI swaps a single prompt step may attempt before failing.
+	/// Default: 3. Set to 0 to disable swap recovery entirely.
+	/// </summary>
+	public int? BudgetPerStep { get; set; }
+
+	/// <summary>
+	/// When true, the swap path calls <c>ResumeSessionAsync</c> on the new CLI with
+	/// the prior session id, preserving conversation history. Default: true.
+	/// </summary>
+	public bool? ResumeOnSwap { get; set; }
+
+	/// <summary>
+	/// Maximum total time (seconds) the swap path waits for the SDK to report
+	/// whether the resumed session is <c>AlreadyInUse</c> by the dying CLI before
+	/// falling back to a cold restart. Default: 5.
+	/// </summary>
+	public double? ResumeAlreadyInUseWaitSeconds { get; set; }
+
+	/// <summary>
+	/// Interval (milliseconds) between resume-attempt polls inside the
+	/// <see cref="ResumeAlreadyInUseWaitSeconds"/> window. Default: 500.
+	/// </summary>
+	public double? ResumeAlreadyInUsePollIntervalMs { get; set; }
 }
 
 /// <summary>

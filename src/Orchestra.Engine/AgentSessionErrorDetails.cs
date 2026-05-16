@@ -51,4 +51,17 @@ public sealed record AgentSessionErrorDetails
 	/// future analysis tool can correlate against the bundled CLI's source.
 	/// </summary>
 	public string? Stack { get; init; }
+
+	/// <summary>
+	/// True when the CLI itself signalled that it had already exhausted its own retry
+	/// budget before surfacing this error (the bundled <c>copilot.exe</c> retries the
+	/// upstream model API internally; when those retries are exhausted it emits a
+	/// <c>session.error</c> with a message like <c>"Failed to get response from the AI
+	/// model; retried 5 times"</c>). When this flag is set the CLI process is typically
+	/// about to shut down — swapping to a fresh CLI worker often clears the upstream
+	/// routing / connection-pool issue. Set by <c>CopilotSessionHandler.HandleError</c>
+	/// when the SDK message matches the well-known exhaustion pattern, and used by
+	/// <c>CopilotAgent</c>'s swap loop to decide whether to retry on a new worker.
+	/// </summary>
+	public bool ExhaustedCliRetries { get; init; }
 }

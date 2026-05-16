@@ -584,7 +584,8 @@ public static class OrchestrationsApi
 				enabled = l.Enabled,
 				delaySeconds = l.DelaySeconds,
 				maxIterations = l.MaxIterations,
-				continueOnFailure = l.ContinueOnFailure
+				continueOnFailure = l.ContinueOnFailure,
+				autoResume = l.AutoResume
 			},
 			WebhookTriggerConfig w => new
 			{
@@ -619,7 +620,8 @@ public static class OrchestrationsApi
 				enabled = l.Enabled,
 				delaySeconds = l.DelaySeconds,
 				maxIterations = l.MaxIterations,
-				continueOnFailure = l.ContinueOnFailure
+				continueOnFailure = l.ContinueOnFailure,
+				autoResume = l.AutoResume
 			},
 			WebhookTriggerConfig w => new
 			{

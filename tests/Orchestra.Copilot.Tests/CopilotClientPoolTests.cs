@@ -92,6 +92,23 @@ public class CopilotClientPoolTests
 		});
 	}
 
+	[Fact]
+	public async Task RecordSwapTriggered_IncrementsCounterOnSnapshot()
+	{
+		// CopilotAgent calls _clientPool.RecordSwapTriggered() each time it abandons a CLI
+		// worker. The snapshot exposes the counter for AgentRuntimeStatus / observability.
+		var factory = new FakeCopilotClientFactory();
+		await using var pool = CreatePool(factory, maxInstances: 4, maxSessionsPerInstance: 1);
+
+		pool.GetSnapshot().TotalSwapsTriggered.Should().Be(0);
+
+		pool.RecordSwapTriggered();
+		pool.RecordSwapTriggered();
+		pool.RecordSwapTriggered();
+
+		pool.GetSnapshot().TotalSwapsTriggered.Should().Be(3);
+	}
+
 	private static CopilotClientPool CreatePool(
 		FakeCopilotClientFactory factory,
 		int minInstances = 0,
@@ -154,6 +171,9 @@ public class CopilotClientPoolTests
 
 		public Task PingAsync(string message, CancellationToken cancellationToken) => Task.CompletedTask;
 		public Task<ICopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken) => throw new NotSupportedException();
+		public Task<ICopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken) => throw new NotSupportedException();
+		public Task<string?> GetLastSessionIdAsync(CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+		public Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken) => Task.CompletedTask;
 		public Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
 
 		public ValueTask DisposeAsync()

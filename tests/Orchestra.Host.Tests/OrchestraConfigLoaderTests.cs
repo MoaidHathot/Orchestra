@@ -204,6 +204,88 @@ public class OrchestraConfigLoaderTests : IDisposable
 			options.Sse.HeartbeatInterval).Should().Be(defaults);
 	}
 
+	[Fact]
+	public void ApplyConfig_CopilotSwap_AllFields_OverridesDefaults()
+	{
+		// Arrange — verify the JSON-configurable swap policy reaches
+		// OrchestrationHostOptions.Copilot.Swap with all fields applied.
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile
+		{
+			Copilot = new CopilotProviderConfig
+			{
+				Swap = new CopilotSwapConfig
+				{
+					BudgetPerStep = 7,
+					ResumeOnSwap = false,
+					ResumeAlreadyInUseWaitSeconds = 12.5,
+					ResumeAlreadyInUsePollIntervalMs = 250,
+				},
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.Copilot.Swap.BudgetPerStep.Should().Be(7);
+		options.Copilot.Swap.ResumeOnSwap.Should().BeFalse();
+		options.Copilot.Swap.ResumeAlreadyInUseWaitSeconds.Should().Be(12.5);
+		options.Copilot.Swap.ResumeAlreadyInUsePollIntervalMs.Should().Be(250);
+	}
+
+	[Fact]
+	public void ApplyConfig_CopilotSwap_PartialOverride_KeepsDefaults()
+	{
+		// Arrange — only one swap field set in JSON; the rest must remain at defaults
+		// so users can tweak budget without re-stating everything else.
+		var options = new OrchestrationHostOptions();
+		var defaultResumeOnSwap = options.Copilot.Swap.ResumeOnSwap;
+		var defaultWait = options.Copilot.Swap.ResumeAlreadyInUseWaitSeconds;
+		var defaultPoll = options.Copilot.Swap.ResumeAlreadyInUsePollIntervalMs;
+
+		var config = new OrchestraConfigFile
+		{
+			Copilot = new CopilotProviderConfig
+			{
+				Swap = new CopilotSwapConfig { BudgetPerStep = 5 },
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.Copilot.Swap.BudgetPerStep.Should().Be(5);
+		options.Copilot.Swap.ResumeOnSwap.Should().Be(defaultResumeOnSwap);
+		options.Copilot.Swap.ResumeAlreadyInUseWaitSeconds.Should().Be(defaultWait);
+		options.Copilot.Swap.ResumeAlreadyInUsePollIntervalMs.Should().Be(defaultPoll);
+	}
+
+	[Fact]
+	public void ApplyConfig_CopilotSection_Null_LeavesDefaultsUntouched()
+	{
+		// Arrange — older orchestra.json files have no copilot section. The loader
+		// must NOT zero out the defaults in that case.
+		var options = new OrchestrationHostOptions();
+		var defaults = (
+			options.Copilot.Swap.BudgetPerStep,
+			options.Copilot.Swap.ResumeOnSwap,
+			options.Copilot.Swap.ResumeAlreadyInUseWaitSeconds,
+			options.Copilot.Swap.ResumeAlreadyInUsePollIntervalMs);
+
+		var config = new OrchestraConfigFile { Copilot = null };
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		(options.Copilot.Swap.BudgetPerStep,
+			options.Copilot.Swap.ResumeOnSwap,
+			options.Copilot.Swap.ResumeAlreadyInUseWaitSeconds,
+			options.Copilot.Swap.ResumeAlreadyInUsePollIntervalMs).Should().Be(defaults);
+	}
+
 	// ── LoadAndApply tests ──
 
 	[Fact]
@@ -507,6 +589,38 @@ public class OrchestraConfigLoaderTests : IDisposable
 	}
 
 	// ── Full round-trip test ──
+
+	[Fact]
+	public void LoadAndApply_CopilotSwapJson_RoundTrip()
+	{
+		// Arrange — the JSON snippet that documentation tells users to put in
+		// orchestra.json. If this test breaks, the documented snippet stops working.
+		var configPath = Path.Combine(_tempDir, "copilot-swap.json");
+		File.WriteAllText(configPath, """
+		{
+			"copilot": {
+				"swap": {
+					"budgetPerStep": 5,
+					"resumeOnSwap": true,
+					"resumeAlreadyInUseWaitSeconds": 8,
+					"resumeAlreadyInUsePollIntervalMs": 750
+				}
+			}
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert
+		options.Copilot.Swap.BudgetPerStep.Should().Be(5);
+		options.Copilot.Swap.ResumeOnSwap.Should().BeTrue();
+		options.Copilot.Swap.ResumeAlreadyInUseWaitSeconds.Should().Be(8);
+		options.Copilot.Swap.ResumeAlreadyInUsePollIntervalMs.Should().Be(750);
+	}
 
 	[Fact]
 	public void LoadAndApply_FullConfig_RoundTrip()

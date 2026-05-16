@@ -24,6 +24,8 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 	private int _nextWorkerId;
 	private int _workerCount;
 	private int _activeSessionCount;
+	private int _totalSwapsTriggered;
+	private int _workersSwappedOut;
 	private int _disposed;
 	private int _shrinkRunning;
 	private IReadOnlyList<AvailableModelInfo>? _cachedAvailableModels;
@@ -59,11 +61,27 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 	public CopilotClientPoolSnapshot GetSnapshot()
 	{
 		return Volatile.Read(ref _disposed) == 1
-			? new CopilotClientPoolSnapshot(0, 0)
+			? new CopilotClientPoolSnapshot(0, 0, Volatile.Read(ref _totalSwapsTriggered), Volatile.Read(ref _workersSwappedOut))
 			: new CopilotClientPoolSnapshot(
 				Volatile.Read(ref _workerCount),
-				Volatile.Read(ref _activeSessionCount));
+				Volatile.Read(ref _activeSessionCount),
+				Volatile.Read(ref _totalSwapsTriggered),
+				Volatile.Read(ref _workersSwappedOut));
 	}
+
+	/// <summary>
+	/// Records that a CLI swap was triggered for one of this pool's sessions. Used by
+	/// <see cref="CopilotAgent"/> for diagnostic counters surfaced via
+	/// <see cref="GetSnapshot"/>.
+	/// </summary>
+	public void RecordSwapTriggered() => Interlocked.Increment(ref _totalSwapsTriggered);
+
+	/// <summary>
+	/// Records that a worker was removed from rotation because a session it owned faulted
+	/// the CLI. Counter is incremented by <see cref="PruneWorkersLockedAsync"/> when it
+	/// removes an unhealthy worker.
+	/// </summary>
+	private void RecordWorkerSwappedOut() => Interlocked.Increment(ref _workersSwappedOut);
 
 	public async Task PrewarmAsync(CancellationToken cancellationToken)
 	{
@@ -276,9 +294,14 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 			if (!worker.FaultBroker.IsClientUnhealthy && _workers.Count <= _minInstances)
 				break;
 
+			var wasUnhealthy = worker.FaultBroker.IsClientUnhealthy;
 			_workers.Remove(worker);
 			Volatile.Write(ref _workerCount, _workers.Count);
-			LogWorkerStopping(_poolId, worker.Id, worker.FaultBroker.IsClientUnhealthy ? "unhealthy" : "idle", _workers.Count);
+			LogWorkerStopping(_poolId, worker.Id, wasUnhealthy ? "unhealthy" : "idle", _workers.Count);
+			if (wasUnhealthy)
+			{
+				RecordWorkerSwappedOut();
+			}
 			await StopWorkerAsync(worker).ConfigureAwait(false);
 		}
 	}

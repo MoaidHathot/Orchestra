@@ -3,6 +3,12 @@ namespace Orchestra.Copilot;
 internal interface ICopilotClientPool
 {
 	ValueTask<ICopilotClientLease> AcquireAsync(CancellationToken cancellationToken);
+
+	/// <summary>
+	/// Increments the pool's CLI-swap counter for diagnostics. No-op for fixed/single
+	/// client pools used in tests. Safe to call from any thread.
+	/// </summary>
+	void RecordSwapTriggered() { }
 }
 
 internal interface ICopilotClientLease : IAsyncDisposable
@@ -18,6 +24,7 @@ internal sealed class FixedCopilotClientPool : ICopilotClientPool
 	private readonly ICopilotClient _client;
 	private readonly ISessionFaultBroker? _faultBroker;
 	private IReadOnlyList<Engine.AvailableModelInfo>? _cachedAvailableModels;
+	private int _swapCount;
 
 	public FixedCopilotClientPool(ICopilotClient client, ISessionFaultBroker? faultBroker = null)
 	{
@@ -25,11 +32,15 @@ internal sealed class FixedCopilotClientPool : ICopilotClientPool
 		_faultBroker = faultBroker;
 	}
 
+	public int SwapCount => Volatile.Read(ref _swapCount);
+
 	public ValueTask<ICopilotClientLease> AcquireAsync(CancellationToken cancellationToken)
 	{
 		_ = cancellationToken;
 		return ValueTask.FromResult<ICopilotClientLease>(new Lease(this));
 	}
+
+	public void RecordSwapTriggered() => Interlocked.Increment(ref _swapCount);
 
 	private sealed class Lease : ICopilotClientLease
 	{

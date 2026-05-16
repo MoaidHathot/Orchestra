@@ -180,13 +180,12 @@ public partial class TriggerManager : BackgroundService
 			OrchestrationVersion = orchVersion,
 		};
 
-		// Calculate next fire time for scheduler triggers
-		if (config is SchedulerTriggerConfig schedulerConfig && config.Enabled)
-		{
-			registration.NextFireTime = CalculateNextFireTime(schedulerConfig);
-		}
-
-		// Preserve runtime state from existing registration (if re-registering)
+		// Preserve runtime state from existing registration (if re-registering) BEFORE
+		// computing NextFireTime, so interval schedulers honor the prior LastFireTime
+		// across hot re-registrations (file-watcher edits, profile toggles, etc.).
+		// Cold-start population from the persisted run store happens later via
+		// SeedTriggerHistoryFromRunStoreAsync so the very first registration of an
+		// orchestration also respects history.
 		if (_triggers.TryGetValue(id, out var existing))
 		{
 			registration.RunCount = existing.RunCount;
@@ -200,6 +199,13 @@ public partial class TriggerManager : BackgroundService
 				registration.ActiveExecutionId = existing.ActiveExecutionId;
 				registration.Status = existing.Status;
 			}
+		}
+
+		// Calculate next fire time for scheduler triggers. Pass the (possibly preserved)
+		// LastFireTime so interval schedulers wait the remaining time instead of resetting.
+		if (config is SchedulerTriggerConfig schedulerConfig && config.Enabled)
+		{
+			registration.NextFireTime = CalculateNextFireTime(schedulerConfig, registration.LastFireTime);
 		}
 
 		_triggers[id] = registration;
@@ -256,7 +262,10 @@ public partial class TriggerManager : BackgroundService
 
 		if (enabled && reg.Config is SchedulerTriggerConfig schedulerConfig)
 		{
-			reg.NextFireTime = CalculateNextFireTime(schedulerConfig);
+			// Honor history on re-enable so profile re-activation does not reset the
+			// schedule. Passing the trigger's preserved LastFireTime ensures interval
+			// schedulers wait the remaining time (or fire once if already overdue).
+			reg.NextFireTime = CalculateNextFireTime(schedulerConfig, reg.LastFireTime);
 		}
 		else if (!enabled)
 		{
@@ -646,6 +655,19 @@ public partial class TriggerManager : BackgroundService
 		// Load persisted triggers on startup
 		LoadPersistedTriggers();
 
+		// Seed in-memory RunCount / LastFireTime / NextFireTime from the persisted run
+		// store so interval schedulers honor history across restarts and profile toggles,
+		// and auto-resume any loop triggers configured to continue across restarts. Done
+		// before the main tick loop so the first poll already sees correct fire times.
+		try
+		{
+			await SeedTriggerHistoryFromRunStoreAsync(stoppingToken);
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			LogTriggerSeedingFailed(ex);
+		}
+
 		// Main loop: check triggers every second
 		while (!stoppingToken.IsCancellationRequested)
 		{
@@ -728,6 +750,124 @@ public partial class TriggerManager : BackgroundService
 		LogGracefulShutdownComplete();
 	}
 
+	/// <summary>
+	/// Seeds <see cref="TriggerRegistration.RunCount"/> and
+	/// <see cref="TriggerRegistration.LastFireTime"/> from the persisted run store, then
+	/// recomputes <see cref="TriggerRegistration.NextFireTime"/> for interval schedulers
+	/// so the user-facing schedule survives host restarts and profile re-activation. Also
+	/// re-fires loop triggers whose <see cref="LoopTriggerConfig.AutoResume"/> flag is set.
+	/// <para>
+	/// This bridges the gap between the in-memory <see cref="TriggerRegistration"/> (which
+	/// resets on every host process) and the durable <see cref="FileSystemRunStore"/>
+	/// (which records every fire). It is intentionally idempotent: running it multiple
+	/// times with the same store contents produces the same result, and it never moves
+	/// <c>RunCount</c> or <c>LastFireTime</c> backwards.
+	/// </para>
+	/// </summary>
+	/// <remarks>
+	/// Marked <c>internal</c> so tests in <c>Orchestra.Host.Tests</c> can invoke seeding
+	/// deterministically without spinning up the <see cref="ExecuteAsync"/> background loop.
+	/// </remarks>
+	internal async Task SeedTriggerHistoryFromRunStoreAsync(CancellationToken cancellationToken)
+	{
+		// We need the per-orchestration stats lookup which is host-specific; gracefully
+		// no-op if the configured IRunStore is something other than the file-system
+		// implementation (test doubles, in-memory stubs, etc.).
+		if (_runStore is not Persistence.FileSystemRunStore fsStore)
+		{
+			LogTriggerSeedingSkippedNoStore();
+			return;
+		}
+
+		var stats = await fsStore.GetOrchestrationRunStatsAsync(cancellationToken);
+
+		var loopAutoResumes = new List<TriggerRegistration>();
+
+		foreach (var reg in _triggers.Values)
+		{
+			if (reg.OrchestrationName is null) continue;
+			if (!stats.TryGetValue(reg.OrchestrationName, out var s)) continue;
+
+			// Never move counters backwards: a trigger that fired in-process before
+			// seeding (rare but possible if registration happens after another
+			// orchestration completes very quickly) already has higher values.
+			if (s.Count > reg.RunCount) reg.RunCount = s.Count;
+			var storeLastFire = s.LastStartedAt.UtcDateTime;
+			if (reg.LastFireTime is not { } existingLastFire || storeLastFire > existingLastFire)
+			{
+				reg.LastFireTime = storeLastFire;
+			}
+
+			// Re-compute scheduler NextFireTime with the (possibly newly-populated)
+			// LastFireTime. Cron triggers ignore the hint; interval triggers honor it.
+			if (reg.Config is SchedulerTriggerConfig sched && sched.Enabled &&
+				reg.Status == TriggerStatus.Waiting)
+			{
+				reg.NextFireTime = CalculateNextFireTime(sched, reg.LastFireTime);
+			}
+
+			// Queue auto-resume loops to fire below (outside the iteration so we don't
+			// mutate _triggers shape mid-enumeration if a fire triggers a registration).
+			if (reg.Config is LoopTriggerConfig { Enabled: true, AutoResume: true } &&
+				reg.Status == TriggerStatus.Waiting &&
+				reg.ActiveExecutionId is null)
+			{
+				loopAutoResumes.Add(reg);
+			}
+		}
+
+		// Auto-resume queued loops. Honors DelaySeconds measured from the most-recent
+		// persisted run, with the same exactly-once catch-up semantics used for interval
+		// schedulers (overdue -> fire now; not yet due -> arm NextFireTime).
+		foreach (var reg in loopAutoResumes)
+		{
+			if (cancellationToken.IsCancellationRequested) break;
+			if (reg.Config is not LoopTriggerConfig loop) continue;
+
+			var lastFire = reg.LastFireTime;
+			var now = DateTime.UtcNow;
+			var due = lastFire is { } lf ? lf.AddSeconds(loop.DelaySeconds) : now;
+
+			LogLoopTriggerAutoResume(reg.Id, reg.OrchestrationPath, reg.RunCount, lastFire);
+
+			if (due > now)
+			{
+				// Not yet due — arm NextFireTime so a future tick fires it. The scheduler
+				// tick only watches SchedulerTriggerConfig, so we schedule the resume via
+				// a tracked background delay task instead.
+				var wait = due - now;
+				TrackBackgroundTask(Task.Run(async () =>
+				{
+					try
+					{
+						await Task.Delay(wait, cancellationToken);
+						if (!cancellationToken.IsCancellationRequested && reg.Config.Enabled)
+						{
+							await ExecuteOrchestrationAsync(reg, reg.Parameters);
+						}
+					}
+					catch (OperationCanceledException) { /* shutdown */ }
+				}, cancellationToken));
+			}
+			else
+			{
+				// Overdue (or no history). Fire exactly once on a background task so we
+				// continue seeding without blocking.
+				TrackBackgroundTask(Task.Run(async () =>
+				{
+					try
+					{
+						if (!cancellationToken.IsCancellationRequested && reg.Config.Enabled)
+						{
+							await ExecuteOrchestrationAsync(reg, reg.Parameters);
+						}
+					}
+					catch (OperationCanceledException) { /* shutdown */ }
+				}, cancellationToken));
+			}
+		}
+	}
+
 	private async Task CheckSchedulerTriggersAsync(CancellationToken stoppingToken)
 	{
 		var now = DateTime.UtcNow;
@@ -778,7 +918,11 @@ public partial class TriggerManager : BackgroundService
 				}
 				else
 				{
-					reg.NextFireTime = CalculateNextFireTime(schedulerConfig);
+					// Post-run: reg.LastFireTime was just updated to now in
+					// ExecuteOrchestrationCoreAsync, so passing it produces the same
+					// "now + interval" result as before but keeps the call site
+					// consistent with the history-aware overload.
+					reg.NextFireTime = CalculateNextFireTime(schedulerConfig, reg.LastFireTime);
 					reg.Status = TriggerStatus.Waiting;
 				}
 			}
@@ -1032,7 +1176,7 @@ public partial class TriggerManager : BackgroundService
 		else if (reg.Config is SchedulerTriggerConfig schedulerConfig)
 		{
 			reg.Status = TriggerStatus.Waiting;
-			reg.NextFireTime = CalculateNextFireTime(schedulerConfig);
+			reg.NextFireTime = CalculateNextFireTime(schedulerConfig, reg.LastFireTime);
 		}
 		else if (reg.Config is ManualTriggerConfig)
 		{
@@ -1176,6 +1320,24 @@ public partial class TriggerManager : BackgroundService
 	}
 
 	private static DateTime CalculateNextFireTime(SchedulerTriggerConfig config)
+		=> CalculateNextFireTime(config, lastFireTime: null);
+
+	/// <summary>
+	/// Computes the next scheduled fire time for an interval or cron scheduler trigger.
+	/// <para>
+	/// Cron triggers always pick the next wall-clock occurrence and ignore <paramref name="lastFireTime"/>.
+	/// </para>
+	/// <para>
+	/// Interval triggers honor the persisted <paramref name="lastFireTime"/> so the user-facing
+	/// schedule survives host restarts and profile re-activation. The rules:
+	/// </para>
+	/// <list type="bullet">
+	///   <item><description>No history: next = now + interval (first run will fire after one full interval).</description></item>
+	///   <item><description>Due time (lastFire + interval) is in the future: next = due (wait remaining time).</description></item>
+	///   <item><description>Due time has already passed: next = now (fire exactly once on the next tick — even if several intervals were missed, we do not catch up multiple times).</description></item>
+	/// </list>
+	/// </summary>
+	private static DateTime CalculateNextFireTime(SchedulerTriggerConfig config, DateTime? lastFireTime)
 	{
 		if (!string.IsNullOrWhiteSpace(config.Cron))
 		{
@@ -1184,7 +1346,14 @@ public partial class TriggerManager : BackgroundService
 
 		if (config.IntervalSeconds.HasValue && config.IntervalSeconds.Value > 0)
 		{
-			return DateTime.UtcNow.AddSeconds(config.IntervalSeconds.Value);
+			var interval = TimeSpan.FromSeconds(config.IntervalSeconds.Value);
+			var now = DateTime.UtcNow;
+			if (lastFireTime is { } lastFire)
+			{
+				var due = lastFire + interval;
+				return due <= now ? now : due;
+			}
+			return now + interval;
 		}
 
 		// Default: 1 minute from now
@@ -1226,6 +1395,7 @@ public partial class TriggerManager : BackgroundService
 				DelaySeconds = l.DelaySeconds,
 				MaxIterations = l.MaxIterations,
 				ContinueOnFailure = l.ContinueOnFailure,
+				AutoResume = l.AutoResume,
 			},
 		WebhookTriggerConfig w => new WebhookTriggerConfig
 		{
@@ -1282,6 +1452,7 @@ public partial class TriggerManager : BackgroundService
 				DelaySeconds = element.TryGetProperty("delaySeconds", out var delay) ? delay.GetInt32() : 0,
 				MaxIterations = element.TryGetProperty("maxIterations", out var maxIter) ? maxIter.GetInt32() : null,
 				ContinueOnFailure = element.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
+				AutoResume = element.TryGetProperty("autoResume", out var autoResume) && autoResume.GetBoolean(),
 			},
 		TriggerType.Webhook => new WebhookTriggerConfig
 		{
@@ -1358,6 +1529,15 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Error in trigger manager loop")]
 	private partial void LogTriggerManagerLoopError(Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to seed trigger history from run store")]
+	private partial void LogTriggerSeedingFailed(Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Trigger history seeding skipped: configured run store does not expose orchestration stats")]
+	private partial void LogTriggerSeedingSkippedNoStore();
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Auto-resuming loop trigger '{TriggerId}' for orchestration '{Path}' (prior runs={RunCount}, lastFire={LastFire})")]
+	private partial void LogLoopTriggerAutoResume(string triggerId, string path, int runCount, DateTime? lastFire);
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Trigger '{TriggerId}' execution failed")]
 	private partial void LogTriggerExecutionFailed(Exception ex, string triggerId);

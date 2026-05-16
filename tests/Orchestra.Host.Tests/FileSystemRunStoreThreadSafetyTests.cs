@@ -35,16 +35,18 @@ public class FileSystemRunStoreThreadSafetyTests : IDisposable
 		string? runId = null,
 		string orchestrationName = "test-orchestration",
 		string triggeredBy = "manual",
-		string? triggerId = null)
+		string? triggerId = null,
+		DateTimeOffset? startedAt = null)
 	{
 		var id = runId ?? Guid.NewGuid().ToString("N")[..12];
-		var now = DateTimeOffset.UtcNow;
+		var completedAt = startedAt is { } s ? s.AddSeconds(5) : DateTimeOffset.UtcNow;
+		var effectiveStartedAt = startedAt ?? completedAt.AddSeconds(-5);
 		return new OrchestrationRunRecord
 		{
 			RunId = id,
 			OrchestrationName = orchestrationName,
-			StartedAt = now.AddSeconds(-5),
-			CompletedAt = now,
+			StartedAt = effectiveStartedAt,
+			CompletedAt = completedAt,
 			Status = ExecutionStatus.Succeeded,
 			TriggeredBy = triggeredBy,
 			TriggerId = triggerId,
@@ -56,8 +58,8 @@ public class FileSystemRunStoreThreadSafetyTests : IDisposable
 				{
 					StepName = "step-1",
 					Status = ExecutionStatus.Succeeded,
-					StartedAt = now.AddSeconds(-5),
-					CompletedAt = now,
+					StartedAt = effectiveStartedAt,
+					CompletedAt = completedAt,
 					Content = "output",
 				}
 			},
@@ -67,8 +69,8 @@ public class FileSystemRunStoreThreadSafetyTests : IDisposable
 				{
 					StepName = "step-1",
 					Status = ExecutionStatus.Succeeded,
-					StartedAt = now.AddSeconds(-5),
-					CompletedAt = now,
+					StartedAt = effectiveStartedAt,
+					CompletedAt = completedAt,
 					Content = "output",
 				}
 			},
@@ -636,5 +638,60 @@ public class FileSystemRunStoreThreadSafetyTests : IDisposable
 		summaries.Should().HaveCount(1);
 		summaries[0].FailedStepName.Should().Be("analyze");
 		summaries[0].ErrorMessage.Should().Be("Rate limit exceeded");
+	}
+
+	// ─── GetOrchestrationRunStatsAsync ─────────────────────────────────────────
+
+	[Fact]
+	public async Task GetOrchestrationRunStatsAsync_EmptyStore_ReturnsEmptyMap()
+	{
+		var stats = await _store.GetOrchestrationRunStatsAsync();
+		stats.Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task GetOrchestrationRunStatsAsync_SingleOrchestration_ReturnsCountAndLatest()
+	{
+		var t0 = new DateTimeOffset(2024, 5, 1, 12, 0, 0, TimeSpan.Zero);
+		await Store.SaveRunAsync(CreateTestRecord(runId: "r1", orchestrationName: "alpha", startedAt: t0));
+		await Store.SaveRunAsync(CreateTestRecord(runId: "r2", orchestrationName: "alpha", startedAt: t0.AddMinutes(5)));
+		await Store.SaveRunAsync(CreateTestRecord(runId: "r3", orchestrationName: "alpha", startedAt: t0.AddMinutes(2)));
+
+		var stats = await _store.GetOrchestrationRunStatsAsync();
+
+		stats.Should().ContainKey("alpha");
+		stats["alpha"].Count.Should().Be(3);
+		stats["alpha"].LastStartedAt.Should().Be(t0.AddMinutes(5),
+			"LastStartedAt should be the maximum StartedAt regardless of save order");
+	}
+
+	[Fact]
+	public async Task GetOrchestrationRunStatsAsync_MultipleOrchestrations_KeepsCountsIsolated()
+	{
+		var now = DateTimeOffset.UtcNow;
+		await Store.SaveRunAsync(CreateTestRecord(runId: "a1", orchestrationName: "alpha", startedAt: now.AddMinutes(-3)));
+		await Store.SaveRunAsync(CreateTestRecord(runId: "a2", orchestrationName: "alpha", startedAt: now.AddMinutes(-1)));
+		await Store.SaveRunAsync(CreateTestRecord(runId: "b1", orchestrationName: "beta", startedAt: now.AddMinutes(-2)));
+
+		var stats = await _store.GetOrchestrationRunStatsAsync();
+
+		stats.Should().HaveCount(2);
+		stats["alpha"].Count.Should().Be(2);
+		stats["beta"].Count.Should().Be(1);
+	}
+
+	[Fact]
+	public async Task GetOrchestrationRunStatsAsync_KeysAreCaseInsensitive()
+	{
+		var now = DateTimeOffset.UtcNow;
+		await Store.SaveRunAsync(CreateTestRecord(runId: "x1", orchestrationName: "MyOrch", startedAt: now));
+
+		var stats = await _store.GetOrchestrationRunStatsAsync();
+
+		// Same key lookup with different casing must succeed: orchestration names are
+		// matched case-insensitively across the host API layer.
+		stats.ContainsKey("myorch").Should().BeTrue();
+		stats.ContainsKey("MYORCH").Should().BeTrue();
+		stats.ContainsKey("MyOrch").Should().BeTrue();
 	}
 }

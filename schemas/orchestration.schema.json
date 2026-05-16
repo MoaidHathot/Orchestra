@@ -859,6 +859,11 @@
                 "type": "boolean",
                 "description": "Whether to continue looping after a failed run.",
                 "default": false
+              },
+              "autoResume": {
+                "type": "boolean",
+                "description": "When true, the host re-fires this loop on startup so the chain continues across host restarts. The first auto-resume fire respects delaySeconds measured from the most recent persisted run. Defaults to false.",
+                "default": false
               }
             },
             "unevaluatedProperties": false

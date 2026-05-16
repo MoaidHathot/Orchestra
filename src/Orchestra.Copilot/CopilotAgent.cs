@@ -22,6 +22,7 @@ public partial class CopilotAgent : IAgent
 	private readonly string[] _skillDirectories;
 	private readonly Engine.InfiniteSessionConfig? _infiniteSessionConfig;
 	private readonly ImageAttachment[] _attachments;
+	private readonly CopilotAgentSwapOptions _swapOptions;
 	private readonly ILogger<CopilotAgent> _logger;
 	private readonly ILoggerFactory _loggerFactory;
 
@@ -57,6 +58,7 @@ public partial class CopilotAgent : IAgent
 			skillDirectories,
 			infiniteSessionConfig,
 			attachments,
+			swapOptions: null,
 			logger,
 			loggerFactory)
 	{
@@ -79,6 +81,45 @@ public partial class CopilotAgent : IAgent
 			ImageAttachment[] attachments,
 			ILogger<CopilotAgent> logger,
 			ILoggerFactory? loggerFactory = null)
+		: this(
+			clientPool,
+			model,
+			systemPrompt,
+			mcps,
+			subagents,
+			reasoningLevel,
+			systemPromptMode,
+			systemPromptSections,
+			reporter,
+			engineTools,
+			engineToolContext,
+			skillDirectories,
+			infiniteSessionConfig,
+			attachments,
+			swapOptions: null,
+			logger,
+			loggerFactory)
+	{
+	}
+
+	internal CopilotAgent(
+			ICopilotClientPool clientPool,
+			string model,
+			string? systemPrompt,
+			Mcp[] mcps,
+			Subagent[] subagents,
+			ReasoningLevel? reasoningLevel,
+			SystemPromptMode? systemPromptMode,
+			Dictionary<string, SystemPromptSectionOverride>? systemPromptSections,
+			IOrchestrationReporter reporter,
+			IReadOnlyCollection<IEngineTool> engineTools,
+			EngineToolContext? engineToolContext,
+			string[] skillDirectories,
+			Engine.InfiniteSessionConfig? infiniteSessionConfig,
+			ImageAttachment[] attachments,
+			CopilotAgentSwapOptions? swapOptions,
+			ILogger<CopilotAgent> logger,
+			ILoggerFactory? loggerFactory = null)
 	{
 		_clientPool = clientPool;
 		_model = model;
@@ -94,6 +135,7 @@ public partial class CopilotAgent : IAgent
 		_skillDirectories = skillDirectories;
 		_infiniteSessionConfig = infiniteSessionConfig;
 		_attachments = attachments;
+		_swapOptions = swapOptions ?? CopilotAgentSwapOptions.Defaults;
 		_logger = logger;
 		_loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
 	}
@@ -105,10 +147,126 @@ public partial class CopilotAgent : IAgent
 		return new AgentTask(channel.Reader, resultTask);
 	}
 
+	/// <summary>
+	/// Drives the full prompt-step lifecycle, including the CLI-swap-and-resume recovery
+	/// loop. On a transport-class failure (broker latched the worker unhealthy, or the
+	/// CLI's own retry budget was exhausted) the loop abandons the dying CLI, acquires
+	/// a fresh worker, and either resumes the prior session (Phase 2) or cold-restarts
+	/// (re-send the original prompt). Budget is bounded by
+	/// <see cref="CopilotAgentSwapOptions.CliSwapBudgetPerStep"/>; non-recoverable errors
+	/// short-circuit immediately.
+	/// </summary>
 	private async Task<AgentResult> RunSessionAsync(
 			string prompt,
 			ChannelWriter<AgentEvent> writer,
 			CancellationToken cancellationToken)
+	{
+		try
+		{
+			string? priorSessionId = null;
+			int swapAttempt = 0;
+
+			while (true)
+			{
+				// Box that the inner attempt updates as soon as CreateSession/Resume succeeds.
+				// We can't rely on the exception's TriggeringSessionId because the fault
+				// broker may have been latched by a SIBLING session (e.g. another concurrent
+				// step on the same CLI) — that id belongs to someone else and must NOT
+				// become this step's resume target.
+				var attemptSessionIdBox = new SessionIdBox();
+
+				try
+				{
+					return await RunOneAttemptAsync(
+						prompt,
+						writer,
+						priorSessionId,
+						swapAttempt,
+						attemptSessionIdBox,
+						cancellationToken).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException)
+				{
+					throw;
+				}
+				catch (Exception ex) when (TryClassifySwapEligibleFailure(ex, out var reason))
+				{
+					// We saw a CLI-class failure. Decide whether we still have budget,
+					// and figure out the recovery mode (resume vs cold restart).
+					var attemptedSessionId = attemptSessionIdBox.Value ?? priorSessionId;
+					if (swapAttempt >= _swapOptions.CliSwapBudgetPerStep)
+					{
+						LogSwapBudgetExhausted(
+							attemptedSessionId ?? "(none)",
+							swapAttempt,
+							_swapOptions.CliSwapBudgetPerStep,
+							reason);
+						throw;
+					}
+
+					swapAttempt++;
+					// resume_locked is the signal that the SDK couldn't take ownership of
+					// the prior session in time. Force a cold restart so we don't loop on
+					// the same lock; everything else honours the resume policy.
+					var nextMode = reason == "resume_locked"
+						? SwapMode.ColdRestart
+						: ResolveSwapMode(attemptedSessionId);
+					LogSwapTriggered(
+						attemptedSessionId ?? "(none)",
+						swapAttempt,
+						_swapOptions.CliSwapBudgetPerStep,
+						reason,
+						nextMode);
+
+					EmitSwapEvent(
+						writer,
+						priorSessionId: attemptedSessionId,
+						swapAttempt: swapAttempt,
+						swapBudget: _swapOptions.CliSwapBudgetPerStep,
+						reason: reason,
+						mode: nextMode);
+
+					_clientPool.RecordSwapTriggered();
+					_reporter.ReportCliSwapTriggered(
+						_stepName,
+						priorSessionId: attemptedSessionId,
+						swapAttempt: swapAttempt,
+						swapBudget: _swapOptions.CliSwapBudgetPerStep,
+						reason: reason,
+						mode: nextMode == SwapMode.Resume ? "resume" : "cold_restart");
+
+					priorSessionId = nextMode == SwapMode.Resume ? attemptedSessionId : null;
+					// Loop back for another attempt on a fresh worker.
+				}
+			}
+		}
+		catch (OperationCanceledException)
+		{
+			throw;
+		}
+		finally
+		{
+			writer.TryComplete();
+		}
+	}
+
+	/// <summary>
+	/// One pass of acquire-lease → create-or-resume-session → send → await-completion.
+	/// Throws on any failure; the outer <see cref="RunSessionAsync"/> classifies the
+	/// exception and either retries (CLI-class failures, budget permitting) or rethrows
+	/// (non-recoverable failures, cancellation, or budget exhausted).
+	/// </summary>
+	/// <param name="attemptSessionIdBox">Mutable wrapper the inner attempt populates as
+	/// soon as it has issued (or resumed) a session id, so the outer swap loop knows
+	/// which session id is OURS — distinct from any sibling session that may have
+	/// latched the fault broker first.</param>
+	private async Task<AgentResult> RunOneAttemptAsync(
+		string prompt,
+		ChannelWriter<AgentEvent> writer,
+		string? priorSessionId,
+		int swapAttempt,
+		SessionIdBox attemptSessionIdBox,
+		CancellationToken cancellationToken)
 	{
 		ICopilotClientLease? lease = null;
 		try
@@ -120,7 +278,7 @@ public partial class CopilotAgent : IAgent
 			// Fast-fail: if a sibling session has already declared this CLI client unhealthy,
 			// don't even attempt CreateSessionAsync — the JSON-RPC call would just hang or
 			// throw "connection lost" anyway. Surface a loud, structured exception so the
-			// engine's retry policy can short-circuit instead of burning the retry budget.
+			// swap loop classifies it as transport_lost and tries again on a fresh worker.
 			if (faultBroker?.IsClientUnhealthy == true)
 			{
 				LogSessionSkippedClientUnhealthy(
@@ -138,15 +296,36 @@ public partial class CopilotAgent : IAgent
 							 $"Probe: {faultBroker.UnhealthyReason ?? "(no details)"}.");
 			}
 
-			var config = BuildSessionConfig();
 			LogMcpConfiguration();
 
-			LogSessionCreating(client.DiagnosticHash, _model, _mcps.Length, Environment.CurrentManagedThreadId);
+			var isResumeAttempt = swapAttempt > 0
+				&& priorSessionId is not null
+				&& _swapOptions.ResumeOnSwapEnabled;
+			var attemptSessionConfig = BuildSessionConfig();
+
+			LogSessionCreating(
+				client.DiagnosticHash,
+				_model,
+				_mcps.Length,
+				Environment.CurrentManagedThreadId,
+				isResumeAttempt ? "resume" : "create",
+				priorSessionId ?? "(none)");
+
 			var sw = System.Diagnostics.Stopwatch.StartNew();
 			ICopilotSession session;
 			try
 			{
-				session = await client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
+				if (isResumeAttempt)
+				{
+					var resumeConfig = BuildResumeSessionConfig(attemptSessionConfig);
+					session = await client.ResumeSessionAsync(priorSessionId!, resumeConfig, cancellationToken)
+						.ConfigureAwait(false);
+				}
+				else
+				{
+					session = await client.CreateSessionAsync(attemptSessionConfig, cancellationToken)
+						.ConfigureAwait(false);
+				}
 			}
 			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 			{
@@ -154,14 +333,37 @@ public partial class CopilotAgent : IAgent
 			}
 			catch (Exception ex)
 			{
-				LogSessionCreateFailed(ex, client.DiagnosticHash, sw.ElapsedMilliseconds);
+				LogSessionCreateFailed(
+					ex,
+					client.DiagnosticHash,
+					sw.ElapsedMilliseconds,
+					isResumeAttempt ? "resume" : "create");
 				await ProbeAfterSdkFailureAsync(
 					faultBroker,
-					failedSessionId: "(session-create)",
-					failureReason: $"CreateSessionAsync failed: {ex.Message}").ConfigureAwait(false);
+					failedSessionId: isResumeAttempt
+						? $"(session-resume:{priorSessionId})"
+						: "(session-create)",
+					failureReason: $"{(isResumeAttempt ? "ResumeSessionAsync" : "CreateSessionAsync")} failed: {ex.Message}").ConfigureAwait(false);
+
+				// If the probe latched the broker, surface a structured unhealthy exception
+				// so the outer swap loop can route this attempt to a fresh worker. Otherwise
+				// rethrow the SDK's exception unchanged.
+				if (faultBroker?.IsClientUnhealthy == true)
+				{
+					throw NewClientUnhealthyFromBroker(faultBroker, ex,
+						triggeringSessionId: priorSessionId ?? "(session-create)");
+				}
 				throw;
 			}
-			LogSessionCreated(client.DiagnosticHash, sw.ElapsedMilliseconds);
+			LogSessionCreated(
+				client.DiagnosticHash,
+				sw.ElapsedMilliseconds,
+				session.SessionId,
+				isResumeAttempt ? "resume" : "create");
+			// Tell the outer swap loop this is OUR session id (distinct from any sibling
+			// that might have failed first on the same CLI). The classifier prefers this
+			// over UnhealthyTriggeringSessionId for the resume target.
+			attemptSessionIdBox.Value = session.SessionId;
 			await using var _sessionDispose = session;
 
 			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -176,6 +378,41 @@ public partial class CopilotAgent : IAgent
 				session.SessionId,
 				faultException => done.TrySetException(faultException));
 
+			// On the resume path, wait briefly for the SDK's SessionResumeEvent so we can
+			// detect an AlreadyInUse race against the dying CLI's lock and fall back to
+			// cold restart if the lock isn't released within our grace window.
+			if (isResumeAttempt && _swapOptions.ResumeAlreadyInUseWait > TimeSpan.Zero)
+			{
+				var resumeOutcome = await WaitForResumeOutcomeAsync(
+					handler,
+					sessionId: session.SessionId,
+					cancellationToken).ConfigureAwait(false);
+
+				if (resumeOutcome == ResumeOutcome.AlreadyInUseLocked)
+				{
+					// Abandon this resume attempt. Best-effort delete the on-disk session so
+					// it doesn't pile up across runs, then throw a synthetic unhealthy
+					// exception with the special "resume_locked" reason. The outer swap loop
+					// catches that and re-enters with priorSessionId=null (cold restart).
+					LogResumeAlreadyInUseFallback(session.SessionId, _swapOptions.ResumeAlreadyInUseWait);
+					try
+					{
+						await client.DeleteSessionAsync(session.SessionId, CancellationToken.None)
+							.ConfigureAwait(false);
+					}
+					catch (Exception delEx)
+					{
+						LogResumeDeleteFailed(delEx, session.SessionId);
+					}
+
+					throw new CopilotClientUnhealthyException(
+						triggeringSessionId: session.SessionId,
+						triggeringFailureReason: "resume_locked",
+						probeDetails: $"SessionResumeEvent.AlreadyInUse=true persisted past {_swapOptions.ResumeAlreadyInUseWait.TotalSeconds:0.#}s grace window",
+						message: $"Resumed session '{session.SessionId}' remained AlreadyInUse past the grace window; falling back to cold restart.");
+				}
+			}
+
 			// Build message options with optional attachments
 			var messageOptions = new MessageOptions { Prompt = prompt };
 			if (_attachments.Length > 0)
@@ -183,11 +420,12 @@ public partial class CopilotAgent : IAgent
 				messageOptions.Attachments = BuildAttachments();
 			}
 
+			// On a resume that succeeded (not AlreadyInUseLocked), the SDK has restored the
+			// conversation. We still send the same prompt; the model continues from where
+			// the previous turn left off. If the user wants a different behavior in future,
+			// this is the place to gate it.
 			try
 			{
-				// Bracket the SDK SendAsync call with structured logs so the success path
-				// has timing/visibility instead of being silent. Pairs with LogSessionError
-				// in the handler to give a complete picture of the SDK call's outcome.
 				LogSessionSendStarting(session.SessionId, _model, prompt.Length, _attachments.Length);
 				var sendSw = System.Diagnostics.Stopwatch.StartNew();
 				await session.SendAsync(messageOptions, cancellationToken).ConfigureAwait(false);
@@ -204,6 +442,15 @@ public partial class CopilotAgent : IAgent
 					faultBroker,
 					failedSessionId: session.SessionId,
 					failureReason: $"SendAsync failed: {ex.Message}").ConfigureAwait(false);
+
+				// Same idea as the CreateSessionAsync catch: if the probe latched the
+				// broker, the right classification of this failure is "CLI is dead, retry
+				// on a fresh worker", not "the SDK's specific InvalidOperationException".
+				if (faultBroker?.IsClientUnhealthy == true)
+				{
+					throw NewClientUnhealthyFromBroker(faultBroker, ex,
+						triggeringSessionId: session.SessionId);
+				}
 				throw;
 			}
 
@@ -248,18 +495,171 @@ public partial class CopilotAgent : IAgent
 				ActualModelInfo = FindModelInfo(availableModels, handler.ActualModel),
 			};
 		}
-		catch (OperationCanceledException)
-		{
-			throw;
-		}
 		finally
 		{
 			if (lease is not null)
 			{
 				await lease.DisposeAsync().ConfigureAwait(false);
 			}
-			writer.TryComplete();
 		}
+	}
+
+	/// <summary>
+	/// Recovery mode used by the swap loop. Resume preserves conversation history by
+	/// reattaching to the prior session id on a fresh CLI worker; ColdRestart re-creates
+	/// the session from scratch and re-sends the original prompt.
+	/// </summary>
+	private enum SwapMode
+	{
+		Resume,
+		ColdRestart,
+	}
+
+	/// <summary>
+	/// Outcome of waiting for the SDK's <c>SessionResumeEvent</c> on a resume attempt.
+	/// </summary>
+	private enum ResumeOutcome
+	{
+		/// <summary>Resume event arrived with AlreadyInUse=false (clean resume).</summary>
+		Resumed,
+		/// <summary>Resume event arrived with AlreadyInUse=true and never cleared inside the grace window.</summary>
+		AlreadyInUseLocked,
+		/// <summary>No resume event observed before the grace window expired; treat as clean (the SDK may simply not emit one when the session has no replayable state).</summary>
+		NoEventObserved,
+	}
+
+	private SwapMode ResolveSwapMode(string? attemptedSessionId)
+		=> _swapOptions.ResumeOnSwapEnabled && !string.IsNullOrEmpty(attemptedSessionId)
+			? SwapMode.Resume
+			: SwapMode.ColdRestart;
+
+	/// <summary>
+	/// Classifies an exception thrown from <see cref="RunOneAttemptAsync"/> as a CLI-class
+	/// swap-eligible failure. Returns true for: <see cref="CopilotClientUnhealthyException"/>
+	/// (transport / fault-broker latched), <see cref="CopilotSessionFailedException"/> with
+	/// the CLI's own "retried N times" exhaustion pattern, and <see cref="CopilotSessionFailedException"/>
+	/// with <c>Kind == AbnormalShutdown</c>. Returns false for everything else (validation
+	/// errors, cancellation, plain model errors) so they propagate without being retried.
+	/// </summary>
+	private static bool TryClassifySwapEligibleFailure(Exception ex, out string reason)
+	{
+		reason = string.Empty;
+
+		switch (ex)
+		{
+			case CopilotClientUnhealthyException unhealthy:
+				reason = unhealthy.TriggeringFailureReason == "resume_locked"
+					? "resume_locked"
+					: "transport_lost";
+				return true;
+
+			case CopilotSessionFailedException sessionFailed:
+				if (sessionFailed.Kind == CopilotSessionFailureKind.AbnormalShutdown)
+				{
+					reason = "abnormal_shutdown";
+					return true;
+				}
+				if (sessionFailed.Details?.ExhaustedCliRetries == true)
+				{
+					reason = "cli_exhausted_retries";
+					return true;
+				}
+				return false;
+
+			default:
+				return false;
+		}
+	}
+
+	/// <summary>
+	/// Small mutable wrapper used to thread the session id of the current attempt back to
+	/// the outer swap loop without throwing it through the exception. The outer loop reads
+	/// <see cref="Value"/> after a failed attempt; resume swaps use it as the resume target.
+	/// </summary>
+	private sealed class SessionIdBox
+	{
+		public string? Value;
+	}
+
+	/// <summary>
+	/// Waits for the SDK's <c>SessionResumeEvent</c> with a bounded grace window. When
+	/// the event arrives with <c>AlreadyInUse=true</c> we poll up to
+	/// <see cref="CopilotAgentSwapOptions.ResumeAlreadyInUseWait"/> for the flag to clear
+	/// (the dying CLI typically releases the lock within seconds). If it never clears,
+	/// returns <see cref="ResumeOutcome.AlreadyInUseLocked"/> so the caller can abandon
+	/// the resume and cold-restart instead.
+	/// </summary>
+	private async Task<ResumeOutcome> WaitForResumeOutcomeAsync(
+		CopilotSessionHandler handler,
+		string sessionId,
+		CancellationToken cancellationToken)
+	{
+		var deadline = DateTimeOffset.UtcNow + _swapOptions.ResumeAlreadyInUseWait;
+
+		// First, wait briefly for the FIRST resume event (or no event at all — some sessions
+		// don't emit one if there's nothing to replay).
+		var firstWait = Task.WhenAny(
+			handler.ResumeEventReceived,
+			Task.Delay(_swapOptions.ResumeAlreadyInUseWait, cancellationToken));
+		var winner = await firstWait.ConfigureAwait(false);
+		if (winner != handler.ResumeEventReceived)
+		{
+			// Timed out without seeing the resume event. Treat as clean (the SDK didn't
+			// promise we'd always get one; clean is safer than nuking the session here).
+			return ResumeOutcome.NoEventObserved;
+		}
+
+		var data = await handler.ResumeEventReceived.ConfigureAwait(false);
+		if (data.AlreadyInUse != true)
+		{
+			return ResumeOutcome.Resumed;
+		}
+
+		// AlreadyInUse=true. Poll a few times inside the remaining grace window. We can't
+		// re-call ResumeSessionAsync without disposing/recreating, so we just observe the
+		// handler's _lastResumeData (the SDK may emit subsequent SessionResumeEvent
+		// notifications if internal state changes). In practice, AlreadyInUse remains true
+		// for the whole resume, so this poll usually returns immediately with the locked
+		// outcome — that's the trigger to fall back to cold restart.
+		while (DateTimeOffset.UtcNow < deadline)
+		{
+			try
+			{
+				await Task.Delay(_swapOptions.ResumeAlreadyInUsePollInterval, cancellationToken).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException)
+			{
+				throw;
+			}
+
+			var latest = handler.LastResumeData;
+			if (latest is not null && latest.AlreadyInUse != true)
+			{
+				LogResumeAlreadyInUseCleared(sessionId);
+				return ResumeOutcome.Resumed;
+			}
+		}
+
+		return ResumeOutcome.AlreadyInUseLocked;
+	}
+
+	private static void EmitSwapEvent(
+		ChannelWriter<AgentEvent> writer,
+		string? priorSessionId,
+		int swapAttempt,
+		int swapBudget,
+		string reason,
+		SwapMode mode)
+	{
+		writer.TryWrite(new AgentEvent
+		{
+			Type = AgentEventType.CliInstanceSwapped,
+			PriorSessionId = priorSessionId,
+			SwapAttempt = swapAttempt,
+			SwapBudget = swapBudget,
+			SwapReason = reason,
+			SwapMode = mode == SwapMode.Resume ? "resume" : "cold_restart",
+		});
 	}
 
 	private async Task ProbeAfterSdkFailureAsync(
@@ -281,6 +681,62 @@ public partial class CopilotAgent : IAgent
 		{
 			LogFaultBrokerProbeThrew(probeEx, failedSessionId);
 		}
+	}
+
+	/// <summary>
+	/// Builds a <see cref="CopilotClientUnhealthyException"/> from a freshly-latched fault
+	/// broker, carrying the original SDK exception as the <c>InnerException</c>. Used to
+	/// convert opaque SDK transport exceptions into a structured signal that the swap
+	/// loop's classifier recognises.
+	/// </summary>
+	private static CopilotClientUnhealthyException NewClientUnhealthyFromBroker(
+		ISessionFaultBroker faultBroker,
+		Exception innerException,
+		string triggeringSessionId)
+	{
+		var reason = faultBroker.UnhealthyTriggeringFailureReason ?? "transport_lost";
+		var probe = faultBroker.UnhealthyReason ?? "(no probe details)";
+		var attributedSessionId = faultBroker.UnhealthyTriggeringSessionId ?? triggeringSessionId;
+
+		var ex = new CopilotClientUnhealthyException(
+			triggeringSessionId: attributedSessionId,
+			triggeringFailureReason: reason,
+			probeDetails: probe,
+			message: $"Copilot CLI client latched unhealthy after this attempt's SDK failure " +
+					 $"(inner: {innerException.GetType().Name}: {innerException.Message}). " +
+					 $"Triggering session: '{attributedSessionId}'. Probe: {probe}.");
+		// Preserve the original SDK exception for diagnostics. CopilotClientUnhealthyException
+		// inherits from Exception so we can't set InnerException via constructor, but xUnit
+		// and structured loggers serialize Data[] entries.
+		ex.Data["InnerSdkException"] = innerException.ToString();
+		return ex;
+	}
+
+	/// <summary>
+	/// Builds a <see cref="ResumeSessionConfig"/> from the same source data as a normal
+	/// <see cref="SessionConfig"/>, with the fields the SDK actually accepts on resume
+	/// (model, MCPs, sub-agents, tools, hooks). The SDK requires <c>OnPermissionRequest</c>
+	/// on resume or it throws <see cref="ArgumentException"/>; we set it unconditionally
+	/// from <see cref="PermissionHandler.ApproveAll"/> mirroring the create path.
+	/// </summary>
+	internal ResumeSessionConfig BuildResumeSessionConfig(SessionConfig baseConfig)
+	{
+		var config = new ResumeSessionConfig
+		{
+			Model = baseConfig.Model,
+			Streaming = true,
+			OnPermissionRequest = PermissionHandler.ApproveAll,
+			ReasoningEffort = baseConfig.ReasoningEffort,
+			SystemMessage = baseConfig.SystemMessage,
+			McpServers = baseConfig.McpServers,
+			CustomAgents = baseConfig.CustomAgents,
+			Tools = baseConfig.Tools,
+			SkillDirectories = baseConfig.SkillDirectories,
+			InfiniteSessions = baseConfig.InfiniteSessions,
+			Hooks = baseConfig.Hooks,
+			WorkingDirectory = baseConfig.WorkingDirectory,
+		};
+		return config;
 	}
 
 	internal SessionConfig BuildSessionConfig()
@@ -781,16 +1237,16 @@ public partial class CopilotAgent : IAgent
 	private partial void LogListModelsFailed(Exception ex);
 
 	[LoggerMessage(EventId = 8, Level = LogLevel.Information,
-		Message = "Session: creating on client#{ClientHash} (model={Model}, mcps={McpCount}, thread={ThreadId})")]
-	private partial void LogSessionCreating(int clientHash, string model, int mcpCount, int threadId);
+		Message = "Session: {Operation} on client#{ClientHash} (model={Model}, mcps={McpCount}, thread={ThreadId}, priorSessionId={PriorSessionId})")]
+	private partial void LogSessionCreating(int clientHash, string model, int mcpCount, int threadId, string operation, string priorSessionId);
 
 	[LoggerMessage(EventId = 9, Level = LogLevel.Information,
-		Message = "Session: created on client#{ClientHash} in {ElapsedMs}ms")]
-	private partial void LogSessionCreated(int clientHash, long elapsedMs);
+		Message = "Session: {Operation} succeeded on client#{ClientHash} in {ElapsedMs}ms (sessionId={SessionId})")]
+	private partial void LogSessionCreated(int clientHash, long elapsedMs, string sessionId, string operation);
 
 	[LoggerMessage(EventId = 10, Level = LogLevel.Error,
-		Message = "Session: CreateSessionAsync FAILED on client#{ClientHash} after {ElapsedMs}ms")]
-	private partial void LogSessionCreateFailed(Exception ex, int clientHash, long elapsedMs);
+		Message = "Session: {Operation} FAILED on client#{ClientHash} after {ElapsedMs}ms")]
+	private partial void LogSessionCreateFailed(Exception ex, int clientHash, long elapsedMs, string operation);
 
 	[LoggerMessage(EventId = 11, Level = LogLevel.Warning,
 		Message = "Session '{SessionId}': fault-broker probe threw — sibling sessions may not be faulted")]
@@ -815,6 +1271,34 @@ public partial class CopilotAgent : IAgent
 	[LoggerMessage(EventId = 15, Level = LogLevel.Error,
 		Message = "Session '{SessionId}': SendAsync FAILED (model={Model})")]
 	private partial void LogSessionSendFailed(Exception ex, string sessionId, string model);
+
+	// ── CLI-swap / session-resume recovery logs (EventIds 16–20) ──
+	//
+	// These logs are the operator-visible signal that the agent recovered (or tried to
+	// recover) from a CLI-class failure mid-step. Information level by design — a swap
+	// is a notable event that should appear in default-verbosity host logs alongside the
+	// existing session-creation pair so a post-mortem can read the recovery sequence
+	// without enabling Debug.
+
+	[LoggerMessage(EventId = 16, Level = LogLevel.Warning,
+		Message = "CLI swap triggered (priorSessionId={PriorSessionId}, attempt={SwapAttempt}/{SwapBudget}, reason={Reason}, mode={Mode})")]
+	private partial void LogSwapTriggered(string priorSessionId, int swapAttempt, int swapBudget, string reason, SwapMode mode);
+
+	[LoggerMessage(EventId = 17, Level = LogLevel.Error,
+		Message = "CLI swap budget exhausted (priorSessionId={PriorSessionId}, attempts={SwapAttempt}/{SwapBudget}, lastReason={Reason}); failing the step")]
+	private partial void LogSwapBudgetExhausted(string priorSessionId, int swapAttempt, int swapBudget, string reason);
+
+	[LoggerMessage(EventId = 18, Level = LogLevel.Warning,
+		Message = "Resume session '{SessionId}' remained AlreadyInUse past {GraceWindow}; falling back to cold restart")]
+	private partial void LogResumeAlreadyInUseFallback(string sessionId, TimeSpan graceWindow);
+
+	[LoggerMessage(EventId = 19, Level = LogLevel.Information,
+		Message = "Resume session '{SessionId}' AlreadyInUse cleared inside the grace window; continuing with the resumed session")]
+	private partial void LogResumeAlreadyInUseCleared(string sessionId);
+
+	[LoggerMessage(EventId = 20, Level = LogLevel.Warning,
+		Message = "Best-effort DeleteSessionAsync failed for session '{SessionId}' after resume_locked fallback")]
+	private partial void LogResumeDeleteFailed(Exception ex, string sessionId);
 
 	#endregion
 }

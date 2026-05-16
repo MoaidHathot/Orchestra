@@ -189,6 +189,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			skillDirectories: skillDirectories,
 			infiniteSessionConfig: infiniteSessionConfig,
 			attachments: attachments,
+			swapOptions: CopilotAgentSwapOptions.FromPoolOptions(_poolOptions),
 			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
 			loggerFactory: _loggerFactory
 		);
@@ -213,6 +214,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			skillDirectories: config.SkillDirectories,
 			infiniteSessionConfig: config.InfiniteSessionConfig,
 			attachments: config.Attachments,
+			swapOptions: CopilotAgentSwapOptions.FromPoolOptions(_poolOptions),
 			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
 			loggerFactory: _loggerFactory
 		);

@@ -1512,6 +1512,36 @@ public class CopilotSessionHandlerTests
 		((IAgentSessionFailedException)ex!).Details!.StatusCode.Should().Be(429);
 	}
 
+	[Fact]
+	public void HandleEvent_Error_WithCliExhaustedRetriesMessage_SetsExhaustedCliRetriesFlag()
+	{
+		// Arrange — Phase 3: the agent's swap loop classifies "Failed to get response
+		// from the AI model; retried N times" as a swap-eligible failure. The handler
+		// must set Details.ExhaustedCliRetries=true so the classifier can pick it up.
+		var errorEvent = CreateDetailedErrorEvent(
+			message: "Execution failed: Error: Failed to get response from the AI model; retried 5 times (total retry wait time: 5.62 seconds) Last error: Unknown error",
+			errorType: "query");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		var ex = (CopilotSessionFailedException)_done.Task.Exception!.Flatten().InnerException!;
+		ex.Details!.ExhaustedCliRetries.Should().BeTrue(
+			"the CLI's own retry budget was exhausted; the agent should classify this as swap-eligible");
+	}
+
+	[Fact]
+	public void HandleEvent_Error_WithUnrelatedMessage_LeavesExhaustedCliRetriesFalse()
+	{
+		// Arrange — a plain 403/quota error must not be confused with CLI exhaustion.
+		_handler.HandleEvent(CreateDetailedErrorEvent(message: "403 Forbidden", errorType: "authorization"));
+
+		// Assert
+		var ex = (CopilotSessionFailedException)_done.Task.Exception!.Flatten().InnerException!;
+		ex.Details!.ExhaustedCliRetries.Should().BeFalse();
+	}
+
 	#endregion
 
 	#region Tool Execution Complete With Null ToolCallId

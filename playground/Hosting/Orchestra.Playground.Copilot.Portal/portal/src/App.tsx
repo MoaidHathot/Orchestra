@@ -185,6 +185,17 @@ interface RuntimeOrchestration extends Orchestration {
   triggerType?: string;
   hasParameters?: boolean;
   lastExecutionStatus?: string;
+  /**
+   * Total number of recorded runs for this orchestration, derived by the API from the
+   * persisted run store (with in-memory trigger counters as an overlay). Stable across
+   * server restarts; populated even for manual orchestrations that have no trigger.
+   */
+  runCount?: number;
+  /**
+   * Most-recent run start time. ISO-8601 UTC. Same source-of-truth semantics as
+   * <c>runCount</c>.
+   */
+  lastExecutionTime?: string;
 }
 
 type StepStatusValue = PortalStepStatus;
@@ -304,8 +315,13 @@ function App(): React.JSX.Element {
   // The query string is recomputed whenever the filter state changes; the ref allows
   // long-lived polling intervals to read the latest URL without tearing down on every
   // checkbox toggle.
+  //
+  // The sidebar fetches a generous slice (not the full set) so the in-place scroll list
+  // covers the typical browsing case without forcing the user to open the "Show all
+  // executions" modal. The modal at /api/history/all still serves deep history with
+  // pagination. The endpoint returns lightweight row summaries so this size is cheap.
   const historyUrl = useMemo(
-    () => `/api/history?limit=15${buildFilterQueryString(historyFilters)}`,
+    () => `/api/history?limit=50${buildFilterQueryString(historyFilters)}`,
     [historyFilters],
   );
   const historyUrlRef = useRef(historyUrl);
@@ -704,10 +720,15 @@ function App(): React.JSX.Element {
         orchestrationName: orch.name,
         stepCount: rt.stepCount || orch.steps?.length,
         triggeredBy: rt.triggerType || 'Manual',
-        // Merge pending trigger data when available
+        // Merge trigger metadata from activeData.pending
         nextFireTime: pendingInfo?.nextFireTime,
-        lastFireTime: pendingInfo?.lastFireTime,
-        runCount: pendingInfo?.runCount,
+        // runCount and lastFireTime: prefer the orchestration record (sourced from the
+        // persisted run store on the server) over the pending-trigger snapshot. Both
+        // endpoints now overlay the same store-derived stats, but the orchestration
+        // endpoint covers ALL orchestrations including manual / no-trigger ones whose
+        // pendingInfo would otherwise be undefined and leave the card showing 0 / Never.
+        lastFireTime: rt.lastExecutionTime ?? pendingInfo?.lastFireTime,
+        runCount: rt.runCount ?? pendingInfo?.runCount,
         status: pendingInfo?.status,
         webhookUrl: pendingInfo?.webhookUrl,
       };

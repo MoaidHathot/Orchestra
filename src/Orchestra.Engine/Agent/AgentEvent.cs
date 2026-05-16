@@ -188,6 +188,53 @@ public class AgentEvent
 	/// </summary>
 	public IReadOnlyDictionary<string, AgentQuotaSnapshot>? QuotaSnapshots { get; init; }
 
+	// ── CLI swap / session resume recovery (used by CliInstanceSwapped, SessionResumed) ──
+
+	/// <summary>
+	/// Zero-based index of the current swap attempt for the step. <c>0</c> = original attempt,
+	/// <c>1</c> = first swap, etc. Stamped on <see cref="AgentEventType.CliInstanceSwapped"/>.
+	/// </summary>
+	public int? SwapAttempt { get; init; }
+
+	/// <summary>
+	/// Total number of swaps allowed for this step (the per-step swap budget). Stamped on
+	/// <see cref="AgentEventType.CliInstanceSwapped"/> so observers can render "swap 1 of 3".
+	/// </summary>
+	public int? SwapBudget { get; init; }
+
+	/// <summary>
+	/// Short machine-friendly reason for the swap, e.g. <c>"transport_lost"</c>,
+	/// <c>"cli_exhausted_retries"</c>, <c>"abnormal_shutdown"</c>, <c>"resume_locked"</c>.
+	/// </summary>
+	public string? SwapReason { get; init; }
+
+	/// <summary>
+	/// Recovery mode for the swap: <c>"resume"</c> when the new CLI will pick up the prior
+	/// session id, <c>"cold_restart"</c> when the prompt is re-sent on a fresh session.
+	/// </summary>
+	public string? SwapMode { get; init; }
+
+	/// <summary>
+	/// Session id of the session that failed and triggered the swap. Null on the original
+	/// attempt's failure if no session id was ever issued (CreateSessionAsync threw).
+	/// </summary>
+	public string? PriorSessionId { get; init; }
+
+	/// <summary>
+	/// Number of persisted events that already exist in the resumed session, as reported
+	/// by the SDK's <c>SessionResumeData.EventCount</c>. Stamped on
+	/// <see cref="AgentEventType.SessionResumed"/>.
+	/// </summary>
+	public int? ResumedEventCount { get; init; }
+
+	/// <summary>
+	/// True when the SDK reports that another client already had the session open at resume
+	/// time (<c>SessionResumeData.AlreadyInUse</c>). Indicates the previous CLI hasn't fully
+	/// released the session lock yet; Orchestra polls briefly and falls back to cold restart
+	/// if the lock isn't released within the grace window.
+	/// </summary>
+	public bool? ResumeAlreadyInUse { get; init; }
+
 	// ── Actor attribution (sub-agent vs main agent) ──
 
 	/// <summary>

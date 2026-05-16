@@ -500,6 +500,7 @@ public static class OrchestrationParser
 					DelaySeconds = root.TryGetProperty("delaySeconds", out var delay) ? delay.GetInt32() : 0,
 					MaxIterations = root.TryGetProperty("maxIterations", out var maxIter) ? maxIter.GetInt32() : null,
 					ContinueOnFailure = root.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
+					AutoResume = root.TryGetProperty("autoResume", out var autoResume) && autoResume.GetBoolean(),
 				},
 		TriggerType.Webhook => new WebhookTriggerConfig
 		{

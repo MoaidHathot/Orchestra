@@ -553,6 +553,15 @@ public class CopilotAgentTests
 			return Task.FromResult(Session ?? new FakeCopilotSession("session-ok"));
 		}
 
+		public Task<ICopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+			=> Task.FromException<ICopilotSession>(new NotSupportedException("Resume not supported in this fake."));
+
+		public Task<string?> GetLastSessionIdAsync(CancellationToken cancellationToken)
+			=> Task.FromResult<string?>(null);
+
+		public Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken)
+			=> Task.CompletedTask;
+
 		public Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
 			=> Task.FromResult<IReadOnlyList<ModelInfo>>([]);
 

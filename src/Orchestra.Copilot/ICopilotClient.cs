@@ -10,6 +10,32 @@ internal interface ICopilotClient : IAsyncDisposable
 	Task StopAsync();
 	Task PingAsync(string message, CancellationToken cancellationToken);
 	Task<ICopilotSession> CreateSessionAsync(SessionConfig config, CancellationToken cancellationToken);
+
+	/// <summary>
+	/// Resumes an existing on-disk Copilot session by id. The Copilot SDK persists session
+	/// state across CLI process boundaries, so a session created/started on a previous (now
+	/// dead) CLI worker can be resumed on a freshly spawned worker as long as both workers
+	/// share the same config dir (the default on Windows: <c>%USERPROFILE%\.copilot\</c>).
+	/// Used by <see cref="CopilotAgent"/>'s swap-and-resume loop to recover an in-flight
+	/// session after a JSON-RPC transport failure without losing conversation history.
+	/// </summary>
+	Task<ICopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken);
+
+	/// <summary>
+	/// Returns the most recently used session id known to the CLI, or null when no
+	/// session has been seen yet. Diagnostic only — Orchestra always tracks the id it
+	/// just created itself, so this is exposed mainly for tests and future tooling.
+	/// </summary>
+	Task<string?> GetLastSessionIdAsync(CancellationToken cancellationToken);
+
+	/// <summary>
+	/// Permanently deletes a session and all its on-disk data. Used as best-effort cleanup
+	/// when a resume attempt is abandoned because the dying CLI never released the lock
+	/// (<c>SessionResumeData.AlreadyInUse</c> remained true past our grace window), so
+	/// stale session files don't accumulate on disk across orchestration runs.
+	/// </summary>
+	Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken);
+
 	Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken);
 }
 
@@ -47,6 +73,18 @@ internal sealed class CopilotSdkClientAdapter : ICopilotClient
 		var session = await _client.CreateSessionAsync(config, cancellationToken).ConfigureAwait(false);
 		return new CopilotSdkSessionAdapter(session);
 	}
+
+	public async Task<ICopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
+	{
+		var session = await _client.ResumeSessionAsync(sessionId, config, cancellationToken).ConfigureAwait(false);
+		return new CopilotSdkSessionAdapter(session);
+	}
+
+	public Task<string?> GetLastSessionIdAsync(CancellationToken cancellationToken)
+		=> _client.GetLastSessionIdAsync(cancellationToken);
+
+	public Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken)
+		=> _client.DeleteSessionAsync(sessionId, cancellationToken);
 
 	public async Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
 	{

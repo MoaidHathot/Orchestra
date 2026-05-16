@@ -101,6 +101,14 @@ public class OrchestrationHostOptions
 	};
 
 	/// <summary>
+	/// Copilot-provider-specific runtime settings (swap budget, session-resume policy,
+	/// AlreadyInUse grace window). These are applied at <c>CopilotAgentBuilder</c>
+	/// construction time and consumed by every <c>CopilotAgent</c> built from that
+	/// builder. Provider-neutral hosts can leave this null to use the built-in defaults.
+	/// </summary>
+	public CopilotProviderOptions Copilot { get; set; } = new();
+
+	/// <summary>
 	/// Optional global lifecycle hooks applied to all orchestrations executed by this host.
 	/// </summary>
 	public HookDefinition[] Hooks { get; set; } = [];

@@ -124,6 +124,30 @@ public interface IOrchestrationReporter
 	void ReportToolExecutionCompleted(string stepName, string toolName, bool success, string? result, string? error, ActorContext actor)
 		=> ReportToolExecutionCompleted(stepName, toolName, success, result, error);
 
+	// ── CLI swap / session resume recovery (Orchestra.Copilot). ──
+
+	/// <summary>
+	/// Reports that the agent abandoned its current Copilot CLI worker mid-step and
+	/// acquired a fresh one to recover from a transport-level fault. The step is still
+	/// running on the new worker; reporters should surface this as a notable lifecycle
+	/// event distinct from <see cref="ReportStepRetry"/> (which signals orchestration-level
+	/// retry, not in-step recovery). Default implementation is a no-op.
+	/// </summary>
+	/// <param name="stepName">Step that experienced the swap.</param>
+	/// <param name="priorSessionId">Session id that failed, or null if no session id had been issued yet.</param>
+	/// <param name="swapAttempt">1-based attempt counter for this step.</param>
+	/// <param name="swapBudget">Total swap budget for the step.</param>
+	/// <param name="reason">Short machine-friendly reason: <c>"transport_lost"</c>, <c>"cli_exhausted_retries"</c>, <c>"abnormal_shutdown"</c>, <c>"resume_locked"</c>.</param>
+	/// <param name="mode">Recovery mode the agent is about to attempt: <c>"resume"</c> or <c>"cold_restart"</c>.</param>
+	void ReportCliSwapTriggered(
+		string stepName,
+		string? priorSessionId,
+		int swapAttempt,
+		int swapBudget,
+		string reason,
+		string mode)
+	{ }
+
 	// ── Human-in-the-loop ──
 
 	/// <summary>

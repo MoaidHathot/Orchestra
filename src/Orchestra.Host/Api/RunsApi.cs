@@ -528,14 +528,14 @@ public static partial class RunsApi
 					source = "pending",
 					webhookUrl = t.Config is WebhookTriggerConfig ? $"/api/webhooks/{t.Id}" : null,
 				};
-			});
+			}).ToList();
 
 			return Results.Json(new
 			{
 				running = activeList,
 				pending,
 				totalRunning = activeList.Count,
-				totalPending = pending.Count()
+				totalPending = pending.Count
 			}, jsonOptions);
 		});
 

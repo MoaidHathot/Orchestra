@@ -54,4 +54,26 @@ public enum AgentEventType
 
 	// Quota / entitlement snapshot (emitted alongside usage events)
 	QuotaSnapshot,
+
+	// ── CLI swap / session resume recovery (Orchestra.Copilot) ──
+
+	/// <summary>
+	/// Emitted when the agent abandons the current CLI worker mid-step and acquires a
+	/// fresh one to recover from a transport-level failure (e.g. JSON-RPC connection lost,
+	/// CLI process died, CLI exhausted its internal model-API retries). Informational —
+	/// the step continues on the new worker, either by resuming the prior session (if
+	/// session id was captured and resume is enabled) or by re-sending the original prompt.
+	/// Carries <see cref="AgentEvent.SwapAttempt"/>, <see cref="AgentEvent.SwapBudget"/>,
+	/// <see cref="AgentEvent.SwapReason"/>, <see cref="AgentEvent.SwapMode"/>,
+	/// <see cref="AgentEvent.PriorSessionId"/>.
+	/// </summary>
+	CliInstanceSwapped,
+
+	/// <summary>
+	/// Emitted when the agent successfully resumes an existing Copilot session on a fresh
+	/// CLI worker. Surfaces the SDK's <c>SessionResumeEvent</c> payload so operators and
+	/// UIs can show "resumed at event N, model X". Carries
+	/// <see cref="AgentEvent.ResumedEventCount"/>, <see cref="AgentEvent.ResumeAlreadyInUse"/>.
+	/// </summary>
+	SessionResumed,
 }

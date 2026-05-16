@@ -144,6 +144,7 @@ public static class TriggersApi
 				delaySeconds = l.DelaySeconds,
 				maxIterations = l.MaxIterations,
 				continueOnFailure = l.ContinueOnFailure,
+				autoResume = l.AutoResume,
 				inputHandlerPrompt = l.InputHandlerPrompt
 			},
 		WebhookTriggerConfig w => new

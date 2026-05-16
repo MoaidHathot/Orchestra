@@ -387,6 +387,56 @@ public partial class FileSystemRunStore : IRunStore
 	}
 
 	/// <summary>
+	/// Returns per-orchestration aggregate stats (run count and most-recent start time)
+	/// computed from the persisted run index. Cheaper than flattening with
+	/// <see cref="GetRunSummariesAsync(int?, CancellationToken)"/> and then grouping
+	/// because we read straight from the per-orchestration index map.
+	/// <para>
+	/// Used by the public API to surface <c>runCount</c> and <c>lastExecutionTime</c>
+	/// that survive process restarts and correctly reflect manual orchestrations —
+	/// the in-memory <see cref="Triggers.TriggerRegistration.RunCount"/> /
+	/// <see cref="Triggers.TriggerRegistration.LastFireTime"/> are intentionally not
+	/// persisted and only cover trigger fires from the current process lifetime.
+	/// </para>
+	/// </summary>
+	/// <remarks>
+	/// The returned dictionary uses ordinal case-insensitive keys to match the lookup
+	/// semantics used throughout the host (orchestration names are user-supplied and
+	/// not guaranteed to have stable casing across sources).
+	/// </remarks>
+	public async Task<IReadOnlyDictionary<string, OrchestrationRunStats>> GetOrchestrationRunStatsAsync(
+		CancellationToken cancellationToken = default)
+	{
+		await EnsureIndexLoadedAsync(cancellationToken);
+
+		lock (_indexWriteLock)
+		{
+			var stats = new Dictionary<string, OrchestrationRunStats>(
+				_indexByOrchestration.Count,
+				StringComparer.OrdinalIgnoreCase);
+
+			foreach (var (name, indices) in _indexByOrchestration)
+			{
+				if (indices.Count == 0)
+					continue;
+
+				// indices may be appended to concurrently; snapshot length and iterate by index.
+				var count = indices.Count;
+				DateTimeOffset latest = indices[0].StartedAt;
+				for (var i = 1; i < count; i++)
+				{
+					var started = indices[i].StartedAt;
+					if (started > latest) latest = started;
+				}
+
+				stats[name] = new OrchestrationRunStats(count, latest);
+			}
+
+			return stats;
+		}
+	}
+
+	/// <summary>
 	/// Scans persisted run records for entries matching the supplied parent or root execution
 	/// id. Used by the data-plane <c>list_child_runs</c> tool to scope the listing to the
 	/// caller's execution tree without exposing global history.
@@ -843,3 +893,10 @@ public class StepResultRecord
 	public TimeSpan Duration { get; init; }
 	public string? ErrorMessage { get; init; }
 }
+
+/// <summary>
+/// Per-orchestration aggregate statistics derived from the persisted run index.
+/// </summary>
+/// <param name="Count">Total number of recorded runs for the orchestration.</param>
+/// <param name="LastStartedAt">Most-recent <see cref="RunIndex.StartedAt"/> across the orchestration's recorded runs.</param>
+public sealed record OrchestrationRunStats(int Count, DateTimeOffset LastStartedAt);
