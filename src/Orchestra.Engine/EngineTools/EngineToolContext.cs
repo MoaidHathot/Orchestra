@@ -124,15 +124,24 @@ public sealed class EngineToolContext
 	internal CancellationTokenSource? StepCompletionCts { get; set; }
 
 	/// <summary>
-	/// Sets the execution status override. Can only transition to a "worse" state
-	/// (e.g., from null to Failed). Once failed, cannot be reset to succeeded.
-	/// NoAction can transition to Failed but not back to Succeeded.
+	/// Sets the execution status override. The FIRST terminal status wins — once any
+	/// terminal value (<see cref="ExecutionStatus.Succeeded"/>, <see cref="ExecutionStatus.Failed"/>,
+	/// or <see cref="ExecutionStatus.NoAction"/>) has been recorded, subsequent calls are
+	/// silently ignored. This guards against the LLM declaring success and then later
+	/// declaring failure (or vice versa) inside the same step — for example after a CLI
+	/// swap re-runs the prompt and the model on the fresh worker reaches a different
+	/// conclusion than the one that already terminated the step.
 	/// </summary>
 	public void SetStatus(ExecutionStatus status, string? reason = null)
 	{
-		// Only allow setting status if not already failed
-		if (StatusOverride == ExecutionStatus.Failed)
+		// First terminal status wins. Cancelled is not a terminal-by-engine-tool state
+		// (it can only be entered by the engine itself) so it's not considered here.
+		if (StatusOverride is ExecutionStatus.Succeeded
+			or ExecutionStatus.Failed
+			or ExecutionStatus.NoAction)
+		{
 			return;
+		}
 
 		StatusOverride = status;
 		StatusReason = reason;

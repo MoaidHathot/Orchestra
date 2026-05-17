@@ -13,7 +13,17 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private readonly IHumanInputWaiter _humanInputWaiter;
 	private readonly string? _serverUrl;
 	private readonly ILogger<PromptExecutor> _logger;
+	private readonly int _maxAgentSwapAttempts;
 	private readonly RequestUserInputTool _requestUserInputTool = new();
+
+	/// <summary>
+	/// Default budget for executor-level CLI-swap retries when the underlying agent
+	/// surfaces an <see cref="AgentSessionErrorDetails.ExhaustedCliRetries"/> failure
+	/// that the in-agent swap loop did not (or could not) recover from. One extra
+	/// attempt is enough in practice: a fresh CLI process re-rolls upstream provider
+	/// routing / connection pool and typically clears the upstream blip.
+	/// </summary>
+	public const int DefaultMaxAgentSwapAttempts = 1;
 
 	public PromptExecutor(
 		AgentBuilder agentBuilder,
@@ -24,7 +34,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		IMcpResolver? mcpResolver = null,
 		IPendingInputStore? pendingInputStore = null,
 		IHumanInputWaiter? humanInputWaiter = null,
-		string? serverUrl = null)
+		string? serverUrl = null,
+		int maxAgentSwapAttempts = DefaultMaxAgentSwapAttempts)
 	{
 		_agentBuilder = agentBuilder;
 		_reporter = reporter;
@@ -35,9 +46,102 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		_humanInputWaiter = humanInputWaiter ?? NullHumanInputWaiter.Instance;
 		_serverUrl = serverUrl;
 		_logger = logger;
+		_maxAgentSwapAttempts = Math.Max(0, maxAgentSwapAttempts);
 	}
 
+	/// <summary>
+	/// Executes the prompt step with an executor-level swap-retry safety net. If the
+	/// inner attempt fails with <see cref="AgentSessionErrorDetails.ExhaustedCliRetries"/>
+	/// set (CLI's own "Failed to get response from the AI model; retried N times" error),
+	/// we re-run the entire step against a fresh agent instance, up to
+	/// <see cref="DefaultMaxAgentSwapAttempts"/> extra attempts.
+	///
+	/// This is a belt-and-suspenders complement to <c>CopilotAgent</c>'s in-process
+	/// swap loop. The in-agent loop only fires when the failure is observed inside
+	/// the same <c>RunSessionAsync</c> call; if the error surfaces via a code path
+	/// that bypasses the in-agent classifier (e.g. when the SDK reports the failure
+	/// but the swap classifier returns false for any reason), this executor-level
+	/// fallback still recovers the step instead of failing the orchestration outright.
+	/// </summary>
 	public override async Task<ExecutionResult> ExecuteAsync(
+		PromptOrchestrationStep step,
+		OrchestrationExecutionContext context,
+		CancellationToken cancellationToken = default)
+	{
+		var attempt = 0;
+		while (true)
+		{
+			var result = await ExecuteOnceAsync(step, context, cancellationToken).ConfigureAwait(false);
+
+			// Only retry on a Failed result whose details flag the CLI exhaustion pattern.
+			// Cancelled / NoAction / Succeeded short-circuit immediately.
+			//
+			// CRITICAL: also short-circuit when the LLM already declared a terminal status
+			// via orchestra_set_status (CapturedStatusOverride is set). Re-running the
+			// prompt would discard the LLM's decision and could flip a declared success
+			// into a swap-induced failure — exactly the failure mode that motivated this
+			// guard. The captured override is honored unconditionally: success/no_action
+			// short-circuits with a synthesized result; LLM-declared failures propagate
+			// as-is (no retry, no override synthesis).
+			if (result.CapturedStatusOverride is ExecutionStatus.Succeeded or ExecutionStatus.NoAction
+				&& result.Status == ExecutionStatus.Failed)
+			{
+				LogExecutorSkipRetryLlmTerminalStatus(step.Name, result.CapturedStatusOverride.ToString()!, result.ErrorMessage ?? "(no message)");
+				return SynthesizeResultFromCapturedOverride(result);
+			}
+
+			if (result.Status != ExecutionStatus.Failed
+				|| result.ErrorDetails?.ExhaustedCliRetries != true
+				|| attempt >= _maxAgentSwapAttempts
+				|| cancellationToken.IsCancellationRequested)
+			{
+				if (attempt > 0 && result.Status == ExecutionStatus.Failed
+					&& result.ErrorDetails?.ExhaustedCliRetries == true)
+				{
+					LogExecutorSwapBudgetExhausted(step.Name, attempt, _maxAgentSwapAttempts, result.ErrorMessage ?? "(no message)");
+				}
+				return result;
+			}
+
+			attempt++;
+			LogExecutorSwapTriggered(step.Name, attempt, _maxAgentSwapAttempts, result.ErrorMessage ?? "(no message)");
+		}
+	}
+
+	/// <summary>
+	/// Constructs a non-Failed <see cref="ExecutionResult"/> from a Failed result whose
+	/// <see cref="ExecutionResult.CapturedStatusOverride"/> is <see cref="ExecutionStatus.Succeeded"/>
+	/// or <see cref="ExecutionStatus.NoAction"/>. Used when a post-set_status transport
+	/// failure would otherwise discard the LLM's declared outcome.
+	///
+	/// Note: the synthesized result carries an empty content because the original Failed
+	/// result didn't capture the LLM's response body — but that's strictly better than
+	/// failing a step the LLM already finished. Future work could plumb the captured
+	/// content through ExecuteOnceAsync's catch as well.
+	/// </summary>
+	private static ExecutionResult SynthesizeResultFromCapturedOverride(ExecutionResult failedResult)
+	{
+		var status = failedResult.CapturedStatusOverride!.Value;
+		return new ExecutionResult
+		{
+			Content = string.Empty,
+			Status = status,
+			ErrorMessage = null,
+			RawDependencyOutputs = failedResult.RawDependencyOutputs,
+			PromptSent = failedResult.PromptSent,
+			ActualModel = failedResult.ActualModel,
+			SelectedModel = failedResult.SelectedModel,
+			RequestedModelInfo = failedResult.RequestedModelInfo,
+			SelectedModelInfo = failedResult.SelectedModelInfo,
+			ActualModelInfo = failedResult.ActualModelInfo,
+			Trace = failedResult.Trace,
+			SavedFiles = failedResult.SavedFiles,
+			RetryHistory = failedResult.RetryHistory,
+			CapturedStatusOverride = status,
+		};
+	}
+
+	private async Task<ExecutionResult> ExecuteOnceAsync(
 		PromptOrchestrationStep step,
 		OrchestrationExecutionContext context,
 		CancellationToken cancellationToken = default)
@@ -380,10 +484,91 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				if (probe.InnerException is null) break;
 			}
 
+			// Fallback exhaustion detection: when the CLI surfaces "Failed to get response
+			// from the AI model; retried N times" via a path that did NOT mint an
+			// IAgentSessionFailedException with the flag set (e.g. raw SDK exception from
+			// SendAsync, or a wrapped/re-throw that lost the structured payload), we still
+			// want the executor-level swap loop above to kick in. Synthesize a minimal
+			// details record with ExhaustedCliRetries=true so ExecuteAsync's outer loop can
+			// detect it the same way it detects the structured form. The message-pattern
+			// check is intentionally lenient — same shape as
+			// CopilotSessionHandler.LooksLikeCliExhaustedRetries — so the two stay in sync.
+			if (errorDetails?.ExhaustedCliRetries != true && LooksLikeCliExhaustedRetriesMessage(ex.Message))
+			{
+				errorDetails = (errorDetails ?? new AgentSessionErrorDetails()) with { ExhaustedCliRetries = true };
+			}
+
 			_reporter.ReportStepError(step.Name, ex.Message, errorDetails);
 
-			return ExecutionResult.Failed(ex.Message, rawDependencyOutputs, trace: trace, errorCategory: category, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name), errorDetails: errorDetails);
+			// Capture any terminal status the LLM declared via orchestra_set_status BEFORE
+			// the transport failure. The executor-level swap-retry loop (ExecuteAsync) uses
+			// this to skip retrying a step that the LLM already finished — otherwise a
+			// post-success transport error would burn the retry budget and potentially
+			// flip a declared success into a swap-induced failure.
+			var failedResult = ExecutionResult.Failed(
+				ex.Message,
+				rawDependencyOutputs,
+				trace: trace,
+				errorCategory: category,
+				savedFiles: context.TempFileStore?.GetFilesForStep(step.Name),
+				errorDetails: errorDetails);
+
+			if (!engineToolCtx.HasStatusOverride)
+				return failedResult;
+
+			return new ExecutionResult
+			{
+				Content = failedResult.Content,
+				Status = failedResult.Status,
+				ErrorMessage = failedResult.ErrorMessage,
+				RawContent = failedResult.RawContent,
+				RawDependencyOutputs = failedResult.RawDependencyOutputs,
+				PromptSent = failedResult.PromptSent,
+				ActualModel = failedResult.ActualModel,
+				SelectedModel = failedResult.SelectedModel,
+				RequestedModelInfo = failedResult.RequestedModelInfo,
+				SelectedModelInfo = failedResult.SelectedModelInfo,
+				ActualModelInfo = failedResult.ActualModelInfo,
+				Usage = failedResult.Usage,
+				Trace = failedResult.Trace,
+				SavedFiles = failedResult.SavedFiles,
+				RetryHistory = failedResult.RetryHistory,
+				ErrorCategory = failedResult.ErrorCategory,
+				ErrorDetails = failedResult.ErrorDetails,
+				CapturedStatusOverride = engineToolCtx.StatusOverride,
+				ChildOrchestrationInfo = failedResult.ChildOrchestrationInfo,
+				OrchestrationCompleteRequested = failedResult.OrchestrationCompleteRequested,
+				OrchestrationCompleteStatus = failedResult.OrchestrationCompleteStatus,
+				OrchestrationCompleteStepName = failedResult.OrchestrationCompleteStepName,
+				OrchestrationCompleteReason = failedResult.OrchestrationCompleteReason,
+			};
 		}
+	}
+
+	/// <summary>
+	/// Detects the bundled Copilot CLI's "I exhausted my internal retries" error
+	/// message shape so the executor-level swap loop can recognise it even when the
+	/// failure surfaces via a non-structured exception path (i.e. without an
+	/// <see cref="IAgentSessionFailedException"/> carrying
+	/// <see cref="AgentSessionErrorDetails.ExhaustedCliRetries"/>). The pattern is
+	/// intentionally identical to <c>CopilotSessionHandler.LooksLikeCliExhaustedRetries</c>
+	/// so both detection sites stay in sync; duplicated here only because Orchestra.Engine
+	/// must not take a build-time dependency on Orchestra.Copilot.
+	/// </summary>
+	internal static bool LooksLikeCliExhaustedRetriesMessage(string? message)
+	{
+		if (string.IsNullOrEmpty(message))
+			return false;
+
+		if (System.Text.RegularExpressions.Regex.IsMatch(
+				message,
+				@"retried\s+\d+\s+times",
+				System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+		{
+			return true;
+		}
+
+		return message.Contains("Failed to get response from the AI model", StringComparison.OrdinalIgnoreCase);
 	}
 
 	private string BuildUserPrompt(PromptOrchestrationStep step, OrchestrationExecutionContext context)
@@ -616,9 +801,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private static ExecutionResult WithOrchestrationComplete(ExecutionResult result, EngineToolContext ctx, string stepName)
 	{
 		var savedFiles = ctx.TempFileStore?.GetFilesForStep(stepName) ?? result.SavedFiles;
+		var capturedOverride = ctx.HasStatusOverride ? ctx.StatusOverride : result.CapturedStatusOverride;
 
 		if (!ctx.OrchestrationCompleteRequested)
-			return WithSavedFiles(result, savedFiles);
+			return WithSavedFiles(result, savedFiles, capturedOverride);
 
 		return new ExecutionResult
 		{
@@ -638,6 +824,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			SavedFiles = savedFiles,
 			RetryHistory = result.RetryHistory,
 			ErrorCategory = result.ErrorCategory,
+			CapturedStatusOverride = capturedOverride,
 			OrchestrationCompleteRequested = true,
 			OrchestrationCompleteStatus = ctx.OrchestrationCompleteStatus,
 			OrchestrationCompleteReason = ctx.OrchestrationCompleteReason,
@@ -645,7 +832,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		};
 	}
 
-	private static ExecutionResult WithSavedFiles(ExecutionResult result, string[] savedFiles) => new()
+	private static ExecutionResult WithSavedFiles(ExecutionResult result, string[] savedFiles, ExecutionStatus? capturedStatusOverride = null) => new()
 	{
 		Content = result.Content,
 		Status = result.Status,
@@ -663,6 +850,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		SavedFiles = savedFiles,
 		RetryHistory = result.RetryHistory,
 		ErrorCategory = result.ErrorCategory,
+		ErrorDetails = result.ErrorDetails,
+		CapturedStatusOverride = capturedStatusOverride ?? result.CapturedStatusOverride,
 		OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
 		OrchestrationCompleteStatus = result.OrchestrationCompleteStatus,
 		OrchestrationCompleteReason = result.OrchestrationCompleteReason,
@@ -724,6 +913,24 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Error,
 		Message = "Step '{StepName}' failed because the agent client is unhealthy (triggered by session '{TriggeringSessionId}': {TriggeringFailureReason}). Categorized as ClientUnhealthy; retries will be skipped.")]
 	private partial void LogStepFailedClientUnhealthy(string stepName, string triggeringSessionId, string triggeringFailureReason);
+
+	[LoggerMessage(
+		EventId = 10,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' agent CLI exhausted internal retries — re-running the step on a fresh agent (executor-level swap attempt {Attempt}/{Budget}). Last error: {LastError}")]
+	private partial void LogExecutorSwapTriggered(string stepName, int attempt, int budget, string lastError);
+
+	[LoggerMessage(
+		EventId = 11,
+		Level = LogLevel.Error,
+		Message = "Step '{StepName}' executor-level swap budget exhausted after {Attempt}/{Budget} extra attempt(s); failing the step. Last error: {LastError}")]
+	private partial void LogExecutorSwapBudgetExhausted(string stepName, int attempt, int budget, string lastError);
+
+	[LoggerMessage(
+		EventId = 12,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' agent surfaced a transport error AFTER the LLM declared a terminal status via orchestra_set_status ({CapturedStatus}); skipping executor-level swap retry and honoring the LLM's declared outcome. Suppressed error: {SuppressedError}")]
+	private partial void LogExecutorSkipRetryLlmTerminalStatus(string stepName, string capturedStatus, string suppressedError);
 
 	#endregion
 }

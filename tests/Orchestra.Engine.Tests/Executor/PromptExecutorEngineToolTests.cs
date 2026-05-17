@@ -182,10 +182,13 @@ public class PromptExecutorEngineToolTests
 		// Act
 		var result = await executor.ExecuteAsync(step, context);
 
-		// Assert - set_status no longer terminates the agent; the LLM continues
-		// and the full response is preserved as the step content.
+		// Assert — Fix A: orchestra_set_status now terminates the step immediately
+		// (RequestStepCompletion cancels the linked CTS), so the LLM's subsequent
+		// MessageDelta payload is NOT delivered. The step content falls back to the
+		// StatusReason the LLM passed to the tool. This prevents the regression where
+		// a later set_status(failed) call could overwrite an earlier set_status(success).
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		result.Content.Should().Be("I have completed the task.");
+		result.Content.Should().Be("All tasks completed successfully");
 	}
 
 	[Fact]

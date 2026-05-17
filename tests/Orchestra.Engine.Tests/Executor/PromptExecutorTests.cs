@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Orchestra.Engine.Tests.TestHelpers;
+using System.Threading.Channels;
 
 namespace Orchestra.Engine.Tests.Executor;
 
@@ -184,6 +185,347 @@ public class PromptExecutorTests
 		}
 
 		public AgentSessionErrorDetails? Details { get; }
+	}
+
+	#endregion
+
+	#region Executor-Level CLI-Exhaustion Swap Retry
+
+	private static AgentSessionErrorDetails ExhaustedCliRetriesDetails() => new()
+	{
+		ErrorType = "model",
+		ExhaustedCliRetries = true,
+	};
+
+	[Fact]
+	public async Task ExecuteAsync_ExhaustedCliRetries_RetriesOnFreshAgent_AndSucceeds()
+	{
+		// Arrange — The bundled Copilot CLI surfaces "Failed to get response from the
+		// AI model; retried 5 times" as an IAgentSessionFailedException whose Details
+		// carry ExhaustedCliRetries=true. The executor-level swap loop must catch this
+		// shape, re-build the agent, and re-run the step. A successful response on the
+		// second attempt is what the user-visible outcome should be.
+		var sessionException = new TestSessionFailedException(
+			"Copilot session failed: Execution failed: Error: Failed to get response from the AI model; retried 5 times (total retry wait time: 5.92 seconds) Last error: Unknown error",
+			ExhaustedCliRetriesDetails());
+		var agentBuilder = new MockAgentBuilder()
+			.WithFailuresThenResponse(sessionException, failureCount: 1, finalResponseContent: "Recovered output");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("get-latest-teams-chat");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded,
+			"the executor-level swap loop must recover from a single CLI-exhaustion failure by re-running on a fresh agent");
+		result.Content.Should().Be("Recovered output");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ExhaustedCliRetries_PlainExceptionMessage_AlsoTriggersSwap()
+	{
+		// Arrange — Defence-in-depth: even if the failure surfaces as a plain Exception
+		// (no IAgentSessionFailedException marker, no structured Details), the executor
+		// must recognise the well-known CLI message pattern and still trigger a swap.
+		// This guards against future SDK changes that route the same error class through
+		// a different exception type.
+		var plainException = new Exception(
+			"Execution failed: Error: Failed to get response from the AI model; retried 5 times (total retry wait time: 5.92 seconds) Last error: Unknown error");
+		var agentBuilder = new MockAgentBuilder()
+			.WithFailuresThenResponse(plainException, failureCount: 1, finalResponseContent: "Recovered output");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be("Recovered output");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ExhaustedCliRetries_BudgetExhausted_ReturnsFailed()
+	{
+		// Arrange — With MaxAgentSwapAttempts=1 (default) the loop allows one extra
+		// attempt. If BOTH attempts hit the CLI-exhaustion error the step must fail
+		// with the original error category preserved (ModelError, not silently demoted)
+		// and ErrorDetails.ExhaustedCliRetries must still be true so the run record
+		// shows operators exactly why the recovery didn't take.
+		var sessionException = new TestSessionFailedException(
+			"Copilot session failed: Failed to get response from the AI model; retried 5 times",
+			ExhaustedCliRetriesDetails());
+		var agentBuilder = new MockAgentBuilder().WithException(sessionException);
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.ModelError);
+		result.ErrorDetails.Should().NotBeNull();
+		result.ErrorDetails!.ExhaustedCliRetries.Should().BeTrue(
+			"the persisted error details must still reflect the CLI-exhaustion classification so post-mortem readers know why the swap budget was consumed");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PlainModelError_IsNotRetried()
+	{
+		// Arrange — A plain failure with no CLI-exhaustion signal must NOT trigger the
+		// executor-level swap loop. Re-running the step on a fresh agent for an ordinary
+		// model error would waste tokens and time — the existing orchestration-level
+		// retry policy is the right knob for those.
+		var unrelatedException = new InvalidOperationException("validation error: bad parameter");
+		var callCount = 0;
+		var agentBuilder = new MockAgentBuilder().WithHandler((_, _) =>
+		{
+			Interlocked.Increment(ref callCount);
+			var ch = Channel.CreateUnbounded<AgentEvent>();
+			ch.Writer.Complete();
+			return new AgentTask(ch.Reader, Task.FromException<AgentResult>(unrelatedException));
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		callCount.Should().Be(1, "a non-exhaustion failure must not trigger the executor-level swap loop");
+		result.ErrorDetails.Should().BeNull("plain exceptions should not synthesise structured details");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ExhaustedCliRetries_WithZeroBudget_FailsImmediately()
+	{
+		// Arrange — Operators can opt out of executor-level recovery by passing
+		// maxAgentSwapAttempts: 0. In that case even a CLI-exhaustion failure must
+		// fail-fast on the first attempt (in-agent swap remains the only recovery path).
+		var sessionException = new TestSessionFailedException(
+			"Failed to get response from the AI model; retried 5 times",
+			ExhaustedCliRetriesDetails());
+		var callCount = 0;
+		var agentBuilder = new MockAgentBuilder().WithHandler((_, _) =>
+		{
+			Interlocked.Increment(ref callCount);
+			var ch = Channel.CreateUnbounded<AgentEvent>();
+			ch.Writer.Complete();
+			return new AgentTask(ch.Reader, Task.FromException<AgentResult>(sessionException));
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, maxAgentSwapAttempts: 0);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		callCount.Should().Be(1, "with budget=0 the executor must not attempt a second run");
+	}
+
+	[Fact]
+	public void LooksLikeCliExhaustedRetriesMessage_RecognisesUserVisibleErrorString()
+	{
+		// Defends against drift between the engine's executor-level detector and
+		// CopilotSessionHandler.LooksLikeCliExhaustedRetries (the CLI/SDK-side detector
+		// that flags ExhaustedCliRetries on the structured details record). Both sites
+		// must recognise the exact production error string captured in the run.json of
+		// the failing run that motivated this safety net.
+		var userVisibleMessage =
+			"Copilot session failed: Execution failed: Error: Failed to get response from the AI model; retried 5 times (total retry wait time: 5.92 seconds) Last error: Unknown error";
+
+		PromptExecutor.LooksLikeCliExhaustedRetriesMessage(userVisibleMessage).Should().BeTrue();
+		PromptExecutor.LooksLikeCliExhaustedRetriesMessage("Failed to get response from the AI model").Should().BeTrue();
+		PromptExecutor.LooksLikeCliExhaustedRetriesMessage("the operation was retried 7 times before timing out").Should().BeTrue();
+		PromptExecutor.LooksLikeCliExhaustedRetriesMessage("validation error: bad parameter").Should().BeFalse();
+		PromptExecutor.LooksLikeCliExhaustedRetriesMessage(null).Should().BeFalse();
+		PromptExecutor.LooksLikeCliExhaustedRetriesMessage("").Should().BeFalse();
+	}
+
+	#endregion
+
+	#region Fix C — Captured set_status guards the swap-retry loop
+
+	[Fact]
+	public async Task ExecuteAsync_LlmDeclaredSuccess_ThenExhaustedCliRetries_DoesNotRetry_AndReturnsSucceeded()
+	{
+		// Regression for run 505940e23cc1: the LLM successfully completed the work
+		// and called orchestra_set_status('success'), then a transport-class failure
+		// surfaced. Previously the executor's swap-retry loop would re-run the prompt
+		// on a fresh agent, which could (and did) flip the result to Failed when the
+		// fresh model reached a different conclusion. With Fix C the executor must
+		// honour the LLM's declared terminal status and return Succeeded without
+		// re-running anything.
+		var callCount = 0;
+		var setStatusTool = new SetStatusTool();
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			Interlocked.Increment(ref callCount);
+			var ch = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run<AgentResult>(async () =>
+			{
+				// Step 1: drive set_status(success) against the real EngineToolContext
+				// captured by the mock builder, so PromptExecutor sees the override.
+				var ctx = agentBuilder.CapturedEngineToolContext!;
+				setStatusTool.Execute("""{"status":"success","reason":"work done"}""", ctx);
+
+				// Step 2: simulate the trailing CLI-exhaustion failure that motivated
+				// the executor-level swap-retry path. With Fix C, the captured override
+				// MUST short-circuit the retry — even though ExhaustedCliRetries is set.
+				await Task.Yield();
+				ch.Writer.Complete();
+				throw new TestSessionFailedException(
+					"Copilot session failed: Failed to get response from the AI model; retried 5 times",
+					new AgentSessionErrorDetails { ExhaustedCliRetries = true });
+			}, ct);
+			return new AgentTask(ch.Reader, resultTask);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("get-latest-teams-chat");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded,
+			"the LLM declared success before the transport failure; the executor must not retry and must honour that decision");
+		result.CapturedStatusOverride.Should().Be(ExecutionStatus.Succeeded);
+		callCount.Should().Be(1, "the swap-retry loop must NOT re-run a step the LLM already declared terminal");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmDeclaredNoAction_ThenExhaustedCliRetries_DoesNotRetry_AndReturnsNoAction()
+	{
+		// no_action is symmetric to success: a terminal LLM decision the executor
+		// must respect rather than blow away with a swap retry.
+		var callCount = 0;
+		var setStatusTool = new SetStatusTool();
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			Interlocked.Increment(ref callCount);
+			var ch = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run<AgentResult>(async () =>
+			{
+				var ctx = agentBuilder.CapturedEngineToolContext!;
+				setStatusTool.Execute("""{"status":"no_action","reason":"nothing to process"}""", ctx);
+				await Task.Yield();
+				ch.Writer.Complete();
+				throw new TestSessionFailedException(
+					"Failed to get response from the AI model; retried 5 times",
+					new AgentSessionErrorDetails { ExhaustedCliRetries = true });
+			}, ct);
+			return new AgentTask(ch.Reader, resultTask);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.NoAction);
+		result.CapturedStatusOverride.Should().Be(ExecutionStatus.NoAction);
+		callCount.Should().Be(1);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LlmDeclaredFailure_ThenExhaustedCliRetries_DoesNotRetry_AndReturnsFailed()
+	{
+		// An LLM-declared failure (set_status('failed')) is ALSO terminal — the
+		// executor must not retry it. The result stays Failed (no upgrade to success).
+		var callCount = 0;
+		var setStatusTool = new SetStatusTool();
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			Interlocked.Increment(ref callCount);
+			var ch = Channel.CreateUnbounded<AgentEvent>();
+			var resultTask = Task.Run<AgentResult>(async () =>
+			{
+				var ctx = agentBuilder.CapturedEngineToolContext!;
+				setStatusTool.Execute("""{"status":"failed","reason":"genuine failure"}""", ctx);
+				await Task.Yield();
+				ch.Writer.Complete();
+				throw new TestSessionFailedException(
+					"Failed to get response from the AI model; retried 5 times",
+					new AgentSessionErrorDetails { ExhaustedCliRetries = true });
+			}, ct);
+			return new AgentTask(ch.Reader, resultTask);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed, "an LLM-declared failure remains Failed; the swap-retry guard does NOT upgrade Failed→Succeeded");
+		result.CapturedStatusOverride.Should().Be(ExecutionStatus.Failed);
+		callCount.Should().Be(1, "the swap-retry loop must not re-run a step the LLM explicitly declared Failed");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_NoCapturedOverride_ExhaustedCliRetries_StillRetries()
+	{
+		// Sanity guard: the Fix C short-circuit must ONLY fire when the LLM declared
+		// a terminal status. Pure transport failures with no engine-tool signal must
+		// still benefit from the executor-level swap-retry loop introduced previously.
+		var sessionException = new TestSessionFailedException(
+			"Failed to get response from the AI model; retried 5 times",
+			new AgentSessionErrorDetails { ExhaustedCliRetries = true });
+		var agentBuilder = new MockAgentBuilder()
+			.WithFailuresThenResponse(sessionException, failureCount: 1, finalResponseContent: "Recovered output");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded, "without a captured override the swap-retry loop must still recover from CLI exhaustion");
+		result.Content.Should().Be("Recovered output");
 	}
 
 	#endregion

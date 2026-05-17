@@ -50,20 +50,26 @@ public class EngineToolContextTests
 	}
 
 	[Fact]
-	public void SetStatus_SucceededThenFailed_TransitionsToFailed()
+	public void SetStatus_SucceededThenFailed_KeepsFirstSucceeded()
 	{
+		// Fix B: first terminal status wins. Without this, a CLI swap that re-runs the
+		// prompt could observe the LLM declaring success on attempt 1 and failure on
+		// attempt 2, and the second call would silently overwrite the first — the
+		// exact bug reported on run 505940e23cc1.
 		var context = new EngineToolContext();
 
 		context.SetStatus(ExecutionStatus.Succeeded, "Done");
-		context.SetStatus(ExecutionStatus.Failed, "Actually failed");
+		context.SetStatus(ExecutionStatus.Failed, "Trying to overwrite success");
 
-		context.StatusOverride.Should().Be(ExecutionStatus.Failed);
-		context.StatusReason.Should().Be("Actually failed");
+		context.StatusOverride.Should().Be(ExecutionStatus.Succeeded, "first terminal status must be sticky for all terminal values");
+		context.StatusReason.Should().Be("Done");
 	}
 
 	[Fact]
 	public void SetStatus_FailedThenSucceeded_StaysFailed()
 	{
+		// Existing first-wins behaviour (Failed was sticky pre-Fix-B). Regression guard
+		// for the case the prior implementation already covered.
 		var context = new EngineToolContext();
 
 		context.SetStatus(ExecutionStatus.Failed, "Failed");
@@ -97,15 +103,17 @@ public class EngineToolContextTests
 	}
 
 	[Fact]
-	public void SetStatus_NoActionThenFailed_TransitionsToFailed()
+	public void SetStatus_NoActionThenFailed_KeepsFirstNoAction()
 	{
+		// Fix B: no_action is also first-wins. Previously NoAction could be overridden
+		// by Failed; that allowed late-arriving overrides to flip the step's outcome.
 		var context = new EngineToolContext();
 
 		context.SetStatus(ExecutionStatus.NoAction, "Nothing to do");
-		context.SetStatus(ExecutionStatus.Failed, "Actually failed");
+		context.SetStatus(ExecutionStatus.Failed, "Trying to overwrite no_action");
 
-		context.StatusOverride.Should().Be(ExecutionStatus.Failed);
-		context.StatusReason.Should().Be("Actually failed");
+		context.StatusOverride.Should().Be(ExecutionStatus.NoAction);
+		context.StatusReason.Should().Be("Nothing to do");
 	}
 
 	[Fact]
@@ -118,6 +126,30 @@ public class EngineToolContextTests
 
 		context.StatusOverride.Should().Be(ExecutionStatus.Failed);
 		context.StatusReason.Should().Be("Failed");
+	}
+
+	[Fact]
+	public void SetStatus_NoActionThenSucceeded_KeepsFirstNoAction()
+	{
+		var context = new EngineToolContext();
+
+		context.SetStatus(ExecutionStatus.NoAction, "Nothing to do");
+		context.SetStatus(ExecutionStatus.Succeeded, "Trying to overwrite no_action");
+
+		context.StatusOverride.Should().Be(ExecutionStatus.NoAction);
+		context.StatusReason.Should().Be("Nothing to do");
+	}
+
+	[Fact]
+	public void SetStatus_SucceededThenNoAction_KeepsFirstSucceeded()
+	{
+		var context = new EngineToolContext();
+
+		context.SetStatus(ExecutionStatus.Succeeded, "Done");
+		context.SetStatus(ExecutionStatus.NoAction, "Trying to overwrite success");
+
+		context.StatusOverride.Should().Be(ExecutionStatus.Succeeded);
+		context.StatusReason.Should().Be("Done");
 	}
 
 	[Fact]

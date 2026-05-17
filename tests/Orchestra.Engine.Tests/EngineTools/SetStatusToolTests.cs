@@ -213,4 +213,87 @@ public class SetStatusToolTests
 
 		tool.Description.Should().Contain("no_action");
 	}
+
+	// ── Fix A: orchestra_set_status is terminal-by-default ──────────────────────────
+	// Calling the tool with any terminal status must (a) cancel the linked
+	// StepCompletionCts so the running agent stops immediately and (b) advertise
+	// "terminal" semantics in its description and return text. This prevents the
+	// failure mode where the LLM marks the step success/failed, keeps running on
+	// the same or a later session, and then overwrites the prior status.
+
+	[Fact]
+	public void Description_DocumentsTerminalSemantics()
+	{
+		var tool = new SetStatusTool();
+
+		// Loose match — exact phrasing may evolve. The key requirements: the model
+		// must be told (1) this terminates immediately and (2) only call it once.
+		tool.Description.Should().ContainAll("TERMINATES", "once");
+	}
+
+	[Fact]
+	public void Execute_StatusSuccess_RequestsStepCompletion()
+	{
+		var tool = new SetStatusTool();
+		using var cts = new CancellationTokenSource();
+		var context = new EngineToolContext { StepCompletionCts = cts };
+
+		tool.Execute("""{"status": "success", "reason": "Done"}""", context);
+
+		context.StepCompletionRequested.Should().BeTrue("orchestra_set_status('success') must signal step completion so the agent is cancelled before it can make further tool calls");
+		cts.IsCancellationRequested.Should().BeTrue("the linked CTS must be cancelled so PromptExecutor's catch picks up the captured StatusOverride");
+	}
+
+	[Fact]
+	public void Execute_StatusFailed_RequestsStepCompletion()
+	{
+		var tool = new SetStatusTool();
+		using var cts = new CancellationTokenSource();
+		var context = new EngineToolContext { StepCompletionCts = cts };
+
+		tool.Execute("""{"status": "failed", "reason": "Cannot proceed"}""", context);
+
+		context.StepCompletionRequested.Should().BeTrue();
+		cts.IsCancellationRequested.Should().BeTrue();
+	}
+
+	[Fact]
+	public void Execute_StatusNoAction_RequestsStepCompletion()
+	{
+		var tool = new SetStatusTool();
+		using var cts = new CancellationTokenSource();
+		var context = new EngineToolContext { StepCompletionCts = cts };
+
+		tool.Execute("""{"status": "no_action", "reason": "Nothing to do"}""", context);
+
+		context.StepCompletionRequested.Should().BeTrue();
+		cts.IsCancellationRequested.Should().BeTrue();
+	}
+
+	[Fact]
+	public void Execute_UnknownStatus_DoesNotRequestStepCompletion()
+	{
+		var tool = new SetStatusTool();
+		using var cts = new CancellationTokenSource();
+		var context = new EngineToolContext { StepCompletionCts = cts };
+
+		tool.Execute("""{"status": "pending", "reason": "Not sure"}""", context);
+
+		context.StepCompletionRequested.Should().BeFalse("only recognised terminal statuses should terminate the step; unknown values are no-ops");
+		cts.IsCancellationRequested.Should().BeFalse();
+	}
+
+	[Fact]
+	public void Execute_StatusSuccess_ReturnTextSignalsTermination()
+	{
+		var tool = new SetStatusTool();
+		var context = new EngineToolContext();
+
+		var result = tool.Execute("""{"status": "success", "reason": "Done"}""", context);
+
+		// The exact phrasing isn't an API contract; just require that the LLM-visible
+		// return text no longer claims work may continue.
+		result.Should().NotContain("continue with any remaining work");
+		result.Should().Contain("terminated");
+	}
 }

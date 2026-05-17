@@ -84,6 +84,19 @@ public class ExecutionResult
 	public AgentSessionErrorDetails? ErrorDetails { get; init; }
 
 	/// <summary>
+	/// The terminal status the step's LLM observed via <c>orchestra_set_status</c>
+	/// before the result was finalised, or <c>null</c> if no such call was made.
+	/// Captured even when an outer failure (e.g. agent transport error) ultimately
+	/// produced a <see cref="ExecutionStatus.Failed"/> result so the executor-level
+	/// swap-retry loop can detect "the LLM already decided" and skip the retry —
+	/// otherwise the retry would re-run the prompt, discard the captured override,
+	/// and potentially flip an LLM-declared success into a swap-induced failure.
+	/// Not persisted into <c>run.json</c>; lives only inside the engine's executor
+	/// pipeline.
+	/// </summary>
+	public ExecutionStatus? CapturedStatusOverride { get; init; }
+
+	/// <summary>
 	/// Set only for steps of type <see cref="OrchestrationStepType.Orchestration"/>.
 	/// Carries the child run's execution id, per-step results, error message, and
 	/// cancellation details, enabling parent templates to drill into the child's data

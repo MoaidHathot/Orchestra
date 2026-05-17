@@ -176,6 +176,72 @@ public class MockAgentBuilder : AgentBuilder
 	}
 
 	/// <summary>
+	/// Configures the mock agent with a per-invocation sequence of behaviours. Each
+	/// entry produces one <see cref="AgentTask"/>; the Nth call to
+	/// <c>agent.SendAsync</c> picks the Nth entry. Once exhausted, the last entry
+	/// is reused so trailing calls behave identically to the final entry.
+	/// </summary>
+	public MockAgentBuilder WithSequence(params Func<string, CancellationToken, AgentTask>[] handlers)
+	{
+		if (handlers is null || handlers.Length == 0)
+			throw new ArgumentException("Sequence must contain at least one handler", nameof(handlers));
+
+		var callCount = 0;
+		_sendAsyncHandler = (prompt, ct) =>
+		{
+			var idx = Math.Min(Interlocked.Increment(ref callCount) - 1, handlers.Length - 1);
+			return handlers[idx](prompt, ct);
+		};
+		return this;
+	}
+
+	/// <summary>
+	/// Convenience helper that builds a sequence which throws the supplied
+	/// exception on the first <c>SendAsync</c> call(s) and returns
+	/// <paramref name="finalResponseContent"/> on subsequent call(s). Useful for
+	/// verifying executor-level swap/retry recovery without having to assemble the
+	/// channel/task scaffolding by hand.
+	/// </summary>
+	public MockAgentBuilder WithFailuresThenResponse(
+		Exception exception,
+		int failureCount,
+		string finalResponseContent)
+	{
+		if (failureCount < 0)
+			throw new ArgumentOutOfRangeException(nameof(failureCount));
+
+		var handlers = new Func<string, CancellationToken, AgentTask>[failureCount + 1];
+		for (var i = 0; i < failureCount; i++)
+		{
+			handlers[i] = (_, _) =>
+			{
+				var ch = Channel.CreateUnbounded<AgentEvent>();
+				var rt = Task.FromException<AgentResult>(exception);
+				ch.Writer.Complete();
+				return new AgentTask(ch.Reader, rt);
+			};
+		}
+
+		handlers[failureCount] = (_, ct) =>
+		{
+			var ch = Channel.CreateUnbounded<AgentEvent>();
+			var rt = Task.Run(async () =>
+			{
+				await ch.Writer.WriteAsync(new AgentEvent
+				{
+					Type = AgentEventType.MessageDelta,
+					Content = finalResponseContent,
+				}, ct);
+				ch.Writer.Complete();
+				return new AgentResult { Content = finalResponseContent, ActualModel = Model };
+			}, ct);
+			return new AgentTask(ch.Reader, rt);
+		};
+
+		return WithSequence(handlers);
+	}
+
+	/// <summary>
 	/// Configures a custom handler for full control over agent behavior.
 	/// </summary>
 	public MockAgentBuilder WithHandler(Func<string, CancellationToken, AgentTask> handler)

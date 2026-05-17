@@ -17,7 +17,11 @@ public sealed class SetStatusTool : IEngineTool
 		"the task (e.g., required tools are unavailable, input is invalid, or the task is " +
 		"impossible), or 'no_action' if there is nothing to do (e.g., no items to process, " +
 		"all items already handled). When 'no_action' is used, all downstream steps that " +
-		"depend on this step will be skipped. Provide a reason describing the outcome.";
+		"depend on this step will be skipped. " +
+		"IMPORTANT: This call TERMINATES the step immediately — no further tool calls or " +
+		"assistant messages will be processed after it returns. Call this exactly once, " +
+		"at the very end of your work, with a reason describing the outcome. The first " +
+		"terminal status wins; subsequent calls are ignored.";
 
 	public string ParametersSchema => """
 		{
@@ -56,21 +60,24 @@ public sealed class SetStatusTool : IEngineTool
 		{
 			context.SetStatus(ExecutionStatus.Succeeded, reason ?? "Step marked as succeeded by LLM");
 			context.Reporter?.ReportStepStatusSet(context.StepName!, "success", reason ?? "Step marked as succeeded by LLM");
-			return "Status set to success. You may continue with any remaining work.";
+			context.RequestStepCompletion();
+			return "Status set to success; the step has terminated. No further work will be processed.";
 		}
 
 		if (string.Equals(status, "failed", StringComparison.OrdinalIgnoreCase))
 		{
 			context.SetStatus(ExecutionStatus.Failed, reason ?? "Step marked as failed by LLM");
 			context.Reporter?.ReportStepStatusSet(context.StepName!, "failed", reason ?? "Step marked as failed by LLM");
-			return "Status set to failed. You may continue with any remaining work.";
+			context.RequestStepCompletion();
+			return "Status set to failed; the step has terminated. No further work will be processed.";
 		}
 
 		if (string.Equals(status, "no_action", StringComparison.OrdinalIgnoreCase))
 		{
 			context.SetStatus(ExecutionStatus.NoAction, reason ?? "No action needed");
 			context.Reporter?.ReportStepStatusSet(context.StepName!, "no_action", reason ?? "No action needed");
-			return "Status set to no_action. All downstream dependent steps will be skipped. You may continue with any remaining work.";
+			context.RequestStepCompletion();
+			return "Status set to no_action; the step has terminated. All downstream dependent steps will be skipped. No further work will be processed.";
 		}
 
 			return $"Unknown status '{status}'. Supported values are 'success', 'failed', and 'no_action'.";
