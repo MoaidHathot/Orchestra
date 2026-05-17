@@ -828,7 +828,7 @@
     }
     .cards-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
       gap: 16px;
     }
     .cards-section-header {
@@ -866,11 +866,12 @@
     .orch-card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-      transition: all 0.1s ease;
+      border-radius: 8px;
+      overflow: visible; /* allow the kebab popover to escape the card frame */
+      transition: all 0.15s ease;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
     }
-    .orch-card:hover { border-color: var(--border-light); box-shadow: 0 1px 4px rgba(0,0,0,0.2); }
+    .orch-card:hover { border-color: var(--border-light); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
     .card-header {
       padding: 3px 5px;
       border-bottom: 1px solid var(--border);
@@ -898,7 +899,7 @@
     .card-status-indicator.failed { background: var(--error); }
     .card-status-indicator.running { background: var(--warning); animation: pulse 1.5s infinite; }
     .card-status-indicator.idle { background: var(--text-dim); }
-    .card-body { padding: 3px 5px; }
+    .card-body { padding: 6px 8px; }
     .card-meta-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -923,6 +924,89 @@
       gap: 2px;
       flex-wrap: wrap;
     }
+
+    /* ── Resource + label rows on orchestration cards ────────────────────
+     * Group MCPs / Skills / Environment / Models on one flex-wrap "resources"
+     * row and tags + profiles on a single "labels" row. Replaces what used to
+     * be one block per section (up to 6 stacked rows) with at most two rows
+     * total — collapsed badges remain individually expandable. */
+    .card-resources-row,
+    .card-labels-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 4px;
+    }
+
+    /* ── Header-resident trigger toggle (power icon) ─────────────────────
+     * Compact button next to the status chip. Replaces the bottom-of-card
+     * Enabled/Disabled pill button so the action row can host only the
+     * primary verb (Run or Cancel). Green when enabled, dim when disabled. */
+    .card-power-icon {
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 3px;
+      color: var(--text-dim);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+    .card-power-icon svg { width: 11px; height: 11px; }
+    .card-power-icon.enabled { color: var(--success); border-color: rgba(63, 185, 80, 0.3); }
+    .card-power-icon:hover { background: var(--surface-hover); }
+
+    /* ── Card kebab menu (⋮) and its popover ──────────────────────────────
+     * Header-resident "more actions" menu. Hidden entirely when there are
+     * no tertiary actions to surface; the wrapper carries position: relative
+     * so the popover anchors flush with the kebab button. */
+    .card-kebab-wrapper { position: relative; flex-shrink: 0; }
+    .card-kebab-button {
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card-kebab-button svg { width: 12px; height: 12px; }
+    .card-kebab-button:hover { background: var(--surface-hover); color: var(--text); }
+    .card-kebab-popover {
+      position: absolute;
+      top: 100%;
+      right: 0;
+      z-index: 10;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      min-width: 180px;
+      padding: 4px;
+      margin-top: 2px;
+    }
+    .card-kebab-popover button {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      width: 100%;
+      padding: 6px 8px;
+      background: transparent;
+      border: none;
+      border-radius: 4px;
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .card-kebab-popover button:hover { background: var(--surface-hover); }
+    .card-kebab-popover button svg { width: 12px; height: 12px; flex-shrink: 0; }
 
     /* Modal Overlay */
     .modal-overlay {

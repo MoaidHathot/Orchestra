@@ -20,6 +20,8 @@ vi.mock('../icons', () => ({
     Ban: () => <span data-testid="icon-ban" />,
     Skill: () => <span data-testid="icon-skill" />,
     Hand: () => <span data-testid="icon-hand" />,
+    Power: () => <span data-testid="icon-power" />,
+    Menu: () => <span data-testid="icon-menu" />,
   },
   getTriggerIcon: () => <span data-testid="icon-trigger" />,
 }));
@@ -41,6 +43,8 @@ function renderCard(overrides: {
   onView?: typeof noop;
   onCancel?: (id: string) => void;
   onRun?: (orch: Orchestration) => void;
+  onToggleTrigger?: (orchestrationId: string, currentlyEnabled: boolean) => void;
+  awaitingInput?: boolean;
 } = {}) {
   const execution = { ...baseExecution, ...overrides.execution };
   return render(
@@ -50,8 +54,10 @@ function renderCard(overrides: {
       onView={overrides.onView ?? noop}
       onCancel={overrides.onCancel}
       onRun={overrides.onRun}
+      onToggleTrigger={overrides.onToggleTrigger}
       orchestrations={overrides.orchestrations}
       profiles={overrides.profiles}
+      awaitingInput={overrides.awaitingInput}
     />,
   );
 }
@@ -221,11 +227,15 @@ describe('ActiveOrchestrationCard – Interactions', () => {
   });
 
   it('calls onView with matched orchestration when card is clicked', () => {
+    // The explicit "View" button was removed in favour of the whole card being
+    // clickable (less visual clutter; the card's hover state signals tap-ability).
+    // The matched orchestration must still be passed through so the modal can
+    // render the full definition view.
     const onView = vi.fn();
     const orch: Orchestration = { id: 'orch-1', name: 'Test' };
-    renderCard({ onView, orchestrations: [orch] });
+    const { container } = renderCard({ onView, orchestrations: [orch] });
 
-    fireEvent.click(screen.getByText('View'));
+    fireEvent.click(container.querySelector('.orch-card')!);
 
     expect(onView).toHaveBeenCalledWith(
       expect.objectContaining({ orchestrationId: 'orch-1' }),
@@ -706,15 +716,18 @@ describe('ActiveOrchestrationCard – Description one-line clamp', () => {
   });
 });
 
-// ── Webhook URL → action button (B3) ─────────────────────────────────────────
+// ── Webhook URL → kebab menu item ────────────────────────────────────────────
 
-describe('ActiveOrchestrationCard – Webhook URL action button', () => {
-  it('renders a "Webhook URL" copy button on webhook trigger cards, replacing the old inline URL row', () => {
+describe('ActiveOrchestrationCard – Webhook URL in kebab menu', () => {
+  it('exposes a "Copy webhook URL" item in the header kebab menu on webhook cards', () => {
+    // The webhook URL copy moved from an inline action-row button into the
+    // header kebab popover. This keeps the action row clean (only Run / Cancel
+    // remain) while preserving the affordance for webhook-triggered cards.
     const orchestrations: Orchestration[] = [
       { id: 'orch-1', name: 'Webhook Orch' },
     ];
 
-    renderCard({
+    const { container } = renderCard({
       type: 'pending',
       orchestrations,
       execution: {
@@ -724,13 +737,22 @@ describe('ActiveOrchestrationCard – Webhook URL action button', () => {
       },
     });
 
-    // Button is in the action row, not a separate full-width block.
-    expect(screen.getByText('Webhook URL')).toBeInTheDocument();
-    // The old "Webhook URL" labelled cell is gone — no full-width URL display.
-    expect(screen.queryByText('/api/webhooks/orch-1')).not.toBeInTheDocument();
+    // Kebab button is present in the header.
+    const kebabButton = container.querySelector('.card-kebab-button');
+    expect(kebabButton).not.toBeNull();
+
+    // Item is initially hidden behind the popover.
+    expect(screen.queryByText('Copy webhook URL')).not.toBeInTheDocument();
+
+    // Open the menu — the item appears.
+    fireEvent.click(kebabButton!);
+    expect(screen.getByText('Copy webhook URL')).toBeInTheDocument();
+
+    // Old inline button is gone.
+    expect(screen.queryByText('Webhook URL')).not.toBeInTheDocument();
   });
 
-  it('copies the full webhook URL to clipboard when the action button is clicked', () => {
+  it('copies the full webhook URL to clipboard when the kebab item is clicked', () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.assign(navigator, { clipboard: { writeText } });
 
@@ -738,7 +760,7 @@ describe('ActiveOrchestrationCard – Webhook URL action button', () => {
       { id: 'orch-1', name: 'Webhook Orch' },
     ];
 
-    renderCard({
+    const { container } = renderCard({
       type: 'pending',
       orchestrations,
       execution: {
@@ -748,26 +770,31 @@ describe('ActiveOrchestrationCard – Webhook URL action button', () => {
       },
     });
 
-    fireEvent.click(screen.getByText('Webhook URL'));
+    // Open the kebab and click the item.
+    fireEvent.click(container.querySelector('.card-kebab-button')!);
+    fireEvent.click(screen.getByText('Copy webhook URL'));
 
     expect(writeText).toHaveBeenCalledTimes(1);
-    // Origin + path. JSDOM defaults origin to http://localhost; the assertion just
-    // checks that the path is appended to whatever origin the test runtime sets.
+    // JSDOM defaults origin to http://localhost; the path must be appended.
     expect(writeText.mock.calls[0][0]).toContain('/api/webhooks/orch-1');
   });
 
-  it('does NOT render the webhook button on non-webhook trigger cards', () => {
+  it('does NOT render the kebab on non-webhook trigger cards (no tertiary actions)', () => {
+    // The kebab disappears entirely when there is nothing to put inside it,
+    // keeping the header visually minimal on cards that have no extras.
     const orchestrations: Orchestration[] = [
       { id: 'orch-1', name: 'Scheduler Orch' },
     ];
 
-    renderCard({
+    const { container } = renderCard({
       type: 'pending',
       orchestrations,
       execution: { ...baseExecution, triggeredBy: 'scheduler' },
     });
 
+    expect(container.querySelector('.card-kebab-button')).toBeNull();
     expect(screen.queryByText('Webhook URL')).not.toBeInTheDocument();
+    expect(screen.queryByText('Copy webhook URL')).not.toBeInTheDocument();
   });
 });
 
@@ -980,5 +1007,205 @@ describe('ActiveOrchestrationCard – Single-line header with status chip', () =
     expect(titleAreaNoWait!.querySelector('.waiting-inputs-chip')).toBeNull();
     expect(titleAreaNoWait!.querySelector('.step-status-badge')).not.toBeNull();
     expect(titleAreaNoWait!.querySelector('.card-title')).not.toBeNull();
+  });
+});
+
+// ── Resources row + labels row + simplified actions (this round) ─────────────
+
+describe('ActiveOrchestrationCard – Resources row', () => {
+  it('groups MCPs, Skills, Environment, and Models on a single flex-wrap row', () => {
+    // The old layout rendered each badge in its own block; this round merges
+    // them into one `.card-resources-row` so up to four stacked rows collapse
+    // into a single visual band. Each badge stays individually expandable.
+    const orchestrations: Orchestration[] = [
+      {
+        id: 'orch-1',
+        name: 'Test',
+        mcps: [{ name: 'mcp-a' }, { name: 'mcp-b' }],
+        models: ['gpt-5.4', 'claude-opus-4.6'],
+        referencedEnvVars: ['HOME', 'PATH'],
+        steps: [{ name: 's1', skillDirectories: ['/skill-a'] }],
+      } as unknown as Orchestration,
+    ];
+
+    const { container } = renderCard({ orchestrations });
+
+    const row = container.querySelector('.card-resources-row');
+    expect(row).not.toBeNull();
+    // All four badges' labels render inside the same row (collapsed state).
+    expect(row!.textContent).toContain('MCPs:');
+    expect(row!.textContent).toContain('skill'); // SkillBadge text
+    expect(row!.textContent).toContain('Environment:');
+    expect(row!.textContent).toContain('Models:');
+  });
+
+  it('does not render the resources row when no resources are present', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test' },
+    ];
+
+    const { container } = renderCard({ orchestrations });
+
+    expect(container.querySelector('.card-resources-row')).toBeNull();
+  });
+});
+
+describe('ActiveOrchestrationCard – Labels row', () => {
+  it('groups tags and profiles on a single row', () => {
+    // Tags and profiles share a single flex-wrap row. They keep their distinct
+    // chip styles so users can still tell them apart at a glance.
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', tags: ['prod'] },
+    ];
+    const timestamps = { createdAt: '2026-05-01T00:00:00Z', updatedAt: '2026-05-01T00:00:00Z' };
+    const profiles: Profile[] = [
+      {
+        id: 'p1',
+        name: 'Profile 1',
+        isActive: true,
+        filter: { tags: ['*'], orchestrationIds: [], excludeOrchestrationIds: [] },
+        ...timestamps,
+      },
+    ];
+
+    const { container } = renderCard({ orchestrations, profiles });
+
+    const row = container.querySelector('.card-labels-row');
+    expect(row).not.toBeNull();
+    expect(row!.querySelector('.tag-chip')).not.toBeNull();
+    expect(row!.querySelector('.profile-badge')).not.toBeNull();
+  });
+
+  it('does not render the labels row when there are no tags or profiles', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test' },
+    ];
+
+    const { container } = renderCard({ orchestrations });
+
+    expect(container.querySelector('.card-labels-row')).toBeNull();
+  });
+});
+
+describe('ActiveOrchestrationCard – View button removed', () => {
+  it('does NOT render an explicit "View" button anywhere on the card', () => {
+    // The View button is gone. Card click already opens the modal, so the
+    // explicit affordance is redundant; removing it cleans up the action row.
+    renderCard({});
+
+    expect(screen.queryByText('View')).not.toBeInTheDocument();
+  });
+
+  it('does not render the action row at all when no Run/Cancel applies', () => {
+    // A pending card with no onRun callback has nothing to put in the action
+    // row. We collapse the wrapper entirely so the card saves the row's
+    // margin/padding (instead of rendering an empty `.card-actions` shell).
+    const { container } = renderCard({ type: 'pending' });
+
+    expect(container.querySelector('.card-actions')).toBeNull();
+  });
+});
+
+describe('ActiveOrchestrationCard – Trigger toggle in header (power icon)', () => {
+  function renderWithTrigger(extras: {
+    enabled: boolean;
+    onToggleTrigger?: (id: string, currentlyEnabled: boolean) => void;
+    onView?: typeof noop;
+  }) {
+    const orch: Orchestration = {
+      id: 'orch-1',
+      name: 'Triggered Orch',
+      trigger: { type: 'scheduler', schedule: '0 * * * *' },
+    };
+    return renderCard({
+      type: extras.enabled ? 'pending' : 'disabled',
+      orchestrations: [orch],
+      onToggleTrigger: extras.onToggleTrigger,
+      onView: extras.onView,
+    });
+  }
+
+  it('renders the power icon inside the header for triggered orchestrations', () => {
+    const { container } = renderWithTrigger({ enabled: true, onToggleTrigger: () => {} });
+
+    const titleArea = container.querySelector('.card-title-area');
+    expect(titleArea).not.toBeNull();
+    const power = titleArea!.querySelector('.card-power-icon');
+    expect(power).not.toBeNull();
+  });
+
+  it('reflects the enabled state via the .enabled class on the power icon', () => {
+    const enabled = renderWithTrigger({ enabled: true, onToggleTrigger: () => {} });
+    const enabledPower = enabled.container.querySelector('.card-power-icon');
+    expect(enabledPower).not.toBeNull();
+    expect(enabledPower!.classList.contains('enabled')).toBe(true);
+    enabled.unmount();
+
+    const disabled = renderWithTrigger({ enabled: false, onToggleTrigger: () => {} });
+    const disabledPower = disabled.container.querySelector('.card-power-icon');
+    expect(disabledPower).not.toBeNull();
+    expect(disabledPower!.classList.contains('enabled')).toBe(false);
+  });
+
+  it('invokes onToggleTrigger with the current state and stops propagation', () => {
+    const onToggleTrigger = vi.fn();
+    const onView = vi.fn();
+    const { container } = renderWithTrigger({ enabled: true, onToggleTrigger, onView });
+
+    const power = container.querySelector('.card-power-icon') as HTMLElement;
+    fireEvent.click(power);
+
+    // The callback signature is `(orchestrationId, currentlyEnabled)` — the
+    // second arg is the CURRENT state at the moment of the click, not the
+    // flipped state. The caller is responsible for inverting it server-side
+    // (matches the contract of the previous TriggerToggle button).
+    expect(onToggleTrigger).toHaveBeenCalledTimes(1);
+    expect(onToggleTrigger).toHaveBeenCalledWith('orch-1', true);
+
+    // Click did NOT bubble up to the card's onView.
+    expect(onView).not.toHaveBeenCalled();
+  });
+
+  it('passes the disabled state correctly when clicking a disabled card power icon', () => {
+    // Sanity check: disabled card → second arg is `false`.
+    const onToggleTrigger = vi.fn();
+    const { container } = renderWithTrigger({ enabled: false, onToggleTrigger });
+
+    fireEvent.click(container.querySelector('.card-power-icon') as HTMLElement);
+
+    expect(onToggleTrigger).toHaveBeenCalledWith('orch-1', false);
+  });
+
+  it('does NOT render the power icon for manual orchestrations (no trigger)', () => {
+    // hasTrigger is computed from the orch.trigger.type ≠ "manual". Manual
+    // orchestrations therefore omit the power icon — there's nothing to toggle.
+    const orch: Orchestration = { id: 'orch-1', name: 'Manual Orch' };
+    const { container } = renderCard({
+      type: 'manual',
+      orchestrations: [orch],
+      onToggleTrigger: () => {},
+    });
+
+    expect(container.querySelector('.card-power-icon')).toBeNull();
+  });
+});
+
+describe('ActiveOrchestrationCard – Kebab menu interactions', () => {
+  it('stops click propagation so opening the kebab does not also call onView', () => {
+    // The kebab lives inside the card and the card's root has onClick → onView.
+    // Clicking the kebab button must NOT bubble up; otherwise users get a modal
+    // pop every time they open the menu.
+    const onView = vi.fn();
+    const { container } = renderCard({
+      type: 'pending',
+      onView,
+      execution: { ...baseExecution, triggeredBy: 'webhook', webhookUrl: '/api/webhooks/orch-1' },
+    });
+
+    const kebabButton = container.querySelector('.card-kebab-button') as HTMLElement;
+    expect(kebabButton).not.toBeNull();
+    fireEvent.click(kebabButton);
+
+    expect(onView).not.toHaveBeenCalled();
   });
 });

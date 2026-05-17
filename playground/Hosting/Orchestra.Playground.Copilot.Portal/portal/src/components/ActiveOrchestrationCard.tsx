@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Icons, getTriggerIcon } from '../icons';
 import { formatTimeAgo, formatTimeUntil, getMatchingProfiles } from '../utils';
 import type { Orchestration, Profile, RunContext } from '../types';
@@ -193,6 +193,48 @@ export default function ActiveOrchestrationCard({
     || (orch as unknown as { triggerType?: string })?.triggerType;
   const hasTrigger = !!triggerType && triggerType.toLowerCase() !== 'manual';
 
+  // Tertiary actions that live in the header kebab. Today this is just "copy
+  // webhook URL" for webhook-triggered orchestrations; the array shape lets us
+  // extend the menu later (export config, delete, ...) without restructuring.
+  // We deliberately do NOT add a redundant "Open" item — the entire card is
+  // already clickable to open the modal.
+  const kebabItems: CardKebabMenuItem[] = [];
+  if (!isRunning && execution.triggeredBy === 'webhook' && execution.webhookUrl) {
+    const webhookUrl = execution.webhookUrl;
+    kebabItems.push({
+      label: 'Copy webhook URL',
+      icon: <Icons.Copy />,
+      onClick: () => {
+        navigator.clipboard.writeText(window.location.origin + webhookUrl);
+      },
+    });
+  }
+
+  // Context sections (Environment, Models) used to render in their own vertical
+  // column; they now live as direct siblings in the resources flex-wrap row
+  // alongside MCPs and Skills. buildContextSections returns the bare data so
+  // the card owns the row layout.
+  const contextSections = buildContextSections(orch, isRunning ? execution.runContext : undefined);
+
+  // Profiles list is computed once per render so we can decide whether to emit
+  // the labels row at all and keep the same value for the inline chip overflow.
+  const matchedProfiles = profiles && orch
+    ? getMatchingProfiles(profiles, orch.id, orch.tags)
+    : [];
+
+  const hasResources =
+    allMcps.length > 0 ||
+    allSkillDirs.length > 0 ||
+    contextSections.length > 0;
+  const hasLabels = (orch?.tags?.length ?? 0) > 0 || matchedProfiles.length > 0;
+
+  // The action row collapses to nothing when neither Run nor Cancel applies
+  // (e.g., a disabled card with no onRun). Compute up-front so we can skip the
+  // whole `.card-actions` wrapper and save its margin.
+  const showRun = !isRunning && onRun != null && orch != null;
+  const showCancel = isRunning && onCancel != null;
+  const hasActionButtons = showRun || showCancel;
+
   return (
     <div
       className={`orch-card ${isDisabled ? 'orch-card-disabled' : ''}`}
@@ -205,20 +247,22 @@ export default function ActiveOrchestrationCard({
     >
       <div className="card-header">
         {/*
-         * Single-row header: [status chip] [title flex:1] [waiting chip?]. Replaces
-         * the previous two-line header (dot + title on line 1, status icon+text on
-         * line 2). Saves ~9 px of vertical space per card and removes the
-         * visual-bug "dark oval" that the old dot rendered as (the dot reused the
-         * `.step-status-badge` pill class but kept its padding, producing a
-         * 26×14 px oval instead of a 10 px circle).
+         * Single-row header packs four affordances into one line:
+         *   [status chip] [power-icon?] [title flex:1] [waiting chip?] [kebab?]
+         * - status chip   : at-a-glance state (Pending / Running / Manual / ...)
+         * - power-icon    : direct toggle for triggered orchestrations
+         * - title         : flex:1 + ellipsis; absorbs free space and truncates
+         * - waiting chip  : HITL prompt surfaced when awaitingInput
+         * - kebab         : tertiary actions (e.g., copy webhook URL); hidden
+         *                   entirely when there is nothing to put inside it
          *
-         * Visual distinction: the status chip is a colored pill with a state-color
-         * background + icon; the title is bold flat text with no background.
-         * Side-by-side they read as "[metadata] Title" at a glance.
+         * Visual distinction: status chip and power icon are small colored
+         * affordances, title is bold flat text, waiting + kebab live at the
+         * right edge. Side-by-side they read as "[metadata] Title [actions]".
          */}
         <div
           className="card-title-area"
-          style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}
+          style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}
         >
           <span
             className={`step-status-badge ${getStatusBadgeClass()}`}
@@ -226,6 +270,15 @@ export default function ActiveOrchestrationCard({
           >
             {getStatusLabel()}
           </span>
+          {!isRunning && hasTrigger && onToggleTrigger && orch && (
+            <PowerIconToggle
+              enabled={!isDisabled}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleTrigger(orch.id, !isDisabled);
+              }}
+            />
+          )}
           <div className="card-title" style={{ flex: 1, minWidth: 0 }}>
             {execution.orchestrationName}
           </div>
@@ -238,6 +291,7 @@ export default function ActiveOrchestrationCard({
               <Icons.Hand /> Waiting
             </span>
           )}
+          <CardKebabMenu items={kebabItems} />
         </div>
       </div>
 
@@ -402,163 +456,216 @@ export default function ActiveOrchestrationCard({
           )}
         </div>
 
-        {/* MCPs list (includes both inline and step-level/global MCPs) — collapsed by default */}
-        {allMcps.length > 0 && (
-          <CollapsibleMcpsBadge mcps={allMcps} />
+        {/*
+         * Resources row — MCPs, Skills, Environment, Models all live on one
+         * flex-wrap line as collapsible badges. Expanding any one of them
+         * unfolds the detail panel inline below the badge (each component
+         * owns its own expanded state). This collapses what used to be up
+         * to four rows into a single visual band.
+         */}
+        {hasResources && (
+          <div className="card-resources-row">
+            {allMcps.length > 0 && <CollapsibleMcpsBadge mcps={allMcps} />}
+            {allSkillDirs.length > 0 && <SkillBadge skillDirs={allSkillDirs} />}
+            {contextSections.map((section) => (
+              <CollapsibleContextSection
+                key={section.title}
+                title={section.title}
+                entries={section.entries}
+                isRuntime={section.isRuntime}
+              />
+            ))}
+          </div>
         )}
 
-        {/* Skill Directories — compact badge, click to expand */}
-        {allSkillDirs.length > 0 && (
-          <SkillBadge skillDirs={allSkillDirs} />
-        )}
-
-        {/* Tags — cap at 3 inline, "+N more" chip reveals the rest */}
-        {orch?.tags && orch.tags.length > 0 && (
-          <OverflowChipRow
-            className="orch-tags"
-            style={{ marginBottom: '4px' }}
-            items={orch.tags}
-            cap={3}
-            renderItem={(tag) => (
-              <span key={tag} className={`tag-chip ${tag === '*' ? 'tag-wildcard' : ''}`}>
-                <Icons.Tag />{tag}
-              </span>
+        {/*
+         * Labels row — tags and profiles share a single flex-wrap line; each
+         * has its own overflow control ("+N more"). Visually distinct via
+         * their existing .tag-chip and .profile-badge styling.
+         */}
+        {hasLabels && (
+          <div className="card-labels-row">
+            {orch?.tags && orch.tags.length > 0 && (
+              <OverflowChipRow
+                className="orch-tags"
+                style={{ margin: 0 }}
+                items={orch.tags}
+                cap={3}
+                renderItem={(tag) => (
+                  <span key={tag} className={`tag-chip ${tag === '*' ? 'tag-wildcard' : ''}`}>
+                    <Icons.Tag />{tag}
+                  </span>
+                )}
+                moreLabel={(count) => `+${count} more`}
+                moreClassName="tag-chip"
+              />
             )}
-            moreLabel={(count) => `+${count} more`}
-            moreClassName="tag-chip"
-          />
+            {matchedProfiles.length > 0 && (
+              <OverflowChipRow
+                className="orch-profiles"
+                style={{ margin: 0 }}
+                items={matchedProfiles}
+                cap={3}
+                renderItem={(p) => (
+                  <span key={p.id} className={`profile-badge ${p.isActive ? 'active' : ''}`}>
+                    <Icons.Shield />{p.name}
+                  </span>
+                )}
+                moreLabel={(count) => `+${count} more`}
+                moreClassName="profile-badge"
+              />
+            )}
+          </div>
         )}
 
-        {/* Profiles — same overflow treatment */}
-        {(() => {
-          const matchedProfiles = profiles && orch
-            ? getMatchingProfiles(profiles, orch.id, orch.tags)
-            : [];
-          return matchedProfiles.length > 0 ? (
-            <OverflowChipRow
-              className="orch-profiles"
-              items={matchedProfiles}
-              cap={3}
-              renderItem={(p) => (
-                <span key={p.id} className={`profile-badge ${p.isActive ? 'active' : ''}`}>
-                  <Icons.Shield />{p.name}
-                </span>
-              )}
-              moreLabel={(count) => `+${count} more`}
-              moreClassName="profile-badge"
-            />
-          ) : null;
-        })()}
-
-        {/* Resolved context for running orchestrations (from SSE run-context event) */}
-        {isRunning && execution.runContext && (
-          <OrchestrationContextSection
-            runContext={execution.runContext}
-            orch={orch}
-          />
+        {/*
+         * Action row — single primary verb only.
+         *   - Run    on non-running cards (definition view)
+         *   - Cancel on running cards (safety affordance, kept visible)
+         * View was removed (the entire card is clickable to open the modal).
+         * Trigger toggle moved to the header's power-icon. Webhook URL copy
+         * moved into the kebab menu. When no button applies, the wrapper is
+         * skipped entirely to save its margin.
+         */}
+        {hasActionButtons && (
+          <div className="card-actions" style={{ marginTop: '6px' }}>
+            {showRun && (
+              <button
+                className="btn btn-success btn-sm"
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  onRun!(orch!);
+                }}
+              >
+                <Icons.Play /> Run
+              </button>
+            )}
+            {showCancel && (
+              <button
+                className="btn btn-danger btn-sm"
+                onClick={(e: React.MouseEvent) => {
+                  e.stopPropagation();
+                  if (execution.executionId) {
+                    onCancel!(execution.executionId);
+                  }
+                }}
+              >
+                <Icons.X /> Cancel
+              </button>
+            )}
+          </div>
         )}
-
-        {/* Orchestration context for non-running cards (definition view) */}
-        {!isRunning && orch && (
-          <OrchestrationContextSection
-            orch={orch}
-          />
-        )}
-
-        <div className="card-actions" style={{ marginTop: '6px' }}>
-          <button
-            className="btn btn-sm"
-            onClick={(e: React.MouseEvent) => {
-              e.stopPropagation();
-              onView(execution, orch);
-            }}
-          >
-            <Icons.Eye /> View
-          </button>
-          {!isRunning && onRun && orch && (
-            <button
-              className="btn btn-success btn-sm"
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation();
-                onRun(orch);
-              }}
-            >
-              <Icons.Play /> Run
-            </button>
-          )}
-          {isRunning && onCancel && (
-            <button
-              className="btn btn-danger btn-sm"
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation();
-                if (execution.executionId) {
-                  onCancel(execution.executionId);
-                }
-              }}
-            >
-              <Icons.X /> Cancel
-            </button>
-          )}
-          {/* Webhook URL copy — replaces the old full-row code block (~30 px saved).
-              Only renders for webhook triggers; the full URL is exposed via title= for
-              hover verification before copying. */}
-          {!isRunning && execution.triggeredBy === 'webhook' && execution.webhookUrl && (
-            <button
-              className="btn btn-sm"
-              onClick={(e: React.MouseEvent) => {
-                e.stopPropagation();
-                navigator.clipboard.writeText(window.location.origin + execution.webhookUrl);
-              }}
-              title={`Copy: ${window.location.origin}${execution.webhookUrl}`}
-            >
-              <Icons.Copy /> Webhook URL
-            </button>
-          )}
-          {/* Trigger enable/disable toggle for orchestrations with non-manual triggers */}
-          {!isRunning && hasTrigger && onToggleTrigger && orch && (
-            <TriggerToggle
-              enabled={!isDisabled}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleTrigger(orch.id, !isDisabled);
-              }}
-            />
-          )}
-        </div>
       </div>
     </div>
   );
 }
 
-/* ── Trigger enable/disable toggle ───────────────────────────────────── */
+/* ── Power-icon toggle for the trigger (header-resident) ─────────────── */
 
-function TriggerToggle({ enabled, onClick }: { enabled: boolean; onClick: (e: React.MouseEvent) => void }) {
+/**
+ * Compact `⏻` button that flips the orchestration's trigger between enabled and
+ * disabled. Replaces the bottom-of-card "Enabled / Disabled" pill, freeing the
+ * action row to host only the primary verb (Run or Cancel). Color cue: green
+ * when enabled, dim when disabled. Click bubbles `(orchId, !enabled)` to the
+ * `onToggleTrigger` handler and stops propagation so the card's onClick (which
+ * opens the modal) does not fire.
+ */
+function PowerIconToggle({ enabled, onClick }: { enabled: boolean; onClick: (e: React.MouseEvent) => void }) {
   return (
     <button
-      className="btn btn-sm"
+      className={`card-power-icon ${enabled ? 'enabled' : ''}`}
       onClick={onClick}
-      title={enabled ? 'Disable trigger' : 'Enable trigger'}
-      style={{
-        marginLeft: 'auto',
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '5px',
-        color: enabled ? 'var(--success, #3fb950)' : 'var(--text-dim)',
-        borderColor: enabled ? 'rgba(63, 185, 80, 0.3)' : undefined,
-      }}
+      title={enabled ? 'Trigger enabled — click to disable' : 'Trigger disabled — click to enable'}
+      aria-label={enabled ? 'Disable trigger' : 'Enable trigger'}
+      aria-pressed={enabled}
     >
-      <span
-        style={{
-          width: '8px',
-          height: '8px',
-          borderRadius: '50%',
-          background: enabled ? 'var(--success, #3fb950)' : 'var(--text-dim)',
-          flexShrink: 0,
-          transition: 'background 0.2s',
-        }}
-      />
-      {enabled ? 'Enabled' : 'Disabled'}
+      <Icons.Power />
     </button>
+  );
+}
+
+/* ── Kebab menu (⋮) for tertiary card actions ────────────────────────── */
+
+interface CardKebabMenuItem {
+  /** User-visible label rendered in the popover. */
+  label: string;
+  /** Optional leading icon, e.g. <Icons.Copy />. */
+  icon?: React.ReactNode;
+  /** Invoked on item click; the menu closes itself afterwards. */
+  onClick: () => void;
+}
+
+/**
+ * Renders a `⋮` button in the card header that opens a popover with secondary
+ * actions (copy webhook URL, future items). Renders nothing when `items` is
+ * empty so cards without tertiary actions stay clean.
+ *
+ * Closes the popover on outside-click (document `mousedown` listener) and the
+ * Escape key. Each item's onClick fires and then closes the menu.
+ *
+ * All click handlers (button + items) stopPropagation so the card's onClick
+ * never fires accidentally when interacting with the menu.
+ */
+function CardKebabMenu({ items }: { items: CardKebabMenuItem[] }) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleMouseDown(e: MouseEvent) {
+      const node = wrapperRef.current;
+      if (node && e.target instanceof Node && !node.contains(e.target)) {
+        setOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false);
+    }
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [open]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <div className="card-kebab-wrapper" ref={wrapperRef}>
+      <button
+        className="card-kebab-button"
+        onClick={(e: React.MouseEvent) => {
+          e.stopPropagation();
+          setOpen((v) => !v);
+        }}
+        title="More actions"
+        aria-label="More actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+      >
+        <Icons.Menu />
+      </button>
+      {open && (
+        <div className="card-kebab-popover" role="menu">
+          {items.map((item, idx) => (
+            <button
+              key={`${idx}-${item.label}`}
+              role="menuitem"
+              onClick={(e: React.MouseEvent) => {
+                e.stopPropagation();
+                item.onClick();
+                setOpen(false);
+              }}
+            >
+              {item.icon}
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -824,29 +931,39 @@ function ContextRow({ label, value, color }: { label: string; value: string; col
 
 /* ── Context section showing variables, inputs, env vars, models ──────── */
 
-interface OrchestrationContextSectionProps {
-  /** Orchestration definition (for definition-time data) */
-  orch?: Orchestration;
-  /** Run context from SSE stream (for runtime-resolved data) */
-  runContext?: RunContext;
+interface ContextSectionData {
+  title: string;
+  entries: { key: string; value: string; color?: string }[];
+  /** Marks the Environment section as runtime-resolved (vs. definition-time refs). */
+  isRuntime: boolean;
 }
 
-function OrchestrationContextSection({ orch, runContext }: OrchestrationContextSectionProps) {
+/**
+ * Collects the per-orchestration context sections (Environment, Models) that the
+ * card surfaces as collapsible badges. Returns an empty array when there is
+ * nothing to show so the caller can omit the resources row entirely.
+ *
+ * Returning data (not JSX) lets the card place each section as a direct sibling
+ * inside the single flex-wrap "resources" row alongside MCPs and Skills, rather
+ * than nesting them in their own vertical column wrapper.
+ */
+function buildContextSections(
+  orch: Orchestration | undefined,
+  runContext: RunContext | undefined,
+): ContextSectionData[] {
   const hasRunContext = !!runContext;
-
-  // Collect data sections (Variables and Inputs are shown in ViewerModal/ExecutionModal only)
-  const sections: { title: string; entries: { key: string; value: string; color?: string }[] }[] = [];
+  const sections: ContextSectionData[] = [];
 
   // Environment variables
-  if (hasRunContext && runContext.accessedEnvironmentVariables) {
-    const envEntries = Object.entries(runContext.accessedEnvironmentVariables)
+  if (hasRunContext && runContext!.accessedEnvironmentVariables) {
+    const envEntries = Object.entries(runContext!.accessedEnvironmentVariables)
       .map(([k, v]) => ({
         key: k,
         value: v !== null ? v : '(not set)',
         color: v !== null ? '#7ee787' : '#f85149',
       }));
     if (envEntries.length > 0) {
-      sections.push({ title: 'Environment', entries: envEntries });
+      sections.push({ title: 'Environment', entries: envEntries, isRuntime: true });
     }
   } else if (!hasRunContext && orch?.referencedEnvVars && orch.referencedEnvVars.length > 0) {
     sections.push({
@@ -856,35 +973,20 @@ function OrchestrationContextSection({ orch, runContext }: OrchestrationContextS
         value: '{{env.' + v + '}}',
         color: '#d2a8ff',
       })),
+      isRuntime: false,
     });
   }
 
-  // Models (definition cards only, running cards show model in step details)
+  // Models (definition cards only; running cards expose model in step details)
   if (!hasRunContext && orch?.models && orch.models.length > 0) {
     sections.push({
       title: 'Models',
       entries: orch.models.map(m => ({ key: m, value: '', color: '#ffa657' })),
+      isRuntime: false,
     });
   }
 
-  if (sections.length === 0) return null;
-
-  // Each section gets its own collapsed-by-default badge (mirrors the Skills badge).
-  // Rationale: cards that include Environment/Models used to be vertically long, and
-  // a CSS grid row's auto-height made every sibling card stretch to match. Collapsing
-  // by default keeps cards short and uniform until the user opts into the detail.
-  return (
-    <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-      {sections.map((section) => (
-        <CollapsibleContextSection
-          key={section.title}
-          title={section.title}
-          entries={section.entries}
-          isRuntime={hasRunContext && section.title === 'Environment'}
-        />
-      ))}
-    </div>
-  );
+  return sections;
 }
 
 /* ── Collapsible badge for a single context section ─────────────────────── */
