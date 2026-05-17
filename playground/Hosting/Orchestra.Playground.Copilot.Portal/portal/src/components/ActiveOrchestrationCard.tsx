@@ -135,14 +135,17 @@ export default function ActiveOrchestrationCard({
     return 'pending';
   };
 
+  // Returns the icon + text payload for the status chip. The chip itself (the
+  // `.step-status-badge` pill wrapper) provides the colored background and the
+  // text color via CSS; this function only owns icon sizing.
   const getStatusLabel = (): React.JSX.Element => {
     if (isCancelling) {
       return (
         <>
-          <span style={{ width: '12px', height: '12px', color: 'var(--warning)', display: 'inline-flex' }}>
+          <span style={{ width: '12px', height: '12px', display: 'inline-flex' }}>
             <Icons.Spinner />
           </span>
-          <span style={{ color: 'var(--warning)' }}>Cancelling</span>
+          Cancelling
         </>
       );
     }
@@ -169,10 +172,10 @@ export default function ActiveOrchestrationCard({
     if (isDisabled) {
       return (
         <>
-          <span style={{ width: '12px', height: '12px', display: 'inline-flex', opacity: 0.5 }}>
+          <span style={{ width: '12px', height: '12px', display: 'inline-flex' }}>
             <Icons.Ban />
           </span>
-          <span style={{ opacity: 0.5 }}>Disabled</span>
+          Disabled
         </>
       );
     }
@@ -201,31 +204,40 @@ export default function ActiveOrchestrationCard({
       onClick={() => onView(execution, orch)}
     >
       <div className="card-header">
-        <div className="card-title-area">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div
-              className={`step-status-badge ${getStatusBadgeClass()}`}
-              style={{
-                width: '10px',
-                height: '10px',
-                borderRadius: '50%',
-                flexShrink: 0,
-                background: isCancelling ? 'var(--warning)' : isDisabled ? 'var(--text-dim)' : isManual ? 'var(--text-muted)' : undefined,
-              }}
-            />
-            <div className="card-title">{execution.orchestrationName}</div>
-          </div>
-          <div
-            className="card-version"
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+        {/*
+         * Single-row header: [status chip] [title flex:1] [waiting chip?]. Replaces
+         * the previous two-line header (dot + title on line 1, status icon+text on
+         * line 2). Saves ~9 px of vertical space per card and removes the
+         * visual-bug "dark oval" that the old dot rendered as (the dot reused the
+         * `.step-status-badge` pill class but kept its padding, producing a
+         * 26×14 px oval instead of a 10 px circle).
+         *
+         * Visual distinction: the status chip is a colored pill with a state-color
+         * background + icon; the title is bold flat text with no background.
+         * Side-by-side they read as "[metadata] Title" at a glance.
+         */}
+        <div
+          className="card-title-area"
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}
+        >
+          <span
+            className={`step-status-badge ${getStatusBadgeClass()}`}
+            style={{ flexShrink: 0 }}
           >
-            {awaitingInput && (
-              <span className="waiting-inputs-chip" title="Waiting for human input — open the Waiting Inputs panel to respond">
-                <Icons.Hand /> Waiting
-              </span>
-            )}
             {getStatusLabel()}
+          </span>
+          <div className="card-title" style={{ flex: 1, minWidth: 0 }}>
+            {execution.orchestrationName}
           </div>
+          {awaitingInput && (
+            <span
+              className="waiting-inputs-chip"
+              style={{ flexShrink: 0 }}
+              title="Waiting for human input — open the Waiting Inputs panel to respond"
+            >
+              <Icons.Hand /> Waiting
+            </span>
+          )}
         </div>
       </div>
 
@@ -286,6 +298,11 @@ export default function ActiveOrchestrationCard({
                       boxSizing: 'content-box',
                       position: 'relative',
                     }}
+                    // Surface the current step on hover instead of as a separate row;
+                    // saves ~14 px of vertical space and keeps the bar self-contained.
+                    title={execution.currentStep
+                      ? `Current step: ${execution.currentStep}`
+                      : undefined}
                   >
                     {(() => {
                       const completed = execution.completedSteps || 0;
@@ -311,156 +328,83 @@ export default function ActiveOrchestrationCard({
                       );
                     })()}
                   </div>
-                  {execution.currentStep && (
-                    <div style={{ fontSize: '8px', color: 'var(--warning)', marginTop: '2px' }}>
-                      {execution.currentStep}
-                    </div>
-                  )}
                 </div>
               )}
             </>
           ) : isManual || isDisabled ? (
-            <>
-              <div className="card-meta-item">
-                <div className="card-meta-label">Type</div>
-                <div className="card-meta-value">
-                  {isManual ? 'Manual (no trigger)' : 'Trigger disabled'}
-                </div>
-              </div>
-              <div className="card-meta-item">
-                <div className="card-meta-label">Steps</div>
-                <div className="card-meta-value">
-                  {orch?.steps?.length || '-'}
-                </div>
-              </div>
+            // Inline pipe-separated summary instead of a labelled 2x2 grid (~50 px saved).
+            // Description (when present) renders below on a single clamped line with a
+            // tooltip carrying the full text. The card-meta-item wrapper keeps the same
+            // grid-row affordance for any future siblings that opt back into a grid cell.
+            <div className="card-meta-item" style={{ gridColumn: '1 / -1' }}>
+              <InlineMetaRow
+                segments={[
+                  { value: isManual ? 'Manual (no trigger)' : 'Trigger disabled', title: 'Trigger type' },
+                  orch?.steps?.length
+                    ? { value: `${orch.steps.length} ${orch.steps.length === 1 ? 'step' : 'steps'}`, title: 'Number of steps' }
+                    : null,
+                ]}
+              />
               {orch?.description && (
-                <div className="card-meta-item" style={{ gridColumn: '1 / -1' }}>
-                  <div className="card-meta-label">Description</div>
-                  <div className="card-meta-value" style={{ whiteSpace: 'pre-wrap' }}>
-                    {orch.description.length > 120 ? orch.description.slice(0, 120) + '...' : orch.description}
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="card-meta-item">
-                <div className="card-meta-label">Trigger</div>
                 <div
-                  className="card-meta-value"
-                  style={{ display: 'flex', alignItems: 'center', gap: '4px' }}
+                  className="card-description"
+                  style={{ marginTop: '2px' }}
+                  title={orch.description}
                 >
-                  {getTriggerIcon(execution.triggeredBy)}
-                  {execution.triggeredBy}
-                </div>
-              </div>
-              <div className="card-meta-item">
-                <div className="card-meta-label">Status</div>
-                <div className="card-meta-value">{execution.status || 'Scheduled'}</div>
-              </div>
-              <div className="card-meta-item">
-                <div className="card-meta-label">Next Fire</div>
-                <div className="card-meta-value">
-                  {execution.nextFireTime
-                    ? formatTimeUntil(execution.nextFireTime)
-                    : 'Unknown'}
-                </div>
-              </div>
-              <div className="card-meta-item">
-                <div className="card-meta-label">Last Fired</div>
-                <div className="card-meta-value">
-                  {execution.lastFireTime
-                    ? formatTimeAgo(execution.lastFireTime)
-                    : 'Never'}
-                </div>
-              </div>
-              <div className="card-meta-item">
-                <div className="card-meta-label">Run Count</div>
-                <div className="card-meta-value">{execution.runCount ?? 0}</div>
-              </div>
-              <div className="card-meta-item">
-                <div className="card-meta-label">Steps</div>
-                <div className="card-meta-value">
-                  {execution.stepCount || orch?.steps?.length || '-'}
-                </div>
-              </div>
-
-              {/* Webhook URL for webhook triggers */}
-              {execution.triggeredBy === 'webhook' && execution.webhookUrl && (
-                <div className="card-meta-item" style={{ gridColumn: '1 / -1' }}>
-                  <div className="card-meta-label">Webhook URL</div>
-                  <div
-                    className="card-meta-value"
-                    style={{
-                      fontFamily: 'monospace',
-                      fontSize: '11px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                    }}
-                  >
-                    <code
-                      style={{
-                        flex: 1,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        background: 'var(--bg)',
-                        padding: '4px 8px',
-                        borderRadius: '4px',
-                      }}
-                    >
-                      {execution.webhookUrl}
-                    </code>
-                    <button
-                      className="btn-icon"
-                      onClick={(e: React.MouseEvent) => {
-                        e.stopPropagation();
-                        navigator.clipboard.writeText(
-                          window.location.origin + execution.webhookUrl,
-                        );
-                      }}
-                      title="Copy full URL"
-                      style={{ flexShrink: 0 }}
-                    >
-                      <Icons.Copy />
-                    </button>
-                  </div>
+                  {orch.description}
                 </div>
               )}
-            </>
+            </div>
+          ) : (
+            // Pending (scheduler / loop / webhook) — single inline summary line.
+            // Empty/zero-state fields (e.g. Never Fired, Run Count 0) are simply not pushed
+            // into the segments array, so light cards stay short and heavy cards stay readable.
+            <div className="card-meta-item" style={{ gridColumn: '1 / -1' }}>
+              <InlineMetaRow
+                segments={[
+                  execution.triggeredBy
+                    ? {
+                        value: execution.triggeredBy,
+                        title: `Trigger: ${execution.triggeredBy}`,
+                        prefix: getTriggerIcon(execution.triggeredBy),
+                      }
+                    : null,
+                  execution.status
+                    ? { value: execution.status, title: 'Status' }
+                    : { value: 'Scheduled', title: 'Status' },
+                  (execution.stepCount ?? orch?.steps?.length)
+                    ? {
+                        value: `${execution.stepCount ?? orch!.steps!.length} ${(execution.stepCount ?? orch!.steps!.length) === 1 ? 'step' : 'steps'}`,
+                        title: 'Number of steps',
+                      }
+                    : null,
+                  execution.runCount && execution.runCount > 0
+                    ? {
+                        value: `${execution.runCount} ${execution.runCount === 1 ? 'run' : 'runs'}`,
+                        title: `Run count: ${execution.runCount}`,
+                      }
+                    : null,
+                  execution.lastFireTime
+                    ? {
+                        value: `last ${formatTimeAgo(execution.lastFireTime)}`,
+                        title: `Last fired: ${execution.lastFireTime}`,
+                      }
+                    : null,
+                  execution.nextFireTime
+                    ? {
+                        value: `next ${formatTimeUntil(execution.nextFireTime)}`,
+                        title: `Next fire: ${execution.nextFireTime}`,
+                      }
+                    : null,
+                ]}
+              />
+            </div>
           )}
         </div>
 
-        {/* MCPs list (includes both inline and step-level/global MCPs) */}
+        {/* MCPs list (includes both inline and step-level/global MCPs) — collapsed by default */}
         {allMcps.length > 0 && (
-          <div style={{ marginBottom: '8px' }}>
-            <div className="card-meta-label">MCPs</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '2px' }}>
-              {allMcps.map((mcp) => (
-                  <span
-                    key={mcp.name}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      padding: '2px 6px',
-                      fontSize: '10px',
-                      background: mcp.source === 'step'
-                        ? 'rgba(56, 189, 248, 0.15)'
-                        : 'rgba(139, 92, 246, 0.15)',
-                      border: `1px solid ${mcp.source === 'step'
-                        ? 'rgba(56, 189, 248, 0.3)'
-                        : 'rgba(139, 92, 246, 0.3)'}`,
-                      borderRadius: '4px',
-                      color: mcp.source === 'step' ? '#38bdf8' : '#a78bfa',
-                    }}
-                    title={mcp.source === 'step' ? 'Shared/global MCP (used in steps)' : 'Inline MCP'}
-                  >
-                    {mcp.name}
-                  </span>
-              ))}
-            </div>
-          </div>
+          <CollapsibleMcpsBadge mcps={allMcps} />
         )}
 
         {/* Skill Directories — compact badge, click to expand */}
@@ -468,30 +412,41 @@ export default function ActiveOrchestrationCard({
           <SkillBadge skillDirs={allSkillDirs} />
         )}
 
-        {/* Tags */}
+        {/* Tags — cap at 3 inline, "+N more" chip reveals the rest */}
         {orch?.tags && orch.tags.length > 0 && (
-          <div className="orch-tags" style={{ marginBottom: '4px' }}>
-            {orch.tags.map(tag => (
+          <OverflowChipRow
+            className="orch-tags"
+            style={{ marginBottom: '4px' }}
+            items={orch.tags}
+            cap={3}
+            renderItem={(tag) => (
               <span key={tag} className={`tag-chip ${tag === '*' ? 'tag-wildcard' : ''}`}>
                 <Icons.Tag />{tag}
               </span>
-            ))}
-          </div>
+            )}
+            moreLabel={(count) => `+${count} more`}
+            moreClassName="tag-chip"
+          />
         )}
 
-        {/* Profiles */}
+        {/* Profiles — same overflow treatment */}
         {(() => {
           const matchedProfiles = profiles && orch
             ? getMatchingProfiles(profiles, orch.id, orch.tags)
             : [];
           return matchedProfiles.length > 0 ? (
-            <div className="orch-profiles">
-              {matchedProfiles.map(p => (
+            <OverflowChipRow
+              className="orch-profiles"
+              items={matchedProfiles}
+              cap={3}
+              renderItem={(p) => (
                 <span key={p.id} className={`profile-badge ${p.isActive ? 'active' : ''}`}>
                   <Icons.Shield />{p.name}
                 </span>
-              ))}
-            </div>
+              )}
+              moreLabel={(count) => `+${count} more`}
+              moreClassName="profile-badge"
+            />
           ) : null;
         })()}
 
@@ -544,6 +499,21 @@ export default function ActiveOrchestrationCard({
               <Icons.X /> Cancel
             </button>
           )}
+          {/* Webhook URL copy — replaces the old full-row code block (~30 px saved).
+              Only renders for webhook triggers; the full URL is exposed via title= for
+              hover verification before copying. */}
+          {!isRunning && execution.triggeredBy === 'webhook' && execution.webhookUrl && (
+            <button
+              className="btn btn-sm"
+              onClick={(e: React.MouseEvent) => {
+                e.stopPropagation();
+                navigator.clipboard.writeText(window.location.origin + execution.webhookUrl);
+              }}
+              title={`Copy: ${window.location.origin}${execution.webhookUrl}`}
+            >
+              <Icons.Copy /> Webhook URL
+            </button>
+          )}
           {/* Trigger enable/disable toggle for orchestrations with non-manual triggers */}
           {!isRunning && hasTrigger && onToggleTrigger && orch && (
             <TriggerToggle
@@ -589,6 +559,56 @@ function TriggerToggle({ enabled, onClick }: { enabled: boolean; onClick: (e: Re
       />
       {enabled ? 'Enabled' : 'Disabled'}
     </button>
+  );
+}
+
+/* ── Inline pipe-separated meta row ──────────────────────────────────────
+ * Replaces the 2-column labelled `card-meta-grid` for pending/manual/disabled
+ * cards. Renders only segments that have data, separated by middle-dots, so an
+ * orchestration that has never fired isn't padded out by "Never fired · Run
+ * Count 0 · ...". Each segment can carry an optional icon prefix and tooltip
+ * title — the title is the verbose label/value so users can still inspect what
+ * each segment means on hover. */
+
+interface InlineMetaSegment {
+  value: string;
+  title?: string;
+  prefix?: React.ReactNode;
+}
+
+function InlineMetaRow({ segments }: { segments: (InlineMetaSegment | null | undefined | false)[] }) {
+  // Materialise once, discarding the falsy segments callers use for compact
+  // conditionals like `cond ? {...} : null`. Doing it here keeps callsites tidy.
+  const present = segments.filter((s): s is InlineMetaSegment => !!s);
+  if (present.length === 0) return null;
+
+  return (
+    <div
+      className="card-meta-value"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '4px',
+      }}
+    >
+      {present.map((seg, idx) => (
+        <React.Fragment key={idx}>
+          {idx > 0 && (
+            <span style={{ color: 'var(--text-dim)' }} aria-hidden>
+              ·
+            </span>
+          )}
+          <span
+            title={seg.title}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+          >
+            {seg.prefix}
+            {seg.value}
+          </span>
+        </React.Fragment>
+      ))}
+    </div>
   );
 }
 
@@ -645,6 +665,141 @@ function SkillBadge({ skillDirs }: { skillDirs: string[] }) {
             </div>
           ))}
         </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Collapsible MCPs badge ──────────────────────────────────────────── */
+
+/**
+ * Renders the full MCPs list as a single collapsed-by-default badge with a
+ * count, mirroring the Skills/Environment/Models pattern. Cards used to render
+ * a flex-wrap of N MCP chips inline, which could span 2-3 rows when many MCPs
+ * were attached and made cards visibly heterogeneous in the same grid row.
+ * Click expands the chip list (preserving the existing inline/step colour
+ * distinction); click stops propagation so the card's `onView` is not fired.
+ */
+function CollapsibleMcpsBadge({ mcps }: { mcps: { name: string; source: 'inline' | 'step' }[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const count = mcps.length;
+  const countLabel = count === 1 ? '1 MCP' : `${count} MCPs`;
+
+  return (
+    <div style={{ marginBottom: '4px' }}>
+      <span
+        role="button"
+        onClick={(e: React.MouseEvent) => {
+          e.stopPropagation();
+          setExpanded((v) => !v);
+        }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '2px 6px',
+          fontSize: '10px',
+          // Match the inline-MCP chip colour so the badge reads as "this is the
+          // MCPs section" even when collapsed.
+          background: 'rgba(139, 92, 246, 0.15)',
+          border: '1px solid rgba(139, 92, 246, 0.3)',
+          borderRadius: '4px',
+          color: '#a78bfa',
+          cursor: 'pointer',
+          userSelect: 'none',
+          fontFamily: 'monospace',
+        }}
+        title={expanded ? 'Click to collapse MCPs' : 'Click to show MCPs'}
+      >
+        <span style={{ fontWeight: 600 }}>MCPs:</span>
+        <span>{countLabel}</span>
+        <span style={{ fontSize: '8px', marginLeft: '2px', opacity: 0.7 }}>
+          {expanded ? '\u25B2' : '\u25BC'}
+        </span>
+      </span>
+      {expanded && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+          {mcps.map((mcp) => (
+            <span
+              key={mcp.name}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '2px 6px',
+                fontSize: '10px',
+                background: mcp.source === 'step'
+                  ? 'rgba(56, 189, 248, 0.15)'
+                  : 'rgba(139, 92, 246, 0.15)',
+                border: `1px solid ${mcp.source === 'step'
+                  ? 'rgba(56, 189, 248, 0.3)'
+                  : 'rgba(139, 92, 246, 0.3)'}`,
+                borderRadius: '4px',
+                color: mcp.source === 'step' ? '#38bdf8' : '#a78bfa',
+              }}
+              title={mcp.source === 'step' ? 'Shared/global MCP (used in steps)' : 'Inline MCP'}
+            >
+              {mcp.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Overflow chip row (used by Tags and Profiles) ───────────────────── */
+
+interface OverflowChipRowProps<T> {
+  items: T[];
+  /** Maximum number of items to render inline before collapsing the remainder. */
+  cap: number;
+  /** Per-item chip renderer. Should return a chip-styled element with its own
+   *  key (the wrapper relies on React's reconciler from `items.map`). */
+  renderItem: (item: T, index: number) => React.ReactNode;
+  /** Builds the label for the "+N more" chip. Defaults to `+N more`. */
+  moreLabel?: (overflowCount: number) => string;
+  /** Optional class for the "+N more" chip so it picks up the host visual
+   *  language (tag-chip vs profile-badge). */
+  moreClassName?: string;
+  className?: string;
+  style?: React.CSSProperties;
+}
+
+/**
+ * Renders the first `cap` items as chips. If there are more, appends a single
+ * `+N more` chip that, when clicked, reveals the rest inline. A second click
+ * collapses again. The "+N more" chip stops click propagation so the card's
+ * `onView` doesn't fire when users expand a long tag list.
+ */
+function OverflowChipRow<T>({
+  items,
+  cap,
+  renderItem,
+  moreLabel = (n) => `+${n} more`,
+  moreClassName,
+  className,
+  style,
+}: OverflowChipRowProps<T>) {
+  const [expanded, setExpanded] = useState(false);
+  const overflow = Math.max(0, items.length - cap);
+  const shown = expanded || overflow === 0 ? items : items.slice(0, cap);
+
+  return (
+    <div className={className} style={style}>
+      {shown.map((item, idx) => renderItem(item, idx))}
+      {overflow > 0 && (
+        <span
+          role="button"
+          className={moreClassName}
+          onClick={(e: React.MouseEvent) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          style={{ cursor: 'pointer', userSelect: 'none' }}
+          title={expanded ? 'Click to collapse' : `Show ${overflow} more`}
+        >
+          {expanded ? '\u25B2 less' : moreLabel(overflow)}
+        </span>
       )}
     </div>
   );

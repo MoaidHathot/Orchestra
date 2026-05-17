@@ -73,6 +73,9 @@ describe('ActiveOrchestrationCard – MCP rendering', () => {
 
     renderCard({ orchestrations });
 
+    // MCPs are collapsed-by-default behind a count badge — click to expose the
+    // chip list before asserting on chip names.
+    fireEvent.click(screen.getByText('MCPs:'));
     expect(screen.getByText('github-mcp')).toBeInTheDocument();
     expect(screen.getByText('slack-mcp')).toBeInTheDocument();
   });
@@ -89,6 +92,7 @@ describe('ActiveOrchestrationCard – MCP rendering', () => {
 
     renderCard({ orchestrations });
 
+    fireEvent.click(screen.getByText('MCPs:'));
     expect(screen.getByText('raw-string-mcp')).toBeInTheDocument();
     expect(screen.getByText('another-mcp')).toBeInTheDocument();
   });
@@ -107,6 +111,7 @@ describe('ActiveOrchestrationCard – MCP rendering', () => {
 
     renderCard({ orchestrations });
 
+    fireEvent.click(screen.getByText('MCPs:'));
     expect(screen.getByText('string-mcp')).toBeInTheDocument();
     expect(screen.getByText('object-mcp')).toBeInTheDocument();
   });
@@ -118,7 +123,9 @@ describe('ActiveOrchestrationCard – MCP rendering', () => {
 
     renderCard({ orchestrations });
 
-    expect(screen.queryByText('MCPs')).not.toBeInTheDocument();
+    // The collapsed badge uses "MCPs:" (with colon); a stale assertion on plain "MCPs"
+    // could pass even when the badge is rendered. Use the exact badge label.
+    expect(screen.queryByText('MCPs:')).not.toBeInTheDocument();
   });
 
   it('does not render MCP section when mcps is undefined', () => {
@@ -128,7 +135,7 @@ describe('ActiveOrchestrationCard – MCP rendering', () => {
 
     renderCard({ orchestrations });
 
-    expect(screen.queryByText('MCPs')).not.toBeInTheDocument();
+    expect(screen.queryByText('MCPs:')).not.toBeInTheDocument();
   });
 
   it('does not render MCP section when no orchestration matches', () => {
@@ -139,6 +146,8 @@ describe('ActiveOrchestrationCard – MCP rendering', () => {
     renderCard({ orchestrations });
 
     expect(screen.queryByText('hidden-mcp')).not.toBeInTheDocument();
+    // Also verify the badge itself is absent — the card has no matching orchestration.
+    expect(screen.queryByText('MCPs:')).not.toBeInTheDocument();
   });
 });
 
@@ -271,8 +280,10 @@ describe('ActiveOrchestrationCard – Progress bar', () => {
     expect(screen.getByText('2/5 steps')).toBeInTheDocument();
   });
 
-  it('shows current step name if provided', () => {
-    renderCard({
+  it('shows current step name as a tooltip on the progress bar', () => {
+    // We moved the current-step name out of a separate subtitle row into the bar's
+    // `title=` so cards stay short while still being inspectable on hover.
+    const { container } = renderCard({
       type: 'running',
       execution: {
         executionId: 'exec-1',
@@ -284,7 +295,11 @@ describe('ActiveOrchestrationCard – Progress bar', () => {
       },
     });
 
-    expect(screen.getByText('analyze-data')).toBeInTheDocument();
+    // The step name must NOT appear as standalone visible text on the card.
+    expect(screen.queryByText('analyze-data')).not.toBeInTheDocument();
+    // It is reachable via the progress bar's tooltip.
+    const tooltipHost = container.querySelector('[title="Current step: analyze-data"]');
+    expect(tooltipHost).not.toBeNull();
   });
 });
 
@@ -478,5 +493,492 @@ describe('ActiveOrchestrationCard – Environment & Models collapse-by-default',
 
     expect(screen.queryByText('Environment:')).not.toBeInTheDocument();
     expect(screen.queryByText('Models:')).not.toBeInTheDocument();
+  });
+});
+
+// ── MCPs collapsible badge (A2) ───────────────────────────────────────────────
+
+describe('ActiveOrchestrationCard – MCPs collapsible badge', () => {
+  it('renders MCPs as a collapsed badge by default, hiding individual chips', () => {
+    // Cards with many MCPs used to flex-wrap to multiple rows. Collapsing keeps the
+    // first visual height to a single badge.
+    const orchestrations: Orchestration[] = [
+      {
+        id: 'orch-1',
+        name: 'Test',
+        mcps: [{ name: 'mcp-a' }, { name: 'mcp-b' }, { name: 'mcp-c' }],
+      },
+    ];
+
+    renderCard({ orchestrations });
+
+    expect(screen.getByText('MCPs:')).toBeInTheDocument();
+    expect(screen.getByText('3 MCPs')).toBeInTheDocument();
+    // Individual MCP chip names are hidden until expanded.
+    expect(screen.queryByText('mcp-a')).not.toBeInTheDocument();
+    expect(screen.queryByText('mcp-b')).not.toBeInTheDocument();
+    expect(screen.queryByText('mcp-c')).not.toBeInTheDocument();
+  });
+
+  it('expands MCP chips when the badge is clicked', () => {
+    const orchestrations: Orchestration[] = [
+      {
+        id: 'orch-1',
+        name: 'Test',
+        mcps: [{ name: 'mcp-a' }, { name: 'mcp-b' }],
+      },
+    ];
+
+    renderCard({ orchestrations });
+
+    fireEvent.click(screen.getByText('MCPs:'));
+
+    expect(screen.getByText('mcp-a')).toBeInTheDocument();
+    expect(screen.getByText('mcp-b')).toBeInTheDocument();
+  });
+
+  it('singularises the badge count when only one MCP is attached', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', mcps: [{ name: 'only-mcp' }] },
+    ];
+
+    renderCard({ orchestrations });
+
+    // Singular form keeps the badge text natural — "1 MCP", not "1 MCPs".
+    expect(screen.getByText('1 MCP')).toBeInTheDocument();
+  });
+
+  it('does NOT bubble badge clicks up to the card onView handler', () => {
+    // The badge lives inside the card, which itself opens the modal on click. The
+    // badge must stopPropagation so expanding MCPs doesn't accidentally open the
+    // modal at the same time.
+    const onView = vi.fn();
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', mcps: [{ name: 'mcp-a' }] },
+    ];
+
+    renderCard({ onView, orchestrations });
+
+    fireEvent.click(screen.getByText('MCPs:'));
+
+    expect(onView).not.toHaveBeenCalled();
+  });
+});
+
+// ── Inline meta-row (B1) ──────────────────────────────────────────────────────
+
+describe('ActiveOrchestrationCard – Inline meta-row for pending / manual / disabled', () => {
+  it('renders only present segments and skips zero-state fields on pending cards', () => {
+    // A freshly registered pending orchestration: trigger + status + step count.
+    // No lastFireTime, no nextFireTime, no runCount → those segments must not appear.
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', steps: [{ name: 's1' }, { name: 's2' }] },
+    ];
+
+    renderCard({
+      type: 'pending',
+      execution: {
+        ...baseExecution,
+        triggeredBy: 'scheduler',
+        status: 'Scheduled',
+        // runCount, lastFireTime, nextFireTime intentionally absent
+      },
+      orchestrations,
+    });
+
+    expect(screen.getByText('scheduler')).toBeInTheDocument();
+    expect(screen.getByText('Scheduled')).toBeInTheDocument();
+    expect(screen.getByText('2 steps')).toBeInTheDocument();
+    // None of these zero-state segments should render — they used to take rows in
+    // the old 2x2 grid as "Never" / "0" / "Unknown".
+    expect(screen.queryByText(/last/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/next/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/run/i)).not.toBeInTheDocument();
+    // The old labelled-grid labels must be gone too.
+    expect(screen.queryByText('Last Fired')).not.toBeInTheDocument();
+    expect(screen.queryByText('Run Count')).not.toBeInTheDocument();
+    expect(screen.queryByText('Next Fire')).not.toBeInTheDocument();
+  });
+
+  it('renders all populated segments on a pending card with full data', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', steps: [{ name: 's1' }, { name: 's2' }, { name: 's3' }] },
+    ];
+
+    renderCard({
+      type: 'pending',
+      execution: {
+        ...baseExecution,
+        triggeredBy: 'scheduler',
+        status: 'Scheduled',
+        runCount: 42,
+        lastFireTime: new Date(Date.now() - 60_000).toISOString(),
+        nextFireTime: new Date(Date.now() + 300_000).toISOString(),
+      },
+      orchestrations,
+    });
+
+    expect(screen.getByText('scheduler')).toBeInTheDocument();
+    expect(screen.getByText('Scheduled')).toBeInTheDocument();
+    expect(screen.getByText('3 steps')).toBeInTheDocument();
+    expect(screen.getByText('42 runs')).toBeInTheDocument();
+    // The inline segment uses formatTimeAgo / formatTimeUntil prefixed with "last"/"next".
+    expect(screen.getByText(/^last /)).toBeInTheDocument();
+    expect(screen.getByText(/^next /)).toBeInTheDocument();
+  });
+
+  it('singularises "1 step" and "1 run" on the inline row', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', steps: [{ name: 'only' }] },
+    ];
+
+    renderCard({
+      type: 'pending',
+      execution: {
+        ...baseExecution,
+        triggeredBy: 'scheduler',
+        runCount: 1,
+      },
+      orchestrations,
+    });
+
+    expect(screen.getByText('1 step')).toBeInTheDocument();
+    expect(screen.getByText('1 run')).toBeInTheDocument();
+  });
+
+  it('renders inline summary instead of labelled grid on manual cards', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', steps: [{ name: 's1' }, { name: 's2' }] },
+    ];
+
+    renderCard({ type: 'manual', orchestrations });
+
+    // Inline label text replaces the old "TYPE / STEPS" labelled cells.
+    expect(screen.getByText('Manual (no trigger)')).toBeInTheDocument();
+    expect(screen.getByText('2 steps')).toBeInTheDocument();
+    // Old grid labels gone.
+    expect(screen.queryByText('Type')).not.toBeInTheDocument();
+    expect(screen.queryByText('Steps')).not.toBeInTheDocument();
+  });
+
+  it('renders inline summary on disabled cards', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', steps: [{ name: 's1' }] },
+    ];
+
+    renderCard({ type: 'disabled', orchestrations });
+
+    expect(screen.getByText('Trigger disabled')).toBeInTheDocument();
+    expect(screen.getByText('1 step')).toBeInTheDocument();
+  });
+});
+
+// ── Description one-line clamp (B2) ───────────────────────────────────────────
+
+describe('ActiveOrchestrationCard – Description one-line clamp', () => {
+  it('renders the description with the .card-description clamp class and full text in title=', () => {
+    // The .card-description class applies -webkit-line-clamp: 1, so even a very long
+    // description occupies a single row. The full unclipped string is available via
+    // the title attribute for hover inspection.
+    const longDescription =
+      'This orchestration discovers ZTS-Official builds and dispatches a per-run tracking workflow. ' +
+      'It runs every 15 minutes and emits SSE events for the Portal to render in real time.';
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', description: longDescription },
+    ];
+
+    const { container } = renderCard({ type: 'manual', orchestrations });
+
+    const descEl = container.querySelector('.card-description');
+    expect(descEl).not.toBeNull();
+    expect(descEl!.getAttribute('title')).toBe(longDescription);
+    expect(descEl!.textContent).toBe(longDescription);
+  });
+
+  it('does not render a description block when the orchestration has none', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', steps: [{ name: 's1' }] },
+    ];
+
+    const { container } = renderCard({ type: 'manual', orchestrations });
+
+    expect(container.querySelector('.card-description')).toBeNull();
+  });
+});
+
+// ── Webhook URL → action button (B3) ─────────────────────────────────────────
+
+describe('ActiveOrchestrationCard – Webhook URL action button', () => {
+  it('renders a "Webhook URL" copy button on webhook trigger cards, replacing the old inline URL row', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Webhook Orch' },
+    ];
+
+    renderCard({
+      type: 'pending',
+      orchestrations,
+      execution: {
+        ...baseExecution,
+        triggeredBy: 'webhook',
+        webhookUrl: '/api/webhooks/orch-1',
+      },
+    });
+
+    // Button is in the action row, not a separate full-width block.
+    expect(screen.getByText('Webhook URL')).toBeInTheDocument();
+    // The old "Webhook URL" labelled cell is gone — no full-width URL display.
+    expect(screen.queryByText('/api/webhooks/orch-1')).not.toBeInTheDocument();
+  });
+
+  it('copies the full webhook URL to clipboard when the action button is clicked', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Webhook Orch' },
+    ];
+
+    renderCard({
+      type: 'pending',
+      orchestrations,
+      execution: {
+        ...baseExecution,
+        triggeredBy: 'webhook',
+        webhookUrl: '/api/webhooks/orch-1',
+      },
+    });
+
+    fireEvent.click(screen.getByText('Webhook URL'));
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+    // Origin + path. JSDOM defaults origin to http://localhost; the assertion just
+    // checks that the path is appended to whatever origin the test runtime sets.
+    expect(writeText.mock.calls[0][0]).toContain('/api/webhooks/orch-1');
+  });
+
+  it('does NOT render the webhook button on non-webhook trigger cards', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Scheduler Orch' },
+    ];
+
+    renderCard({
+      type: 'pending',
+      orchestrations,
+      execution: { ...baseExecution, triggeredBy: 'scheduler' },
+    });
+
+    expect(screen.queryByText('Webhook URL')).not.toBeInTheDocument();
+  });
+});
+
+// ── Tag / Profile overflow (A3 + A4) ──────────────────────────────────────────
+
+describe('ActiveOrchestrationCard – Tag overflow', () => {
+  it('renders all tags inline when count is at or below the cap', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', tags: ['a', 'b', 'c'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    expect(screen.getByText('a')).toBeInTheDocument();
+    expect(screen.getByText('b')).toBeInTheDocument();
+    expect(screen.getByText('c')).toBeInTheDocument();
+    // No overflow chip when at the cap.
+    expect(screen.queryByText(/more$/)).not.toBeInTheDocument();
+  });
+
+  it('shows only the first 3 tags inline plus a "+N more" chip when there are more', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', tags: ['a', 'b', 'c', 'd', 'e'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    // First 3 tags visible.
+    expect(screen.getByText('a')).toBeInTheDocument();
+    expect(screen.getByText('b')).toBeInTheDocument();
+    expect(screen.getByText('c')).toBeInTheDocument();
+    // Hidden behind the overflow chip.
+    expect(screen.queryByText('d')).not.toBeInTheDocument();
+    expect(screen.queryByText('e')).not.toBeInTheDocument();
+    // Overflow chip is present.
+    expect(screen.getByText('+2 more')).toBeInTheDocument();
+  });
+
+  it('reveals all tags when the "+N more" chip is clicked', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', tags: ['a', 'b', 'c', 'd', 'e'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    fireEvent.click(screen.getByText('+2 more'));
+
+    expect(screen.getByText('d')).toBeInTheDocument();
+    expect(screen.getByText('e')).toBeInTheDocument();
+  });
+
+  it('does NOT bubble overflow-chip clicks up to the card onView handler', () => {
+    // Critical: the tag list lives inside the card, which itself fires onView on click.
+    // The overflow chip must stopPropagation so power users don't get a modal pop every
+    // time they expand a long tag list.
+    const onView = vi.fn();
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', tags: ['a', 'b', 'c', 'd'] },
+    ];
+
+    renderCard({ orchestrations, onView });
+
+    fireEvent.click(screen.getByText('+1 more'));
+
+    expect(onView).not.toHaveBeenCalled();
+  });
+});
+
+describe('ActiveOrchestrationCard – Profile overflow', () => {
+  it('shows only 3 profile badges inline with "+N more" when more profiles match', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', tags: ['production'] },
+    ];
+    // Five profiles, all with wildcard filters → all match. Cap=3 so 2 should collapse.
+    // ProfileFilter uses { tags, orchestrationIds, excludeOrchestrationIds } where a
+    // '*' in tags matches every orchestration (see profileFilterMatchesOrchestration).
+    const wildcardFilter = { tags: ['*'], orchestrationIds: [], excludeOrchestrationIds: [] };
+    const timestamps = { createdAt: '2026-05-01T00:00:00Z', updatedAt: '2026-05-01T00:00:00Z' };
+    const profiles: Profile[] = [
+      { id: 'p1', name: 'Profile 1', isActive: false, filter: wildcardFilter, ...timestamps },
+      { id: 'p2', name: 'Profile 2', isActive: false, filter: wildcardFilter, ...timestamps },
+      { id: 'p3', name: 'Profile 3', isActive: false, filter: wildcardFilter, ...timestamps },
+      { id: 'p4', name: 'Profile 4', isActive: false, filter: wildcardFilter, ...timestamps },
+      { id: 'p5', name: 'Profile 5', isActive: false, filter: wildcardFilter, ...timestamps },
+    ];
+
+    renderCard({ orchestrations, profiles });
+
+    expect(screen.getByText('Profile 1')).toBeInTheDocument();
+    expect(screen.getByText('Profile 2')).toBeInTheDocument();
+    expect(screen.getByText('Profile 3')).toBeInTheDocument();
+    expect(screen.queryByText('Profile 4')).not.toBeInTheDocument();
+    expect(screen.queryByText('Profile 5')).not.toBeInTheDocument();
+    expect(screen.getByText('+2 more')).toBeInTheDocument();
+  });
+});
+
+// ── Single-line header (status chip replaces the old left-side dot) ──────────
+
+describe('ActiveOrchestrationCard – Single-line header with status chip', () => {
+  it('does NOT render the legacy left-side status dot inside the header', () => {
+    // Old layout had a 10×10 div with the .step-status-badge class but also
+    // overrode width/height/borderRadius inline. Because the class kept its
+    // pill `padding: 2px 8px`, the dot actually rendered as a ~26×14 oval —
+    // the visual bug we set out to remove. Assert that no such dot exists
+    // anywhere inside the card header.
+    const { container } = renderCard({
+      type: 'pending',
+      execution: { ...baseExecution, triggeredBy: 'scheduler' },
+    });
+
+    const header = container.querySelector('.card-header');
+    expect(header).not.toBeNull();
+    const dot = header!.querySelector('div[style*="border-radius: 50%"]');
+    expect(dot).toBeNull();
+  });
+
+  it('removes the old two-line .card-version status row entirely', () => {
+    // The previous header rendered the status icon + text on a second
+    // `.card-version` row underneath the title. That row is gone now — status
+    // is rendered as a chip on the title row instead, saving ~10 px of header
+    // height per card.
+    const { container } = renderCard({
+      type: 'running',
+      execution: {
+        ...baseExecution,
+        executionId: 'exec-1',
+        status: 'Running',
+        startedAt: new Date().toISOString(),
+      },
+    });
+
+    expect(container.querySelector('.card-version')).toBeNull();
+  });
+
+  it('renders the status as a .step-status-badge pill with the correct state class', () => {
+    // Each card state maps to a CSS pill class so colors come from App.css
+    // (a single source of truth) instead of inline overrides. Verify the chip
+    // wraps the visible status text with the correct state class — that's how
+    // the right colour ends up applied at runtime.
+    const cases: { type: 'running' | 'pending' | 'manual' | 'disabled'; text: string; stateClass: string }[] = [
+      { type: 'running', text: 'Running', stateClass: 'running' },
+      { type: 'pending', text: 'Pending', stateClass: 'pending' },
+      { type: 'manual', text: 'Manual', stateClass: 'manual' },
+      { type: 'disabled', text: 'Disabled', stateClass: 'disabled' },
+    ];
+
+    for (const c of cases) {
+      const { container, unmount } = renderCard({
+        type: c.type,
+        execution: c.type === 'running'
+          ? { ...baseExecution, executionId: 'e', status: 'Running', startedAt: new Date().toISOString() }
+          : baseExecution,
+      });
+
+      // Find the chip that contains the status text and confirm it carries both
+      // the base `step-status-badge` class and the per-state class.
+      const chip = container.querySelector(`.step-status-badge.${c.stateClass}`);
+      expect(chip).not.toBeNull();
+      expect(chip!.textContent).toContain(c.text);
+
+      unmount();
+    }
+  });
+
+  it('keeps the Waiting chip on the same row as the title and status', () => {
+    // Critical UX assertion: the "Waiting" affordance must remain visible at a
+    // glance when a run is paused on a HITL prompt. After collapsing the header
+    // to one row, all three (status chip, title, waiting chip) must share the
+    // same .card-title-area flex parent so they line up horizontally.
+    const { container } = renderCard({
+      type: 'running',
+      execution: {
+        ...baseExecution,
+        executionId: 'exec-1',
+        status: 'Running',
+        startedAt: new Date().toISOString(),
+      },
+    });
+
+    // Render with awaitingInput separately because renderCard doesn't expose
+    // it; mount via the component directly here.
+    const renderHelper = () => render(
+      <ActiveOrchestrationCard
+        execution={{ ...baseExecution, executionId: 'exec-1', status: 'Running', startedAt: new Date().toISOString() }}
+        type="running"
+        onView={noop}
+        awaitingInput
+      />,
+    );
+    const { container: c2 } = renderHelper();
+    const titleArea = c2.querySelector('.card-title-area');
+    expect(titleArea).not.toBeNull();
+    const chip = titleArea!.querySelector('.step-status-badge');
+    const title = titleArea!.querySelector('.card-title');
+    const waiting = titleArea!.querySelector('.waiting-inputs-chip');
+
+    // All three must be present and all must be direct children of card-title-area
+    // so the flex row lays them out as `[status] [title] [waiting]`.
+    expect(chip).not.toBeNull();
+    expect(title).not.toBeNull();
+    expect(waiting).not.toBeNull();
+    expect(chip!.parentElement).toBe(titleArea);
+    expect(title!.parentElement).toBe(titleArea);
+    expect(waiting!.parentElement).toBe(titleArea);
+
+    // Without awaitingInput, the Waiting chip is gone but the status chip and
+    // title still share the same parent.
+    const titleAreaNoWait = container.querySelector('.card-title-area');
+    expect(titleAreaNoWait!.querySelector('.waiting-inputs-chip')).toBeNull();
+    expect(titleAreaNoWait!.querySelector('.step-status-badge')).not.toBeNull();
+    expect(titleAreaNoWait!.querySelector('.card-title')).not.toBeNull();
   });
 });

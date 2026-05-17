@@ -1520,6 +1520,16 @@
     .step-status-badge.cancelled { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
     .step-status-badge.skipped { background: var(--bg-secondary); color: var(--text-muted); }
     .step-status-badge.noaction { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    /* States unique to the orchestration cards (ActiveOrchestrationCard). Keep next
+       to the pill family above so the visual language stays consistent across the
+       Portal (Execution Modal step list, History rows, etc.). */
+    .step-status-badge.cancelling { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
+    .step-status-badge.manual { background: var(--bg-secondary); color: var(--text-muted); }
+    .step-status-badge.disabled { background: var(--bg-secondary); color: var(--text-dim); opacity: 0.7; }
+    /* When the pill is used inline next to a card title (single-line header), shrink
+       its footprint so the title stays the dominant element. Scoped to .card-title-area
+       so existing pill usages elsewhere keep their default 11 px / 2px 8px size. */
+    .card-title-area .step-status-badge { font-size: 9px; padding: 1px 6px; }
     
     /* Pulse animation for running steps */
     @keyframes pulse {
