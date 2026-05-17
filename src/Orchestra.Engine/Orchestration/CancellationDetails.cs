@@ -160,6 +160,51 @@ public sealed class CancellationDetails
 	public CancellationProgressSummary? Progress { get; init; }
 
 	/// <summary>
+	/// Optional caller-supplied free-text reason for the cancellation (e.g. <c>"superseded by
+	/// a newer scheduled run"</c> or <c>"build is no longer needed"</c>). Distinct from
+	/// <see cref="Detail"/>, which identifies the cancellation source/route. When set, the
+	/// computed <see cref="Reason"/> includes this text so it surfaces in summaries.
+	/// </summary>
+	/// <remarks>
+	/// Sourced from the request body on the REST cancel endpoint. Null on cancellations that
+	/// originated from non-REST paths (timeouts, host shutdown, etc.) or from clients that
+	/// chose not to supply one. Whitespace-only values are not persisted.
+	/// </remarks>
+	public string? CallerReason { get; init; }
+
+	/// <summary>
+	/// Optional caller-supplied client-type label (e.g. <c>"portal-ui"</c>, <c>"cli"</c>,
+	/// <c>"mcp"</c>, <c>"automation"</c>). Lets dashboards distinguish "user clicked the
+	/// Portal cancel button" from "CLI script ran <c>orchestra cancel</c>" without parsing
+	/// User-Agent strings. When set on the REST cancel endpoint, it overrides the default
+	/// <see cref="Source"/> = <c>"caller"</c>.
+	/// </summary>
+	/// <remarks>
+	/// Caller-untrusted. Stored verbatim for diagnostics; do NOT use for authorization.
+	/// </remarks>
+	public string? CallerSource { get; init; }
+
+	/// <summary>
+	/// The authenticated principal name of the HTTP caller that requested the cancel,
+	/// captured from <c>HttpContext.User.Identity.Name</c> when present. Null when no
+	/// authentication scheme is wired or the request was anonymous.
+	/// </summary>
+	public string? CallerIdentity { get; init; }
+
+	/// <summary>
+	/// The remote IP address of the HTTP caller that requested the cancel, captured from
+	/// <c>HttpContext.Connection.RemoteIpAddress</c>. Null for non-HTTP cancellation paths.
+	/// </summary>
+	public string? CallerAddress { get; init; }
+
+	/// <summary>
+	/// The <c>User-Agent</c> header of the HTTP caller that requested the cancel. Useful
+	/// for distinguishing browser-driven cancels (Portal) from programmatic ones (CLI,
+	/// curl, automation scripts) when <see cref="CallerSource"/> was not supplied.
+	/// </summary>
+	public string? CallerUserAgent { get; init; }
+
+	/// <summary>
 	/// A short human-readable summary (e.g. <c>"timed out after 1800s (sync-invoke)"</c>).
 	/// Suitable for embedding in error messages and run summaries.
 	/// </summary>
@@ -177,8 +222,7 @@ public sealed class CancellationDetails
 					TimeoutSeconds is { } s
 						? $"sync invocation timed out after {s}s"
 						: "sync invocation timed out",
-				CancellationCauseKind.External =>
-					!string.IsNullOrWhiteSpace(Detail) ? $"cancelled by caller: {Detail}" : "cancelled by caller",
+				CancellationCauseKind.External => BuildExternalReason(),
 				CancellationCauseKind.HostShutdown =>
 					!string.IsNullOrWhiteSpace(Detail) ? $"interrupted by host shutdown: {Detail}" : "interrupted by host shutdown",
 				CancellationCauseKind.OrchestrationComplete =>
@@ -218,6 +262,46 @@ public sealed class CancellationDetails
 		or CancellationCauseKind.SyncInvokeTimeout
 		or CancellationCauseKind.AwaitingInputTimeout
 		or CancellationCauseKind.McpRequestAborted;
+
+	/// <summary>
+	/// Builds the human-readable summary for <see cref="CancellationCauseKind.External"/> cancellations.
+	/// Layers in caller-supplied attribution (reason and source label) when present so the
+	/// run summary explains "who" cancelled and "why", not just "REST endpoint was hit".
+	/// </summary>
+	/// <remarks>
+	/// Composition order (when all set):
+	/// <c>"cancelled by &lt;callerSource&gt; (&lt;callerIdentity&gt;): &lt;callerReason&gt; [via &lt;detail&gt;]"</c>.
+	/// Each piece is optional and omitted from the message when its source field is null/whitespace.
+	/// </remarks>
+	private string BuildExternalReason()
+	{
+		var who = !string.IsNullOrWhiteSpace(CallerSource)
+			? CallerSource
+			: "caller";
+
+		var sb = new System.Text.StringBuilder("cancelled by ").Append(who);
+
+		if (!string.IsNullOrWhiteSpace(CallerIdentity))
+		{
+			sb.Append(" (").Append(CallerIdentity).Append(')');
+		}
+
+		if (!string.IsNullOrWhiteSpace(CallerReason))
+		{
+			sb.Append(": ").Append(CallerReason);
+		}
+
+		if (!string.IsNullOrWhiteSpace(Detail))
+		{
+			sb.Append(string.IsNullOrWhiteSpace(CallerReason) ? ": " : " [via ").Append(Detail);
+			if (!string.IsNullOrWhiteSpace(CallerReason))
+			{
+				sb.Append(']');
+			}
+		}
+
+		return sb.ToString();
+	}
 
 	/// <summary>
 	/// Convenience constructor for an orchestration-level timeout.

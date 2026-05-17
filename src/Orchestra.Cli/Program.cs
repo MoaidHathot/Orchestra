@@ -67,7 +67,10 @@ public class Program
 				"disable" => await RunWithArg(args, 1, "orchestration ID", id => client.DisableOrchestrationAsync(id)),
 
 				"active" => await client.GetActiveExecutionsAsync(),
-				"cancel" => await RunWithArg(args, 1, "execution ID", id => client.CancelExecutionAsync(id)),
+				"cancel" => await RunWithArg(args, 1, "execution ID", id => client.CancelExecutionAsync(
+					id,
+					reason: GetFlag(args, "--reason"),
+					source: GetFlag(args, "--source") ?? "cli")),
 
 				"runs" => await HandleRunsCommand(args, client),
 				"triggers" => await HandleTriggersCommand(args, client),
@@ -512,6 +515,8 @@ public class Program
 		Console.WriteLine("  attach <orchestration> <runId> Re-attach to an in-flight run (same flags as run)");
 		Console.WriteLine("  active                        List active executions");
 		Console.WriteLine("  cancel <execution-id>         Cancel a running execution");
+		Console.WriteLine("    [--reason \"text\"]              Free-text reason recorded on the run record");
+		Console.WriteLine("    [--source <label>]            Client-type label (defaults to \"cli\")");
 		Console.WriteLine();
 		Console.WriteLine("Run History:");
 		Console.WriteLine("  runs [list] [--limit N]             List recent runs");

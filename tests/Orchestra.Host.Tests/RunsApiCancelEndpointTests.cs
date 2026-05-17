@@ -69,7 +69,9 @@ public sealed class RunsApiCancelEndpointTests : IDisposable
 		using var host = await BuildHostAsync(infos);
 		using var client = host.GetTestClient();
 
-		// Act
+		// Act — historical "empty body" callers (legacy CLI, curl, manual tests) must keep
+		// working without supplying a body. The detail still records the canonical route, but
+		// caller-supplied fields are null because none were sent.
 		var response = await client.PostAsync($"/api/active/{execId}/cancel", content: null);
 
 		// Assert
@@ -79,7 +81,151 @@ public sealed class RunsApiCancelEndpointTests : IDisposable
 		info.CancellationCauseOverride.Source.Should().Be("caller");
 		info.CancellationCauseOverride.Detail.Should().Be("REST /api/active/{id}/cancel");
 		info.CancellationCauseOverride.RequestedAt.Should().NotBeNull();
+		// No body was sent — caller-supplied fields stay null so dashboards can tell
+		// "legacy empty-body cancel" apart from a structured one.
+		info.CancellationCauseOverride.CallerReason.Should().BeNull();
+		info.CancellationCauseOverride.CallerSource.Should().BeNull();
+		// HTTP-derived identity is best-effort. The TestServer doesn't set RemoteIpAddress,
+		// so we only assert that User-Agent is captured when the test client sends one (it
+		// doesn't by default), and that nothing throws.
 		cts.IsCancellationRequested.Should().BeTrue();
+	}
+
+	[Fact]
+	public async Task PostCancel_WithStructuredBody_PersistsCallerReasonAndSource()
+	{
+		// New behaviour: callers can supply { "reason": "...", "source": "<label>" } so the
+		// run record explains "who" cancelled and "why", not just "REST endpoint was hit".
+		using var cts = new CancellationTokenSource();
+		var execId = "rest-cancel-structured";
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = execId,
+			OrchestrationId = "orch",
+			OrchestrationName = "orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = NullOrchestrationReporter.Instance,
+		};
+		var infos = new ConcurrentDictionary<string, ActiveExecutionInfo>();
+		infos[execId] = info;
+
+		using var host = await BuildHostAsync(infos);
+		using var client = host.GetTestClient();
+
+		var response = await client.PostAsJsonAsync(
+			$"/api/active/{execId}/cancel",
+			new { reason = "superseded by a newer scheduled run", source = "portal-ui" });
+
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		info.CancellationCauseOverride.Should().NotBeNull();
+		info.CancellationCauseOverride!.Kind.Should().Be(CancellationCauseKind.External);
+		// Source stays "caller" for backwards-compat; CallerSource is the new label.
+		info.CancellationCauseOverride.Source.Should().Be("caller");
+		info.CancellationCauseOverride.CallerSource.Should().Be("portal-ui");
+		info.CancellationCauseOverride.CallerReason.Should().Be("superseded by a newer scheduled run");
+		// The Reason getter weaves both into the human-readable summary so it shows up in
+		// run.json's finalContent and SSE error messages.
+		info.CancellationCauseOverride.Reason.Should().Contain("portal-ui");
+		info.CancellationCauseOverride.Reason.Should().Contain("superseded by a newer scheduled run");
+		cts.IsCancellationRequested.Should().BeTrue();
+	}
+
+	[Fact]
+	public async Task PostCancel_WithWhitespaceReason_PersistsAsNullNotEmpty()
+	{
+		// Whitespace-only fields are noise; normalize them to null so dashboards don't render
+		// blank "Reason:" rows.
+		using var cts = new CancellationTokenSource();
+		var execId = "rest-cancel-whitespace";
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = execId,
+			OrchestrationId = "orch",
+			OrchestrationName = "orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = NullOrchestrationReporter.Instance,
+		};
+		var infos = new ConcurrentDictionary<string, ActiveExecutionInfo>();
+		infos[execId] = info;
+
+		using var host = await BuildHostAsync(infos);
+		using var client = host.GetTestClient();
+
+		var response = await client.PostAsJsonAsync(
+			$"/api/active/{execId}/cancel",
+			new { reason = "   ", source = "\t" });
+
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		info.CancellationCauseOverride!.CallerReason.Should().BeNull();
+		info.CancellationCauseOverride.CallerSource.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task PostCancel_WithMalformedJsonBody_ReturnsBadRequest()
+	{
+		// Defensive: a malformed body must not silently fall through to "cancel succeeded"
+		// because that would hide a client-side bug while still cancelling the run.
+		using var cts = new CancellationTokenSource();
+		var execId = "rest-cancel-bad-json";
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = execId,
+			OrchestrationId = "orch",
+			OrchestrationName = "orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = NullOrchestrationReporter.Instance,
+		};
+		var infos = new ConcurrentDictionary<string, ActiveExecutionInfo>();
+		infos[execId] = info;
+
+		using var host = await BuildHostAsync(infos);
+		using var client = host.GetTestClient();
+
+		using var badContent = new StringContent("{not-json", System.Text.Encoding.UTF8, "application/json");
+		var response = await client.PostAsync($"/api/active/{execId}/cancel", badContent);
+
+		response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+		// The run must NOT have been cancelled — bad input rejects, doesn't half-execute.
+		cts.IsCancellationRequested.Should().BeFalse();
+		info.CancellationCauseOverride.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task PostCancel_CapturesUserAgentFromRequestHeader()
+	{
+		// User-Agent is the only HTTP-attribution field the TestServer reliably carries
+		// (RemoteIpAddress is null on TestServer, no auth is wired). Verify it lands on the
+		// run record so production cancels by curl/automation are recognisable.
+		using var cts = new CancellationTokenSource();
+		var execId = "rest-cancel-ua";
+		var info = new ActiveExecutionInfo
+		{
+			ExecutionId = execId,
+			OrchestrationId = "orch",
+			OrchestrationName = "orch",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = NullOrchestrationReporter.Instance,
+		};
+		var infos = new ConcurrentDictionary<string, ActiveExecutionInfo>();
+		infos[execId] = info;
+
+		using var host = await BuildHostAsync(infos);
+		using var client = host.GetTestClient();
+
+		using var request = new HttpRequestMessage(HttpMethod.Post, $"/api/active/{execId}/cancel");
+		request.Headers.UserAgent.ParseAdd("orchestra-test-suite/1.0");
+		var response = await client.SendAsync(request);
+
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		info.CancellationCauseOverride!.CallerUserAgent.Should().Be("orchestra-test-suite/1.0");
 	}
 
 	[Fact]

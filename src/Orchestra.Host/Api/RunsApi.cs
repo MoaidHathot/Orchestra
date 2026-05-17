@@ -540,16 +540,56 @@ public static partial class RunsApi
 		});
 
 		// POST /api/active/{executionId}/cancel - Cancel a running execution
-		activeGroup.MapPost("/{executionId}/cancel", (HttpContext httpContext, string executionId) =>
+		//
+		// Optional JSON body:
+		//   { "reason": "<free-text>", "source": "<client-type-label>" }
+		//
+		// Both fields are optional and untrusted; they are stored verbatim on the run record
+		// for diagnostics, not used for authorization. The endpoint also captures the
+		// authenticated principal name, remote IP, and User-Agent automatically so a run
+		// record always identifies "who" cancelled it (best-effort: anonymous unauthenticated
+		// calls record null identity).
+		activeGroup.MapPost("/{executionId}/cancel", async (HttpContext httpContext, string executionId) =>
 		{
 			var activeExecutionInfos = httpContext.RequestServices
 				.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
 			var loggerFactory = httpContext.RequestServices.GetRequiredService<ILoggerFactory>();
+			var logger = loggerFactory.CreateLogger(typeof(RunsApi));
+
+			// Parse the optional body. Empty/whitespace/missing body is fine — historical
+			// clients post `null`, and we keep them working unchanged. We probe for a JSON
+			// content type rather than ContentLength because chunked-transfer requests under
+			// some HTTP stacks (notably TestServer) leave ContentLength null even when a body
+			// is present.
+			CancelRequestBody? body = null;
+			if (httpContext.Request.HasJsonContentType())
+			{
+				try
+				{
+					body = await httpContext.Request.ReadFromJsonAsync<CancelRequestBody>(jsonOptions);
+				}
+				catch (JsonException ex)
+				{
+					LogCancelBodyParseFailed(logger, executionId, ex.Message);
+					return ProblemDetailsHelpers.BadRequest("Cancel request body is not valid JSON.");
+				}
+			}
+
+			var callerReason = NormalizeOrNull(body?.Reason);
+			var callerSource = NormalizeOrNull(body?.Source);
+
 			if (activeExecutionInfos.TryGetValue(executionId, out var info))
 			{
 				info.Status = HostExecutionStatus.Cancelling;
 				if (info.Reporter is SseReporter sseReporter)
 					sseReporter.ReportStatusChange(HostExecutionStatus.Cancelling);
+
+				// Capture caller identity from the HTTP context. Best-effort: any/all of these
+				// may be null on anonymous or non-HTTP-piped requests; we never throw.
+				var callerIdentity = NormalizeOrNull(httpContext.User?.Identity?.Name);
+				var callerAddress = httpContext.Connection?.RemoteIpAddress?.ToString();
+				var callerUserAgent = httpContext.Request.Headers.UserAgent.ToString();
+				if (string.IsNullOrWhiteSpace(callerUserAgent)) callerUserAgent = null;
 
 				// Attribute the cancel before triggering it so the engine's probe records a
 				// precise CancellationDetails on the run record instead of a generic "caller".
@@ -560,10 +600,21 @@ public static partial class RunsApi
 					Source = "caller",
 					Detail = "REST /api/active/{id}/cancel",
 					RequestedAt = DateTimeOffset.UtcNow,
+					CallerReason = callerReason,
+					CallerSource = callerSource,
+					CallerIdentity = callerIdentity,
+					CallerAddress = callerAddress,
+					CallerUserAgent = callerUserAgent,
 				};
 
-				var logger = loggerFactory.CreateLogger(typeof(RunsApi));
-				LogRunCancelRequested(logger, executionId, "rest-api", "REST /api/active/{id}/cancel");
+				LogRunCancelRequested(
+					logger,
+					executionId,
+					callerSource ?? "rest-api",
+					"REST /api/active/{id}/cancel",
+					callerReason,
+					callerIdentity,
+					callerAddress);
 
 				info.CancellationTokenSource.Cancel();
 				return Results.Ok(new { cancelled = true, executionId, status = HostExecutionStatus.Cancelling });
@@ -574,9 +625,37 @@ public static partial class RunsApi
 		return endpoints;
 	}
 
+	/// <summary>
+	/// Optional body shape for <c>POST /api/active/{id}/cancel</c>. Both fields are caller-supplied
+	/// diagnostics, never used for authorization. Whitespace-only values are treated as null.
+	/// </summary>
+	/// <remarks>
+	/// Property names are pinned with <see cref="JsonPropertyNameAttribute"/> so deserialization
+	/// works the same whether the host's <see cref="JsonSerializerOptions.PropertyNamingPolicy"/>
+	/// is camelCase, PascalCase, or null. Without this, positional-record parameter binding can
+	/// silently miss values when the configured naming policy doesn't match.
+	/// </remarks>
+	private sealed record CancelRequestBody(
+		[property: System.Text.Json.Serialization.JsonPropertyName("reason")] string? Reason,
+		[property: System.Text.Json.Serialization.JsonPropertyName("source")] string? Source);
+
+	private static string? NormalizeOrNull(string? value)
+		=> string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
 	[LoggerMessage(Level = LogLevel.Information,
-		Message = "Run cancel requested: executionId={ExecutionId}, source={Source}, detail={Detail}")]
-	private static partial void LogRunCancelRequested(ILogger logger, string executionId, string source, string? detail);
+		Message = "Run cancel requested: executionId={ExecutionId}, source={Source}, detail={Detail}, callerReason={CallerReason}, callerIdentity={CallerIdentity}, callerAddress={CallerAddress}")]
+	private static partial void LogRunCancelRequested(
+		ILogger logger,
+		string executionId,
+		string source,
+		string? detail,
+		string? callerReason,
+		string? callerIdentity,
+		string? callerAddress);
+
+	[LoggerMessage(Level = LogLevel.Warning,
+		Message = "Run cancel body parse failed: executionId={ExecutionId}, error={Error}")]
+	private static partial void LogCancelBodyParseFailed(ILogger logger, string executionId, string error);
 
 	/// <summary>
 	/// Projects a <see cref="CancellationDetails"/> into a stable JSON shape for API responses.
@@ -599,6 +678,11 @@ public static partial class RunsApi
 			reason = details.Reason,
 			isTimeout = details.IsTimeout,
 			requestedAt = details.RequestedAt,
+			callerReason = details.CallerReason,
+			callerSource = details.CallerSource,
+			callerIdentity = details.CallerIdentity,
+			callerAddress = details.CallerAddress,
+			callerUserAgent = details.CallerUserAgent,
 			progress = details.Progress is null ? null : new
 			{
 				totalSteps = details.Progress.TotalSteps,

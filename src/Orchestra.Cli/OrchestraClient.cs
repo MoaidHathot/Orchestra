@@ -131,8 +131,18 @@ public class OrchestraClient : IDisposable
 	public async Task<JsonElement> GetActiveExecutionsAsync()
 		=> await GetAsync("api/active");
 
-	public async Task<JsonElement> CancelExecutionAsync(string executionId)
-		=> await PostAsync($"api/active/{Uri.EscapeDataString(executionId)}/cancel", new { });
+	public async Task<JsonElement> CancelExecutionAsync(
+		string executionId,
+		string? reason = null,
+		string? source = "cli")
+	{
+		var body = new
+		{
+			reason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim(),
+			source = string.IsNullOrWhiteSpace(source) ? "cli" : source.Trim(),
+		};
+		return await PostAsync($"api/active/{Uri.EscapeDataString(executionId)}/cancel", body);
+	}
 
 	// ── Run History ──
 

@@ -1751,11 +1751,17 @@ function App(): React.JSX.Element {
 
   // ── Cancel running orchestration ──────────────────────────────────────────
 
-  const cancelExecution = async (executionId: string | null): Promise<void> => {
+  const cancelExecution = async (executionId: string | null, reason?: string): Promise<void> => {
     if (!executionId) return;
     try {
       setExecutionModal(prev => ({ ...prev, status: 'cancelling' }));
-      await api.post(`/api/active/${executionId}/cancel`);
+      // Send a structured cancel body so the run record attributes the cancel to the Portal
+      // UI (instead of a generic "REST endpoint was hit"). `reason` is optional free-text the
+      // user can supply when prompted; `source` is a fixed client-type label.
+      await api.post(`/api/active/${executionId}/cancel`, {
+        source: 'portal-ui',
+        reason: reason && reason.trim().length > 0 ? reason.trim() : undefined,
+      });
 
       if (!eventSourceRef.current) {
         setExecutionModal(prev => ({ ...prev, status: 'cancelled' }));

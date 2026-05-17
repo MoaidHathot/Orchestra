@@ -1811,6 +1811,11 @@ public partial class OrchestrationExecutor
 			Detail = details.Detail,
 			RequestedAt = details.RequestedAt,
 			Progress = progress,
+			CallerReason = details.CallerReason,
+			CallerSource = details.CallerSource,
+			CallerIdentity = details.CallerIdentity,
+			CallerAddress = details.CallerAddress,
+			CallerUserAgent = details.CallerUserAgent,
 		};
 	}
 
