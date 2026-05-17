@@ -877,6 +877,9 @@
          button floating in the middle of their visible area. */
       display: flex;
       flex-direction: column;
+      /* Anchor the absolutely-positioned hover-revealed Run chip
+         (.orch-card-run-chip) to the card frame. */
+      position: relative;
     }
     .orch-card:hover { border-color: var(--border-light); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
     .card-header {
@@ -956,6 +959,58 @@
       line-height: 1.3;
     }
     .btn-card-action svg { width: 11px; height: 11px; }
+
+    /* ── Hover-revealed Run chip on orchestration cards ──────────────────
+     * Icon-only primary action overlaid at the bottom-right corner of the
+     * card, hidden at rest so the card stays visually clean. Revealed on
+     * `.orch-card:hover` (mouse), `.orch-card:focus-within` (any inner
+     * element receives focus), or the chip's own `:focus-visible` (keyboard
+     * tab lands on it). On touch devices the `@media (hover: none)` block
+     * keeps the chip permanently visible since there is no hover state.
+     *
+     * The chip is `position: absolute` so its reveal does not shift card
+     * layout — sibling cards keep the same height regardless of hover state.
+     * The Run action is also available through the kebab menu so it remains
+     * reachable even when the chip is hidden (e.g., screen-reader users who
+     * never trigger hover). */
+    .orch-card-run-chip {
+      position: absolute;
+      bottom: 6px;
+      right: 6px;
+      z-index: 5;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 6px;
+      background: var(--success);
+      border: 1px solid var(--success);
+      border-radius: 6px;
+      color: #fff;
+      cursor: pointer;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(2px);
+      transition: opacity 0.15s ease, transform 0.15s ease, filter 0.15s ease;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+    }
+    .orch-card-run-chip svg { width: 12px; height: 12px; display: block; }
+    .orch-card:hover .orch-card-run-chip,
+    .orch-card:focus-within .orch-card-run-chip,
+    .orch-card-run-chip:focus-visible {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
+    }
+    .orch-card-run-chip:hover { filter: brightness(1.1); }
+    /* Touch devices have no hover — always-show so users can still reach the
+       chip; the kebab Run item remains a secondary affordance. */
+    @media (hover: none) {
+      .orch-card-run-chip {
+        opacity: 1;
+        pointer-events: auto;
+        transform: none;
+      }
+    }
 
     /* ── Resource + label rows on orchestration cards ────────────────────
      * Group MCPs / Skills / Environment / Models on one flex-wrap "resources"

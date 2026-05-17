@@ -193,12 +193,21 @@ export default function ActiveOrchestrationCard({
     || (orch as unknown as { triggerType?: string })?.triggerType;
   const hasTrigger = !!triggerType && triggerType.toLowerCase() !== 'manual';
 
-  // Tertiary actions that live in the header kebab. Today this is just "copy
-  // webhook URL" for webhook-triggered orchestrations; the array shape lets us
-  // extend the menu later (export config, delete, ...) without restructuring.
+  // Tertiary actions that live in the header kebab. The kebab is the
+  // touch/keyboard-friendly fallback for Run (since the primary affordance is
+  // a hover-revealed chip in the bottom-right corner of the card, which
+  // isn't reachable on touch without hover). Webhook URL copy is webhook-only.
   // We deliberately do NOT add a redundant "Open" item — the entire card is
   // already clickable to open the modal.
   const kebabItems: CardKebabMenuItem[] = [];
+  if (!isRunning && onRun && orch) {
+    const orchToRun = orch;
+    kebabItems.push({
+      label: 'Run',
+      icon: <Icons.Play />,
+      onClick: () => onRun(orchToRun),
+    });
+  }
   if (!isRunning && execution.triggeredBy === 'webhook' && execution.webhookUrl) {
     const webhookUrl = execution.webhookUrl;
     kebabItems.push({
@@ -228,12 +237,13 @@ export default function ActiveOrchestrationCard({
     contextSections.length > 0;
   const hasLabels = (orch?.tags?.length ?? 0) > 0 || matchedProfiles.length > 0;
 
-  // The action row collapses to nothing when neither Run nor Cancel applies
-  // (e.g., a disabled card with no onRun). Compute up-front so we can skip the
-  // whole `.card-actions` wrapper and save its margin.
+  // Run is no longer in the bottom action row — it's a hover-revealed chip
+  // overlaid at the bottom-right of the card, plus a kebab fallback. The
+  // action row is reserved for the always-visible Cancel safety affordance
+  // on running cards.
   const showRun = !isRunning && onRun != null && orch != null;
   const showCancel = isRunning && onCancel != null;
-  const hasActionButtons = showRun || showCancel;
+  const hasActionButtons = showCancel;
 
   return (
     <div
@@ -519,31 +529,19 @@ export default function ActiveOrchestrationCard({
         )}
 
         {/*
-         * Action row — single primary verb only.
-         *   - Run    on non-running cards (definition view)
-         *   - Cancel on running cards (safety affordance, kept visible)
-         * View was removed (the entire card is clickable to open the modal).
-         * Trigger toggle moved to the header's power-icon. Webhook URL copy
-         * moved into the kebab menu. When no button applies, the wrapper is
-         * skipped entirely to save its margin.
+         * Action row — reserved for the always-visible Cancel safety affordance
+         * on running cards. Run is no longer rendered here; it's a hover-only
+         * chip overlaid at the bottom-right (see .orch-card-run-chip below) plus
+         * a kebab-menu fallback for touch/keyboard users. The wrapper is
+         * skipped entirely when there is no button to render so non-running
+         * cards lose the whole row at rest (no margin, no padding).
          *
          * The .card-actions class pins this row to the bottom of the card via
-         * `margin-top: auto` so the Run button sits in a consistent place
-         * regardless of how much content lives above it.
+         * `margin-top: auto` so the Cancel button sits consistently regardless
+         * of how much content lives above it.
          */}
         {hasActionButtons && (
           <div className="card-actions">
-            {showRun && (
-              <button
-                className="btn btn-success btn-sm btn-card-action"
-                onClick={(e: React.MouseEvent) => {
-                  e.stopPropagation();
-                  onRun!(orch!);
-                }}
-              >
-                <Icons.Play /> Run
-              </button>
-            )}
             {showCancel && (
               <button
                 className="btn btn-danger btn-sm btn-card-action"
@@ -560,6 +558,31 @@ export default function ActiveOrchestrationCard({
           </div>
         )}
       </div>
+
+      {/*
+       * Hover-revealed Run chip — icon-only pill in the bottom-right corner,
+       * absolutely positioned so it does not affect card height. Hidden at
+       * rest, revealed on `.orch-card:hover`, `.orch-card:focus-within`, or
+       * `.orch-card-run-chip:focus-visible`. On touch devices (no hover) the
+       * chip is permanently visible via `@media (hover: none)` in App.css.
+       *
+       * The Run action is also exposed through the kebab menu's "Run" item,
+       * so touch and keyboard users always have a discoverable path even
+       * without the hover state.
+       */}
+      {showRun && (
+        <button
+          className="orch-card-run-chip"
+          onClick={(e: React.MouseEvent) => {
+            e.stopPropagation();
+            onRun!(orch!);
+          }}
+          title={`Run ${execution.orchestrationName}`}
+          aria-label={`Run ${execution.orchestrationName}`}
+        >
+          <Icons.Play />
+        </button>
+      )}
     </div>
   );
 }

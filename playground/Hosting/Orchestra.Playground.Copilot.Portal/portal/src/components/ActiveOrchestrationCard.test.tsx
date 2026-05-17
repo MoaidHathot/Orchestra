@@ -256,17 +256,23 @@ describe('ActiveOrchestrationCard – Interactions', () => {
     expect(onCancel).toHaveBeenCalledWith('exec-123');
   });
 
-  it('calls onRun when Run button is clicked on a pending card', () => {
+  it('calls onRun when the hover Run chip is clicked on a pending card', () => {
+    // The visible "Run" verb is now an icon-only chip overlaid in the
+    // bottom-right corner of the card (hidden at rest via CSS, revealed on
+    // hover/focus). We assert the DOM presence + click semantics; the CSS
+    // hover-reveal is verified visually and isn't testable in jsdom.
     const onRun = vi.fn();
     const orch: Orchestration = { id: 'orch-1', name: 'Test' };
 
-    renderCard({
+    const { container } = renderCard({
       type: 'pending',
       orchestrations: [orch],
       onRun,
     });
 
-    fireEvent.click(screen.getByText('Run'));
+    const chip = container.querySelector('.orch-card-run-chip') as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    fireEvent.click(chip!);
 
     expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: 'orch-1' }));
   });
@@ -326,13 +332,15 @@ describe('ActiveOrchestrationCard – Manual type', () => {
     expect(screen.getByText('Manual (no trigger)')).toBeInTheDocument();
   });
 
-  it('shows Run button for manual cards', () => {
+  it('exposes Run via the hover chip for manual cards', () => {
+    // Manual cards (no trigger) still allow ad-hoc runs. The Run affordance
+    // is the same hover chip used on triggered definition cards.
     const onRun = vi.fn();
     const orchestrations: Orchestration[] = [
       { id: 'orch-1', name: 'Test' },
     ];
-    renderCard({ type: 'manual', orchestrations, onRun });
-    expect(screen.getByText('Run')).toBeInTheDocument();
+    const { container } = renderCard({ type: 'manual', orchestrations, onRun });
+    expect(container.querySelector('.orch-card-run-chip')).not.toBeNull();
   });
 
   it('renders with reduced opacity for disabled cards', () => {
@@ -1213,9 +1221,12 @@ describe('ActiveOrchestrationCard – Kebab menu interactions', () => {
 // ── Action button polish (compact size + bottom-pinned) ──────────────────────
 
 describe('ActiveOrchestrationCard – Action button polish', () => {
-  it('renders the Run button with the compact .btn-card-action class', () => {
-    // The Run button uses .btn-card-action for tighter padding and a smaller
-    // font, so the action row stays visually subordinate to the card title.
+  it('renders the Run chip outside .card-actions (icon-only, hover-revealed)', () => {
+    // The Run verb is no longer a button inside .card-actions — it's a small
+    // icon-only chip absolutely positioned at the bottom-right of the card,
+    // hidden at rest via CSS and revealed on hover/focus. This test asserts
+    // the DOM structure: the chip is a sibling of .card-body (not a child),
+    // and .card-actions is not rendered on the (non-running) card.
     const orch: Orchestration = { id: 'orch-1', name: 'Test' };
     const { container } = renderCard({
       type: 'pending',
@@ -1223,13 +1234,19 @@ describe('ActiveOrchestrationCard – Action button polish', () => {
       orchestrations: [orch],
     });
 
-    const runButton = container.querySelector('.card-actions .btn-card-action');
-    expect(runButton).not.toBeNull();
-    expect(runButton!.textContent).toContain('Run');
-    // The button keeps its semantic colour and size classes so existing
-    // visual styling (success green, compact size) still applies.
-    expect(runButton!.classList.contains('btn-success')).toBe(true);
-    expect(runButton!.classList.contains('btn-sm')).toBe(true);
+    // No bottom action row at all on non-running cards.
+    expect(container.querySelector('.card-actions')).toBeNull();
+
+    // Run chip is present, has Play-icon child, no visible text label
+    // (icon-only design with tooltip via title=).
+    const chip = container.querySelector('.orch-card-run-chip') as HTMLElement | null;
+    expect(chip).not.toBeNull();
+    // Chip is a direct child of .orch-card (sibling of .card-body), so the
+    // absolute positioning anchors to the card frame.
+    expect(chip!.parentElement?.classList.contains('orch-card')).toBe(true);
+    // Tooltip carries the Run verb + orchestration name.
+    expect(chip!.getAttribute('title')).toContain('Run');
+    expect(chip!.getAttribute('aria-label')).toContain('Run');
   });
 
   it('renders the Cancel button with the compact .btn-card-action class on running cards', () => {
@@ -1250,24 +1267,26 @@ describe('ActiveOrchestrationCard – Action button polish', () => {
     expect(cancelButton!.classList.contains('btn-danger')).toBe(true);
   });
 
-  it('does NOT apply an inline margin-top to the action row (CSS pins it instead)', () => {
+  it('does NOT apply an inline margin-top to the action row on running cards (CSS pins it instead)', () => {
     // The action row used to carry an inline `style={{ marginTop: '6px' }}`.
     // We removed it because `.card-actions { margin-top: auto }` (set in
-    // App.css) now pins the row to the bottom of the card body — pushing it
-    // down to keep the Run button in a consistent vertical position regardless
-    // of how much content lives above it. The inline style would override the
-    // auto-margin and break the pin.
-    const orch: Orchestration = { id: 'orch-1', name: 'Test' };
+    // App.css) now pins the row to the bottom of the card body — pushing
+    // Cancel down to keep it in a consistent vertical position regardless
+    // of how much content lives above it. The inline style would override
+    // the auto-margin and break the pin.
     const { container } = renderCard({
-      type: 'pending',
-      onRun: () => {},
-      orchestrations: [orch],
+      type: 'running',
+      onCancel: () => {},
+      execution: {
+        ...baseExecution,
+        executionId: 'exec-1',
+        status: 'Running',
+        startedAt: new Date().toISOString(),
+      },
     });
 
     const actionRow = container.querySelector('.card-actions') as HTMLElement | null;
     expect(actionRow).not.toBeNull();
-    // jsdom returns '' for inline styles that were never set; either way, this
-    // assertion catches a regression that re-introduces an inline marginTop.
     expect(actionRow!.style.marginTop).toBe('');
   });
 });
@@ -1305,5 +1324,169 @@ describe('ActiveOrchestrationCard – Resources row badge alignment', () => {
       expect(w.style.marginLeft).toBe('');
       expect(w.style.marginRight).toBe('');
     }
+  });
+});
+
+// ── Hybrid Run affordance: hover chip + kebab fallback ───────────────────────
+
+describe('ActiveOrchestrationCard – Hover Run chip', () => {
+  function makeOrch(): Orchestration {
+    return { id: 'orch-1', name: 'Test' };
+  }
+
+  it('renders the Run chip on non-running cards with an onRun callback', () => {
+    // Chip is unconditionally in the DOM when the card is non-running and has
+    // an onRun callback. CSS controls its visibility (hidden at rest, revealed
+    // on hover/focus); jsdom can't simulate hover so we assert presence only.
+    const { container } = renderCard({
+      type: 'pending',
+      onRun: () => {},
+      orchestrations: [makeOrch()],
+    });
+
+    expect(container.querySelector('.orch-card-run-chip')).not.toBeNull();
+  });
+
+  it('does NOT render the Run chip on running cards', () => {
+    // Running cards expose Cancel (safety affordance) and hide Run entirely —
+    // re-running while already running is meaningless.
+    const { container } = renderCard({
+      type: 'running',
+      onRun: () => {},
+      onCancel: () => {},
+      orchestrations: [makeOrch()],
+      execution: {
+        ...baseExecution,
+        executionId: 'exec-1',
+        status: 'Running',
+        startedAt: new Date().toISOString(),
+      },
+    });
+
+    expect(container.querySelector('.orch-card-run-chip')).toBeNull();
+  });
+
+  it('does NOT render the Run chip when no onRun callback is provided', () => {
+    const { container } = renderCard({
+      type: 'pending',
+      orchestrations: [makeOrch()],
+      // onRun intentionally omitted
+    });
+
+    expect(container.querySelector('.orch-card-run-chip')).toBeNull();
+  });
+
+  it('does NOT render the Run chip when no matching orchestration is found', () => {
+    // showRun requires both onRun AND a matched `orch` (from the lookup) so
+    // the chip click has a target. Without a match, the chip is suppressed.
+    const { container } = renderCard({
+      type: 'pending',
+      onRun: () => {},
+      // No orchestrations[] → orch lookup is undefined
+    });
+
+    expect(container.querySelector('.orch-card-run-chip')).toBeNull();
+  });
+
+  it('invokes onRun with the matched orchestration when the chip is clicked', () => {
+    const onRun = vi.fn();
+    const orch = makeOrch();
+    const { container } = renderCard({
+      type: 'pending',
+      onRun,
+      orchestrations: [orch],
+    });
+
+    const chip = container.querySelector('.orch-card-run-chip') as HTMLElement;
+    fireEvent.click(chip);
+
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: 'orch-1' }));
+  });
+
+  it('stops click propagation so the chip click does NOT also call onView', () => {
+    // Both the card root and the chip handle clicks — the chip must
+    // stopPropagation so users running an orchestration don't also get the
+    // modal popping open underneath.
+    const onRun = vi.fn();
+    const onView = vi.fn();
+    const { container } = renderCard({
+      type: 'pending',
+      onRun,
+      onView,
+      orchestrations: [makeOrch()],
+    });
+
+    fireEvent.click(container.querySelector('.orch-card-run-chip') as HTMLElement);
+
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(onView).not.toHaveBeenCalled();
+  });
+});
+
+describe('ActiveOrchestrationCard – Kebab Run fallback', () => {
+  it('exposes "Run" as the first item in the kebab menu on non-running cards', () => {
+    // The kebab carries Run as the touch/keyboard-accessible fallback when
+    // the hover-revealed chip isn't reachable. Run is the FIRST item because
+    // it's the most primary verb on a definition card (above Copy webhook URL).
+    const onRun = vi.fn();
+    const { container } = renderCard({
+      type: 'pending',
+      onRun,
+      orchestrations: [{ id: 'orch-1', name: 'Test' }],
+      execution: {
+        ...baseExecution,
+        triggeredBy: 'webhook',
+        webhookUrl: '/api/webhooks/orch-1',
+      },
+    });
+
+    const kebabButton = container.querySelector('.card-kebab-button') as HTMLElement;
+    expect(kebabButton).not.toBeNull();
+    fireEvent.click(kebabButton);
+
+    // The popover renders its items as <button>s in order.
+    const items = container.querySelectorAll('.card-kebab-popover button');
+    expect(items.length).toBeGreaterThanOrEqual(2);
+    expect(items[0].textContent).toContain('Run');
+    expect(items[1].textContent).toContain('Copy webhook URL');
+  });
+
+  it('invokes onRun with the matched orchestration when the kebab Run item is clicked', () => {
+    const onRun = vi.fn();
+    const { container } = renderCard({
+      type: 'pending',
+      onRun,
+      orchestrations: [{ id: 'orch-1', name: 'Test' }],
+    });
+
+    fireEvent.click(container.querySelector('.card-kebab-button') as HTMLElement);
+    fireEvent.click(screen.getByText('Run'));
+
+    expect(onRun).toHaveBeenCalledTimes(1);
+    expect(onRun).toHaveBeenCalledWith(expect.objectContaining({ id: 'orch-1' }));
+  });
+
+  it('does NOT add a Run kebab item on running cards', () => {
+    // Running cards can be Cancelled but not Run-again; the kebab should
+    // surface only legitimate tertiary actions.
+    const { container } = renderCard({
+      type: 'running',
+      onRun: () => {},
+      onCancel: () => {},
+      orchestrations: [{ id: 'orch-1', name: 'Test' }],
+      execution: {
+        ...baseExecution,
+        executionId: 'exec-1',
+        status: 'Running',
+        startedAt: new Date().toISOString(),
+        triggeredBy: 'webhook',
+        webhookUrl: '/api/webhooks/orch-1',
+      },
+    });
+
+    // For running webhook cards, no kebab actions remain (the Copy webhook
+    // URL item is also gated on !isRunning), so the kebab is omitted entirely.
+    expect(container.querySelector('.card-kebab-button')).toBeNull();
   });
 });
