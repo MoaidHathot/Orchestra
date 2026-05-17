@@ -714,30 +714,103 @@ function OrchestrationContextSection({ orch, runContext }: OrchestrationContextS
 
   if (sections.length === 0) return null;
 
+  // Each section gets its own collapsed-by-default badge (mirrors the Skills badge).
+  // Rationale: cards that include Environment/Models used to be vertically long, and
+  // a CSS grid row's auto-height made every sibling card stretch to match. Collapsing
+  // by default keeps cards short and uniform until the user opts into the detail.
   return (
-    <div
-      style={{
-        marginTop: '8px',
-        padding: '6px 8px',
-        background: 'var(--bg)',
-        borderRadius: '6px',
-        fontSize: '11px',
-        fontFamily: 'monospace',
-      }}
-    >
-      {sections.map((section, si) => (
-        <div key={section.title} style={{ marginTop: si > 0 ? '6px' : 0 }}>
-          <div className="card-meta-label" style={{ marginBottom: '2px', fontSize: '10px' }}>
-            {section.title}
-            {hasRunContext && section.title === 'Environment' && (
-              <span style={{ marginLeft: '6px', color: 'var(--text-dim)', fontWeight: 'normal' }}>
-                (runtime)
-              </span>
-            )}
-          </div>
-          {section.title === 'Models' ? (
+    <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      {sections.map((section) => (
+        <CollapsibleContextSection
+          key={section.title}
+          title={section.title}
+          entries={section.entries}
+          isRuntime={hasRunContext && section.title === 'Environment'}
+        />
+      ))}
+    </div>
+  );
+}
+
+/* ── Collapsible badge for a single context section ─────────────────────── */
+
+interface CollapsibleContextSectionProps {
+  title: string;
+  entries: { key: string; value: string; color?: string }[];
+  /** Marks the Environment section as runtime-resolved (vs. definition-time refs). */
+  isRuntime: boolean;
+}
+
+/**
+ * Renders a single context section (Environment / Models / ...) as a collapsed-by-default
+ * badge. Clicking the badge toggles the entries panel. Visual styling mirrors the existing
+ * <c>SkillBadge</c> so users get a consistent "click chevron to expand" affordance across
+ * the card.
+ */
+function CollapsibleContextSection({ title, entries, isRuntime }: CollapsibleContextSectionProps) {
+  const [expanded, setExpanded] = useState(false);
+
+  // Per-section colour theme — distinct from MCPs/Skills so users can scan a dense card
+  // and tell sections apart at a glance even when all are collapsed.
+  const theme = title === 'Environment'
+    ? { color: '#7ee787', bg: 'rgba(126, 231, 135, 0.12)', border: 'rgba(126, 231, 135, 0.3)' }
+    : title === 'Models'
+      ? { color: '#ffa657', bg: 'rgba(255, 166, 87, 0.12)', border: 'rgba(255, 166, 87, 0.3)' }
+      : { color: '#a78bfa', bg: 'rgba(167, 139, 250, 0.12)', border: 'rgba(167, 139, 250, 0.3)' };
+
+  // Pluralise the count noun so the badge reads naturally: "1 model" / "3 models".
+  const noun = title === 'Environment' ? 'env var' : title === 'Models' ? 'model' : 'item';
+  const count = entries.length;
+  const countLabel = count === 1 ? `1 ${noun}` : `${count} ${noun}s`;
+
+  return (
+    <div>
+      <span
+        role="button"
+        onClick={(e: React.MouseEvent) => {
+          e.stopPropagation();
+          setExpanded((v) => !v);
+        }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          padding: '2px 6px',
+          fontSize: '10px',
+          background: theme.bg,
+          border: `1px solid ${theme.border}`,
+          borderRadius: '4px',
+          color: theme.color,
+          cursor: 'pointer',
+          userSelect: 'none',
+          fontFamily: 'monospace',
+        }}
+        title={expanded ? `Click to collapse ${title.toLowerCase()}` : `Click to show ${title.toLowerCase()}`}
+      >
+        <span style={{ fontWeight: 600 }}>{title}:</span>
+        <span>{countLabel}</span>
+        {isRuntime && (
+          <span style={{ opacity: 0.7, fontWeight: 'normal' }}>(runtime)</span>
+        )}
+        <span style={{ fontSize: '8px', marginLeft: '2px', opacity: 0.7 }}>
+          {expanded ? '\u25B2' : '\u25BC'}
+        </span>
+      </span>
+
+      {expanded && (
+        <div
+          style={{
+            marginTop: '4px',
+            padding: '6px 8px',
+            background: 'var(--bg)',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontFamily: 'monospace',
+          }}
+        >
+          {title === 'Models' ? (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-              {section.entries.map(e => (
+              {entries.map(e => (
                 <span
                   key={e.key}
                   style={{
@@ -755,17 +828,19 @@ function OrchestrationContextSection({ orch, runContext }: OrchestrationContextS
               ))}
             </div>
           ) : (
-            section.entries.slice(0, 5).map(e => (
-              <ContextRow key={e.key} label={e.key} value={e.value} color={e.color} />
-            ))
-          )}
-          {section.entries.length > 5 && (
-            <div style={{ color: 'var(--text-dim)', fontSize: '10px' }}>
-              +{section.entries.length - 5} more...
-            </div>
+            <>
+              {entries.slice(0, 5).map(e => (
+                <ContextRow key={e.key} label={e.key} value={e.value} color={e.color} />
+              ))}
+              {entries.length > 5 && (
+                <div style={{ color: 'var(--text-dim)', fontSize: '10px' }}>
+                  +{entries.length - 5} more...
+                </div>
+              )}
+            </>
           )}
         </div>
-      ))}
+      )}
     </div>
   );
 }

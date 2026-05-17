@@ -18,6 +18,8 @@ vi.mock('../icons', () => ({
     Tag: () => <span data-testid="icon-tag" />,
     Shield: () => <span data-testid="icon-shield" />,
     Ban: () => <span data-testid="icon-ban" />,
+    Skill: () => <span data-testid="icon-skill" />,
+    Hand: () => <span data-testid="icon-hand" />,
   },
   getTriggerIcon: () => <span data-testid="icon-trigger" />,
 }));
@@ -332,5 +334,149 @@ describe('ActiveOrchestrationCard – Disabled type', () => {
     const { container } = renderCard({ type: 'disabled' });
     const card = container.querySelector('.orch-card-disabled');
     expect(card).not.toBeNull();
+  });
+});
+
+// ── Environment / Models collapsible badges ───────────────────────────────────
+
+describe('ActiveOrchestrationCard – Environment & Models collapse-by-default', () => {
+  it('renders Environment badge collapsed by default with a count, hiding the entries', () => {
+    // Cards used to stretch vertically when an orchestration referenced many env vars,
+    // forcing the whole grid row to match the tallest card. Collapsed-by-default keeps
+    // every card short until the user opts in.
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', referencedEnvVars: ['HOME', 'USER', 'PATH'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    // Badge header is visible with a pluralised count.
+    expect(screen.getByText('Environment:')).toBeInTheDocument();
+    expect(screen.getByText('3 env vars')).toBeInTheDocument();
+    // Individual entries (the rendered key names) must NOT appear until expanded.
+    expect(screen.queryByText('HOME:')).not.toBeInTheDocument();
+    expect(screen.queryByText('USER:')).not.toBeInTheDocument();
+    expect(screen.queryByText('PATH:')).not.toBeInTheDocument();
+  });
+
+  it('expands Environment entries when the badge is clicked', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', referencedEnvVars: ['HOME', 'USER'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    // Click the Environment badge to expand. Click the badge header text (the count
+    // label sits inside the same clickable span via event bubbling).
+    fireEvent.click(screen.getByText('Environment:'));
+
+    // Now the entries are visible.
+    expect(screen.getByText('HOME:')).toBeInTheDocument();
+    expect(screen.getByText('USER:')).toBeInTheDocument();
+  });
+
+  it('singularises the count noun when only one env var is referenced', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', referencedEnvVars: ['ONLY_ONE'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    // Singular form when count is 1 — keeps the badge text readable instead of "1 env vars".
+    expect(screen.getByText('1 env var')).toBeInTheDocument();
+  });
+
+  it('renders Models badge collapsed by default, hiding the model chips', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', models: ['gpt-5.4', 'claude-opus-4.6'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    expect(screen.getByText('Models:')).toBeInTheDocument();
+    expect(screen.getByText('2 models')).toBeInTheDocument();
+    // Model chips are hidden until the user clicks the badge.
+    expect(screen.queryByText('gpt-5.4')).not.toBeInTheDocument();
+    expect(screen.queryByText('claude-opus-4.6')).not.toBeInTheDocument();
+  });
+
+  it('expands Models chips when the badge is clicked', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', models: ['gpt-5.4', 'claude-opus-4.6'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    fireEvent.click(screen.getByText('Models:'));
+
+    expect(screen.getByText('gpt-5.4')).toBeInTheDocument();
+    expect(screen.getByText('claude-opus-4.6')).toBeInTheDocument();
+  });
+
+  it('toggles back to collapsed when the badge is clicked twice', () => {
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', models: ['gpt-5.4'] },
+    ];
+
+    renderCard({ orchestrations });
+
+    fireEvent.click(screen.getByText('Models:'));
+    expect(screen.getByText('gpt-5.4')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText('Models:'));
+    // Second click collapses again — verifies the toggle is symmetric and `useState`
+    // is wired both ways.
+    expect(screen.queryByText('gpt-5.4')).not.toBeInTheDocument();
+  });
+
+  it('does NOT bubble badge clicks up to the card onView handler', () => {
+    // The card itself opens the modal on click. Toggling an inline badge must NOT
+    // also open the modal — otherwise users get an unwanted modal pop every time
+    // they expand a section.
+    const onView = vi.fn();
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test', models: ['gpt-5.4'] },
+    ];
+
+    renderCard({ orchestrations, onView });
+
+    fireEvent.click(screen.getByText('Models:'));
+
+    expect(onView).not.toHaveBeenCalled();
+  });
+
+  it('renders both Environment and Models badges independently when both are present', () => {
+    const orchestrations: Orchestration[] = [
+      {
+        id: 'orch-1',
+        name: 'Test',
+        referencedEnvVars: ['API_KEY'],
+        models: ['gpt-5.4', 'claude-opus-4.6'],
+      },
+    ];
+
+    renderCard({ orchestrations });
+
+    // Both badges render side-by-side in collapsed state.
+    expect(screen.getByText('Environment:')).toBeInTheDocument();
+    expect(screen.getByText('Models:')).toBeInTheDocument();
+
+    // Expanding one section does not affect the other.
+    fireEvent.click(screen.getByText('Environment:'));
+    expect(screen.getByText('API_KEY:')).toBeInTheDocument();
+    // Models still collapsed.
+    expect(screen.queryByText('gpt-5.4')).not.toBeInTheDocument();
+  });
+
+  it('renders nothing when neither Environment nor Models data is present', () => {
+    // No referencedEnvVars and no models on the orchestration → no badges should render.
+    const orchestrations: Orchestration[] = [
+      { id: 'orch-1', name: 'Test' },
+    ];
+
+    renderCard({ orchestrations });
+
+    expect(screen.queryByText('Environment:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Models:')).not.toBeInTheDocument();
   });
 });
