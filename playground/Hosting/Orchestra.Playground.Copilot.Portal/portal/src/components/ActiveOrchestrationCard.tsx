@@ -526,12 +526,16 @@ export default function ActiveOrchestrationCard({
          * Trigger toggle moved to the header's power-icon. Webhook URL copy
          * moved into the kebab menu. When no button applies, the wrapper is
          * skipped entirely to save its margin.
+         *
+         * The .card-actions class pins this row to the bottom of the card via
+         * `margin-top: auto` so the Run button sits in a consistent place
+         * regardless of how much content lives above it.
          */}
         {hasActionButtons && (
-          <div className="card-actions" style={{ marginTop: '6px' }}>
+          <div className="card-actions">
             {showRun && (
               <button
-                className="btn btn-success btn-sm"
+                className="btn btn-success btn-sm btn-card-action"
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   onRun!(orch!);
@@ -542,7 +546,7 @@ export default function ActiveOrchestrationCard({
             )}
             {showCancel && (
               <button
-                className="btn btn-danger btn-sm"
+                className="btn btn-danger btn-sm btn-card-action"
                 onClick={(e: React.MouseEvent) => {
                   e.stopPropagation();
                   if (execution.executionId) {
@@ -724,8 +728,13 @@ function InlineMetaRow({ segments }: { segments: (InlineMetaSegment | null | und
 function SkillBadge({ skillDirs }: { skillDirs: string[] }) {
   const [expanded, setExpanded] = useState(false);
 
+  // No outer margin: the parent .card-resources-row owns the inter-badge gap.
+  // Adding a bottom margin here would make `align-items: center` on the row
+  // treat the wrapper's outer box (including margin) as the centring target,
+  // which visually shifts the chip content upward relative to its siblings —
+  // the "skill badge sits higher than MCPs" misalignment users saw.
   return (
-    <div style={{ marginBottom: '8px' }}>
+    <div>
       <span
         role="button"
         onClick={(e: React.MouseEvent) => {
@@ -792,8 +801,10 @@ function CollapsibleMcpsBadge({ mcps }: { mcps: { name: string; source: 'inline'
   const count = mcps.length;
   const countLabel = count === 1 ? '1 MCP' : `${count} MCPs`;
 
+  // No outer margin — the parent .card-resources-row controls inter-badge gap.
+  // See SkillBadge for the alignment rationale.
   return (
-    <div style={{ marginBottom: '4px' }}>
+    <div>
       <span
         role="button"
         onClick={(e: React.MouseEvent) => {

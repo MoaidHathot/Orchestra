@@ -1209,3 +1209,101 @@ describe('ActiveOrchestrationCard – Kebab menu interactions', () => {
     expect(onView).not.toHaveBeenCalled();
   });
 });
+
+// ── Action button polish (compact size + bottom-pinned) ──────────────────────
+
+describe('ActiveOrchestrationCard – Action button polish', () => {
+  it('renders the Run button with the compact .btn-card-action class', () => {
+    // The Run button uses .btn-card-action for tighter padding and a smaller
+    // font, so the action row stays visually subordinate to the card title.
+    const orch: Orchestration = { id: 'orch-1', name: 'Test' };
+    const { container } = renderCard({
+      type: 'pending',
+      onRun: () => {},
+      orchestrations: [orch],
+    });
+
+    const runButton = container.querySelector('.card-actions .btn-card-action');
+    expect(runButton).not.toBeNull();
+    expect(runButton!.textContent).toContain('Run');
+    // The button keeps its semantic colour and size classes so existing
+    // visual styling (success green, compact size) still applies.
+    expect(runButton!.classList.contains('btn-success')).toBe(true);
+    expect(runButton!.classList.contains('btn-sm')).toBe(true);
+  });
+
+  it('renders the Cancel button with the compact .btn-card-action class on running cards', () => {
+    const { container } = renderCard({
+      type: 'running',
+      onCancel: () => {},
+      execution: {
+        ...baseExecution,
+        executionId: 'exec-1',
+        status: 'Running',
+        startedAt: new Date().toISOString(),
+      },
+    });
+
+    const cancelButton = container.querySelector('.card-actions .btn-card-action');
+    expect(cancelButton).not.toBeNull();
+    expect(cancelButton!.textContent).toContain('Cancel');
+    expect(cancelButton!.classList.contains('btn-danger')).toBe(true);
+  });
+
+  it('does NOT apply an inline margin-top to the action row (CSS pins it instead)', () => {
+    // The action row used to carry an inline `style={{ marginTop: '6px' }}`.
+    // We removed it because `.card-actions { margin-top: auto }` (set in
+    // App.css) now pins the row to the bottom of the card body — pushing it
+    // down to keep the Run button in a consistent vertical position regardless
+    // of how much content lives above it. The inline style would override the
+    // auto-margin and break the pin.
+    const orch: Orchestration = { id: 'orch-1', name: 'Test' };
+    const { container } = renderCard({
+      type: 'pending',
+      onRun: () => {},
+      orchestrations: [orch],
+    });
+
+    const actionRow = container.querySelector('.card-actions') as HTMLElement | null;
+    expect(actionRow).not.toBeNull();
+    // jsdom returns '' for inline styles that were never set; either way, this
+    // assertion catches a regression that re-introduces an inline marginTop.
+    expect(actionRow!.style.marginTop).toBe('');
+  });
+});
+
+// ── Resources row badge alignment ────────────────────────────────────────────
+
+describe('ActiveOrchestrationCard – Resources row badge alignment', () => {
+  it('does not apply outer margins on SkillBadge or CollapsibleMcpsBadge wrappers', () => {
+    // With `align-items: center` on .card-resources-row, a `margin-bottom` on
+    // a child wrapper shifts the chip content upward relative to siblings —
+    // the "skill badge sits higher than MCPs" misalignment users reported.
+    // Both badges intentionally have no inline outer-margin styles; the row's
+    // `gap` owns inter-badge spacing instead.
+    const orchestrations: Orchestration[] = [
+      {
+        id: 'orch-1',
+        name: 'Test',
+        mcps: [{ name: 'mcp-a' }],
+        steps: [{ name: 's1', skillDirectories: ['/skill-a'] }],
+      } as unknown as Orchestration,
+    ];
+
+    const { container } = renderCard({ orchestrations });
+
+    const row = container.querySelector('.card-resources-row');
+    expect(row).not.toBeNull();
+    // Collect each badge's direct wrapper <div> and assert no inline margin
+    // styles are present. There are exactly two wrappers in this scenario
+    // (MCPs + Skills); both must be margin-free.
+    const wrappers = Array.from(row!.children) as HTMLElement[];
+    expect(wrappers.length).toBe(2);
+    for (const w of wrappers) {
+      expect(w.style.marginTop).toBe('');
+      expect(w.style.marginBottom).toBe('');
+      expect(w.style.marginLeft).toBe('');
+      expect(w.style.marginRight).toBe('');
+    }
+  });
+});

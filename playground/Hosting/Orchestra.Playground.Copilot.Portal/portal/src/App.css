@@ -870,6 +870,13 @@
       overflow: visible; /* allow the kebab popover to escape the card frame */
       transition: all 0.15s ease;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+      /* Flex column so the action row (.card-actions) can pin itself to the
+         bottom of the card via `margin-top: auto`. CSS Grid stretches every
+         card in a row to the tallest member's height, so cards with sparse
+         content (no MCPs, no env, no models) would otherwise leave the Run
+         button floating in the middle of their visible area. */
+      display: flex;
+      flex-direction: column;
     }
     .orch-card:hover { border-color: var(--border-light); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
     .card-header {
@@ -878,6 +885,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-shrink: 0;
     }
     .card-title-area { flex: 1; min-width: 0; }
     .card-title {
@@ -899,7 +907,14 @@
     .card-status-indicator.failed { background: var(--error); }
     .card-status-indicator.running { background: var(--warning); animation: pulse 1.5s infinite; }
     .card-status-indicator.idle { background: var(--text-dim); }
-    .card-body { padding: 6px 8px; }
+    .card-body {
+      padding: 6px 8px;
+      /* Grow to fill the card so the trailing .card-actions sticks to the bottom. */
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+    }
     .card-meta-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -921,9 +936,26 @@
     }
     .card-actions {
       display: flex;
-      gap: 2px;
+      gap: 4px;
       flex-wrap: wrap;
+      /* Pin to bottom of the card body so the Run/Cancel button stays in a
+         consistent position regardless of how dense the card's body is. */
+      margin-top: auto;
+      /* Reserve a small breathing space above the action row so it doesn't
+         butt up against the labels/resources rows. */
+      padding-top: 6px;
     }
+    /* Compact card-resident action button — used for the Run / Cancel verb on
+       orchestration cards. Smaller than .btn-sm so the card's visual centre
+       of gravity stays on the title and metadata, not the button. */
+    .btn-card-action {
+      padding: 3px 8px;
+      font-size: 11px;
+      gap: 4px;
+      min-height: 0;          /* override the mobile media-query .btn-sm floor */
+      line-height: 1.3;
+    }
+    .btn-card-action svg { width: 11px; height: 11px; }
 
     /* ── Resource + label rows on orchestration cards ────────────────────
      * Group MCPs / Skills / Environment / Models on one flex-wrap "resources"
