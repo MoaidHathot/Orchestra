@@ -366,6 +366,123 @@ public class PromptExecutorTests
 		PromptExecutor.LooksLikeCliExhaustedRetriesMessage("").Should().BeFalse();
 	}
 
+	[Fact]
+	public void LooksLikeTransientUpstreamMessage_RecognisesUserVisibleErrorString()
+	{
+		// Defends against drift between the engine's executor-level detector and
+		// CopilotSessionHandler.LooksLikeTransientUpstreamFailure. Both sites must
+		// recognise the exact production error string captured in the run.json of
+		// the failing zts-official-pipeline-auto-discoverer run that motivated this
+		// safety net.
+		var brokerError =
+			"Copilot session failed: Execution failed: Error: 500 \"can't get copilot user by id: error getting copilot user details: twirp error permission_denied: Error from intermediary with HTTP status code 403 \\\"Forbidden\\\"\\n\" (Request ID: F490:865D5:3A32591:3FE6380:6A0C16FC)";
+
+		PromptExecutor.LooksLikeTransientUpstreamMessage(brokerError).Should().BeTrue();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("Error: 502 Bad Gateway").Should().BeTrue();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("HTTP status code 503").Should().BeTrue();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("HTTP status code 403").Should().BeTrue();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("twirp error permission_denied: ...").Should().BeTrue();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("can't get copilot user by id").Should().BeTrue();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("rate limit exceeded").Should().BeTrue();
+		// SDK session-create failures where the bundled CLI lost its auth handle.
+		// Production string captured from zts-official-pipeline-tracker on 2026-05-19.
+		PromptExecutor.LooksLikeTransientUpstreamMessage(
+			"Copilot session failed: Execution failed: Error: Session was not created with authentication info or custom provider").Should().BeTrue();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("Session was not created with authentication info").Should().BeTrue();
+
+		PromptExecutor.LooksLikeTransientUpstreamMessage("HTTP status code 400").Should().BeFalse();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("validation error: bad parameter").Should().BeFalse();
+		PromptExecutor.LooksLikeTransientUpstreamMessage(null).Should().BeFalse();
+		PromptExecutor.LooksLikeTransientUpstreamMessage("").Should().BeFalse();
+	}
+
+	private static AgentSessionErrorDetails TransientUpstreamDetails() => new()
+	{
+		ErrorType = "authorization",
+		StatusCode = 500,
+		TransientUpstreamFailure = true,
+	};
+
+	[Fact]
+	public async Task ExecuteAsync_TransientUpstreamFailure_RetriesOnFreshAgent_AndSucceeds()
+	{
+		// Arrange — the 500/403 broker handshake failure that took down
+		// zts-official-pipeline-auto-discoverer surfaces as IAgentSessionFailedException
+		// with Details.TransientUpstreamFailure=true. The executor-level swap loop must
+		// catch this shape, re-build the agent, and re-run the step.
+		var sessionException = new TestSessionFailedException(
+			"Copilot session failed: Execution failed: Error: 500 \"can't get copilot user by id: ... twirp error permission_denied: Error from intermediary with HTTP status code 403 \\\"Forbidden\\\"\\n\"",
+			TransientUpstreamDetails());
+		var agentBuilder = new MockAgentBuilder()
+			.WithFailuresThenResponse(sessionException, failureCount: 1, finalResponseContent: "Recovered output");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("gate-discovery");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded,
+			"the executor-level swap loop must recover from a single transient upstream failure by re-running on a fresh agent");
+		result.Content.Should().Be("Recovered output");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_TransientUpstreamFailure_PlainExceptionMessage_AlsoTriggersSwap()
+	{
+		// Defence-in-depth: even if the broker error surfaces as a plain Exception
+		// (no IAgentSessionFailedException marker, no structured Details), the executor
+		// must recognise the well-known message pattern and still trigger a swap.
+		var plainException = new Exception(
+			"Execution failed: Error: 500 \"can't get copilot user by id: error getting copilot user details: twirp error permission_denied: Error from intermediary with HTTP status code 403 \\\"Forbidden\\\"\\n\"");
+		var agentBuilder = new MockAgentBuilder()
+			.WithFailuresThenResponse(plainException, failureCount: 1, finalResponseContent: "Recovered output");
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("gate-discovery");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be("Recovered output");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_TransientUpstreamFailure_BudgetExhausted_ReturnsFailed()
+	{
+		// Both attempts hit the broker error; the step must fail with the original
+		// error preserved AND ErrorDetails.TransientUpstreamFailure still set so the
+		// run record shows operators exactly why the recovery didn't take.
+		var sessionException = new TestSessionFailedException(
+			"Copilot session failed: Execution failed: Error: 500 broker permission_denied",
+			TransientUpstreamDetails());
+		var agentBuilder = new MockAgentBuilder().WithException(sessionException);
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("test-step");
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorDetails.Should().NotBeNull();
+		result.ErrorDetails!.TransientUpstreamFailure.Should().BeTrue(
+			"the structured flag must propagate even when the swap budget is exhausted so operators can triage");
+	}
+
 	#endregion
 
 	#region Fix C — Captured set_status guards the swap-retry loop

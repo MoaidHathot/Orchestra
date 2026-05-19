@@ -91,12 +91,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			}
 
 			if (result.Status != ExecutionStatus.Failed
-				|| result.ErrorDetails?.ExhaustedCliRetries != true
+				|| !IsExecutorSwapEligible(result)
 				|| attempt >= _maxAgentSwapAttempts
 				|| cancellationToken.IsCancellationRequested)
 			{
 				if (attempt > 0 && result.Status == ExecutionStatus.Failed
-					&& result.ErrorDetails?.ExhaustedCliRetries == true)
+					&& IsExecutorSwapEligible(result))
 				{
 					LogExecutorSwapBudgetExhausted(step.Name, attempt, _maxAgentSwapAttempts, result.ErrorMessage ?? "(no message)");
 				}
@@ -106,6 +106,21 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			attempt++;
 			LogExecutorSwapTriggered(step.Name, attempt, _maxAgentSwapAttempts, result.ErrorMessage ?? "(no message)");
 		}
+	}
+
+	/// <summary>
+	/// Returns whether a Failed <see cref="ExecutionResult"/> looks like a CLI-class
+	/// failure the outer executor-level swap loop should retry on a fresh agent worker.
+	/// True when <see cref="AgentSessionErrorDetails.ExhaustedCliRetries"/> or
+	/// <see cref="AgentSessionErrorDetails.TransientUpstreamFailure"/> is set on the
+	/// captured details record. The two flags are kept distinct (instead of collapsed
+	/// into one bit) so diagnostics / metrics can tell the two failure classes apart.
+	/// </summary>
+	private static bool IsExecutorSwapEligible(ExecutionResult result)
+	{
+		var details = result.ErrorDetails;
+		if (details is null) return false;
+		return details.ExhaustedCliRetries || details.TransientUpstreamFailure;
 	}
 
 	/// <summary>
@@ -484,18 +499,24 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				if (probe.InnerException is null) break;
 			}
 
-			// Fallback exhaustion detection: when the CLI surfaces "Failed to get response
-			// from the AI model; retried N times" via a path that did NOT mint an
-			// IAgentSessionFailedException with the flag set (e.g. raw SDK exception from
-			// SendAsync, or a wrapped/re-throw that lost the structured payload), we still
-			// want the executor-level swap loop above to kick in. Synthesize a minimal
-			// details record with ExhaustedCliRetries=true so ExecuteAsync's outer loop can
-			// detect it the same way it detects the structured form. The message-pattern
-			// check is intentionally lenient — same shape as
-			// CopilotSessionHandler.LooksLikeCliExhaustedRetries — so the two stay in sync.
+			// Fallback exhaustion / transient-upstream detection: when the CLI surfaces
+			// "Failed to get response from the AI model; retried N times" — or a
+			// 5xx/403/permission_denied upstream error — via a path that did NOT mint an
+			// IAgentSessionFailedException with the structured flag set (e.g. raw SDK
+			// exception from SendAsync, or a wrapped/re-throw that lost the structured
+			// payload), we still want the executor-level swap loop above to kick in.
+			// Synthesize a minimal details record with the appropriate flag(s) so
+			// ExecuteAsync's outer loop can detect it the same way it detects the
+			// structured form. The message-pattern checks are intentionally lenient —
+			// same shape as their CopilotSessionHandler counterparts — so the two stay
+			// in sync.
 			if (errorDetails?.ExhaustedCliRetries != true && LooksLikeCliExhaustedRetriesMessage(ex.Message))
 			{
 				errorDetails = (errorDetails ?? new AgentSessionErrorDetails()) with { ExhaustedCliRetries = true };
+			}
+			if (errorDetails?.TransientUpstreamFailure != true && LooksLikeTransientUpstreamMessage(ex.Message))
+			{
+				errorDetails = (errorDetails ?? new AgentSessionErrorDetails()) with { TransientUpstreamFailure = true };
 			}
 
 			_reporter.ReportStepError(step.Name, ex.Message, errorDetails);
@@ -569,6 +590,56 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		}
 
 		return message.Contains("Failed to get response from the AI model", StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
+	/// Detects transient upstream failures (5xx broker errors, 403/permission_denied
+	/// identity-handshake errors, 429 rate limits) in a free-form exception message.
+	/// Mirrors <c>CopilotSessionHandler.LooksLikeTransientUpstreamFailure</c> so both
+	/// detection sites stay in sync; duplicated here only because Orchestra.Engine must
+	/// not take a build-time dependency on Orchestra.Copilot.
+	/// </summary>
+	internal static bool LooksLikeTransientUpstreamMessage(string? message)
+	{
+		if (string.IsNullOrEmpty(message))
+			return false;
+
+		// 5xx broker error.
+		if (System.Text.RegularExpressions.Regex.IsMatch(
+				message,
+				@"\b(?:Error:|HTTP\s+status\s+code)\s*5\d{2}\b",
+				System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+		{
+			return true;
+		}
+
+		// 403 / 429 surfaced verbatim.
+		if (System.Text.RegularExpressions.Regex.IsMatch(
+				message,
+				@"\b(?:Error:|HTTP\s+status\s+code)\s*(?:403|429)\b",
+				System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+		{
+			return true;
+		}
+
+		if (message.Contains("permission_denied", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("can't get copilot user by id", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase)
+			&& message.Contains("intermediary", StringComparison.OrdinalIgnoreCase))
+			return true;
+		// SDK session-create failures where the bundled CLI lost its auth handle.
+		// Mirrors CopilotSessionHandler.LooksLikeTransientUpstreamFailure.
+		if (message.Contains("Session was not created with authentication info", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("custom provider", StringComparison.OrdinalIgnoreCase)
+			&& message.Contains("authentication", StringComparison.OrdinalIgnoreCase))
+			return true;
+
+		return false;
 	}
 
 	private string BuildUserPrompt(PromptOrchestrationStep step, OrchestrationExecutionContext context)

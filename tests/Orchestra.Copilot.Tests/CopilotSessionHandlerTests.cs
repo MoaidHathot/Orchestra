@@ -1542,6 +1542,145 @@ public class CopilotSessionHandlerTests
 		ex.Details!.ExhaustedCliRetries.Should().BeFalse();
 	}
 
+	[Fact]
+	public void HandleEvent_Error_With500BrokerError_SetsTransientUpstreamFailureFlag()
+	{
+		// Arrange — the broker observed at runtime: a 500 wrapping a 403 twirp
+		// permission_denied on the user-identity handshake. This is the exact failure
+		// shape that took down zts-official-pipeline-auto-discoverer's gate-discovery
+		// step on 2026-05-19; the dying CLI's cached auth token is the usual culprit
+		// and a cold restart (CLI swap) clears it.
+		var errorEvent = CreateDetailedErrorEvent(
+			message: "Execution failed: Error: 500 \"can't get copilot user by id: error getting copilot user details: twirp error permission_denied: Error from intermediary with HTTP status code 403 \\\"Forbidden\\\"\\n\" (Request ID: F490:865D5:3A32591:3FE6380:6A0C16FC)",
+			errorType: "authorization");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		var ex = (CopilotSessionFailedException)_done.Task.Exception!.Flatten().InnerException!;
+		ex.Details!.TransientUpstreamFailure.Should().BeTrue(
+			"a 500 broker error with permission_denied is a transient upstream failure a fresh CLI worker is likely to clear");
+		ex.Details.ExhaustedCliRetries.Should().BeFalse(
+			"the CLI did not surface 'retried N times'; the two flags must stay distinct");
+	}
+
+	[Fact]
+	public void HandleEvent_Error_WithSessionAuthHandleLost_SetsTransientUpstreamFailureFlag()
+	{
+		// Arrange — the bundled CLI's session-create call observed at runtime
+		// (zts-official-pipeline-tracker, 2026-05-19 20:59:25) surfaces as a plain
+		// SessionErrorEvent with no structured StatusCode/ErrorType. The dying CLI
+		// has lost its auth handle; a fresh worker recreates the session with valid
+		// auth from scratch.
+		var errorEvent = CreateDetailedErrorEvent(
+			message: "Execution failed: Error: Session was not created with authentication info or custom provider");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		var ex = (CopilotSessionFailedException)_done.Task.Exception!.Flatten().InnerException!;
+		ex.Details!.TransientUpstreamFailure.Should().BeTrue(
+			"the CLI lost its auth handle mid-flight; a swap to a fresh worker is the documented recovery path");
+		ex.Details.ExhaustedCliRetries.Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_Error_With429RateLimit_SetsTransientUpstreamFailureFlag()
+	{
+		// Arrange — a 429 surfaced via the structured statusCode field. Even with no
+		// keyword in the free-form message, a fresh CLI should be tried.
+		var errorEvent = CreateDetailedErrorEvent(
+			message: "Rate limit exceeded",
+			statusCode: 429,
+			errorType: "rate_limit");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		var ex = (CopilotSessionFailedException)_done.Task.Exception!.Flatten().InnerException!;
+		ex.Details!.TransientUpstreamFailure.Should().BeTrue();
+	}
+
+	[Fact]
+	public void HandleEvent_Error_With403StatusCode_SetsTransientUpstreamFailureFlag()
+	{
+		// Arrange — bare 403 via structured status code. The message text alone would
+		// not match the regex (no "Error: 403" or "HTTP status code 403"); the
+		// structured statusCode path must carry it.
+		var errorEvent = CreateDetailedErrorEvent(
+			message: "Forbidden",
+			statusCode: 403,
+			errorType: "authorization");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		var ex = (CopilotSessionFailedException)_done.Task.Exception!.Flatten().InnerException!;
+		ex.Details!.TransientUpstreamFailure.Should().BeTrue();
+	}
+
+	[Fact]
+	public void HandleEvent_Error_With400ValidationError_LeavesTransientUpstreamFailureFalse()
+	{
+		// Arrange — a 400 validation error is NOT swap-eligible. Retrying the same
+		// bad request on a fresh CLI will just fail the same way.
+		var errorEvent = CreateDetailedErrorEvent(
+			message: "Bad request: validation failed",
+			statusCode: 400,
+			errorType: "query");
+
+		// Act
+		_handler.HandleEvent(errorEvent);
+
+		// Assert
+		var ex = (CopilotSessionFailedException)_done.Task.Exception!.Flatten().InnerException!;
+		ex.Details!.TransientUpstreamFailure.Should().BeFalse();
+		ex.Details.ExhaustedCliRetries.Should().BeFalse();
+	}
+
+	[Theory]
+	[InlineData("Execution failed: Error: 502 Bad Gateway", true)]
+	[InlineData("HTTP status code 503", true)]
+	[InlineData("HTTP status code 504", true)]
+	[InlineData("HTTP status code 403 from intermediary", true)]
+	[InlineData("twirp error permission_denied: ...", true)]
+	[InlineData("can't get copilot user by id: ...", true)]
+	[InlineData("rate limit exceeded for model", true)]
+	[InlineData("Forbidden response from intermediary", true)]
+	[InlineData("Execution failed: Error: Session was not created with authentication info or custom provider", true)]
+	[InlineData("Session was not created with authentication info", true)]
+	[InlineData("HTTP status code 400: bad request", false)]
+	[InlineData("validation error: unknown field", false)]
+	[InlineData("Unknown error", false)]
+	[InlineData("", false)]
+	public void LooksLikeTransientUpstreamFailure_RecognisesExpectedShapes(string message, bool expected)
+	{
+		CopilotSessionHandler.LooksLikeTransientUpstreamFailure(message, statusCode: null)
+			.Should().Be(expected, $"message '{message}' classification mismatch");
+	}
+
+	[Theory]
+	[InlineData(500L, true)]
+	[InlineData(502L, true)]
+	[InlineData(503L, true)]
+	[InlineData(599L, true)]
+	[InlineData(429L, true)]
+	[InlineData(403L, true)]
+	[InlineData(400L, false)]
+	[InlineData(401L, false)]
+	[InlineData(404L, false)]
+	[InlineData(200L, false)]
+	[InlineData(null, false)]
+	public void LooksLikeTransientUpstreamFailure_StatusCodeClassification(long? statusCode, bool expected)
+	{
+		CopilotSessionHandler.LooksLikeTransientUpstreamFailure(message: null, statusCode: statusCode)
+			.Should().Be(expected, $"status code {statusCode?.ToString() ?? "null"} classification mismatch");
+	}
+
 	#endregion
 
 	#region Tool Execution Complete With Null ToolCallId

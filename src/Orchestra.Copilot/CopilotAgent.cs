@@ -537,9 +537,12 @@ public partial class CopilotAgent : IAgent
 	/// Classifies an exception thrown from <see cref="RunOneAttemptAsync"/> as a CLI-class
 	/// swap-eligible failure. Returns true for: <see cref="CopilotClientUnhealthyException"/>
 	/// (transport / fault-broker latched), <see cref="CopilotSessionFailedException"/> with
-	/// the CLI's own "retried N times" exhaustion pattern, and <see cref="CopilotSessionFailedException"/>
-	/// with <c>Kind == AbnormalShutdown</c>. Returns false for everything else (validation
-	/// errors, cancellation, plain model errors) so they propagate without being retried.
+	/// the CLI's own "retried N times" exhaustion pattern, <see cref="CopilotSessionFailedException"/>
+	/// with <c>Kind == AbnormalShutdown</c>, and <see cref="CopilotSessionFailedException"/>
+	/// whose <see cref="AgentSessionErrorDetails.TransientUpstreamFailure"/> flag is set
+	/// (5xx broker error, 403/permission_denied identity-handshake error, 429 rate limit).
+	/// Returns false for everything else (validation errors, cancellation, plain model
+	/// errors) so they propagate without being retried.
 	/// </summary>
 	private static bool TryClassifySwapEligibleFailure(Exception ex, out string reason)
 	{
@@ -562,6 +565,11 @@ public partial class CopilotAgent : IAgent
 				if (sessionFailed.Details?.ExhaustedCliRetries == true)
 				{
 					reason = "cli_exhausted_retries";
+					return true;
+				}
+				if (sessionFailed.Details?.TransientUpstreamFailure == true)
+				{
+					reason = "transient_upstream";
 					return true;
 				}
 				return false;

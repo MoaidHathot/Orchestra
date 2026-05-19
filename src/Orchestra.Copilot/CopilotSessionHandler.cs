@@ -1007,6 +1007,12 @@ internal sealed partial class CopilotSessionHandler
 		// clears it. Flag the details record so CopilotAgent's swap loop can react.
 		var exhaustedCliRetries = LooksLikeCliExhaustedRetries(message);
 
+		// Detect transient upstream failures that a fresh CLI worker is likely to clear:
+		// 5xx broker errors, 403/permission_denied identity-handshake errors, and 429
+		// rate limits. The dying CLI's cached auth/connection state is the usual culprit;
+		// cold restart re-authenticates from scratch.
+		var transientUpstream = LooksLikeTransientUpstreamFailure(message, err.Data.StatusCode);
+
 		// Capture every field the SDK gave us in SessionErrorData. Historically only
 		// Message was retained which collapsed the upstream ErrorType / StatusCode /
 		// ProviderCallId / Url / Stack into nothing — making real failures (e.g. a
@@ -1019,6 +1025,7 @@ internal sealed partial class CopilotSessionHandler
 			Url = err.Data.Url,
 			Stack = err.Data.Stack,
 			ExhaustedCliRetries = exhaustedCliRetries,
+			TransientUpstreamFailure = transientUpstream,
 		};
 
 		// Loud ERROR log: a fatal session-level error from the CLI MUST be visible.
@@ -1142,6 +1149,82 @@ internal sealed partial class CopilotSessionHandler
 		// Fallback: the surrounding "Failed to get response from the AI model" phrase
 		// has been stable across CLI versions even when the retry-count format shifted.
 		return message.Contains("Failed to get response from the AI model", StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
+	/// Recognises transient upstream failures that a fresh CLI worker is likely to
+	/// clear: HTTP 5xx broker errors, 403 / permission_denied identity-handshake
+	/// errors, and 429 rate limits. The dying CLI's cached auth/connection state is
+	/// the typical culprit — a cold restart re-authenticates from scratch and
+	/// resets the upstream connection pool.
+	/// </summary>
+	/// <remarks>
+	/// Detection is layered:
+	/// <list type="number">
+	///   <item>The SDK-supplied <paramref name="statusCode"/> is consulted first. Any
+	///   5xx response, 429, or 403 counts as transient.</item>
+	///   <item>The free-form <paramref name="message"/> is scanned for the well-known
+	///   strings the upstream broker emits even when the SDK does not surface a
+	///   structured status code:
+	///   <c>"Error: 5xx"</c>, <c>"HTTP status code 5xx"</c>, <c>"HTTP status code 403"</c>,
+	///   <c>"permission_denied"</c>, <c>"can't get copilot user by id"</c>,
+	///   <c>"rate limit"</c>.</item>
+	/// </list>
+	/// Matching is intentionally lenient so the same swap path catches every shape
+	/// the broker has shipped to date without needing per-release tuning.
+	/// </remarks>
+	internal static bool LooksLikeTransientUpstreamFailure(string? message, long? statusCode)
+	{
+		// Structured status-code path first — most reliable when the SDK supplies one.
+		if (statusCode is { } code)
+		{
+			if (code >= 500 && code <= 599) return true;
+			if (code == 429) return true;
+			if (code == 403) return true;
+		}
+
+		if (string.IsNullOrEmpty(message))
+			return false;
+
+		// Message-pattern fallback. The SDK frequently surfaces the HTTP status only
+		// inside the free-form message (the structured StatusCode field is null in
+		// practice for many error shapes the broker emits today).
+		if (System.Text.RegularExpressions.Regex.IsMatch(
+				message,
+				@"\b(?:Error:|HTTP\s+status\s+code)\s*5\d{2}\b",
+				System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+		{
+			return true;
+		}
+
+		if (System.Text.RegularExpressions.Regex.IsMatch(
+				message,
+				@"\b(?:Error:|HTTP\s+status\s+code)\s*(?:403|429)\b",
+				System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+		{
+			return true;
+		}
+
+		// Common broker / identity-handshake strings the CLI surfaces verbatim.
+		if (message.Contains("permission_denied", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("can't get copilot user by id", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("Forbidden", StringComparison.OrdinalIgnoreCase)
+			&& message.Contains("intermediary", StringComparison.OrdinalIgnoreCase))
+			return true;
+		// SDK session-create failures where the bundled CLI lost its auth handle.
+		// A fresh CLI worker creates a new session with valid auth from scratch,
+		// which clears the failure.
+		if (message.Contains("Session was not created with authentication info", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("custom provider", StringComparison.OrdinalIgnoreCase)
+			&& message.Contains("authentication", StringComparison.OrdinalIgnoreCase))
+			return true;
+
+		return false;
 	}
 
 	#region Source-Generated Logging

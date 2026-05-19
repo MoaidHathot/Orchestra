@@ -64,4 +64,24 @@ public sealed record AgentSessionErrorDetails
 	/// <c>CopilotAgent</c>'s swap loop to decide whether to retry on a new worker.
 	/// </summary>
 	public bool ExhaustedCliRetries { get; init; }
+
+	/// <summary>
+	/// True when the SDK's error message indicates a transient upstream failure that a
+	/// fresh CLI worker is likely to clear. Typical shapes:
+	/// <list type="bullet">
+	///   <item>HTTP <c>5xx</c> from the Copilot broker (e.g. <c>"Execution failed: Error: 500 ..."</c>).</item>
+	///   <item>HTTP <c>403</c> / <c>twirp error permission_denied</c> on the user-identity
+	///   handshake (e.g. <c>"can't get copilot user by id"</c>). These typically reflect
+	///   a stale auth token cached inside the dying CLI process; a cold restart
+	///   re-authenticates from scratch and clears the failure.</item>
+	///   <item>HTTP <c>429</c> rate-limit responses surfaced as part of session.error
+	///   payloads — a brief swap-induced delay plus a fresh connection often clears
+	///   the upstream throttle.</item>
+	/// </list>
+	/// Set by <c>CopilotSessionHandler.HandleError</c> when the message or structured
+	/// fields match the well-known patterns. Consumed by the agent and executor swap
+	/// loops in the same way as <see cref="ExhaustedCliRetries"/>, but with a distinct
+	/// flag so diagnostics / metrics can tell the two classes apart.
+	/// </summary>
+	public bool TransientUpstreamFailure { get; init; }
 }
