@@ -1271,14 +1271,23 @@ public partial class OrchestrationExecutor
 				// Stable, deterministic ordering for diagnostics and tests.
 				var orderedRoots = noActionRoots.OrderBy(n => n, StringComparer.Ordinal).ToArray();
 				reason = $"{NoActionSkipReasonPrefix} [{string.Join(", ", orderedRoots)}]";
+				// Benign cascade: a gate upstream called set_status no_action and the
+				// engine is propagating "nothing to do" through the DAG. Log at
+				// Information so operators are not paged for the expected case; the
+				// dedicated LogStepSkippedDueToNoActionRoots emitter (also Information)
+				// already carries the structured root list for filtering.
 				LogStepSkippedDueToNoActionRoots(step.Name, string.Join(", ", orderedRoots));
+				LogSkippingStepBenign(step.Name, reason);
 			}
 			else
 			{
 				reason = $"Skipped because dependencies failed, were cancelled, or were skipped: [{string.Join(", ", failedDeps)}]";
+				// Non-benign cascade: an upstream step failed, was cancelled, or was
+				// itself skipped for a non-NoAction reason. Keep at Warning so this
+				// surfaces in normal log filters.
+				LogSkippingStep(step.Name, reason);
 			}
 
-			LogSkippingStep(step.Name, reason);
 			_reporter.ReportStepSkipped(step.Name, reason);
 			return ExecutionResult.Skipped(reason);
 		}
@@ -2196,6 +2205,9 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Skipping step '{StepName}': {Reason}")]
 	private partial void LogSkippingStep(string stepName, string reason);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Skipping step '{StepName}': {Reason}")]
+	private partial void LogSkippingStepBenign(string stepName, string reason);
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' skipped because all dependency failures trace back to NoAction root(s): {Roots}")]
 	private partial void LogStepSkippedDueToNoActionRoots(string stepName, string roots);
