@@ -612,4 +612,250 @@ public class OrchestrationStepExecutorTests
 		result.ChildOrchestrationInfo.Status.Should().Be(ExecutionStatus.Failed);
 		result.ChildOrchestrationInfo.ErrorMessage.Should().Contain("missing");
 	}
+
+	// ── forEach fan-out ───────────────────────────────────────────────────────
+
+	private static OrchestrationInvocationStep MakeForEachStep(
+		string forEach,
+		string itemParameter = "itemData",
+		string orchestrationName = "child-orch",
+		Dictionary<string, string>? staticParameters = null,
+		string? forEachPath = null,
+		int? maxConcurrency = null,
+		bool continueOnItemFailure = true,
+		OrchestrationInvocationMode mode = OrchestrationInvocationMode.Sync) => new()
+	{
+		Name = "dispatch-children",
+		Type = OrchestrationStepType.Orchestration,
+		OrchestrationName = orchestrationName,
+		ChildParameters = staticParameters ?? [],
+		Mode = mode,
+		ForEach = forEach,
+		ForEachPath = forEachPath,
+		ItemParameter = itemParameter,
+		MaxConcurrency = maxConcurrency,
+		ContinueOnItemFailure = continueOnItemFailure,
+	};
+
+	[Fact]
+	public async Task ForEach_EmptyArray_SucceedsWithEmptyRollup()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		var executor = CreateExecutor(launcher);
+
+		var step = MakeForEachStep(forEach: "[]");
+		var result = await executor.ExecuteAsync(step, MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		await launcher.DidNotReceiveWithAnyArgs().LaunchAsync(default!, default);
+
+		using var doc = JsonDocument.Parse(result.Content);
+		doc.RootElement.GetProperty("totalDispatched").GetInt32().Should().Be(0);
+		doc.RootElement.GetProperty("succeeded").GetInt32().Should().Be(0);
+		doc.RootElement.GetProperty("failed").GetInt32().Should().Be(0);
+		doc.RootElement.GetProperty("results").GetArrayLength().Should().Be(0);
+	}
+
+	[Fact]
+	public async Task ForEach_LaunchesOneChildPerItem_AggregatesResults()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		var launchCount = 0;
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(call =>
+			{
+				var req = call.Arg<ChildLaunchRequest>();
+				var idx = Interlocked.Increment(ref launchCount);
+				var execId = $"exec-{idx}";
+				return MakeHandle(executionId: execId, terminal: new ChildOrchestrationResult
+				{
+					ExecutionId = execId,
+					OrchestrationId = req.OrchestrationId,
+					OrchestrationName = req.OrchestrationId,
+					Status = ExecutionStatus.Succeeded,
+					FinalContent = $"final-{req.Parameters["itemData"]}",
+					StartedAt = DateTimeOffset.UtcNow,
+					CompletedAt = DateTimeOffset.UtcNow,
+				});
+			});
+
+		var executor = CreateExecutor(launcher);
+		var step = MakeForEachStep(forEach: """[{"id":1},{"id":2},{"id":3}]""");
+
+		var result = await executor.ExecuteAsync(step, MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		launchCount.Should().Be(3);
+
+		using var doc = JsonDocument.Parse(result.Content);
+		doc.RootElement.GetProperty("totalDispatched").GetInt32().Should().Be(3);
+		doc.RootElement.GetProperty("succeeded").GetInt32().Should().Be(3);
+		doc.RootElement.GetProperty("failed").GetInt32().Should().Be(0);
+		var results = doc.RootElement.GetProperty("results");
+		results.GetArrayLength().Should().Be(3);
+		// Each entry includes the per-item input JSON verbatim.
+		foreach (var entry in results.EnumerateArray())
+		{
+			entry.GetProperty("status").GetString().Should().Be("succeeded");
+			entry.GetProperty("input").GetRawText().Should().Contain("id");
+		}
+	}
+
+	[Fact]
+	public async Task ForEach_ForEachPath_DrillsIntoJsonObject()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(call =>
+			{
+				var req = call.Arg<ChildLaunchRequest>();
+				return MakeHandle(executionId: "x", terminal: new ChildOrchestrationResult
+				{
+					ExecutionId = "x",
+					OrchestrationId = req.OrchestrationId,
+					OrchestrationName = req.OrchestrationId,
+					Status = ExecutionStatus.Succeeded,
+					FinalContent = "ok",
+					StartedAt = DateTimeOffset.UtcNow,
+					CompletedAt = DateTimeOffset.UtcNow,
+				});
+			});
+
+		var executor = CreateExecutor(launcher);
+		var step = MakeForEachStep(
+			forEach: """{"meetingsToProcess":[{"id":"a"},{"id":"b"}],"meetingsSkipped":[]}""",
+			forEachPath: "meetingsToProcess");
+
+		var result = await executor.ExecuteAsync(step, MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		using var doc = JsonDocument.Parse(result.Content);
+		doc.RootElement.GetProperty("totalDispatched").GetInt32().Should().Be(2);
+	}
+
+	[Fact]
+	public async Task ForEach_MixedResults_CapturesFailuresAndStillSucceeds_WhenContinueOnItemFailure()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		var launchIndex = 0;
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(call =>
+			{
+				var req = call.Arg<ChildLaunchRequest>();
+				var idx = Interlocked.Increment(ref launchIndex);
+				var status = idx == 2 ? ExecutionStatus.Failed : ExecutionStatus.Succeeded;
+				return MakeHandle(executionId: $"e-{idx}", terminal: new ChildOrchestrationResult
+				{
+					ExecutionId = $"e-{idx}",
+					OrchestrationId = req.OrchestrationId,
+					OrchestrationName = req.OrchestrationId,
+					Status = status,
+					ErrorMessage = status == ExecutionStatus.Failed ? "boom" : null,
+					FinalContent = status == ExecutionStatus.Succeeded ? "ok" : null,
+					StartedAt = DateTimeOffset.UtcNow,
+					CompletedAt = DateTimeOffset.UtcNow,
+				});
+			});
+
+		var executor = CreateExecutor(launcher);
+		var step = MakeForEachStep(forEach: """[{"id":1},{"id":2},{"id":3}]""", continueOnItemFailure: true);
+
+		var result = await executor.ExecuteAsync(step, MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		using var doc = JsonDocument.Parse(result.Content);
+		doc.RootElement.GetProperty("succeeded").GetInt32().Should().Be(2);
+		doc.RootElement.GetProperty("failed").GetInt32().Should().Be(1);
+	}
+
+	[Fact]
+	public async Task ForEach_FailureWithContinueOnItemFailureFalse_FailsStep()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		var launchIndex = 0;
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(call =>
+			{
+				var req = call.Arg<ChildLaunchRequest>();
+				var idx = Interlocked.Increment(ref launchIndex);
+				var status = idx == 2 ? ExecutionStatus.Failed : ExecutionStatus.Succeeded;
+				return MakeHandle(executionId: $"e-{idx}", terminal: new ChildOrchestrationResult
+				{
+					ExecutionId = $"e-{idx}",
+					OrchestrationId = req.OrchestrationId,
+					OrchestrationName = req.OrchestrationId,
+					Status = status,
+					ErrorMessage = status == ExecutionStatus.Failed ? "boom" : null,
+					FinalContent = status == ExecutionStatus.Succeeded ? "ok" : null,
+					StartedAt = DateTimeOffset.UtcNow,
+					CompletedAt = DateTimeOffset.UtcNow,
+				});
+			});
+
+		var executor = CreateExecutor(launcher);
+		var step = MakeForEachStep(forEach: """[{"id":1},{"id":2}]""", continueOnItemFailure: false);
+
+		var result = await executor.ExecuteAsync(step, MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("1 of 2");
+	}
+
+	[Fact]
+	public async Task ForEach_InvalidJson_FailsStep()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		var executor = CreateExecutor(launcher);
+
+		var step = MakeForEachStep(forEach: "not-json");
+		var result = await executor.ExecuteAsync(step, MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		await launcher.DidNotReceiveWithAnyArgs().LaunchAsync(default!, default);
+	}
+
+	[Fact]
+	public async Task ForEach_BindsItemParameterAndStaticParameters()
+	{
+		var capturedRequests = new List<ChildLaunchRequest>();
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(call =>
+			{
+				var req = call.Arg<ChildLaunchRequest>();
+				lock (capturedRequests) capturedRequests.Add(req);
+				return MakeHandle(executionId: "x", terminal: new ChildOrchestrationResult
+				{
+					ExecutionId = "x",
+					OrchestrationId = req.OrchestrationId,
+					OrchestrationName = req.OrchestrationId,
+					Status = ExecutionStatus.Succeeded,
+					FinalContent = "ok",
+					StartedAt = DateTimeOffset.UtcNow,
+					CompletedAt = DateTimeOffset.UtcNow,
+				});
+			});
+
+		var executor = CreateExecutor(launcher);
+		var step = MakeForEachStep(
+			forEach: """[{"id":1,"name":"alpha"},{"id":2,"name":"beta"}]""",
+			itemParameter: "meetingData",
+			staticParameters: new Dictionary<string, string>
+			{
+				["dryRun"] = "false",
+				["actionItemsDir"] = "C:/tmp",
+			});
+
+		var result = await executor.ExecuteAsync(step, MakeContext());
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+
+		capturedRequests.Should().HaveCount(2);
+		foreach (var req in capturedRequests)
+		{
+			req.Parameters.Should().ContainKey("meetingData");
+			req.Parameters.Should().ContainKey("dryRun").WhoseValue.Should().Be("false");
+			req.Parameters.Should().ContainKey("actionItemsDir").WhoseValue.Should().Be("C:/tmp");
+			req.Parameters["meetingData"].Should().Contain("id");
+		}
+	}
 }

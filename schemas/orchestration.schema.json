@@ -735,6 +735,28 @@
         "inputHandlerModel": {
           "type": "string",
           "description": "Model to use for the input handler prompt. Defaults to the orchestration default model."
+        },
+        "forEach": {
+          "type": "string",
+          "description": "Optional template that resolves to a JSON array. When set, the step launches one child orchestration per element instead of a single child. Supports all standard template references: {{stepName.output}}, {{param.X}}, {{vars.X}}, etc. The resolved value must be a JSON array, or a JSON object containing the array at 'forEachPath'."
+        },
+        "forEachPath": {
+          "type": "string",
+          "description": "Optional dotted JSON path used to extract the items array out of 'forEach' when the template resolves to a JSON object. Example: when the prior step output is {\"meetingsToProcess\":[...]}, set this to 'meetingsToProcess'."
+        },
+        "itemParameter": {
+          "type": "string",
+          "description": "Required when 'forEach' is set. The name of the child parameter carrying the raw per-item JSON. The item is serialized as a compact JSON string and assigned to this parameter for every child invocation."
+        },
+        "maxConcurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum number of children to run concurrently in forEach mode. Defaults to unbounded. Honored only in sync mode."
+        },
+        "continueOnItemFailure": {
+          "type": "boolean",
+          "default": true,
+          "description": "In forEach + sync mode, when true the step succeeds even if some child invocations failed (the rollup captures per-item status). When false, any failed child fails the step."
         }
       }
     },
