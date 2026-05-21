@@ -457,6 +457,14 @@ public static class ServiceProviderExtensions
 			var profilesDir = Path.Combine(scanConfig.Directory, OrchestrationSyncService.ProfilesDirName);
 			if (Directory.Exists(profilesDir))
 			{
+				// Prime the in-memory profile dictionary BEFORE syncing the scan directory.
+				// SyncDirectory uses Get(id) to decide between "update (preserve IsActive)" and
+				// "new (force IsActive=false)" — without loading first, a previously-activated
+				// scan-sourced profile would be treated as new on every startup and have its
+				// activation state silently reset. ProfileManager.Initialize() will call
+				// LoadAll() again after sync, which is fine (idempotent).
+				profileStore.LoadAll();
+
 				var syncResult = profileStore.SyncDirectory(profilesDir);
 				initLogger.LogInformation(
 					"Profile sync from {Directory}: {Added} added, {Updated} updated, {Removed} removed, {Unchanged} unchanged, {Failed} failed",

@@ -1179,4 +1179,109 @@ public class ScriptStepExecutorTests
 	}
 
 	#endregion
+
+	#region Argument Spill (CreateProcess limit)
+
+	[Fact]
+	public void SpillOversizeArguments_BelowTotalThreshold_ReturnsArgumentsUnchanged()
+	{
+		// Arrange
+		var args = new[] { "small", new string('a', 500), "another" };
+		var store = new OrchestrationTempFileStore(Path.GetTempPath(), "spill-below", Guid.NewGuid().ToString("N"));
+
+		// Act
+		var (rewritten, env) = ScriptStepExecutor.SpillOversizeArguments(args, store, "step");
+
+		// Assert
+		rewritten.Should().Equal(args);
+		env.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void SpillOversizeArguments_NullTempStore_ReturnsArgumentsUnchanged()
+	{
+		// Arrange
+		var args = new[] { new string('a', 100_000) };
+
+		// Act
+		var (rewritten, env) = ScriptStepExecutor.SpillOversizeArguments(args, tempFileStore: null, "step");
+
+		// Assert
+		rewritten.Should().Equal(args);
+		env.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void SpillOversizeArguments_ExceedsThreshold_SpillsLargeArgsToFiles()
+	{
+		// Arrange
+		var huge = new string('x', 50_000);
+		var small = "small-value";
+		var args = new[] { small, huge, small, huge };
+		var store = new OrchestrationTempFileStore(Path.GetTempPath(), "spill-over", Guid.NewGuid().ToString("N"));
+
+		// Act
+		var (rewritten, env) = ScriptStepExecutor.SpillOversizeArguments(args, store, "step");
+
+		// Assert: small args pass through, large args become markers pointing to files containing the original text
+		rewritten.Should().HaveCount(4);
+		rewritten[0].Should().Be(small);
+		rewritten[2].Should().Be(small);
+
+		rewritten[1].Should().StartWith(ScriptStepExecutor.OrchestraFileMarker);
+		rewritten[3].Should().StartWith(ScriptStepExecutor.OrchestraFileMarker);
+
+		var path1 = rewritten[1][ScriptStepExecutor.OrchestraFileMarker.Length..];
+		var path3 = rewritten[3][ScriptStepExecutor.OrchestraFileMarker.Length..];
+		File.Exists(path1).Should().BeTrue();
+		File.Exists(path3).Should().BeTrue();
+		File.ReadAllText(path1).Should().Be(huge);
+		File.ReadAllText(path3).Should().Be(huge);
+
+		// Manifest env var points to a JSON file containing the original (resolved) args
+		env.Should().ContainKey("ORCHESTRA_ARGS_FILE");
+		var manifestPath = env["ORCHESTRA_ARGS_FILE"];
+		File.Exists(manifestPath).Should().BeTrue();
+		var manifestArgs = System.Text.Json.JsonSerializer.Deserialize<string[]>(File.ReadAllText(manifestPath));
+		manifestArgs.Should().Equal(args);
+
+		// Spilled files are registered for the step so they appear in the run trace
+		var filesForStep = store.GetFilesForStep("step");
+		filesForStep.Should().Contain(path1);
+		filesForStep.Should().Contain(path3);
+		filesForStep.Should().Contain(manifestPath);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_LargeArgument_DoesNotExceedCommandLineLimit()
+	{
+		// Arrange: a payload that, if inlined, would exceed Windows' CreateProcess 32K limit
+		var bigPayload = "{" + new string('a', 40_000) + "}";
+		var dataPath = Path.Combine(Path.GetTempPath(), "orchestra-spill-e2e-" + Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(dataPath);
+		var store = new OrchestrationTempFileStore(dataPath, "orch", "run");
+
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			// Script reads $args[0] and asserts the original content is restored
+			script: "if ($args[0].Length -ne " + bigPayload.Length + ") { Write-Error 'unexpected arg length'; exit 1 } Write-Output ('len=' + $args[0].Length)",
+			arguments: [bigPayload]);
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+			TempFileStore = store,
+		};
+		var executor = CreateExecutor();
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert: previously this would fail with "The filename or extension is too long".
+		// With spill in place, pwsh starts and the prologue restores the original arg.
+		result.Status.Should().Be(ExecutionStatus.Succeeded, because: $"output was: {result.Content}");
+		result.Content.Should().Contain("len=" + bigPayload.Length);
+	}
+
+	#endregion
 }

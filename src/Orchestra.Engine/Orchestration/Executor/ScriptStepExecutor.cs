@@ -45,6 +45,40 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
+	/// Marker prefix used to indicate that an argument has been spilled to a file
+	/// due to size constraints (Windows CreateProcess ~32K limit). The value after
+	/// the prefix is the absolute path to a file containing the original argument
+	/// text (UTF-8, no BOM). PowerShell scripts have this resolved transparently
+	/// via the injected prologue.
+	/// </summary>
+	internal const string OrchestraFileMarker = "@orchestra-file:";
+
+	/// <summary>
+	/// Conservative per-process command-line length budget. Windows
+	/// <c>CreateProcessW</c> caps the command line at 32,767 chars; we leave
+	/// headroom for the executable path, run-file args, env block, and quoting.
+	/// When the total resolved-args length exceeds this budget, any single arg
+	/// larger than <see cref="ArgSpillSingleArgThreshold"/> is written to a
+	/// temp file and replaced with an <see cref="OrchestraFileMarker"/> token.
+	/// </summary>
+	internal const int ArgSpillTotalThreshold = 8_000;
+
+	/// <summary>
+	/// Per-argument spill threshold. An individual arg larger than this value is
+	/// eligible to be replaced with an <see cref="OrchestraFileMarker"/> token
+	/// once the total length exceeds <see cref="ArgSpillTotalThreshold"/>.
+	/// </summary>
+	internal const int ArgSpillSingleArgThreshold = 2_000;
+
+	/// <summary>
+	/// PowerShell snippet that rewrites <c>$args</c> by resolving any
+	/// <see cref="OrchestraFileMarker"/> tokens to the original file contents.
+	/// Kept on a single line to avoid disturbing user-script line numbers.
+	/// </summary>
+	private const string PowerShellArgSpillResolver =
+		"if ($args) { $args = @($args | ForEach-Object { if ($_ -is [string] -and $_.StartsWith('" + OrchestraFileMarker + "')) { [System.IO.File]::ReadAllText($_.Substring(" + "16" + ")) } else { $_ } }) };";
+
+	/// <summary>
 	/// PowerShell prologue injected at the top of the resolved script for the default
 	/// (auto) <see cref="ScriptOrchestrationStep.StrictMode"/> setting.
 	/// </summary>
@@ -68,7 +102,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	/// log consumers can grep for <c>ORCHESTRA-PWSH-ERROR:</c> to extract structured failure data.</para>
 	/// </remarks>
 	internal const string PowerShellDefaultPrologue =
-		"$ErrorActionPreference='Stop'; trap { $r=$_; [Console]::Error.WriteLine(\"ORCHESTRA-PWSH-ERROR: $($r.InvocationInfo.ScriptName):$($r.InvocationInfo.ScriptLineNumber):$($r.InvocationInfo.OffsetInLine): $($r.Exception.Message)\"); if ($r.InvocationInfo.Line) { [Console]::Error.WriteLine('  | ' + $r.InvocationInfo.Line.TrimEnd()) }; if ($r.ScriptStackTrace) { [Console]::Error.WriteLine($r.ScriptStackTrace) }; exit 1 };";
+		"$ErrorActionPreference='Stop'; " + PowerShellArgSpillResolver + " trap { $r=$_; [Console]::Error.WriteLine(\"ORCHESTRA-PWSH-ERROR: $($r.InvocationInfo.ScriptName):$($r.InvocationInfo.ScriptLineNumber):$($r.InvocationInfo.OffsetInLine): $($r.Exception.Message)\"); if ($r.InvocationInfo.Line) { [Console]::Error.WriteLine('  | ' + $r.InvocationInfo.Line.TrimEnd()) }; if ($r.ScriptStackTrace) { [Console]::Error.WriteLine($r.ScriptStackTrace) }; exit 1 };";
 
 	/// <summary>
 	/// PowerShell prologue injected when the step opts in via <c>strictMode: true</c>.
@@ -87,7 +121,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	/// (e.g., <c>$obj.PSObject.Properties['Name']?.Value</c>) before enabling this.</para>
 	/// </remarks>
 	internal const string PowerShellStrictPrologue =
-		"$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; trap { $r=$_; [Console]::Error.WriteLine(\"ORCHESTRA-PWSH-ERROR: $($r.InvocationInfo.ScriptName):$($r.InvocationInfo.ScriptLineNumber):$($r.InvocationInfo.OffsetInLine): $($r.Exception.Message)\"); if ($r.InvocationInfo.Line) { [Console]::Error.WriteLine('  | ' + $r.InvocationInfo.Line.TrimEnd()) }; if ($r.ScriptStackTrace) { [Console]::Error.WriteLine($r.ScriptStackTrace) }; exit 1 };";	public ScriptStepExecutor(
+		"$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; " + PowerShellArgSpillResolver + " trap { $r=$_; [Console]::Error.WriteLine(\"ORCHESTRA-PWSH-ERROR: $($r.InvocationInfo.ScriptName):$($r.InvocationInfo.ScriptLineNumber):$($r.InvocationInfo.OffsetInLine): $($r.Exception.Message)\"); if ($r.InvocationInfo.Line) { [Console]::Error.WriteLine('  | ' + $r.InvocationInfo.Line.TrimEnd()) }; if ($r.ScriptStackTrace) { [Console]::Error.WriteLine($r.ScriptStackTrace) }; exit 1 };";	public ScriptStepExecutor(
 		IOrchestrationReporter reporter,
 		ILogger<ScriptStepExecutor> logger)
 	{
@@ -162,9 +196,25 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			}
 
 			// Resolve template expressions in arguments
-			var arguments = scriptStep.Arguments
+			var resolvedArguments = scriptStep.Arguments
 				.Select(arg => TemplateResolver.Resolve(arg, context.Parameters, context, step.DependsOn, step))
 				.ToArray();
+
+			// Spill oversize arguments to files to avoid the Windows CreateProcess
+			// command-line length limit (~32,767 chars). When an upstream step's
+			// dependency output is large (e.g., aggregated meeting data), passing it
+			// inline as a single positional argument would fail with
+			// "The filename or extension is too long" (ERROR_FILENAME_EXCED_RANGE).
+			// We replace each oversize arg with the marker token "@orchestra-file:<path>".
+			// For pwsh/powershell, the injected prologue auto-resolves the marker so
+			// $args[N] retains the original string value. For other shells, authors
+			// must read the file themselves (or use the ORCHESTRA_ARGS_FILE env var
+			// which points to a JSON manifest with the fully-resolved args array).
+			var (arguments, argSpillEnv) = SpillOversizeArguments(
+				resolvedArguments,
+				context.TempFileStore,
+				step.Name);
+
 			var processArguments = runFileArgs
 				.Append(scriptFilePath)
 				.Concat(arguments)
@@ -219,6 +269,14 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			// the step's Environment section if they truly want raw ANSI bytes.
 			startInfo.Environment["NO_COLOR"] = "1";
 			startInfo.Environment["TERM"] = "dumb";
+
+			// Surface arg-spill env vars before user-provided env so authors can override
+			// them if they really want to. ORCHESTRA_ARGS_FILE points to a JSON manifest
+			// containing the fully-resolved arguments array (after spill resolution).
+			foreach (var (key, value) in argSpillEnv)
+			{
+				startInfo.Environment[key] = value;
+			}
 
 			// Set environment variables (resolve templates in values)
 			var resolvedEnvironment = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -610,6 +668,75 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		}
 
 		return -1;
+	}
+
+	/// <summary>
+	/// Spills oversize arguments to files under the orchestration's temp directory
+	/// to keep the launched process's command line within Windows'
+	/// <c>CreateProcessW</c> limit (~32,767 chars).
+	/// </summary>
+	/// <remarks>
+	/// <para>When the combined length of resolved arguments exceeds
+	/// <see cref="ArgSpillTotalThreshold"/>, every individual argument larger
+	/// than <see cref="ArgSpillSingleArgThreshold"/> is written to a temp file
+	/// (tagged to the current step so it appears in the run's saved-files
+	/// trace) and replaced in the argument list with a marker of the form
+	/// <c>@orchestra-file:&lt;absolute-path&gt;</c>. Small arguments are passed
+	/// through verbatim.</para>
+	/// <para>In addition, a JSON manifest containing the fully-resolved arguments
+	/// (post-spill values reflecting the original strings) is written and its
+	/// path exposed via the <c>ORCHESTRA_ARGS_FILE</c> environment variable, so
+	/// scripts in any shell can reconstruct the full argument list without
+	/// relying on the PowerShell-specific prologue.</para>
+	/// <para>If <paramref name="tempFileStore"/> is <c>null</c> (e.g., in tests
+	/// that construct an <c>OrchestrationExecutionContext</c> directly without a
+	/// temp store), spilling is skipped and arguments are returned unchanged —
+	/// preserving prior behavior.</para>
+	/// </remarks>
+	internal static (string[] Arguments, IReadOnlyDictionary<string, string> Environment) SpillOversizeArguments(
+		string[] arguments,
+		OrchestrationTempFileStore? tempFileStore,
+		string stepName)
+	{
+		var emptyEnv = (IReadOnlyDictionary<string, string>)new Dictionary<string, string>(StringComparer.Ordinal);
+
+		if (arguments.Length == 0 || tempFileStore is null)
+			return (arguments, emptyEnv);
+
+		var totalLength = 0;
+		for (var i = 0; i < arguments.Length; i++)
+			totalLength += arguments[i]?.Length ?? 0;
+
+		if (totalLength <= ArgSpillTotalThreshold)
+			return (arguments, emptyEnv);
+
+		var rewritten = new string[arguments.Length];
+		for (var i = 0; i < arguments.Length; i++)
+		{
+			var arg = arguments[i] ?? string.Empty;
+			if (arg.Length > ArgSpillSingleArgThreshold)
+			{
+				var spilledPath = tempFileStore.SaveFile(arg, stepName, "arg");
+				rewritten[i] = OrchestraFileMarker + spilledPath;
+			}
+			else
+			{
+				rewritten[i] = arg;
+			}
+		}
+
+		// Write a JSON manifest with the *original* (fully-resolved) argument
+		// values so non-PowerShell scripts can reconstruct the full argv via
+		// $env:ORCHESTRA_ARGS_FILE without parsing markers themselves.
+		var manifestJson = System.Text.Json.JsonSerializer.Serialize(arguments);
+		var manifestPath = tempFileStore.SaveFile(manifestJson, stepName, "json");
+
+		var env = new Dictionary<string, string>(StringComparer.Ordinal)
+		{
+			["ORCHESTRA_ARGS_FILE"] = manifestPath,
+		};
+
+		return (rewritten, env);
 	}
 
 	/// <summary>

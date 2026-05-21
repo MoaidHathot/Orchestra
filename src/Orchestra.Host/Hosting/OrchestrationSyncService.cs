@@ -259,7 +259,9 @@ public partial class OrchestrationSyncService : BackgroundService
 
 	private async Task HandleOrchestrationFileCreatedOrChangedAsync(string fullPath)
 	{
-		// File may still be locked by the editor — retry with backoff
+		// File may still be locked or mid-write by the editor — retry with backoff.
+		// Many editors (vim, VS Code on Windows, etc.) save by truncate-then-write, so a
+		// readable-but-empty snapshot is also a transient state worth retrying.
 		string? rawContent = null;
 		for (var attempt = 0; attempt < MaxRetries; attempt++)
 		{
@@ -268,7 +270,20 @@ public partial class OrchestrationSyncService : BackgroundService
 				if (!File.Exists(fullPath))
 					return; // File was deleted between event and processing
 
-				rawContent = File.ReadAllText(fullPath);
+				var content = File.ReadAllText(fullPath);
+				if (string.IsNullOrWhiteSpace(content))
+				{
+					if (attempt < MaxRetries - 1)
+					{
+						await Task.Delay(RetryDelay);
+						continue;
+					}
+					// Final attempt is still empty — give up quietly below.
+					rawContent = content;
+					break;
+				}
+
+				rawContent = content;
 				break;
 			}
 			catch (IOException) when (attempt < MaxRetries - 1)
@@ -277,7 +292,7 @@ public partial class OrchestrationSyncService : BackgroundService
 			}
 		}
 
-		if (rawContent is null)
+		if (string.IsNullOrWhiteSpace(rawContent))
 		{
 			LogFileReadFailed(fullPath);
 			return;
@@ -379,7 +394,9 @@ public partial class OrchestrationSyncService : BackgroundService
 
 	private async Task HandleProfileFileCreatedOrChangedAsync(string fullPath)
 	{
-		// File may still be locked by the editor — retry with backoff
+		// File may still be locked or mid-write by the editor — retry with backoff.
+		// Many editors (vim, VS Code on Windows, etc.) save by truncate-then-write, so a
+		// readable-but-empty snapshot is also a transient state worth retrying.
 		string? rawContent = null;
 		for (var attempt = 0; attempt < MaxRetries; attempt++)
 		{
@@ -388,7 +405,19 @@ public partial class OrchestrationSyncService : BackgroundService
 				if (!File.Exists(fullPath))
 					return;
 
-				rawContent = File.ReadAllText(fullPath);
+				var content = File.ReadAllText(fullPath);
+				if (string.IsNullOrWhiteSpace(content))
+				{
+					if (attempt < MaxRetries - 1)
+					{
+						await Task.Delay(RetryDelay);
+						continue;
+					}
+					rawContent = content;
+					break;
+				}
+
+				rawContent = content;
 				break;
 			}
 			catch (IOException) when (attempt < MaxRetries - 1)
@@ -397,7 +426,7 @@ public partial class OrchestrationSyncService : BackgroundService
 			}
 		}
 
-		if (rawContent is null)
+		if (string.IsNullOrWhiteSpace(rawContent))
 		{
 			LogFileReadFailed(fullPath);
 			return;
@@ -406,7 +435,18 @@ public partial class OrchestrationSyncService : BackgroundService
 		try
 		{
 			var contentHash = ProfileStore.ComputeContentHash(rawContent);
-			var profile = JsonSerializer.Deserialize<Profile>(rawContent, ProfileStore.JsonOptions);
+			Profile? profile;
+			try
+			{
+				profile = JsonSerializer.Deserialize<Profile>(rawContent, ProfileStore.JsonOptions);
+			}
+			catch (JsonException jex)
+			{
+				// Malformed JSON (or a torn read that slipped past the retry). Log a clean
+				// one-liner instead of dumping the full stack trace — this is user data, not a bug.
+				LogProfileJsonInvalid(fullPath, jex.Message);
+				return;
+			}
 			if (profile is null)
 			{
 				LogProfileSyncFailed(fullPath);
@@ -564,4 +604,7 @@ public partial class OrchestrationSyncService : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to sync profile from '{Path}'")]
 	private partial void LogProfileSyncError(string path, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Profile JSON invalid at '{Path}': {Reason}")]
+	private partial void LogProfileJsonInvalid(string path, string reason);
 }

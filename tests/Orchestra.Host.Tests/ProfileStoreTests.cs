@@ -406,6 +406,70 @@ public class ProfileStoreTests : IDisposable
 	}
 
 	[Fact]
+	public void SyncDirectory_AfterRestart_PreservesActivationState_WhenLoadAllCalledFirst()
+	{
+		// Regression: previously, on startup the scan-sync ran before LoadAll(), so a
+		// scan-sourced profile was always seen as "new" and force-reset to IsActive=false,
+		// silently clobbering the user's activation. The fix is to call LoadAll() before
+		// SyncDirectory() at startup. This test asserts that contract.
+		var externalDir = CreateExternalProfileDir();
+		WriteProfileFile(externalDir, "Survivor");
+
+		// First boot: import + activate.
+		{
+			var store = CreateStore();
+			store.LoadAll();
+			store.SyncDirectory(externalDir);
+
+			var profile = store.GetAll().First();
+			profile.IsActive = true;
+			profile.ActivatedAt = DateTimeOffset.UtcNow;
+			profile.ActivationTrigger = "manual";
+			store.Save(profile);
+		}
+
+		// Simulate restart: new ProfileStore instance over the same data dir, scan dir unchanged.
+		{
+			var store = CreateStore();
+			store.LoadAll();           // <-- the fix: prime in-memory state first
+			store.SyncDirectory(externalDir);
+
+			var profile = store.GetAll().Single();
+			profile.IsActive.Should().BeTrue("manual activation must survive restart for scan-sourced profiles");
+			profile.ActivationTrigger.Should().Be("manual");
+		}
+	}
+
+	[Fact]
+	public void SyncDirectory_WithoutPriorLoadAll_TreatsExistingProfileAsNew()
+	{
+		// Documents the broken behavior the A1 fix avoids: if SyncDirectory runs against a
+		// fresh ProfileStore instance without LoadAll() first, the on-disk activation is lost.
+		var externalDir = CreateExternalProfileDir();
+		WriteProfileFile(externalDir, "Victim");
+
+		{
+			var store = CreateStore();
+			store.LoadAll();
+			store.SyncDirectory(externalDir);
+			var profile = store.GetAll().First();
+			profile.IsActive = true;
+			profile.ActivationTrigger = "manual";
+			store.Save(profile);
+		}
+
+		// Simulate the buggy startup order: SyncDirectory without LoadAll first.
+		{
+			var store = CreateStore();
+			store.SyncDirectory(externalDir); // no LoadAll() — bug repro
+			store.LoadAll();                  // load after, as Initialize() would
+
+			var profile = store.GetAll().Single();
+			profile.IsActive.Should().BeFalse("repro of the pre-fix bug: activation is clobbered when sync runs before load");
+		}
+	}
+
+	[Fact]
 	public void SyncDirectory_SkipsUnchangedProfiles()
 	{
 		var store = CreateStore();

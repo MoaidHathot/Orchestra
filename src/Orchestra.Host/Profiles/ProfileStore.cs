@@ -308,17 +308,42 @@ public partial class ProfileStore
 		return $"{sanitized}-{hash}";
 	}
 
+	private readonly object _persistLock = new();
+
 	private void PersistProfile(Profile profile)
 	{
-		try
+		// Serialize concurrent writes to the same data dir: two near-simultaneous file-watch
+		// events (or an API call colliding with a watcher event) can both reach WriteAllText
+		// on the same path and race, producing "being used by another process" IOExceptions.
+		// A single lock here is sufficient because writes are short and infrequent.
+		var path = GetProfilePath(profile.Id);
+		var json = JsonSerializer.Serialize(profile, JsonOptions);
+
+		const int maxAttempts = 5;
+		var delayMs = 50;
+		for (var attempt = 1; attempt <= maxAttempts; attempt++)
 		{
-			var json = JsonSerializer.Serialize(profile, JsonOptions);
-			File.WriteAllText(GetProfilePath(profile.Id), json);
+			try
+			{
+				lock (_persistLock)
+				{
+					File.WriteAllText(path, json);
+				}
+				return;
+			}
+			catch (IOException) when (attempt < maxAttempts)
+			{
+				Thread.Sleep(delayMs);
+				delayMs *= 2;
+			}
+			catch (Exception ex)
+			{
+				LogProfileSaveFailed(ex, profile.Id);
+				return;
+			}
 		}
-		catch (Exception ex)
-		{
-			LogProfileSaveFailed(ex, profile.Id);
-		}
+
+		LogProfileSaveFailed(new IOException($"Gave up after {maxAttempts} attempts"), profile.Id);
 	}
 
 	private string GetProfilePath(string id) => Path.Combine(_profilesDir, $"{id}.json");
