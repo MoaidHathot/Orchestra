@@ -222,6 +222,89 @@ public class CopilotAgentSwapTests
 		await Task.CompletedTask;
 	}
 
+	[Fact]
+	public async Task ResumeSessionMissing_FallsBackToColdRestartOnNextAttempt_AndSucceeds()
+	{
+		// First attempt: a normal transport failure produces a session id "session-first"
+		// and triggers a swap with resume enabled.
+		var failingSession = new ScriptedCopilotSession("session-first", sendThrows: new InvalidOperationException("connection lost"));
+		var failingClient = new ScriptedCopilotClient(failingSession);
+		var failingBroker = new ProbeLatchingFaultBroker();
+
+		// Second attempt: swap loop calls ResumeSessionAsync, the CLI replies "Session not
+		// found". This is the regression: previously the orchestration would fail; now we
+		// expect another swap (cold restart) instead.
+		var resumeMissingClient = new ScriptedCopilotClient(
+			resumeSessionThrows: new Exception("Communication error with Copilot CLI: Request session.resume failed with message: Session not found: session-first"));
+
+		// Third attempt: cold restart on a fresh worker — succeeds.
+		var recoverySession = new ScriptedCopilotSession("session-recovered", completeImmediately: true);
+		var recoveryClient = new ScriptedCopilotClient(recoverySession);
+
+		var pool = new ScriptedPool(
+			new ScriptedLease(failingClient, failingBroker),
+			new ScriptedLease(resumeMissingClient, faultBroker: null),
+			new ScriptedLease(recoveryClient, faultBroker: null));
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var agent = CreateAgent(pool, reporter, ResumeEnabled: true);
+
+		var task = agent.SendAsync(Prompt);
+		var events = await DrainEventsAsync(task);
+		var result = await task.GetResultAsync();
+
+		result.Should().NotBeNull("the step must succeed via cold restart after the resume failed with Session not found");
+		pool.AcquireCount.Should().Be(3);
+		pool.SwapsRecorded.Should().Be(2);
+
+		// First swap is resume (transport_lost), second is cold restart triggered by the
+		// missing prior session id.
+		var swaps = events.Where(e => e.Type == AgentEventType.CliInstanceSwapped).ToList();
+		swaps.Should().HaveCount(2);
+		swaps[0].SwapReason.Should().Be("transport_lost");
+		swaps[0].SwapMode.Should().Be("resume");
+		swaps[1].SwapReason.Should().Be("resume_session_missing");
+		swaps[1].SwapMode.Should().Be("cold_restart", "a missing prior session id must force a cold restart, not another resume");
+
+		// The recovery client must have been used via CreateSessionAsync (not Resume).
+		recoveryClient.CreateCalls.Should().HaveCount(1);
+		recoveryClient.ResumeCalls.Should().BeEmpty();
+		// And we did attempt resume against the second client with the original session id.
+		resumeMissingClient.ResumeCalls.Should().ContainSingle()
+			.Which.sessionId.Should().Be("session-first");
+	}
+
+	[Fact]
+	public async Task ResumeSessionMissing_RepeatedlyFailing_RespectsSwapBudget()
+	{
+		// Three workers all fail with the same transport error so we keep producing a
+		// prior session id and re-attempting resume. Each resume hits "Session not found"
+		// → cold restart → next worker → fails transport → resume again → ... The budget
+		// must cap the loop so it can't run forever.
+		ScriptedLease MakeLease(string sessionId) => new(
+			new ScriptedCopilotClient(
+				session: new ScriptedCopilotSession(sessionId, sendThrows: new InvalidOperationException("connection lost")),
+				resumeSessionThrows: new Exception("Communication error with Copilot CLI: Request session.resume failed with message: Session not found: " + sessionId)),
+			new ProbeLatchingFaultBroker());
+
+		var pool = new ScriptedPool(
+			MakeLease("s1"),
+			MakeLease("s2"),
+			MakeLease("s3"),
+			MakeLease("s4"));
+		var agent = CreateAgent(pool, Substitute.For<IOrchestrationReporter>(), ResumeEnabled: true, swapBudgetOverride: 3);
+
+		var task = agent.SendAsync(Prompt);
+		await DrainEventsAsync(task);
+
+		var act = () => task.GetResultAsync();
+		await act.Should().ThrowAsync<Exception>();
+		// 1 original + at most 3 swaps. We don't pin an exact count because the cold-restart
+		// branch could short-circuit on a different recoverable failure first; what matters
+		// is the loop is bounded by the configured budget.
+		pool.AcquireCount.Should().BeLessThanOrEqualTo(4, "the swap loop must not exceed the configured budget");
+		pool.SwapsRecorded.Should().BeLessThanOrEqualTo(3);
+	}
+
 	#region Helpers
 
 	private static CopilotAgent CreateAgent(
@@ -325,6 +408,7 @@ public class CopilotAgentSwapTests
 	{
 		private readonly ScriptedCopilotSession? _session;
 		private readonly Exception? _createSessionThrows;
+		private readonly Exception? _resumeSessionThrows;
 
 		public ScriptedCopilotClient(ScriptedCopilotSession session)
 		{
@@ -336,10 +420,11 @@ public class CopilotAgentSwapTests
 			_createSessionThrows = createSessionThrows;
 		}
 
-		public ScriptedCopilotClient(ScriptedCopilotSession? session = null, Exception? createSessionThrows = null)
+		public ScriptedCopilotClient(ScriptedCopilotSession? session = null, Exception? createSessionThrows = null, Exception? resumeSessionThrows = null)
 		{
 			_session = session;
 			_createSessionThrows = createSessionThrows;
+			_resumeSessionThrows = resumeSessionThrows;
 		}
 
 		public int DiagnosticHash => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
@@ -365,6 +450,8 @@ public class CopilotAgentSwapTests
 		public Task<ICopilotSession> ResumeSessionAsync(string sessionId, ResumeSessionConfig config, CancellationToken cancellationToken)
 		{
 			ResumeCalls.Add((sessionId, config));
+			if (_resumeSessionThrows is not null)
+				return Task.FromException<ICopilotSession>(_resumeSessionThrows);
 			if (_session is null)
 				throw new InvalidOperationException("ScriptedCopilotClient has no session configured for resume.");
 			return Task.FromResult<ICopilotSession>(_session);

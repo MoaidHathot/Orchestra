@@ -205,10 +205,11 @@ public partial class CopilotAgent : IAgent
 					}
 
 					swapAttempt++;
-					// resume_locked is the signal that the SDK couldn't take ownership of
-					// the prior session in time. Force a cold restart so we don't loop on
-					// the same lock; everything else honours the resume policy.
-					var nextMode = reason == "resume_locked"
+					// resume_locked / resume_session_missing both mean the prior session can't
+					// be replayed (lock contention or the CLI no longer has the session id).
+					// Force a cold restart so we don't loop on the same dead id; everything
+					// else honours the resume policy.
+					var nextMode = reason is "resume_locked" or "resume_session_missing"
 						? SwapMode.ColdRestart
 						: ResolveSwapMode(attemptedSessionId);
 					LogSwapTriggered(
@@ -353,6 +354,25 @@ public partial class CopilotAgent : IAgent
 					throw NewClientUnhealthyFromBroker(faultBroker, ex,
 						triggeringSessionId: priorSessionId ?? "(session-create)");
 				}
+
+				// Resume-specific fallback: if ResumeSessionAsync failed because the CLI no
+				// longer knows about the prior session id ("Session not found"), the worker
+				// itself is fine — the saved session just isn't replayable anymore (e.g. the
+				// CLI was restarted/cleaned between our prior attempt and this one). Surface
+				// a structured unhealthy exception with reason "resume_session_missing" so
+				// the outer swap loop classifies it as swap-eligible and forces a cold
+				// restart (priorSessionId=null) on the next attempt, re-running the step's
+				// prompt from scratch instead of failing the whole orchestration.
+				if (isResumeAttempt && IsResumeSessionMissing(ex))
+				{
+					LogResumeSessionMissingFallback(priorSessionId ?? "(unknown)", ex.Message);
+					throw new CopilotClientUnhealthyException(
+						triggeringSessionId: priorSessionId ?? "(unknown)",
+						triggeringFailureReason: "resume_session_missing",
+						probeDetails: ex.Message,
+						message: $"Resume of session '{priorSessionId}' failed because the CLI no longer has that session; falling back to cold restart.");
+				}
+
 				throw;
 			}
 			LogSessionCreated(
@@ -534,6 +554,20 @@ public partial class CopilotAgent : IAgent
 			: SwapMode.ColdRestart;
 
 	/// <summary>
+	/// Returns true if the exception from <c>ResumeSessionAsync</c> indicates the CLI no
+	/// longer recognises the prior session id (typical SDK message:
+	/// <c>"Communication error with Copilot CLI: Request session.resume failed with message: Session not found: &lt;guid&gt;"</c>).
+	/// In that case the worker itself is fine; only the saved session is stale, so we
+	/// can safely fall back to a cold restart of the same step.
+	/// </summary>
+	private static bool IsResumeSessionMissing(Exception ex)
+	{
+		var message = ex.Message ?? string.Empty;
+		return message.Contains("Session not found", StringComparison.OrdinalIgnoreCase)
+			|| message.Contains("session.resume failed", StringComparison.OrdinalIgnoreCase);
+	}
+
+	/// <summary>
 	/// Classifies an exception thrown from <see cref="RunOneAttemptAsync"/> as a CLI-class
 	/// swap-eligible failure. Returns true for: <see cref="CopilotClientUnhealthyException"/>
 	/// (transport / fault-broker latched), <see cref="CopilotSessionFailedException"/> with
@@ -551,9 +585,12 @@ public partial class CopilotAgent : IAgent
 		switch (ex)
 		{
 			case CopilotClientUnhealthyException unhealthy:
-				reason = unhealthy.TriggeringFailureReason == "resume_locked"
-					? "resume_locked"
-					: "transport_lost";
+				reason = unhealthy.TriggeringFailureReason switch
+				{
+					"resume_locked" => "resume_locked",
+					"resume_session_missing" => "resume_session_missing",
+					_ => "transport_lost",
+				};
 				return true;
 
 			case CopilotSessionFailedException sessionFailed:
@@ -1307,6 +1344,10 @@ public partial class CopilotAgent : IAgent
 	[LoggerMessage(EventId = 20, Level = LogLevel.Warning,
 		Message = "Best-effort DeleteSessionAsync failed for session '{SessionId}' after resume_locked fallback")]
 	private partial void LogResumeDeleteFailed(Exception ex, string sessionId);
+
+	[LoggerMessage(EventId = 21, Level = LogLevel.Warning,
+		Message = "ResumeSessionAsync reported the prior session '{PriorSessionId}' is missing on the CLI ({SdkMessage}); falling back to cold restart of the step")]
+	private partial void LogResumeSessionMissingFallback(string priorSessionId, string sdkMessage);
 
 	#endregion
 }
