@@ -337,6 +337,17 @@ function App(): React.JSX.Element {
       return next;
     });
   }, []);
+  const [orchestrationsCollapsed, setOrchestrationsCollapsed] = useState<boolean>(() => {
+    const stored = localStorage.getItem('orchestra-orchestrations-collapsed');
+    return stored === 'true';
+  });
+  const toggleOrchestrationsCollapsed = useCallback(() => {
+    setOrchestrationsCollapsed(prev => {
+      const next = !prev;
+      localStorage.setItem('orchestra-orchestrations-collapsed', String(next));
+      return next;
+    });
+  }, []);
 
   // Status bar state
   const [serverStatus, setServerStatus] = useState<ServerStatus>({
@@ -2259,7 +2270,31 @@ function App(): React.JSX.Element {
           </div>
         </div>
 
-        <div className="orchestrations-list" role="listbox" aria-label="Orchestrations">
+        <div className={`orchestrations-section ${orchestrationsCollapsed ? 'collapsed' : ''}`} aria-label="Orchestrations">
+          <div
+            className="orchestrations-header"
+            onClick={toggleOrchestrationsCollapsed}
+            style={{ cursor: 'pointer' }}
+            role="button"
+            aria-expanded={!orchestrationsCollapsed}
+            tabIndex={0}
+            onKeyDown={(e: React.KeyboardEvent) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                toggleOrchestrationsCollapsed();
+              }
+            }}
+          >
+            <span className="orchestrations-title" id="orchestrations-title">
+              <span className="orchestrations-collapse-caret">{orchestrationsCollapsed ? '\u25B6' : '\u25BC'}</span>
+              Orchestrations
+              {orchestrationsCollapsed && filteredOrchestrations.length > 0 && (
+                <span className="orchestrations-count-badge">{filteredOrchestrations.length}</span>
+              )}
+            </span>
+          </div>
+          {!orchestrationsCollapsed && (
+          <div className="orchestrations-list" role="listbox" aria-label="Orchestrations" aria-labelledby="orchestrations-title">
           {loading ? (
             <div className="empty-state">
               <div className="spinner"></div>
@@ -2363,6 +2398,8 @@ function App(): React.JSX.Element {
                 })()}
               </div>
             ))
+          )}
+          </div>
           )}
         </div>
 

@@ -212,6 +212,68 @@
     .btn-toggle svg { width: 14px; height: 14px; }
 
     /* Left Pane - Orchestration List */
+    .orchestrations-section {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg);
+      transition: flex-basis 0.2s ease;
+    }
+    .orchestrations-section.collapsed {
+      flex: 0 0 auto;
+    }
+    .orchestrations-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-secondary);
+      user-select: none;
+      min-width: 0;
+    }
+    .orchestrations-section.collapsed .orchestrations-header {
+      border-bottom: none;
+    }
+    .orchestrations-collapse-caret {
+      display: inline-block;
+      font-size: 10px;
+      margin-right: 6px;
+      color: var(--text-dim);
+      transition: transform 0.15s ease;
+    }
+    .orchestrations-count-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      margin-left: 8px;
+      font-size: 10px;
+      font-weight: 600;
+      border-radius: 9px;
+      background: var(--accent);
+      color: #fff;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+    .orchestrations-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: flex;
+      align-items: center;
+      flex: 0 1 auto;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+    }
     .orchestrations-list {
       flex: 1;
       min-height: 0;
@@ -303,6 +365,11 @@
     }
     .history-section.collapsed {
       flex: 0 0 auto;
+    }
+    /* When the orchestrations section is collapsed, let the history
+       section expand to fill the available vertical space. */
+    .orchestrations-section.collapsed + .history-section:not(.collapsed) {
+      flex: 1 1 auto;
     }
     .history-header {
       display: flex;
@@ -2008,6 +2075,11 @@
       .history-section {
         height: 35%;
         min-height: 150px;
+      }
+      /* When orchestrations is collapsed on mobile, allow history to fill */
+      .orchestrations-section.collapsed + .history-section:not(.collapsed) {
+        height: auto;
+        flex: 1 1 auto;
       }
 
       /* Search box: full width */
