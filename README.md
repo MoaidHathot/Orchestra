@@ -836,26 +836,48 @@ The Portal (`Orchestra.Playground.Copilot.Portal`) is a full React 18 + TypeScri
 
 ## CLI Client
 
-The CLI (`Orchestra.Cli`) provides a command-line interface for managing orchestrations via the REST API, built with Spectre.Console for rich terminal output:
+The CLI (`Orchestra.Cli`, executable name `orchestra`) provides a command-line interface
+for managing orchestrations against a running Orchestra server. It's a thin HTTP/SSE
+client built on **Spectre.Console.Cli** — every subcommand has its own `--help` with
+typed arguments, examples, and tab-completion–friendly options.
+
+> The CLI requires a running Orchestra server (Portal/Host). The server URL resolves from
+> `--server <URL>`, then the `ORCHESTRA_URL` environment variable, then
+> `http://localhost:5000`.
 
 ```bash
-# List orchestrations
+# Discover orchestrations
 orchestra list
+orchestra list --filter deploy --tag prod --enabled
+orchestra get research-assistant --format table
 
-# Register an orchestration
-orchestra register path/to/orchestration.json
+# Register / scan / remove
+orchestra register ./orchestrations/hello-world.json
+orchestra scan ./orchestrations
+orchestra remove research-assistant
 
-# Run an orchestration
-orchestra run <id> --param key=value
+# Run and watch it live (SSE)
+orchestra run research-assistant --param topic=AI
 
-# Manage triggers, profiles, tags, runs
+# Re-attach to an in-flight run, or inspect past ones
+orchestra attach research-assistant run-abc123
+orchestra runs list --limit 50
+orchestra runs get research-assistant run-abc123
+
+# Manage triggers, profiles, tags, HITL
 orchestra triggers list
-orchestra profiles list
-orchestra tags list <id>
-orchestra runs list <id>
+orchestra profiles activate nightly-research
+orchestra tags add research-assistant prod,nightly
+orchestra pending
+orchestra respond research-assistant run-abc123 review --choice approve --by alice
 ```
 
-Commands: `list`, `get`, `register`, `remove`, `scan`, `enable`, `disable`, `run`, `active`, `cancel`, `runs`, `triggers`, `profiles`, `tags`, `server-status`.
+Command groups: `list`, `get`, `register`, `remove`, `scan`, `enable`, `disable`,
+`run`, `attach`, `active`, `cancel`, `runs`, `triggers`, `profiles`, `tags`,
+`pending`, `respond`, `server-status`.
+
+See [`docs/cli.md`](docs/cli.md) for the full command reference, exit-code mapping, and
+HITL workflow walkthrough.
 
 ## REST API
 

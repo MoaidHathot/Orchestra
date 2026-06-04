@@ -1,109 +1,39 @@
-using System.Text.Json;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Orchestra.Cli.Run;
+using Orchestra.Cli.Commands;
 using Spectre.Console;
+using Spectre.Console.Cli;
 
 namespace Orchestra.Cli;
 
+/// <summary>
+/// Orchestra CLI entry point. Wires every verb against <see cref="CommandApp"/> from
+/// Spectre.Console.Cli, which gives us per-command <c>--help</c>, typed settings,
+/// validation, suggested-command typo correction, and pretty error rendering out of the box
+/// — replacing the previous hand-rolled positional parser.
+///
+/// The <c>--server / -s</c> flag and <c>--format</c> flag are inherited by every leaf
+/// command via <see cref="GlobalSettings"/> / <see cref="JsonOutputSettings"/> so they
+/// appear once in the per-command help and resolve uniformly through
+/// <see cref="ClientFactory"/>.
+/// </summary>
 public class Program
 {
-	private static readonly JsonSerializerOptions s_jsonOptions = new()
+	public static int Main(string[] args)
 	{
-		WriteIndented = true,
-		PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-		DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-	};
-
-	public static async Task<int> Main(string[] args)
-	{
-		if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
-		{
-			PrintHelp();
-			return 0;
-		}
-
-		var serverUrl = Environment.GetEnvironmentVariable("ORCHESTRA_URL") ?? "http://localhost:5000";
-
-		// Parse --server flag
-		var argsList = args.ToList();
-		for (var i = 0; i < argsList.Count - 1; i++)
-		{
-			if (argsList[i] is "--server" or "-s")
-			{
-				serverUrl = argsList[i + 1];
-				argsList.RemoveAt(i + 1);
-				argsList.RemoveAt(i);
-				break;
-			}
-		}
-		args = argsList.ToArray();
-
-		using var client = new OrchestraClient(serverUrl);
+		var app = new CommandApp();
+		app.Configure(Configure);
 
 		try
 		{
-			// Streaming commands handle their own output and lifecycle (Ctrl+C, exit codes).
-			if (args[0] == "run")
-			{
-				return await HandleRunCommand(args, client);
-			}
-			if (args[0] == "attach")
-			{
-				return await HandleAttachCommand(args, client);
-			}
-
-			var result = args[0] switch
-			{
-				"list" => await client.ListOrchestrationsAsync(),
-				"get" => await RunWithArg(args, 1, "orchestration ID", id => client.GetOrchestrationAsync(id)),
-				"register" => await RunWithArg(args, 1, "file path", path =>
-				{
-					return client.RegisterOrchestrationAsync(path);
-				}),
-				"remove" => await RunWithArg(args, 1, "orchestration ID", id => client.RemoveOrchestrationAsync(id)),
-				"scan" => await RunWithArg(args, 1, "directory", dir => client.ScanDirectoryAsync(dir)),
-				"enable" => await RunWithArg(args, 1, "orchestration ID", id => client.EnableOrchestrationAsync(id)),
-				"disable" => await RunWithArg(args, 1, "orchestration ID", id => client.DisableOrchestrationAsync(id)),
-
-				"active" => await client.GetActiveExecutionsAsync(),
-				"cancel" => await RunWithArg(args, 1, "execution ID", id => client.CancelExecutionAsync(
-					id,
-					reason: GetFlag(args, "--reason"),
-					source: GetFlag(args, "--source") ?? "cli")),
-
-				"runs" => await HandleRunsCommand(args, client),
-				"triggers" => await HandleTriggersCommand(args, client),
-				"profiles" => await HandleProfilesCommand(args, client),
-				"tags" => await HandleTagsCommand(args, client),
-				"pending" => await HandlePendingCommand(args, client),
-				"respond" => await HandleRespondCommand(args, client),
-
-				"server-status" => await client.GetStatusAsync(),
-
-				_ => throw new ArgumentException($"Unknown command: {args[0]}"),
-			};
-
-			var json = JsonSerializer.Serialize(result, s_jsonOptions);
-
-			if (HasFlag(args, "--format", "table"))
-			{
-				PrintAsTable(result, args[0]);
-			}
-			else
-			{
-				Console.WriteLine(json);
-			}
-
-			return 0;
+			return app.Run(args);
 		}
-		catch (HttpRequestException ex)
+		catch (CommandRuntimeException ex)
 		{
-			AnsiConsole.MarkupLine($"[red]Error:[/] Cannot connect to Orchestra server at {serverUrl}");
-			AnsiConsole.MarkupLine($"[dim]{Markup.Escape(ex.Message)}[/]");
+			// Argument parse / validation errors. Spectre has already printed the rich
+			// formatted error to stderr; we just translate the outcome to exit code 1.
+			AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(ex.Message)}");
 			return 1;
 		}
-		catch (ArgumentException ex)
+		catch (HttpRequestException ex)
 		{
 			AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(ex.Message)}");
 			return 1;
@@ -116,438 +46,156 @@ public class Program
 	}
 
 	/// <summary>
-	/// Streams a fresh run via SSE, rendering events to the console and prompting the user
-	/// inline whenever the orchestration awaits human input. Exit codes:
-	/// 0 = succeeded, 1 = errored, 2 = paused (non-interactive abort), 130 = Ctrl+C disconnect.
+	/// Builds the command map for the Orchestra CLI. Public so tests can configure a
+	/// <c>CommandAppTester</c> against the exact same wiring as production. Adding or
+	/// removing commands here is the canonical place — keep it grouped by user-facing
+	/// concept.
 	/// </summary>
-	private static async Task<int> HandleRunCommand(string[] args, OrchestraClient client)
+	public static void Configure(IConfigurator config)
 	{
-		if (args.Length < 2)
-		{
-			throw new ArgumentException("Missing required argument: <orchestration ID>");
-		}
-		var orchestrationId = args[1];
-		var parameters = ParseParams(args);
+		config.SetApplicationName("orchestra");
+		config.SetApplicationVersion(ThisAssembly.InformationalVersion());
 
-		var verbose = HasBoolFlag(args, "--verbose", "-V");
-		var quiet = HasBoolFlag(args, "--quiet", "-q");
-		var noInteractive = HasBoolFlag(args, "--no-interactive");
-		var respondedBy = GetFlag(args, "--by");
+		// PropagateExceptions lets our outer try/catch render uniform error text.
+		// CaseSensitivity.None matches the legacy hand-rolled parser's lenience.
+		config.PropagateExceptions();
+		config.CaseSensitivity(CaseSensitivity.None);
 
-		using var cts = new CancellationTokenSource();
-		var ctrlCPressed = false;
-		Console.CancelKeyPress += OnCancelKeyPress;
-		void OnCancelKeyPress(object? _, ConsoleCancelEventArgs e)
-		{
-			e.Cancel = true; // Don't kill the process; let us disconnect cleanly
-			ctrlCPressed = true;
-			cts.Cancel();
-		}
+		// ── Orchestration commands (top-level) ───────────────────────────────────
+		config.AddCommand<ListCommand>("list")
+			.WithAlias("ls")
+			.WithDescription("List all orchestrations (supports --filter, --tag, --enabled/--disabled).")
+			.WithExample("list")
+			.WithExample("list", "--filter", "deploy")
+			.WithExample("list", "--tag", "prod", "--enabled");
 
-		try
+		config.AddCommand<GetCommand>("get")
+			.WithDescription("Get details for a single orchestration by ID or declared name.")
+			.WithExample("get", "research-assistant");
+
+		config.AddCommand<RegisterCommand>("register")
+			.WithDescription("Register an orchestration from a .json/.yaml file.")
+			.WithExample("register", "./orchestrations/hello-world.json");
+
+		config.AddCommand<RemoveCommand>("remove")
+			.WithAlias("rm")
+			.WithDescription("Remove an orchestration from the registry.");
+
+		config.AddCommand<ScanCommand>("scan")
+			.WithDescription("Scan a directory and register every orchestration file it contains.");
+
+		config.AddCommand<EnableCommand>("enable")
+			.WithDescription("Enable an orchestration's trigger.");
+
+		config.AddCommand<DisableCommand>("disable")
+			.WithDescription("Disable an orchestration's trigger.");
+
+		// ── Execution ────────────────────────────────────────────────────────────
+		config.AddCommand<RunCommand>("run")
+			.WithDescription("Start a new run and stream live SSE events. Prompts inline on HITL pauses.")
+			.WithExample("run", "research-assistant", "--param", "topic=AI")
+			.WithExample("run", "deploy-pipeline", "--no-interactive", "-q");
+
+		config.AddCommand<AttachCommand>("attach")
+			.WithDescription("Re-attach to a still-running run and stream the remaining events.")
+			.WithExample("attach", "deploy-pipeline", "run-abc123");
+
+		config.AddCommand<ActiveCommand>("active")
+			.WithDescription("List currently active executions.");
+
+		config.AddCommand<CancelCommand>("cancel")
+			.WithDescription("Cancel a running execution.")
+			.WithExample("cancel", "exec-abc123", "--reason", "superseded");
+
+		config.AddCommand<ServerStatusCommand>("server-status")
+			.WithDescription("Show the Orchestra server's status.");
+
+		// ── Run history (branch) ─────────────────────────────────────────────────
+		config.AddBranch("runs", branch =>
 		{
-			using var response = await client.OpenRunStreamAsync(orchestrationId, parameters, cts.Token);
-			var session = BuildRunSession(client, verbose, quiet, noInteractive, respondedBy);
-			var result = await session.RunAsync(response, orchestrationId, cts.Token);
-			return MapOutcomeToExitCode(result, ctrlCPressed);
-		}
-		finally
+			branch.SetDescription("Inspect past run history.");
+			branch.AddCommand<RunsListCommand>("list")
+				.WithDescription("List recent runs across all orchestrations.")
+				.WithExample("runs", "list", "--limit", "50");
+			branch.AddCommand<RunsGetCommand>("get")
+				.WithDescription("Get a specific run's full record.");
+			branch.AddCommand<RunsDeleteCommand>("delete")
+				.WithAlias("rm")
+				.WithDescription("Delete a run record.");
+		});
+
+		// ── Triggers (branch) ────────────────────────────────────────────────────
+		config.AddBranch("triggers", branch =>
 		{
-			Console.CancelKeyPress -= OnCancelKeyPress;
-		}
+			branch.SetDescription("Manage orchestration triggers.");
+			branch.AddCommand<TriggersListCommand>("list")
+				.WithDescription("List all triggers and their state.");
+			branch.AddCommand<TriggersEnableCommand>("enable")
+				.WithDescription("Enable a trigger.");
+			branch.AddCommand<TriggersDisableCommand>("disable")
+				.WithDescription("Disable a trigger.");
+			branch.AddCommand<TriggersFireCommand>("fire")
+				.WithDescription("Fire a trigger manually with optional parameters.")
+				.WithExample("triggers", "fire", "nightly-deploy", "--param", "env=staging");
+		});
+
+		// ── Profiles (branch) ────────────────────────────────────────────────────
+		config.AddBranch("profiles", branch =>
+		{
+			branch.SetDescription("Manage profiles (named subsets of active orchestrations).");
+			branch.AddCommand<ProfilesListCommand>("list")
+				.WithDescription("List all profiles.");
+			branch.AddCommand<ProfilesGetCommand>("get")
+				.WithDescription("Get a profile's details.");
+			branch.AddCommand<ProfilesActivateCommand>("activate")
+				.WithDescription("Activate a profile (its orchestrations become eligible to run).");
+			branch.AddCommand<ProfilesDeactivateCommand>("deactivate")
+				.WithDescription("Deactivate a profile.");
+			branch.AddCommand<ProfilesDeleteCommand>("delete")
+				.WithAlias("rm")
+				.WithDescription("Delete a profile.");
+		});
+
+		// ── Tags (branch) ────────────────────────────────────────────────────────
+		config.AddBranch("tags", branch =>
+		{
+			branch.SetDescription("Manage orchestration tags.");
+			branch.AddCommand<TagsListCommand>("list")
+				.WithDescription("List all known tags with usage counts.");
+			branch.AddCommand<TagsGetCommand>("get")
+				.WithDescription("Show the effective tags on an orchestration.");
+			branch.AddCommand<TagsAddCommand>("add")
+				.WithDescription("Add comma-separated tags to an orchestration.")
+				.WithExample("tags", "add", "research-assistant", "prod,nightly");
+			branch.AddCommand<TagsRemoveCommand>("remove")
+				.WithAlias("rm")
+				.WithDescription("Remove a single tag from an orchestration.");
+		});
+
+		// ── Human-in-the-loop ────────────────────────────────────────────────────
+		config.AddCommand<PendingCommand>("pending")
+			.WithDescription("List runs awaiting human input.")
+			.WithExample("pending", "--orchestration", "deploy-pipeline");
+
+		config.AddCommand<RespondCommand>("respond")
+			.WithDescription("Submit a response to a pending HITL wait.")
+			.WithExample("respond", "deploy-pipeline", "run-abc123", "approve", "--choice", "approve")
+			.WithExample("respond", "draft-summary", "run-xyz789", "clarify", "--reply", "AI angle");
 	}
+}
 
-	/// <summary>
-	/// Attaches to an in-flight run by user-visible (orchestrationName, runId) and streams events.
-	/// </summary>
-	private static async Task<int> HandleAttachCommand(string[] args, OrchestraClient client)
+/// <summary>
+/// Tiny helper to expose the assembly's informational version for Spectre's
+/// <c>--version</c> flag without forcing a Microsoft.Extensions.Configuration dependency.
+/// </summary>
+internal static class ThisAssembly
+{
+	public static string InformationalVersion()
 	{
-		if (args.Length < 3)
-		{
-			throw new ArgumentException("Usage: orchestra attach <orchestration-name> <run-id>");
-		}
-		var orchestrationName = args[1];
-		var runId = args[2];
-
-		var verbose = HasBoolFlag(args, "--verbose", "-V");
-		var quiet = HasBoolFlag(args, "--quiet", "-q");
-		var noInteractive = HasBoolFlag(args, "--no-interactive");
-		var respondedBy = GetFlag(args, "--by");
-
-		using var cts = new CancellationTokenSource();
-		var ctrlCPressed = false;
-		Console.CancelKeyPress += OnCancelKeyPress;
-		void OnCancelKeyPress(object? _, ConsoleCancelEventArgs e)
-		{
-			e.Cancel = true;
-			ctrlCPressed = true;
-			cts.Cancel();
-		}
-
-		try
-		{
-			using var response = await client.OpenAttachStreamAsync(orchestrationName, runId, cts.Token);
-			var session = BuildRunSession(client, verbose, quiet, noInteractive, respondedBy);
-			var result = await session.RunAsync(response, orchestrationName, cts.Token);
-			return MapOutcomeToExitCode(result, ctrlCPressed);
-		}
-		finally
-		{
-			Console.CancelKeyPress -= OnCancelKeyPress;
-		}
-	}
-
-	/// <summary>
-	/// Builds the <see cref="RunSession"/> with the right observer + prompter for the current
-	/// flags and TTY state. We auto-degrade to non-interactive when stdin is redirected
-	/// (CI / pipes) so scripts that previously used <c>orchestra run | jq</c> still get a
-	/// deterministic outcome instead of a hang.
-	/// </summary>
-	private static RunSession BuildRunSession(
-		OrchestraClient client,
-		bool verbose,
-		bool quiet,
-		bool noInteractive,
-		string? respondedBy)
-	{
-		var loggerFactory = NullLoggerFactory.Instance;
-		var ansi = AnsiConsole.Console;
-
-		IRunObserver observer;
-		if (verbose)
-		{
-			var compact = new ConsoleRunObserver(ansi, loggerFactory.CreateLogger<ConsoleRunObserver>());
-			observer = new VerboseRunObserver(ansi, loggerFactory.CreateLogger<VerboseRunObserver>(), compact);
-		}
-		else if (quiet)
-		{
-			observer = new QuietRunObserver(ansi, loggerFactory.CreateLogger<QuietRunObserver>());
-		}
-		else
-		{
-			observer = new ConsoleRunObserver(ansi, loggerFactory.CreateLogger<ConsoleRunObserver>());
-		}
-
-		var stdinIsTty = !Console.IsInputRedirected;
-		IHumanInputPrompter prompter = (noInteractive || !stdinIsTty)
-			? new NonInteractiveHumanInputPrompter(ansi, loggerFactory.CreateLogger<NonInteractiveHumanInputPrompter>())
-			: new InteractiveHumanInputPrompter(ansi, respondedBy, loggerFactory.CreateLogger<InteractiveHumanInputPrompter>());
-
-		var responder = new HumanInputResponder(client, loggerFactory.CreateLogger<HumanInputResponder>());
-		return new RunSession(observer, prompter, responder, loggerFactory.CreateLogger<RunSession>());
-	}
-
-	private static int MapOutcomeToExitCode(RunSessionResult result, bool ctrlCPressed)
-	{
-		if (ctrlCPressed && result.Outcome == RunSessionOutcome.Disconnected)
-		{
-			AnsiConsole.MarkupLine("[grey]Run continues on the server.[/]");
-			if (result.OrchestrationName is not null && result.RunId is not null)
-			{
-				AnsiConsole.MarkupLine(
-					$"[grey]Re-attach with:[/]  orchestra attach {Markup.Escape(result.OrchestrationName)} {Markup.Escape(result.RunId)}");
-			}
-			return 130; // POSIX SIGINT convention
-		}
-
-		return result.Outcome switch
-		{
-			RunSessionOutcome.Succeeded => 0,
-			RunSessionOutcome.NonSuccessfulTerminal => 1,
-			RunSessionOutcome.Errored => 1,
-			RunSessionOutcome.Disconnected => 1,
-			RunSessionOutcome.NonInteractiveAbort => 2,
-			_ => 1,
-		};
-	}
-
-	private static async Task<JsonElement> HandleRunsCommand(string[] args, OrchestraClient client)
-	{
-		if (args.Length < 2) return await client.ListRunsAsync(20);
-
-		return args[1] switch
-		{
-			"list" => await client.ListRunsAsync(GetIntFlag(args, "--limit") ?? 20),
-			"get" when args.Length >= 4 => await client.GetRunAsync(args[2], args[3]),
-			"delete" when args.Length >= 4 => await client.DeleteRunAsync(args[2], args[3]),
-			_ => await client.ListRunsAsync(20),
-		};
-	}
-
-	private static async Task<JsonElement> HandleTriggersCommand(string[] args, OrchestraClient client)
-	{
-		if (args.Length < 2) return await client.ListTriggersAsync();
-
-		return args[1] switch
-		{
-			"list" => await client.ListTriggersAsync(),
-			"enable" when args.Length >= 3 => await client.EnableTriggerAsync(args[2]),
-			"disable" when args.Length >= 3 => await client.DisableTriggerAsync(args[2]),
-			"fire" when args.Length >= 3 => await client.FireTriggerAsync(args[2], ParseParams(args)),
-			_ => throw new ArgumentException($"Unknown triggers subcommand: {args[1]}. Use: list, enable, disable, fire"),
-		};
-	}
-
-	private static async Task<JsonElement> HandleProfilesCommand(string[] args, OrchestraClient client)
-	{
-		if (args.Length < 2) return await client.ListProfilesAsync();
-
-		return args[1] switch
-		{
-			"list" => await client.ListProfilesAsync(),
-			"get" when args.Length >= 3 => await client.GetProfileAsync(args[2]),
-			"activate" when args.Length >= 3 => await client.ActivateProfileAsync(args[2]),
-			"deactivate" when args.Length >= 3 => await client.DeactivateProfileAsync(args[2]),
-			"delete" when args.Length >= 3 => await client.DeleteProfileAsync(args[2]),
-			_ => throw new ArgumentException($"Unknown profiles subcommand: {args[1]}. Use: list, get, activate, deactivate, delete"),
-		};
-	}
-
-	private static async Task<JsonElement> HandleTagsCommand(string[] args, OrchestraClient client)
-	{
-		if (args.Length < 2) return await client.ListTagsAsync();
-
-		return args[1] switch
-		{
-			"list" => await client.ListTagsAsync(),
-			"get" when args.Length >= 3 => await client.GetOrchestrationTagsAsync(args[2]),
-			"add" when args.Length >= 4 => await client.AddTagsAsync(args[2],
-				args[3].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)),
-			"remove" when args.Length >= 4 => await client.RemoveTagAsync(args[2], args[3]),
-			_ => throw new ArgumentException($"Unknown tags subcommand: {args[1]}. Use: list, get, add, remove"),
-		};
-	}
-
-	/// <summary>
-	/// Lists pending input requests (runs awaiting human response). Optionally filters by orchestration.
-	/// </summary>
-	private static async Task<JsonElement> HandlePendingCommand(string[] args, OrchestraClient client)
-	{
-		var orchestration = GetFlag(args, "--orchestration");
-		return await client.ListPendingAsync(orchestration);
-	}
-
-	/// <summary>
-	/// Submits a response to a pending input wait. Usage:
-	///   orchestra respond &lt;orchestration-name&gt; &lt;run-id&gt; &lt;step-name&gt; [--choice X] [--reply "..."] [--by name]
-	/// </summary>
-	private static async Task<JsonElement> HandleRespondCommand(string[] args, OrchestraClient client)
-	{
-		if (args.Length < 4)
-		{
-			throw new ArgumentException(
-				"Usage: orchestra respond <orchestration-name> <run-id> <step-name> [--choice X] [--reply \"...\"] [--by name]");
-		}
-
-		var orchestrationName = args[1];
-		var runId = args[2];
-		var stepName = args[3];
-		var choice = GetFlag(args, "--choice");
-		var reply = GetFlag(args, "--reply");
-		var respondedBy = GetFlag(args, "--by");
-
-		if (choice is null && reply is null)
-		{
-			throw new ArgumentException("Must supply at least one of --choice or --reply.");
-		}
-
-		return await client.RespondAsync(orchestrationName, runId, stepName, choice, reply, respondedBy);
-	}
-
-	private static async Task<JsonElement> RunWithArg(string[] args, int index, string argName, Func<string, Task<JsonElement>> action)
-	{
-		if (args.Length <= index)
-			throw new ArgumentException($"Missing required argument: <{argName}>");
-		return await action(args[index]);
-	}
-
-	private static Dictionary<string, string>? ParseParams(string[] args)
-	{
-		var parameters = new Dictionary<string, string>();
-		for (var i = 0; i < args.Length; i++)
-		{
-			if (args[i] == "--param" && i + 1 < args.Length)
-			{
-				var parts = args[i + 1].Split('=', 2);
-				if (parts.Length == 2)
-					parameters[parts[0]] = parts[1];
-				i++;
-			}
-		}
-		return parameters.Count > 0 ? parameters : null;
-	}
-
-	private static string? GetFlag(string[] args, string flag)
-	{
-		for (var i = 0; i < args.Length - 1; i++)
-			if (args[i] == flag) return args[i + 1];
-		return null;
-	}
-
-	private static int? GetIntFlag(string[] args, string flag)
-	{
-		var value = GetFlag(args, flag);
-		return value is not null && int.TryParse(value, out var result) ? result : null;
-	}
-
-	private static bool HasFlag(string[] args, string flag, string value)
-	{
-		for (var i = 0; i < args.Length - 1; i++)
-			if (args[i] == flag && args[i + 1].Equals(value, StringComparison.OrdinalIgnoreCase))
-				return true;
-		return false;
-	}
-
-	/// <summary>
-	/// True when any of the given flag names appears as a standalone argument.
-	/// </summary>
-	private static bool HasBoolFlag(string[] args, params string[] flags)
-	{
-		foreach (var arg in args)
-		{
-			foreach (var flag in flags)
-			{
-				if (string.Equals(arg, flag, StringComparison.Ordinal))
-				{
-					return true;
-				}
-			}
-		}
-		return false;
-	}
-
-	private static void PrintAsTable(JsonElement result, string command)
-	{
-		var table = new Table();
-		table.Border(TableBorder.Rounded);
-
-		JsonElement? arrayToRender = null;
-
-		if (result.ValueKind == JsonValueKind.Array)
-			arrayToRender = result;
-		else if (result.TryGetProperty("orchestrations", out var o) && o.ValueKind == JsonValueKind.Array)
-			arrayToRender = o;
-		else if (result.TryGetProperty("runs", out var r) && r.ValueKind == JsonValueKind.Array)
-			arrayToRender = r;
-		else if (result.TryGetProperty("triggers", out var t) && t.ValueKind == JsonValueKind.Array)
-			arrayToRender = t;
-		else if (result.TryGetProperty("profiles", out var p) && p.ValueKind == JsonValueKind.Array)
-			arrayToRender = p;
-
-		if (arrayToRender.HasValue)
-		{
-			RenderArrayAsTable(arrayToRender.Value, table);
-		}
-		else
-		{
-			table.AddColumn("Property");
-			table.AddColumn("Value");
-			foreach (var prop in result.EnumerateObject())
-			{
-				table.AddRow(
-					Markup.Escape(prop.Name),
-					Markup.Escape(FormatValue(prop.Value)));
-			}
-		}
-
-		AnsiConsole.Write(table);
-	}
-
-	private static void RenderArrayAsTable(JsonElement array, Table table)
-	{
-		var items = array.EnumerateArray().ToList();
-		if (items.Count == 0)
-		{
-			table.AddColumn("(empty)");
-			return;
-		}
-
-		var columns = items[0].EnumerateObject().Select(p => p.Name).ToList();
-		foreach (var col in columns)
-			table.AddColumn(Markup.Escape(col));
-
-		foreach (var item in items)
-		{
-			var values = columns.Select(col =>
-			{
-				if (item.TryGetProperty(col, out var value))
-					return Markup.Escape(FormatValue(value));
-				return "";
-			}).ToArray();
-			table.AddRow(values);
-		}
-	}
-
-	private static string FormatValue(JsonElement value) => value.ValueKind switch
-	{
-		JsonValueKind.Array => $"[{value.GetArrayLength()} items]",
-		JsonValueKind.Object => "{...}",
-		JsonValueKind.Null => "",
-		_ => value.ToString() ?? "",
-	};
-
-	private static void PrintHelp()
-	{
-		Console.WriteLine("Orchestra CLI");
-		Console.WriteLine("A command-line interface for managing Orchestra orchestrations.");
-		Console.WriteLine();
-		Console.WriteLine("Usage: orchestra <command> [args] [options]");
-		Console.WriteLine();
-		Console.WriteLine("Global Options:");
-		Console.WriteLine("  --server, -s <url>    Server URL (default: ORCHESTRA_URL env var or http://localhost:5000)");
-		Console.WriteLine("  --format table        Output as table instead of JSON");
-		Console.WriteLine();
-		Console.WriteLine("Orchestrations:");
-		Console.WriteLine("  list                          List all orchestrations");
-		Console.WriteLine("  get <id>                      Get orchestration details");
-		Console.WriteLine("  register <path>               Register from file");
-		Console.WriteLine("  remove <id>                   Remove an orchestration");
-		Console.WriteLine("  scan <directory>              Scan directory for orchestrations");
-		Console.WriteLine("  enable <id>                   Enable orchestration trigger");
-		Console.WriteLine("  disable <id>                  Disable orchestration trigger");
-		Console.WriteLine();
-		Console.WriteLine("Execution:");
-		Console.WriteLine("  run <id> [--param k=v ...]    Stream an orchestration run live (interactive HITL)");
-		Console.WriteLine("    [--no-interactive]            Don't prompt; print pending-input message and exit 2");
-		Console.WriteLine("    [--quiet | -q]                Suppress per-step chatter; show only HITL + summary");
-		Console.WriteLine("    [--verbose | -V]              Print every SSE event (firehose)");
-		Console.WriteLine("    [--by <name>]                 Audit identifier for any HITL responses");
-		Console.WriteLine("  attach <orchestration> <runId> Re-attach to an in-flight run (same flags as run)");
-		Console.WriteLine("  active                        List active executions");
-		Console.WriteLine("  cancel <execution-id>         Cancel a running execution");
-		Console.WriteLine("    [--reason \"text\"]              Free-text reason recorded on the run record");
-		Console.WriteLine("    [--source <label>]            Client-type label (defaults to \"cli\")");
-		Console.WriteLine();
-		Console.WriteLine("Run History:");
-		Console.WriteLine("  runs [list] [--limit N]             List recent runs");
-		Console.WriteLine("  runs get <name> <run-id>            Get run details");
-		Console.WriteLine("  runs delete <name> <run-id>         Delete a run");
-		Console.WriteLine();
-		Console.WriteLine("Triggers:");
-		Console.WriteLine("  triggers [list]                     List all triggers");
-		Console.WriteLine("  triggers enable <id>                Enable a trigger");
-		Console.WriteLine("  triggers disable <id>               Disable a trigger");
-		Console.WriteLine("  triggers fire <id> [--param k=v]    Fire a trigger");
-		Console.WriteLine();
-		Console.WriteLine("Profiles:");
-		Console.WriteLine("  profiles [list]                     List all profiles");
-		Console.WriteLine("  profiles get <id>                   Get profile details");
-		Console.WriteLine("  profiles activate <id>              Activate a profile");
-		Console.WriteLine("  profiles deactivate <id>            Deactivate a profile");
-		Console.WriteLine("  profiles delete <id>                Delete a profile");
-		Console.WriteLine();
-		Console.WriteLine("Tags:");
-		Console.WriteLine("  tags [list]                         List all tags with counts");
-		Console.WriteLine("  tags get <id>                       Get tags for an orchestration");
-		Console.WriteLine("  tags add <id> <tag1,tag2,...>        Add tags to an orchestration");
-		Console.WriteLine("  tags remove <id> <tag>              Remove a tag");
-		Console.WriteLine();
-		Console.WriteLine("Human-in-the-loop:");
-		Console.WriteLine("  pending [--orchestration <name>]                    List runs awaiting human input");
-		Console.WriteLine("  respond <orchestration> <runId> <step>               Respond to a pending wait");
-		Console.WriteLine("    [--choice <value>] [--reply \"text\"] [--by <name>]");
-		Console.WriteLine();
-		Console.WriteLine("Server:");
-		Console.WriteLine("  server-status                       Get server status");
+		var asm = typeof(Program).Assembly;
+		var attr = asm.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+			.OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+			.FirstOrDefault();
+		return attr?.InformationalVersion ?? asm.GetName().Version?.ToString() ?? "0.0.0";
 	}
 }

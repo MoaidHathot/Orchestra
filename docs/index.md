@@ -115,6 +115,7 @@ curl -N "http://localhost:5000/api/orchestrations/{id}/run?params={\"topic\":\"q
 - [Orchestra.Engine](engine) - Core engine documentation
 - [Orchestra.Host](host) - Hosting layer and API reference
 - [Orchestra.Copilot](copilot) - GitHub Copilot integration
+- [CLI](cli) - Orchestra command-line interface
 - [API Reference](api-reference) - Complete REST API documentation
 
 ## Requirements

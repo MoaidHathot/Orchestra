@@ -27,5 +27,7 @@ navigation:
     url: /host
   - title: Copilot
     url: /copilot
+  - title: CLI
+    url: /cli
   - title: API Reference
     url: /api-reference
