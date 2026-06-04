@@ -218,6 +218,13 @@ internal static partial class CopilotCliBootstrap
 			var archivePath = Path.Combine(cacheDir, "copilot.tgz");
 
 			LogDownloadStarting(logger, CopilotCliVersion, npmPlatform, url);
+			// Stderr write so the user-visible progress shows up even when the host hasn't
+			// wired CopilotCliBootstrap.SetLogger (which is the default for the Portal /
+			// Server hosts today). The download blocks the calling thread for ~30-90 s on
+			// a fresh install; without this line the tool appears to hang silently and
+			// users open issues thinking it's stuck. Stderr (not stdout) so machine-
+			// readable consumers piping `orchestra` JSON output aren't polluted.
+			WriteProgressToStderr($"Copilot CLI: downloading {CopilotCliVersion} for {npmPlatform} from {url} (one-time setup, ~100 MB)...");
 
 			using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
 			{
@@ -251,9 +258,28 @@ internal static partial class CopilotCliBootstrap
 			}
 
 			LogDownloadCompleted(logger, binaryPath, new FileInfo(binaryPath).Length);
+			WriteProgressToStderr($"Copilot CLI: ready at {binaryPath}");
 		}
 
 		return binaryPath;
+	}
+
+	/// <summary>
+	/// Writes a single line to stderr without any formatter dependency, so first-run
+	/// progress is visible to the user regardless of how the host wires ILogger.
+	/// Best-effort: any I/O failure (e.g., stderr redirected to a broken pipe) is
+	/// swallowed -- the visible message is a courtesy, not a contract.
+	/// </summary>
+	private static void WriteProgressToStderr(string message)
+	{
+		try
+		{
+			Console.Error.WriteLine(message);
+		}
+		catch
+		{
+			// Ignore. The structured log via ILogger is the authoritative record.
+		}
 	}
 
 	/// <summary>
