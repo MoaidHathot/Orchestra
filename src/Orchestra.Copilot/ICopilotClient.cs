@@ -119,5 +119,19 @@ internal interface ICopilotClientFactory
 
 internal sealed class CopilotSdkClientFactory : ICopilotClientFactory
 {
-	public ICopilotClient CreateClient() => new CopilotSdkClientAdapter(new CopilotClient());
+	public ICopilotClient CreateClient()
+	{
+		// Resolve the Copilot CLI binary lazily through the bootstrap. The first call here
+		// (in a fresh install) blocks until the npm download completes (~100 MB, one-off
+		// per machine per CLI version); subsequent calls return instantly from the
+		// per-process Lazy cache or the on-disk cache the bootstrap maintains.
+		//
+		// We block synchronously because CreateClient is sync (ICopilotClientFactory is
+		// used from sync construction paths in CopilotClientPool). GetAwaiter().GetResult()
+		// is safe here: the bootstrap performs only HTTP + file I/O, no SynchronizationContext-
+		// bound work, so there's no deadlock risk on UI/ASP.NET request contexts.
+		var cliPath = CopilotCliBootstrap.EnsureAsync().GetAwaiter().GetResult();
+		var options = new GitHub.Copilot.SDK.CopilotClientOptions { CliPath = cliPath };
+		return new CopilotSdkClientAdapter(new CopilotClient(options));
+	}
 }

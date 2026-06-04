@@ -11,16 +11,15 @@
     <ToolCommandName>orchestra</ToolCommandName>
 
     <!--
-      The GitHub.Copilot.SDK's auto-download target runs on Orchestra.Copilot (via the
-      transitive PackageReference there) and downloads the build host's Copilot CLI
-      binary into Orchestra.Copilot's bin. That binary flows into our publish output
-      automatically via the ProjectReference.
+      Ship the tool nupkg SMALL. Bundling the Copilot CLI for every supported RID
+      pushed the package to ~342 MB (NuGet.org rejects >250 MB), and shipping only
+      one RID re-creates the original bug where users on other OSes find no binary.
 
-      We disable the SDK's auto-target ON THIS PROJECT to avoid double-downloading the
-      host binary into Tool's own obj/ — having both projects register the same
-      relative output path produces NETSDK1152 "multiple publish output files with the
-      same relative path" during publish/pack. Our multi-RID target below adds only the
-      OTHER five RIDs, so the final tool nupkg has all six.
+      Instead the tool fetches just the host's Copilot CLI on first run via
+      Orchestra.Copilot.CopilotCliBootstrap, caching it in the user's local app
+      data so subsequent runs are instant. CopilotSkipCliDownload=true keeps the
+      SDK's per-host build-time download from baking the binary into the tool's
+      publish output.
     -->
     <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
   </PropertyGroup>
@@ -29,16 +28,6 @@
     <ProjectReference Include="..\Orchestra.Engine\Orchestra.Engine.csproj" />
     <ProjectReference Include="..\Orchestra.Copilot\Orchestra.Copilot.csproj" />
     <ProjectReference Include="..\Orchestra.Host\Orchestra.Host.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!--
-      Direct PackageReference (not just transitive via Orchestra.Copilot) so the SDK's
-      build/props file is imported into THIS project. That file sets $(CopilotCliVersion),
-      which the _DownloadAllCopilotCliBinaries target below requires. Without the direct
-      reference, MSBuild .props from a transitive PackageReference don't flow upward.
-    -->
-    <PackageReference Include="GitHub.Copilot.SDK" />
   </ItemGroup>
 
   <ItemGroup>
@@ -67,151 +56,4 @@
              Pack="false" />
   </ItemGroup>
 
-  <!--
-    ============================================================================
-    Multi-RID Copilot CLI bundling
-    ============================================================================
-    The Copilot SDK's own MSBuild target (GitHub.Copilot.SDK.targets) downloads
-    the Copilot CLI binary only for the build host's RID. That works for normal
-    apps published with `dotnet publish -r <RID>` but produces a broken
-    `dotnet tool` package, because tool nupkgs ship a single payload that has
-    to satisfy every consumer OS.
-
-    Symptoms when omitted: end users see
-        "Copilot CLI not found at '.../tools/net10.0/any/runtimes/win-x64/native/copilot.exe'.
-         Ensure the SDK NuGet package was restored correctly or provide an explicit CliPath."
-    even though the SDK NuGet itself does not ship the binary; the binary is
-    expected to be co-located with the SDK in the tool's output layout.
-
-    This target fetches the FIVE non-host RIDs (the SDK already handles the
-    host's RID itself via a transitive PackageReference) and registers each one
-    as `<Content Pack="true">` so they land under
-    `tools/$(TargetFramework)/any/runtimes/<rid>/native/` in the final nupkg.
-
-    The download URL pattern, version, registry, and binary names mirror the SDK's
-    own target exactly so the two stay in lockstep.
-  -->
-  <PropertyGroup>
-    <CopilotNpmRegistryUrl Condition="'$(CopilotNpmRegistryUrl)' == ''">https://registry.npmjs.org</CopilotNpmRegistryUrl>
-    <CopilotCliDownloadTimeoutMs Condition="'$(CopilotCliDownloadTimeoutMs)' == ''">600000</CopilotCliDownloadTimeoutMs>
-
-    <!--
-      The portable RID of the build host. Matches the SDK's own _CopilotRid computation
-      when no RuntimeIdentifier is set (which is the case for a `dotnet pack` of a
-      PackAsTool project). We use it below to SKIP the host's RID from our download
-      matrix, because the SDK's auto-target has already downloaded and registered that
-      binary; double-registering would produce NETSDK1152 "multiple publish output files
-      with the same relative path".
-    -->
-    <_CopilotHostRid>$(NETCoreSdkPortableRuntimeIdentifier)</_CopilotHostRid>
-  </PropertyGroup>
-
-  <ItemGroup>
-    <!--
-      Each item is one (Rid, NpmPlatform, BinaryName) triple. NpmPlatform is the
-      naming the @github/copilot-<platform> npm packages use; BinaryName is the
-      extracted file we care about. The Remove= condition strips out the host RID so
-      the SDK and this target don't fight over the same publish path.
-    -->
-    <_CopilotRidMatrix Include="win-x64">
-      <NpmPlatform>win32-x64</NpmPlatform>
-      <BinaryName>copilot.exe</BinaryName>
-    </_CopilotRidMatrix>
-    <_CopilotRidMatrix Include="win-arm64">
-      <NpmPlatform>win32-arm64</NpmPlatform>
-      <BinaryName>copilot.exe</BinaryName>
-    </_CopilotRidMatrix>
-    <_CopilotRidMatrix Include="linux-x64">
-      <NpmPlatform>linux-x64</NpmPlatform>
-      <BinaryName>copilot</BinaryName>
-    </_CopilotRidMatrix>
-    <_CopilotRidMatrix Include="linux-arm64">
-      <NpmPlatform>linux-arm64</NpmPlatform>
-      <BinaryName>copilot</BinaryName>
-    </_CopilotRidMatrix>
-    <_CopilotRidMatrix Include="osx-x64">
-      <NpmPlatform>darwin-x64</NpmPlatform>
-      <BinaryName>copilot</BinaryName>
-    </_CopilotRidMatrix>
-    <_CopilotRidMatrix Include="osx-arm64">
-      <NpmPlatform>darwin-arm64</NpmPlatform>
-      <BinaryName>copilot</BinaryName>
-    </_CopilotRidMatrix>
-    <_CopilotRidMatrix Remove="$(_CopilotHostRid)" />
-  </ItemGroup>
-
-  <Target Name="_ValidateCopilotCliVersion" BeforeTargets="_DownloadAllCopilotCliBinaries">
-    <!--
-      $(CopilotCliVersion) is provided by GitHub.Copilot.SDK.props which is imported
-      transitively by the GitHub.Copilot.SDK PackageReference. If that import didn't
-      run (broken restore, mis-pinned version), fail loudly here rather than silently
-      producing a tool nupkg that has no Copilot binary inside.
-    -->
-    <Error Condition="'$(CopilotCliVersion)' == ''"
-           Text="CopilotCliVersion is empty. The GitHub.Copilot.SDK NuGet package's .props file was not imported; cannot determine which Copilot CLI version to bundle. Restore the project (dotnet restore) and try again." />
-  </Target>
-
-  <Target Name="_DownloadAllCopilotCliBinaries"
-          BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems;_GetPackageFiles"
-          DependsOnTargets="_ValidateCopilotCliVersion">
-
-    <PropertyGroup>
-      <!--
-        Cache under the project's intermediate (obj) directory. The path is computed
-        inside the target so it picks up the final value of $(IntermediateOutputPath)
-        set by SDK targets; declaring this at <PropertyGroup> top-level evaluates too
-        early (IntermediateOutputPath is empty then) and the cache leaks to the project
-        root, which is messier and not gitignored.
-      -->
-      <_CopilotToolCacheRoot>$(IntermediateOutputPath)copilot-cli-multirid\</_CopilotToolCacheRoot>
-    </PropertyGroup>
-
-    <!-- Delete stale archive if the binary is missing (partial / corrupt download from a prior run). -->
-    <Delete Files="$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\copilot.tgz"
-            Condition="!Exists('$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\%(_CopilotRidMatrix.BinaryName)')
-                       And Exists('$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\copilot.tgz')" />
-
-    <MakeDir Directories="$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)"
-             Condition="!Exists('$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\%(_CopilotRidMatrix.BinaryName)')" />
-
-    <Message Importance="high"
-             Text="Downloading Copilot CLI $(CopilotCliVersion) for %(_CopilotRidMatrix.NpmPlatform) (RID %(_CopilotRidMatrix.Identity))..."
-             Condition="!Exists('$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\%(_CopilotRidMatrix.BinaryName)')" />
-
-    <DownloadFile SourceUrl="$(CopilotNpmRegistryUrl.TrimEnd('/'))/@github/copilot-%(_CopilotRidMatrix.NpmPlatform)/-/copilot-%(_CopilotRidMatrix.NpmPlatform)-$(CopilotCliVersion).tgz"
-                  DestinationFolder="$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)"
-                  DestinationFileName="copilot.tgz"
-                  Timeout="$(CopilotCliDownloadTimeoutMs)"
-                  Condition="!Exists('$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\%(_CopilotRidMatrix.BinaryName)')" />
-
-    <!-- Extract with the system tar (avoid Git-Bash tar quirks on Windows). -->
-    <PropertyGroup>
-      <_TarCommand Condition="$([MSBuild]::IsOSPlatform('Windows'))">$(SystemRoot)\System32\tar.exe</_TarCommand>
-      <_TarCommand Condition="'$(_TarCommand)' == ''">tar</_TarCommand>
-    </PropertyGroup>
-
-    <Exec Command="&quot;$(_TarCommand)&quot; -xzf &quot;$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\copilot.tgz&quot; --strip-components=1 -C &quot;$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)&quot;"
-          Condition="!Exists('$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\%(_CopilotRidMatrix.BinaryName)')" />
-
-    <Error Condition="!Exists('$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\%(_CopilotRidMatrix.BinaryName)')"
-           Text="Failed to extract Copilot CLI binary for RID %(_CopilotRidMatrix.Identity) (expected at $(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\%(_CopilotRidMatrix.BinaryName))" />
-
-    <!--
-      Register each downloaded binary as build-output + publish content. PackAsTool
-      packages the publish directory verbatim into `tools/$(TargetFramework)/any/` in
-      the final nupkg, so CopyToPublishDirectory="PreserveNewest" is sufficient; we
-      deliberately omit Pack="true"/PackagePath to avoid registering each file twice
-      (NU5118 "package already contains file" warning).
-    -->
-    <ItemGroup>
-      <Content Include="$(_CopilotToolCacheRoot)$(CopilotCliVersion)\%(_CopilotRidMatrix.Identity)\%(_CopilotRidMatrix.BinaryName)"
-               Link="runtimes\%(_CopilotRidMatrix.Identity)\native\%(_CopilotRidMatrix.BinaryName)"
-               TargetPath="runtimes\%(_CopilotRidMatrix.Identity)\native\%(_CopilotRidMatrix.BinaryName)"
-               CopyToOutputDirectory="PreserveNewest"
-               CopyToPublishDirectory="PreserveNewest"
-               Pack="false" />
-    </ItemGroup>
-  </Target>
-
 </Project>
-
