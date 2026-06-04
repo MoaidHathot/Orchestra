@@ -9,7 +9,6 @@ $repoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $artifactsRoot = Join-Path $repoRoot 'artifacts'
 $packageOutput = Join-Path $artifactsRoot 'packages'
 $solutionPath = Join-Path $repoRoot 'OrchestrationEngine.slnx'
-$portalTestsProject = Join-Path $repoRoot 'tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj'
 
 function Invoke-Step {
     param(
@@ -34,9 +33,12 @@ New-Item -ItemType Directory -Path $packageOutput | Out-Null
 $portalProject = Join-Path $repoRoot 'playground/Hosting/Orchestra.Playground.Copilot.Portal/Orchestra.Playground.Copilot.Portal.csproj'
 $toolProject = Join-Path $repoRoot 'src/Orchestra.Tool/Orchestra.Tool.csproj'
 
+# Pack is a build+publish step, not a verification step. Tests live in CI (or a
+# dedicated test.ps1 if you want a local pre-flight). Running them here is
+# expensive and turns every `pack.ps1` into a 3-minute wait, even when nothing
+# under test has changed.
 Invoke-Step -Description 'Restore solution' -Command "dotnet restore `"$solutionPath`""
 Invoke-Step -Description 'Build portal assets and solution' -Command "dotnet build `"$solutionPath`" --configuration Release --no-restore"
-Invoke-Step -Description 'Run portal tests' -Command "dotnet test `"$portalTestsProject`" --configuration Release --no-build"
 Invoke-Step -Description 'Verify portal publish output' -Command "dotnet publish `"$portalProject`" --configuration Release --no-build -o `"$(Join-Path $artifactsRoot 'portal-publish')`""
 Invoke-Step -Description 'Pack Orchestra tool' -Command "dotnet pack `"$toolProject`" --configuration Release --no-build -o `"$packageOutput`""
 
