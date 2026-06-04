@@ -384,10 +384,19 @@ public static class OrchestrationsApi
 		// DELETE /api/orchestrations/{id} - Remove an orchestration
 		group.MapDelete("/{id}", (string id, OrchestrationRegistry registry, TriggerManager triggerManager) =>
 		{
-			if (registry.Remove(id))
+			// Accept the registry ID or the orchestration's declared name. Same lookup
+			// policy as GET /api/orchestrations/{id} so name-based CLI/Portal calls work
+			// against every read AND mutation endpoint. The downstream registry/trigger
+			// stores are ID-keyed, so we always operate on `entry.Id`.
+			var entry = registry.GetByIdOrName(id);
+			if (entry is null)
+				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
+
+			var resolvedId = entry.Id;
+			if (registry.Remove(resolvedId))
 			{
-				triggerManager.RemoveTrigger(id);
-				return Results.Ok(new { removed = true, id });
+				triggerManager.RemoveTrigger(resolvedId);
+				return Results.Ok(new { removed = true, id = resolvedId });
 			}
 			return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 		});
@@ -395,11 +404,14 @@ public static class OrchestrationsApi
 		// POST /api/orchestrations/{id}/enable - Enable an orchestration's trigger
 		group.MapPost("/{id}/enable", (string id, OrchestrationRegistry registry, TriggerManager triggerManager) =>
 		{
-			var entry = registry.Get(id);
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
-			var existingTrigger = triggerManager.GetTrigger(id);
+			// TriggerManager indexes by orchestration ID, not by declared name, so we must
+			// look the trigger up via the resolved ID even when the caller passed a name.
+			var resolvedId = entry.Id;
+			var existingTrigger = triggerManager.GetTrigger(resolvedId);
 			if (existingTrigger == null)
 			{
 				// Register the trigger with enabled = true
@@ -415,20 +427,21 @@ public static class OrchestrationsApi
 			}
 			else
 			{
-				triggerManager.SetTriggerEnabled(id, true);
+				triggerManager.SetTriggerEnabled(resolvedId, true);
 			}
-			return Results.Ok(new { id, enabled = true });
+			return Results.Ok(new { id = resolvedId, enabled = true });
 		});
 
 		// POST /api/orchestrations/{id}/disable - Disable an orchestration's trigger
 		group.MapPost("/{id}/disable", (string id, OrchestrationRegistry registry, TriggerManager triggerManager) =>
 		{
-			var entry = registry.Get(id);
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
-			triggerManager.SetTriggerEnabled(id, false);
-			return Results.Ok(new { id, enabled = false });
+			var resolvedId = entry.Id;
+			triggerManager.SetTriggerEnabled(resolvedId, false);
+			return Results.Ok(new { id = resolvedId, enabled = false });
 		});
 
 		// POST /api/orchestrations/scan - Scan folder for orchestration files

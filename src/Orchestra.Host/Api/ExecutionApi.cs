@@ -40,7 +40,7 @@ public static partial class ExecutionApi
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 			DashboardEventBroadcaster dashboardBroadcaster) =>
 		{
-			var entry = registry.Get(id);
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 			{
 				httpContext.Response.StatusCode = 404;
@@ -55,6 +55,10 @@ public static partial class ExecutionApi
 				});
 				return;
 			}
+			// Resolve once: downstream stores (reporter, dashboard broadcaster, launcher)
+			// are all keyed by the canonical registry ID. Using the input `id` after a
+			// name-based lookup would mis-attribute the run on every observer surface.
+			var resolvedId = entry.Id;
 
 			// Parse optional parameters from query string (EventSource can't send body)
 			Dictionary<string, string>? parameters = null;
@@ -108,7 +112,7 @@ public static partial class ExecutionApi
 			{
 				handle = await launcher.LaunchAsync(new ChildLaunchRequest
 				{
-					OrchestrationId = id,
+					OrchestrationId = resolvedId,
 					Parameters = parameters,
 					Mode = ChildLaunchMode.Async, // We stream SSE; do not block the request thread
 					TriggeredBy = "manual",
@@ -141,7 +145,7 @@ public static partial class ExecutionApi
 			// (served on attach and via /state) reflects it without needing to scan the event log.
 			reporter.SetExecutionContext(
 				executionId,
-				id,
+				resolvedId,
 				entry.Orchestration.Name,
 				handle.StartedAt,
 				"manual",
@@ -151,7 +155,7 @@ public static partial class ExecutionApi
 			// without polling.
 			dashboardBroadcaster.BroadcastExecutionStarted(
 				executionId,
-				id,
+				resolvedId,
 				entry.Orchestration.Name,
 				"manual");
 
@@ -182,7 +186,7 @@ public static partial class ExecutionApi
 					: result.Status.ToString();
 				dashboardBroadcaster.BroadcastExecutionCompleted(
 					executionId,
-					id,
+					resolvedId,
 					entry.Orchestration.Name,
 					dashboardStatus);
 			}, CancellationToken.None);

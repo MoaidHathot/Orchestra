@@ -45,17 +45,22 @@ public static class TagsApi
 		// GET /api/orchestrations/{id}/tags - Get effective tags for an orchestration
 		orchTagGroup.MapGet("/{id}/tags", (string id, OrchestrationTagStore tagStore, OrchestrationRegistry registry) =>
 		{
-			var entry = registry.Get(id);
+			// Accept ID or declared name (parity with GET /api/orchestrations/{id}). The
+			// tag store is ID-keyed, so we must use entry.Id for every store call AND in
+			// the response payload's orchestrationId field — otherwise a name-input would
+			// return tags for the wrong key (always empty) and confuse the caller.
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
-			var effectiveTags = tagStore.GetEffectiveTags(id, entry.Orchestration.Tags);
-			var hostTags = tagStore.GetTags(id);
+			var resolvedId = entry.Id;
+			var effectiveTags = tagStore.GetEffectiveTags(resolvedId, entry.Orchestration.Tags);
+			var hostTags = tagStore.GetTags(resolvedId);
 			var authorTags = entry.Orchestration.Tags;
 
 			return Results.Json(new
 			{
-				orchestrationId = id,
+				orchestrationId = resolvedId,
 				effectiveTags,
 				authorTags,
 				hostTags,
@@ -66,7 +71,7 @@ public static class TagsApi
 		orchTagGroup.MapPut("/{id}/tags", async (string id, HttpContext ctx,
 			OrchestrationTagStore tagStore, OrchestrationRegistry registry, ProfileManager profileManager) =>
 		{
-			var entry = registry.Get(id);
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
@@ -74,20 +79,21 @@ public static class TagsApi
 			if (body?.Tags is null)
 				return ProblemDetailsHelpers.BadRequest("Tags array is required.");
 
-			tagStore.SetTags(id, body.Tags);
+			var resolvedId = entry.Id;
+			tagStore.SetTags(resolvedId, body.Tags);
 
 			// Recompute effective active set since tag changes may affect profile matching
 			profileManager.RefreshEffectiveActiveSet("tags-changed");
 
-			var effectiveTags = tagStore.GetEffectiveTags(id, entry.Orchestration.Tags);
-			return Results.Json(new { orchestrationId = id, effectiveTags }, jsonOptions);
+			var effectiveTags = tagStore.GetEffectiveTags(resolvedId, entry.Orchestration.Tags);
+			return Results.Json(new { orchestrationId = resolvedId, effectiveTags }, jsonOptions);
 		});
 
 		// POST /api/orchestrations/{id}/tags - Add host-managed tags (merges)
 		orchTagGroup.MapPost("/{id}/tags", async (string id, HttpContext ctx,
 			OrchestrationTagStore tagStore, OrchestrationRegistry registry, ProfileManager profileManager) =>
 		{
-			var entry = registry.Get(id);
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
@@ -95,32 +101,34 @@ public static class TagsApi
 			if (body?.Tags is null)
 				return ProblemDetailsHelpers.BadRequest("Tags array is required.");
 
-			tagStore.AddTags(id, body.Tags);
+			var resolvedId = entry.Id;
+			tagStore.AddTags(resolvedId, body.Tags);
 
 			// Recompute effective active set since tag changes may affect profile matching
 			profileManager.RefreshEffectiveActiveSet("tags-changed");
 
-			var effectiveTags = tagStore.GetEffectiveTags(id, entry.Orchestration.Tags);
-			return Results.Json(new { orchestrationId = id, effectiveTags }, jsonOptions);
+			var effectiveTags = tagStore.GetEffectiveTags(resolvedId, entry.Orchestration.Tags);
+			return Results.Json(new { orchestrationId = resolvedId, effectiveTags }, jsonOptions);
 		});
 
 		// DELETE /api/orchestrations/{id}/tags/{tag} - Remove a host-managed tag
 		orchTagGroup.MapDelete("/{id}/tags/{tag}", (string id, string tag,
 			OrchestrationTagStore tagStore, OrchestrationRegistry registry, ProfileManager profileManager) =>
 		{
-			var entry = registry.Get(id);
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 				return ProblemDetailsHelpers.NotFound($"Orchestration '{id}' not found.");
 
-			var removed = tagStore.RemoveTag(id, tag);
+			var resolvedId = entry.Id;
+			var removed = tagStore.RemoveTag(resolvedId, tag);
 			if (!removed)
 				return ProblemDetailsHelpers.NotFound($"Tag '{tag}' not found on orchestration '{id}'.");
 
 			// Recompute effective active set since tag changes may affect profile matching
 			profileManager.RefreshEffectiveActiveSet("tags-changed");
 
-			var effectiveTags = tagStore.GetEffectiveTags(id, entry.Orchestration.Tags);
-			return Results.Json(new { orchestrationId = id, effectiveTags }, jsonOptions);
+			var effectiveTags = tagStore.GetEffectiveTags(resolvedId, entry.Orchestration.Tags);
+			return Results.Json(new { orchestrationId = resolvedId, effectiveTags }, jsonOptions);
 		});
 
 		// ── Orchestration Browse endpoint ──

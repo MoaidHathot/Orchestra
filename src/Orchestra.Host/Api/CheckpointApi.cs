@@ -116,7 +116,10 @@ public static class CheckpointApi
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
 		{
-			var entry = registry.Get(id);
+			// Accept ID or declared name (parity with GET /api/orchestrations/{id}).
+			// ActiveExecutionInfo.OrchestrationId is the canonical key dashboards index by,
+			// so we must record entry.Id even when the caller resumed by name.
+			var entry = registry.GetByIdOrName(id);
 			if (entry is null)
 			{
 				httpContext.Response.StatusCode = 404;
@@ -131,6 +134,7 @@ public static class CheckpointApi
 				});
 				return;
 			}
+			var resolvedId = entry.Id;
 
 			var checkpoint = await checkpointStore.LoadCheckpointAsync(entry.Orchestration.Name, runId);
 			if (checkpoint is null)
@@ -162,7 +166,7 @@ public static class CheckpointApi
 			var executionInfo = new ActiveExecutionInfo
 			{
 				ExecutionId = executionId,
-				OrchestrationId = id,
+				OrchestrationId = resolvedId,
 				OrchestrationName = entry.Orchestration.Name,
 				StartedAt = checkpoint.StartedAt,
 				TriggeredBy = "resume",

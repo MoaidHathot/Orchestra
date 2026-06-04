@@ -1,7 +1,7 @@
 ---
 layout: default
 title: API Reference
-nav_order: 6
+nav_order: 7
 ---
 
 # API Reference
@@ -15,6 +15,14 @@ All endpoints are relative to your host's base URL (e.g., `http://localhost:5000
 ## Authentication
 
 Orchestra does not include built-in authentication. Implement authentication middleware in your ASP.NET Core application as needed.
+
+## Resolving Orchestrations: `{id}` Accepts ID or Name
+
+Every endpoint that takes an `{id}` path parameter under `/api/orchestrations/{id}/...` accepts **either** the auto-generated registry ID (e.g. `research-assistant-a1b2c3d4`) **or** the orchestration's declared `name` field (e.g. `research-assistant`). When invoked by name, the response payload's `id` / `orchestrationId` field always echoes the canonical registry ID so callers can cache by it.
+
+This applies to: `GET /{id}`, `GET /{id}/run`, `DELETE /{id}`, `POST /{id}/enable`, `POST /{id}/disable`, `GET/PUT/POST /{id}/tags`, `DELETE /{id}/tags/{tag}`, `GET/DELETE /{id}/versions`, `GET /{id}/versions/{hash}`, `GET /{id}/versions/{hash1}/diff/{hash2}`, and `GET /{id}/resume/{runId}`.
+
+If multiple orchestrations share a `name` (rare), the lookup returns the first match; reference such orchestrations explicitly by registry ID.
 
 ---
 
