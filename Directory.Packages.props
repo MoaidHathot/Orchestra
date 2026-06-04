@@ -25,7 +25,7 @@
     <PackageVersion Include="McpProxy.Sdk" Version="1.19.0" />
     <PackageVersion Include="ModelContextProtocol" Version="1.3.0" />
     <!-- Serialization -->
-    <PackageVersion Include="Nerdbank.MessagePack" Version="1.1.62" />
+    <PackageVersion Include="Nerdbank.MessagePack" Version="1.2.4" />
     <PackageVersion Include="YamlDotNet" Version="17.0.1" />
     <!-- Scheduling -->
     <PackageVersion Include="Cronos" Version="0.8.4" />

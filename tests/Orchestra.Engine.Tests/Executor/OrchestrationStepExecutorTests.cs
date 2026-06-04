@@ -673,7 +673,7 @@ public class OrchestrationStepExecutorTests
 					OrchestrationId = req.OrchestrationId,
 					OrchestrationName = req.OrchestrationId,
 					Status = ExecutionStatus.Succeeded,
-					FinalContent = $"final-{req.Parameters["itemData"]}",
+					FinalContent = $"final-{req.Parameters!["itemData"]}",
 					StartedAt = DateTimeOffset.UtcNow,
 					CompletedAt = DateTimeOffset.UtcNow,
 				});
@@ -855,7 +855,7 @@ public class OrchestrationStepExecutorTests
 			req.Parameters.Should().ContainKey("meetingData");
 			req.Parameters.Should().ContainKey("dryRun").WhoseValue.Should().Be("false");
 			req.Parameters.Should().ContainKey("actionItemsDir").WhoseValue.Should().Be("C:/tmp");
-			req.Parameters["meetingData"].Should().Contain("id");
+			req.Parameters!["meetingData"].Should().Contain("id");
 		}
 	}
 }
