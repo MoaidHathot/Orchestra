@@ -25,6 +25,20 @@ namespace Orchestra.Host.Api;
 /// </list>
 /// All endpoints stream Server-Sent Events using the same vocabulary as
 /// <see cref="ExecutionApi"/> so the existing Portal modal works unchanged.
+///
+/// <para>
+/// For <c>mode=all</c> the caller may additionally pass <c>?params=&lt;URL-encoded JSON
+/// object&gt;</c> to OVERRIDE the source run's parameters (the "re-run with edits"
+/// flow exposed in the Portal as the "Re-run with edits..." button). When supplied
+/// and non-empty, the override fully replaces the stored parameter set and the run
+/// record is tagged <c>retryMode = "all-edited"</c> so historical browsing can tell
+/// the two flavours apart. The retry lineage (<c>retriedFromRunId</c>) is preserved
+/// either way. Override is rejected (HTTP 400) for <c>failed</c> / <c>from-step</c>
+/// modes because those replay completed-step outputs from a checkpoint whose key
+/// values were derived from the original parameter set; changing parameters mid-
+/// replay would produce a run whose checkpointed step outputs no longer reflect the
+/// current parameters, which is incoherent.
+/// </para>
 /// </summary>
 public static partial class RetryApi
 {
@@ -59,6 +73,7 @@ public static partial class RetryApi
 		{
 			var modeRaw = httpContext.Request.Query["mode"].FirstOrDefault();
 			var fromStep = httpContext.Request.Query["step"].FirstOrDefault();
+			var paramsOverrideRaw = httpContext.Request.Query["params"].FirstOrDefault();
 			if (!RetryService.TryParseMode(modeRaw, out var mode))
 			{
 				await WriteProblemAsync(httpContext, 400, "Bad Request",
@@ -71,6 +86,58 @@ public static partial class RetryApi
 				await WriteProblemAsync(httpContext, 400, "Bad Request",
 					"Retry mode 'from-step' requires a 'step' query parameter naming the target step.");
 				return;
+			}
+
+			// Parse the optional ?params=<URL-encoded JSON object> override (the Portal's
+			// "Re-run with edits" flow sends this). We accept it only for mode=all because
+			// failed / from-step replay checkpointed step outputs that were derived from the
+			// original parameters; swapping parameters mid-replay would silently corrupt the
+			// per-step inputs visible to dependent steps that aren't being replayed.
+			Dictionary<string, string>? paramsOverride = null;
+			var hasParamsOverride = false;
+			if (!string.IsNullOrEmpty(paramsOverrideRaw))
+			{
+				if (mode != RetryMode.All)
+				{
+					await WriteProblemAsync(httpContext, 400, "Bad Request",
+						"Parameter overrides are only valid for retry mode 'all'. " +
+						"'failed' and 'from-step' replay checkpointed outputs derived from the original parameters.");
+					return;
+				}
+
+				try
+				{
+					var parsed = JsonSerializer.Deserialize<JsonElement>(paramsOverrideRaw, jsonOptions);
+					if (parsed.ValueKind == JsonValueKind.Object)
+					{
+						paramsOverride = new Dictionary<string, string>();
+						foreach (var prop in parsed.EnumerateObject())
+						{
+							var val = prop.Value.ValueKind switch
+							{
+								JsonValueKind.String => prop.Value.GetString(),
+								JsonValueKind.Number => prop.Value.ToString(),
+								JsonValueKind.True => "true",
+								JsonValueKind.False => "false",
+								_ => null,
+							};
+							if (val is not null && val.Length > 0)
+							{
+								paramsOverride[prop.Name] = val;
+							}
+						}
+					}
+				}
+				catch (JsonException)
+				{
+					await WriteProblemAsync(httpContext, 400, "Bad Request",
+						"Invalid JSON in 'params' query parameter. Expected a URL-encoded JSON object of {key:string}.");
+					return;
+				}
+
+				// Treat an empty / all-empty-values object as "no override supplied" so the
+				// stored parameters survive. A genuinely user-cleared override sends nothing.
+				hasParamsOverride = paramsOverride is { Count: > 0 };
 			}
 
 			var sourceRun = await runStore.GetRunAsync(orchestrationName, runId);
@@ -117,7 +184,22 @@ public static partial class RetryApi
 			var executionId = checkpoint?.RunId ?? Guid.NewGuid().ToString("N")[..12];
 			var reporter = (SseReporter)reporterFactory.Create();
 			var cts = new CancellationTokenSource();
-			var retryModeString = RetryService.FormatRetryMode(mode, fromStep);
+			// Tag the retry mode in run records as "all-edited" when the caller supplied a
+			// non-empty parameter override; otherwise the standard formatter wins. This keeps
+			// historical browsing able to distinguish "rerun verbatim" from "rerun with edits"
+			// without inventing a separate API surface.
+			var retryModeString = hasParamsOverride
+				? "all-edited"
+				: RetryService.FormatRetryMode(mode, fromStep);
+
+			// The parameter set that actually drives this run: override if supplied, else
+			// the source run's stored parameters. Snapshotted once so the ActiveExecutionInfo,
+			// the executor call, and the retry-metadata all see exactly the same dictionary.
+			var effectiveParameters = hasParamsOverride
+				? paramsOverride
+				: (sourceRun.Parameters.Count > 0
+					? new Dictionary<string, string>(sourceRun.Parameters)
+					: null);
 
 			activeExecutions[executionId] = cts;
 			var executionInfo = new ActiveExecutionInfo
@@ -129,7 +211,7 @@ public static partial class RetryApi
 				TriggeredBy = "retry",
 				CancellationTokenSource = cts,
 				Reporter = reporter,
-				Parameters = sourceRun.Parameters.Count > 0 ? new Dictionary<string, string>(sourceRun.Parameters) : null,
+				Parameters = effectiveParameters,
 				TotalSteps = entry.Orchestration.Steps.Length,
 				CompletedSteps = checkpoint?.CompletedSteps.Count ?? 0,
 			};
@@ -195,11 +277,14 @@ public static partial class RetryApi
 					OrchestrationResult result;
 					if (checkpoint is null)
 					{
-						// Mode = "all" — fresh execution with original parameters
+						// Mode = "all" — fresh execution with parameters from the override (when
+						// the caller supplied ?params=...) or the source run otherwise. The
+						// snapshot is captured in `effectiveParameters` above so the executor,
+						// the ActiveExecutionInfo, and the dashboard all agree.
 						result = await executor.ExecuteAsync(
 							entry.Orchestration,
-							parameters: sourceRun.Parameters.Count > 0
-								? new Dictionary<string, string>(sourceRun.Parameters)
+							parameters: effectiveParameters is { Count: > 0 }
+								? new Dictionary<string, string>(effectiveParameters)
 								: null,
 							triggerId: null,
 							preExecutionParameterTransform: null,

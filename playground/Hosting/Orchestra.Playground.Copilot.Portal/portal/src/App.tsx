@@ -136,6 +136,25 @@ interface AddModalState {
 interface RunModalState {
   open: boolean;
   orchestration: Orchestration | null;
+  /**
+   * Pre-filled parameter values. Only set for the "Re-run with edits…" flow that
+   * seeds the modal from a source run's stored parameters. Null/absent for a
+   * fresh run keeps the existing empty-defaults behavior.
+   */
+  initialValues?: Record<string, string> | null;
+  /**
+   * When set, the modal acts as a retry: the source run's identifiers are
+   * remembered so on submit we POST to the retry endpoint (preserving lineage)
+   * instead of the fresh-run endpoint (which would orphan the lineage badge).
+   */
+  retryContext?: {
+    orchestrationName: string;
+    sourceRunId: string;
+  } | null;
+  /** Optional override for the modal title (e.g. "Re-run {name}"). */
+  title?: string;
+  /** Optional override for the submit button (e.g. "Re-run"). */
+  submitLabel?: string;
 }
 
 interface McpsModalState {
@@ -1702,6 +1721,13 @@ function App(): React.JSX.Element {
     sourceRunId: string,
     mode: 'failed' | 'all' | 'from-step',
     fromStep?: string,
+    /**
+     * Optional parameter overrides. Only honored for mode='all' (the server
+     * rejects them for failed/from-step because those replay checkpointed
+     * step outputs derived from the original parameter set). When supplied
+     * and non-empty, the server records the run with retryMode='all-edited'.
+     */
+    paramsOverride?: Record<string, string> | null,
   ): Promise<void> => {
     if (!orchestrationName || !sourceRunId) return;
 
@@ -1715,6 +1741,11 @@ function App(): React.JSX.Element {
       o.name === orchestrationName || o.id === orchestrationName,
     );
     const initialStatuses = buildInitialStatuses(orchestration);
+
+    const hasParamsOverride = !!(paramsOverride && Object.keys(paramsOverride).length > 0);
+    const recordedMode = mode === 'from-step'
+      ? `from-step:${fromStep ?? ''}`
+      : (mode === 'all' && hasParamsOverride ? 'all-edited' : mode);
 
     setExecutionModal({
       open: true,
@@ -1736,7 +1767,7 @@ function App(): React.JSX.Element {
       savedFiles: [],
       stepSavedFiles: {},
       retriedFromRunId: sourceRunId,
-      retryMode: mode === 'from-step' ? `from-step:${fromStep ?? ''}` : mode,
+      retryMode: recordedMode,
       historicalRun: null,
     });
 
@@ -1744,6 +1775,12 @@ function App(): React.JSX.Element {
       const params = new URLSearchParams({ mode });
       if (mode === 'from-step' && fromStep) {
         params.set('step', fromStep);
+      }
+      if (hasParamsOverride) {
+        // The server-side endpoint parses ?params=<URL-encoded JSON object>
+        // identically to /api/orchestrations/{id}/run, so the encoded shape
+        // matches what runOrchestration already produces.
+        params.set('params', JSON.stringify(paramsOverride));
       }
       const url = `/api/history/${encodeURIComponent(orchestrationName)}/${encodeURIComponent(sourceRunId)}/retry?${params.toString()}`;
       const eventSource = new EventSource(url);
@@ -2708,10 +2745,21 @@ function App(): React.JSX.Element {
       />
       <RunModal
         {...runModal}
-        onClose={() => setRunModal({ open: false, orchestration: null })}
+        onClose={() => setRunModal({ open: false, orchestration: null, retryContext: null, initialValues: null })}
         onRun={(params: Record<string, string>) => {
-          setRunModal({ open: false, orchestration: null });
-          runOrchestration(runModal.orchestration?.id, params);
+          // Snapshot the retry context before we tear the modal down so the
+          // setState below doesn't strip it from the closure.
+          const retryCtx = runModal.retryContext;
+          const orch = runModal.orchestration;
+          setRunModal({ open: false, orchestration: null, retryContext: null, initialValues: null });
+          if (retryCtx) {
+            // "Re-run with edits" flow: route through the retry endpoint so the
+            // new run is linked to its source (retriedFromRunId lineage) and
+            // tagged retryMode='all-edited' in the run record.
+            retryExecution(retryCtx.orchestrationName, retryCtx.sourceRunId, 'all', undefined, params);
+          } else {
+            runOrchestration(orch?.id, params);
+          }
         }}
       />
       <ExecutionModal
@@ -2756,9 +2804,31 @@ function App(): React.JSX.Element {
           const sourceRunId = executionModal.historicalRun?.runId
             ?? executionModal.executionId
             ?? null;
-          if (name && sourceRunId) {
-            retryExecution(name, sourceRunId, mode, fromStep);
+          if (!name || !sourceRunId) return;
+
+          if (mode === 'all-with-edits') {
+            // Re-locate the orchestration definition so the RunModal can render the
+            // typed-input form with the current schema, even if the source run was
+            // produced by an older version. Pre-fill values come from runContext
+            // (already loaded for both historical and live-completed runs); a
+            // missing runContext is tolerated -- the user just sees empty defaults.
+            const orch = orchestrations.find(o => o.name === name || o.id === name) ?? null;
+            if (!orch) {
+              console.warn('Re-run with edits: orchestration not found in registry; cannot open modal.');
+              return;
+            }
+            setRunModal({
+              open: true,
+              orchestration: orch,
+              initialValues: executionModal.runContext?.parameters ?? null,
+              retryContext: { orchestrationName: name, sourceRunId },
+              title: `Re-run ${orch.name}`,
+              submitLabel: 'Re-run',
+            });
+            return;
           }
+
+          retryExecution(name, sourceRunId, mode, fromStep);
         }}
         onViewSourceRun={(sourceRunId) => {
           if (executionModal.orchestration?.name) {

@@ -8,9 +8,32 @@ interface Props {
   orchestration: Orchestration | null;
   onClose: () => void;
   onRun: (params: Record<string, string>) => void;
+  /**
+   * Optional pre-fill for the parameter fields. Used by the "Re-run with edits"
+   * flow that opens this modal with the source run's parameters already populated
+   * so the user can tweak them before submitting. Keys that aren't valid input
+   * names for the current orchestration are ignored on render; the user can still
+   * see them by inspecting the source run's record.
+   *
+   * Changing this prop after the modal is already open does NOT clobber the
+   * user's in-progress edits — initial values are seeded only once per (open,
+   * orchestration) pair so a re-render with the same orchestration won't reset
+   * fields the user has just typed into.
+   */
+  initialValues?: Record<string, string> | null;
+  /**
+   * Optional override for the modal title. Defaults to "Run {orchestration.name}".
+   * The "Re-run with edits" flow passes "Re-run {name}" so users see context.
+   */
+  title?: string;
+  /**
+   * Optional override for the submit button label. Defaults to "Run". The
+   * "Re-run with edits" flow passes "Re-run" so the affordance matches user intent.
+   */
+  submitLabel?: string;
 }
 
-export default function RunModal({ open, orchestration, onClose, onRun }: Props): React.JSX.Element | null {
+export default function RunModal({ open, orchestration, onClose, onRun, initialValues, title, submitLabel }: Props): React.JSX.Element | null {
   const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
   const [params, setParams] = useState<Record<string, string>>({});
 
@@ -27,9 +50,21 @@ export default function RunModal({ open, orchestration, onClose, onRun }: Props)
   }
 
   useEffect(() => {
+    // Seed only when the modal opens for a (possibly different) orchestration. We
+    // intentionally don't include the user-mutable `params` in the dep array; that
+    // would clobber edits on every keystroke. Re-keying off `open` ensures the
+    // re-run-with-edits flow gets a fresh seeding from `initialValues` each time
+    // the modal is opened.
+    if (!open) return;
     const initial: Record<string, string> = {};
     for (const { name, def } of inputEntries) {
-      if (def?.type === 'boolean') {
+      // Precedence: explicit initialValues > declared default for booleans > empty.
+      // Strings (including non-booleans with a typed default) start empty unless the
+      // caller supplied an initial value, matching the prior fresh-run behavior.
+      const supplied = initialValues?.[name];
+      if (supplied !== undefined && supplied !== null) {
+        initial[name] = String(supplied);
+      } else if (def?.type === 'boolean') {
         initial[name] = def?.default ?? '';
       } else {
         initial[name] = '';
@@ -37,7 +72,7 @@ export default function RunModal({ open, orchestration, onClose, onRun }: Props)
     }
     setParams(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orchestration]);
+  }, [orchestration, open, initialValues]);
 
   if (!orchestration) return null;
 
@@ -58,10 +93,10 @@ export default function RunModal({ open, orchestration, onClose, onRun }: Props)
         className={hasAnyMultiline ? 'modal modal-lg' : 'modal modal-sm'}
         role="dialog"
         aria-modal="true"
-        aria-label="Run orchestration"
+        aria-label={title ?? 'Run orchestration'}
       >
         <div className="modal-header">
-          <div className="modal-title">Run {orchestration.name}</div>
+          <div className="modal-title">{title ?? `Run ${orchestration.name}`}</div>
           <button className="modal-close" aria-label="Close" onClick={onClose}>
             <Icons.X />
           </button>
@@ -99,7 +134,7 @@ export default function RunModal({ open, orchestration, onClose, onRun }: Props)
             }
             onRun(nonEmpty);
           }}>
-            <Icons.Play /> Run
+            <Icons.Play /> {submitLabel ?? 'Run'}
           </button>
         </div>
       </div>

@@ -280,7 +280,7 @@ interface Props {
   onClose: () => void;
   onCancel: (executionId: string) => void;
   /** Invoked from the Retry buttons. Required to enable retry UI. */
-  onRetry?: (mode: 'failed' | 'all' | 'from-step', fromStep?: string) => void;
+  onRetry?: (mode: 'failed' | 'all' | 'all-with-edits' | 'from-step', fromStep?: string) => void;
   /** Invoked when the user clicks the "Retried from" badge to navigate to the source run. */
   onViewSourceRun?: (sourceRunId: string) => void;
   /** Invoked when the user clicks the child-run badge next to a step name. */
@@ -995,6 +995,15 @@ export default function ExecutionModal({
               const hasFailedSteps = Object.values(stepStatuses).some(
                 s => s === 'failed' || s === 'cancelled' || s === 'skipped',
               );
+              // Whether the orchestration accepts user-provided parameters at all. We
+              // only surface the "Re-run with edits" button when there's something to
+              // edit -- a parameterless orchestration would open an empty modal.
+              const orchInputs = orchestration?.inputs;
+              const orchParams = orchestration?.parameters;
+              const hasEditableInputs = !!(
+                (orchInputs && Object.keys(orchInputs).length > 0)
+                || (orchParams && orchParams.length > 0)
+              );
               return (
                 <>
                   <button
@@ -1016,6 +1025,16 @@ export default function ExecutionModal({
                   >
                     Re-run All
                   </button>
+                  {hasEditableInputs && (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-secondary"
+                      title="Open the parameter form pre-filled with this run's values so you can edit them, then re-run from scratch."
+                      onClick={() => onRetry!('all-with-edits')}
+                    >
+                      Re-run with edits…
+                    </button>
+                  )}
                   {selectedStep && (
                     <button
                       type="button"
