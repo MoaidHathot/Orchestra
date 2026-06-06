@@ -177,8 +177,26 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				process.StandardInput.Close();
 			}
 
-			// Wait for process to exit with cancellation support
-			await process.WaitForExitAsync(cancellationToken);
+			// Wait for process to exit with cancellation support.
+			//
+			// On cancellation (orchestration cancel, step timeout, host shutdown,
+			// orchestration timeout) the child process is still alive and would
+			// continue running as an orphan after this method returns. Because
+			// CommandStepExecutor always wraps in `cmd.exe /c` on Windows
+			// (line 94), the descendant tree typically includes a cmd.exe
+			// grandchild that, if signalled rather than terminated, will produce
+			// the "Terminate batch job (Y/N)?" prompt — a long-standing source
+			// of unkillable strays. Force-kill the entire tree synchronously and
+			// drain briefly before re-throwing.
+			try
+			{
+				await process.WaitForExitAsync(cancellationToken);
+			}
+			catch (OperationCanceledException)
+			{
+				TerminateProcessTreeOnCancel(process, step.Name);
+				throw;
+			}
 			process.WaitForExit();
 
 			var stdout = stdoutBuilder.ToString().TrimEnd();
@@ -227,6 +245,64 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			LogCommandException(step.Name, ex);
 			_reporter.ReportStepError(step.Name, errorMessage);
 			return ExecutionResult.Failed(errorMessage, rawDependencyOutputs);
+		}
+	}
+
+	/// <summary>
+	/// Grace window granted to a force-killed command process to release
+	/// any held resources (and let any pending stdout/stderr callbacks
+	/// drain) before <see cref="ExecuteAsync"/> returns. Mirrors the
+	/// equivalent constant in <see cref="ScriptStepExecutor"/>.
+	/// </summary>
+	private const int CancelKillGraceSeconds = 5;
+
+	/// <summary>
+	/// Force-kills <paramref name="process"/> and its entire descendant tree
+	/// (which on Windows always includes the <c>cmd.exe</c> wrapper this
+	/// executor spawns) and waits briefly for the OS to release process
+	/// handles. Used on the cancellation path so the descendant tree does
+	/// not outlive the orchestration as an orphan — and so any <c>cmd.exe</c>
+	/// running a <c>.cmd</c>/<c>.bat</c> shim is terminated outright rather
+	/// than signalled (which would otherwise produce the
+	/// "Terminate batch job (Y/N)?" prompt on a stranded console).
+	/// </summary>
+	/// <remarks>
+	/// All failures (kill races, drain timeout) are logged and swallowed —
+	/// the cancellation outcome must be preserved regardless.
+	/// </remarks>
+	private void TerminateProcessTreeOnCancel(Process process, string stepName)
+	{
+		int processId;
+		try { processId = process.Id; }
+		catch { processId = -1; }
+
+		LogCommandCancelled(stepName, processId);
+
+		try
+		{
+			process.Kill(entireProcessTree: true);
+		}
+		catch (Exception killEx)
+		{
+			// Most common cause: the process exited naturally between our
+			// last poll and the kill — not worth surfacing as an error.
+			LogCommandKillFailed(stepName, killEx);
+		}
+
+		var grace = TimeSpan.FromSeconds(CancelKillGraceSeconds);
+		var drained = false;
+		try
+		{
+			drained = process.WaitForExit((int)grace.TotalMilliseconds);
+		}
+		catch
+		{
+			drained = true;
+		}
+
+		if (!drained)
+		{
+			LogCommandKillDrainTimeout(stepName, CancelKillGraceSeconds);
 		}
 	}
 
@@ -304,6 +380,24 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 		Level = LogLevel.Error,
 		Message = "Step '{StepName}' command threw an exception")]
 	private partial void LogCommandException(string stepName, Exception ex);
+
+	[LoggerMessage(
+		EventId = 6,
+		Level = LogLevel.Information,
+		Message = "Step '{StepName}' cancelled; terminating command process tree (PID {ProcessId})")]
+	private partial void LogCommandCancelled(string stepName, int processId);
+
+	[LoggerMessage(
+		EventId = 7,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' failed to kill command process tree on cancel (process may have already exited)")]
+	private partial void LogCommandKillFailed(string stepName, Exception ex);
+
+	[LoggerMessage(
+		EventId = 8,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' command process did not exit within {GraceSeconds}s after kill")]
+	private partial void LogCommandKillDrainTimeout(string stepName, int graceSeconds);
 
 	#endregion
 }

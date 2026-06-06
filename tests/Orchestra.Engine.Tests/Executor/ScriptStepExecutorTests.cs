@@ -471,19 +471,298 @@ public class ScriptStepExecutorTests
 	[Fact]
 	public async Task ExecuteAsync_Cancellation_ThrowsOperationCanceledException()
 	{
-		// Arrange
+		// Arrange — also verifies the kill-on-cancel contract: after the
+		// OperationCanceledException propagates, (a) the spawned pwsh process
+		// must be dead (no orphaned strays), and (b) the temp script file must
+		// be deleted (pwsh held a read handle on it, so File.Delete in the
+		// executor's finally only succeeds if we actually terminate pwsh first).
+		var marker = NewMarkerPath();
 		var executor = CreateExecutor();
 		var step = CreateScriptStep(
 			shell: "pwsh",
-			script: "Start-Sleep -Seconds 30; Write-Output 'done'");
+			script: $$"""
+				Set-Content -LiteralPath '{{EscapeForPwsh(marker)}}' -Value "$PID|$PSCommandPath" -NoNewline
+				Start-Sleep -Seconds 30
+				Write-Output 'should-not-reach-here'
+				""");
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
-		using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
-		// Act
-		var act = () => executor.ExecuteAsync(step, context, cts.Token);
+		try
+		{
+			// Act — wait for the script to publish its PID, then cancel. Waiting
+			// on the marker (instead of a fixed timer) eliminates flakiness from
+			// cold pwsh startup variance under parallel CI load: cancellation
+			// only fires after the script has actually captured the data we need.
+			await RunAndAssertCancellationKillsAsync(
+				executor, step, context, marker,
+				assertions: async (childPid, tempScriptPath) =>
+				{
+					// Assert — the spawned pwsh process was force-killed by the executor.
+					await AssertProcessExitedAsync(childPid);
 
-		// Assert
+					// Assert — the temp script file was deleted, even though pwsh held it open.
+					File.Exists(tempScriptPath).Should().BeFalse(
+						$"the temp script file '{tempScriptPath}' must be cleaned up after cancellation; if it remains, pwsh was not terminated before File.Delete ran.");
+				});
+		}
+		finally
+		{
+			SafeDelete(marker);
+		}
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_Cancellation_KillsEntireProcessTreeIncludingGrandchildren()
+	{
+		// Arrange — the real-world failure mode is not a hung pwsh; it's the
+		// cmd.exe grandchild that pwsh transparently spawns to invoke an
+		// `az.cmd`/`gh.cmd`/`npm.cmd` shim. Without entireProcessTree, the
+		// pwsh dies and the cmd.exe is reparented to the system as an orphan
+		// (and on a real Orchestra host, sits on the unanswerable
+		// "Terminate batch job (Y/N)?" prompt). This test reproduces that
+		// topology and asserts that the kill walks the tree.
+		if (!OperatingSystem.IsWindows())
+			return; // cmd.exe is Windows-only.
+
+		var marker = NewMarkerPath();
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			// Spawn a real cmd.exe grandchild (mirrors the az.cmd shim case),
+			// capture both PIDs to the marker, then wait long enough that we
+			// have time to cancel before it exits on its own.
+			//
+			// `ping -n 30 127.0.0.1` is used rather than `timeout /t 30` because
+			// Orchestra spawns pwsh with redirected stdout/stderr; under that
+			// configuration `timeout` immediately fails with "Input redirection
+			// is not supported, exiting the process immediately." `ping` has no
+			// such dependency and reliably keeps the cmd.exe grandchild alive
+			// for ~30 seconds.
+			script: $$"""
+				$cmdProc = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c','ping -n 30 127.0.0.1 >NUL' -PassThru -NoNewWindow
+				Set-Content -LiteralPath '{{EscapeForPwsh(marker)}}' -Value "$PID|$($cmdProc.Id)|$PSCommandPath" -NoNewline
+				Wait-Process -Id $cmdProc.Id
+				""");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		try
+		{
+			using var cts = new CancellationTokenSource();
+			var task = executor.ExecuteAsync(step, context, cts.Token);
+			await WaitForMarkerAsync(marker, TimeSpan.FromSeconds(15), task);
+			cts.Cancel();
+
+			var act = async () => await task;
+			await act.Should().ThrowAsync<OperationCanceledException>();
+
+			var rawMarker = await ReadAllTextWithRetryAsync(marker);
+			var parts = rawMarker.Trim().Split('|');
+			parts.Should().HaveCountGreaterOrEqualTo(3,
+				because: $"script must have captured pwshPid|cmdPid|scriptPath before sleeping (raw marker: '{rawMarker}')");
+			var pwshPid = int.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture);
+			var cmdPid = int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+			var tempScriptPath = parts[2];
+
+			// Both the direct child (pwsh) and the grandchild (cmd.exe) must be dead.
+			await AssertProcessExitedAsync(pwshPid);
+			await AssertProcessExitedAsync(cmdPid);
+
+			// And the temp script file must be gone, even though pwsh held it open.
+			File.Exists(tempScriptPath).Should().BeFalse(
+				$"the temp script file '{tempScriptPath}' must be cleaned up after cancellation");
+		}
+		finally
+		{
+			SafeDelete(marker);
+		}
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_Cancellation_DeletesTempFileEvenWhenChildHoldsItOpen()
+	{
+		// Arrange — focused regression for the pwsh `-File` lock semantics: pwsh
+		// opens the script with FILE_SHARE_READ but not FILE_SHARE_DELETE on
+		// Windows, so a swallowed File.Delete in the executor's finally was the
+		// historical leak source. After the kill-on-cancel fix, pwsh is dead by
+		// the time File.Delete runs and the file is removed.
+		var marker = NewMarkerPath();
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: $$"""
+				Set-Content -LiteralPath '{{EscapeForPwsh(marker)}}' -Value $PSCommandPath -NoNewline
+				Start-Sleep -Seconds 30
+				""");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		try
+		{
+			using var cts = new CancellationTokenSource();
+			var task = executor.ExecuteAsync(step, context, cts.Token);
+			await WaitForMarkerAsync(marker, TimeSpan.FromSeconds(15), task);
+			cts.Cancel();
+
+			var act = async () => await task;
+			await act.Should().ThrowAsync<OperationCanceledException>();
+
+			var tempScriptPath = (await ReadAllTextWithRetryAsync(marker)).Trim();
+			tempScriptPath.Should().NotBeNullOrWhiteSpace();
+			tempScriptPath.Should().MatchRegex(@"orchestra-[0-9a-f]{32}\.ps1$",
+				because: "the temp file path captured from $PSCommandPath should match the Orchestra naming convention");
+
+			File.Exists(tempScriptPath).Should().BeFalse(
+				$"the temp script file '{tempScriptPath}' must be deleted by the executor's finally after cancellation kills pwsh");
+		}
+		finally
+		{
+			SafeDelete(marker);
+		}
+	}
+
+	// ── Test helpers ────────────────────────────────────────────────────────
+
+	/// <summary>
+	/// Creates a unique marker file path under %TEMP%. Used so a cancelled
+	/// pwsh script can publish its PID and $PSCommandPath back to the test
+	/// before sleeping, without having to enumerate the parent's child PIDs
+	/// (which is racy when xUnit runs tests in parallel).
+	/// </summary>
+	private static string NewMarkerPath() =>
+		Path.Combine(Path.GetTempPath(), $"orchestra-test-marker-{Guid.NewGuid():N}.txt");
+
+	/// <summary>
+	/// Escapes a Windows path for embedding in a single-quoted PowerShell string
+	/// literal. Single quotes inside single-quoted pwsh strings are escaped by
+	/// doubling them; backslashes are literal so no further escaping is needed.
+	/// </summary>
+	private static string EscapeForPwsh(string path) => path.Replace("'", "''");
+
+	/// <summary>
+	/// Drives a cancellation test deterministically: starts the executor,
+	/// waits for the script to publish its marker (proving the script has
+	/// reached the post-marker statements), then cancels and asserts that
+	/// (a) the cancellation throws <see cref="OperationCanceledException"/>,
+	/// (b) the captured pwsh PID is dead, and (c) the temp script file is
+	/// deleted. The marker-driven trigger eliminates cold-start timing
+	/// flakiness under parallel CI load — cancellation only fires after the
+	/// script has actually captured the data we need.
+	/// </summary>
+	private static async Task RunAndAssertCancellationKillsAsync(
+		ScriptStepExecutor executor,
+		ScriptOrchestrationStep step,
+		OrchestrationExecutionContext context,
+		string markerPath,
+		Func<int, string, Task> assertions)
+	{
+		using var cts = new CancellationTokenSource();
+		var task = executor.ExecuteAsync(step, context, cts.Token);
+
+		await WaitForMarkerAsync(markerPath, TimeSpan.FromSeconds(15), task);
+
+		cts.Cancel();
+
+		var act = async () => await task;
 		await act.Should().ThrowAsync<OperationCanceledException>();
+
+		var (pid, tempScriptPath) = await ReadPidAndPathMarkerAsync(markerPath);
+		await assertions(pid, tempScriptPath);
+	}
+
+	/// <summary>
+	/// Polls until <paramref name="markerPath"/> exists or the executor task
+	/// completes (whichever comes first). Throws if the marker is not
+	/// written within the timeout — that indicates the script failed to
+	/// start, which is a real test failure rather than a flaky timing.
+	/// </summary>
+	private static async Task WaitForMarkerAsync(string markerPath, TimeSpan timeout, Task? executorTask = null)
+	{
+		var deadline = DateTime.UtcNow.Add(timeout);
+		while (DateTime.UtcNow < deadline)
+		{
+			if (File.Exists(markerPath))
+				return;
+			if (executorTask is not null && executorTask.IsCompleted)
+			{
+				// The executor returned before the script even wrote the
+				// marker — propagate any exception so the caller sees the
+				// real failure (e.g., script syntax error, missing pwsh).
+				await executorTask.ConfigureAwait(false);
+				throw new Xunit.Sdk.XunitException(
+					$"executor returned before marker '{markerPath}' was written; the script may have failed to start.");
+			}
+			await Task.Delay(25);
+		}
+		throw new Xunit.Sdk.XunitException(
+			$"marker file '{markerPath}' was not written within {timeout.TotalSeconds}s — the spawned pwsh may have failed to start.");
+	}
+
+	/// <summary>
+	/// Reads a marker file written by the test script. Polls briefly because
+	/// the writer may not yet have flushed even though the file exists.
+	/// </summary>
+	private static async Task<string> ReadAllTextWithRetryAsync(string path)
+	{
+		var deadline = DateTime.UtcNow.AddSeconds(5);
+		while (DateTime.UtcNow < deadline)
+		{
+			if (File.Exists(path))
+			{
+				try { return await File.ReadAllTextAsync(path); }
+				catch (IOException) { /* writer not fully flushed; retry */ }
+			}
+			await Task.Delay(25);
+		}
+		throw new Xunit.Sdk.XunitException($"marker file '{path}' was never written by the test script — it may have been cancelled before reaching the marker statement.");
+	}
+
+	/// <summary>
+	/// Parses a "pid|scriptPath" marker into its components.
+	/// </summary>
+	private static async Task<(int pid, string tempScriptPath)> ReadPidAndPathMarkerAsync(string path)
+	{
+		var raw = (await ReadAllTextWithRetryAsync(path)).Trim();
+		var parts = raw.Split('|');
+		parts.Should().HaveCountGreaterOrEqualTo(2,
+			because: $"marker must contain 'pid|scriptPath' (raw: '{raw}')");
+		var pid = int.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture);
+		return (pid, parts[1]);
+	}
+
+	/// <summary>
+	/// Polls until the OS reports <paramref name="pid"/> as exited. The Kill
+	/// itself is essentially instantaneous, but stdout/stderr drain and the
+	/// kernel-side handle teardown add a small (~tens of ms) tail.
+	/// </summary>
+	private static async Task AssertProcessExitedAsync(int pid)
+	{
+		var deadline = DateTime.UtcNow.AddSeconds(10);
+		while (DateTime.UtcNow < deadline)
+		{
+			try
+			{
+				using var p = System.Diagnostics.Process.GetProcessById(pid);
+				if (p.HasExited)
+					return;
+			}
+			catch (ArgumentException)
+			{
+				return; // No such process — already gone, which is the desired state.
+			}
+			catch (InvalidOperationException)
+			{
+				return; // Process exited between Get and HasExited.
+			}
+			await Task.Delay(50);
+		}
+		throw new Xunit.Sdk.XunitException(
+			$"Process {pid} was not terminated within 10s of cancellation. " +
+			"The kill-on-cancel path in ScriptStepExecutor.ExecuteAsync may have regressed.");
+	}
+
+	private static void SafeDelete(string path)
+	{
+		try { File.Delete(path); }
+		catch { /* best effort */ }
 	}
 
 	#endregion
@@ -531,21 +810,40 @@ public class ScriptStepExecutorTests
 	[Fact]
 	public async Task ExecuteAsync_InlineScript_CleansTempFile()
 	{
-		// Arrange
+		// Arrange — capture the actual temp script path via $PSCommandPath
+		// inside the script so we can assert deletion of the exact file we
+		// created (rather than a flaky "no orchestra-*.ps1 leftover anywhere"
+		// check that races against other test runs).
+		var marker = NewMarkerPath();
 		var executor = CreateExecutor();
 		var step = CreateScriptStep(
 			shell: "pwsh",
-			script: "Write-Output 'cleanup-test'");
+			script: $$"""
+				Set-Content -LiteralPath '{{EscapeForPwsh(marker)}}' -Value $PSCommandPath -NoNewline
+				Write-Output 'cleanup-test'
+				""");
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
 
-		// Act
-		var result = await executor.ExecuteAsync(step, context);
+		try
+		{
+			// Act
+			var result = await executor.ExecuteAsync(step, context);
 
-		// Assert — temp files should be cleaned up; check that no orchestra-* temp files linger
-		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		var tempFiles = Directory.GetFiles(Path.GetTempPath(), "orchestra-*.ps1");
-		// There may be other test runs' temp files, but this test's specific file should be gone
-		// We can't assert the exact count, but we verify the step succeeds and doesn't leak
+			// Assert — the step succeeded …
+			result.Status.Should().Be(ExecutionStatus.Succeeded);
+			result.Content.Should().Contain("cleanup-test");
+
+			// … and the exact temp file the executor created has been deleted.
+			var tempScriptPath = (await ReadAllTextWithRetryAsync(marker)).Trim();
+			tempScriptPath.Should().MatchRegex(@"orchestra-[0-9a-f]{32}\.ps1$",
+				because: "the temp file path captured from $PSCommandPath should match the Orchestra naming convention");
+			File.Exists(tempScriptPath).Should().BeFalse(
+				$"the temp script file '{tempScriptPath}' must be cleaned up after successful execution");
+		}
+		finally
+		{
+			SafeDelete(marker);
+		}
 	}
 
 	#endregion
@@ -1156,6 +1454,210 @@ public class ScriptStepExecutorTests
 		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellDefaultPrologue, StringComparison.Ordinal);
 		var bodyIndex = output.IndexOf("Write-Output", StringComparison.Ordinal);
 		prologueIndex.Should().BeLessThan(bodyIndex);
+	}
+
+	[Fact]
+	public void InjectPowerShellPrologue_LeadingStaticMethodCall_PrologueAtOffsetZero()
+	{
+		// Regression — a leading `[Type]::Method(...)` is a type-literal
+		// expression, NOT an attribute. The scanner historically misidentified
+		// it as an attribute and inserted the prologue between `]` and `::`,
+		// breaking the static call with "The term '::WriteAllText' is not
+		// recognized as a name of a cmdlet, function, script file, or
+		// executable program."
+		var input = "[System.IO.File]::WriteAllText('marker.txt', 'data')\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellPrologue(input, ScriptStepExecutor.PowerShellDefaultPrologue);
+
+		// Assert — prologue is at offset 0, the user script is preserved
+		// verbatim afterwards (in particular, `[System.IO.File]` and
+		// `::WriteAllText` are NOT split).
+		output.Should().StartWith(ScriptStepExecutor.PowerShellDefaultPrologue);
+		output.Should().Contain("[System.IO.File]::WriteAllText('marker.txt', 'data')");
+		output.IndexOf("[System.IO.File]::WriteAllText", StringComparison.Ordinal)
+			.Should().BeGreaterThan(ScriptStepExecutor.PowerShellDefaultPrologue.Length,
+				because: "the user's static method call must appear AFTER the injected prologue, not have the prologue inserted in the middle of it.");
+	}
+
+	[Fact]
+	public void InjectPowerShellPrologue_LeadingTypeStaticPropertyAccess_PrologueAtOffsetZero()
+	{
+		// Regression — same family as the static method case but with a
+		// property access: `[int]::MaxValue`, `[datetime]::Now`. The trailing
+		// `::` after `]` must classify the bracket as a type-literal
+		// expression rather than an attribute.
+		var input = "$max = [int]::MaxValue\nWrite-Output $max\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellPrologue(input, ScriptStepExecutor.PowerShellDefaultPrologue);
+
+		// Assert
+		output.Should().StartWith(ScriptStepExecutor.PowerShellDefaultPrologue);
+		output.Should().Contain("$max = [int]::MaxValue");
+	}
+
+	[Fact]
+	public void InjectPowerShellPrologue_LeadingTypeCast_PrologueAtOffsetZero()
+	{
+		// Regression — `[int]$x` is a type cast onto a variable, also a
+		// type-literal expression. The `$` after `]` must classify it as
+		// an expression, NOT an attribute.
+		var input = "[int]$x = 5\nWrite-Output $x\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellPrologue(input, ScriptStepExecutor.PowerShellDefaultPrologue);
+
+		// Assert
+		output.Should().StartWith(ScriptStepExecutor.PowerShellDefaultPrologue);
+		output.Should().Contain("[int]$x = 5");
+	}
+
+	[Fact]
+	public void InjectPowerShellPrologue_LeadingTypeMemberAccess_PrologueAtOffsetZero()
+	{
+		// Regression — `[Type].Member` is instance-member access on the
+		// reflected Type object, which is a type-literal expression. The
+		// trailing `.` after `]` must classify it as an expression.
+		var input = "$name = [string].FullName\nWrite-Output $name\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellPrologue(input, ScriptStepExecutor.PowerShellDefaultPrologue);
+
+		// Assert
+		output.Should().StartWith(ScriptStepExecutor.PowerShellDefaultPrologue);
+		output.Should().Contain("$name = [string].FullName");
+	}
+
+	[Fact]
+	public void InjectPowerShellPrologue_LeadingTypeInvocation_PrologueAtOffsetZero()
+	{
+		// Regression — `[Type](args)` is a constructor-style cast invocation
+		// (e.g., `[System.IO.FileInfo]('path')`). The trailing `(` after `]`
+		// must classify it as an expression.
+		var input = "$fi = [System.IO.FileInfo]('C:\\\\test.txt')\nWrite-Output $fi\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellPrologue(input, ScriptStepExecutor.PowerShellDefaultPrologue);
+
+		// Assert
+		output.Should().StartWith(ScriptStepExecutor.PowerShellDefaultPrologue);
+		output.Should().Contain("$fi = [System.IO.FileInfo]");
+	}
+
+	[Fact]
+	public void InjectPowerShellPrologue_AttributeFollowedByBlockCommentThenParam_PrologueAfterParam()
+	{
+		// Regression — attribute decorations may legally be separated from the
+		// param/function/class keyword they decorate by intervening comments.
+		// The scanner must treat a block comment after `[Attr()]` as an
+		// "attribute follower" so it continues scanning forward to the param
+		// block.
+		var input = "[CmdletBinding()]\n<# explanatory note #>\nparam($X)\nWrite-Output $X\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellPrologue(input, ScriptStepExecutor.PowerShellDefaultPrologue);
+
+		// Assert
+		var attrIndex = output.IndexOf("[CmdletBinding()]", StringComparison.Ordinal);
+		var commentIndex = output.IndexOf("<# explanatory note #>", StringComparison.Ordinal);
+		var paramIndex = output.IndexOf("param(", StringComparison.Ordinal);
+		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellDefaultPrologue, StringComparison.Ordinal);
+
+		attrIndex.Should().Be(0);
+		attrIndex.Should().BeLessThan(commentIndex);
+		commentIndex.Should().BeLessThan(paramIndex);
+		paramIndex.Should().BeLessThan(prologueIndex,
+			because: "the prologue must land after `param()`; a block comment between attribute and param must not stop the scanner.");
+	}
+
+	[Fact]
+	public void InjectPowerShellPrologue_AttributeFollowedByLineCommentThenParam_PrologueAfterParam()
+	{
+		// Regression — same as the block-comment case but with a `# line`
+		// comment instead.
+		var input = "[CmdletBinding()]\n# inline reason\nparam($X)\nWrite-Output $X\n";
+
+		// Act
+		var output = ScriptStepExecutor.InjectPowerShellPrologue(input, ScriptStepExecutor.PowerShellDefaultPrologue);
+
+		// Assert
+		var paramIndex = output.IndexOf("param(", StringComparison.Ordinal);
+		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellDefaultPrologue, StringComparison.Ordinal);
+		paramIndex.Should().BeLessThan(prologueIndex);
+	}
+
+	[Fact]
+	public void InjectPowerShellPrologue_AttributeFollowedByFunction_PrologueAfterAttribute()
+	{
+		// Regression — attributes can decorate a `function` declaration (less
+		// common at script top level but legal). The scanner consumes the
+		// attribute past `]` and then breaks at `function` (because the
+		// scanner does not look inside function bodies for `param`), so the
+		// prologue lands BETWEEN the attribute and the function declaration.
+		// The function declaration itself remains intact.
+		//
+		// This test guards against a different regression than the
+		// `[Type]::Method` case: here we want to ensure the scanner DOES
+		// continue past the attribute (IsAttributeFollower returns true for
+		// `function`) rather than treating `[CmdletBinding()]` as the body
+		// start (which would put the prologue at offset 0 and leave the
+		// attribute decorating the prologue, which is invalid).
+		var input = "[CmdletBinding()]\nfunction Invoke-Foo { Write-Output 'foo' }\nInvoke-Foo\n";
+
+		var output = ScriptStepExecutor.InjectPowerShellPrologue(input, ScriptStepExecutor.PowerShellDefaultPrologue);
+
+		var attrIndex = output.IndexOf("[CmdletBinding()]", StringComparison.Ordinal);
+		var prologueIndex = output.IndexOf(ScriptStepExecutor.PowerShellDefaultPrologue, StringComparison.Ordinal);
+		var fnIndex = output.IndexOf("function Invoke-Foo", StringComparison.Ordinal);
+
+		attrIndex.Should().Be(0,
+			because: "the attribute must be preserved at the top of the script.");
+		attrIndex.Should().BeLessThan(prologueIndex,
+			because: "the prologue must land AFTER the attribute, not before it.");
+		prologueIndex.Should().BeLessThan(fnIndex,
+			because: "the prologue lands between the attribute and the function declaration; the scanner does not look inside function bodies.");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshScriptStartingWithStaticMethodCall_RunsSuccessfully()
+	{
+		// End-to-end regression for the prologue-injection bug above. Before
+		// the fix, this exact script would fail with:
+		//   "The term '::WriteAllText' is not recognized as a name of a
+		//    cmdlet, function, script file, or executable program."
+		// because the scanner inserted the prologue between `[System.IO.File]`
+		// and `::WriteAllText`. With the fix, the prologue lands at offset 0
+		// and the static call runs intact.
+		var marker = NewMarkerPath();
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: $$"""
+				[System.IO.File]::WriteAllText('{{EscapeForPwsh(marker)}}', 'hello-from-static-call')
+				Write-Output 'done'
+				""");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		try
+		{
+			// Act
+			var result = await executor.ExecuteAsync(step, context);
+
+			// Assert — the script runs to completion (the bug previously made
+			// it fail with a "not recognized" error before reaching `Write-Output`).
+			result.Status.Should().Be(ExecutionStatus.Succeeded,
+				because: $"the prologue must not be inserted between `]` and `::`. error was: {result.ErrorMessage}");
+			result.Content.Should().Contain("done");
+
+			File.Exists(marker).Should().BeTrue(
+				"the static `[System.IO.File]::WriteAllText` call must have run and written the marker.");
+			(await File.ReadAllTextAsync(marker)).Should().Be("hello-from-static-call");
+		}
+		finally
+		{
+			SafeDelete(marker);
+		}
 	}
 
 	[Fact]

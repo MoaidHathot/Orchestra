@@ -340,8 +340,25 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				process.StandardInput.Close();
 			}
 
-			// Wait for process to exit with cancellation support
-			await process.WaitForExitAsync(cancellationToken);
+			// Wait for process to exit with cancellation support.
+			//
+			// On cancellation (orchestration cancel, step timeout, host shutdown,
+			// orchestration timeout) the child process is still alive and (a) holds
+			// the temp script file open so the `File.Delete` in `finally` would
+			// fail with a sharing violation, and (b) would continue running as an
+			// orphan after this method returns — re-creating the very leak this
+			// fix exists to prevent. Force-kill the entire descendant tree
+			// (e.g., pwsh -> cmd.exe -> az.cmd) and wait briefly for the OS to
+			// settle the file handles before re-throwing the cancellation.
+			try
+			{
+				await process.WaitForExitAsync(cancellationToken);
+			}
+			catch (OperationCanceledException)
+			{
+				TerminateProcessTreeOnCancel(process, step.Name);
+				throw;
+			}
 			process.WaitForExit();
 
 			var stdout = stdoutBuilder.ToString().TrimEnd();
@@ -537,11 +554,37 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			}
 
 			// Attribute or attribute-decorated param: '[...]'.
+			//
+			// PowerShell uses `[...]` for TWO unrelated syntactic constructs at
+			// the top of a script:
+			//
+			//   (a) Attribute decoration:  [CmdletBinding()] param($x)
+			//                              [Alias('foo')] function Bar { ... }
+			//
+			//   (b) Type-literal expression: [System.IO.File]::WriteAllText(...)
+			//                                [int]$x = 5
+			//                                [datetime]::Now
+			//
+			// Only (a) precedes a `param`/`function`/`class`/`filter` (or another
+			// attribute) — i.e., the `[...]` must be followed by something the
+			// attribute can decorate. Case (b) is the START of the script body
+			// and the prologue MUST be inserted BEFORE the `[`, not after the
+			// matching `]` (doing the latter splits `[Type]` from `::Method` and
+			// breaks the static call with `'::WriteAllText' is not recognized`).
+			//
+			// We disambiguate by peeking past the `]` for the next non-trivial
+			// token via `IsAttributeFollower`.
 			if (script[i] == '[')
 			{
 				var closeIndex = FindMatchingBracket(script, i, '[', ']');
 				if (closeIndex < 0)
 					break;
+
+				if (!IsAttributeFollower(script, closeIndex + 1))
+				{
+					// Type-literal expression — body starts at this `[`.
+					break;
+				}
 
 				i = closeIndex + 1;
 				lastSafeOffset = i;
@@ -616,6 +659,67 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 
 		var nextChar = script[offset + keyword.Length];
 		return char.IsWhiteSpace(nextChar) || nextChar == '(';
+	}
+
+	/// <summary>
+	/// Returns true if the character at <paramref name="offset"/> (after
+	/// skipping whitespace) begins a token that can legally follow a
+	/// PowerShell attribute decoration at the top of a script — namely:
+	/// another attribute (<c>[</c>), a comment (which the outer scanner
+	/// will skip on its next iteration), or one of the attribute-target
+	/// keywords <c>param</c>, <c>function</c>, <c>class</c>, <c>filter</c>.
+	/// </summary>
+	/// <remarks>
+	/// <para>Returns false for <c>::</c> (static member access), <c>$</c>
+	/// (type cast onto a variable), <c>.</c> (instance member access),
+	/// <c>(</c> (type-literal invocation), operators, or any other token
+	/// — all of which indicate the preceding <c>[...]</c> is a
+	/// type-literal expression (<c>[Type]::Method</c>, <c>[int]$x</c>,
+	/// <c>[datetime]::Now</c>, etc.), NOT an attribute decoration.</para>
+	/// <para>This is what protects scripts like <c>[System.IO.File]::WriteAllText(...)</c>
+	/// from having the prologue inserted between <c>]</c> and <c>::</c>,
+	/// which would break the static call with
+	/// <c>The term '::WriteAllText' is not recognized</c>.</para>
+	/// </remarks>
+	private static bool IsAttributeFollower(string script, int offset)
+	{
+		var i = offset;
+		var len = script.Length;
+
+		// Skip whitespace and newlines (PowerShell allows line breaks
+		// between attributes and the param/function keyword they decorate).
+		while (i < len && char.IsWhiteSpace(script[i]))
+			i++;
+
+		if (i >= len)
+			return false;
+
+		// Another attribute decoration — the outer scanner will recurse.
+		if (script[i] == '[')
+			return true;
+
+		// Comments between attribute and target are unusual but legal.
+		// Returning true lets the outer scanner consume the comment on its
+		// next iteration and then re-evaluate the follow-up token.
+		if (script[i] == '#')
+			return true;
+		if (i + 1 < len && script[i] == '<' && script[i + 1] == '#')
+			return true;
+
+		// Canonical attribute targets at script top level.
+		if (MatchesKeywordAt(script, i, "param"))
+			return true;
+		if (MatchesKeywordAt(script, i, "function"))
+			return true;
+		if (MatchesKeywordAt(script, i, "class"))
+			return true;
+		if (MatchesKeywordAt(script, i, "filter"))
+			return true;
+
+		// Everything else — `::`, `$`, `.`, `(`, operators, unrecognized
+		// identifiers — means the bracketed token was a type-literal
+		// expression, not an attribute. The script body starts at the `[`.
+		return false;
 	}
 
 	/// <summary>
@@ -740,6 +844,75 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	}
 
 	/// <summary>
+	/// Grace window granted to a force-killed script process to release its
+	/// file handles (and let any pending stdout/stderr callbacks drain)
+	/// before <see cref="ExecuteAsync"/>'s <c>finally</c> block attempts to
+	/// delete the temp script file. Five seconds is comfortably larger than
+	/// the &lt;100ms typical kernel-side termination latency on Windows / Linux
+	/// while still bounding the user-visible cancellation delay.
+	/// </summary>
+	private const int CancelKillGraceSeconds = 5;
+
+	/// <summary>
+	/// Force-kills <paramref name="process"/> and its entire descendant tree
+	/// (e.g. <c>pwsh</c> -&gt; <c>cmd.exe</c> -&gt; <c>az.cmd</c>) and waits
+	/// briefly for the OS to release the process's file handles. Used on the
+	/// cancellation path so the temp script file can be deleted in the outer
+	/// <c>finally</c> instead of leaking, and so the descendant tree does not
+	/// outlive the orchestration as an orphan.
+	/// </summary>
+	/// <remarks>
+	/// All failures (kill races, drain timeout) are logged and swallowed —
+	/// the cancellation outcome must be preserved regardless.
+	/// </remarks>
+	private void TerminateProcessTreeOnCancel(Process process, string stepName)
+	{
+		// Snapshot the PID up front: once Kill races complete, .NET may
+		// throw InvalidOperationException when reading Id from a disposed
+		// or already-exited process.
+		int processId;
+		try { processId = process.Id; }
+		catch { processId = -1; }
+
+		LogScriptCancelled(stepName, processId);
+
+		try
+		{
+			process.Kill(entireProcessTree: true);
+		}
+		catch (Exception killEx)
+		{
+			// Most common cause: the process exited naturally between our
+			// last poll and the kill (e.g., the script reached its final
+			// statement just as cancellation fired). Not worth surfacing
+			// as an error, but useful to capture for diagnostic noise.
+			LogScriptKillFailed(stepName, killEx);
+		}
+
+		// Bounded synchronous drain so the temp file handle is released
+		// before File.Delete runs. WaitForExit(milliseconds) is the
+		// synchronous form — using the async form here would require
+		// awaiting in a catch block which fights the existing flow and
+		// risks deadlocking the cancellation token plumbing.
+		var grace = TimeSpan.FromSeconds(CancelKillGraceSeconds);
+		var drained = false;
+		try
+		{
+			drained = process.WaitForExit((int)grace.TotalMilliseconds);
+		}
+		catch
+		{
+			// Process may already be disposed / inaccessible — best effort.
+			drained = true;
+		}
+
+		if (!drained)
+		{
+			LogScriptKillDrainTimeout(stepName, CancelKillGraceSeconds);
+		}
+	}
+
+	/// <summary>
 	/// Builds a trace record for the script step so the viewer can display
 	/// the shell, script source, arguments, and output.
 	/// </summary>
@@ -828,6 +1001,24 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		Level = LogLevel.Debug,
 		Message = "Step '{StepName}' strict-mode prologue injected for shell '{Shell}'")]
 	private partial void LogStrictPrologueInjected(string stepName, string shell);
+
+	[LoggerMessage(
+		EventId = 8,
+		Level = LogLevel.Information,
+		Message = "Step '{StepName}' cancelled; terminating script process tree (PID {ProcessId})")]
+	private partial void LogScriptCancelled(string stepName, int processId);
+
+	[LoggerMessage(
+		EventId = 9,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' failed to kill script process tree on cancel (process may have already exited)")]
+	private partial void LogScriptKillFailed(string stepName, Exception ex);
+
+	[LoggerMessage(
+		EventId = 10,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' script process did not exit within {GraceSeconds}s after kill; the temp script file may leak")]
+	private partial void LogScriptKillDrainTimeout(string stepName, int graceSeconds);
 
 	#endregion
 }

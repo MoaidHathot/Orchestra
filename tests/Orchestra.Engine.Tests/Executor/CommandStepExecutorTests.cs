@@ -381,20 +381,183 @@ public class CommandStepExecutorTests
 	[Fact]
 	public async Task ExecuteAsync_Cancellation_ThrowsOperationCanceledException()
 	{
-		// Arrange
+		// Arrange — also verifies the kill-on-cancel contract for
+		// CommandStepExecutor: after the OperationCanceledException propagates,
+		// (a) the actual command process must be dead, and (b) the executor's
+		// shell wrapper (cmd.exe on Windows, /bin/sh on Linux/macOS) must be
+		// dead too. The shell-wrapper part is what suppresses the
+		// `Terminate batch job (Y/N)?` prompt on Windows: that prompt is only
+		// produced when cmd.exe is signalled (CTRL_C_EVENT) while a .cmd/.bat
+		// is on its call stack; force-killing via Win32 TerminateProcess (which
+		// is what Process.Kill(entireProcessTree: true) emits) bypasses it.
+		var marker = NewMarkerPath();
 		var executor = CreateExecutor();
-		// Use a cross-platform command that runs long enough to cancel.
-		var step = OperatingSystem.IsWindows()
-			? CreateCommandStep(command: "ping", arguments: ["-n", "30", "127.0.0.1"])
-			: CreateCommandStep(command: "sleep", arguments: ["30"]);
+
+		// The inner process writes its own PID and its parent's PID (the
+		// executor-spawned shell wrapper) to a marker file, then sleeps long
+		// enough that we have time to cancel.
+		//
+		// NOTE: the snippet uses only single-quoted PowerShell strings and
+		// string concatenation. Embedding double quotes would have to survive
+		// THREE quoting layers (C# string literal -> cmd.exe /c arg parsing ->
+		// powershell -Command parsing) and is extraordinarily error-prone.
+		CommandOrchestrationStep step;
+		if (OperatingSystem.IsWindows())
+		{
+			// Direct child = cmd.exe (executor wraps in `cmd.exe /c`). The
+			// powershell process below is the grandchild we explicitly assert
+			// has also been killed.
+			var pwshSnippet =
+				"$ppid = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID)).ParentProcessId; " +
+				$"Set-Content -LiteralPath '{marker.Replace("'", "''")}' -Value ($PID.ToString() + '|' + $ppid) -NoNewline; " +
+				"Start-Sleep -Seconds 30";
+			step = CreateCommandStep(command: "powershell", arguments: ["-NoProfile", "-Command", pwshSnippet]);
+		}
+		else
+		{
+			// Direct child = /bin/sh -c "<resolvedLine>". The inner sh spawned
+			// from `command: sh` is the grandchild we capture; $PPID is the
+			// outer /bin/sh wrapper that the executor spawned directly.
+			step = CreateCommandStep(command: "sh", arguments: ["-c", $"printf '%s|%s' \"$$\" \"$PPID\" > '{marker}'; sleep 30"]);
+		}
+
 		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
-		using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
 
-		// Act
-		var act = () => executor.ExecuteAsync(step, context, cts.Token);
+		try
+		{
+			// Act — wait for the inner process to publish its PIDs, then cancel.
+			// Waiting on the marker (instead of a fixed timer) eliminates flakiness
+			// from cold-process startup variance under parallel CI load.
+			using var cts = new CancellationTokenSource();
+			var task = executor.ExecuteAsync(step, context, cts.Token);
+			await WaitForMarkerAsync(marker, TimeSpan.FromSeconds(15), task);
+			cts.Cancel();
 
-		// Assert
-		await act.Should().ThrowAsync<OperationCanceledException>();
+			var act = async () => await task;
+
+			// Assert — cancellation surfaces as OperationCanceledException.
+			await act.Should().ThrowAsync<OperationCanceledException>();
+
+			// Both the inner command process and the executor-spawned shell
+			// wrapper must be dead (kill walked the whole tree).
+			var (innerPid, wrapperPid) = await ReadPidPairAsync(marker);
+			await AssertProcessExitedAsync(innerPid);
+			await AssertProcessExitedAsync(wrapperPid);
+		}
+		finally
+		{
+			SafeDelete(marker);
+		}
+	}
+
+	// ── Test helpers ────────────────────────────────────────────────────────
+
+	/// <summary>
+	/// Creates a unique marker file path under %TEMP%. The spawned command
+	/// publishes PIDs back to the test via this file so the test does not
+	/// have to enumerate child processes (which would be racy under
+	/// parallel xUnit execution).
+	/// </summary>
+	private static string NewMarkerPath() =>
+		Path.Combine(Path.GetTempPath(), $"orchestra-test-cmd-marker-{Guid.NewGuid():N}.txt");
+
+	/// <summary>
+	/// Polls until <paramref name="markerPath"/> exists or the executor task
+	/// completes (whichever comes first). Throws if the marker is not written
+	/// within the timeout — that indicates the command failed to start, which
+	/// is a real test failure rather than a flaky timing.
+	/// </summary>
+	private static async Task WaitForMarkerAsync(string markerPath, TimeSpan timeout, Task? executorTask = null)
+	{
+		var deadline = DateTime.UtcNow.Add(timeout);
+		while (DateTime.UtcNow < deadline)
+		{
+			if (File.Exists(markerPath))
+				return;
+			if (executorTask is not null && executorTask.IsCompleted)
+			{
+				// The executor returned before the command even wrote the
+				// marker — propagate any exception so the caller sees the
+				// real failure (e.g., a quoting bug producing an immediate
+				// non-zero exit).
+				await executorTask.ConfigureAwait(false);
+				throw new Xunit.Sdk.XunitException(
+					$"executor returned before marker '{markerPath}' was written; the command may have failed to start.");
+			}
+			await Task.Delay(25);
+		}
+		throw new Xunit.Sdk.XunitException(
+			$"marker file '{markerPath}' was not written within {timeout.TotalSeconds}s — the spawned command may have failed to start.");
+	}
+
+	/// <summary>
+	/// Reads a "innerPid|wrapperPid" marker file, retrying briefly to absorb
+	/// the small window between cancellation firing and the marker write
+	/// fully flushing to disk.
+	/// </summary>
+	private static async Task<(int innerPid, int wrapperPid)> ReadPidPairAsync(string path)
+	{
+		var deadline = DateTime.UtcNow.AddSeconds(5);
+		string? raw = null;
+		while (DateTime.UtcNow < deadline)
+		{
+			if (File.Exists(path))
+			{
+				try { raw = await File.ReadAllTextAsync(path); break; }
+				catch (IOException) { /* writer not fully flushed; retry */ }
+			}
+			await Task.Delay(25);
+		}
+
+		if (raw is null)
+			throw new Xunit.Sdk.XunitException(
+				$"marker file '{path}' was never written. The spawned command must publish its PIDs " +
+				"before cancellation fires; if it doesn't, either the command failed to start (check " +
+				"stdin-sensitive tools like `timeout`) or the cancellation deadline is too short.");
+
+		var parts = raw.Trim().Split('|');
+		parts.Should().HaveCountGreaterOrEqualTo(2,
+			because: $"marker must contain 'innerPid|wrapperPid' (raw: '{raw}')");
+		var innerPid = int.Parse(parts[0], System.Globalization.CultureInfo.InvariantCulture);
+		var wrapperPid = int.Parse(parts[1], System.Globalization.CultureInfo.InvariantCulture);
+		return (innerPid, wrapperPid);
+	}
+
+	/// <summary>
+	/// Polls until the OS reports <paramref name="pid"/> as exited. The Kill
+	/// itself is essentially instantaneous, but stdout/stderr drain and the
+	/// kernel-side handle teardown add a small (~tens of ms) tail.
+	/// </summary>
+	private static async Task AssertProcessExitedAsync(int pid)
+	{
+		var deadline = DateTime.UtcNow.AddSeconds(10);
+		while (DateTime.UtcNow < deadline)
+		{
+			try
+			{
+				using var p = System.Diagnostics.Process.GetProcessById(pid);
+				if (p.HasExited)
+					return;
+			}
+			catch (ArgumentException)
+			{
+				return; // No such process — already gone, which is the desired state.
+			}
+			catch (InvalidOperationException)
+			{
+				return; // Process exited between Get and HasExited.
+			}
+			await Task.Delay(50);
+		}
+		throw new Xunit.Sdk.XunitException(
+			$"Process {pid} was not terminated within 10s of cancellation. " +
+			"The kill-on-cancel path in CommandStepExecutor.ExecuteAsync may have regressed.");
+	}
+
+	private static void SafeDelete(string path)
+	{
+		try { File.Delete(path); }
+		catch { /* best effort */ }
 	}
 
 	#endregion
