@@ -2941,6 +2941,80 @@ public class OrchestrationParserTests
 		step.Loop.ExitPattern.Should().Be("APPROVED");
 	}
 
+	[Fact]
+	public void ParseOrchestrationFile_YamlWithEscapedTemplateExpressions_ParsesValidatesAndPreservesBackslash()
+	{
+		// Arrange — end-to-end coverage of the escape pipeline: YAML literal
+		// block scalars preserve backslashes, the JSON converter retains them
+		// across the YAML→JSON boundary, the validator skips escaped expressions,
+		// and the resolver consumes the backslash at runtime. This exact shape
+		// (a Script step whose body contains a documentation reference to its
+		// OWN output) is the regression scenario from `pr-auto-reviewer.yaml`.
+		var yaml = """
+			name: escape-syntax-e2e
+			description: Verifies that \{{...}} escapes survive YAML parsing and validation.
+			steps:
+			  - name: fetch-data
+			    type: Script
+			    shell: pwsh
+			    script: |
+			      # The downstream `transform` step consumes \{{fetch-data.output}}
+			      # as a JSON document. Keep the contract documented here.
+			      Write-Output '{"id":1}'
+			  - name: transform
+			    type: Prompt
+			    dependsOn: [fetch-data]
+			    systemPrompt: |
+			      Read the JSON in \{{fetch-data.output}} and produce a summary.
+			      Use the literal placeholder \{{param.style}} when the user did
+			      not supply a style preference.
+			    userPrompt: |
+			      Real reference (resolves at runtime): {{fetch-data.output}}
+			    model: claude-opus-4.6
+			""";
+
+		var tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-escape-e2e-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(tempDir);
+		var filePath = Path.Combine(tempDir, "escape-syntax.yaml");
+
+		try
+		{
+			File.WriteAllText(filePath, yaml);
+
+			// Act 1 — parse the YAML through the real pipeline.
+			var orchestration = OrchestrationParser.ParseOrchestrationFile(filePath, []);
+
+			// Assert 1 — the backslash escape survives YAML→JSON→object deserialization.
+			var scriptStep = orchestration.Steps[0].Should().BeOfType<ScriptOrchestrationStep>().Subject;
+			scriptStep.Script.Should().Contain(@"\{{fetch-data.output}}",
+				because: "the runtime resolver needs to see the backslash to know this is an escape");
+
+			var promptStep = orchestration.Steps[1].Should().BeOfType<PromptOrchestrationStep>().Subject;
+			promptStep.SystemPrompt.Should().Contain(@"\{{fetch-data.output}}");
+			promptStep.SystemPrompt.Should().Contain(@"\{{param.style}}");
+			// The unescaped reference in the userPrompt is NOT prefixed with a backslash —
+			// it is a real cross-step reference that the resolver will substitute.
+			promptStep.UserPrompt.Should().Contain("{{fetch-data.output}}");
+			promptStep.UserPrompt.Should().NotContain(@"\{{fetch-data.output}}");
+
+			// Act 2 — run full validation.
+			var validation = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+			// Assert 2 — the escaped self-reference in the script body and the
+			// escaped placeholders in the system prompt do NOT produce errors.
+			// (Without the escape, the script body wouldn't be validated since
+			// ScriptOrchestrationStep is not in GetStepFields, but the prompt
+			// step's `\{{param.style}}` would otherwise fail "undeclared param"
+			// validation, and `\{{fetch-data.output}}` would otherwise pass
+			// reachability only because `transform` depends on `fetch-data`.)
+			validation.IsValid.Should().BeTrue(validation.FormatErrors());
+		}
+		finally
+		{
+			Directory.Delete(tempDir, recursive: true);
+		}
+	}
+
 	#endregion
 
 	#region Advanced Copilot SDK Features Example

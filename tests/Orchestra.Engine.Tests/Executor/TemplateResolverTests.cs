@@ -2375,4 +2375,302 @@ public class TemplateResolverTests
 	}
 
 	#endregion
+
+	#region Escape Syntax
+
+	[Fact]
+	public void Resolve_EscapedStepOutput_EmitsLiteralCurliesAndStripsBackslash()
+	{
+		// Arrange — exactly the bug scenario: a step's own script body contains
+		// {{stepName.output}} for documentation. Without the escape this would
+		// be tracked as an unresolved expression. With \{{stepName.output}} the
+		// engine consumes the backslash and emits the body verbatim.
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = @"downstream consumers use \{{current-step.output}} to read this";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("downstream consumers use {{current-step.output}} to read this");
+		// And critically: it must NOT be tracked as unresolved, because the user
+		// signaled intent with the escape.
+		context.ResolutionTracker.UnresolvedExpressions.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void Resolve_EscapedParameter_DoesNotSubstituteParameter()
+	{
+		// Arrange — a value happens to look like {{param.topic}} but is meant
+		// to be emitted literally (e.g. inside a prompt that documents the
+		// parameter contract to an LLM).
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["topic"] = "AI" }
+		};
+		var template = @"Use the literal placeholder \{{param.topic}} in your output";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, [], s_defaultStep);
+
+		// Assert — the literal `{{param.topic}}` appears, NOT the resolved "AI".
+		result.Should().Be("Use the literal placeholder {{param.topic}} in your output");
+	}
+
+	[Fact]
+	public void Resolve_EscapedEnvVar_DoesNotReadEnvironment()
+	{
+		// Arrange — escaped {{env.*}} must NOT touch the environment at all.
+		// We assert no tracking happened by checking AccessedEnvironmentVariables.
+		Environment.SetEnvironmentVariable("ORCHESTRA_ESCAPE_TEST", "should-not-appear");
+		try
+		{
+			var context = new OrchestrationExecutionContext
+			{
+				OrchestrationInfo = s_defaultInfo,
+				Parameters = new Dictionary<string, string>()
+			};
+			var template = @"Reference: \{{env.ORCHESTRA_ESCAPE_TEST}}";
+
+			// Act
+			var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+			// Assert
+			result.Should().Be("Reference: {{env.ORCHESTRA_ESCAPE_TEST}}");
+			context.ResolutionTracker.AccessedEnvironmentVariables.Should().NotContainKey("ORCHESTRA_ESCAPE_TEST");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("ORCHESTRA_ESCAPE_TEST", null);
+		}
+	}
+
+	[Fact]
+	public void Resolve_EscapedVarsExpression_DoesNotExpandVariable()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+			Variables = new Dictionary<string, string> { ["region"] = "us-east-1" }
+		};
+		var template = @"The vars.region placeholder is \{{vars.region}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("The vars.region placeholder is {{vars.region}}");
+	}
+
+	[Fact]
+	public void Resolve_EscapedOrchestrationProperty_DoesNotResolveMetadata()
+	{
+		// Arrange
+		var info = new OrchestrationInfo("my-pipeline", "1.0.0", "run-1", DateTimeOffset.UtcNow);
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = info,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = @"Use \{{orchestration.name}} to reference the pipeline name";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert — the literal stays; the actual name "my-pipeline" does NOT appear.
+		result.Should().Be("Use {{orchestration.name}} to reference the pipeline name");
+	}
+
+	[Fact]
+	public void Resolve_MixedEscapedAndUnescaped_HandlesBothCorrectly()
+	{
+		// Arrange — escaping is per-expression; unescaped expressions in the
+		// same string must still resolve normally.
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["topic"] = "AI" }
+		};
+		var template = @"Document the contract: \{{param.topic}} is replaced with the actual value (currently: {{param.topic}})";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, context.Parameters, context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("Document the contract: {{param.topic}} is replaced with the actual value (currently: AI)");
+	}
+
+	[Fact]
+	public void Resolve_MultipleEscapedExpressions_AllPreserved()
+	{
+		// Arrange
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = @"Pipeline references: \{{step1.output}}, \{{step2.files[0]}}, \{{vars.foo}}.";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert — every escape works independently, no tracking happens.
+		result.Should().Be("Pipeline references: {{step1.output}}, {{step2.files[0]}}, {{vars.foo}}.");
+		context.ResolutionTracker.UnresolvedExpressions.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void Resolve_EscapedExpression_DoesNotTrackAsUnresolved()
+	{
+		// Arrange — this is the exact regression scenario from the field:
+		// `fetch-assigned-prs` step's script contained {{fetch-assigned-prs.output}}
+		// in a PowerShell comment, producing a noisy "unresolved template" warning
+		// on every run. The escape must suppress that tracking entirely.
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var selfReferentialStep = new TransformOrchestrationStep
+		{
+			Name = "fetch-assigned-prs",
+			Type = OrchestrationStepType.Transform,
+			DependsOn = [],
+			Template = ""
+		};
+		var template = @"# downstream readers consume \{{fetch-assigned-prs.output}} as JSON";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], selfReferentialStep);
+
+		// Assert
+		result.Should().Be("# downstream readers consume {{fetch-assigned-prs.output}} as JSON");
+		context.ResolutionTracker.UnresolvedExpressions.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void Resolve_UnescapedSelfReference_StillTrackedAsUnresolvedForBackCompat()
+	{
+		// Arrange — without an explicit escape, the engine continues to track
+		// unresolvable expressions exactly as before. This pins the regression
+		// behavior we are deliberately preserving (only the opt-in escape skips
+		// tracking).
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var selfReferentialStep = new TransformOrchestrationStep
+		{
+			Name = "fetch-assigned-prs",
+			Type = OrchestrationStepType.Transform,
+			DependsOn = [],
+			Template = ""
+		};
+		var template = @"# downstream readers consume {{fetch-assigned-prs.output}} as JSON";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], selfReferentialStep);
+
+		// Assert — text unchanged, but the engine WARNS via the tracker.
+		result.Should().Be("# downstream readers consume {{fetch-assigned-prs.output}} as JSON");
+		context.ResolutionTracker.UnresolvedExpressions.Should().HaveCount(1);
+		context.ResolutionTracker.UnresolvedExpressions.First().Expression
+			.Should().Be("{{fetch-assigned-prs.output}}");
+	}
+
+	[Fact]
+	public void ResolveStatic_EscapedExpression_EmitsLiteralCurliesAndStripsBackslash()
+	{
+		// Arrange — the static resolver (used for vars, MCP fields, etc.) must
+		// honor the escape with identical semantics so authors can put literal
+		// `{{...}}` text inside variable values or MCP timeout templates.
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string> { ["topic"] = "AI" }
+		};
+		var template = @"Use \{{param.topic}} as the placeholder";
+
+		// Act
+		var result = TemplateResolver.ResolveStatic(template, context.Parameters, context);
+
+		// Assert
+		result.Should().Be("Use {{param.topic}} as the placeholder");
+	}
+
+	[Fact]
+	public void Resolve_EscapeInsideVarValue_PreservesLiteralWhenVarIsExpanded()
+	{
+		// Arrange — a variable whose value contains \{{...}} should resolve to
+		// `{{...}}` literal when the variable is expanded. Because Regex.Replace
+		// does not re-scan its replacement, the literal text remains in the
+		// outer template's output untouched (no double processing).
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>(),
+			Variables = new Dictionary<string, string>
+			{
+				["docNote"] = @"Reference \{{step.output}} in your reply"
+			}
+		};
+		var template = @"{{vars.docNote}}";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert — the inner variable expansion produces `{{step.output}}`
+		// literal, which then sits in the outer template as-is.
+		result.Should().Be("Reference {{step.output}} in your reply");
+	}
+
+	[Fact]
+	public void Resolve_EscapeAtStartOfString_Works()
+	{
+		// Arrange — an escape at position 0 must still match (no characters
+		// precede the backslash, which is a common boundary bug).
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = @"\{{step1.output}} sits at the very start";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert
+		result.Should().Be("{{step1.output}} sits at the very start");
+		context.ResolutionTracker.UnresolvedExpressions.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void Resolve_BackslashFollowedByNonTemplate_IsLeftUntouched()
+	{
+		// Arrange — the escape only consumes a backslash when it is IMMEDIATELY
+		// followed by `{{expr}}`. A standalone backslash (or one in front of
+		// non-template text) must be preserved verbatim.
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_defaultInfo,
+			Parameters = new Dictionary<string, string>()
+		};
+		var template = @"A literal backslash: \ and a path: C:\Users\test should both survive";
+
+		// Act
+		var result = TemplateResolver.Resolve(template, [], context, [], s_defaultStep);
+
+		// Assert — no template pattern was matched at all; the string is unchanged.
+		result.Should().Be(@"A literal backslash: \ and a path: C:\Users\test should both survive");
+	}
+
+	#endregion
 }

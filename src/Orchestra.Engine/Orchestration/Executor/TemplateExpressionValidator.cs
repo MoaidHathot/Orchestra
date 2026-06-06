@@ -53,10 +53,20 @@ public record TemplateValidationError(
 ///   <item><see cref="ValidateOrchestration"/> — parse-time validation that requires no runtime context.</item>
 ///   <item><see cref="ValidateRuntime"/> — pre-execution validation that checks environment variables and parameter resolution.</item>
 /// </list>
+/// <para>
+/// Expressions prefixed with a single backslash (<c>\{{...}}</c>) are treated as
+/// intentional literals and are skipped by this validator. The runtime resolver
+/// strips the backslash and emits the body verbatim, so escaped expressions are
+/// never executed and never need to satisfy reachability, namespace, or
+/// existence rules.
+/// </para>
 /// </summary>
 public static partial class TemplateExpressionValidator
 {
-	[GeneratedRegex(@"\{\{(?<expr>[^}]+)\}\}", RegexOptions.Compiled)]
+	// Mirror of TemplateResolver.TemplatePattern: the optional 'escape' group
+	// captures a single leading backslash so that `\{{expr}}` is treated as a
+	// literal and skipped during validation. Keep these two regexes in sync.
+	[GeneratedRegex(@"(?<escape>\\)?\{\{(?<expr>[^}]+)\}\}", RegexOptions.Compiled)]
 	private static partial Regex TemplatePattern();
 
 	[GeneratedRegex(@"^files\[(\d+)\]$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
@@ -209,6 +219,11 @@ public static partial class TemplateExpressionValidator
 		{
 			foreach (var match in TemplatePattern().Matches(varValue).Cast<Match>())
 			{
+				// Escaped expressions (\{{...}}) are intentional literals and are
+				// not validated against parameter availability.
+				if (match.Groups["escape"].Success)
+					continue;
+
 				var expr = match.Groups["expr"].Value.Trim();
 				if (expr.StartsWith("param.", StringComparison.OrdinalIgnoreCase))
 				{
@@ -247,6 +262,13 @@ public static partial class TemplateExpressionValidator
 
 		foreach (var match in TemplatePattern().Matches(value).Cast<Match>())
 		{
+			// Escaped expressions (\{{...}}) are intentional literals; skip them
+			// so they are not flagged as unreachable step references, unknown
+			// namespaces, etc. The runtime resolver consumes the backslash and
+			// emits the body verbatim.
+			if (match.Groups["escape"].Success)
+				continue;
+
 			var expr = match.Groups["expr"].Value.Trim();
 			ValidateSingleExpression(result, expr, stepName, fieldName,
 				allParamNames, variables, stepNames, stepTypes, reachability, isStaticOnlyContext);
@@ -610,6 +632,11 @@ public static partial class TemplateExpressionValidator
 
 		foreach (var match in TemplatePattern().Matches(value).Cast<Match>())
 		{
+			// Escaped expressions don't participate in resolution at runtime,
+			// so they cannot contribute to a circular variable chain.
+			if (match.Groups["escape"].Success)
+				continue;
+
 			var expr = match.Groups["expr"].Value.Trim();
 			if (expr.StartsWith("vars.", StringComparison.OrdinalIgnoreCase))
 			{
@@ -666,6 +693,12 @@ public static partial class TemplateExpressionValidator
 
 		foreach (var match in TemplatePattern().Matches(value).Cast<Match>())
 		{
+			// Escaped expressions don't trigger env-var lookups at runtime, so
+			// they should not be added to the "must-be-set" environment list
+			// (which would cause ValidateRuntime to reject the orchestration).
+			if (match.Groups["escape"].Success)
+				continue;
+
 			var expr = match.Groups["expr"].Value.Trim();
 			if (expr.StartsWith("env.", StringComparison.OrdinalIgnoreCase))
 			{

@@ -16,6 +16,17 @@ namespace Orchestra.Engine;
 ///   {{stepName.files}}     — JSON array of file paths saved by a step via orchestra_save_file
 ///   {{stepName.files[N]}}  — Nth file path (0-based) saved by a step via orchestra_save_file
 ///
+/// <para>
+/// <b>Escape syntax:</b> Prefix an expression with a backslash to emit it literally
+/// without template processing. The leading backslash is consumed, so
+/// <c>\{{stepName.output}}</c> in the input produces <c>{{stepName.output}}</c> in the
+/// output. This is useful for embedding the literal template syntax in comments,
+/// documentation strings, or prompts shown to an LLM (where the literal
+/// <c>{{...}}</c> form is part of the message). Without the escape, such an
+/// expression would either resolve (when the target is reachable) or be tracked
+/// as <see cref="TemplateResolutionTracker.UnresolvedExpressions"/> (when it is not).
+/// </para>
+///
 /// For steps of type Orchestration, the following additional accessors drill into the
 /// child run's data (populated by <see cref="OrchestrationStepExecutor"/>):
 ///   {{stepName.executionId}}             — execution ID of the child run
@@ -35,7 +46,10 @@ namespace Orchestra.Engine;
 /// </summary>
 public static partial class TemplateResolver
 {
-	[GeneratedRegex(@"\{\{(?<expr>[^}]+)\}\}", RegexOptions.Compiled)]
+	// The optional 'escape' group captures a single leading backslash so that
+	// `\{{expr}}` resolves to the literal `{{expr}}` (the backslash is stripped).
+	// Without an escape, the regex behaves identically to the prior pattern.
+	[GeneratedRegex(@"(?<escape>\\)?\{\{(?<expr>[^}]+)\}\}", RegexOptions.Compiled)]
 	private static partial Regex TemplatePattern();
 
 	[GeneratedRegex(@"^files\[(\d+)\]$", RegexOptions.IgnoreCase | RegexOptions.Compiled)]
@@ -227,6 +241,16 @@ public static partial class TemplateResolver
 	{
 		return TemplatePattern().Replace(template, match =>
 		{
+			// Escape syntax: a leading backslash suppresses template resolution
+			// for this match. The backslash is consumed and the `{{...}}` body
+			// is emitted literally. This is intentionally checked before any
+			// expression-specific branches so escapes work uniformly for every
+			// kind of expression (params, vars, step outputs, env vars, etc.).
+			if (match.Groups["escape"].Success)
+			{
+				return match.Value[1..]; // Strip the leading backslash
+			}
+
 			var expr = match.Groups["expr"].Value.Trim();
 
 			// {{param.name}} — parameter reference
@@ -426,6 +450,14 @@ public static partial class TemplateResolver
 	{
 		return TemplatePattern().Replace(template, match =>
 		{
+			// Escape syntax (see Resolve for details): a leading backslash emits
+			// the `{{...}}` body verbatim and consumes the backslash. Handled
+			// before any expression-specific branches so escapes apply uniformly.
+			if (match.Groups["escape"].Success)
+			{
+				return match.Value[1..];
+			}
+
 			var expr = match.Groups["expr"].Value.Trim();
 
 			// {{param.name}} — parameter reference

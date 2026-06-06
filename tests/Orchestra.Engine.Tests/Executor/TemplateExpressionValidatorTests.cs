@@ -1409,4 +1409,168 @@ public class TemplateExpressionValidatorTests
 	}
 
 	#endregion
+
+	#region ValidateOrchestration — Escape Syntax
+
+	[Fact]
+	public void ValidateOrchestration_EscapedSelfReference_NoError()
+	{
+		// Arrange — the exact regression scenario. A step's UserPrompt contains
+		// a documentation reference to its own output via \{{stepName.output}}.
+		// The validator must NOT flag this as unreachable; the runtime resolver
+		// will strip the backslash and emit the body verbatim.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreatePromptStep(
+					"synthesize",
+					userPrompt: @"Save markdown so downstream readers can use \{{synthesize.files[0]}}."),
+			]);
+
+		// Act
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		// Assert
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_EscapedUnreachableStep_NoError()
+	{
+		// Arrange — a Transform step references another step that is NOT in its
+		// DependsOn. Without an escape, this would be a hard validation error
+		// (the unreachable-step rule). The escape signals intent and suppresses
+		// the check.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateTransformStep("step1", "Hello"),
+				CreateTransformStep("step2", @"\{{step1.output}}"), // escaped, no dependsOn
+			]);
+
+		// Act
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		// Assert
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_EscapedNonExistentStep_NoError()
+	{
+		// Arrange — even references to steps that DO NOT EXIST in the
+		// orchestration are tolerated when escaped. The author has explicitly
+		// asked for the literal form.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateTransformStep("step1", @"document the placeholder \{{ghost.output}}"),
+			]);
+
+		// Act
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		// Assert
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_EscapedUnknownNamespace_NoError()
+	{
+		// Arrange — without an escape, {{foo.bar}} is "Unknown expression namespace 'foo'".
+		// With an escape, it is a literal and must be accepted as-is.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateTransformStep("step1", @"see \{{foo.bar}} in the documentation"),
+			]);
+
+		// Act
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		// Assert
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_EscapedExpression_DoesNotCountAsCircularVarReference()
+	{
+		// Arrange — a variable value contains \{{vars.self}} which LOOKS like a
+		// circular self-reference. Because the escape makes this a literal,
+		// circular-reference detection must skip it.
+		var orchestration = CreateOrchestration(
+			variables: new Dictionary<string, string>
+			{
+				["self"] = @"This is the literal placeholder \{{vars.self}}",
+			});
+
+		// Act
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		// Assert
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_MixedEscapedAndRealReferences_OnlyRealOnesValidated()
+	{
+		// Arrange — `step2` legitimately references `step1.output` (with a
+		// proper dependsOn) AND has an escaped `\{{ghost.output}}` for
+		// documentation. Only the real reference matters; the escape is ignored.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateTransformStep("step1", "Hello"),
+				CreateTransformStep(
+					"step2",
+					@"Real: {{step1.output}}, Doc: \{{ghost.output}}",
+					dependsOn: ["step1"]),
+			]);
+
+		// Act
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		// Assert
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateRuntime_EscapedEnvVar_DoesNotRequireEnvVarToBeSet()
+	{
+		// Arrange — without an escape, ValidateRuntime would reject the
+		// orchestration if ORCHESTRA_NEVER_SET is not in the environment. With
+		// an escape, the env var is never read at runtime, so it doesn't have
+		// to exist.
+		var envName = "ORCHESTRA_ESCAPE_RUNTIME_TEST_" + Guid.NewGuid().ToString("N")[..8];
+		Environment.SetEnvironmentVariable(envName, null); // ensure unset
+		var orchestration = CreateOrchestration(
+			steps: [CreateTransformStep("step1", @"see \{{env." + envName + "}} in the docs")]);
+
+		// Act
+		var result = TemplateExpressionValidator.ValidateRuntime(orchestration, parameters: null);
+
+		// Assert
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateRuntime_UnescapedMissingEnvVar_StillReturnsError()
+	{
+		// Arrange — pins the back-compat behavior: only escaped env references
+		// are skipped. Unescaped ones still go through the must-be-set check.
+		var envName = "ORCHESTRA_RUNTIME_MUST_BE_MISSING_" + Guid.NewGuid().ToString("N")[..8];
+		Environment.SetEnvironmentVariable(envName, null);
+		var orchestration = CreateOrchestration(
+			steps: [CreateTransformStep("step1", "{{env." + envName + "}}")]);
+
+		// Act
+		var result = TemplateExpressionValidator.ValidateRuntime(orchestration, parameters: null);
+
+		// Assert
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().Contain(e =>
+			e.Message.Contains(envName) && e.Message.Contains("not set"));
+	}
+
+	#endregion
 }
