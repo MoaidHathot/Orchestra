@@ -99,4 +99,21 @@ public class McpServerOptions
 	/// </para>
 	/// </summary>
 	public int DefaultInvokeOrchestrationSyncTimeoutSeconds { get; set; } = 300;
+
+	/// <summary>
+	/// Per-server timeout (seconds) applied by <c>McpManager.GetGlobalMcpToolCountsAsync</c>
+	/// when probing a global MCP's <c>tools/list</c> at step start to detect the
+	/// "Connected but zero tools" failure mode that the Copilot SDK's
+	/// <c>SessionMcpServersLoadedEvent</c> cannot surface.
+	/// <para>
+	/// The probe is intentionally short: a single slow backend must not stall the
+	/// step start. On a healthy local proxy the probe completes in &lt; 50ms; on a
+	/// backend stuck in interactive-browser auth (the typical reproducer) the probe
+	/// times out and the step proceeds with "tool count unknown" so the SDK-status
+	/// fast-fail remains the safety net. Set to a small positive value; values
+	/// &lt; 1 are clamped to 1.
+	/// </para>
+	/// <para>Default: 5 seconds.</para>
+	/// </summary>
+	public int ToolDiscoveryProbeTimeoutSeconds { get; set; } = 5;
 }

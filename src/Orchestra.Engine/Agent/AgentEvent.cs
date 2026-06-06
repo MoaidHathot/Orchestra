@@ -271,10 +271,28 @@ public class AgentEvent
 }
 
 /// <summary>
-/// Represents the status of an individual MCP server, as reported by the SDK.
+/// Represents the status of an individual MCP server.
+/// <para>
+/// <see cref="Status"/>, <see cref="Source"/> and <see cref="Error"/> come from the
+/// Copilot SDK's <c>SessionMcpServersLoadedEvent</c> — they describe the
+/// <em>transport-level</em> connection (e.g. <c>"Connected"</c> means the SDK opened the
+/// MCP channel, NOT that <c>tools/list</c> succeeded or returned anything).
+/// </para>
+/// <para>
+/// <see cref="ToolCount"/> is supplied by Orchestra itself (via
+/// <see cref="IMcpResolver.GetGlobalMcpToolCountsAsync"/>) — it is the number of tools
+/// the upstream backend exposed when Orchestra probed it directly. A value of <c>0</c>
+/// on a server whose <see cref="Status"/> is <c>"Connected"</c> is the
+/// "MCP connected but no tools" failure mode (e.g. an upstream proxy with
+/// <c>deferConnection: true</c> whose backend has not finished authenticating yet);
+/// <see langword="null"/> means Orchestra did not / could not probe that server
+/// (for example because it is an inline MCP, not a global one routed through
+/// <c>McpManager</c>'s in-process proxy).
+/// </para>
 /// </summary>
 public record McpServerStatusInfo(
 	string Name,
 	string Status,
 	string? Source = null,
-	string? Error = null);
+	string? Error = null,
+	int? ToolCount = null);

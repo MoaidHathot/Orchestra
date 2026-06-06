@@ -18,6 +18,29 @@ public class AgentEventProcessor
 	private readonly StringBuilder _currentResponseBuilder = new();
 	private readonly Dictionary<string, PendingToolCall> _pendingToolCalls = [];
 	private readonly List<string> _warnings = [];
+
+	/// <summary>
+	/// The most recent SDK-supplied status payload (transport-level connection state).
+	/// Replaced on every <c>SessionMcpServersLoadedEvent</c>. Combined with
+	/// <see cref="_externalToolCounts"/> in <see cref="RecomputeMcpServerStatuses"/> to
+	/// produce the public <see cref="McpServerStatuses"/> list.
+	/// </summary>
+	private List<McpServerStatusInfo> _sdkMcpServerStatuses = [];
+
+	/// <summary>
+	/// Tool counts probed by Orchestra's own MCP proxy (see
+	/// <see cref="IMcpResolver.GetGlobalMcpToolCountsAsync"/>). Keyed by MCP name,
+	/// case-insensitive. Values are <see langword="null"/> when the probe could not
+	/// determine a count (and must be treated as "unknown", not "zero"). Persists
+	/// across SDK status refreshes so re-fired <c>McpServersLoaded</c> events
+	/// continue to carry the latest probe result.
+	/// </summary>
+	private readonly Dictionary<string, int?> _externalToolCounts = new(StringComparer.OrdinalIgnoreCase);
+
+	/// <summary>
+	/// The merged view (SDK statuses + probed tool counts). Refreshed by
+	/// <see cref="RecomputeMcpServerStatuses"/> whenever either source changes.
+	/// </summary>
 	private readonly List<McpServerStatusInfo> _mcpServerStatuses = [];
 	private readonly List<ConversationMessage> _conversationHistory = [];
 	private readonly List<AuditLogEntry> _auditLog = [];
@@ -329,19 +352,31 @@ public class AgentEventProcessor
 	private void HandleMcpServersLoaded(AgentEvent evt)
 	{
 		var statuses = evt.McpServerStatuses ?? [];
-		_mcpServerStatuses.Clear();
-		_mcpServerStatuses.AddRange(statuses);
+		_sdkMcpServerStatuses = statuses.ToList();
+		RecomputeMcpServerStatuses();
 
-		_reporter.ReportMcpServersLoaded(statuses);
+		// Report the enriched (probe-aware) statuses so subscribers see the same
+		// view as the trace and the public McpServerStatuses property.
+		_reporter.ReportMcpServersLoaded(_mcpServerStatuses);
 
-		// Auto-generate warnings for any failed servers
-		foreach (var server in statuses)
+		// Auto-generate warnings for any failed servers OR for "Connected but zero tools"
+		// servers (the latter is the proxy-deferred-auth failure mode that the SDK
+		// alone cannot detect — `Connected` only means transport handshake succeeded).
+		foreach (var server in _mcpServerStatuses)
 		{
 			if (string.Equals(server.Status, "Failed", StringComparison.OrdinalIgnoreCase))
 			{
 				var errorDetail = server.Error is not null ? $": {server.Error}" : "";
 				var warningMessage = $"MCP server '{server.Name}' failed to connect{errorDetail}";
 				_warnings.Add($"[mcp_server_failed] {warningMessage}");
+			}
+			else if (server.ToolCount == 0)
+			{
+				var warningMessage =
+					$"MCP server '{server.Name}' connected (status: {server.Status}) but exposed 0 tools. "
+					+ "The upstream backend likely isn't ready yet — check authentication or "
+					+ "deferred-connection settings on the proxy/backend.";
+				_warnings.Add($"[mcp_server_no_tools] {warningMessage}");
 			}
 		}
 	}
@@ -582,6 +617,107 @@ public class AgentEventProcessor
 	}
 
 	/// <summary>
+	/// Returns the names of MCP servers that are reachable (any non-failed status) but
+	/// reported <c>0</c> tools when Orchestra probed them via
+	/// <see cref="IMcpResolver.GetGlobalMcpToolCountsAsync"/>. This is the
+	/// "Connected but no tools" failure mode that the Copilot SDK's connection-level
+	/// status cannot surface on its own.
+	/// <para>
+	/// MCPs whose tool count is <see langword="null"/> (unknown — probe failed or
+	/// the resolver doesn't manage that name) are NOT included; callers must not
+	/// conflate "unknown" with "zero".
+	/// </para>
+	/// </summary>
+	public IReadOnlyList<string> GetMcpServersWithoutTools()
+	{
+		return _mcpServerStatuses
+			.Where(s =>
+				s.ToolCount == 0
+				&& !string.Equals(s.Status, "Failed", StringComparison.OrdinalIgnoreCase))
+			.Select(s => s.Name)
+			.ToList();
+	}
+
+	/// <summary>
+	/// Applies tool counts probed by an external source (Orchestra's
+	/// <see cref="IMcpResolver"/>) to the in-memory MCP status view. Merges into
+	/// any existing counts (non-null wins; later calls with a <see langword="null"/>
+	/// value do not clobber a previously-known count). Recomputes the public
+	/// <see cref="McpServerStatuses"/> snapshot so it reflects both SDK-reported
+	/// connection state and locally-probed tool counts.
+	/// <para>
+	/// Idempotent — safe to call multiple times. Names are matched case-insensitively.
+	/// </para>
+	/// </summary>
+	public void ApplyMcpToolCounts(IReadOnlyDictionary<string, int?> counts)
+	{
+		ArgumentNullException.ThrowIfNull(counts);
+
+		foreach (var (name, count) in counts)
+		{
+			if (string.IsNullOrWhiteSpace(name))
+				continue;
+
+			// Don't overwrite a known count with null. A later definite probe
+			// SHOULD overwrite a stale one, however, so non-null wins unconditionally.
+			if (count is null && _externalToolCounts.ContainsKey(name))
+				continue;
+
+			_externalToolCounts[name] = count;
+		}
+
+		RecomputeMcpServerStatuses();
+	}
+
+	/// <summary>
+	/// Rebuilds <see cref="_mcpServerStatuses"/> from the SDK-supplied
+	/// <see cref="_sdkMcpServerStatuses"/> overlaid with the locally-probed
+	/// <see cref="_externalToolCounts"/>. The merge rule is: SDK status fields win;
+	/// the tool count comes from the local probe when present, falling back to whatever
+	/// the SDK happened to report (currently always <see langword="null"/>, but
+	/// future-proofs against an SDK that does ship a tool count one day).
+	/// <para>
+	/// Names that only appear in the probe (no matching SDK status) are appended with
+	/// an <c>"Unknown"</c> status so the trace still records what Orchestra saw — this
+	/// matters when the SDK never fires <c>SessionMcpServersLoadedEvent</c> for an MCP
+	/// the step explicitly requested.
+	/// </para>
+	/// </summary>
+	private void RecomputeMcpServerStatuses()
+	{
+		_mcpServerStatuses.Clear();
+
+		var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+		foreach (var sdk in _sdkMcpServerStatuses)
+		{
+			seenNames.Add(sdk.Name);
+			var toolCount = _externalToolCounts.TryGetValue(sdk.Name, out var probed) && probed is not null
+				? probed
+				: sdk.ToolCount;
+			_mcpServerStatuses.Add(sdk with { ToolCount = toolCount });
+		}
+
+		foreach (var (name, count) in _externalToolCounts)
+		{
+			if (seenNames.Contains(name))
+				continue;
+
+			// Probe-only entries with a null (unknown) count add no diagnostic value
+			// without a matching SDK status — skip them. They remain in
+			// `_externalToolCounts` so a later definite probe overwrites correctly.
+			if (count is null)
+				continue;
+
+			// Probe-only entry — surface it so the trace records what Orchestra
+			// observed even when the SDK never reported a status for this MCP.
+			_mcpServerStatuses.Add(new McpServerStatusInfo(
+				Name: name,
+				Status: "Unknown",
+				ToolCount: count));
+		}
+	}
+
+	/// <summary>
 	/// Builds a StepExecutionTrace from the collected data.
 	/// </summary>
 	public StepExecutionTrace BuildTrace(
@@ -649,6 +785,12 @@ public class AgentEventProcessor
 	/// <summary>
 	/// Merges MCP server config descriptions with runtime statuses.
 	/// If we have runtime statuses, use them (more informative); otherwise, fall back to config descriptions.
+	/// <para>
+	/// Each status string includes the tool count when Orchestra has probed it
+	/// (e.g. <c>"calendar (status: Connected, tools: 0)"</c>) so the trace makes
+	/// the "Connected but no tools" failure mode immediately visible without
+	/// requiring a reader to cross-reference the Warnings section.
+	/// </para>
 	/// </summary>
 	private List<string> BuildMcpServerList(List<string>? configDescriptions)
 	{
@@ -658,7 +800,8 @@ public class AgentEventProcessor
 			{
 				var err = s.Error is not null ? $" — {s.Error}" : "";
 				var source = s.Source is not null ? $", source: {s.Source}" : "";
-				return $"{s.Name} (status: {s.Status}{source}{err})";
+				var tools = s.ToolCount is { } count ? $", tools: {count}" : "";
+				return $"{s.Name} (status: {s.Status}{source}{tools}{err})";
 			}).ToList();
 		}
 

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using McpProxy.Abstractions;
 using McpProxy.Sdk.Configuration;
+using McpProxy.Sdk.Proxy;
 using McpProxy.Sdk.Sdk;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -355,6 +356,160 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	}
 
 	/// <summary>
+	/// Per-server probe timeout used by <see cref="GetGlobalMcpToolCountsAsync"/>.
+	/// Bounds how long a single backend can stall the step-start probe. Tunable via
+	/// <see cref="McpServerOptions.ToolDiscoveryProbeTimeoutSeconds"/>.
+	/// </summary>
+	private TimeSpan ToolProbeTimeout =>
+		TimeSpan.FromSeconds(Math.Max(1, _mcpServerOptions.ToolDiscoveryProbeTimeoutSeconds));
+
+	/// <inheritdoc/>
+	/// <remarks>
+	/// Implementation queries Orchestra's in-process <c>McpProxy.Sdk</c> via
+	/// <see cref="IPerServerProxyRegistrar"/> — the same surface the LLM hits at
+	/// <c>http://localhost:{port}/mcp/{name}</c>, so the count is exactly what
+	/// <c>tools/list</c> would return for the Copilot SDK.
+	/// <para>
+	/// Each probe is bounded by <see cref="ToolProbeTimeout"/>. Names that don't
+	/// match a registered global MCP, or whose probe times out / throws, are mapped
+	/// to <see langword="null"/> so callers can distinguish "0 tools (definite)"
+	/// from "unknown".
+	/// </para>
+	/// </remarks>
+	public async Task<IReadOnlyDictionary<string, int?>> GetGlobalMcpToolCountsAsync(
+		IEnumerable<string> mcpNames,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(mcpNames);
+
+		var requested = mcpNames
+			.Where(n => !string.IsNullOrWhiteSpace(n))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+
+		var result = new Dictionary<string, int?>(requested.Length, StringComparer.OrdinalIgnoreCase);
+		if (requested.Length == 0)
+			return result;
+
+		var registrar = TryGetPerServerProxyRegistrar();
+		var probeTimeout = ToolProbeTimeout;
+
+		foreach (var name in requested)
+		{
+			// Only probe names that match a global MCP we actually manage; for everything
+			// else we report `null` (unknown) so callers don't conflate "inline / not ours"
+			// with "Connected but zero tools".
+			if (!_globalMcpNames.Contains(name))
+			{
+				result[name] = null;
+				continue;
+			}
+
+			result[name] = await ProbeServerToolCountAsync(name, registrar, probeTimeout, cancellationToken)
+				.ConfigureAwait(false);
+		}
+
+		return result;
+	}
+
+	/// <summary>
+	/// Probes a single backend's <c>tools/list</c> via the in-process proxy's
+	/// <see cref="SingleServerProxy"/>. Returns the tool count, or <see langword="null"/>
+	/// when the probe fails / times out / the registrar isn't available. Exceptions and
+	/// timeouts are swallowed by design — a probe failure must not abort the step.
+	/// </summary>
+	/// <remarks>
+	/// Test-only: <see cref="McpManagerTests"/>' <c>TestableMcpManager</c> overrides
+	/// this so unit tests can supply deterministic counts without spinning up the
+	/// proxy or any HTTP traffic.
+	/// </remarks>
+	protected virtual async Task<int?> ProbeServerToolCountAsync(
+		string mcpName,
+		IPerServerProxyRegistrar? registrar,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
+	{
+		if (registrar is null)
+		{
+			LogToolProbeNoRegistrar(mcpName);
+			return null;
+		}
+
+		SingleServerProxy? proxy;
+		try
+		{
+			proxy = registrar.GetProxy(mcpName);
+		}
+		catch (Exception ex)
+		{
+			LogToolProbeRegistrarFailed(mcpName, ex.Message);
+			return null;
+		}
+
+		if (proxy is null)
+		{
+			LogToolProbeProxyMissing(mcpName);
+			return null;
+		}
+
+		using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		cts.CancelAfter(timeout);
+
+		var startedAt = DateTimeOffset.UtcNow;
+		try
+		{
+			var listResult = await proxy.ListToolsAsync(cts.Token).ConfigureAwait(false);
+			var count = listResult.Tools?.Count ?? 0;
+			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+			LogToolProbeSucceeded(mcpName, count, elapsedMs);
+			return count;
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			// Outer cancellation — re-throw so the step itself can fail with the
+			// caller's cancellation, not a swallowed timeout.
+			throw;
+		}
+		catch (OperationCanceledException)
+		{
+			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+			LogToolProbeTimedOut(mcpName, elapsedMs, (long)timeout.TotalMilliseconds);
+			return null;
+		}
+		catch (Exception ex)
+		{
+			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+			LogToolProbeFailed(mcpName, elapsedMs, ex.Message);
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// Resolves the per-server proxy registrar from the in-process proxy's service
+	/// provider. Returns <see langword="null"/> when the proxy hasn't been started
+	/// (no global MCPs configured), failed to start, or is configured with a routing
+	/// mode that doesn't register a registrar — in any of those cases tool-count
+	/// probing is silently disabled and callers fall back to the SDK's connection-level
+	/// status only.
+	/// </summary>
+	private IPerServerProxyRegistrar? TryGetPerServerProxyRegistrar()
+	{
+		var app = _proxyApp;
+		if (app is null)
+			return null;
+
+		try
+		{
+			return app.Services.GetService<IPerServerProxyRegistrar>();
+		}
+		catch (Exception ex)
+		{
+			LogToolProbeRegistrarFailed("<lookup>", ex.Message);
+			return null;
+		}
+	}
+
+	/// <summary>
 	/// Returns <c>true</c> when the given endpoint URL targets this Orchestra host's own
 	/// MCP surface — either the data plane directly or the per-MCP proxy route that
 	/// global MCPs are rewritten to in <see cref="Resolve(Engine.Mcp[], ParentExecutionAnnotation?)"/>.
@@ -591,6 +746,50 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		Level = LogLevel.Information,
 		Message = "Applied effectively-infinite catch-all transport timeout to MCP entry '{McpName}' (mcpServer.defaultMcpToolCallTimeoutSeconds is 0, so no client-side transport timeout applies; orchestration and server-side deadlines remain authoritative).")]
 	private partial void LogAppliedCatchAllInfiniteTimeout(string mcpName);
+
+	// ── Tool-discovery probe (Connected ≠ tools/list returned tools) ──
+	//
+	// Used by GetGlobalMcpToolCountsAsync to detect the "MCP connected but no tools"
+	// race that the Copilot SDK's SessionMcpServersLoadedEvent cannot surface (the SDK
+	// only carries Name/Status/Source/Error — no tool count). Logging at Debug for the
+	// happy path keeps default-verbosity logs quiet; the failure paths log at Warning
+	// so operators see them when triaging a step that ran without the tools it asked for.
+
+	[LoggerMessage(
+		EventId = 12,
+		Level = LogLevel.Debug,
+		Message = "MCP tool-discovery probe succeeded for '{McpName}': {ToolCount} tool(s) in {ElapsedMs}ms.")]
+	private partial void LogToolProbeSucceeded(string mcpName, int toolCount, long elapsedMs);
+
+	[LoggerMessage(
+		EventId = 13,
+		Level = LogLevel.Warning,
+		Message = "MCP tool-discovery probe TIMED OUT for '{McpName}' after {ElapsedMs}ms (timeout={TimeoutMs}ms). The step will treat the tool count as unknown and rely on SDK status only.")]
+	private partial void LogToolProbeTimedOut(string mcpName, long elapsedMs, long timeoutMs);
+
+	[LoggerMessage(
+		EventId = 14,
+		Level = LogLevel.Warning,
+		Message = "MCP tool-discovery probe FAILED for '{McpName}' after {ElapsedMs}ms: {Error}. The step will treat the tool count as unknown and rely on SDK status only.")]
+	private partial void LogToolProbeFailed(string mcpName, long elapsedMs, string error);
+
+	[LoggerMessage(
+		EventId = 15,
+		Level = LogLevel.Debug,
+		Message = "MCP tool-discovery probe skipped for '{McpName}': the in-process proxy has no IPerServerProxyRegistrar (proxy not running, or routing mode is not PerServer).")]
+	private partial void LogToolProbeNoRegistrar(string mcpName);
+
+	[LoggerMessage(
+		EventId = 16,
+		Level = LogLevel.Debug,
+		Message = "MCP tool-discovery probe skipped for '{McpName}': the registrar returned no SingleServerProxy for that name (the MCP may not be globally registered).")]
+	private partial void LogToolProbeProxyMissing(string mcpName);
+
+	[LoggerMessage(
+		EventId = 17,
+		Level = LogLevel.Warning,
+		Message = "MCP tool-discovery probe could not resolve registrar for '{McpName}': {Error}.")]
+	private partial void LogToolProbeRegistrarFailed(string mcpName, string error);
 
 	#endregion
 }

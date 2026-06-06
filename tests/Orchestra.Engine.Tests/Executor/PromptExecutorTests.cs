@@ -2066,5 +2066,215 @@ public class PromptExecutorTests
 		captured.StepName.Should().Be("calling-step");
 	}
 
+	[Fact]
+	public async Task ExecuteAsync_McpResolverReportsZeroTools_FailsFastBeforeLlm()
+	{
+		// Arrange — simulates the proxy-deferred-auth race: the MCP server is reachable
+		// (Resolve succeeds) but the probe finds tools/list returns 0. The executor must
+		// fail-fast BEFORE invoking the LLM so we don't waste tokens on a step that
+		// can't possibly succeed.
+		var calendarMcp = new LocalMcp { Name = "calendar", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		resolver
+			.GetGlobalMcpToolCountsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<IReadOnlyDictionary<string, int?>>(
+				new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase) { ["calendar"] = 0 }));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("should not be reached");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("list-events");
+		step.Mcps = [calendarMcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — step failed, agent was never invoked, error category is McpFailure
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.McpFailure);
+		result.ErrorMessage.Should().Contain("calendar");
+		result.ErrorMessage.Should().Contain("0 tools");
+		agentBuilder.CapturedMcps.Should().BeEmpty("the LLM must NOT be invoked when a required MCP has 0 tools");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_McpResolverReportsZeroToolsForOneOfMany_FailsFast()
+	{
+		// Arrange — multiple required MCPs, one of them has 0 tools.
+		var calendarMcp = new LocalMcp { Name = "calendar", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var mailMcp = new LocalMcp { Name = "mail", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		resolver
+			.GetGlobalMcpToolCountsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<IReadOnlyDictionary<string, int?>>(
+				new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+				{
+					["calendar"] = 0,
+					["mail"] = 12,
+				}));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("should not be reached");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("multi-mcp-step");
+		step.Mcps = [calendarMcp, mailMcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — calendar is named; mail is not because it had non-zero tools
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("calendar");
+		result.ErrorMessage.Should().NotContain("mail");
+		agentBuilder.CapturedMcps.Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_McpResolverReportsNullToolCount_ProceedsToLlm()
+	{
+		// Arrange — probe couldn't determine a count (e.g. proxy unreachable, race, etc.).
+		// The pre-LLM fast-fail must NOT trigger; the post-LLM SDK-status check remains
+		// the safety net. The LLM should be invoked normally.
+		var inlineMcp = new LocalMcp { Name = "ad-hoc-inline", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		resolver
+			.GetGlobalMcpToolCountsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<IReadOnlyDictionary<string, int?>>(
+				new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase) { ["ad-hoc-inline"] = null }));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("Hello from the LLM");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("test");
+		step.Mcps = [inlineMcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — unknown count must NOT fail-fast; LLM ran and step succeeded
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		agentBuilder.CapturedMcps.Should().HaveCount(1);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_McpResolverReportsPositiveToolCount_StepSucceedsNormally()
+	{
+		// Arrange — happy path: probe finds tools, step proceeds and succeeds.
+		var calendarMcp = new LocalMcp { Name = "calendar", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		resolver
+			.GetGlobalMcpToolCountsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<IReadOnlyDictionary<string, int?>>(
+				new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase) { ["calendar"] = 5 }));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("All five tools available");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("test");
+		step.Mcps = [calendarMcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.Content.Should().Be("All five tools available");
+		agentBuilder.CapturedMcps.Should().HaveCount(1);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_McpResolverProbeThrows_DoesNotBlockStep()
+	{
+		// Arrange — a probe-side exception must NOT abort the step; it should log and
+		// fall through to the post-LLM SDK-status check as the safety net.
+		var calendarMcp = new LocalMcp { Name = "calendar", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		resolver
+			.GetGlobalMcpToolCountsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns<Task<IReadOnlyDictionary<string, int?>>>(_ => throw new InvalidOperationException("probe boom"));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("LLM ran despite probe failure");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("test");
+		step.Mcps = [calendarMcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — step proceeded; the probe failure was swallowed
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		agentBuilder.CapturedMcps.Should().HaveCount(1);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_SdkReportsConnectedAndProbeReportsZeroTools_FailsPostLlm()
+	{
+		// Arrange — the post-LLM safety net. The pre-LLM probe wasn't able to determine
+		// (returns null for this test path) but the SDK fires McpServersLoaded with
+		// status=Connected while an `ApplyMcpToolCounts({calendar:0})` (simulated via
+		// the AgentEvent path that the SDK would have triggered) shows 0 tools. Here we
+		// simulate the SDK side via the mid-session McpServersLoaded event AND have the
+		// resolver supply a probe count of 0 — same end-state, exercising the post-LLM
+		// `GetMcpServersWithoutTools` check that's intentionally redundant with the
+		// pre-LLM fast-fail.
+		var calendarMcp = new LocalMcp { Name = "calendar", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		// Probe says 0 → pre-LLM fast-fail engages. (Post-LLM is the safety net for
+		// MCPs the probe didn't / couldn't report on, exercised by other tests.)
+		resolver
+			.GetGlobalMcpToolCountsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<IReadOnlyDictionary<string, int?>>(
+				new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase) { ["calendar"] = 0 }));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("hallucinated content");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("test");
+		step.Mcps = [calendarMcp];
+		var context = new OrchestrationExecutionContext { Parameters = new Dictionary<string, string>(), OrchestrationInfo = s_defaultInfo };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.McpFailure);
+		result.ErrorMessage.Should().Contain("0 tools");
+		// Trace should also surface the "Unknown" status entry from the probe-only
+		// recompute path (no SDK status was actually fired in this short-circuit case).
+		result.Trace.Should().NotBeNull();
+		result.Trace!.McpServers.Should().Contain(s => s.Contains("calendar") && s.Contains("tools: 0"));
+	}
+
 	#endregion
 }

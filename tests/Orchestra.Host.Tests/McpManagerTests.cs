@@ -1361,10 +1361,132 @@ public class McpManagerTests : IAsyncLifetime
 
 	#endregion
 
+	#region GetGlobalMcpToolCountsAsync
+
+	[Fact]
+	public async Task GetGlobalMcpToolCountsAsync_EmptyNames_ReturnsEmpty()
+	{
+		// Arrange
+		await using var manager = new TestableMcpManager();
+		await manager.InitializeAsync([CreateLocalMcp("calendar")]);
+
+		// Act
+		var result = await manager.GetGlobalMcpToolCountsAsync([]);
+
+		// Assert
+		result.Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task GetGlobalMcpToolCountsAsync_NameNotGlobal_ReturnsNullCount()
+	{
+		// Arrange — manager knows about "calendar" only; "ad-hoc-inline" is unknown.
+		// The contract says non-global names map to null (unknown), NOT 0 — callers
+		// must not conflate "we don't manage this" with "exposed zero tools".
+		await using var manager = new TestableMcpManager();
+		await manager.InitializeAsync([CreateLocalMcp("calendar")]);
+
+		// Act
+		var result = await manager.GetGlobalMcpToolCountsAsync(["ad-hoc-inline"]);
+
+		// Assert
+		result.Should().ContainKey("ad-hoc-inline");
+		result["ad-hoc-inline"].Should().BeNull("non-global names must report Unknown, not 0");
+	}
+
+	[Fact]
+	public async Task GetGlobalMcpToolCountsAsync_GlobalNameWithProbe_ReturnsProbedCount()
+	{
+		// Arrange — TestableProbeMcpManager intercepts the probe so we can supply a
+		// deterministic count without spinning up the real in-process proxy.
+		await using var manager = new TestableProbeMcpManager(
+			probeResults: new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["calendar"] = 0,
+				["mail"] = 7,
+			});
+		await manager.InitializeAsync([CreateLocalMcp("calendar"), CreateLocalMcp("mail")]);
+
+		// Act
+		var result = await manager.GetGlobalMcpToolCountsAsync(["calendar", "mail"]);
+
+		// Assert
+		result.Should().HaveCount(2);
+		result["calendar"].Should().Be(0);
+		result["mail"].Should().Be(7);
+	}
+
+	[Fact]
+	public async Task GetGlobalMcpToolCountsAsync_DuplicateNames_DeduplicatedCaseInsensitively()
+	{
+		// Arrange
+		await using var manager = new TestableProbeMcpManager(
+			probeResults: new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+			{
+				["calendar"] = 3,
+			});
+		await manager.InitializeAsync([CreateLocalMcp("calendar")]);
+
+		// Act — same name three times in different cases
+		var result = await manager.GetGlobalMcpToolCountsAsync(["calendar", "CALENDAR", "Calendar"]);
+
+		// Assert — only one entry, probed once
+		result.Should().HaveCount(1);
+		manager.ProbeCallCount.Should().Be(1);
+	}
+
+	[Fact]
+	public async Task GetGlobalMcpToolCountsAsync_ProbeThrows_ReturnsNullForThatName()
+	{
+		// Arrange — the probe must not surface its own exception to callers; failures
+		// degrade to "unknown" so PromptExecutor falls back to the post-LLM SDK check.
+		await using var manager = new TestableProbeMcpManager(probeException: new InvalidOperationException("boom"));
+		await manager.InitializeAsync([CreateLocalMcp("calendar")]);
+
+		// Act
+		var result = await manager.GetGlobalMcpToolCountsAsync(["calendar"]);
+
+		// Assert
+		result.Should().ContainKey("calendar");
+		result["calendar"].Should().BeNull();
+	}
+
+	[Fact]
+	public async Task GetGlobalMcpToolCountsAsync_NullNames_Throws()
+	{
+		// Arrange
+		await using var manager = new TestableMcpManager();
+		await manager.InitializeAsync([]);
+
+		// Act + Assert
+		await FluentActions
+			.Awaiting(() => manager.GetGlobalMcpToolCountsAsync(null!))
+			.Should()
+			.ThrowAsync<ArgumentNullException>();
+	}
+
+	[Fact]
+	public async Task GetGlobalMcpToolCountsAsync_NoProxyStarted_SkipsProbe()
+	{
+		// Arrange — no global MCPs, so the proxy never starts. The probe must
+		// degrade gracefully (return null/unknown) rather than throwing.
+		await using var manager = new TestableMcpManager();
+		await manager.InitializeAsync([]);
+
+		// Act — even asking for a known global name when proxy isn't up should be safe
+		var result = await manager.GetGlobalMcpToolCountsAsync(["calendar"]);
+
+		// Assert
+		result.Should().ContainKey("calendar");
+		result["calendar"].Should().BeNull();
+	}
+
+	#endregion
+
 	/// <summary>
 	/// Test subclass that bypasses the real proxy startup.
 	/// </summary>
-	private sealed class TestableMcpManager : McpManager
+	private class TestableMcpManager : McpManager
 	{
 		public bool StartProxyCalled { get; private set; }
 
@@ -1377,6 +1499,47 @@ public class McpManagerTests : IAsyncLifetime
 		{
 			StartProxyCalled = true;
 			return Task.CompletedTask;
+		}
+	}
+
+	/// <summary>
+	/// Test subclass that intercepts the per-server tool-count probe so unit tests
+	/// can supply deterministic counts without starting a real in-process proxy or
+	/// resolving an <c>IPerServerProxyRegistrar</c>.
+	/// </summary>
+	private sealed class TestableProbeMcpManager : TestableMcpManager
+	{
+		private readonly IReadOnlyDictionary<string, int?>? _probeResults;
+		private readonly Exception? _probeException;
+		public int ProbeCallCount { get; private set; }
+
+		public TestableProbeMcpManager(
+			IReadOnlyDictionary<string, int?>? probeResults = null,
+			Exception? probeException = null,
+			McpServerOptions? options = null)
+			: base(options)
+		{
+			_probeResults = probeResults;
+			_probeException = probeException;
+		}
+
+		protected override Task<int?> ProbeServerToolCountAsync(
+			string mcpName,
+			McpProxy.Sdk.Sdk.IPerServerProxyRegistrar? registrar,
+			TimeSpan timeout,
+			CancellationToken cancellationToken)
+		{
+			ProbeCallCount++;
+			if (_probeException is not null)
+			{
+				// Mirror the production behavior: swallow the exception and return null.
+				// (The real impl catches inside ProbeServerToolCountAsync; we simulate
+				// that here so tests of the public API see the same contract.)
+				return Task.FromResult<int?>(null);
+			}
+			if (_probeResults is null)
+				return Task.FromResult<int?>(null);
+			return Task.FromResult(_probeResults.TryGetValue(mcpName, out var count) ? count : null);
 		}
 	}
 

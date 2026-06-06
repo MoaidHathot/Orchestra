@@ -1428,6 +1428,219 @@ public class AgentEventProcessorTests
 
 	#endregion
 
+	#region ApplyMcpToolCounts / GetMcpServersWithoutTools
+
+	[Fact]
+	public void ApplyMcpToolCounts_NullArgument_Throws()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+
+		// Act + Assert
+		Assert.Throws<ArgumentNullException>(() => processor.ApplyMcpToolCounts(null!));
+	}
+
+	[Fact]
+	public void ApplyMcpToolCounts_BeforeAnySdkEvents_AddsProbeOnlyEntriesAsUnknownStatus()
+	{
+		// Arrange — a probe at step start, before the SDK has fired McpServersLoaded.
+		// The processor must still surface those probe results in McpServerStatuses
+		// (with Status="Unknown") so the trace records what Orchestra observed.
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+
+		// Act
+		processor.ApplyMcpToolCounts(new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = 0,
+			["mail"] = 7,
+			["unknown-server"] = null, // null = probe couldn't determine
+		});
+
+		// Assert — only the two definite counts surface; the null is dropped because
+		// it adds no information when there's no SDK status to attach it to.
+		var statuses = processor.McpServerStatuses;
+		Assert.Equal(2, statuses.Count);
+		var calendar = statuses.Single(s => s.Name == "calendar");
+		Assert.Equal("Unknown", calendar.Status);
+		Assert.Equal(0, calendar.ToolCount);
+		var mail = statuses.Single(s => s.Name == "mail");
+		Assert.Equal("Unknown", mail.Status);
+		Assert.Equal(7, mail.ToolCount);
+	}
+
+	[Fact]
+	public async Task ApplyMcpToolCounts_AfterSdkEvents_EnrichesExistingStatusesWithToolCounts()
+	{
+		// Arrange — SDK fires McpServersLoaded first (typical session-mid-flight order),
+		// then a late probe lands. The merged view must keep SDK Status and overlay
+		// ToolCount onto the matching name.
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		var sdkStatuses = new List<McpServerStatusInfo>
+		{
+			new("calendar", "Connected", Source: "user"),
+			new("mail", "Connected", Source: "user"),
+		};
+		await processor.ProcessEventsAsync(CreateAsyncEnumerable(
+			new AgentEvent { Type = AgentEventType.McpServersLoaded, McpServerStatuses = sdkStatuses }));
+
+		// Act
+		processor.ApplyMcpToolCounts(new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = 0,
+			["mail"] = 4,
+		});
+
+		// Assert
+		var statuses = processor.McpServerStatuses;
+		Assert.Equal(2, statuses.Count);
+		var calendar = statuses.Single(s => s.Name == "calendar");
+		Assert.Equal("Connected", calendar.Status);
+		Assert.Equal("user", calendar.Source);
+		Assert.Equal(0, calendar.ToolCount);
+		var mail = statuses.Single(s => s.Name == "mail");
+		Assert.Equal("Connected", mail.Status);
+		Assert.Equal(4, mail.ToolCount);
+	}
+
+	[Fact]
+	public async Task ApplyMcpToolCounts_ProbeBeforeSdkEvents_PersistsAcrossSdkRefresh()
+	{
+		// Arrange — probe runs first (pre-LLM), then SDK fires McpServersLoaded.
+		// The pre-existing count must survive and attach to the new SDK status.
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		processor.ApplyMcpToolCounts(new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = 0,
+		});
+
+		// Act — SDK status arrives later
+		await processor.ProcessEventsAsync(CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = [new("calendar", "Connected")],
+			}));
+
+		// Assert
+		var calendar = processor.McpServerStatuses.Single(s => s.Name == "calendar");
+		Assert.Equal("Connected", calendar.Status);
+		Assert.Equal(0, calendar.ToolCount);
+	}
+
+	[Fact]
+	public void ApplyMcpToolCounts_LaterNullDoesNotClobberKnownCount()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		processor.ApplyMcpToolCounts(new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = 3,
+		});
+
+		// Act — a later probe returns null (probe failed); must not erase the prior known count.
+		processor.ApplyMcpToolCounts(new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = null,
+		});
+
+		// Assert
+		var calendar = processor.McpServerStatuses.Single(s => s.Name == "calendar");
+		Assert.Equal(3, calendar.ToolCount);
+	}
+
+	[Fact]
+	public async Task GetMcpServersWithoutTools_ReturnsOnlyConnectedZeroToolServers()
+	{
+		// Arrange
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		await processor.ProcessEventsAsync(CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses =
+				[
+					new("calendar", "Connected"),
+					new("mail", "Connected"),
+					new("graph", "Failed", Error: "boom"),
+					new("docs", "Connected"),
+				],
+			}));
+
+		processor.ApplyMcpToolCounts(new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = 0,         // ← Should be reported
+			["mail"] = 5,             // healthy
+			["graph"] = 0,             // also 0 — but already Failed, must not be double-counted
+			["docs"] = null,           // unknown — must NOT be reported
+		});
+
+		// Act
+		var empty = processor.GetMcpServersWithoutTools();
+
+		// Assert — only "calendar" (Connected + 0 tools). "graph" is excluded because
+		// it's already covered by GetFailedMcpServers; "docs" is excluded because count is unknown.
+		Assert.Single(empty);
+		Assert.Equal("calendar", empty[0]);
+	}
+
+	[Fact]
+	public async Task HandleMcpServersLoaded_ConnectedWithZeroTools_EmitsNoToolsWarning()
+	{
+		// Arrange — pre-apply probe counts, then have the SDK fire McpServersLoaded.
+		// The handler should emit a [mcp_server_no_tools] warning into the trace
+		// so operators can see the issue without correlating multiple sections.
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		processor.ApplyMcpToolCounts(new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = 0,
+		});
+
+		// Act
+		await processor.ProcessEventsAsync(CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses = [new("calendar", "Connected")],
+			}));
+
+		// Assert
+		var trace = processor.BuildTrace("sys", "user");
+		Assert.Contains(trace.Warnings, w =>
+			w.StartsWith("[mcp_server_no_tools]") && w.Contains("calendar"));
+	}
+
+	[Fact]
+	public async Task BuildMcpServerList_IncludesToolCountInFormattedString()
+	{
+		// Arrange — verify the human-readable trace string surfaces `tools: N` so the
+		// reader doesn't have to consult Warnings or correlate sources.
+		var processor = new AgentEventProcessor(_reporter, "test-step");
+		await processor.ProcessEventsAsync(CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.McpServersLoaded,
+				McpServerStatuses =
+				[
+					new("calendar", "Connected", Source: "user"),
+					new("mail", "Connected"),
+				],
+			}));
+		processor.ApplyMcpToolCounts(new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = 0,
+			["mail"] = 12,
+		});
+
+		// Act
+		var trace = processor.BuildTrace("sys", "user");
+
+		// Assert
+		Assert.Contains("calendar (status: Connected, source: user, tools: 0)", trace.McpServers);
+		Assert.Contains("mail (status: Connected, tools: 12)", trace.McpServers);
+	}
+
+	#endregion
+
 	#region Compaction Events
 
 	[Fact]

@@ -213,6 +213,64 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			? TemplateResolver.Resolve(step.OutputHandlerPrompt, context.Parameters, context, step.DependsOn, step)
 			: null;
 
+		// Probe each requested MCP's tools/list BEFORE the LLM runs. The Copilot SDK's
+		// SessionMcpServersLoadedEvent only carries transport-level connection status —
+		// it cannot tell us whether tools/list actually returned tools. An upstream
+		// backend that handshakes successfully but exposes 0 tools (e.g. mcpproxy with
+		// `deferConnection: true` whose backend hasn't authenticated yet) would
+		// otherwise leave the LLM with no real tools, silently hallucinate, and the
+		// step would "succeed" with garbage. Probing here lets us fail-fast with a
+		// precise diagnostic instead.
+		if (_mcpResolver is not null && resolvedMcps.Length > 0)
+		{
+			try
+			{
+				var toolCounts = await _mcpResolver
+					.GetGlobalMcpToolCountsAsync(resolvedMcps.Select(m => m.Name), cancellationToken)
+					.ConfigureAwait(false);
+				eventProcessor.ApplyMcpToolCounts(toolCounts);
+
+				// Pre-LLM fail-fast: only count zero-tool MCPs that the step explicitly
+				// asked for; an unknown count (null) is left to the post-LLM check.
+				var preLlmEmpty = toolCounts
+					.Where(kvp => kvp.Value == 0)
+					.Select(kvp => kvp.Key)
+					.Where(name => resolvedMcps.Any(m => string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase)))
+					.ToList();
+
+				if (preLlmEmpty.Count > 0)
+				{
+					var serverList = string.Join(", ", preLlmEmpty);
+					var errorMessage =
+						$"Required MCP server(s) connected but exposed 0 tools: {serverList}. "
+						+ "The upstream backend is reachable but tools/list returned nothing — "
+						+ "check that the backend is authenticated and that any proxy is not "
+						+ "holding a deferred-connection state. The step cannot execute without these tools.";
+					var preLlmTrace = eventProcessor.BuildPartialTrace(resolvedSystemPrompt, userPromptRaw, mcpServerDescriptions);
+					_reporter.ReportStepTrace(step.Name, preLlmTrace);
+					_reporter.ReportStepError(step.Name, errorMessage);
+					LogMcpServersNoTools(step.Name, serverList);
+					return ExecutionResult.Failed(
+						errorMessage,
+						rawDependencyOutputs,
+						trace: preLlmTrace,
+						errorCategory: StepErrorCategory.McpFailure,
+						savedFiles: context.TempFileStore?.GetFilesForStep(step.Name));
+				}
+			}
+			catch (OperationCanceledException)
+			{
+				// Honor cancellation — the outer try/catch below will categorize it.
+				throw;
+			}
+			catch (Exception ex)
+			{
+				// A probe failure must never block the step. Log and move on — the SDK-status
+				// fast-fail below is the safety net for unprobed/unknown MCPs.
+				LogMcpToolCountProbeFailed(step.Name, ex.Message);
+			}
+		}
+
 		// Create a fresh engine tool context for this execution
 		var enabledOptInTools = ResolveEnabledOptInTools(step, context);
 		var respondUrlBuilder = _serverUrl is null
@@ -282,25 +340,44 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 			var result = await task.GetResultAsync();
 
-			// Check if any required MCP servers failed to start.
-			// When MCP servers fail, the LLM runs without the expected tools and produces
-			// unreliable output. Fail the step early with a clear error rather than
-			// propagating the LLM's confused response as a "success."
+			// Check if any required MCP servers failed to start OR were Connected with
+			// zero tools. When MCP servers fail (or expose no tools) the LLM runs without
+			// the expected tools and produces unreliable output. Fail the step early with
+			// a clear error rather than propagating the LLM's confused response as a "success."
+			//
+			// The pre-LLM probe above already catches zero-tool cases for global MCPs that
+			// Orchestra's own in-process proxy could query. This post-LLM check is the
+			// safety net for: (a) MCPs the probe couldn't reach in time, (b) MCPs whose
+			// tools/list returned non-zero pre-LLM but went to zero by the time the SDK
+			// re-listed them, and (c) the SDK-reported `Failed` status that existed before.
 			var failedMcpServers = eventProcessor.GetFailedMcpServers();
-			if (failedMcpServers.Count > 0 && resolvedMcps.Length > 0)
+			var emptyMcpServers = eventProcessor.GetMcpServersWithoutTools();
+			if ((failedMcpServers.Count > 0 || emptyMcpServers.Count > 0) && resolvedMcps.Length > 0)
 			{
 				var requiredFailed = failedMcpServers
 					.Where(f => resolvedMcps.Any(m => string.Equals(m.Name, f, StringComparison.OrdinalIgnoreCase)))
 					.ToList();
+				var requiredEmpty = emptyMcpServers
+					.Where(f => resolvedMcps.Any(m => string.Equals(m.Name, f, StringComparison.OrdinalIgnoreCase)))
+					.Where(f => !requiredFailed.Contains(f, StringComparer.OrdinalIgnoreCase))
+					.ToList();
 
-				if (requiredFailed.Count > 0)
+				if (requiredFailed.Count > 0 || requiredEmpty.Count > 0)
 				{
-					var serverList = string.Join(", ", requiredFailed);
-					var errorMessage = $"Required MCP server(s) failed to start: {serverList}. The step cannot execute without these tools.";
+					var parts = new List<string>();
+					if (requiredFailed.Count > 0)
+						parts.Add($"failed to start: {string.Join(", ", requiredFailed)}");
+					if (requiredEmpty.Count > 0)
+						parts.Add($"connected but exposed 0 tools: {string.Join(", ", requiredEmpty)}");
+
+					var errorMessage = $"Required MCP server(s) {string.Join("; ", parts)}. The step cannot execute without these tools.";
 					var mcpFailTrace = eventProcessor.BuildPartialTrace(resolvedSystemPrompt, userPromptRaw, mcpServerDescriptions);
 					_reporter.ReportStepTrace(step.Name, mcpFailTrace);
 					_reporter.ReportStepError(step.Name, errorMessage);
-					LogMcpServersFailed(step.Name, serverList);
+					if (requiredFailed.Count > 0)
+						LogMcpServersFailed(step.Name, string.Join(", ", requiredFailed));
+					if (requiredEmpty.Count > 0)
+						LogMcpServersNoTools(step.Name, string.Join(", ", requiredEmpty));
 					return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: mcpFailTrace, errorCategory: StepErrorCategory.McpFailure, savedFiles: context.TempFileStore?.GetFilesForStep(step.Name));
 				}
 			}
@@ -1002,6 +1079,18 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' agent surfaced a transport error AFTER the LLM declared a terminal status via orchestra_set_status ({CapturedStatus}); skipping executor-level swap retry and honoring the LLM's declared outcome. Suppressed error: {SuppressedError}")]
 	private partial void LogExecutorSkipRetryLlmTerminalStatus(string stepName, string capturedStatus, string suppressedError);
+
+	[LoggerMessage(
+		EventId = 13,
+		Level = LogLevel.Error,
+		Message = "Step '{StepName}' failed because required MCP server(s) connected but exposed 0 tools: {Servers}. Likely upstream backend hasn't finished authenticating, or the proxy is holding a deferred-connection state.")]
+	private partial void LogMcpServersNoTools(string stepName, string servers);
+
+	[LoggerMessage(
+		EventId = 14,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' tool-count probe threw — proceeding without the pre-LLM check. Post-LLM SDK-status check remains as the safety net. Error: {Error}")]
+	private partial void LogMcpToolCountProbeFailed(string stepName, string error);
 
 	#endregion
 }
