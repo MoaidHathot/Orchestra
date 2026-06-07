@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 
 namespace Orchestra.Engine.Tests.Serialization;
@@ -702,6 +703,128 @@ public class OrchestrationParserTests
 		local.Command.Should().Be("node");
 		local.Arguments.Should().BeEquivalentTo(["server.js", "--port", "3000"]);
 		local.WorkingDirectory.Should().Be("/app");
+		// SDK 1.0.0 added LocalMcp.Environment; the parser should default to null when
+		// no 'environment' object is present so unchanged orchestrations behave exactly
+		// as they did before (process-inherited environment).
+		local.Environment.Should().BeNull();
+	}
+
+	[Fact]
+	public void ParseMcps_LocalMcp_WithEnvironment_ParsesIntoDictionary()
+	{
+		// Arrange — the canonical env-injection pattern: API key + per-server NODE_ENV.
+		// Values may carry template expressions ({{env.X}}) that resolve at step time.
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "openai-tool",
+						"type": "local",
+						"command": "npx",
+						"arguments": ["openai-mcp-server"],
+						"environment": {
+							"OPENAI_API_KEY": "{{env.OPENAI_API_KEY}}",
+							"NODE_ENV": "production"
+						}
+					}
+				]
+			}
+			""";
+
+		// Act
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		// Assert
+		mcps.Should().HaveCount(1);
+		var local = mcps[0].Should().BeOfType<LocalMcp>().Subject;
+		local.Environment.Should().NotBeNull();
+		local.Environment!.Should().HaveCount(2);
+		local.Environment!["OPENAI_API_KEY"].Should().Be("{{env.OPENAI_API_KEY}}");
+		local.Environment!["NODE_ENV"].Should().Be("production");
+	}
+
+	[Fact]
+	public void ParseMcps_LocalMcp_EmptyEnvironmentObject_ParsesToNull()
+	{
+		// Arrange — empty {} should behave the same as omitting the field entirely; the
+		// runtime should fall back to the inherited host environment without surfacing
+		// an empty dictionary that downstream code might treat differently.
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "tool",
+						"type": "local",
+						"command": "cmd",
+						"arguments": [],
+						"environment": {}
+					}
+				]
+			}
+			""";
+
+		// Act
+		var mcps = OrchestrationParser.ParseMcps(json);
+
+		// Assert
+		var local = mcps[0].Should().BeOfType<LocalMcp>().Subject;
+		local.Environment.Should().BeNull();
+	}
+
+	[Fact]
+	public void ParseMcps_LocalMcp_EnvironmentWithNonStringValue_Throws()
+	{
+		// Arrange — only strings are valid (template expressions are also strings); a
+		// numeric value is a YAML/JSON authoring mistake we want surfaced immediately.
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "tool",
+						"type": "local",
+						"command": "cmd",
+						"arguments": [],
+						"environment": {
+							"LEVEL": 5
+						}
+					}
+				]
+			}
+			""";
+
+		// Act
+		var act = () => OrchestrationParser.ParseMcps(json);
+
+		// Assert
+		act.Should().Throw<JsonException>()
+			.WithMessage("*non-string value*'LEVEL'*");
+	}
+
+	[Fact]
+	public void ParseMcps_LocalMcp_EnvironmentAsArray_Throws()
+	{
+		// Arrange — a JSON array is the most common shape mistake (authors thinking of
+		// it as a list of strings rather than a key/value map). Surface a clear error.
+		var json = """
+			{
+				"mcps": [
+					{
+						"name": "tool",
+						"type": "local",
+						"command": "cmd",
+						"arguments": [],
+						"environment": ["KEY=value"]
+					}
+				]
+			}
+			""";
+
+		// Act
+		var act = () => OrchestrationParser.ParseMcps(json);
+
+		// Assert
+		act.Should().Throw<JsonException>()
+			.WithMessage("*invalid 'environment' value*JSON object*");
 	}
 
 	[Fact]

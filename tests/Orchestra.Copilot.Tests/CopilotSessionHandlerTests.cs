@@ -2116,6 +2116,208 @@ public class CopilotSessionHandlerTests
 	}
 
 	[Fact]
+	public void HandleEvent_ModelCallFailure_EmitsModelCallFailureEvent_AndDoesNotFault()
+	{
+		// Arrange — SDK 1.0.0's ModelCallFailureEvent: an individual model API call
+		// fails (HTTP 503 from upstream broker, say) but the CLI's own retry loop will
+		// recover. Handler should emit a structured AgentEvent for observability and
+		// MUST NOT fault the TaskCompletionSource — pre-empting CLI recovery would
+		// consume a swap budget for a transient blip.
+		var evt = new ModelCallFailureEvent
+		{
+			Data = new ModelCallFailureData
+			{
+				Source = ModelCallFailureSource.TopLevel,
+				Model = "claude-opus-4.6",
+				ErrorMessage = "Upstream broker returned 503 Service Unavailable",
+				StatusCode = 503,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert — exactly one AgentEvent emitted, no exception faulted onto _done.
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.ModelCallFailure);
+		emitted.ModelCallFailureSource.Should().Be("top_level");
+		emitted.ModelCallFailureModel.Should().Be("claude-opus-4.6");
+		emitted.ModelCallFailureMessage.Should().Be("Upstream broker returned 503 Service Unavailable");
+		emitted.ModelCallFailureStatusCode.Should().Be(503);
+
+		// No additional events follow this single emission.
+		_channel.Reader.TryRead(out var nextEvt).Should().BeFalse();
+		nextEvt.Should().BeNull();
+
+		// Crucially: the TCS must not be faulted. The CLI retry path owns the
+		// session-fail decision; we are observational only on ModelCallFailure.
+		_done.Task.IsCompleted.Should().BeFalse(
+			"ModelCallFailureEvent is observational — only SessionErrorEvent / SessionShutdownEvent should fault the session TCS");
+	}
+
+	[Fact]
+	public void HandleEvent_Usage_SurfacesInterTokenLatencyOnAgentEvent()
+	{
+		// Arrange — SDK 1.0.0 added AssistantUsageData.InterTokenLatency (TimeSpan?).
+		// We project it to milliseconds on AgentEvent.InterTokenLatencyMs so consumers
+		// can graph streaming-perf without re-querying.
+		#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only
+		var evt = new AssistantUsageEvent
+		{
+			Data = new AssistantUsageData
+			{
+				Model = "claude-opus-4.6",
+				InputTokens = 1000,
+				OutputTokens = 200,
+				InterTokenLatency = TimeSpan.FromMilliseconds(42),
+			}
+		};
+		#pragma warning restore GHCP001
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var usage).Should().BeTrue();
+		usage!.Type.Should().Be(AgentEventType.Usage);
+		usage.InterTokenLatencyMs.Should().Be(42.0);
+	}
+
+	[Fact]
+	public void HandleEvent_Info_SurfacesTipAndUrl()
+	{
+		// Arrange — SDK 1.0.0 added Tip + Url alongside InfoType + Message.
+		var evt = new SessionInfoEvent
+		{
+			Data = new SessionInfoData
+			{
+				InfoType = "auth_handshake_required",
+				Message = "Run `gh auth login` to refresh your token.",
+				Tip = "Use `--scopes copilot` for full access.",
+				Url = "https://docs.example/auth-refresh",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var info).Should().BeTrue();
+		info!.Type.Should().Be(AgentEventType.Info);
+		info.InfoTip.Should().Be("Use `--scopes copilot` for full access.");
+		info.InfoUrl.Should().Be("https://docs.example/auth-refresh");
+	}
+
+	[Fact]
+	public void HandleEvent_Warning_SurfacesUrl()
+	{
+		// Arrange — SDK 1.0.0 added Url to warnings (typically a status-page link).
+		var evt = new SessionWarningEvent
+		{
+			Data = new SessionWarningData
+			{
+				WarningType = "model_degraded",
+				Message = "Model latency elevated.",
+				Url = "https://status.example/model-x",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var warning).Should().BeTrue();
+		warning!.Type.Should().Be(AgentEventType.Warning);
+		warning.WarningUrl.Should().Be("https://status.example/model-x");
+	}
+
+	[Fact]
+	public void HandleEvent_Shutdown_CapturesStructuredBillingSummary()
+	{
+		// Arrange — SDK 1.0.0 SessionShutdownEvent carries a structured billing payload
+		// that replaces the per-usage QuotaSnapshots / TotalNanoAiu of 0.3.0. Handler
+		// must project it into AgentSessionShutdownSummary and expose via
+		// ShutdownSummary so CopilotAgent can include it in AgentResult.FinalUsage.
+		#pragma warning disable GHCP001 // SessionShutdownData.TotalNanoAiu + ShutdownModelMetric.* are evaluation-only
+		var evt = new SessionShutdownEvent
+		{
+			Data = new SessionShutdownData
+			{
+				ShutdownType = ShutdownType.Routine,
+				// SessionStartTime is `required` on the SDK 1.0.0 SessionShutdownData. The handler
+				// does not consume the field but the SDK's record initializer demands it.
+				SessionStartTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+				ConversationTokens = 9_001,
+				CurrentTokens = 9_500,
+				SystemTokens = 250,
+				ToolDefinitionsTokens = 1_200,
+				TotalApiDuration = TimeSpan.FromSeconds(42),
+				TotalNanoAiu = 12_345.678,
+				CodeChanges = new ShutdownCodeChanges
+				{
+					FilesModified = ["src/Foo.cs", "src/Bar.cs"],
+					LinesAdded = 17,
+					LinesRemoved = 4,
+				},
+				ModelMetrics = new Dictionary<string, ShutdownModelMetric>(StringComparer.Ordinal)
+				{
+					["claude-opus-4.6"] = new ShutdownModelMetric
+					{
+						TotalNanoAiu = 12_000,
+						Requests = new ShutdownModelMetricRequests
+						{
+							Count = 5,
+							Cost = 0.123,
+						},
+						Usage = new ShutdownModelMetricUsage
+						{
+							InputTokens = 800,
+							OutputTokens = 200,
+							CacheReadTokens = 50,
+							CacheWriteTokens = 25,
+							ReasoningTokens = 30,
+						}
+					}
+				}
+			}
+		};
+		#pragma warning restore GHCP001
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert — shutdown summary materialised with full fidelity.
+		var summary = _handler.ShutdownSummary;
+		summary.Should().NotBeNull();
+		summary!.TotalNanoAiu.Should().Be(12_345.678);
+		summary.ConversationTokens.Should().Be(9_001);
+		summary.CurrentTokens.Should().Be(9_500);
+		summary.SystemTokens.Should().Be(250);
+		summary.ToolDefinitionsTokens.Should().Be(1_200);
+		summary.TotalApiDuration.Should().Be(TimeSpan.FromSeconds(42));
+
+		summary.CodeChanges.Should().NotBeNull();
+		summary.CodeChanges!.FilesModified.Should().BeEquivalentTo(["src/Foo.cs", "src/Bar.cs"]);
+		summary.CodeChanges.LinesAdded.Should().Be(17);
+		summary.CodeChanges.LinesRemoved.Should().Be(4);
+
+		summary.ModelMetrics.Should().NotBeNull();
+		summary.ModelMetrics!.Should().ContainKey("claude-opus-4.6");
+		var modelMetric = summary.ModelMetrics!["claude-opus-4.6"];
+		modelMetric.TotalNanoAiu.Should().Be(12_000);
+		modelMetric.Requests!.Count.Should().Be(5);
+		modelMetric.Requests.Cost.Should().Be(0.123);
+		modelMetric.Usage!.InputTokens.Should().Be(800);
+		modelMetric.Usage.OutputTokens.Should().Be(200);
+		modelMetric.Usage.CacheReadTokens.Should().Be(50);
+		modelMetric.Usage.CacheWriteTokens.Should().Be(25);
+		modelMetric.Usage.ReasoningTokens.Should().Be(30);
+
+		// Routine shutdown must complete the TCS — this matches the pre-1.0.0 behaviour.
+		_done.Task.IsCompletedSuccessfully.Should().BeTrue();
+	}
+
+	[Fact]
 	public void HandleEvent_SystemNotificationEvent_EmitsSystemNotificationWithKindAndMessage()
 	{
 		// Arrange — SDK 0.3.0 system notification with typed discriminator.

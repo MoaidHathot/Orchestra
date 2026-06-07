@@ -205,6 +205,14 @@ public static partial class TemplateResolver
 				WorkingDirectory = local.WorkingDirectory is not null
 					? ResolveStatic(local.WorkingDirectory, parameters, context)
 					: null,
+				// Resolve template expressions (e.g. {{env.OPENAI_API_KEY}}, {{param.token}})
+				// inside each env value, the same way Command / Arguments / WorkingDirectory
+				// are resolved. Keys stay verbatim; only values flow through ResolveStatic.
+				// Returns null when the source dict is null or empty so the consumer falls
+				// back to inheriting the host process environment.
+				Environment = local.Environment is { Count: > 0 } envEntries
+					? envEntries.ToDictionary(kv => kv.Key, kv => ResolveStatic(kv.Value, parameters, context))
+					: null,
 				Timeout = resolvedTimeout,
 				// Once resolved, drop the template — downstream code should consume the
 				// concrete Timeout. Keeping the template around invites double-resolution

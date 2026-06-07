@@ -147,6 +147,16 @@ public enum AuditEventType
 	/// <summary>A tool call completed (post-hook).</summary>
 	PostToolUse,
 
+	/// <summary>
+	/// A tool call completed with a failure. SDK 1.0.0 (PR #1013) introduced a dedicated
+	/// failure-side hook (<c>SessionHooks.OnPostToolUseFailure</c>) that fires only when
+	/// the tool execution errored — the success-path <see cref="PostToolUse"/> entry is
+	/// not emitted in that case. Separating success and failure into distinct entries
+	/// keeps audit-log consumers from having to inspect <c>ToolSuccess</c> to decide
+	/// whether a tool call faulted; it also makes failure-rate analytics cheaper.
+	/// </summary>
+	PostToolUseFailure,
+
 	/// <summary>An error occurred during the session.</summary>
 	Error,
 

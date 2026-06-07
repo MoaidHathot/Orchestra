@@ -42,6 +42,11 @@ public abstract class AgentBuilder
 	/// </summary>
 	protected ImageAttachment[] Attachments { get; private set; } = [];
 
+	/// <summary>
+	/// Optional list of tool names to exclude from the main agent's tool catalog.
+	/// </summary>
+	protected string[] ExcludedTools { get; private set; } = [];
+
 	public AgentBuilder WithModel(string model)
 	{
 		Model = model;
@@ -132,6 +137,24 @@ public abstract class AgentBuilder
 	public AgentBuilder WithAttachments(params ImageAttachment[] attachments)
 	{
 		Attachments = attachments;
+		return this;
+	}
+
+	/// <summary>
+	/// Configures the main agent's tool exclusion list. The named tools are removed from
+	/// the SDK's built-in tool catalog before the model sees it, so the agent cannot
+	/// invoke them. Sub-agents are not affected unless they declare their own
+	/// <see cref="Subagent.Tools"/> filter.
+	/// </summary>
+	/// <remarks>
+	/// Tool names use the Copilot SDK's wire vocabulary — typical built-ins include
+	/// <c>"shell"</c>, <c>"edit_file"</c>, <c>"write_file"</c>, <c>"view"</c>, and
+	/// <c>"bash"</c>. Use this for least-privilege patterns where a step should be able
+	/// to read but not write, or where shell access is forbidden by host policy.
+	/// </remarks>
+	public AgentBuilder WithExcludedTools(params string[] toolNames)
+	{
+		ExcludedTools = toolNames ?? [];
 		return this;
 	}
 

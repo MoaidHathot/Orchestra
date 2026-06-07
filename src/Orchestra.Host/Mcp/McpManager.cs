@@ -241,6 +241,10 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 							Command = l.Command,
 							Arguments = l.Arguments,
 							WorkingDirectory = l.WorkingDirectory,
+							// Carry Environment across the default-timeout clone; dropping it
+							// here would silently strip env vars (commonly API keys) from
+							// every MCP that goes through the data-plane catch-all path.
+							Environment = l.Environment,
 							Timeout = defaultTimeout,
 						},
 						_ => current,
@@ -301,6 +305,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 							Command = l.Command,
 							Arguments = l.Arguments,
 							WorkingDirectory = l.WorkingDirectory,
+							// Same as the data-plane clone above — preserve Environment
+							// across the catch-all default-timeout clone.
+							Environment = l.Environment,
 							Timeout = defaultTimeout,
 						},
 						_ => current,
@@ -596,9 +603,19 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 				switch (mcp)
 				{
 					case LocalMcp local:
-						proxy.AddStdioServer(mcp.Name, local.Command, local.Arguments)
-							.WithTitle(mcp.Name)
-							.Build();
+						var stdioBuilder = proxy.AddStdioServer(mcp.Name, local.Command, local.Arguments)
+							.WithTitle(mcp.Name);
+						// McpProxy.Sdk 1.19's IServerBuilder.WithEnvironment(Dictionary<string,string>)
+						// forwards env vars to the spawned MCP stdio process; mirrors the new
+						// LocalMcp.Environment Orchestra schema field. Skip when no env was
+						// configured so the inherited host environment remains the default
+						// (matches the pre-1.0 behaviour for unchanged orchestrations).
+						if (local.Environment is { Count: > 0 } envEntries)
+						{
+							stdioBuilder.WithEnvironment(envEntries.ToDictionary(
+								kv => kv.Key, kv => kv.Value, StringComparer.Ordinal));
+						}
+						stdioBuilder.Build();
 						break;
 
 					case RemoteMcp remote:

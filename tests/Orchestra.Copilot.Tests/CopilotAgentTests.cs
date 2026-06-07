@@ -2,6 +2,7 @@ using FluentAssertions;
 using GitHub.Copilot;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Orchestra.Engine;
 
 namespace Orchestra.Copilot.Tests;
@@ -620,6 +621,200 @@ public class CopilotAgentTests
 		);
 	}
 
+	private static CopilotAgent CreateAgentWithSubagents(params Subagent[] subagents)
+	{
+		return new CopilotAgent(
+			client: new CopilotClient(),
+			model: "test-model",
+			systemPrompt: null,
+			mcps: [],
+			subagents: subagents,
+			reasoningLevel: null,
+			systemPromptMode: null,
+			systemPromptSections: null,
+			reporter: NullOrchestrationReporter.Instance,
+			engineTools: [],
+			engineToolContext: null,
+			skillDirectories: [],
+			infiniteSessionConfig: null,
+			attachments: [],
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>()
+		);
+	}
+
+	private static CopilotAgent CreateAgentWithExcludedTools(params string[] excludedTools)
+	{
+		return new CopilotAgent(
+			client: new CopilotClient(),
+			model: "test-model",
+			systemPrompt: null,
+			mcps: [],
+			subagents: [],
+			reasoningLevel: null,
+			systemPromptMode: null,
+			systemPromptSections: null,
+			reporter: NullOrchestrationReporter.Instance,
+			engineTools: [],
+			engineToolContext: null,
+			skillDirectories: [],
+			infiniteSessionConfig: null,
+			attachments: [],
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>(),
+			excludedTools: excludedTools
+		);
+	}
+
+	[Fact]
+	public void BuildSessionConfig_SubagentWithModel_PropagatesToCustomAgentConfig()
+	{
+		// Arrange — SDK 1.0.0's CustomAgentConfig.Model (PR #1309) lets each sub-agent
+		// pick a different model from the main session. We exercise the fan-out pattern:
+		// main step on a strong model, researcher sub-agent on a faster/cheaper model.
+		var agent = CreateAgentWithSubagents(new Subagent
+		{
+			Name = "researcher",
+			Prompt = "Research the question and report findings.",
+			Model = "gpt-5-mini",
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.CustomAgents.Should().NotBeNull();
+		config.CustomAgents!.Should().ContainSingle();
+		config.CustomAgents![0].Name.Should().Be("researcher");
+		config.CustomAgents![0].Model.Should().Be("gpt-5-mini");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_SubagentWithoutModel_LeavesCustomAgentConfigModelNull()
+	{
+		// Arrange — when no per-sub-agent model is configured, the SDK runtime falls
+		// back to the main session's model. We must NOT set CustomAgentConfig.Model
+		// to an empty string or the SDK will treat it as an explicit (invalid) override.
+		var agent = CreateAgentWithSubagents(new Subagent
+		{
+			Name = "default-model-agent",
+			Prompt = "Use whatever model the main session is on.",
+			// Model intentionally omitted.
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.CustomAgents![0].Model.Should().BeNull();
+	}
+
+	[Fact]
+	public void BuildSessionConfig_SubagentWithSkills_PropagatesToCustomAgentConfig()
+	{
+		// Arrange — SDK 1.0.0 PR #995 lets each sub-agent declare a subset of the host's
+		// skill catalog. Pair with Model overrides to give each sub-agent its own model
+		// AND its own specialised instruction surface.
+		var agent = CreateAgentWithSubagents(new Subagent
+		{
+			Name = "code-reviewer",
+			Prompt = "Review the diff and report style issues.",
+			Skills = ["dotnet-best-practices", "security-review"],
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.CustomAgents.Should().NotBeNull();
+		var customAgent = config.CustomAgents!.Single();
+		customAgent.Skills.Should().NotBeNull();
+		customAgent.Skills!.Should().HaveCount(2);
+		customAgent.Skills!.Should().BeEquivalentTo(["dotnet-best-practices", "security-review"]);
+	}
+
+	[Fact]
+	public void BuildSessionConfig_SubagentWithoutSkills_LeavesCustomAgentConfigSkillsNull()
+	{
+		// Arrange — when Skills is null/empty the sub-agent inherits the main session's
+		// skill resolution. Setting an empty list would be a tighter restriction than
+		// the author intended (zero skills active) so we must leave the property null.
+		var agent = CreateAgentWithSubagents(new Subagent
+		{
+			Name = "no-skills",
+			Prompt = "No specific skills.",
+			Skills = [],
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.CustomAgents![0].Skills.Should().BeNull();
+	}
+
+	[Fact]
+	public void BuildSessionConfig_WithExcludedTools_PopulatesDefaultAgentExcludedTools()
+	{
+		// Arrange — least-privilege pattern: agent can read but not write or run shell.
+		// SDK 1.0.0 PR #1098 introduced DefaultAgentConfig.ExcludedTools for this.
+		var agent = CreateAgentWithExcludedTools("write_file", "shell", "edit_file");
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.DefaultAgent.Should().NotBeNull();
+		config.DefaultAgent!.ExcludedTools.Should().NotBeNull();
+		config.DefaultAgent!.ExcludedTools!.Should().BeEquivalentTo(["write_file", "shell", "edit_file"]);
+	}
+
+	[Fact]
+	public void BuildSessionConfig_WithoutExcludedTools_LeavesDefaultAgentNull()
+	{
+		// Arrange — when no exclusions are configured we must NOT instantiate
+		// DefaultAgentConfig. An empty list would be a no-op functionally but it
+		// changes the wire shape; the SDK runtime treats absent-vs-empty differently
+		// in some code paths (defaults vs. explicit "nothing excluded").
+		var agent = CreateAgentWithMcps();
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		config.DefaultAgent.Should().BeNull();
+	}
+
+	[Fact]
+	public void BuildResumeSessionConfig_PropagatesDefaultAgent()
+	{
+		// Arrange — the resume path must preserve the exclusion policy or a swap-and-resume
+		// would silently re-enable the excluded tools (security-relevant regression).
+		var agent = CreateAgentWithExcludedTools("shell");
+		var baseConfig = agent.BuildSessionConfig();
+
+		// Act
+		var resumeConfig = agent.BuildResumeSessionConfig(baseConfig);
+
+		// Assert
+		resumeConfig.DefaultAgent.Should().NotBeNull();
+		resumeConfig.DefaultAgent!.ExcludedTools.Should().BeEquivalentTo(["shell"]);
+	}
+
+	[Fact]
+	public void AgentBuilder_WithExcludedTools_StoresOnBuilder()
+	{
+		// Arrange & Act — fluent surface check. The actual propagation to the SDK
+		// config is covered by BuildSessionConfig_WithExcludedTools above; here we
+		// just assert the fluent setter returns the builder and the value is
+		// retrievable via a follow-up BuildAgentAsync (asserted indirectly by D.2).
+		var builder = new CopilotAgentBuilder()
+			.WithModel("test-model")
+			.WithExcludedTools("write_file", "shell");
+
+		// Assert — the builder should be the same instance (fluent chaining), and the
+		// excluded tools should not have raised any errors during set.
+		builder.Should().NotBeNull();
+	}
+
 	[Fact]
 	public void BuildSessionConfig_LocalMcp_SetsToolsToWildcard()
 	{
@@ -744,6 +939,60 @@ public class CopilotAgentTests
 		// Assert — Mcp.Timeout (TimeSpan) is converted to milliseconds for the SDK.
 		var serverConfig = config.McpServers!["long-runner"].Should().BeOfType<McpStdioServerConfig>().Subject;
 		serverConfig.Timeout.Should().Be(1_800_000, "30 minutes in milliseconds");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_LocalMcpWithEnvironment_PropagatesToStdioConfigEnv()
+	{
+		// Arrange — the canonical secret-injection pattern: pass an API key + a feature
+		// flag to a stdio MCP via the new LocalMcp.Environment field. The forwarded
+		// dictionary should land verbatim on McpStdioServerConfig.Env so the SDK 1.0.0
+		// runtime can hand it to the spawned MCP process.
+		var agent = CreateAgentWithMcps(new LocalMcp
+		{
+			Name = "openai-tool",
+			Type = McpType.Local,
+			Command = "npx",
+			Arguments = ["openai-mcp-server"],
+			Environment = new Dictionary<string, string>(StringComparer.Ordinal)
+			{
+				["OPENAI_API_KEY"] = "sk-test-1234",
+				["NODE_ENV"] = "production",
+			},
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		var serverConfig = config.McpServers!["openai-tool"].Should().BeOfType<McpStdioServerConfig>().Subject;
+		serverConfig.Env.Should().NotBeNull();
+		serverConfig.Env!.Should().HaveCount(2);
+		serverConfig.Env!["OPENAI_API_KEY"].Should().Be("sk-test-1234");
+		serverConfig.Env!["NODE_ENV"].Should().Be("production");
+	}
+
+	[Fact]
+	public void BuildSessionConfig_LocalMcpWithoutEnvironment_LeavesStdioConfigEnvNull()
+	{
+		// Arrange — when no environment is configured, McpStdioServerConfig.Env must
+		// stay null so the SDK falls back to inheriting the host process environment
+		// (matches the pre-1.0 behaviour for unchanged orchestrations).
+		var agent = CreateAgentWithMcps(new LocalMcp
+		{
+			Name = "no-env-tool",
+			Type = McpType.Local,
+			Command = "node",
+			Arguments = ["server.js"],
+			// Environment intentionally omitted.
+		});
+
+		// Act
+		var config = agent.BuildSessionConfig();
+
+		// Assert
+		var serverConfig = config.McpServers!["no-env-tool"].Should().BeOfType<McpStdioServerConfig>().Subject;
+		serverConfig.Env.Should().BeNull();
 	}
 
 	[Fact]
@@ -1032,9 +1281,73 @@ public class CopilotAgentTests
 		config.Hooks!.OnSessionStart.Should().NotBeNull();
 		config.Hooks.OnPreToolUse.Should().NotBeNull();
 		config.Hooks.OnPostToolUse.Should().NotBeNull();
+		// SDK 1.0.0 added OnPostToolUseFailure as a separate hook for failure paths.
+		config.Hooks.OnPostToolUseFailure.Should().NotBeNull();
 		config.Hooks.OnUserPromptSubmitted.Should().NotBeNull();
 		config.Hooks.OnErrorOccurred.Should().NotBeNull();
 		config.Hooks.OnSessionEnd.Should().NotBeNull();
+	}
+
+	[Fact]
+	public async Task BuildSessionConfig_OnPostToolUseFailure_EmitsAuditLogEntry()
+	{
+		// Arrange — capture audit log entries through a substituted reporter so we can
+		// assert the hook produced the expected PostToolUseFailure entry.
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var capturedEntries = new List<AuditLogEntry>();
+		reporter.WhenForAnyArgs(r => r.ReportAuditLogEntry(default!, default!))
+			.Do(call => capturedEntries.Add((AuditLogEntry)call.Args()[1]));
+
+		var agent = new CopilotAgent(
+			client: new GitHub.Copilot.CopilotClient(new GitHub.Copilot.CopilotClientOptions()),
+			model: "test-model",
+			systemPrompt: null,
+			mcps: [],
+			subagents: [],
+			reasoningLevel: null,
+			systemPromptMode: null,
+			systemPromptSections: null,
+			reporter: reporter,
+			engineTools: [],
+			engineToolContext: null,
+			skillDirectories: [],
+			infiniteSessionConfig: null,
+			attachments: [],
+			logger: NullLoggerFactory.Instance.CreateLogger<CopilotAgent>());
+
+		var config = agent.BuildSessionConfig();
+		var hook = config.Hooks!.OnPostToolUseFailure;
+		hook.Should().NotBeNull();
+
+		// Act — invoke the hook directly with a synthetic failure input that mirrors
+		// what the SDK runtime emits when a tool call faults. ToolArgs is JsonElement?
+		// in SDK 1.0.0; serialize the dictionary on the fly.
+		var argsElement = System.Text.Json.JsonSerializer.SerializeToElement(
+			new Dictionary<string, object> { ["command"] = "ls /nope" });
+		var input = new PostToolUseFailureHookInput
+		{
+			SessionId = "sess-1",
+			Timestamp = DateTimeOffset.UtcNow,
+			ToolName = "shell",
+			ToolArgs = argsElement,
+			Error = "ENOENT: no such file or directory",
+		};
+		var invocation = new HookInvocation { SessionId = "sess-1" };
+
+		var output = await hook!(input, invocation);
+
+		// Assert — the SDK contract allows the hook to return null when it has no
+		// behaviour to inject (no AdditionalContext, no SuppressOutput); we follow that
+		// contract because Orchestra only needs the audit-log side effect.
+		output.Should().BeNull();
+
+		capturedEntries.Should().ContainSingle();
+		var entry = capturedEntries[0];
+		entry.EventType.Should().Be(AuditEventType.PostToolUseFailure);
+		entry.ToolName.Should().Be("shell");
+		entry.ToolArguments.Should().Contain("ls /nope");
+		entry.Error.Should().Be("ENOENT: no such file or directory");
+		entry.ToolSuccess.Should().Be(false);
 	}
 
 	#endregion

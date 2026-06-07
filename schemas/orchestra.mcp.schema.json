@@ -62,6 +62,13 @@
               "workingDirectory": {
                 "type": "string",
                 "description": "Working directory for the MCP server process."
+              },
+              "environment": {
+                "type": "object",
+                "description": "Optional environment variables passed to the spawned MCP server process. Merged on top of the inherited host environment. Values may contain Orchestra template expressions ({{env.X}}, {{param.foo}}, {{step.output}}) that are resolved at step execution time.",
+                "additionalProperties": {
+                  "type": "string"
+                }
               }
             },
             "required": ["command", "arguments"],

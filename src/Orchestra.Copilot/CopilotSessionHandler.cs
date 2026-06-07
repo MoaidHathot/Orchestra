@@ -128,6 +128,17 @@ internal sealed partial class CopilotSessionHandler
 	public AgentUsage? Usage => _usage;
 
 	/// <summary>
+	/// SDK 1.0.0 end-of-session billing summary projected from
+	/// <c>SessionShutdownEvent</c>. Replaces the per-usage QuotaSnapshots / TotalNanoAiu
+	/// that SDK 0.3.0 surfaced on every <c>AssistantUsageEvent</c> — those moved to a
+	/// single terminal payload. <c>null</c> until <c>HandleShutdown</c> fires (e.g. when
+	/// the session ends via <c>SessionIdleEvent</c> without a shutdown envelope, or when
+	/// it faults before the shutdown event is emitted).
+	/// </summary>
+	public AgentSessionShutdownSummary? ShutdownSummary => _shutdownSummary;
+	private AgentSessionShutdownSummary? _shutdownSummary;
+
+	/// <summary>
 	/// Handles a session event from the Copilot SDK.
 	/// </summary>
 	public void HandleEvent(SessionEvent evt)
@@ -252,6 +263,15 @@ internal sealed partial class CopilotSessionHandler
 		// ── Session usage info ──
 		case SessionUsageInfoEvent usageInfo:
 			HandleSessionUsageInfo(usageInfo);
+			break;
+
+		// ── Model-call failure (SDK 1.0.0) ──
+		// Observational only: the CLI's own retry budget normally recovers; if it
+		// can't, a SessionErrorEvent with exhaustedCliRetries=true follows and the
+		// existing swap loop kicks in. Emitting an AgentEvent gives the Portal /
+		// operator logs an early warning of upstream flakiness.
+		case ModelCallFailureEvent modelCallFailure:
+			HandleModelCallFailure(modelCallFailure);
 			break;
 
 		// ── Informational events (silently consumed — no engine-level processing needed) ──
@@ -503,6 +523,26 @@ internal sealed partial class CopilotSessionHandler
 			PriorSessionId = evt.PriorSessionId,
 			ResumedEventCount = evt.ResumedEventCount,
 			ResumeAlreadyInUse = evt.ResumeAlreadyInUse,
+			ModelCallFailureSource = evt.ModelCallFailureSource,
+			ModelCallFailureMessage = evt.ModelCallFailureMessage,
+			ModelCallFailureModel = evt.ModelCallFailureModel,
+			ModelCallFailureStatusCode = evt.ModelCallFailureStatusCode,
+			// SDK 1.0.0 richer diagnostic fields — pass through verbatim from the emitter.
+			InterTokenLatencyMs = evt.InterTokenLatencyMs,
+			InfoTip = evt.InfoTip,
+			InfoUrl = evt.InfoUrl,
+			WarningUrl = evt.WarningUrl,
+			ToolExecutionModel = evt.ToolExecutionModel,
+			ToolExecutionTurnId = evt.ToolExecutionTurnId,
+			ToolDisplayVerbatim = evt.ToolDisplayVerbatim,
+			ToolSandboxed = evt.ToolSandboxed,
+			ToolDescription = evt.ToolDescription,
+			ResumeSessionWasActive = evt.ResumeSessionWasActive,
+			ResumeContinuePendingWork = evt.ResumeContinuePendingWork,
+			MessageModel = evt.MessageModel,
+			MessageOutputTokens = evt.MessageOutputTokens,
+			MessageRequestId = evt.MessageRequestId,
+			MessageTurnId = evt.MessageTurnId,
 			ActorAgentName = ctx.AgentName,
 			ActorAgentDisplayName = ctx.AgentDisplayName,
 			ActorToolCallId = ctx.ToolCallId,
@@ -544,6 +584,12 @@ internal sealed partial class CopilotSessionHandler
 		var ttftMs = usageEvt.Data.TimeToFirstToken is { } ttft
 			? (double?)ttft.TotalMilliseconds
 			: null;
+		// SDK 1.0.0 added AssistantUsageData.InterTokenLatency (TimeSpan?) — the
+		// average inter-token gap during a streaming response. Project to ms for
+		// AgentEvent.InterTokenLatencyMs.
+		var interTokenLatencyMs = usageEvt.Data.InterTokenLatency is { } itl
+			? (double?)itl.TotalMilliseconds
+			: null;
 
 		_usage = new AgentUsage
 		{
@@ -563,6 +609,7 @@ internal sealed partial class CopilotSessionHandler
 			Type = AgentEventType.Usage,
 			Model = _actualModel,
 			Usage = _usage,
+			InterTokenLatencyMs = interTokenLatencyMs,
 		});
 	}
 
@@ -596,6 +643,13 @@ internal sealed partial class CopilotSessionHandler
 		{
 			Type = AgentEventType.Message,
 			Content = msg.Data.Content,
+			// SDK 1.0.0 richer diagnostic fields: surface the model, output-token
+			// count, request id, and turn id so downstream consumers can correlate
+			// per-message billing and trace upstream provider issues.
+			MessageModel = msg.Data.Model,
+			MessageOutputTokens = msg.Data.OutputTokens,
+			MessageRequestId = msg.Data.RequestId,
+			MessageTurnId = msg.Data.TurnId,
 		}, ResolveActor(ReadParentToolCallId(msg.Data)));
 	}
 
@@ -629,6 +683,12 @@ internal sealed partial class CopilotSessionHandler
 			ToolName = toolName,
 			ToolArguments = serializedArgs,
 			McpServerName = toolStart.Data.McpServerName,
+			// SDK 1.0.0 richer fields: which model issued the tool call, which turn
+			// it belongs to, and whether the runtime hints the output should be shown
+			// verbatim.
+			ToolExecutionModel = toolStart.Data.Model,
+			ToolExecutionTurnId = toolStart.Data.TurnId,
+			ToolDisplayVerbatim = toolStart.Data.DisplayVerbatim,
 		}, ResolveActor(ReadParentToolCallId(toolStart.Data)));
 	}
 
@@ -649,6 +709,12 @@ internal sealed partial class CopilotSessionHandler
 			ToolSuccess = toolComplete.Data.Success,
 			ToolResult = toolComplete.Data.Result?.Content ?? toolComplete.Data.Result?.DetailedContent,
 			ToolError = toolComplete.Data.Error?.Message,
+			// SDK 1.0.0 richer fields: same model/turn correlation as ToolExecutionStart,
+			// plus Sandboxed and the human-readable Description.
+			ToolExecutionModel = toolComplete.Data.Model,
+			ToolExecutionTurnId = toolComplete.Data.TurnId,
+			ToolSandboxed = toolComplete.Data.Sandboxed,
+			ToolDescription = toolComplete.Data.ToolDescription?.Description,
 		}, ResolveActor(ReadParentToolCallId(toolComplete.Data)));
 	}
 
@@ -738,6 +804,8 @@ internal sealed partial class CopilotSessionHandler
 			Type = AgentEventType.Warning,
 			ErrorMessage = warning.Data.Message,
 			DiagnosticType = warning.Data.WarningType,
+			// SDK 1.0.0 added Url so the CLI can include a remediation / docs link.
+			WarningUrl = warning.Data.Url,
 		});
 	}
 
@@ -749,6 +817,10 @@ internal sealed partial class CopilotSessionHandler
 			Type = AgentEventType.Info,
 			Content = info.Data.Message,
 			DiagnosticType = info.Data.InfoType,
+			// SDK 1.0.0 added Tip + Url alongside the existing Message/InfoType so the
+			// CLI can attach hyperlinks and one-liner remediation hints.
+			InfoTip = info.Data.Tip,
+			InfoUrl = info.Data.Url,
 		});
 	}
 
@@ -970,6 +1042,45 @@ internal sealed partial class CopilotSessionHandler
 		});
 	}
 
+	/// <summary>
+	/// Handles SDK 1.0.0's <c>ModelCallFailureEvent</c>. This fires when an individual
+	/// model API call faults (HTTP error, timeout, rate-limit) WITHOUT ending the
+	/// session — the CLI's own retry loop normally recovers. We capture it for
+	/// observability so the Portal and operator logs can show upstream flakiness
+	/// ahead of an eventual <see cref="SessionErrorEvent"/>.
+	/// </summary>
+	/// <remarks>
+	/// We deliberately do NOT fault the TaskCompletionSource here. If the CLI's retry
+	/// budget runs out, it surfaces a <c>SessionErrorEvent</c> with the
+	/// "retried N times" / "Failed to get response from the AI model" pattern which
+	/// our existing <see cref="LooksLikeCliExhaustedRetries"/> matcher classifies as
+	/// swap-eligible. Eagerly faulting on the first ModelCallFailure would pre-empt
+	/// the CLI's recovery and consume a swap budget for what is usually a transient
+	/// per-call blip.
+	/// </remarks>
+	private void HandleModelCallFailure(ModelCallFailureEvent failure)
+	{
+		var source = failure.Data.Source.Value;
+		var message = failure.Data.ErrorMessage;
+		var model = failure.Data.Model;
+		var statusCode = failure.Data.StatusCode;
+
+		LogModelCallFailure(
+			source ?? "(unknown)",
+			model ?? "(unknown)",
+			statusCode,
+			message ?? "(no message)");
+
+		EmitEvent(new AgentEvent
+		{
+			Type = AgentEventType.ModelCallFailure,
+			ModelCallFailureSource = source,
+			ModelCallFailureMessage = message,
+			ModelCallFailureModel = model,
+			ModelCallFailureStatusCode = statusCode,
+		});
+	}
+
 	private void HandleSessionResume(SessionResumeEvent resumeEvt)
 	{
 		_lastResumeData = resumeEvt.Data;
@@ -991,6 +1102,12 @@ internal sealed partial class CopilotSessionHandler
 			Model = resumeEvt.Data.SelectedModel,
 			ResumedEventCount = (int)Math.Min(int.MaxValue, resumeEvt.Data.EventCount),
 			ResumeAlreadyInUse = alreadyInUse,
+			// SDK 1.0.0 added SessionWasActive + ContinuePendingWork to the resume
+			// envelope. SessionWasActive=true means the prior CLI still had work in
+			// flight when we resumed; ContinuePendingWork tells us whether the runtime
+			// is going to re-deliver that pending message after the resume.
+			ResumeSessionWasActive = resumeEvt.Data.SessionWasActive,
+			ResumeContinuePendingWork = resumeEvt.Data.ContinuePendingWork,
 		});
 	}
 
@@ -1060,6 +1177,13 @@ internal sealed partial class CopilotSessionHandler
 		var errorReason = shutdown.Data.ErrorReason;
 		var shutdownType = shutdown.Data.ShutdownType.ToString();
 
+		// SDK 1.0.0 surfaces a structured billing roll-up on every shutdown event
+		// (the per-usage QuotaSnapshots / TotalNanoAiu fields disappeared in 1.0.0).
+		// Capture the summary BEFORE we decide whether the shutdown was clean or
+		// abnormal — even error shutdowns carry token / nano-AIU counters so the
+		// engine can include them in failure telemetry.
+		_shutdownSummary = ProjectShutdownSummary(shutdown.Data);
+
 		if (!string.IsNullOrEmpty(errorReason))
 		{
 			// Abnormal shutdown — the CLI is terminating because of an error.
@@ -1087,6 +1211,76 @@ internal sealed partial class CopilotSessionHandler
 			Content = $"Session shutdown ({shutdownType})",
 		});
 		_done.TrySetResult();
+	}
+
+	/// <summary>
+	/// Projects the SDK 1.0.0 <c>SessionShutdownData</c> into Orchestra's
+	/// <see cref="AgentSessionShutdownSummary"/>. Per-model breakdown and code-change
+	/// counters are passed through verbatim when present; absent fields stay null so
+	/// downstream consumers can distinguish "no data" from "zero".
+	/// </summary>
+	/// <remarks>
+	/// SDK 1.0.0 marks several billing-related fields with the GHCP001 "evaluation-only"
+	/// diagnostic (<c>SessionShutdownData.TotalNanoAiu</c>,
+	/// <c>ShutdownModelMetric.TotalNanoAiu</c>, <c>ShutdownModelMetricRequests.Count</c>,
+	/// <c>ShutdownModelMetricRequests.Cost</c>). They are wire-compatible with 0.3.0's
+	/// shape and our consumers already treat them as best-effort, so we suppress the
+	/// diagnostic locally rather than removing the fields from our shutdown summary.
+	/// </remarks>
+	private static AgentSessionShutdownSummary ProjectShutdownSummary(SessionShutdownData data)
+	{
+		AgentShutdownCodeChanges? codeChanges = null;
+		if (data.CodeChanges is { } cc)
+		{
+			codeChanges = new AgentShutdownCodeChanges(
+				FilesModified: cc.FilesModified is { Length: > 0 } files ? files : [],
+				LinesAdded: cc.LinesAdded,
+				LinesRemoved: cc.LinesRemoved);
+		}
+
+		IReadOnlyDictionary<string, AgentShutdownModelMetric>? modelMetrics = null;
+		if (data.ModelMetrics is { Count: > 0 } metrics)
+		{
+			var projected = new Dictionary<string, AgentShutdownModelMetric>(metrics.Count, StringComparer.Ordinal);
+			foreach (var (model, metric) in metrics)
+			{
+				if (metric is null) continue;
+				#pragma warning disable GHCP001 // ShutdownModelMetric.TotalNanoAiu / Requests.* are evaluation-only
+				projected[model] = new AgentShutdownModelMetric
+				{
+					TotalNanoAiu = metric.TotalNanoAiu,
+					Requests = metric.Requests is { } r
+						? new AgentShutdownModelMetricRequests(r.Count, r.Cost)
+						: null,
+					Usage = metric.Usage is { } u
+						? new AgentShutdownModelMetricUsage(
+							InputTokens: u.InputTokens,
+							OutputTokens: u.OutputTokens,
+							CacheReadTokens: u.CacheReadTokens,
+							CacheWriteTokens: u.CacheWriteTokens,
+							ReasoningTokens: u.ReasoningTokens)
+						: null,
+				};
+				#pragma warning restore GHCP001
+			}
+			modelMetrics = projected;
+		}
+
+		#pragma warning disable GHCP001 // SessionShutdownData.TotalNanoAiu is evaluation-only
+		var totalNanoAiu = data.TotalNanoAiu;
+		#pragma warning restore GHCP001
+
+		return new AgentSessionShutdownSummary
+		{
+			TotalNanoAiu = totalNanoAiu,
+			ConversationTokens = data.ConversationTokens,
+			ToolDefinitionsTokens = data.ToolDefinitionsTokens,
+			SystemTokens = data.SystemTokens,
+			CurrentTokens = data.CurrentTokens,
+			TotalApiDuration = data.TotalApiDuration,
+			CodeChanges = codeChanges,
+			ModelMetrics = modelMetrics,
+		};
 	}
 
 	private void HandleTaskComplete(SessionTaskCompleteEvent taskComplete)
@@ -1322,6 +1516,21 @@ internal sealed partial class CopilotSessionHandler
 		long eventCount,
 		string selectedModel,
 		string resumeTime);
+
+	// EventId 11: SDK 1.0.0 introduced ModelCallFailureEvent — a single failing model API
+	// call (HTTP error, timeout, rate-limit) that does NOT yet end the session. The CLI
+	// retries internally; if it gives up, our existing SessionErrorEvent / swap-loop
+	// machinery kicks in. We log at Warning so the operator log shows upstream flakiness
+	// without alarming on every transient retry.
+	[LoggerMessage(
+		EventId = 11,
+		Level = LogLevel.Warning,
+		Message = "Model call failure (source={Source}, model={Model}, statusCode={StatusCode}, message={Message}) — CLI retry loop will attempt recovery")]
+	private partial void LogModelCallFailure(
+		string source,
+		string model,
+		int? statusCode,
+		string message);
 
 	#endregion
 }

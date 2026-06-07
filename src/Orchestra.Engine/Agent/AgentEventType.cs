@@ -76,4 +76,16 @@ public enum AgentEventType
 	/// <see cref="AgentEvent.ResumedEventCount"/>, <see cref="AgentEvent.ResumeAlreadyInUse"/>.
 	/// </summary>
 	SessionResumed,
+
+	/// <summary>
+	/// SDK 1.0.0 introduced <c>ModelCallFailureEvent</c> — fires when an individual model
+	/// API call faults (HTTP error, timeout, rate-limit), distinct from a fatal session
+	/// error. The CLI's own retry loop normally recovers without us doing anything; we
+	/// emit this as a pure observability signal so the Portal and operator logs can
+	/// surface upstream flakiness ahead of an eventual <see cref="Error"/>. Carries
+	/// <see cref="AgentEvent.ModelCallFailureSource"/> ("top_level" / "subagent" / "mcp_sampling"),
+	/// <see cref="AgentEvent.ModelCallFailureMessage"/>, <see cref="AgentEvent.ModelCallFailureModel"/>,
+	/// <see cref="AgentEvent.ModelCallFailureStatusCode"/>.
+	/// </summary>
+	ModelCallFailure,
 }

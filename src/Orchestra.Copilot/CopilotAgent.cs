@@ -22,6 +22,11 @@ public partial class CopilotAgent : IAgent
 	private readonly string[] _skillDirectories;
 	private readonly Engine.InfiniteSessionConfig? _infiniteSessionConfig;
 	private readonly ImageAttachment[] _attachments;
+	/// <summary>
+	/// SDK 1.0.0 PR #1098: tool names removed from the main agent's catalog.
+	/// Forwarded to DefaultAgentConfig.ExcludedTools in BuildSessionConfig.
+	/// </summary>
+	private readonly string[] _excludedTools;
 	private readonly CopilotAgentSwapOptions _swapOptions;
 	private readonly ILogger<CopilotAgent> _logger;
 	private readonly ILoggerFactory _loggerFactory;
@@ -42,7 +47,8 @@ public partial class CopilotAgent : IAgent
 			Engine.InfiniteSessionConfig? infiniteSessionConfig,
 			ImageAttachment[] attachments,
 			ILogger<CopilotAgent> logger,
-			ILoggerFactory? loggerFactory = null)
+			ILoggerFactory? loggerFactory = null,
+			string[]? excludedTools = null)
 		: this(
 			clientPool: new FixedCopilotClientPool(new CopilotSdkClientAdapter(client, ownsClient: false)),
 			model,
@@ -60,7 +66,8 @@ public partial class CopilotAgent : IAgent
 			attachments,
 			swapOptions: null,
 			logger,
-			loggerFactory)
+			loggerFactory,
+			excludedTools)
 	{
 	}
 
@@ -80,7 +87,8 @@ public partial class CopilotAgent : IAgent
 			Engine.InfiniteSessionConfig? infiniteSessionConfig,
 			ImageAttachment[] attachments,
 			ILogger<CopilotAgent> logger,
-			ILoggerFactory? loggerFactory = null)
+			ILoggerFactory? loggerFactory = null,
+			string[]? excludedTools = null)
 		: this(
 			clientPool,
 			model,
@@ -98,7 +106,8 @@ public partial class CopilotAgent : IAgent
 			attachments,
 			swapOptions: null,
 			logger,
-			loggerFactory)
+			loggerFactory,
+			excludedTools)
 	{
 	}
 
@@ -119,7 +128,8 @@ public partial class CopilotAgent : IAgent
 			ImageAttachment[] attachments,
 			CopilotAgentSwapOptions? swapOptions,
 			ILogger<CopilotAgent> logger,
-			ILoggerFactory? loggerFactory = null)
+			ILoggerFactory? loggerFactory = null,
+			string[]? excludedTools = null)
 	{
 		_clientPool = clientPool;
 		_model = model;
@@ -135,6 +145,10 @@ public partial class CopilotAgent : IAgent
 		_skillDirectories = skillDirectories;
 		_infiniteSessionConfig = infiniteSessionConfig;
 		_attachments = attachments;
+		// SDK 1.0.0 PR #1098: forwarded to DefaultAgentConfig.ExcludedTools in
+		// BuildSessionConfig / BuildResumeSessionConfig. Default-empty so existing
+		// agents (none of which pass this) behave exactly as they did pre-1.0.
+		_excludedTools = excludedTools ?? [];
 		_swapOptions = swapOptions ?? CopilotAgentSwapOptions.Defaults;
 		_logger = logger;
 		_loggerFactory = loggerFactory ?? Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance;
@@ -302,7 +316,17 @@ public partial class CopilotAgent : IAgent
 			var isResumeAttempt = swapAttempt > 0
 				&& priorSessionId is not null
 				&& _swapOptions.ResumeOnSwapEnabled;
-			var attemptSessionConfig = BuildSessionConfig();
+
+			// SDK 1.0.0: construct the handler + completion source BEFORE the config so we
+			// can wire the handler in via SessionConfig.OnEvent. The old pattern called
+			// session.On(handler.HandleEvent) right after CreateSessionAsync returned, which
+			// left a tiny window where events emitted by the runtime between session
+			// materialisation and our subscription were dropped. With OnEvent set at config
+			// time the runtime invokes the handler from the first event onward.
+			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+			var handler = new CopilotSessionHandler(writer, _reporter, _model, done, _loggerFactory.CreateLogger<CopilotSessionHandler>());
+
+			var attemptSessionConfig = BuildSessionConfig(handler.HandleEvent);
 
 			LogSessionCreating(
 				client.DiagnosticHash,
@@ -318,7 +342,7 @@ public partial class CopilotAgent : IAgent
 			{
 				if (isResumeAttempt)
 				{
-					var resumeConfig = BuildResumeSessionConfig(attemptSessionConfig);
+					var resumeConfig = BuildResumeSessionConfig(attemptSessionConfig, handler.HandleEvent);
 					session = await client.ResumeSessionAsync(priorSessionId!, resumeConfig, cancellationToken)
 						.ConfigureAwait(false);
 				}
@@ -386,10 +410,9 @@ public partial class CopilotAgent : IAgent
 			attemptSessionIdBox.Value = session.SessionId;
 			await using var _sessionDispose = session;
 
-			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-			var handler = new CopilotSessionHandler(writer, _reporter, _model, done, _loggerFactory.CreateLogger<CopilotSessionHandler>());
-
-			session.On(handler.HandleEvent);
+			// SDK 1.0.0: handler is already wired through SessionConfig.OnEvent (set when
+			// the config was built above), so there is no session.On(...) call here. The
+			// runtime is already invoking handler.HandleEvent for every event it emits.
 
 			// Register this session with the per-worker fault broker so that, if a sibling
 			// session on the same CopilotClient detects a CLI-level fault, this session
@@ -509,6 +532,11 @@ public partial class CopilotAgent : IAgent
 				SelectedModel = handler.SelectedModel,
 				ActualModel = handler.ActualModel,
 				Usage = handler.Usage,
+				// SDK 1.0.0: end-of-session billing summary projected from the structured
+				// SessionShutdownEvent payload. Null when the session ended without a
+				// shutdown event (e.g. SessionIdle-only path or a fault before any model
+				// call); callers should treat null as "no roll-up available".
+				FinalUsage = handler.ShutdownSummary,
 				AvailableModels = availableModels,
 				RequestedModelInfo = FindModelInfo(availableModels, _model),
 				SelectedModelInfo = FindModelInfo(availableModels, handler.SelectedModel),
@@ -764,10 +792,24 @@ public partial class CopilotAgent : IAgent
 	/// on resume or it throws <see cref="ArgumentException"/>; we set it unconditionally
 	/// from <see cref="PermissionHandler.ApproveAll"/> mirroring the create path.
 	/// </summary>
-	internal ResumeSessionConfig BuildResumeSessionConfig(SessionConfig baseConfig)
+	/// <param name="baseConfig">The create-time config whose carry-over fields we mirror.</param>
+	/// <param name="onEvent">
+	/// Optional event handler registered at config time via SDK 1.0.0's
+	/// <see cref="SessionConfigBase.OnEvent"/>. When supplied, the SDK invokes the handler
+	/// for every event the resumed session emits — including events that fire before our
+	/// call to <see cref="CopilotSession.SendAsync(MessageOptions, CancellationToken)"/>
+	/// returns. This is what closes the small subscribe-after-create race window the old
+	/// <c>session.On(...)</c> pattern left open.
+	/// </param>
+	internal ResumeSessionConfig BuildResumeSessionConfig(SessionConfig baseConfig, Action<SessionEvent>? onEvent = null)
 	{
 		var config = new ResumeSessionConfig
 		{
+			// SDK 1.0.0 introduces ClientName as a stable identifier the runtime / telemetry
+			// pipeline can use to partition events by host. We pin it to "orchestra" so
+			// downstream observers (SDK-internal logs, OpenTelemetry traces, CLI-side
+			// process accounting) can correlate sessions back to this orchestrator.
+			ClientName = "orchestra",
 			Model = baseConfig.Model,
 			Streaming = true,
 			OnPermissionRequest = PermissionHandler.ApproveAll,
@@ -775,6 +817,11 @@ public partial class CopilotAgent : IAgent
 			SystemMessage = baseConfig.SystemMessage,
 			McpServers = baseConfig.McpServers,
 			CustomAgents = baseConfig.CustomAgents,
+			// SDK 1.0.0 PR #1098: carry the main-agent excluded-tools list across resume
+			// so a swap-and-resume cycle preserves the exclusion policy. Without this,
+			// the resumed session would silently re-enable the excluded tools — a
+			// security-relevant regression.
+			DefaultAgent = baseConfig.DefaultAgent,
 			Tools = baseConfig.Tools,
 			SkillDirectories = baseConfig.SkillDirectories,
 			// SDK 1.0.0 added InstructionDirectories — carry it across resume so the agent
@@ -783,17 +830,33 @@ public partial class CopilotAgent : IAgent
 			InfiniteSessions = baseConfig.InfiniteSessions,
 			Hooks = baseConfig.Hooks,
 			WorkingDirectory = baseConfig.WorkingDirectory,
+			// SDK 1.0.0 lets us register the event handler at config-time via OnEvent
+			// rather than calling session.On(...) after CreateSessionAsync/ResumeSessionAsync
+			// returns. Closing the window also matters on resume because the runtime starts
+			// replaying historical events the moment the resumed session is materialised.
+			OnEvent = onEvent,
 		};
 		return config;
 	}
 
-	internal SessionConfig BuildSessionConfig()
+	internal SessionConfig BuildSessionConfig(Action<SessionEvent>? onEvent = null)
 	{
 		var config = new SessionConfig
 		{
+			// SDK 1.0.0 introduces ClientName — pin to "orchestra" so the runtime / telemetry
+			// pipeline can partition events by host (see BuildResumeSessionConfig for the
+			// full rationale).
+			ClientName = "orchestra",
 			Model = _model,
 			Streaming = true,
 			OnPermissionRequest = PermissionHandler.ApproveAll,
+			// SDK 1.0.0 lets us register the event handler at config-time via OnEvent
+			// rather than calling session.On(...) after CreateSessionAsync returns. The
+			// post-create subscription window had a tiny race where events fired between
+			// the SDK creating the session and our subscription would be dropped (in
+			// particular the very first SessionStartEvent could slip through on cold
+			// CLI workers). Setting OnEvent eliminates that gap.
+			OnEvent = onEvent,
 		};
 
 		if (_reasoningLevel is not null)
@@ -894,6 +957,20 @@ public partial class CopilotAgent : IAgent
 		// Configure session hooks for structured audit logging
 		config.Hooks = BuildSessionHooks();
 
+		// SDK 1.0.0 PR #1098: forward the main-agent tool-exclusion list. Sub-agents
+		// are NOT affected here — they get their own Subagent.Tools filter via
+		// CustomAgentConfig.Tools in BuildCustomAgents. The DefaultAgentConfig is
+		// only set when there is at least one excluded tool, so the typical "no
+		// exclusions" path leaves config.DefaultAgent null and the SDK uses its
+		// full built-in catalog.
+		if (_excludedTools.Length > 0)
+		{
+			config.DefaultAgent = new DefaultAgentConfig
+			{
+				ExcludedTools = [.. _excludedTools],
+			};
+		}
+
 		return config;
 	}
 
@@ -971,6 +1048,41 @@ public partial class CopilotAgent : IAgent
 					ToolResult = resultStr?.Length > 500 ? resultStr[..500] + "..." : resultStr,
 				});
 				return Task.FromResult<PostToolUseHookOutput?>(null);
+			},
+
+			// SDK 1.0.0 (PR #1013) added OnPostToolUseFailure — a dedicated hook that
+			// fires only when a tool call fails. OnPostToolUse only fires on success,
+			// so without this hook every tool fault would disappear from the audit log
+			// even though the model usually sees them and adapts. We emit a parallel
+			// AuditEventType.PostToolUseFailure entry that carries the error message
+			// (input.Error) alongside the tool name and arguments. AdditionalContext is
+			// also injected back into the model's next turn — useful for retry guidance.
+			OnPostToolUseFailure = (input, invocation) =>
+			{
+				string? argsJson = null;
+				if (input.ToolArgs is not null)
+				{
+					try { argsJson = System.Text.Json.JsonSerializer.Serialize(input.ToolArgs); }
+					catch { /* ignore: arguments are best-effort for the trace */ }
+				}
+
+				var errorMessage = input.Error;
+				LogHookPostToolUseFailure(
+					input.SessionId ?? "(unknown)",
+					input.ToolName ?? "(unknown)",
+					errorMessage ?? "(no message)");
+
+				_reporter.ReportAuditLogEntry(_stepName, new AuditLogEntry
+				{
+					Sequence = 0,
+					Timestamp = DateTimeOffset.UtcNow,
+					EventType = AuditEventType.PostToolUseFailure,
+					ToolName = input.ToolName,
+					ToolArguments = argsJson,
+					ToolSuccess = false,
+					Error = errorMessage,
+				});
+				return Task.FromResult<PostToolUseFailureHookOutput?>(null);
 			},
 
 			OnErrorOccurred = (input, invocation) =>
@@ -1179,6 +1291,13 @@ public partial class CopilotAgent : IAgent
 			if (!string.IsNullOrEmpty(subagent.Model))
 				config.Model = subagent.Model;
 
+			// SDK 1.0.0 added per-sub-agent skills (PR #995) so a sub-agent can scope
+			// its instruction surface to a curated subset of the host's skill catalog.
+			// Empty / null leaves the sub-agent on the main session's skill resolution
+			// (which itself may be filtered by the orchestration-level SkillDirectories).
+			if (subagent.Skills is { Length: > 0 })
+				config.Skills = [.. subagent.Skills];
+
 			// Add MCP servers specific to this subagent
 			if (subagent.Mcps.Length > 0)
 			{
@@ -1211,7 +1330,7 @@ public partial class CopilotAgent : IAgent
 			switch (mcp)
 			{
 				case LocalMcp local:
-					servers[mcp.Name] = new McpStdioServerConfig
+					var stdio = new McpStdioServerConfig
 					{
 						Command = local.Command,
 						Args = [.. local.Arguments],
@@ -1222,6 +1341,16 @@ public partial class CopilotAgent : IAgent
 						Tools = ["*"],
 						Timeout = timeoutMs,
 					};
+					// SDK 1.0.0 added McpStdioServerConfig.Env so per-server env vars can
+					// be injected at session-creation time (commonly used for API keys
+					// resolved from {{env.*}} templates). Only set the dict when the engine
+					// LocalMcp actually has values — the SDK will otherwise use the
+					// inherited process environment.
+					if (local.Environment is { Count: > 0 } envEntries)
+					{
+						stdio.Env = envEntries.ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.Ordinal);
+					}
+					servers[mcp.Name] = stdio;
 					break;
 
 				case RemoteMcp remote:
@@ -1405,6 +1534,16 @@ public partial class CopilotAgent : IAgent
 	[LoggerMessage(EventId = 22, Level = LogLevel.Debug,
 		Message = "OnSessionStart hook fired (sessionId={SessionId}, source={Source}, workingDirectory={WorkingDirectory})")]
 	private partial void LogHookSessionStart(string sessionId, string source, string workingDirectory);
+
+	// EventId 23: SDK 1.0.0 added OnPostToolUseFailure (PR #1013) so the host learns about
+	// tool faults without having to filter post-tool-use entries by ToolSuccess=false.
+	// Warning level by design — a tool fault is noteworthy enough to surface in default
+	// host logs alongside the existing per-attempt swap/retry logs, but not loud enough
+	// to bypass log shippers' rate limits during a flaky-MCP outage. The error message
+	// is included verbatim so operators can grep for upstream-specific failure patterns.
+	[LoggerMessage(EventId = 23, Level = LogLevel.Warning,
+		Message = "OnPostToolUseFailure hook fired (sessionId={SessionId}, tool={ToolName}, error={Error})")]
+	private partial void LogHookPostToolUseFailure(string sessionId, string toolName, string error);
 
 	#endregion
 }

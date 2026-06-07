@@ -268,6 +268,144 @@ public class AgentEvent
 	/// </summary>
 	public ActorContext Actor =>
 		new(ActorAgentName, ActorAgentDisplayName, ActorToolCallId, ActorDepth);
+
+	// ── Model call failure (SDK 1.0.0 — observational only) ──
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ModelCallFailureData.Source.Value</c>: where the failing call
+	/// originated (<c>"top_level"</c>, <c>"subagent"</c>, or <c>"mcp_sampling"</c>).
+	/// Stamped on <see cref="AgentEventType.ModelCallFailure"/>.
+	/// </summary>
+	public string? ModelCallFailureSource { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ModelCallFailureData.ErrorMessage</c>: the upstream error message
+	/// surfaced by the model API (or null if the SDK couldn't extract one).
+	/// </summary>
+	public string? ModelCallFailureMessage { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ModelCallFailureData.Model</c>: the model identifier the failing
+	/// call was targeting. Often the same as the session model but can differ for
+	/// sub-agent or MCP-sampling-driven calls.
+	/// </summary>
+	public string? ModelCallFailureModel { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ModelCallFailureData.StatusCode</c>: HTTP status (or null if the
+	/// failure was a transport-level issue with no HTTP response). Useful for the
+	/// Portal to bucket failures by class (5xx vs 4xx vs network).
+	/// </summary>
+	public int? ModelCallFailureStatusCode { get; init; }
+
+	// ── Richer SDK 1.0.0 diagnostic fields ───────────────────────────────────
+	// These mirror previously-dropped fields the SDK surfaces on per-event payloads.
+	// They are additive: leaving them null on AgentEvent emitters that don't supply
+	// them costs nothing for downstream consumers (existing fields keep working).
+
+	/// <summary>
+	/// SDK 1.0.0 <c>AssistantUsageData.InterTokenLatency</c> projected to milliseconds.
+	/// Streaming-perf metric: time gap between tokens during a response. Useful for
+	/// detecting upstream slowness without waiting for the full call to complete.
+	/// Stamped on <see cref="AgentEventType.Usage"/>.
+	/// </summary>
+	public double? InterTokenLatencyMs { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>SessionInfoData.Tip</c>: optional CLI-side hint string the runtime
+	/// surfaces alongside info messages (e.g. "Try running …"). Stamped on
+	/// <see cref="AgentEventType.Info"/>.
+	/// </summary>
+	public string? InfoTip { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>SessionInfoData.Url</c>: optional CLI-side hyperlink the runtime
+	/// associates with an info message (typically a docs URL). Stamped on
+	/// <see cref="AgentEventType.Info"/>.
+	/// </summary>
+	public string? InfoUrl { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>SessionWarningData.Url</c>: optional CLI-side hyperlink the runtime
+	/// associates with a warning message (typically a docs / status-page URL).
+	/// Stamped on <see cref="AgentEventType.Warning"/>.
+	/// </summary>
+	public string? WarningUrl { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ToolExecutionStartData.Model</c> / <c>ToolExecutionCompleteData.Model</c>:
+	/// the model that initiated the tool call. Useful when multiple models are active
+	/// in a session (sub-agents, auto-mode switches). Stamped on
+	/// <see cref="AgentEventType.ToolExecutionStart"/> and
+	/// <see cref="AgentEventType.ToolExecutionComplete"/>.
+	/// </summary>
+	public string? ToolExecutionModel { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ToolExecutionStartData.TurnId</c> / <c>ToolExecutionCompleteData.TurnId</c>:
+	/// correlates a tool call back to the assistant turn that triggered it.
+	/// </summary>
+	public string? ToolExecutionTurnId { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ToolExecutionStartData.DisplayVerbatim</c>: hint from the runtime
+	/// that the tool's output should be shown verbatim (vs. pretty-printed) by UIs.
+	/// Stamped on <see cref="AgentEventType.ToolExecutionStart"/>.
+	/// </summary>
+	public bool? ToolDisplayVerbatim { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ToolExecutionCompleteData.Sandboxed</c>: indicates the tool ran
+	/// inside the runtime's sandbox. Useful for audit / Portal display.
+	/// </summary>
+	public bool? ToolSandboxed { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>ToolExecutionCompleteData.ToolDescription</c>: human-readable
+	/// description the runtime attaches to the tool definition. Lets Portals render
+	/// per-tool cards without maintaining a hardcoded catalog. We surface the
+	/// description's display text only (the structured meta is consumed internally).
+	/// </summary>
+	public string? ToolDescription { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>SessionResumeData.SessionWasActive</c>: true if the resumed session
+	/// was active when the snapshot was taken (i.e. the dying CLI still had work in
+	/// flight). Helps the swap loop decide whether ContinuePendingWork should fire.
+	/// </summary>
+	public bool? ResumeSessionWasActive { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>SessionResumeData.ContinuePendingWork</c>: signals whether the
+	/// runtime resumed the prior session's pending message. Stamped on
+	/// <see cref="AgentEventType.SessionResumed"/> for observability of swap behaviour.
+	/// </summary>
+	public bool? ResumeContinuePendingWork { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>AssistantMessageData.Model</c>: the model that produced this
+	/// message (may differ from the session model for sub-agents / auto-mode).
+	/// </summary>
+	public string? MessageModel { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>AssistantMessageData.OutputTokens</c>: per-message output token
+	/// count. Sums up to <see cref="AgentUsage.OutputTokens"/> on the matching turn.
+	/// </summary>
+	public long? MessageOutputTokens { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>AssistantMessageData.RequestId</c>: the upstream request id the
+	/// SDK used to generate the message. Surfaces in upstream provider logs for
+	/// triage of model-side issues.
+	/// </summary>
+	public string? MessageRequestId { get; init; }
+
+	/// <summary>
+	/// SDK 1.0.0 <c>AssistantMessageData.TurnId</c>: correlates this message back to
+	/// the assistant turn that produced it.
+	/// </summary>
+	public string? MessageTurnId { get; init; }
 }
 
 /// <summary>

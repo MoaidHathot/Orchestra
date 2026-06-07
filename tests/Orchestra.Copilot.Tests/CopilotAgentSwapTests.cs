@@ -443,6 +443,15 @@ public class CopilotAgentSwapTests
 				return Task.FromException<ICopilotSession>(_createSessionThrows);
 			if (_session is null)
 				throw new InvalidOperationException("ScriptedCopilotClient has no session configured.");
+			// SDK 1.0.0: CopilotAgent now wires the event handler via SessionConfig.OnEvent
+			// instead of session.On(...) — capture the config-supplied handler onto the
+			// fake so the synthetic SessionIdleEvent fired from SendAsync still drives the
+			// session's TaskCompletionSource. Without this the test hangs waiting for
+			// completion that never arrives.
+			if (config.OnEvent is { } onEvent)
+			{
+				_session.WireConfigHandler(onEvent);
+			}
 			return Task.FromResult<ICopilotSession>(_session);
 		}
 
@@ -453,6 +462,12 @@ public class CopilotAgentSwapTests
 				return Task.FromException<ICopilotSession>(_resumeSessionThrows);
 			if (_session is null)
 				throw new InvalidOperationException("ScriptedCopilotClient has no session configured for resume.");
+			// Mirror of the CreateSessionAsync path — see comment above. Both paths route
+			// the handler through SessionConfig.OnEvent on the SDK 1.0.0 wire.
+			if (config.OnEvent is { } onEvent)
+			{
+				_session.WireConfigHandler(onEvent);
+			}
 			return Task.FromResult<ICopilotSession>(_session);
 		}
 
@@ -468,7 +483,10 @@ public class CopilotAgentSwapTests
 		private readonly Exception? _sendThrows;
 		private readonly bool _completeImmediately;
 		// SDK 1.0.0 dropped the SessionEventHandler delegate; sessions now register
-		// plain Action<SessionEvent> callbacks.
+		// plain Action<SessionEvent> callbacks. CopilotAgent registers the handler at
+		// config time via SessionConfig.OnEvent, so the fake ScriptedCopilotClient
+		// calls WireConfigHandler on construction; legacy code that calls session.On()
+		// after creation also lands here.
 		private Action<SessionEvent>? _handler;
 
 		public ScriptedCopilotSession(string sessionId, Exception? sendThrows = null, bool completeImmediately = false)
@@ -485,6 +503,13 @@ public class CopilotAgentSwapTests
 			_handler = handler;
 			return new NoopDisposable();
 		}
+
+		/// <summary>
+		/// Test seam: lets the fake client install the SessionConfig.OnEvent handler
+		/// onto this session. Mirrors what the SDK 1.0.0 runtime does internally when
+		/// the config-supplied OnEvent fires for events the runtime emits.
+		/// </summary>
+		internal void WireConfigHandler(Action<SessionEvent> handler) => _handler = handler;
 
 		public Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken)
 		{

@@ -171,6 +171,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		var skillDirectories = SkillDirectories;
 		var infiniteSessionConfig = InfiniteSession;
 		var attachments = Attachments;
+		var excludedTools = ExcludedTools;
 
 		var pool = await GetActivePoolAsync(cancellationToken).ConfigureAwait(false);
 
@@ -191,7 +192,8 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			attachments: attachments,
 			swapOptions: CopilotAgentSwapOptions.FromPoolOptions(_poolOptions),
 			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
-			loggerFactory: _loggerFactory
+			loggerFactory: _loggerFactory,
+			excludedTools: excludedTools
 		);
 	}
 
@@ -216,7 +218,8 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			attachments: config.Attachments,
 			swapOptions: CopilotAgentSwapOptions.FromPoolOptions(_poolOptions),
 			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
-			loggerFactory: _loggerFactory
+			loggerFactory: _loggerFactory,
+			excludedTools: config.ExcludedTools
 		);
 	}
 

@@ -392,6 +392,7 @@ public static class OrchestrationParser
 						? args.EnumerateArray().Select(e => e.GetString()!).ToArray()
 						: [],
 					WorkingDirectory = ResolveWorkingDirectory(root, _context),
+					Environment = ReadEnvironment(root, name),
 					Timeout = timeout,
 					TimeoutTemplate = timeoutTemplate,
 				},
@@ -420,6 +421,44 @@ public static class OrchestrationParser
 			return root.TryGetProperty("workingDirectory", out var wd) && wd.GetString() is { } workingDirectory
 				? PromptStepTypeParser.ResolvePathRelativeToBaseDirectory(workingDirectory, context)
 				: null;
+		}
+
+		/// <summary>
+		/// Reads the optional <c>environment</c> object on a local MCP entry into an
+		/// <see cref="IReadOnlyDictionary{TKey,TValue}"/>. Values must be strings (template
+		/// expressions like <c>{{env.X}}</c> are kept as raw text and resolved by the
+		/// executor at step-launch time). Returns <c>null</c> when the field is absent,
+		/// null, an empty object, or any non-object value — the runtime then falls back
+		/// to the inherited process environment.
+		/// </summary>
+		private static IReadOnlyDictionary<string, string>? ReadEnvironment(JsonElement root, string mcpName)
+		{
+			if (!root.TryGetProperty("environment", out var envProp))
+				return null;
+
+			if (envProp.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+				return null;
+
+			if (envProp.ValueKind != JsonValueKind.Object)
+			{
+				throw new JsonException(
+					$"MCP entry '{mcpName}' has an invalid 'environment' value. Expected a JSON object " +
+					$"mapping variable names to string values.");
+			}
+
+			var dict = new Dictionary<string, string>(StringComparer.Ordinal);
+			foreach (var prop in envProp.EnumerateObject())
+			{
+				if (prop.Value.ValueKind != JsonValueKind.String)
+				{
+					throw new JsonException(
+						$"MCP entry '{mcpName}' has a non-string value for environment variable '{prop.Name}'. " +
+						$"All environment values must be strings (template expressions are also strings).");
+				}
+				dict[prop.Name] = prop.Value.GetString()!;
+			}
+
+			return dict.Count > 0 ? dict : null;
 		}
 	}
 

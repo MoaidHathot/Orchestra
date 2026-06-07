@@ -21,6 +21,16 @@ public class AgentResult
 	public AgentUsage? Usage { get; init; }
 
 	/// <summary>
+	/// SDK 1.0.0 added a structured shutdown payload (<c>SessionShutdownData</c>) that
+	/// aggregates per-model usage, total billing units, code-change counters, and the
+	/// overall API duration when a session ends. This property carries that summary so
+	/// callers don't have to subscribe to the raw event stream just to get end-of-session
+	/// roll-ups. <c>null</c> when the session ended without a structured shutdown
+	/// (cancellation, error before any model call, or a runtime older than SDK 1.0.0).
+	/// </summary>
+	public AgentSessionShutdownSummary? FinalUsage { get; init; }
+
+	/// <summary>
 	/// Available models reported by the server. Populated when a model mismatch is detected.
 	/// </summary>
 	public IReadOnlyList<AvailableModelInfo>? AvailableModels { get; init; }
@@ -73,3 +83,105 @@ public class AgentUsage
 	/// </summary>
 	public IReadOnlyDictionary<string, AgentQuotaSnapshot>? QuotaSnapshots { get; init; }
 }
+
+/// <summary>
+/// End-of-session aggregate captured from SDK 1.0.0's <c>SessionShutdownEvent</c>.
+/// Replaces the per-usage <c>QuotaSnapshots</c> / <c>TotalNanoAiu</c> that SDK 0.3.0
+/// surfaced on every <c>AssistantUsageEvent</c>: in 1.0.0 they roll up into a single
+/// terminal payload, so consumers that want billing totals subscribe here instead of
+/// summing across streaming events.
+/// </summary>
+public sealed record AgentSessionShutdownSummary
+{
+	/// <summary>
+	/// Total billable nano-AIU (Anthropic / OpenAI billing units, 10^-9 units) consumed
+	/// across all model calls in the session. Sums up the per-model
+	/// <see cref="ModelMetrics"/> entries when populated.
+	/// </summary>
+	public double? TotalNanoAiu { get; init; }
+
+	/// <summary>
+	/// Total conversation tokens at session end (history + prompts + responses, not
+	/// counting tool-definition or system tokens which are tracked separately).
+	/// </summary>
+	public long? ConversationTokens { get; init; }
+
+	/// <summary>
+	/// Total tokens occupied by the session's tool definitions at shutdown. Useful
+	/// when triaging "why is context full" — tool definitions can grow large with
+	/// many MCPs.
+	/// </summary>
+	public long? ToolDefinitionsTokens { get; init; }
+
+	/// <summary>
+	/// Total tokens occupied by the system message at shutdown.
+	/// </summary>
+	public long? SystemTokens { get; init; }
+
+	/// <summary>
+	/// Total tokens currently in the context window at shutdown. The sum of
+	/// <see cref="ConversationTokens"/> + <see cref="SystemTokens"/> +
+	/// <see cref="ToolDefinitionsTokens"/> approximates this but the SDK reports the
+	/// authoritative number here.
+	/// </summary>
+	public long? CurrentTokens { get; init; }
+
+	/// <summary>
+	/// Cumulative wall-clock duration spent in upstream model API calls. Aggregates
+	/// across all model calls in the session, including sub-agent calls.
+	/// </summary>
+	public TimeSpan? TotalApiDuration { get; init; }
+
+	/// <summary>
+	/// Code-change counters when the session touched files via the SDK's edit tools.
+	/// <c>null</c> when no file edits occurred. SDK 1.0.0 surfaces these in the
+	/// shutdown envelope.
+	/// </summary>
+	public AgentShutdownCodeChanges? CodeChanges { get; init; }
+
+	/// <summary>
+	/// Per-model usage breakdown (input/output tokens, reasoning tokens, cost, nano-AIU,
+	/// and request counts). Keyed by the model identifier the runtime reports. When the
+	/// session ran a single model end-to-end this dictionary has one entry; sub-agent
+	/// or auto-mode patterns produce one entry per distinct model.
+	/// </summary>
+	public IReadOnlyDictionary<string, AgentShutdownModelMetric>? ModelMetrics { get; init; }
+}
+
+/// <summary>
+/// Code-change aggregate captured at session shutdown when the agent touched files.
+/// </summary>
+public sealed record AgentShutdownCodeChanges(
+	IReadOnlyList<string> FilesModified,
+	long LinesAdded,
+	long LinesRemoved);
+
+/// <summary>
+/// Per-model usage breakdown captured at session shutdown.
+/// </summary>
+public sealed record AgentShutdownModelMetric
+{
+	/// <summary>Total billable nano-AIU charged to this model across the session.</summary>
+	public double? TotalNanoAiu { get; init; }
+
+	/// <summary>Request count + cost for this model.</summary>
+	public AgentShutdownModelMetricRequests? Requests { get; init; }
+
+	/// <summary>Aggregated token counts for this model.</summary>
+	public AgentShutdownModelMetricUsage? Usage { get; init; }
+}
+
+/// <summary>
+/// Per-model request count and aggregated cost as of session shutdown.
+/// </summary>
+public sealed record AgentShutdownModelMetricRequests(long? Count, double? Cost);
+
+/// <summary>
+/// Per-model token usage aggregated across all calls in the session.
+/// </summary>
+public sealed record AgentShutdownModelMetricUsage(
+	long InputTokens,
+	long OutputTokens,
+	long CacheReadTokens,
+	long CacheWriteTokens,
+	long? ReasoningTokens);

@@ -68,4 +68,18 @@ public class Subagent
 	/// main session's model — the historical Orchestra 0.x behaviour.
 	/// </remarks>
 	public string? Model { get; init; }
+
+	/// <summary>
+	/// Optional list of skill names to enable for this sub-agent. Skills are auxiliary
+	/// instruction packs the runtime auto-discovers from the configured skill / instruction
+	/// directories. When set, only the listed skills are activated for this sub-agent;
+	/// when null or empty the sub-agent inherits the main session's skill resolution.
+	/// </summary>
+	/// <remarks>
+	/// Requires GitHub.Copilot.SDK 1.0.0+ which added per-sub-agent skill support via
+	/// <c>CustomAgentConfig.Skills</c> (SDK PR #995). Pair this with
+	/// <see cref="Model"/> overrides to give each sub-agent both its own model and its
+	/// own specialised instruction surface.
+	/// </remarks>
+	public string[]? Skills { get; init; }
 }

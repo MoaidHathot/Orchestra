@@ -39,4 +39,18 @@ public sealed record AgentBuildConfig
 	/// Image attachments to send with the prompt.
 	/// </summary>
 	public ImageAttachment[] Attachments { get; init; } = [];
+
+	/// <summary>
+	/// Optional list of tool names to exclude from the main agent's tool catalog. When
+	/// set, the listed tools are unavailable to the main agent (sub-agents are unaffected
+	/// unless they declare their own <see cref="Subagent.Tools"/> filter). Tool names use
+	/// the SDK's wire vocabulary — typically built-in names such as <c>"shell"</c>,
+	/// <c>"edit_file"</c>, <c>"write_file"</c>, <c>"view"</c>, etc.
+	/// </summary>
+	/// <remarks>
+	/// Requires GitHub.Copilot.SDK 1.0.0+ which added <c>DefaultAgentConfig.ExcludedTools</c>
+	/// (SDK PR #1098). Empty / null leaves the SDK's full built-in tool catalog enabled,
+	/// preserving Orchestra's pre-1.0 behaviour for unchanged orchestrations.
+	/// </remarks>
+	public string[] ExcludedTools { get; init; } = [];
 }
