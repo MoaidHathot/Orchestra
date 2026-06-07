@@ -1,5 +1,5 @@
 using FluentAssertions;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
@@ -537,7 +537,6 @@ public class CopilotAgentTests
 	private sealed class ThrowingCopilotClient : ICopilotClient
 	{
 		public int DiagnosticHash => 123;
-		public ConnectionState State => ConnectionState.Connected;
 		public Exception? CreateException { get; init; }
 		public ICopilotSession? Session { get; init; }
 
@@ -578,7 +577,9 @@ public class CopilotAgentTests
 		public string SessionId { get; }
 		public Exception? SendException { get; init; }
 
-		public IDisposable On(SessionEventHandler handler) => new NoopDisposable();
+		// SDK 1.0.0 dropped the SessionEventHandler delegate in favour of plain
+		// Action<SessionEvent>; the runtime semantics are unchanged.
+		public IDisposable On(Action<SessionEvent> handler) => new NoopDisposable();
 
 		public Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken)
 			=> SendException is null
@@ -707,7 +708,8 @@ public class CopilotAgentTests
 
 		var local2 = config.McpServers!["local-2"].Should().BeOfType<McpStdioServerConfig>().Subject;
 		local2.Tools.Should().ContainSingle().Which.Should().Be("*");
-		local2.Cwd.Should().Be("/app");
+		// SDK 1.0.0 renamed McpStdioServerConfig.Cwd -> WorkingDirectory.
+		local2.WorkingDirectory.Should().Be("/app");
 	}
 
 	[Fact]
@@ -1004,9 +1006,12 @@ public class CopilotAgentTests
 		config.SystemMessage.Should().NotBeNull();
 		config.SystemMessage!.Mode.Should().Be(SystemMessageMode.Customize);
 		config.SystemMessage.Sections.Should().HaveCount(2);
-		config.SystemMessage.Sections!["tone"].Action.Should().Be(SectionOverrideAction.Replace);
-		config.SystemMessage.Sections["tone"].Content.Should().Be("Be concise");
-		config.SystemMessage.Sections["code_change_rules"].Action.Should().Be(SectionOverrideAction.Remove);
+		// SDK 1.0.0 changed Sections's key from string to SystemMessageSection struct
+		// (struct has an implicit ctor from string but the indexer requires the struct
+		// type explicitly — we wrap each key here for clarity).
+		config.SystemMessage.Sections![new SystemMessageSection("tone")].Action.Should().Be(SectionOverrideAction.Replace);
+		config.SystemMessage.Sections[new SystemMessageSection("tone")].Content.Should().Be("Be concise");
+		config.SystemMessage.Sections[new SystemMessageSection("code_change_rules")].Action.Should().Be(SectionOverrideAction.Remove);
 	}
 
 	#endregion

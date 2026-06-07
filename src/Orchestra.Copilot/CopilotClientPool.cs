@@ -183,8 +183,12 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 		using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		probeCts.CancelAfter(ProbeTimeout);
 
-		var state = client.State.ToString();
-		LogProbeAttempt(poolId, workerId, state);
+		// SDK 1.0.0 removed the public ConnectionState/State surface (PR #1170 replaced
+		// StreamJsonRpc with a custom transport whose internal state isn't exposed).
+		// Health is now derived strictly from the PingAsync round-trip: if the runtime
+		// answers within ProbeTimeout the client is healthy; any throw or timeout marks
+		// it unhealthy so the broker can fault its in-flight sibling sessions.
+		LogProbeAttempt(poolId, workerId, "(state api removed in SDK 1.0.0; using ping outcome)");
 
 		try
 		{
@@ -192,21 +196,15 @@ internal sealed partial class CopilotClientPool : ICopilotClientPool, IAsyncDisp
 			await client.PingAsync("orchestra-health-probe", probeCts.Token).ConfigureAwait(false);
 			pingSw.Stop();
 
-			var stateAfter = client.State;
-			if (stateAfter != GitHub.Copilot.SDK.ConnectionState.Connected)
-			{
-				return new ProbeResult(false, $"ping ok in {pingSw.ElapsedMilliseconds}ms but state={stateAfter}");
-			}
-
-			return new ProbeResult(true, $"ping ok in {pingSw.ElapsedMilliseconds}ms, state=Connected");
+			return new ProbeResult(true, $"ping ok in {pingSw.ElapsedMilliseconds}ms");
 		}
 		catch (OperationCanceledException) when (probeCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
-			return new ProbeResult(false, $"ping timed out after {ProbeTimeout.TotalSeconds}s, state={client.State}");
+			return new ProbeResult(false, $"ping timed out after {ProbeTimeout.TotalSeconds}s");
 		}
 		catch (Exception ex)
 		{
-			return new ProbeResult(false, $"ping threw {ex.GetType().Name}: {ex.Message}, state={client.State}");
+			return new ProbeResult(false, $"ping threw {ex.GetType().Name}: {ex.Message}");
 		}
 	}
 

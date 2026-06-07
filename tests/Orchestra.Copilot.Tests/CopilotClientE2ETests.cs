@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using FluentAssertions;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
@@ -26,7 +26,10 @@ public class CopilotClientE2ETests : IAsyncLifetime
 
 	public async Task InitializeAsync()
 	{
-		_client = new CopilotClient();
+		// SDK 1.0.0 removed the parameterless CopilotClient() constructor; we now
+		// must hand it an options instance (an empty one is fine — the SDK will
+		// look up the bundled CLI binary via its props-driven RID resolution).
+		_client = new CopilotClient(new CopilotClientOptions());
 		await _client.StartAsync();
 	}
 
@@ -53,7 +56,7 @@ public class CopilotClientE2ETests : IAsyncLifetime
 		// Act
 		await using var session = await _client.CreateSessionAsync(config);
 
-		session.On(evt =>
+		session.On<SessionEvent>(evt =>
 		{
 			receivedEventTypes.Add(evt.GetType().Name);
 
@@ -94,7 +97,7 @@ public class CopilotClientE2ETests : IAsyncLifetime
 			var done1 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 			await using var session1 = await _client.CreateSessionAsync(config);
 
-			session1.On(evt =>
+			session1.On<SessionEvent>(evt =>
 			{
 				if (evt is AssistantMessageEvent msg)
 					content1 = msg.Data.Content;
@@ -121,7 +124,7 @@ public class CopilotClientE2ETests : IAsyncLifetime
 			var done2 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 			await using var session2 = await _client.CreateSessionAsync(config);
 
-			session2.On(evt =>
+			session2.On<SessionEvent>(evt =>
 			{
 				eventTypes2.Add(evt.GetType().Name);
 
@@ -166,7 +169,7 @@ public class CopilotClientE2ETests : IAsyncLifetime
 
 			await using var session = await _client.CreateSessionAsync(config);
 
-			session.On(evt =>
+			session.On<SessionEvent>(evt =>
 			{
 				if (evt is AssistantMessageEvent msg)
 					content = msg.Data.Content;
@@ -210,7 +213,7 @@ public class CopilotClientE2ETests : IAsyncLifetime
 
 				await using var session = await _client.CreateSessionAsync(config);
 
-				session.On(evt =>
+				session.On<SessionEvent>(evt =>
 				{
 					if (evt is AssistantMessageEvent msg)
 						content = msg.Data.Content;

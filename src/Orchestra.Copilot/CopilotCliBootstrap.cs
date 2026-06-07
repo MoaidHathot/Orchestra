@@ -9,7 +9,7 @@ namespace Orchestra.Copilot;
 /// <summary>
 /// First-run bootstrap that downloads the Copilot CLI binary for the current host
 /// platform from the same @github/copilot-&lt;platform&gt; npm package the
-/// GitHub.Copilot.SDK uses at build time, caching it under the user's local app data
+/// GitHub.Copilot SDK uses at build time, caching it under the user's local app data
 /// so the cost is paid once per machine per CLI version.
 ///
 /// <para>
@@ -19,7 +19,7 @@ namespace Orchestra.Copilot;
 /// satisfy every consumer OS, and bundling all six supported RIDs blows past NuGet.org's
 /// 250 MB package limit (~342 MB observed). Instead the tool ships SMALL (no copilot
 /// binary baked in) and this bootstrap fetches just the host's binary the first time
-/// any code constructs a <see cref="GitHub.Copilot.SDK.CopilotClient"/>.
+/// any code constructs a <see cref="GitHub.Copilot.CopilotClient"/>.
 /// </para>
 /// <para>
 /// The download is gated by a <see cref="Lazy{T}"/> over a <see cref="Task{TResult}"/>
@@ -31,11 +31,11 @@ internal static partial class CopilotCliBootstrap
 {
 	/// <summary>
 	/// Mirrors <c>$(CopilotCliVersion)</c> in <c>GitHub.Copilot.SDK.props</c> shipped
-	/// with the SDK NuGet (currently 1.0.36-0 in SDK 0.3.0). When bumping
+	/// with the SDK NuGet (currently 1.0.57 in SDK 1.0.0). When bumping
 	/// <c>GitHub.Copilot.SDK</c> in <c>Directory.Packages.props</c>, update this constant
 	/// to match.
 	/// </summary>
-	public const string CopilotCliVersion = "1.0.36-0";
+	public const string CopilotCliVersion = "1.0.57";
 
 	private const string DefaultNpmRegistry = "https://registry.npmjs.org";
 

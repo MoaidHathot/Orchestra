@@ -1,5 +1,5 @@
 using System.Threading.Channels;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
@@ -777,6 +777,9 @@ public partial class CopilotAgent : IAgent
 			CustomAgents = baseConfig.CustomAgents,
 			Tools = baseConfig.Tools,
 			SkillDirectories = baseConfig.SkillDirectories,
+			// SDK 1.0.0 added InstructionDirectories — carry it across resume so the agent
+			// has the same auxiliary-instructions surface after a swap as the original create.
+			InstructionDirectories = baseConfig.InstructionDirectories,
 			InfiniteSessions = baseConfig.InfiniteSessions,
 			Hooks = baseConfig.Hooks,
 			WorkingDirectory = baseConfig.WorkingDirectory,
@@ -818,9 +821,14 @@ public partial class CopilotAgent : IAgent
 				// Apply section overrides for Customize mode
 				if (_systemPromptMode.Value == SystemPromptMode.Customize && _systemPromptSections is { Count: > 0 })
 				{
+					// SDK 1.0.0 changed Sections from Dictionary<string, SectionOverride>
+					// to Dictionary<SystemMessageSection, SectionOverride>. The struct has
+					// a (string) ctor so we forward the legacy string key as-is; unknown
+					// section names are still accepted by the runtime and treated as
+					// additional-instructions hooks (per the SDK README).
 					config.SystemMessage.Sections = _systemPromptSections
 						.ToDictionary(
-							kvp => kvp.Key,
+							kvp => new SystemMessageSection(kvp.Key),
 							kvp => new SectionOverride
 							{
 								Action = kvp.Value.Action switch
@@ -861,7 +869,7 @@ public partial class CopilotAgent : IAgent
 		// Configure infinite sessions
 		if (_infiniteSessionConfig is not null)
 		{
-			config.InfiniteSessions = new GitHub.Copilot.SDK.InfiniteSessionConfig();
+			config.InfiniteSessions = new GitHub.Copilot.InfiniteSessionConfig();
 
 			if (_infiniteSessionConfig.Enabled.HasValue)
 				config.InfiniteSessions.Enabled = _infiniteSessionConfig.Enabled.Value;
@@ -871,6 +879,16 @@ public partial class CopilotAgent : IAgent
 
 			if (_infiniteSessionConfig.BufferExhaustionThreshold.HasValue)
 				config.InfiniteSessions.BufferExhaustionThreshold = _infiniteSessionConfig.BufferExhaustionThreshold.Value;
+		}
+
+		// SDK 1.0.0: forward Orchestra's skill directories as instruction directories too
+		// so the runtime's instruction-discovery pass picks up any *.md files alongside
+		// any *.skill.yml files. Skill directories remain the primary registration; this
+		// is an additive enhancement that turns directories with mixed contents into a
+		// one-stop-shop for both kinds.
+		if (_skillDirectories.Length > 0)
+		{
+			config.InstructionDirectories = [.. _skillDirectories];
 		}
 
 		// Configure session hooks for structured audit logging
@@ -890,13 +908,17 @@ public partial class CopilotAgent : IAgent
 		{
 			OnSessionStart = (input, invocation) =>
 			{
+				// SDK 1.0.0 renamed input.Cwd to input.WorkingDirectory and now exposes
+				// SessionId on every hook input (PR series #1295/#1306), so we can log
+				// the actual session id rather than reconstructing it from invocation.
+				LogHookSessionStart(input.SessionId ?? "(unknown)", input.Source ?? "(unspecified)", input.WorkingDirectory ?? "(none)");
 				_reporter.ReportAuditLogEntry(_stepName, new AuditLogEntry
 				{
 					Sequence = 0,
 					Timestamp = DateTimeOffset.UtcNow,
 					EventType = AuditEventType.SessionStart,
 					SessionSource = input.Source,
-					AdditionalContext = input.Cwd,
+					AdditionalContext = input.WorkingDirectory,
 				});
 				return Task.FromResult<SessionStartHookOutput?>(null);
 			},
@@ -987,16 +1009,16 @@ public partial class CopilotAgent : IAgent
 	/// <summary>
 	/// Builds image attachments for the Copilot SDK message.
 	/// </summary>
-	private List<UserMessageAttachment> BuildAttachments()
+	private List<Attachment> BuildAttachments()
 	{
-		var attachments = new List<UserMessageAttachment>();
+		var attachments = new List<Attachment>();
 
 		foreach (var attachment in _attachments)
 		{
 			switch (attachment)
 			{
 				case FileImageAttachment file:
-					attachments.Add(new UserMessageAttachmentFile
+					attachments.Add(new AttachmentFile
 					{
 						Path = file.Path,
 						DisplayName = file.DisplayName ?? System.IO.Path.GetFileName(file.Path),
@@ -1004,7 +1026,7 @@ public partial class CopilotAgent : IAgent
 					break;
 
 				case BlobImageAttachment blob:
-					attachments.Add(new UserMessageAttachmentBlob
+					attachments.Add(new AttachmentBlob
 					{
 						Data = blob.Data,
 						MimeType = blob.MimeType,
@@ -1148,6 +1170,15 @@ public partial class CopilotAgent : IAgent
 			if (!subagent.Infer)
 				config.Infer = false;
 
+			// SDK 1.0.0 added per-sub-agent model overrides (PR #1309). Forward
+			// Subagent.Model when set so a sub-agent can run on a different model than
+			// the main step (e.g. main step on claude-opus-4.6, a researcher sub-agent
+			// on gpt-5-mini for cheap fan-out). Null leaves the runtime to inherit the
+			// main session's model, preserving the old behaviour for sub-agents that
+			// don't specify one.
+			if (!string.IsNullOrEmpty(subagent.Model))
+				config.Model = subagent.Model;
+
 			// Add MCP servers specific to this subagent
 			if (subagent.Mcps.Length > 0)
 			{
@@ -1184,7 +1215,10 @@ public partial class CopilotAgent : IAgent
 					{
 						Command = local.Command,
 						Args = [.. local.Arguments],
-						Cwd = local.WorkingDirectory,
+						// SDK 1.0.0 renamed Cwd -> WorkingDirectory on McpStdioServerConfig
+						// (cross-SDK naming consolidation). Same semantics; only the property
+						// name changed.
+						WorkingDirectory = local.WorkingDirectory,
 						Tools = ["*"],
 						Timeout = timeoutMs,
 					};
@@ -1221,13 +1255,27 @@ public partial class CopilotAgent : IAgent
 	}
 
 	/// <summary>
-	/// Converts engine tools to AIFunction instances that the Copilot SDK can register.
-	/// Each engine tool is wrapped in an <see cref="EngineToolAIFunction"/> that delegates
-	/// to <see cref="IEngineTool.Execute"/> with the shared <see cref="EngineToolContext"/>.
+	/// Converts engine tools to <see cref="AIFunctionDeclaration"/> instances that the
+	/// Copilot SDK can register on the session. Each engine tool is wrapped in an
+	/// <see cref="EngineToolAIFunction"/> that delegates to <see cref="IEngineTool.Execute"/>
+	/// with the shared <see cref="EngineToolContext"/>.
 	/// </summary>
-	private List<AIFunction> BuildEngineTools()
+	/// <remarks>
+	/// On SDK 1.0.0 the helper API <see cref="CopilotTool.DefineTool"/> is the new front-door
+	/// for declaring host-side tools, but it generates the JSON schema from the delegate
+	/// signature via <see cref="AIFunctionFactory.Create"/> and cannot accept a hand-built
+	/// schema. Our engine tools each ship their own well-formed schema through
+	/// <see cref="IEngineTool.ParametersSchema"/>, so we keep <see cref="EngineToolAIFunction"/>
+	/// (a custom <see cref="AIFunction"/> subclass) which preserves that schema verbatim and
+	/// stamps the <c>skip_permission</c> additional property the SDK 1.0.0 runtime reads to
+	/// bypass per-call permission prompts (the same flag <see cref="CopilotTool.DefineTool"/>
+	/// sets internally when <see cref="CopilotToolOptions.SkipPermission"/> is configured).
+	/// Result: engine tools integrate with the SDK 1.0.0 permission system identically to
+	/// DefineTool-created tools while keeping their richer parameter schemas.
+	/// </remarks>
+	private List<AIFunctionDeclaration> BuildEngineTools()
 	{
-		var functions = new List<AIFunction>();
+		var functions = new List<AIFunctionDeclaration>();
 
 		foreach (var tool in _engineTools)
 		{
@@ -1348,6 +1396,15 @@ public partial class CopilotAgent : IAgent
 	[LoggerMessage(EventId = 21, Level = LogLevel.Warning,
 		Message = "ResumeSessionAsync reported the prior session '{PriorSessionId}' is missing on the CLI ({SdkMessage}); falling back to cold restart of the step")]
 	private partial void LogResumeSessionMissingFallback(string priorSessionId, string sdkMessage);
+
+	// EventId 22: SDK 1.0.0 added SessionId to every hook input (PR #1306). Logging the
+	// SDK-reported session id alongside the source ("startup" / "resume" / "new") and the
+	// CLI-resolved working directory gives operators a one-line confirmation that the
+	// hook fired against the session id they expect — useful when sub-agents run in
+	// nested sessions and the parent session's hook fires on the child's id.
+	[LoggerMessage(EventId = 22, Level = LogLevel.Debug,
+		Message = "OnSessionStart hook fired (sessionId={SessionId}, source={Source}, workingDirectory={WorkingDirectory})")]
+	private partial void LogHookSessionStart(string sessionId, string source, string workingDirectory);
 
 	#endregion
 }

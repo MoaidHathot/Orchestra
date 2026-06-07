@@ -54,4 +54,18 @@ public class Subagent
 	/// When false, the subagent is only invoked when explicitly requested.
 	/// </summary>
 	public bool Infer { get; init; } = true;
+
+	/// <summary>
+	/// Optional model override for this subagent. When set, the runtime will use this
+	/// model for the subagent's turns instead of inheriting the main session's model.
+	/// Useful for fan-out patterns where a main step runs on a strong model (e.g.,
+	/// <c>claude-opus-4.6</c>) and delegates cheap parallel work to a sub-agent on a
+	/// faster / cheaper model (e.g., <c>gpt-5-mini</c>).
+	/// </summary>
+	/// <remarks>
+	/// Requires GitHub.Copilot.SDK 1.0.0+ which added the per-sub-agent
+	/// <c>CustomAgentConfig.Model</c> field. When null, the subagent inherits the
+	/// main session's model — the historical Orchestra 0.x behaviour.
+	/// </remarks>
+	public string? Model { get; init; }
 }

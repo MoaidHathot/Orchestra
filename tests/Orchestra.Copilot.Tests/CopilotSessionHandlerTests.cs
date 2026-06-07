@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using FluentAssertions;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 using NSubstitute;
 using Orchestra.Engine;
 
@@ -29,7 +29,9 @@ public class CopilotSessionHandlerTests
 		Data = new SessionStartData
 		{
 			SessionId = "test-session-id",
-			Version = 1.0,
+			// SDK 1.0.0 narrowed Version from double to int64; the test fixture value
+			// was always a whole number so a long literal preserves the original intent.
+			Version = 1L,
 			Producer = "test-producer",
 			CopilotVersion = "1.0.0",
 			StartTime = DateTimeOffset.UtcNow,
@@ -49,8 +51,16 @@ public class CopilotSessionHandlerTests
 		int cacheReadTokens = 10,
 		int cacheWriteTokens = 5,
 		double cost = 0.001,
-		double duration = 1.5) => new()
+		double durationSeconds = 1.5) => new()
 	{
+		// SDK 1.0.0 changes AssistantUsageData types:
+		//   * Token counts (Input/Output/CacheRead/CacheWrite) are now long? (auto-widen
+		//     from int implicitly so the int parameter shape can stay).
+		//   * Duration is TimeSpan? — the fixture used a "seconds as double" convention
+		//     so we forward by constructing a TimeSpan from the seconds value.
+		//   * Cost is decorated with the GHCP001 evaluation-only diagnostic; we suppress
+		//     locally because the field is wire-compatible with 0.3.0.
+#pragma warning disable GHCP001
 		Data = new AssistantUsageData
 		{
 			Model = model,
@@ -59,8 +69,9 @@ public class CopilotSessionHandlerTests
 			CacheReadTokens = cacheReadTokens,
 			CacheWriteTokens = cacheWriteTokens,
 			Cost = cost,
-			Duration = duration
+			Duration = TimeSpan.FromSeconds(durationSeconds),
 		}
+#pragma warning restore GHCP001
 	};
 
 	private static AssistantMessageDeltaEvent CreateMessageDeltaEvent(string deltaContent) => new()
@@ -112,7 +123,13 @@ public class CopilotSessionHandlerTests
 			ToolName = toolName,
 			McpToolName = mcpToolName,
 			McpServerName = mcpServerName,
-			Arguments = arguments
+			// SDK 1.0.0 changed Arguments from Dictionary<string, object>? to JsonElement?
+			// (the schema-generator emits Dictionary-shaped payloads as JSON elements so
+			// the wire encoding is preserved). We serialize the legacy test-fixture dict
+			// into a JsonElement on the fly.
+			Arguments = arguments is null
+				? null
+				: System.Text.Json.JsonSerializer.SerializeToElement(arguments),
 		}
 	};
 
@@ -144,6 +161,11 @@ public class CopilotSessionHandlerTests
 	/// tests that assert <see cref="CopilotSessionFailedException.Details"/> carries the
 	/// SDK payload through to the engine layer instead of collapsing it into the message.
 	/// </summary>
+	/// <remarks>
+	/// SDK 1.0.0 narrowed <c>SessionErrorData.StatusCode</c> from <c>long?</c> to
+	/// <c>int?</c>. The helper accepts <c>long?</c> for backwards compatibility with the
+	/// existing call sites and casts down explicitly.
+	/// </remarks>
 	private static SessionErrorEvent CreateDetailedErrorEvent(
 		string message,
 		string? errorType = null,
@@ -156,7 +178,7 @@ public class CopilotSessionHandlerTests
 		{
 			Message = message,
 			ErrorType = errorType!,
-			StatusCode = statusCode,
+			StatusCode = statusCode is null ? null : (int?)statusCode.Value,
 			ProviderCallId = providerCallId!,
 			Url = url!,
 			Stack = stack!,
@@ -340,7 +362,7 @@ public class CopilotSessionHandlerTests
 			cacheReadTokens: 10,
 			cacheWriteTokens: 5,
 			cost: 0.001,
-			duration: 1.5);
+			durationSeconds: 1.5);
 
 		// Act
 		_handler.HandleEvent(usageEvent);
@@ -378,7 +400,7 @@ public class CopilotSessionHandlerTests
 			cacheReadTokens: 20,
 			cacheWriteTokens: 10,
 			cost: 0.002,
-			duration: 2.0);
+			durationSeconds: 2.0);
 
 		// Act
 		_handler.HandleEvent(usageEvent);
@@ -1020,13 +1042,24 @@ public class CopilotSessionHandlerTests
 
 	private static McpServersLoadedServer CreateMcpServerItem(
 		string name,
-		McpServersLoadedServerStatus status,
+		McpServerStatus status,
 		string? source = null,
 		string? error = null) => new()
 	{
 		Name = name,
 		Status = status,
-		Source = source!,
+		// SDK 1.0.0 changed Source from string to a McpServerSource? enum
+		// (User/Workspace/Plugin/Builtin). Tests use the new vocabulary directly so
+		// the assertion can match the handler's .ToString() projection.
+		Source = source switch
+		{
+			null => null,
+			"User" => McpServerSource.User,
+			"Workspace" => McpServerSource.Workspace,
+			"Plugin" => McpServerSource.Plugin,
+			"Builtin" => McpServerSource.Builtin,
+			_ => null,
+		},
 		Error = error!
 	};
 
@@ -1035,8 +1068,8 @@ public class CopilotSessionHandlerTests
 	{
 		// Arrange
 		var evt = CreateMcpServersLoadedEvent(
-			CreateMcpServerItem("icm", McpServersLoadedServerStatus.Connected, "local"),
-			CreateMcpServerItem("graph", McpServersLoadedServerStatus.Failed, "remote", "Connection refused"));
+			CreateMcpServerItem("icm", McpServerStatus.Connected, "User"),
+			CreateMcpServerItem("graph", McpServerStatus.Failed, "Plugin", "Connection refused"));
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -1047,13 +1080,13 @@ public class CopilotSessionHandlerTests
 		agentEvent.McpServerStatuses.Should().HaveCount(2);
 
 		agentEvent.McpServerStatuses![0].Name.Should().Be("icm");
-		agentEvent.McpServerStatuses[0].Status.Should().Be("Connected");
-		agentEvent.McpServerStatuses[0].Source.Should().Be("local");
+		agentEvent.McpServerStatuses[0].Status.Should().Be("connected");
+		agentEvent.McpServerStatuses[0].Source.Should().Be("user");
 		agentEvent.McpServerStatuses[0].Error.Should().BeNull();
 
 		agentEvent.McpServerStatuses[1].Name.Should().Be("graph");
-		agentEvent.McpServerStatuses[1].Status.Should().Be("Failed");
-		agentEvent.McpServerStatuses[1].Source.Should().Be("remote");
+		agentEvent.McpServerStatuses[1].Status.Should().Be("failed");
+		agentEvent.McpServerStatuses[1].Source.Should().Be("plugin");
 		agentEvent.McpServerStatuses[1].Error.Should().Be("Connection refused");
 	}
 
@@ -1062,15 +1095,19 @@ public class CopilotSessionHandlerTests
 	{
 		// Arrange
 		var evt = CreateMcpServersLoadedEvent(
-			CreateMcpServerItem("icm", McpServersLoadedServerStatus.Connected));
+			CreateMcpServerItem("icm", McpServerStatus.Connected));
 
 		// Act
 		_handler.HandleEvent(evt);
 
 		// Assert
+		// SDK 1.0.0 changed McpServerStatus from an enum (whose ToString() returned the
+		// PascalCase member name "Connected") to a struct whose Value/ToString() returns
+		// the lowercase snake_case wire token "connected". The handler surfaces whatever
+		// the SDK ToString() returns to the reporter, so the assertion uses the new shape.
 		_reporter.Received(1).ReportMcpServersLoaded(
 			Arg.Is<IReadOnlyList<McpServerStatusInfo>>(list =>
-				list.Count == 1 && list[0].Name == "icm" && list[0].Status == "Connected"));
+				list.Count == 1 && list[0].Name == "icm" && list[0].Status == "connected"));
 	}
 
 	[Fact]
@@ -1093,11 +1130,11 @@ public class CopilotSessionHandlerTests
 	{
 		// Arrange
 		var evt = CreateMcpServersLoadedEvent(
-			CreateMcpServerItem("s1", McpServersLoadedServerStatus.Connected),
-			CreateMcpServerItem("s2", McpServersLoadedServerStatus.Failed, error: "timeout"),
-			CreateMcpServerItem("s3", McpServersLoadedServerStatus.Pending),
-			CreateMcpServerItem("s4", McpServersLoadedServerStatus.Disabled),
-			CreateMcpServerItem("s5", McpServersLoadedServerStatus.NotConfigured));
+			CreateMcpServerItem("s1", McpServerStatus.Connected),
+			CreateMcpServerItem("s2", McpServerStatus.Failed, error: "timeout"),
+			CreateMcpServerItem("s3", McpServerStatus.Pending),
+			CreateMcpServerItem("s4", McpServerStatus.Disabled),
+			CreateMcpServerItem("s5", McpServerStatus.NotConfigured));
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -1106,12 +1143,12 @@ public class CopilotSessionHandlerTests
 		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
 		var statuses = agentEvent!.McpServerStatuses!;
 		statuses.Should().HaveCount(5);
-		statuses[0].Status.Should().Be("Connected");
-		statuses[1].Status.Should().Be("Failed");
+		statuses[0].Status.Should().Be("connected");
+		statuses[1].Status.Should().Be("failed");
 		statuses[1].Error.Should().Be("timeout");
-		statuses[2].Status.Should().Be("Pending");
-		statuses[3].Status.Should().Be("Disabled");
-		statuses[4].Status.Should().Be("NotConfigured");
+		statuses[2].Status.Should().Be("pending");
+		statuses[3].Status.Should().Be("disabled");
+		statuses[4].Status.Should().Be("not_configured");
 	}
 
 	#endregion
@@ -1120,13 +1157,13 @@ public class CopilotSessionHandlerTests
 
 	private static SessionMcpServerStatusChangedEvent CreateMcpServerStatusChangedEvent(
 		string serverName,
-		McpServersLoadedServerStatus status) => new()
+		McpServerStatus status) => new()
 	{
 		Data = new SessionMcpServerStatusChangedData
 		{
 			ServerName = serverName,
 			// Both enums share the same value layout; cast bridges the SDK 0.3.0 split.
-			Status = (McpServerStatusChangedStatus)(int)status
+			Status = status
 		}
 	};
 
@@ -1134,7 +1171,7 @@ public class CopilotSessionHandlerTests
 	public void HandleEvent_McpServerStatusChanged_WritesMcpServerStatusChangedEvent()
 	{
 		// Arrange
-		var evt = CreateMcpServerStatusChangedEvent("icm", McpServersLoadedServerStatus.Connected);
+		var evt = CreateMcpServerStatusChangedEvent("icm", McpServerStatus.Connected);
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -1143,20 +1180,20 @@ public class CopilotSessionHandlerTests
 		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
 		agentEvent!.Type.Should().Be(AgentEventType.McpServerStatusChanged);
 		agentEvent.McpServerName.Should().Be("icm");
-		agentEvent.McpServerStatus.Should().Be("Connected");
+		agentEvent.McpServerStatus.Should().Be("connected");
 	}
 
 	[Fact]
 	public void HandleEvent_McpServerStatusChanged_ReportsMcpServerStatusChanged()
 	{
 		// Arrange
-		var evt = CreateMcpServerStatusChangedEvent("graph", McpServersLoadedServerStatus.Failed);
+		var evt = CreateMcpServerStatusChangedEvent("graph", McpServerStatus.Failed);
 
 		// Act
 		_handler.HandleEvent(evt);
 
 		// Assert
-		_reporter.Received(1).ReportMcpServerStatusChanged("graph", "Failed");
+		_reporter.Received(1).ReportMcpServerStatusChanged("graph", "failed");
 	}
 
 	#endregion
@@ -1168,10 +1205,10 @@ public class CopilotSessionHandlerTests
 	{
 		// Arrange & Act - Simulate a session with MCP server lifecycle events
 		_handler.HandleEvent(CreateSessionStartEvent("claude-opus-4.5"));
-		_handler.HandleEvent(CreateMcpServerStatusChangedEvent("icm", McpServersLoadedServerStatus.Pending));
+		_handler.HandleEvent(CreateMcpServerStatusChangedEvent("icm", McpServerStatus.Pending));
 		_handler.HandleEvent(CreateMcpServersLoadedEvent(
-			CreateMcpServerItem("icm", McpServersLoadedServerStatus.Connected, "local"),
-			CreateMcpServerItem("graph", McpServersLoadedServerStatus.Failed, error: "timeout")));
+			CreateMcpServerItem("icm", McpServerStatus.Connected, "User"),
+			CreateMcpServerItem("graph", McpServerStatus.Failed, error: "timeout")));
 		_handler.HandleEvent(CreateMessageDeltaEvent("Working with IcM tools..."));
 		_handler.HandleEvent(CreateMessageEvent("Done."));
 		_handler.HandleEvent(CreateUsageEvent("claude-opus-4.5", 100, 50));
@@ -1188,7 +1225,7 @@ public class CopilotSessionHandlerTests
 		events[0].Type.Should().Be(AgentEventType.SessionStart);
 		events[1].Type.Should().Be(AgentEventType.McpServerStatusChanged);
 		events[1].McpServerName.Should().Be("icm");
-		events[1].McpServerStatus.Should().Be("Pending");
+		events[1].McpServerStatus.Should().Be("pending");
 		events[2].Type.Should().Be(AgentEventType.McpServersLoaded);
 		events[2].McpServerStatuses.Should().HaveCount(2);
 		events[3].Type.Should().Be(AgentEventType.MessageDelta);
@@ -1877,6 +1914,9 @@ public class CopilotSessionHandlerTests
 	public void HandleEvent_ExternalToolRequested_WritesToolExecutionStartEvent()
 	{
 		// Arrange
+		// SDK 1.0.0 changed ExternalToolRequestedData.Arguments from Dictionary<string, object>?
+		// to JsonElement?. Serialize the legacy fixture shape on the fly so we can keep
+		// the assertion below — the handler stringifies through JsonSerializer either way.
 		var externalToolEvent = new ExternalToolRequestedEvent
 		{
 			Data = new ExternalToolRequestedData
@@ -1885,7 +1925,8 @@ public class CopilotSessionHandlerTests
 				SessionId = "test-session",
 				ToolCallId = "call-456",
 				ToolName = "my_external_tool",
-				Arguments = new Dictionary<string, object> { ["arg1"] = "value1" },
+				Arguments = System.Text.Json.JsonSerializer.SerializeToElement(
+					new Dictionary<string, object> { ["arg1"] = "value1" }),
 			}
 		};
 
@@ -2048,13 +2089,18 @@ public class CopilotSessionHandlerTests
 	[Fact]
 	public void HandleEvent_AutoModeSwitchCompletedEvent_EmitsAutoModeSwitchCompleted()
 	{
-		// Arrange
+		// Arrange — SDK 1.0.0 changed AutoModeSwitchCompletedData.Response from
+		// a free-form string to a strongly-typed AutoModeSwitchResponse struct
+		// (Yes / YesAlways / No). We use the wire-string ctor here because the
+		// test originally exercised an arbitrary model-name response; in 1.0.0
+		// the value space is constrained to the three known tokens, but the
+		// handler still surfaces them via .Value to the engine-level event.
 		var evt = new AutoModeSwitchCompletedEvent
 		{
 			Data = new AutoModeSwitchCompletedData
 			{
 				RequestId = "req-42",
-				Response = "claude-sonnet-4.5",
+				Response = AutoModeSwitchResponse.YesAlways,
 			}
 		};
 
@@ -2065,7 +2111,7 @@ public class CopilotSessionHandlerTests
 		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
 		emitted!.Type.Should().Be(AgentEventType.AutoModeSwitchCompleted);
 		emitted.AutoModeRequestId.Should().Be("req-42");
-		emitted.AutoModeResponse.Should().Be("claude-sonnet-4.5");
+		emitted.AutoModeResponse.Should().Be("yes_always");
 		emitted.AutoModeErrorCode.Should().BeNull();
 	}
 
@@ -2099,10 +2145,17 @@ public class CopilotSessionHandlerTests
 	}
 
 	[Fact]
-	public void HandleEvent_AssistantUsageWithQuotaSnapshots_EmitsUsageThenQuotaSnapshotEvent()
+	public void HandleEvent_AssistantUsageWithTtftAndReasoningTokens_EmitsUsageWithSdk1_0Fields()
 	{
-		// Arrange — usage event carrying quota snapshots (SDK 0.3.0).
-		var resetDate = DateTimeOffset.Parse("2026-05-01T00:00:00Z");
+		// Arrange — SDK 1.0.0 narrowed AssistantUsageData's surface vs. 0.3.0:
+		//   * QuotaSnapshots dictionary REMOVED (moved to SessionShutdown).
+		//   * CopilotUsage / TotalNanoAiu REMOVED from per-usage events.
+		//   * TtftMs renamed -> TimeToFirstToken (and re-typed from double to TimeSpan?).
+		// This test verifies the handler:
+		//   1. Projects TimeToFirstToken (TimeSpan) -> AgentUsage.TimeToFirstTokenMs (double, ms).
+		//   2. Surfaces ReasoningTokens unchanged.
+		//   3. Leaves TotalNanoAiu/QuotaSnapshots null on the agent-level shape.
+		#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only by the SDK
 		var evt = new AssistantUsageEvent
 		{
 			Data = new AssistantUsageData
@@ -2111,53 +2164,32 @@ public class CopilotSessionHandlerTests
 				InputTokens = 1000,
 				OutputTokens = 200,
 				ReasoningTokens = 50,
-				TtftMs = 230,
-				CopilotUsage = new AssistantUsageCopilotUsage
-				{
-					TotalNanoAiu = 1.234,
-					TokenDetails = Array.Empty<AssistantUsageCopilotUsageTokenDetail>(),
-				},
-				QuotaSnapshots = new Dictionary<string, AssistantUsageQuotaSnapshot>
-				{
-					["premium-requests"] = new AssistantUsageQuotaSnapshot
-					{
-						EntitlementRequests = 1500,
-						UsedRequests = 750,
-						RemainingPercentage = 0.5,
-						Overage = 0,
-						IsUnlimitedEntitlement = false,
-						UsageAllowedWithExhaustedQuota = true,
-						OverageAllowedWithExhaustedQuota = false,
-						ResetDate = resetDate,
-					},
-				}
+				TimeToFirstToken = TimeSpan.FromMilliseconds(230),
+				Cost = 0.0123,
+				Duration = TimeSpan.FromSeconds(4.2),
 			}
 		};
+		#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);
 
-		// Assert — first event is Usage with new SDK 0.3.0 fields populated.
+		// Assert — single Usage event with the SDK 1.0.0 shape; no follow-up QuotaSnapshot
+		// event since the SDK no longer carries quota data on per-usage events.
 		_channel.Reader.TryRead(out var usage).Should().BeTrue();
 		usage!.Type.Should().Be(AgentEventType.Usage);
 		usage.Usage.Should().NotBeNull();
 		usage.Usage!.ReasoningTokens.Should().Be(50);
-		usage.Usage.TotalNanoAiu.Should().Be(1.234);
 		usage.Usage.TimeToFirstTokenMs.Should().Be(230);
-		usage.Usage.QuotaSnapshots.Should().NotBeNull();
-		usage.Usage.QuotaSnapshots!.Should().ContainKey("premium-requests");
+		usage.Usage.Cost.Should().Be(0.0123);
+		usage.Usage.Duration.Should().Be(4.2);
+		usage.Usage.TotalNanoAiu.Should().BeNull("SDK 1.0.0 moved TotalNanoAiu to SessionShutdownData");
+		usage.Usage.QuotaSnapshots.Should().BeNull("SDK 1.0.0 no longer emits quota snapshots on per-usage events");
 
-		// Assert — second event is the dedicated QuotaSnapshot event.
-		_channel.Reader.TryRead(out var quota).Should().BeTrue();
-		quota!.Type.Should().Be(AgentEventType.QuotaSnapshot);
-		quota.QuotaSnapshots.Should().NotBeNull();
-		var snap = quota.QuotaSnapshots!["premium-requests"];
-		snap.EntitlementRequests.Should().Be(1500);
-		snap.UsedRequests.Should().Be(750);
-		snap.RemainingPercentage.Should().Be(0.5);
-		snap.IsUnlimitedEntitlement.Should().BeFalse();
-		snap.UsageAllowedWithExhaustedQuota.Should().BeTrue();
-		snap.ResetDate.Should().Be(resetDate);
+		// No subsequent QuotaSnapshot event must follow.
+		_channel.Reader.TryRead(out var follow).Should().BeFalse(
+			"the handler must not emit a follow-up QuotaSnapshot event in SDK 1.0.0 because the SDK no longer carries quota data on per-usage events");
+		follow.Should().BeNull();
 	}
 
 	[Fact]

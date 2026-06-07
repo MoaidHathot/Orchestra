@@ -1,5 +1,5 @@
 using FluentAssertions;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 
@@ -150,7 +150,9 @@ public class CopilotClientPoolTests
 		}
 
 		public int DiagnosticHash { get; }
-		public ConnectionState State { get; private set; } = ConnectionState.Disconnected;
+		// SDK 1.0.0 removed the public ConnectionState surface, so we track our own
+		// started-ness flag for the test fixture instead of mirroring an SDK type.
+		public bool IsStarted { get; private set; }
 		public int StartCalls { get; private set; }
 		public int StopCalls { get; private set; }
 		public int DisposeCalls { get; private set; }
@@ -158,14 +160,14 @@ public class CopilotClientPoolTests
 		public Task StartAsync(CancellationToken cancellationToken)
 		{
 			StartCalls++;
-			State = ConnectionState.Connected;
+			IsStarted = true;
 			return Task.CompletedTask;
 		}
 
 		public Task StopAsync()
 		{
 			StopCalls++;
-			State = ConnectionState.Disconnected;
+			IsStarted = false;
 			return Task.CompletedTask;
 		}
 

@@ -1,6 +1,6 @@
 using System.Threading.Channels;
 using FluentAssertions;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
@@ -428,7 +428,6 @@ public class CopilotAgentSwapTests
 		}
 
 		public int DiagnosticHash => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(this);
-		public ConnectionState State => ConnectionState.Connected;
 
 		public List<SessionConfig> CreateCalls { get; } = [];
 		public List<(string sessionId, ResumeSessionConfig config)> ResumeCalls { get; } = [];
@@ -468,7 +467,9 @@ public class CopilotAgentSwapTests
 	{
 		private readonly Exception? _sendThrows;
 		private readonly bool _completeImmediately;
-		private SessionEventHandler? _handler;
+		// SDK 1.0.0 dropped the SessionEventHandler delegate; sessions now register
+		// plain Action<SessionEvent> callbacks.
+		private Action<SessionEvent>? _handler;
 
 		public ScriptedCopilotSession(string sessionId, Exception? sendThrows = null, bool completeImmediately = false)
 		{
@@ -479,7 +480,7 @@ public class CopilotAgentSwapTests
 
 		public string SessionId { get; }
 
-		public IDisposable On(SessionEventHandler handler)
+		public IDisposable On(Action<SessionEvent> handler)
 		{
 			_handler = handler;
 			return new NoopDisposable();

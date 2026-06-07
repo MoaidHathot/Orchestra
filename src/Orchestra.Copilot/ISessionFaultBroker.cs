@@ -65,7 +65,7 @@ internal interface ISessionFaultBroker
 
 /// <summary>
 /// Default broker implementation. The probe is injected as a delegate so the broker
-/// is decoupled from the sealed <see cref="GitHub.Copilot.SDK.CopilotClient"/> type
+/// is decoupled from the sealed <see cref="GitHub.Copilot.CopilotClient"/> type
 /// and can be unit-tested with a fake probe.
 /// </summary>
 internal sealed partial class SessionFaultBroker : ISessionFaultBroker

@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Threading.Channels;
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
@@ -526,28 +526,24 @@ internal sealed partial class CopilotSessionHandler
 	{
 		_actualModel = usageEvt.Data.Model;
 
-		// SDK 0.3.0 surfaces per-bucket quota snapshots alongside usage. Capture them so the
-		// Portal can render entitlement vs used vs overage in real time. The dictionary is
-		// keyed by quota name (e.g. "premium-requests", "claude-sonnet-4.5").
-		IReadOnlyDictionary<string, AgentQuotaSnapshot>? quotaSnapshots = null;
-		if (usageEvt.Data.QuotaSnapshots is { Count: > 0 } sdkQuotas)
-		{
-			var captured = new Dictionary<string, AgentQuotaSnapshot>(sdkQuotas.Count, StringComparer.Ordinal);
-			foreach (var (name, snap) in sdkQuotas)
-			{
-				if (snap is null) continue;
-				captured[name] = new AgentQuotaSnapshot(
-					EntitlementRequests: snap.EntitlementRequests,
-					UsedRequests: snap.UsedRequests,
-					RemainingPercentage: snap.RemainingPercentage,
-					Overage: snap.Overage,
-					IsUnlimitedEntitlement: snap.IsUnlimitedEntitlement,
-					UsageAllowedWithExhaustedQuota: snap.UsageAllowedWithExhaustedQuota,
-					OverageAllowedWithExhaustedQuota: snap.OverageAllowedWithExhaustedQuota,
-					ResetDate: snap.ResetDate);
-			}
-			quotaSnapshots = captured;
-		}
+		// SDK 1.0.0 changes the wire types under AssistantUsageData:
+		//   * QuotaSnapshots and CopilotUsage.TotalNanoAiu are removed (those moved to
+		//     SessionShutdownEvent for end-of-session roll-ups instead).
+		//   * Duration, TimeToFirstToken (renamed from TtftMs), and InterTokenLatency
+		//     are TimeSpan? instead of double?. We project Duration to seconds and
+		//     TimeToFirstToken to milliseconds to preserve the existing AgentUsage shape.
+		//   * Cost is decorated with the SDK's GHCP001 "evaluation-only" attribute;
+		//     suppressed locally because the field is still wire-compatible with 0.3.0
+		//     and our consumers already treat it as best-effort.
+		#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only by the SDK
+		var cost = usageEvt.Data.Cost;
+		#pragma warning restore GHCP001
+		var durationSeconds = usageEvt.Data.Duration is { } d
+			? (double?)d.TotalSeconds
+			: null;
+		var ttftMs = usageEvt.Data.TimeToFirstToken is { } ttft
+			? (double?)ttft.TotalMilliseconds
+			: null;
 
 		_usage = new AgentUsage
 		{
@@ -555,12 +551,12 @@ internal sealed partial class CopilotSessionHandler
 			OutputTokens = usageEvt.Data.OutputTokens,
 			CacheReadTokens = usageEvt.Data.CacheReadTokens,
 			CacheWriteTokens = usageEvt.Data.CacheWriteTokens,
-			Cost = usageEvt.Data.Cost,
-			Duration = usageEvt.Data.Duration,
+			Cost = cost,
+			Duration = durationSeconds,
 			ReasoningTokens = usageEvt.Data.ReasoningTokens,
-			TotalNanoAiu = usageEvt.Data.CopilotUsage?.TotalNanoAiu,
-			TimeToFirstTokenMs = usageEvt.Data.TtftMs,
-			QuotaSnapshots = quotaSnapshots,
+			TotalNanoAiu = null, // moved to SessionShutdownData.TotalNanoAiu in SDK 1.0.0
+			TimeToFirstTokenMs = ttftMs,
+			QuotaSnapshots = null, // removed from per-usage events in SDK 1.0.0
 		};
 		EmitEvent(new AgentEvent
 		{
@@ -568,16 +564,6 @@ internal sealed partial class CopilotSessionHandler
 			Model = _actualModel,
 			Usage = _usage,
 		});
-
-		// Emit a separate QuotaSnapshot event so the Portal can react without parsing usage.
-		if (quotaSnapshots is not null)
-		{
-			EmitEvent(new AgentEvent
-			{
-				Type = AgentEventType.QuotaSnapshot,
-				QuotaSnapshots = quotaSnapshots,
-			});
-		}
 	}
 
 	private void HandleMessageDelta(AssistantMessageDeltaEvent delta)
@@ -768,10 +754,14 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleMcpServersLoaded(SessionMcpServersLoadedEvent mcpLoaded)
 	{
+		// SDK 1.0.0 changed McpServersLoadedServer.Source from string to a typed
+		// McpServerSource? enum. Project it back to a string for the engine-level
+		// shape so downstream consumers (Portal, audit log) don't need a per-version
+		// adapter — the well-known values are stable.
 		var statuses = mcpLoaded.Data.Servers.Select(s => new McpServerStatusInfo(
 			Name: s.Name,
 			Status: s.Status.ToString(),
-			Source: s.Source,
+			Source: s.Source?.ToString(),
 			Error: s.Error
 		)).ToList();
 
@@ -825,13 +815,16 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleHookEnd(HookEndEvent hookEnd)
 	{
+		// SDK 1.0.0 changed HookEndData.Error from string? to a structured HookEndError
+		// record carrying Message and Stack. We surface Message (the operator-readable
+		// text); Stack is available if a future AgentEvent field wants to capture it.
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.HookEnd,
 			HookInvocationId = hookEnd.Data.HookInvocationId,
 			HookType = hookEnd.Data.HookType,
 			HookSuccess = hookEnd.Data.Success,
-			ErrorMessage = hookEnd.Data.Error?.ToString(),
+			ErrorMessage = hookEnd.Data.Error?.Message,
 		});
 	}
 
@@ -866,6 +859,10 @@ internal sealed partial class CopilotSessionHandler
 		// during a long generation. Capturing tokenLimit/currentTokens here gives a
 		// growth-over-time signal that surfaces in the host log even when the step never
 		// reaches a completion event. Verbose level keeps it cheap.
+		//
+		// SDK 1.0.0 changed TokenLimit and CurrentTokens from double to long; we keep the
+		// AgentEvent shape (double?) so downstream consumers don't break and just widen
+		// the long into a double on the way out.
 		LogSessionUsageInfo(
 			_requestedModel,
 			_sessionUsageInfoCount,
@@ -894,11 +891,14 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleAutoModeSwitchCompleted(AutoModeSwitchCompletedEvent evt)
 	{
+		// SDK 1.0.0 changed AutoModeSwitchCompletedData.Response from string to a
+		// strongly-typed AutoModeSwitchResponse struct (values: Yes, YesAlways, No).
+		// The struct's .Value property carries the string form we previously consumed.
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.AutoModeSwitchCompleted,
 			AutoModeRequestId = evt.Data.RequestId,
-			AutoModeResponse = evt.Data.Response,
+			AutoModeResponse = evt.Data.Response.Value,
 		});
 	}
 
@@ -1294,6 +1294,9 @@ internal sealed partial class CopilotSessionHandler
 
 	// EventId 9: per-heartbeat session-usage info (Phase 3.2). Debug-level so the noise
 	// stays out of default logs but is one switch away when triaging long sessions.
+	// SDK 1.0.0 narrowed TokenLimit and CurrentTokens to long (int64). We accept long
+	// here because the structured-log shipper preserves the type fidelity better than
+	// the legacy double signature did.
 	[LoggerMessage(
 		EventId = 9,
 		Level = LogLevel.Debug,
@@ -1301,13 +1304,14 @@ internal sealed partial class CopilotSessionHandler
 	private partial void LogSessionUsageInfo(
 		string model,
 		int heartbeatNumber,
-		double tokenLimit,
-		double currentTokens,
+		long tokenLimit,
+		long currentTokens,
 		long sessionElapsedMs,
 		long turnElapsedMs);
 
 	// EventId 10: session resumed on a fresh CLI worker. Information-level — this is a
 	// notable recovery event that operators want visible in default-verbosity logs.
+	// SDK 1.0.0: SessionResumeData.EventCount is long (int64), not double.
 	[LoggerMessage(
 		EventId = 10,
 		Level = LogLevel.Information,
@@ -1315,7 +1319,7 @@ internal sealed partial class CopilotSessionHandler
 	private partial void LogSessionResumed(
 		string model,
 		bool alreadyInUse,
-		double eventCount,
+		long eventCount,
 		string selectedModel,
 		string resumeTime);
 

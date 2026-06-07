@@ -1,11 +1,10 @@
-using GitHub.Copilot.SDK;
+using GitHub.Copilot;
 
 namespace Orchestra.Copilot;
 
 internal interface ICopilotClient : IAsyncDisposable
 {
 	int DiagnosticHash { get; }
-	ConnectionState State { get; }
 	Task StartAsync(CancellationToken cancellationToken);
 	Task StopAsync();
 	Task PingAsync(string message, CancellationToken cancellationToken);
@@ -42,7 +41,7 @@ internal interface ICopilotClient : IAsyncDisposable
 internal interface ICopilotSession : IAsyncDisposable
 {
 	string SessionId { get; }
-	IDisposable On(SessionEventHandler handler);
+	IDisposable On(Action<SessionEvent> handler);
 	Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken);
 	Task AbortAsync(CancellationToken cancellationToken = default);
 }
@@ -59,7 +58,6 @@ internal sealed class CopilotSdkClientAdapter : ICopilotClient
 	}
 
 	public int DiagnosticHash => _client.GetHashCode();
-	public ConnectionState State => _client.State;
 	public Task StartAsync(CancellationToken cancellationToken) => _client.StartAsync(cancellationToken);
 	public Task StopAsync() => _client.StopAsync();
 
@@ -88,6 +86,8 @@ internal sealed class CopilotSdkClientAdapter : ICopilotClient
 
 	public async Task<IReadOnlyList<ModelInfo>> ListModelsAsync(CancellationToken cancellationToken)
 	{
+		// SDK 1.0.0 keeps the IList<ModelInfo> return shape from 0.3.0; we just snapshot
+		// it into a read-only list so callers can iterate safely from any thread.
 		var models = await _client.ListModelsAsync(cancellationToken).ConfigureAwait(false);
 		return [.. models];
 	}
@@ -106,7 +106,7 @@ internal sealed class CopilotSdkSessionAdapter : ICopilotSession
 	}
 
 	public string SessionId => _session.SessionId;
-	public IDisposable On(SessionEventHandler handler) => _session.On(handler);
+	public IDisposable On(Action<SessionEvent> handler) => _session.On(handler);
 	public Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken) => _session.SendAsync(options, cancellationToken);
 	public Task AbortAsync(CancellationToken cancellationToken = default) => _session.AbortAsync(cancellationToken);
 	public ValueTask DisposeAsync() => _session.DisposeAsync();
@@ -119,6 +119,13 @@ internal interface ICopilotClientFactory
 
 internal sealed class CopilotSdkClientFactory : ICopilotClientFactory
 {
+	private readonly string? _baseDirectory;
+
+	public CopilotSdkClientFactory(string? baseDirectory = null)
+	{
+		_baseDirectory = baseDirectory;
+	}
+
 	public ICopilotClient CreateClient()
 	{
 		// Resolve the Copilot CLI binary lazily through the bootstrap. The first call here
@@ -131,7 +138,22 @@ internal sealed class CopilotSdkClientFactory : ICopilotClientFactory
 		// is safe here: the bootstrap performs only HTTP + file I/O, no SynchronizationContext-
 		// bound work, so there's no deadlock risk on UI/ASP.NET request contexts.
 		var cliPath = CopilotCliBootstrap.EnsureAsync().GetAwaiter().GetResult();
-		var options = new GitHub.Copilot.SDK.CopilotClientOptions { CliPath = cliPath };
+
+		// SDK 1.0.0 replaced CopilotClientOptions.CliPath with the RuntimeConnection abstraction;
+		// stdio (child-process) is what we used before, so this is a like-for-like translation.
+		var options = new CopilotClientOptions
+		{
+			Connection = RuntimeConnection.ForStdio(cliPath),
+		};
+
+		// Optional: BaseDirectory routes Copilot's per-session state (COPILOT_HOME) to a
+		// caller-supplied path so multi-tenant hosts can give each tenant an isolated
+		// session store. When null, the SDK uses ~/.copilot.
+		if (!string.IsNullOrEmpty(_baseDirectory))
+		{
+			options.BaseDirectory = _baseDirectory;
+		}
+
 		return new CopilotSdkClientAdapter(new CopilotClient(options));
 	}
 }
