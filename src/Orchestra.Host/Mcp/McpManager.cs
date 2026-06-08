@@ -492,6 +492,196 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	}
 
 	/// <summary>
+	/// Per-MCP timeout used by <see cref="ProbeEndpointReachabilityAsync"/>. Bounded
+	/// small because the probe runs on the error path after the tool-count probe has
+	/// already returned 0 — keeping it tight avoids stacking diagnostic latency on top
+	/// of an already-failed step start. Tunable via
+	/// <see cref="McpServerOptions.EndpointReachabilityProbeTimeoutSeconds"/>.
+	/// </summary>
+	private TimeSpan EndpointReachabilityTimeout =>
+		TimeSpan.FromSeconds(Math.Max(1, _mcpServerOptions.EndpointReachabilityProbeTimeoutSeconds));
+
+	/// <inheritdoc/>
+	/// <remarks>
+	/// Implementation looks each name up in the in-memory <c>_globalMcpList</c> built
+	/// from <c>orchestra.mcp.json</c> and dispatches on the original Mcp type:
+	/// <see cref="LocalMcp"/> → <see cref="McpEndpointReachabilityStatus.LocalStdio"/>
+	/// (no TCP probe possible without spawning the process); <see cref="RemoteMcp"/>
+	/// → TCP-connect to the parsed <c>host:port</c> of <see cref="RemoteMcp.Endpoint"/>
+	/// bounded by <see cref="EndpointReachabilityTimeout"/>; unknown names →
+	/// <see cref="McpEndpointReachabilityStatus.Unknown"/>.
+	/// <para>
+	/// Critically, the probe targets the <em>upstream</em> endpoint (the one configured
+	/// in orchestra.mcp.json, e.g. <c>http://localhost:5113/mcp/...</c>) — not the
+	/// Orchestra-hosted proxy at <c>_proxyBaseUrl</c>. Probing the proxy would always
+	/// report "reachable" because Orchestra's own process is up by definition; what we
+	/// actually want to know is whether the backend the proxy was configured to talk to
+	/// is alive.
+	/// </para>
+	/// </remarks>
+	public async Task<IReadOnlyDictionary<string, McpEndpointReachability>> ProbeEndpointReachabilityAsync(
+		IEnumerable<string> mcpNames,
+		CancellationToken cancellationToken = default)
+	{
+		ArgumentNullException.ThrowIfNull(mcpNames);
+
+		var requested = mcpNames
+			.Where(n => !string.IsNullOrWhiteSpace(n))
+			.Distinct(StringComparer.OrdinalIgnoreCase)
+			.ToArray();
+
+		var result = new Dictionary<string, McpEndpointReachability>(
+			requested.Length, StringComparer.OrdinalIgnoreCase);
+		if (requested.Length == 0)
+			return result;
+
+		var probeTimeout = EndpointReachabilityTimeout;
+
+		foreach (var name in requested)
+		{
+			var original = _globalMcpList.FirstOrDefault(m =>
+				string.Equals(m.Name, name, StringComparison.OrdinalIgnoreCase));
+			if (original is null)
+			{
+				result[name] = new McpEndpointReachability(McpEndpointReachabilityStatus.Unknown);
+				continue;
+			}
+
+			switch (original)
+			{
+				case LocalMcp:
+					result[name] = new McpEndpointReachability(McpEndpointReachabilityStatus.LocalStdio);
+					break;
+
+				case RemoteMcp remote:
+					result[name] = await ProbeRemoteEndpointAsync(name, remote.Endpoint, probeTimeout, cancellationToken)
+						.ConfigureAwait(false);
+					break;
+
+				default:
+					// Future Mcp subtype we don't yet know how to probe — surface as Unknown
+					// so the error message can fall back to the generic multi-cause hint
+					// rather than asserting a misleading "reachable" / "unreachable".
+					result[name] = new McpEndpointReachability(McpEndpointReachabilityStatus.Unknown);
+					break;
+			}
+		}
+
+		return result;
+	}
+
+	/// <summary>
+	/// TCP-connect probe against a remote MCP endpoint. Returns
+	/// <see cref="McpEndpointReachabilityStatus.Reachable"/> when the TCP handshake
+	/// completes within <paramref name="timeout"/>, <see cref="McpEndpointReachabilityStatus.Unreachable"/>
+	/// otherwise. Outer cancellation is honored; per-probe timeouts and connect errors
+	/// are caught and reported via the result's <c>FailureReason</c>.
+	/// </summary>
+	/// <remarks>
+	/// Test-only: <c>TestableMcpManager</c> in <c>McpManagerTests</c> overrides this so
+	/// unit tests can supply deterministic reachability without opening sockets.
+	/// </remarks>
+	protected virtual async Task<McpEndpointReachability> ProbeRemoteEndpointAsync(
+		string mcpName,
+		string endpoint,
+		TimeSpan timeout,
+		CancellationToken cancellationToken)
+	{
+		if (!TryParseEndpointHost(endpoint, out var host, out var port))
+		{
+			LogReachabilityProbeBadEndpoint(mcpName, endpoint);
+			return new McpEndpointReachability(
+				McpEndpointReachabilityStatus.Unknown,
+				Endpoint: endpoint,
+				FailureReason: "endpoint URL could not be parsed");
+		}
+
+		using var client = new TcpClient();
+		using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		cts.CancelAfter(timeout);
+
+		var startedAt = DateTimeOffset.UtcNow;
+		try
+		{
+			await client.ConnectAsync(host, port, cts.Token).ConfigureAwait(false);
+			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+			LogReachabilityProbeSucceeded(mcpName, host, port, elapsedMs);
+			return new McpEndpointReachability(
+				McpEndpointReachabilityStatus.Reachable,
+				Endpoint: endpoint);
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+		{
+			throw;
+		}
+		catch (OperationCanceledException)
+		{
+			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+			LogReachabilityProbeTimedOut(mcpName, host, port, elapsedMs, (long)timeout.TotalMilliseconds);
+			return new McpEndpointReachability(
+				McpEndpointReachabilityStatus.Unreachable,
+				Endpoint: endpoint,
+				FailureReason: $"timed out after {(long)timeout.TotalMilliseconds}ms");
+		}
+		catch (SocketException ex)
+		{
+			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+			LogReachabilityProbeFailed(mcpName, host, port, elapsedMs, ex.SocketErrorCode.ToString(), ex.Message);
+			return new McpEndpointReachability(
+				McpEndpointReachabilityStatus.Unreachable,
+				Endpoint: endpoint,
+				FailureReason: TranslateSocketError(ex.SocketErrorCode));
+		}
+		catch (Exception ex)
+		{
+			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
+			LogReachabilityProbeFailed(mcpName, host, port, elapsedMs, ex.GetType().Name, ex.Message);
+			return new McpEndpointReachability(
+				McpEndpointReachabilityStatus.Unreachable,
+				Endpoint: endpoint,
+				FailureReason: ex.Message);
+		}
+	}
+
+	/// <summary>
+	/// Parses an MCP endpoint URL into host and port. Accepts any absolute URI;
+	/// returns the default port for the scheme when none is specified (80 for http,
+	/// 443 for https). Returns <see langword="false"/> for malformed URLs.
+	/// </summary>
+	private static bool TryParseEndpointHost(string endpoint, out string host, out int port)
+	{
+		host = string.Empty;
+		port = 0;
+		if (string.IsNullOrWhiteSpace(endpoint)) return false;
+		if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) return false;
+		if (string.IsNullOrEmpty(uri.Host)) return false;
+		host = uri.Host;
+		port = uri.Port > 0 ? uri.Port : uri.Scheme switch
+		{
+			"https" => 443,
+			"http" => 80,
+			_ => 0,
+		};
+		return port > 0;
+	}
+
+	/// <summary>
+	/// Maps a <see cref="SocketError"/> to a short human-readable description for the
+	/// failure reason surfaced on the error message. We avoid the raw Windows error
+	/// text because it varies by locale and is more verbose than necessary.
+	/// </summary>
+	private static string TranslateSocketError(SocketError error) => error switch
+	{
+		SocketError.ConnectionRefused => "connection refused",
+		SocketError.HostNotFound => "host not found",
+		SocketError.HostUnreachable => "host unreachable",
+		SocketError.NetworkUnreachable => "network unreachable",
+		SocketError.TimedOut => "TCP connect timed out",
+		SocketError.TryAgain => "DNS resolution temporarily failed",
+		_ => error.ToString(),
+	};
+
+	/// <summary>
 	/// Resolves the per-server proxy registrar from the in-process proxy's service
 	/// provider. Returns <see langword="null"/> when the proxy hasn't been started
 	/// (no global MCPs configured), failed to start, or is configured with a routing
@@ -807,6 +997,30 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		Level = LogLevel.Warning,
 		Message = "MCP tool-discovery probe could not resolve registrar for '{McpName}': {Error}.")]
 	private partial void LogToolProbeRegistrarFailed(string mcpName, string error);
+
+	[LoggerMessage(
+		EventId = 18,
+		Level = LogLevel.Debug,
+		Message = "MCP endpoint reachability probe succeeded: '{McpName}' at {Host}:{Port} ({ElapsedMs} ms).")]
+	private partial void LogReachabilityProbeSucceeded(string mcpName, string host, int port, long elapsedMs);
+
+	[LoggerMessage(
+		EventId = 19,
+		Level = LogLevel.Warning,
+		Message = "MCP endpoint reachability probe TIMED OUT: '{McpName}' at {Host}:{Port} after {ElapsedMs} ms (limit {TimeoutMs} ms).")]
+	private partial void LogReachabilityProbeTimedOut(string mcpName, string host, int port, long elapsedMs, long timeoutMs);
+
+	[LoggerMessage(
+		EventId = 20,
+		Level = LogLevel.Warning,
+		Message = "MCP endpoint reachability probe FAILED: '{McpName}' at {Host}:{Port} after {ElapsedMs} ms ({ErrorCode}): {Error}.")]
+	private partial void LogReachabilityProbeFailed(string mcpName, string host, int port, long elapsedMs, string errorCode, string error);
+
+	[LoggerMessage(
+		EventId = 21,
+		Level = LogLevel.Warning,
+		Message = "MCP endpoint reachability probe skipped for '{McpName}': the configured endpoint '{Endpoint}' could not be parsed as an absolute URL.")]
+	private partial void LogReachabilityProbeBadEndpoint(string mcpName, string endpoint);
 
 	#endregion
 }

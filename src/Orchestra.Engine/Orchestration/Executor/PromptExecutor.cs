@@ -240,16 +240,35 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 				if (preLlmEmpty.Count > 0)
 				{
-					var serverList = string.Join(", ", preLlmEmpty);
-					var errorMessage =
-						$"Required MCP server(s) connected but exposed 0 tools: {serverList}. "
-						+ "The upstream backend is reachable but tools/list returned nothing — "
-						+ "check that the backend is authenticated and that any proxy is not "
-						+ "holding a deferred-connection state. The step cannot execute without these tools.";
+					// Best-effort reachability probe to distinguish "backend offline"
+					// (TCP-connect refused) from "backend reachable, returned 0 tools"
+					// (deferred-auth / OAuth pending). Without this we'd surface a single
+					// "deferred-connection state" hint that misled operators whenever the
+					// real cause was a dead upstream MCP process.
+					IReadOnlyDictionary<string, McpEndpointReachability>? reachability = null;
+					try
+					{
+						reachability = await _mcpResolver
+							.ProbeEndpointReachabilityAsync(preLlmEmpty, cancellationToken)
+							.ConfigureAwait(false);
+					}
+					catch (OperationCanceledException)
+					{
+						throw;
+					}
+					catch (Exception ex)
+					{
+						// Probe is a diagnostic enhancement, not a hard requirement; if it
+						// throws (unexpected resolver bug) we just degrade to the generic
+						// multi-cause message rather than blocking the step's error path.
+						LogMcpReachabilityProbeFailed(step.Name, ex.Message);
+					}
+
+					var errorMessage = BuildMcpZeroToolsErrorMessage(preLlmEmpty, reachability);
 					var preLlmTrace = eventProcessor.BuildPartialTrace(resolvedSystemPrompt, userPromptRaw, mcpServerDescriptions);
 					_reporter.ReportStepTrace(step.Name, preLlmTrace);
 					_reporter.ReportStepError(step.Name, errorMessage);
-					LogMcpServersNoTools(step.Name, serverList);
+					LogMcpServersNoTools(step.Name, string.Join(", ", preLlmEmpty));
 					return ExecutionResult.Failed(
 						errorMessage,
 						rawDependencyOutputs,
@@ -1139,6 +1158,92 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Error,
 		Message = "Step '{StepName}' failed (failOnToolError=true): {FailureCount} tool call(s) failed during the agent loop. Summary: {Summary}")]
 	private partial void LogStepFailedOnToolError(string stepName, int failureCount, string summary);
+
+	[LoggerMessage(
+		EventId = 16,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' MCP endpoint reachability probe threw — proceeding without per-MCP reachability hints in the error message. Error: {Error}")]
+	private partial void LogMcpReachabilityProbeFailed(string stepName, string error);
+
+	/// <summary>
+	/// Builds the human-readable error message for the pre-flight "MCP returned 0
+	/// tools" fast-fail. Uses the optional per-MCP <see cref="McpEndpointReachability"/>
+	/// map (when available) to tailor each MCP's diagnostic line so operators get the
+	/// correct hint immediately — "backend offline" vs "backend reachable + 0 tools"
+	/// vs "local stdio" — instead of the legacy single-line "deferred-connection state"
+	/// guess that misled triage whenever the upstream MCP was actually dead.
+	/// </summary>
+	internal static string BuildMcpZeroToolsErrorMessage(
+		IReadOnlyList<string> mcpNames,
+		IReadOnlyDictionary<string, McpEndpointReachability>? reachability)
+	{
+		var serverList = string.Join(", ", mcpNames);
+		var lines = new System.Text.StringBuilder();
+		lines.Append("Required MCP server(s) returned 0 tools at pre-flight check: ");
+		lines.Append(serverList);
+		lines.Append('.');
+
+		if (reachability is not null && mcpNames.Count > 0)
+		{
+			lines.AppendLine();
+			lines.AppendLine("Per-MCP diagnostics:");
+			foreach (var name in mcpNames)
+			{
+				lines.Append("  • ");
+				lines.Append(name);
+				lines.Append(": ");
+				if (!reachability.TryGetValue(name, out var probe))
+				{
+					lines.AppendLine("reachability probe did not run; check that the backend MCP is running and authenticated.");
+					continue;
+				}
+
+				switch (probe.Status)
+				{
+					case McpEndpointReachabilityStatus.Unreachable:
+						lines.Append("backend appears OFFLINE — TCP connect to ");
+						lines.Append(probe.Endpoint ?? "(unknown endpoint)");
+						if (!string.IsNullOrEmpty(probe.FailureReason))
+						{
+							lines.Append(" failed (");
+							lines.Append(probe.FailureReason);
+							lines.Append(')');
+						}
+						else
+						{
+							lines.Append(" failed");
+						}
+						lines.AppendLine(". Start the upstream MCP backend process and retry.");
+						break;
+
+					case McpEndpointReachabilityStatus.Reachable:
+						lines.Append("backend reachable at ");
+						lines.Append(probe.Endpoint ?? "(endpoint)");
+						lines.AppendLine(", but tools/list returned 0 tools. Likely causes: pending OAuth authentication, proxy in deferred-connection state, or the backend reports no enabled tools for this account.");
+						break;
+
+					case McpEndpointReachabilityStatus.LocalStdio:
+						lines.AppendLine("local stdio MCP — reachability probe not applicable. Check that the configured command can launch cleanly and that the MCP started without errors.");
+						break;
+
+					case McpEndpointReachabilityStatus.Unknown:
+					default:
+						lines.AppendLine("not registered as a globally managed MCP, or endpoint could not be parsed; cause unknown. Check that the backend is running and authenticated.");
+						break;
+				}
+			}
+			lines.Append("The step cannot execute without these tools.");
+		}
+		else
+		{
+			lines.Append(' ');
+			lines.Append("Possible causes: (a) the upstream MCP backend is offline or unreachable, ");
+			lines.Append("(b) the backend is reachable but tools/list returned nothing (pending OAuth, deferred-connection state, or no tools enabled for this account), ");
+			lines.Append("(c) a local stdio MCP failed to start. The step cannot execute without these tools.");
+		}
+
+		return lines.ToString();
+	}
 
 	/// <summary>
 	/// Builds the human-readable error message stored on the failed step's

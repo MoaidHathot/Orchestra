@@ -116,4 +116,20 @@ public class McpServerOptions
 	/// <para>Default: 5 seconds.</para>
 	/// </summary>
 	public int ToolDiscoveryProbeTimeoutSeconds { get; set; } = 5;
+
+	/// <summary>
+	/// Per-MCP timeout (seconds) applied by
+	/// <c>McpManager.ProbeEndpointReachabilityAsync</c> when TCP-probing a remote
+	/// MCP endpoint to distinguish "backend offline" from "backend reachable but
+	/// returned zero tools" in pre-flight error messages.
+	/// <para>
+	/// Smaller than <see cref="ToolDiscoveryProbeTimeoutSeconds"/> on purpose: the
+	/// reachability probe only runs on the error path (after the tool-count probe
+	/// already returned 0), and stacking another long timeout on top of an
+	/// already-failed step start would penalise the user with extra latency before
+	/// the error reaches them. Values &lt; 1 are clamped to 1.
+	/// </para>
+	/// <para>Default: 2 seconds.</para>
+	/// </summary>
+	public int EndpointReachabilityProbeTimeoutSeconds { get; set; } = 2;
 }

@@ -2642,4 +2642,236 @@ public class PromptExecutorTests
 	}
 
 	#endregion
+
+	#region Zero-Tools Error Message Branches (multi-cause diagnostics)
+
+	private static IMcpResolver CreateResolverWithZeroTools(string mcpName, McpEndpointReachability? reachability = null)
+	{
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		resolver
+			.GetGlobalMcpToolCountsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<IReadOnlyDictionary<string, int?>>(
+				new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase) { [mcpName] = 0 }));
+		if (reachability is not null)
+		{
+			resolver
+				.ProbeEndpointReachabilityAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+				.Returns(Task.FromResult<IReadOnlyDictionary<string, McpEndpointReachability>>(
+					new Dictionary<string, McpEndpointReachability>(StringComparer.OrdinalIgnoreCase) { [mcpName] = reachability }));
+		}
+		return resolver;
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ZeroTools_UnreachableBackend_ErrorMessageMentionsOffline()
+	{
+		// Arrange — direct repro of the debug-m365-tools failure: the m365-copilot
+		// backend at localhost:5113 was not listening. The new probe surfaces this
+		// as Unreachable so the error message advises starting the upstream backend
+		// instead of misleading the operator with a "deferred-connection" guess.
+		var mcp = new LocalMcp { Name = "m365-copilot", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = CreateResolverWithZeroTools("m365-copilot", new McpEndpointReachability(
+			McpEndpointReachabilityStatus.Unreachable,
+			Endpoint: "http://localhost:5113/mcp/m365-copilot",
+			FailureReason: "connection refused"));
+		var agentBuilder = new MockAgentBuilder().WithResponse("should not be reached");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("list-copilot-tools");
+		step.Mcps = [mcp];
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.McpFailure);
+		result.ErrorMessage.Should().Contain("0 tools");
+		result.ErrorMessage.Should().Contain("OFFLINE");
+		result.ErrorMessage.Should().Contain("connection refused");
+		result.ErrorMessage.Should().Contain("http://localhost:5113/mcp/m365-copilot");
+		result.ErrorMessage.Should().Contain("Start the upstream MCP backend");
+		// Critically the misleading legacy phrase is gone.
+		result.ErrorMessage.Should().NotContain("upstream backend is reachable but tools/list");
+		agentBuilder.CapturedMcps.Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ZeroTools_ReachableBackend_ErrorMessageMentionsDeferredAuth()
+	{
+		// Arrange — backend is reachable but tools/list returned 0 (the actual
+		// "deferred OAuth" / "tools disabled" case). The diagnostic must point to
+		// auth and tool-enablement rather than blaming a dead backend.
+		var mcp = new LocalMcp { Name = "calendar", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = CreateResolverWithZeroTools("calendar", new McpEndpointReachability(
+			McpEndpointReachabilityStatus.Reachable,
+			Endpoint: "http://localhost:5113/mcp/calendar"));
+		var agentBuilder = new MockAgentBuilder().WithResponse("should not be reached");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("list-calendar-tools");
+		step.Mcps = [mcp];
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("backend reachable");
+		result.ErrorMessage.Should().Contain("http://localhost:5113/mcp/calendar");
+		result.ErrorMessage.Should().Contain("OAuth");
+		result.ErrorMessage.Should().NotContain("OFFLINE");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ZeroTools_LocalStdio_ErrorMessageMentionsLocalStdio()
+	{
+		// Arrange — for local stdio MCPs TCP probing is N/A, so the message guides
+		// the operator to check the configured command instead.
+		var mcp = new LocalMcp { Name = "azdo", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = CreateResolverWithZeroTools("azdo", new McpEndpointReachability(
+			McpEndpointReachabilityStatus.LocalStdio));
+		var agentBuilder = new MockAgentBuilder().WithResponse("should not be reached");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("list-azdo-tools");
+		step.Mcps = [mcp];
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("local stdio MCP");
+		result.ErrorMessage.Should().Contain("configured command");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ZeroTools_ReachabilityProbeThrows_FallsBackToGenericMessage()
+	{
+		// Arrange — when the reachability probe itself throws (resolver bug), the
+		// step error path must NOT block on it. The generic multi-cause message is
+		// used instead, listing all three possibilities so the operator at least
+		// has the previous diagnostic quality.
+		var mcp = new LocalMcp { Name = "calendar", Type = McpType.Local, Command = "fake", Arguments = [] };
+		var resolver = Substitute.For<IMcpResolver>();
+		resolver
+			.Resolve(Arg.Any<Mcp[]>(), Arg.Any<ParentExecutionAnnotation?>())
+			.Returns(callInfo => callInfo.ArgAt<Mcp[]>(0));
+		resolver
+			.GetGlobalMcpToolCountsAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns(Task.FromResult<IReadOnlyDictionary<string, int?>>(
+				new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase) { ["calendar"] = 0 }));
+		resolver
+			.ProbeEndpointReachabilityAsync(Arg.Any<IEnumerable<string>>(), Arg.Any<CancellationToken>())
+			.Returns<Task<IReadOnlyDictionary<string, McpEndpointReachability>>>(
+				_ => throw new InvalidOperationException("probe boom"));
+
+		var agentBuilder = new MockAgentBuilder().WithResponse("should not be reached");
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger, mcpResolver: resolver);
+
+		var step = TestOrchestrations.CreatePromptStep("list-calendar-tools");
+		step.Mcps = [mcp];
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorMessage.Should().Contain("0 tools");
+		// Generic multi-cause hint is rendered without per-MCP diagnostics.
+		result.ErrorMessage.Should().Contain("Possible causes");
+		result.ErrorMessage.Should().NotContain("Per-MCP diagnostics");
+	}
+
+	[Fact]
+	public void BuildMcpZeroToolsErrorMessage_NullReachability_RendersGenericMultiCause()
+	{
+		// Arrange / Act — direct unit test on the helper. With no reachability info,
+		// the message must hedge across all three causes so an operator triaging from
+		// just the message text can still find the answer.
+		var msg = PromptExecutor.BuildMcpZeroToolsErrorMessage(["x", "y"], reachability: null);
+
+		// Assert
+		msg.Should().Contain("x, y");
+		msg.Should().Contain("Possible causes");
+		msg.Should().Contain("offline or unreachable");
+		msg.Should().Contain("pending OAuth");
+		msg.Should().Contain("local stdio MCP failed to start");
+	}
+
+	[Fact]
+	public void BuildMcpZeroToolsErrorMessage_MixedKinds_RendersPerMcpDiagnosticLines()
+	{
+		// Arrange — three MCPs covering each branch of the per-MCP renderer.
+		var reachability = new Dictionary<string, McpEndpointReachability>(StringComparer.OrdinalIgnoreCase)
+		{
+			["m365"] = new(McpEndpointReachabilityStatus.Unreachable,
+				Endpoint: "http://localhost:5113/mcp/m365",
+				FailureReason: "connection refused"),
+			["graph"] = new(McpEndpointReachabilityStatus.Reachable,
+				Endpoint: "https://api.example.com/mcp"),
+			["azdo"] = new(McpEndpointReachabilityStatus.LocalStdio),
+		};
+
+		// Act
+		var msg = PromptExecutor.BuildMcpZeroToolsErrorMessage(["m365", "graph", "azdo"], reachability);
+
+		// Assert — every kind gets its own diagnostic line.
+		msg.Should().Contain("m365: backend appears OFFLINE");
+		msg.Should().Contain("connection refused");
+		msg.Should().Contain("graph: backend reachable");
+		msg.Should().Contain("https://api.example.com/mcp");
+		msg.Should().Contain("azdo: local stdio MCP");
+		msg.Should().Contain("The step cannot execute");
+	}
+
+	[Fact]
+	public void BuildMcpZeroToolsErrorMessage_MissingReachabilityEntry_FallsBackToGenericLineForThatMcp()
+	{
+		// Arrange — the reachability dict can be partial (one MCP probed, another not).
+		// Missing entries get a generic "probe did not run" line.
+		var reachability = new Dictionary<string, McpEndpointReachability>(StringComparer.OrdinalIgnoreCase)
+		{
+			["probed"] = new(McpEndpointReachabilityStatus.Unreachable,
+				Endpoint: "http://localhost:9/mcp",
+				FailureReason: "connection refused"),
+		};
+
+		// Act
+		var msg = PromptExecutor.BuildMcpZeroToolsErrorMessage(["probed", "not-probed"], reachability);
+
+		// Assert
+		msg.Should().Contain("probed: backend appears OFFLINE");
+		msg.Should().Contain("not-probed: reachability probe did not run");
+	}
+
+	#endregion
 }

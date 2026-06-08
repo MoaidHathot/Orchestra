@@ -1483,6 +1483,153 @@ public class McpManagerTests : IAsyncLifetime
 
 	#endregion
 
+	#region ProbeEndpointReachabilityAsync
+
+	[Fact]
+	public async Task ProbeEndpointReachabilityAsync_EmptyNames_ReturnsEmpty()
+	{
+		await using var manager = new TestableReachabilityMcpManager();
+		await manager.InitializeAsync([]);
+
+		var result = await manager.ProbeEndpointReachabilityAsync([]);
+
+		result.Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task ProbeEndpointReachabilityAsync_NameNotGlobal_ReturnsUnknown()
+	{
+		// Arrange — names that aren't registered global MCPs must be mapped to
+		// Unknown so the caller can fall back to the generic multi-cause message
+		// rather than asserting a specific reachability state.
+		await using var manager = new TestableReachabilityMcpManager();
+		await manager.InitializeAsync([]);
+
+		// Act
+		var result = await manager.ProbeEndpointReachabilityAsync(["never-registered"]);
+
+		// Assert
+		result.Should().ContainKey("never-registered");
+		result["never-registered"].Status.Should().Be(McpEndpointReachabilityStatus.Unknown);
+		manager.ProbeCallCount.Should().Be(0, "Unknown names must not trigger a TCP probe");
+	}
+
+	[Fact]
+	public async Task ProbeEndpointReachabilityAsync_LocalStdio_ReturnsLocalStdioWithoutProbing()
+	{
+		// Arrange — local stdio backends launch on demand, so TCP probing is N/A.
+		// The diagnostic uses this signal to render a "check the configured command"
+		// hint instead of a misleading "endpoint refused" line.
+		await using var manager = new TestableReachabilityMcpManager();
+		await manager.InitializeAsync([CreateLocalMcp("local-backend")]);
+
+		// Act
+		var result = await manager.ProbeEndpointReachabilityAsync(["local-backend"]);
+
+		// Assert
+		result["local-backend"].Status.Should().Be(McpEndpointReachabilityStatus.LocalStdio);
+		result["local-backend"].Endpoint.Should().BeNull();
+		manager.ProbeCallCount.Should().Be(0, "LocalStdio MCPs must not trigger a TCP probe");
+	}
+
+	[Fact]
+	public async Task ProbeEndpointReachabilityAsync_RemoteReachable_ReturnsReachableWithEndpoint()
+	{
+		// Arrange — production path delegates to ProbeRemoteEndpointAsync; the test
+		// subclass returns Reachable so we can assert the dispatch and endpoint pass-through
+		// without opening a real socket.
+		await using var manager = new TestableReachabilityMcpManager();
+		await manager.InitializeAsync([CreateRemoteMcp("backend", "http://localhost:9999/mcp/backend")]);
+
+		// Act
+		var result = await manager.ProbeEndpointReachabilityAsync(["backend"]);
+
+		// Assert
+		result["backend"].Status.Should().Be(McpEndpointReachabilityStatus.Reachable);
+		result["backend"].Endpoint.Should().Be("http://localhost:9999/mcp/backend");
+		manager.ProbedRemotes.Should().ContainSingle()
+			.Which.Endpoint.Should().Be("http://localhost:9999/mcp/backend");
+	}
+
+	[Fact]
+	public async Task ProbeEndpointReachabilityAsync_RemoteUnreachable_ReturnsUnreachableWithFailureReason()
+	{
+		// Arrange — simulates the exact failure mode from the debug-m365-tools run:
+		// the upstream m365 MCP backend at localhost:5113 was not running, so TCP
+		// connect refused. The diagnostic must surface this as Unreachable so the
+		// error message can advise "start the upstream MCP backend process".
+		var fake = new Dictionary<string, McpEndpointReachability>(StringComparer.OrdinalIgnoreCase)
+		{
+			["m365-copilot"] = new McpEndpointReachability(
+				McpEndpointReachabilityStatus.Unreachable,
+				Endpoint: "http://localhost:5113/mcp/m365-copilot",
+				FailureReason: "connection refused"),
+		};
+		await using var manager = new TestableReachabilityMcpManager(remoteResults: fake);
+		await manager.InitializeAsync([CreateRemoteMcp("m365-copilot", "http://localhost:5113/mcp/m365-copilot")]);
+
+		// Act
+		var result = await manager.ProbeEndpointReachabilityAsync(["m365-copilot"]);
+
+		// Assert
+		result["m365-copilot"].Status.Should().Be(McpEndpointReachabilityStatus.Unreachable);
+		result["m365-copilot"].Endpoint.Should().Be("http://localhost:5113/mcp/m365-copilot");
+		result["m365-copilot"].FailureReason.Should().Be("connection refused");
+	}
+
+	[Fact]
+	public async Task ProbeEndpointReachabilityAsync_DuplicateNames_DeduplicatedCaseInsensitively()
+	{
+		// Arrange
+		await using var manager = new TestableReachabilityMcpManager();
+		await manager.InitializeAsync([CreateRemoteMcp("backend", "http://localhost:9999/mcp")]);
+
+		// Act — three case variants of the same name
+		var result = await manager.ProbeEndpointReachabilityAsync(["backend", "BACKEND", "Backend"]);
+
+		// Assert
+		result.Should().HaveCount(1);
+		manager.ProbeCallCount.Should().Be(1, "case-insensitive dedup must collapse to one probe");
+	}
+
+	[Fact]
+	public async Task ProbeEndpointReachabilityAsync_NullNames_Throws()
+	{
+		await using var manager = new TestableReachabilityMcpManager();
+		await manager.InitializeAsync([]);
+
+		await manager
+			.Awaiting(m => m.ProbeEndpointReachabilityAsync(null!))
+			.Should().ThrowAsync<ArgumentNullException>();
+	}
+
+	[Fact]
+	public async Task ProbeEndpointReachabilityAsync_RealTcpConnect_LoopbackUnreachablePort_ReturnsUnreachable()
+	{
+		// Arrange — exercises the REAL ProbeRemoteEndpointAsync (no override) against a
+		// loopback port that is guaranteed to be unbound. This is the unit-level cousin
+		// of the production scenario: the M365 MCP backend at localhost:5113 was down,
+		// so the TCP connect was actively refused. We use a guaranteed-closed port
+		// (1 is reserved and not used by any standard daemon) to avoid flakiness from
+		// random unused-port allocation.
+		await using var manager = new TestableMcpManager(new McpServerOptions
+		{
+			EndpointReachabilityProbeTimeoutSeconds = 1,
+		});
+		await manager.InitializeAsync([CreateRemoteMcp("dead-backend", "http://127.0.0.1:1/mcp/dead")]);
+
+		// Act
+		var result = await manager.ProbeEndpointReachabilityAsync(["dead-backend"]);
+
+		// Assert — the production probe must report Unreachable on a refused TCP connect
+		// and must populate the FailureReason so the diagnostic message can surface it.
+		result["dead-backend"].Status.Should().Be(McpEndpointReachabilityStatus.Unreachable);
+		result["dead-backend"].Endpoint.Should().Be("http://127.0.0.1:1/mcp/dead");
+		result["dead-backend"].FailureReason.Should().NotBeNullOrEmpty();
+	}
+
+	#endregion
+
 	/// <summary>
 	/// Test subclass that bypasses the real proxy startup.
 	/// </summary>
@@ -1556,6 +1703,47 @@ public class McpManagerTests : IAsyncLifetime
 		protected override Task StartProxyAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken)
 		{
 			throw new InvalidOperationException("Simulated proxy startup failure");
+		}
+	}
+
+	/// <summary>
+	/// Test subclass that intercepts <see cref="McpManager.ProbeRemoteEndpointAsync"/> so
+	/// unit tests for <see cref="McpManager.ProbeEndpointReachabilityAsync"/> can supply
+	/// deterministic reachability results without opening real TCP sockets. The dispatch
+	/// flow up to (and including) the LocalStdio / Unknown branches is the real production
+	/// code; only the per-remote TCP probe is faked.
+	/// </summary>
+	private sealed class TestableReachabilityMcpManager : TestableMcpManager
+	{
+		private readonly IReadOnlyDictionary<string, McpEndpointReachability>? _remoteResults;
+		private readonly Exception? _probeException;
+		public int ProbeCallCount { get; private set; }
+		public List<(string McpName, string Endpoint, TimeSpan Timeout)> ProbedRemotes { get; } = new();
+
+		public TestableReachabilityMcpManager(
+			IReadOnlyDictionary<string, McpEndpointReachability>? remoteResults = null,
+			Exception? probeException = null,
+			McpServerOptions? options = null)
+			: base(options)
+		{
+			_remoteResults = remoteResults;
+			_probeException = probeException;
+		}
+
+		protected override Task<McpEndpointReachability> ProbeRemoteEndpointAsync(
+			string mcpName,
+			string endpoint,
+			TimeSpan timeout,
+			CancellationToken cancellationToken)
+		{
+			ProbeCallCount++;
+			ProbedRemotes.Add((mcpName, endpoint, timeout));
+			if (_probeException is not null) throw _probeException;
+			if (_remoteResults is not null && _remoteResults.TryGetValue(mcpName, out var result))
+				return Task.FromResult(result);
+			return Task.FromResult(new McpEndpointReachability(
+				McpEndpointReachabilityStatus.Reachable,
+				Endpoint: endpoint));
 		}
 	}
 }

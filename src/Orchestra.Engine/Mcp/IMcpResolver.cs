@@ -59,4 +59,82 @@ public interface IMcpResolver
 		CancellationToken cancellationToken = default)
 		=> Task.FromResult<IReadOnlyDictionary<string, int?>>(
 			new Dictionary<string, int?>(StringComparer.OrdinalIgnoreCase));
+
+	/// <summary>
+	/// Probes the network reachability of every requested global MCP (by name) and
+	/// returns a map of <c>mcpName → reachability</c>. Implementations must probe the
+	/// <em>upstream</em> backend endpoint (as originally configured), not Orchestra's
+	/// in-process proxy wrapper — otherwise the probe would always report "reachable"
+	/// because Orchestra's own process is up by definition.
+	/// <para>
+	/// This is a complementary signal to <see cref="GetGlobalMcpToolCountsAsync"/>:
+	/// when the tool-count probe returns <c>0</c>, the caller can use the reachability
+	/// result to distinguish the two very different causes of "0 tools" —
+	/// </para>
+	/// <list type="bullet">
+	///   <item><see cref="McpEndpointReachabilityStatus.Unreachable"/>: the backend MCP
+	///   process is not running / the endpoint refuses connections. Action: start the
+	///   backend.</item>
+	///   <item><see cref="McpEndpointReachabilityStatus.Reachable"/>: the backend is up
+	///   but returned an empty tool list. Action: check authentication / deferred-connection
+	///   state.</item>
+	/// </list>
+	/// <para>
+	/// Local stdio MCPs map to <see cref="McpEndpointReachabilityStatus.LocalStdio"/>
+	/// because TCP probing isn't applicable. Names that don't match a globally managed
+	/// MCP map to <see cref="McpEndpointReachabilityStatus.Unknown"/>. The default
+	/// implementation returns an empty dictionary so resolvers without an MCP registry
+	/// (test doubles, no-op resolvers) opt out without overriding.
+	/// </para>
+	/// </summary>
+	/// <param name="mcpNames">The names of MCPs to probe (typically those that just
+	/// returned 0 tools from <see cref="GetGlobalMcpToolCountsAsync"/>).</param>
+	/// <param name="cancellationToken">Cancellation token. Implementations should apply
+	/// a short internal timeout per probe so a single unreachable backend cannot stall
+	/// the diagnostic.</param>
+	Task<IReadOnlyDictionary<string, McpEndpointReachability>> ProbeEndpointReachabilityAsync(
+		IEnumerable<string> mcpNames,
+		CancellationToken cancellationToken = default)
+		=> Task.FromResult<IReadOnlyDictionary<string, McpEndpointReachability>>(
+			new Dictionary<string, McpEndpointReachability>(StringComparer.OrdinalIgnoreCase));
+}
+
+/// <summary>
+/// Result of an <see cref="IMcpResolver.ProbeEndpointReachabilityAsync"/> call for a
+/// single MCP name. Carries the status discriminator plus optional context for the
+/// diagnostic message (the endpoint that was probed and, on failure, a brief reason).
+/// </summary>
+/// <param name="Status">Probe outcome category.</param>
+/// <param name="Endpoint">For <see cref="McpEndpointReachabilityStatus.Reachable"/>
+/// and <see cref="McpEndpointReachabilityStatus.Unreachable"/>, the upstream URL that
+/// was probed (e.g. <c>http://localhost:5113/mcp/m365-copilot</c>). Null for local
+/// stdio or unknown MCPs.</param>
+/// <param name="FailureReason">For <see cref="McpEndpointReachabilityStatus.Unreachable"/>,
+/// a short human-readable description of why the connect attempt failed
+/// (e.g. <c>"connection refused"</c>, <c>"timed out after 1s"</c>). Null otherwise.</param>
+public sealed record McpEndpointReachability(
+	McpEndpointReachabilityStatus Status,
+	string? Endpoint = null,
+	string? FailureReason = null);
+
+/// <summary>
+/// Categorical outcome of an MCP endpoint reachability probe.
+/// </summary>
+public enum McpEndpointReachabilityStatus
+{
+	/// <summary>The MCP name is not registered as a globally managed MCP, so the
+	/// resolver could not look up an endpoint to probe.</summary>
+	Unknown,
+
+	/// <summary>The MCP is a local stdio backend. TCP probing is not applicable
+	/// because the process is launched on demand rather than listening on a port.</summary>
+	LocalStdio,
+
+	/// <summary>The upstream remote endpoint accepted a TCP connection within the
+	/// probe timeout.</summary>
+	Reachable,
+
+	/// <summary>The upstream remote endpoint refused the TCP connection, timed out,
+	/// or threw an error. The endpoint host:port is most likely not listening.</summary>
+	Unreachable,
 }
