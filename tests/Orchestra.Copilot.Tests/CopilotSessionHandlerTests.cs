@@ -2058,6 +2058,253 @@ public class CopilotSessionHandlerTests
 		_channel.Reader.TryRead(out _).Should().BeFalse();
 	}
 
+	// ── SDK 1.0.0 events newly added to the silently-consumed group ──
+	//
+	// These tests guard against regression: each event below was previously hitting
+	// the default arm of CopilotSessionHandler.HandleEvent and tripping the
+	// "[unhandled_sdk_event]" warning. Adding them to the silent list means
+	// HandleEvent must produce zero AgentEvents. If the SDK ever adds new semantics
+	// to one of these events that we DO want to surface, the corresponding test
+	// here will need to be updated alongside the handler change.
+
+	[Fact]
+	public void HandleEvent_AssistantMessageStart_DoesNotWriteEvent()
+	{
+		// Arrange — SDK 1.0.0 marker event paired with AssistantMessageDeltaEvent /
+		// AssistantMessageEvent (which DO write to the channel). The start marker
+		// itself carries no actionable payload beyond MessageId + Phase.
+		var evt = new AssistantMessageStartEvent
+		{
+			Data = new AssistantMessageStartData
+			{
+				MessageId = "msg-1",
+				Phase = "main",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_HookProgress_DoesNotWriteEvent()
+	{
+		// Arrange — Long-running hooks can stream interim progress messages via
+		// this event. We do not forward them to the audit log to keep its size
+		// bounded; HookStart/HookEnd entries already mark the lifecycle.
+		var evt = new HookProgressEvent
+		{
+			Data = new HookProgressData
+			{
+				Message = "still working...",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_McpAppToolCallComplete_DoesNotWriteEvent()
+	{
+		// Arrange — SDK 1.0.0 emits this alongside ToolExecutionCompleteEvent for
+		// MCP tool calls, with richer structured data. The regular event is
+		// already wired into HandleToolExecutionComplete, so this one is
+		// redundant for current needs. If we ever add "fail step on MCP tool
+		// error" semantics, this event would be the cleanest hook point — and
+		// this test would need to be replaced with one asserting an emitted
+		// failure signal.
+		var evt = new McpAppToolCallCompleteEvent
+		{
+			Data = new McpAppToolCallCompleteData
+			{
+				ServerName = "workiq",
+				ToolName = "ask_work_iq",
+				Success = false,
+				DurationMs = 63000,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionAutopilotObjectiveChanged_DoesNotWriteEvent()
+	{
+		// Arrange — Autopilot mode is an SDK-level capability Orchestra does not use.
+		var evt = new SessionAutopilotObjectiveChangedEvent
+		{
+			Data = new SessionAutopilotObjectiveChangedData
+			{
+				Operation = AutopilotObjectiveChangedOperation.Create,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionCanvasOpened_DoesNotWriteEvent()
+	{
+		// Arrange — Canvas is an IDE UI surface for extension previews. N/A in a headless host.
+		var evt = new SessionCanvasOpenedEvent
+		{
+			Data = new SessionCanvasOpenedData
+			{
+				Availability = CanvasOpenedAvailability.Ready,
+				CanvasId = "canvas-1",
+				ExtensionId = "ext-1",
+				InstanceId = "inst-1",
+				Reopen = false,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionCanvasRegistryChanged_DoesNotWriteEvent()
+	{
+		// Arrange — Companion to SessionCanvasOpenedEvent; tracks the canvas registry.
+		var evt = new SessionCanvasRegistryChangedEvent
+		{
+			Data = new SessionCanvasRegistryChangedData
+			{
+				Canvases = [],
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionCustomNotification_DoesNotWriteEvent()
+	{
+		// Arrange — Extension-defined notifications. No extensions are wired in
+		// Orchestra's controlled host today, so we expect this event to never fire
+		// in production runs; the silent default is safe.
+		var evt = new SessionCustomNotificationEvent
+		{
+			Data = new SessionCustomNotificationData
+			{
+				Name = "test-notification",
+				Source = "test-source",
+				Payload = System.Text.Json.JsonDocument.Parse("{}").RootElement,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionExtensionsAttachmentsPushed_DoesNotWriteEvent()
+	{
+		// Arrange — Extensions pushing attachments to the session; not used by Orchestra.
+		var evt = new SessionExtensionsAttachmentsPushedEvent
+		{
+			Data = new SessionExtensionsAttachmentsPushedData
+			{
+				Attachments = [],
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionPermissionsChanged_DoesNotWriteEvent()
+	{
+		// Arrange — Permission grant changes ("always allow" UI). Orchestra sets
+		// permissions at session creation and runs unattended, so this event should
+		// never fire in our setup. If it does, it is a security-relevant signal
+		// worth elevating to a SessionWarning audit entry — a future enhancement
+		// will replace this test with one asserting that surfacing.
+		var evt = new SessionPermissionsChangedEvent
+		{
+			Data = new SessionPermissionsChangedData
+			{
+				AllowAllPermissions = false,
+				PreviousAllowAllPermissions = false,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionScheduleCancelled_DoesNotWriteEvent()
+	{
+		// Arrange — SDK-side scheduling. Orchestra uses its own scheduler (OrchestraScheduler).
+		var evt = new SessionScheduleCancelledEvent
+		{
+			Data = new SessionScheduleCancelledData
+			{
+				Id = 1,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_SessionScheduleCreated_DoesNotWriteEvent()
+	{
+		// Arrange — SDK-side scheduling. Orchestra uses its own scheduler.
+		var evt = new SessionScheduleCreatedEvent
+		{
+			Data = new SessionScheduleCreatedData
+			{
+				Id = 1,
+				Interval = TimeSpan.FromMinutes(5),
+				Prompt = "test prompt",
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
 	#endregion
 
 	#region SDK 0.3.0 Telemetry — Auto-mode switch / System notifications / Quota snapshots

@@ -275,6 +275,36 @@ internal sealed partial class CopilotSessionHandler
 			break;
 
 		// ── Informational events (silently consumed — no engine-level processing needed) ──
+		//
+		// These events are acknowledged but produce no AgentEvent and no audit-log entry.
+		// They are listed here (rather than letting them fall through to HandleUnknownEvent)
+		// to suppress the "[unhandled_sdk_event]" warning while documenting that we have
+		// reviewed each one and decided no engine-level action is needed today.
+		//
+		// A few entries carry richer payloads that may be worth elevating in the future:
+		//
+		//   * AssistantMessageStartEvent — start-of-message marker (MessageId, Phase) paired
+		//     with the already-handled AssistantMessageDeltaEvent / AssistantMessageEvent.
+		//     Nothing actionable; could be wired into per-message lifecycle telemetry.
+		//
+		//   * HookProgressEvent — interim progress messages from long-running hooks. Adding
+		//     these to the audit log would balloon it; silently consumed by default.
+		//
+		//   * McpAppToolCallCompleteEvent — SDK 1.0.0 emits this alongside the regular
+		//     ToolExecutionCompleteEvent for MCP tool calls, with extra structured fields
+		//     (ServerName, Arguments, Result, Error, Success, DurationMs, ToolMeta). The
+		//     regular event is already wired into HandleToolExecutionComplete, so this is
+		//     redundant for today's needs — but it is the cleanest hook point if we ever
+		//     add a step-level "fail on MCP tool error" feature (see StepErrorCategory.ToolError,
+		//     which is declared but currently unused).
+		//
+		//   * SessionPermissionsChangedEvent — fires when "always allow" UI grants flip
+		//     AllowAllPermissions. Orchestra sets permissions at session creation in a
+		//     controlled host, so this should never fire in our setup; if it does, it is
+		//     a security-relevant signal worth elevating to a SessionWarning entry.
+		//
+		// Everything else here is IDE / UI / canvas / scheduling plumbing that does not
+		// apply to Orchestra's automated host execution.
 		case PendingMessagesModifiedEvent:
 		case SessionCustomAgentsUpdatedEvent:
 		case SessionToolsUpdatedEvent:
@@ -282,6 +312,7 @@ internal sealed partial class CopilotSessionHandler
 		case AssistantStreamingDeltaEvent:
 		case ExternalToolCompletedEvent:     // UI dismissal signal for external tools
 		case AssistantIntentEvent:
+		case AssistantMessageStartEvent:     // SDK 1.0.0 start-of-message marker (paired with AssistantMessageDeltaEvent)
 		case CapabilitiesChangedEvent:
 		case CommandCompletedEvent:
 		case CommandExecuteEvent:
@@ -291,19 +322,29 @@ internal sealed partial class CopilotSessionHandler
 		case ElicitationRequestedEvent:
 		case ExitPlanModeCompletedEvent:
 		case ExitPlanModeRequestedEvent:
+		case HookProgressEvent:              // SDK 1.0.0 hook progress message stream
+		case McpAppToolCallCompleteEvent:    // SDK 1.0.0 structured MCP tool-call summary (duplicate of ToolExecutionCompleteEvent)
 		case McpOauthCompletedEvent:
 		case McpOauthRequiredEvent:
 		case PermissionCompletedEvent:
 		case PermissionRequestedEvent:
 		case SamplingCompletedEvent:
 		case SamplingRequestedEvent:
+		case SessionAutopilotObjectiveChangedEvent:    // Autopilot mode — Orchestra does not use autopilot
 		case SessionBackgroundTasksChangedEvent:
+		case SessionCanvasOpenedEvent:                 // IDE canvas UI — N/A for headless host
+		case SessionCanvasRegistryChangedEvent:        // IDE canvas UI — N/A for headless host
 		case SessionContextChangedEvent:
+		case SessionCustomNotificationEvent:           // Extension-defined notifications — none configured today
+		case SessionExtensionsAttachmentsPushedEvent:  // Extension attachments — N/A for orchestrated steps
 		case SessionExtensionsLoadedEvent:
 		case SessionHandoffEvent:
 		case SessionModeChangedEvent:
+		case SessionPermissionsChangedEvent:           // Permission grant changes — should never fire in Orchestra's controlled host; see comment above
 		case SessionPlanChangedEvent:
 		case SessionRemoteSteerableChangedEvent:
+		case SessionScheduleCancelledEvent:            // SDK scheduling — Orchestra uses its own scheduler
+		case SessionScheduleCreatedEvent:              // SDK scheduling — Orchestra uses its own scheduler
 		case SessionSkillsLoadedEvent:
 		case SessionSnapshotRewindEvent:
 		case SessionTitleChangedEvent:
