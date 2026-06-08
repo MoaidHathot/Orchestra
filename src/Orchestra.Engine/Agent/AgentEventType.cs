@@ -88,4 +88,28 @@ public enum AgentEventType
 	/// <see cref="AgentEvent.ModelCallFailureStatusCode"/>.
 	/// </summary>
 	ModelCallFailure,
+
+	// ── Per-call permission lifecycle (SDK 1.0.0) ──
+
+	/// <summary>
+	/// SDK 1.0.0 <c>PermissionRequestedEvent</c>: emitted before a side-effectful action
+	/// (file read/write, shell command, URL fetch, MCP tool, memory access, etc.) so the
+	/// host can approve or deny the request. Orchestra uses
+	/// <c>PermissionHandler.ApproveAll</c> at session creation, so every request resolves
+	/// to "approved" — but we still want a per-call audit breadcrumb so a run trace can
+	/// reconstruct exactly what the agent was allowed to do. Carries
+	/// <see cref="AgentEvent.PermissionRequestId"/>, <see cref="AgentEvent.PermissionKind"/>,
+	/// <see cref="AgentEvent.PermissionTarget"/>, <see cref="AgentEvent.PermissionToolCallId"/>.
+	/// </summary>
+	PermissionRequested,
+
+	/// <summary>
+	/// SDK 1.0.0 <c>PermissionCompletedEvent</c>: paired completion of a prior
+	/// <see cref="PermissionRequested"/>, carrying the decision (approved / denied / cancelled
+	/// + the specific result kind) and any contextual reason (denial message, location key,
+	/// feedback, rule names). Carries <see cref="AgentEvent.PermissionRequestId"/>,
+	/// <see cref="AgentEvent.PermissionDecision"/>, <see cref="AgentEvent.PermissionDecisionReason"/>,
+	/// <see cref="AgentEvent.PermissionToolCallId"/>.
+	/// </summary>
+	PermissionCompleted,
 }

@@ -33,7 +33,12 @@ public class AuditLogEntry
 	public string? ToolArguments { get; init; }
 
 	/// <summary>
-	/// The permission decision made for a tool call (allow, deny, ask).
+	/// The permission decision made for a tool call (allow, deny, ask). Historically
+	/// reserved for hook-side pre-tool decisions; now also populated for SDK 1.0.0
+	/// <see cref="AuditEventType.PermissionCompleted"/> entries with the result kind
+	/// from the per-call permission gate (e.g. <c>"approved"</c>, <c>"deniedByRules"</c>,
+	/// <c>"approvedForSession"</c>). See <see cref="PermissionDecisionReason"/> for any
+	/// extra context (denial message, location key, cancellation reason).
 	/// </summary>
 	public string? PermissionDecision { get; init; }
 
@@ -128,6 +133,48 @@ public class AuditLogEntry
 
 	/// <summary>System notification message body.</summary>
 	public string? NotificationMessage { get; init; }
+
+	// ── Per-call permission lifecycle (SDK 1.0.0) ──
+
+	/// <summary>
+	/// Correlation id linking a <see cref="AuditEventType.PermissionRequested"/> entry
+	/// to its matching <see cref="AuditEventType.PermissionCompleted"/> entry. Comes
+	/// directly from the SDK's <c>PermissionRequestedData.RequestId</c> /
+	/// <c>PermissionCompletedData.RequestId</c>.
+	/// </summary>
+	public string? PermissionRequestId { get; init; }
+
+	/// <summary>
+	/// Kind discriminator for the permission request (on
+	/// <see cref="AuditEventType.PermissionRequested"/> entries): <c>"read"</c>,
+	/// <c>"write"</c>, <c>"shell"</c>, <c>"url"</c>, <c>"mcp"</c>, <c>"memory"</c>,
+	/// <c>"customTool"</c>, <c>"hook"</c>, <c>"extensionManagement"</c>,
+	/// <c>"extensionPermissionAccess"</c>, or <c>"unknown"</c> for a future SDK kind.
+	/// </summary>
+	public string? PermissionKind { get; init; }
+
+	/// <summary>
+	/// Human-readable summary of the resource the permission applies to. Depends on
+	/// <see cref="PermissionKind"/>: path for read/write, full command text for shell,
+	/// URL for url, <c>"server::tool"</c> for mcp, subject for memory, tool name for
+	/// customTool/hook, extension name for the extension kinds.
+	/// </summary>
+	public string? PermissionTarget { get; init; }
+
+	/// <summary>
+	/// The tool call id that triggered the permission request, when supplied by the SDK.
+	/// Lets consumers stitch a Permission* audit entry to the originating
+	/// <see cref="ToolName"/>-bearing PreToolUse / PostToolUse entry.
+	/// </summary>
+	public string? PermissionToolCallId { get; init; }
+
+	/// <summary>
+	/// Optional human-readable context for a permission decision on a
+	/// <see cref="AuditEventType.PermissionCompleted"/> entry: location key for
+	/// <c>approvedForLocation</c>, denial message / feedback / rule list for the denied
+	/// results, cancellation reason for <c>cancelled</c>.
+	/// </summary>
+	public string? PermissionDecisionReason { get; init; }
 }
 
 /// <summary>
@@ -195,4 +242,23 @@ public enum AuditEventType
 
 	/// <summary>Per-bucket quota / entitlement snapshot was received with a usage event. SDK 0.3.0.</summary>
 	QuotaSnapshot,
+
+	/// <summary>
+	/// SDK 1.0.0 <c>PermissionRequestedEvent</c>: a per-call permission gate fired before
+	/// a side-effectful action (file read/write, shell command, URL fetch, MCP tool,
+	/// memory access, custom tool, hook, extension management). Orchestra uses
+	/// <c>PermissionHandler.ApproveAll</c> so every request resolves to "approved" in
+	/// practice, but the audit entry captures exactly what was requested for compliance /
+	/// forensic review. Pairs with <see cref="PermissionCompleted"/> via
+	/// <see cref="AuditLogEntry.PermissionRequestId"/>.
+	/// </summary>
+	PermissionRequested,
+
+	/// <summary>
+	/// SDK 1.0.0 <c>PermissionCompletedEvent</c>: completion of a prior
+	/// <see cref="PermissionRequested"/>, carrying the result kind
+	/// (<see cref="AuditLogEntry.PermissionDecision"/>) and any contextual reason
+	/// (<see cref="AuditLogEntry.PermissionDecisionReason"/>).
+	/// </summary>
+	PermissionCompleted,
 }

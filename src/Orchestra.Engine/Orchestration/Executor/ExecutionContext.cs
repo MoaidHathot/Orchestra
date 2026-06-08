@@ -65,6 +65,17 @@ public class OrchestrationExecutionContext
 	public string[] DefaultEnableTools { get; init; } = [];
 
 	/// <summary>
+	/// Default value for <see cref="OrchestrationStep.FailOnToolError"/> applied to every
+	/// step that does not specify its own value. Wired from
+	/// <see cref="Orchestration.DefaultFailOnToolError"/>. When <c>true</c>, any tool-call
+	/// failure inside an agent loop marks the step as
+	/// <see cref="ExecutionStatus.Failed"/> with
+	/// <see cref="StepErrorCategory.ToolError"/> unless the step explicitly overrides
+	/// with <c>FailOnToolError = false</c>.
+	/// </summary>
+	public bool DefaultFailOnToolError { get; init; }
+
+	/// <summary>
 	/// When true, the orchestration timeout clock should pause while a step is awaiting
 	/// human input. Wired from <see cref="Orchestration.PauseTimeoutDuringWait"/>.
 	/// </summary>

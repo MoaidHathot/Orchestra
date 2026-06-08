@@ -2006,6 +2006,155 @@ public class OrchestrationParserTests
 
 	#endregion
 
+	#region FailOnToolError Parsing
+
+	[Fact]
+	public void ParseOrchestration_StepWithFailOnToolErrorTrue_ParsesAsTrue()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "fail-on-tool-error-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"systemPrompt": "s",
+						"userPrompt": "u",
+						"model": "claude-opus-4.6",
+						"failOnToolError": true
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].FailOnToolError.Should().BeTrue();
+	}
+
+	[Fact]
+	public void ParseOrchestration_StepWithFailOnToolErrorFalse_ParsesAsFalse()
+	{
+		// Arrange — explicit false is distinct from "unset" and must override an
+		// orchestration-level DefaultFailOnToolError=true when wired through later.
+		var json = """
+			{
+				"name": "fail-on-tool-error-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"systemPrompt": "s",
+						"userPrompt": "u",
+						"model": "claude-opus-4.6",
+						"failOnToolError": false
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].FailOnToolError.Should().BeFalse();
+	}
+
+	[Fact]
+	public void ParseOrchestration_StepWithoutFailOnToolError_DefaultsToNull()
+	{
+		// Arrange — null preserves the "inherit from orchestration default" semantics
+		// (see OrchestrationStep.FailOnToolError docstring).
+		var json = """
+			{
+				"name": "no-fail-on-tool-error-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"systemPrompt": "s",
+						"userPrompt": "u",
+						"model": "claude-opus-4.6"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.Steps[0].FailOnToolError.Should().BeNull();
+	}
+
+	[Fact]
+	public void ParseOrchestration_DefaultFailOnToolErrorTrue_ParsesAtOrchestrationLevel()
+	{
+		// Arrange — orchestration-level default that individual steps inherit unless
+		// they specify their own value.
+		var json = """
+			{
+				"name": "default-fail-on-tool-error-test",
+				"description": "Test",
+				"defaultFailOnToolError": true,
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"systemPrompt": "s",
+						"userPrompt": "u",
+						"model": "claude-opus-4.6"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.DefaultFailOnToolError.Should().BeTrue();
+		// Step-level remains null (inherit). The executor resolves the effective
+		// value via `step.FailOnToolError ?? context.DefaultFailOnToolError`.
+		orchestration.Steps[0].FailOnToolError.Should().BeNull();
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithoutDefaultFailOnToolError_DefaultsToFalse()
+	{
+		// Arrange — backward compatibility: existing orchestrations that don't set
+		// DefaultFailOnToolError get the historical behavior (tool failures non-fatal).
+		var json = """
+			{
+				"name": "no-default-test",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "step1",
+						"type": "prompt",
+						"systemPrompt": "s",
+						"userPrompt": "u",
+						"model": "claude-opus-4.6"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		orchestration.DefaultFailOnToolError.Should().BeFalse();
+	}
+
+	#endregion
+
 	#region InfiniteSession Parsing
 
 	[Fact]

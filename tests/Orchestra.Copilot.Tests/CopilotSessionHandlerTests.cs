@@ -2242,13 +2242,70 @@ public class CopilotSessionHandlerTests
 	}
 
 	[Fact]
-	public void HandleEvent_SessionPermissionsChanged_DoesNotWriteEvent()
+	public void HandleEvent_SessionPermissionsChanged_FlipOnToAllowAll_EmitsWarning()
 	{
-		// Arrange — Permission grant changes ("always allow" UI). Orchestra sets
-		// permissions at session creation and runs unattended, so this event should
-		// never fire in our setup. If it does, it is a security-relevant signal
-		// worth elevating to a SessionWarning audit entry — a future enhancement
-		// will replace this test with one asserting that surfacing.
+		// Arrange — false -> true transition: "always allow" was just enabled mid-session.
+		// This is the security-relevant case: every subsequent tool call (including
+		// destructive ones) will skip the per-call approval gate until the session ends.
+		// We expect a Warning AgentEvent with DiagnosticType "session_permissions_widened"
+		// so the message lands in StepExecutionTrace.Warnings and the reporter stream.
+		var evt = new SessionPermissionsChangedEvent
+		{
+			Data = new SessionPermissionsChangedData
+			{
+				AllowAllPermissions = true,
+				PreviousAllowAllPermissions = false,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.Warning);
+		emitted.DiagnosticType.Should().Be("session_permissions_widened");
+		emitted.ErrorMessage.Should().Contain("false to true");
+		_reporter.Received(1).ReportSessionWarning(
+			"session_permissions_widened",
+			Arg.Is<string>(s => s.Contains("false to true")));
+	}
+
+	[Fact]
+	public void HandleEvent_SessionPermissionsChanged_FlipOffFromAllowAll_EmitsInfo()
+	{
+		// Arrange — true -> false transition: "always allow" was just disabled. Less
+		// alarming than the widening case (subsequent calls go back to the gated path)
+		// but we still emit an audit breadcrumb through the Info channel so the
+		// permission posture change is visible in operator dashboards.
+		var evt = new SessionPermissionsChangedEvent
+		{
+			Data = new SessionPermissionsChangedData
+			{
+				AllowAllPermissions = false,
+				PreviousAllowAllPermissions = true,
+			}
+		};
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.Info);
+		emitted.DiagnosticType.Should().Be("session_permissions_narrowed");
+		emitted.Content.Should().Contain("true to false");
+		_reporter.Received(1).ReportSessionInfo(
+			"session_permissions_narrowed",
+			Arg.Is<string>(s => s.Contains("true to false")));
+	}
+
+	[Fact]
+	public void HandleEvent_SessionPermissionsChanged_NoActualChange_DoesNotWriteEvent()
+	{
+		// Arrange — the SDK is expected to emit only on actual transitions, but field
+		// reports show occasional pings where current == previous. We silently drop
+		// these to keep the warnings list focused on real posture changes.
 		var evt = new SessionPermissionsChangedEvent
 		{
 			Data = new SessionPermissionsChangedData
@@ -2263,6 +2320,8 @@ public class CopilotSessionHandlerTests
 
 		// Assert
 		_channel.Reader.TryRead(out _).Should().BeFalse();
+		_reporter.DidNotReceive().ReportSessionWarning(Arg.Any<string>(), Arg.Any<string>());
+		_reporter.DidNotReceive().ReportSessionInfo(Arg.Any<string>(), Arg.Any<string>());
 	}
 
 	[Fact]
@@ -2664,6 +2723,342 @@ public class CopilotSessionHandlerTests
 		_channel.Reader.TryRead(out var follow).Should().BeFalse(
 			"a usage event without quota snapshots must not emit a follow-up QuotaSnapshot event");
 		follow.Should().BeNull();
+	}
+
+	#endregion
+
+	#region Permission Lifecycle Audit (SDK 1.0.0)
+
+	// SDK 1.0.0 emits PermissionRequestedEvent / PermissionCompletedEvent around every
+	// side-effectful action (read, write, shell, url, mcp, memory, customTool, hook,
+	// extensionManagement, extensionPermissionAccess). Orchestra wires
+	// OnPermissionRequest = PermissionHandler.ApproveAll, so the practical effect is
+	// "always approved" — but the audit trail captures exactly what the agent was
+	// permitted to do, which is invaluable for compliance / forensic review.
+	//
+	// These tests cover each PermissionRequest subclass + each PermissionResult subclass
+	// to lock in the kind/target/decision extraction so future SDK shape changes are
+	// caught at the unit-test level.
+
+	private static PermissionRequestedEvent BuildPermissionRequested(string requestId, PermissionRequest request) => new()
+	{
+		Data = new PermissionRequestedData
+		{
+			RequestId = requestId,
+			PermissionRequest = request,
+		}
+	};
+
+	private static PermissionCompletedEvent BuildPermissionCompleted(string requestId, PermissionResult result, string? toolCallId = null) => new()
+	{
+		Data = new PermissionCompletedData
+		{
+			RequestId = requestId,
+			Result = result,
+			ToolCallId = toolCallId,
+		}
+	};
+
+	[Fact]
+	public void HandleEvent_PermissionRequested_Read_EmitsPermissionRequestedWithPath()
+	{
+		// Arrange
+		var evt = BuildPermissionRequested("req-1", new PermissionRequestRead
+		{
+			Path = "/tmp/secret.txt",
+			Intention = "Read configuration file",
+			ToolCallId = "tc-read-1",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.PermissionRequested);
+		emitted.PermissionRequestId.Should().Be("req-1");
+		emitted.PermissionKind.Should().Be("read");
+		emitted.PermissionTarget.Should().Be("/tmp/secret.txt");
+		emitted.PermissionToolCallId.Should().Be("tc-read-1");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionRequested_Write_EmitsWithFileName()
+	{
+		// Arrange — Write requests carry FileName + Diff; we surface FileName as the
+		// audit target (the diff is large and would balloon the audit log).
+		var evt = BuildPermissionRequested("req-2", new PermissionRequestWrite
+		{
+			CanOfferSessionApproval = false,
+			Diff = "+ new line",
+			FileName = "/app/main.py",
+			Intention = "Update the entrypoint",
+			ToolCallId = "tc-write-1",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.PermissionRequested);
+		emitted.PermissionKind.Should().Be("write");
+		emitted.PermissionTarget.Should().Be("/app/main.py");
+		emitted.PermissionToolCallId.Should().Be("tc-write-1");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionRequested_Shell_EmitsWithTruncatedCommand()
+	{
+		// Arrange — Shell carries FullCommandText which can be arbitrarily long.
+		// Verify both the short-path (passes through verbatim) and that the helper
+		// truncates a long command for audit storage.
+		var longCommand = new string('a', 600);
+		var evt = BuildPermissionRequested("req-3", new PermissionRequestShell
+		{
+			CanOfferSessionApproval = true,
+			Commands = [],
+			FullCommandText = longCommand,
+			HasWriteFileRedirection = false,
+			Intention = "Stress test",
+			PossiblePaths = [],
+			PossibleUrls = [],
+			ToolCallId = "tc-shell-1",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionKind.Should().Be("shell");
+		emitted.PermissionTarget.Should().HaveLength(501, "audit-side truncation caps shell command text at 500 chars + ellipsis");
+		emitted.PermissionTarget.Should().EndWith("…");
+		emitted.PermissionToolCallId.Should().Be("tc-shell-1");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionRequested_Url_EmitsWithUrl()
+	{
+		// Arrange
+		var evt = BuildPermissionRequested("req-4", new PermissionRequestUrl
+		{
+			Url = "https://example.com/api",
+			Intention = "Fetch external data",
+			ToolCallId = "tc-url-1",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionKind.Should().Be("url");
+		emitted.PermissionTarget.Should().Be("https://example.com/api");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionRequested_Mcp_EmitsServerColonToolTarget()
+	{
+		// Arrange — MCP target format is "server::tool" so a Portal can group all
+		// permission requests for a given server.
+		var evt = BuildPermissionRequested("req-5", new PermissionRequestMcp
+		{
+			ReadOnly = false,
+			ServerName = "workiq",
+			ToolName = "ask_work_iq",
+			ToolTitle = "Ask WorkIQ",
+			ToolCallId = "tc-mcp-1",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionKind.Should().Be("mcp");
+		emitted.PermissionTarget.Should().Be("workiq::ask_work_iq");
+		emitted.PermissionToolCallId.Should().Be("tc-mcp-1");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionRequested_Memory_EmitsWithSubject()
+	{
+		// Arrange
+		var evt = BuildPermissionRequested("req-6", new PermissionRequestMemory
+		{
+			Fact = "user prefers concise output",
+			Subject = "user.preferences",
+			ToolCallId = "tc-memory-1",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionKind.Should().Be("memory");
+		emitted.PermissionTarget.Should().Be("user.preferences");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionRequested_CustomTool_EmitsWithToolName()
+	{
+		// Arrange
+		var evt = BuildPermissionRequested("req-7", new PermissionRequestCustomTool
+		{
+			ToolDescription = "Custom Orchestra engine tool",
+			ToolName = "orchestra_set_status",
+			ToolCallId = "tc-engine-1",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionKind.Should().Be("customTool");
+		emitted.PermissionTarget.Should().Be("orchestra_set_status");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionCompleted_Approved_EmitsApprovedDecision()
+	{
+		// Arrange — the most common case under Orchestra's ApproveAll handler.
+		var evt = BuildPermissionCompleted("req-1", new PermissionResultApproved(), toolCallId: "tc-1");
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.Type.Should().Be(AgentEventType.PermissionCompleted);
+		emitted.PermissionRequestId.Should().Be("req-1");
+		emitted.PermissionDecision.Should().Be("approved");
+		emitted.PermissionDecisionReason.Should().BeNull();
+		emitted.PermissionToolCallId.Should().Be("tc-1");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionCompleted_ApprovedForLocation_EmitsLocationKeyAsReason()
+	{
+		// Arrange — "approve for this folder" UI grant; LocationKey is the scope.
+		var evt = BuildPermissionCompleted("req-2", new PermissionResultApprovedForLocation
+		{
+			Approval = new UserToolSessionApproval(),
+			LocationKey = "/workspace/project-a",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionDecision.Should().Be("approvedForLocation");
+		emitted.PermissionDecisionReason.Should().Be("/workspace/project-a");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionCompleted_DeniedByRules_EmitsDecisionWithRuleList()
+	{
+		// Arrange — rule-based denials need the rule list in the reason so an operator
+		// can identify which rule(s) blocked the action.
+		var evt = BuildPermissionCompleted("req-3", new PermissionResultDeniedByRules
+		{
+			Rules =
+			[
+				new PermissionRule { Kind = "shell" },
+				new PermissionRule { Kind = "write", Argument = "/etc/**" },
+			],
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionDecision.Should().Be("deniedByRules");
+		emitted.PermissionDecisionReason.Should().Contain("shell");
+		emitted.PermissionDecisionReason.Should().Contain("write:/etc/**");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionCompleted_DeniedByContentExclusion_EmitsMessageWithPath()
+	{
+		// Arrange — content-exclusion denials carry both a message and the offending
+		// path; we collapse them into a single reason string.
+		var evt = BuildPermissionCompleted("req-4", new PermissionResultDeniedByContentExclusionPolicy
+		{
+			Message = "Path matches enterprise content exclusion",
+			Path = "/secrets/key.pem",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionDecision.Should().Be("deniedByContentExclusionPolicy");
+		emitted.PermissionDecisionReason.Should().Contain("enterprise content exclusion");
+		emitted.PermissionDecisionReason.Should().Contain("/secrets/key.pem");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionCompleted_Cancelled_EmitsReasonFromPayload()
+	{
+		// Arrange
+		var evt = BuildPermissionCompleted("req-5", new PermissionResultCancelled
+		{
+			Reason = "session_shutdown",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionDecision.Should().Be("cancelled");
+		emitted.PermissionDecisionReason.Should().Be("session_shutdown");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionCompleted_DeniedInteractivelyByUser_EmitsFeedbackAsReason()
+	{
+		// Arrange
+		var evt = BuildPermissionCompleted("req-6", new PermissionResultDeniedInteractivelyByUser
+		{
+			Feedback = "don't touch that file",
+		});
+
+		// Act
+		_handler.HandleEvent(evt);
+
+		// Assert
+		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
+		emitted!.PermissionDecision.Should().Be("deniedInteractivelyByUser");
+		emitted.PermissionDecisionReason.Should().Be("don't touch that file");
+	}
+
+	[Fact]
+	public void HandleEvent_PermissionLifecycle_RequestedAndCompletedShareRequestId()
+	{
+		// Arrange — paired emission with a single request id flowing through both events
+		// so a downstream consumer can stitch them into a single per-call audit row.
+		_handler.HandleEvent(BuildPermissionRequested("req-roundtrip", new PermissionRequestRead
+		{
+			Path = "/tmp/x",
+			Intention = "test",
+			ToolCallId = "tc-roundtrip",
+		}));
+		_handler.HandleEvent(BuildPermissionCompleted("req-roundtrip", new PermissionResultApproved(), toolCallId: "tc-roundtrip"));
+
+		// Assert — both emitted events should share PermissionRequestId.
+		_channel.Reader.TryRead(out var req).Should().BeTrue();
+		_channel.Reader.TryRead(out var done).Should().BeTrue();
+		req!.Type.Should().Be(AgentEventType.PermissionRequested);
+		done!.Type.Should().Be(AgentEventType.PermissionCompleted);
+		req.PermissionRequestId.Should().Be(done.PermissionRequestId);
+		req.PermissionToolCallId.Should().Be(done.PermissionToolCallId);
 	}
 
 	#endregion

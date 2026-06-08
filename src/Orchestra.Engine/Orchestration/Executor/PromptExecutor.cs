@@ -469,6 +469,48 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					savedFiles: context.TempFileStore?.GetFilesForStep(step.Name)), engineToolCtx, step.Name);
 			}
 
+			// failOnToolError gate (step-level override beats orchestration default).
+			//
+			// When enabled, any failed tool call inside the agent loop fails the step with
+			// StepErrorCategory.ToolError — rather than the historical behavior where the
+			// LLM could see the [error] tool result, write a summary, and the step would
+			// still complete as Succeeded. Three precedence rules:
+			//
+			//   1. The LLM's explicit terminal overrides (Failed / NoAction) above already
+			//      ran and returned. We only reach this point on the implicit-success or
+			//      explicit-Succeeded path.
+			//   2. If the LLM explicitly called orchestra_set_status("succeeded", reason)
+			//      we treat that as an informed waiver — the LLM acknowledged the failure
+			//      and chose to succeed anyway. failOnToolError does NOT override that.
+			//   3. Otherwise, if any tool call in eventProcessor.ToolCalls has
+			//      Success == false, fail the step with a structured message listing the
+			//      offending tools.
+			var failOnToolError = step.FailOnToolError ?? context.DefaultFailOnToolError;
+			var llmExplicitlySucceeded = engineToolCtx.HasStatusOverride
+				&& engineToolCtx.StatusOverride == ExecutionStatus.Succeeded;
+			if (failOnToolError && !llmExplicitlySucceeded)
+			{
+				var failedToolCalls = eventProcessor.ToolCalls.Where(tc => !tc.Success).ToList();
+				if (failedToolCalls.Count > 0)
+				{
+					var summary = BuildToolErrorSummary(failedToolCalls);
+					LogStepFailedOnToolError(step.Name, failedToolCalls.Count, summary);
+					_reporter.ReportStepError(step.Name, summary);
+					return WithOrchestrationComplete(ExecutionResult.Failed(
+						summary,
+						rawDependencyOutputs,
+						userPrompt,
+						result.ActualModel,
+						trace,
+						errorCategory: StepErrorCategory.ToolError,
+						selectedModel: result.SelectedModel,
+						requestedModelInfo: result.RequestedModelInfo,
+						selectedModelInfo: result.SelectedModelInfo,
+						actualModelInfo: result.ActualModelInfo,
+						savedFiles: context.TempFileStore?.GetFilesForStep(step.Name)), engineToolCtx, step.Name);
+				}
+			}
+
 			if (engineToolCtx.HasStatusOverride && engineToolCtx.StatusOverride == ExecutionStatus.Succeeded)
 			{
 				var reason = engineToolCtx.StatusReason ?? "Step marked as succeeded by LLM";
@@ -1091,6 +1133,44 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' tool-count probe threw — proceeding without the pre-LLM check. Post-LLM SDK-status check remains as the safety net. Error: {Error}")]
 	private partial void LogMcpToolCountProbeFailed(string stepName, string error);
+
+	[LoggerMessage(
+		EventId = 15,
+		Level = LogLevel.Error,
+		Message = "Step '{StepName}' failed (failOnToolError=true): {FailureCount} tool call(s) failed during the agent loop. Summary: {Summary}")]
+	private partial void LogStepFailedOnToolError(string stepName, int failureCount, string summary);
+
+	/// <summary>
+	/// Builds the human-readable error message stored on the failed step's
+	/// <c>ExecutionResult</c> when <c>failOnToolError</c> trips. The format is designed
+	/// to give an operator triaging the run enough context to diagnose without needing
+	/// to open the full trace: the count of failed calls, then a per-call breakdown
+	/// (tool, MCP server, abbreviated error). Per-call error messages are truncated to
+	/// keep the summary readable; the full payload is always available in the trace.
+	/// </summary>
+	private static string BuildToolErrorSummary(IReadOnlyList<ToolCallRecord> failedToolCalls)
+	{
+		const int MaxErrorChars = 500;
+
+		var prefix = failedToolCalls.Count == 1
+			? "1 tool call failed (failOnToolError=true): "
+			: $"{failedToolCalls.Count} tool calls failed (failOnToolError=true): ";
+
+		var perCallSummaries = failedToolCalls.Select(tc =>
+		{
+			var label = string.IsNullOrEmpty(tc.McpServer)
+				? tc.ToolName
+				: $"{tc.ToolName} (mcp: {tc.McpServer})";
+			var errorText = tc.Error ?? "(no error message)";
+			if (errorText.Length > MaxErrorChars)
+			{
+				errorText = errorText[..MaxErrorChars] + "…";
+			}
+			return $"{label} — {errorText}";
+		});
+
+		return prefix + string.Join("; ", perCallSummaries);
+	}
 
 	#endregion
 }

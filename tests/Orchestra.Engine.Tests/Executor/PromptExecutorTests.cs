@@ -992,6 +992,371 @@ public class PromptExecutorTests
 
 	#endregion
 
+	#region failOnToolError (Step-Level Tool Failure Gate)
+
+	private static AgentEvent[] BuildFailedToolCallEvents(
+		string toolName = "ask_work_iq",
+		string callId = "call-failed-1",
+		string errorMessage = "MCP server 'workiq': An unexpected error occurred while processing your request.",
+		string? finalContent = "I attempted the tool call but it failed. Returning a summary.")
+	{
+		var events = new List<AgentEvent>
+		{
+			new()
+			{
+				Type = AgentEventType.ToolExecutionStart,
+				ToolCallId = callId,
+				ToolName = toolName,
+				McpServerName = "workiq",
+				ToolArguments = "{\"q\":\"x\"}",
+			},
+			new()
+			{
+				Type = AgentEventType.ToolExecutionComplete,
+				ToolCallId = callId,
+				ToolName = toolName,
+				ToolSuccess = false,
+				ToolError = errorMessage,
+			},
+		};
+		if (finalContent is not null)
+		{
+			events.Add(new AgentEvent
+			{
+				Type = AgentEventType.MessageDelta,
+				Content = finalContent,
+			});
+		}
+		return events.ToArray();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_FailOnToolErrorTrue_AndFailedToolCall_ReturnsFailedWithToolErrorCategory()
+	{
+		// Arrange — this is the new opt-in behavior. Without failOnToolError, the
+		// historical path keeps the step Succeeded (the LLM summarized the failure
+		// and ended its turn). With failOnToolError=true, the step must short-circuit
+		// to Failed/ToolError so downstream gating works (e.g. dependency cascade).
+		var events = BuildFailedToolCallEvents();
+		var agentBuilder = new MockAgentBuilder().WithResponse("summarized", events);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = new PromptOrchestrationStep
+		{
+			Name = "search-workiq",
+			Type = OrchestrationStepType.Prompt,
+			SystemPrompt = "test",
+			UserPrompt = "test",
+			Model = "claude-opus-4.6",
+			FailOnToolError = true,
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.ToolError);
+		result.ErrorMessage.Should().Contain("failOnToolError=true");
+		result.ErrorMessage.Should().Contain("ask_work_iq");
+		result.ErrorMessage.Should().Contain("mcp: workiq");
+		reporter.Received().ReportStepError(
+			"search-workiq",
+			Arg.Is<string>(s => s.Contains("failOnToolError=true") && s.Contains("ask_work_iq")));
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_FailOnToolErrorTrue_AndNoFailedToolCalls_ReturnsSucceeded()
+	{
+		// Arrange — failOnToolError must not over-fire. A successful run (no failed
+		// tool calls in the trace) continues to succeed even when the toggle is on.
+		var events = new[]
+		{
+			new AgentEvent
+			{
+				Type = AgentEventType.ToolExecutionStart,
+				ToolCallId = "call1",
+				ToolName = "ask_work_iq",
+			},
+			new AgentEvent
+			{
+				Type = AgentEventType.ToolExecutionComplete,
+				ToolCallId = "call1",
+				ToolName = "ask_work_iq",
+				ToolSuccess = true,
+				ToolResult = "results",
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Done" },
+		};
+		var agentBuilder = new MockAgentBuilder().WithResponse("Done", events);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = new PromptOrchestrationStep
+		{
+			Name = "happy-path",
+			Type = OrchestrationStepType.Prompt,
+			SystemPrompt = "s",
+			UserPrompt = "u",
+			Model = "claude-opus-4.6",
+			FailOnToolError = true,
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.ErrorCategory.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_FailOnToolErrorFalse_AndFailedToolCall_ReturnsSucceeded()
+	{
+		// Arrange — explicitly setting failOnToolError=false at the step level must
+		// preserve the historical behavior even if the orchestration default flips on
+		// later. This is the "I know this tool can fail and I want the LLM to handle
+		// it" escape hatch.
+		var events = BuildFailedToolCallEvents();
+		var agentBuilder = new MockAgentBuilder().WithResponse("summarized", events);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = new PromptOrchestrationStep
+		{
+			Name = "search-workiq",
+			Type = OrchestrationStepType.Prompt,
+			SystemPrompt = "s",
+			UserPrompt = "u",
+			Model = "claude-opus-4.6",
+			FailOnToolError = false,
+		};
+		// Even though the orchestration-level default is on, the explicit step-level
+		// false must win.
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+			DefaultFailOnToolError = true,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.ErrorCategory.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_NoFailOnToolErrorSetting_AndFailedToolCall_ReturnsSucceeded()
+	{
+		// Arrange — regression guard: orchestrations authored before this feature
+		// existed (no FailOnToolError on the step, no DefaultFailOnToolError on the
+		// orchestration) must continue to behave exactly as before. This is the
+		// scenario that the user's debug-m365-search run hit on 2026-06-08:
+		// MCP tool failed, LLM wrote a summary, step ended Succeeded.
+		var events = BuildFailedToolCallEvents();
+		var agentBuilder = new MockAgentBuilder().WithResponse("summarized", events);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("search-workiq");
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+			// Default value of DefaultFailOnToolError is false.
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — historical behavior preserved.
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_FailOnToolErrorNull_AndContextDefaultTrue_AndFailedToolCall_ReturnsFailed()
+	{
+		// Arrange — step inherits from the orchestration default. With the default
+		// flipped on and no step-level override, a failed tool call must fail the step.
+		var events = BuildFailedToolCallEvents();
+		var agentBuilder = new MockAgentBuilder().WithResponse("summarized", events);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = TestOrchestrations.CreatePromptStep("search-workiq");
+		// step.FailOnToolError is null (default), so context default applies.
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+			DefaultFailOnToolError = true,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.ToolError);
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_FailOnToolErrorTrue_LlmExplicitlySetSucceeded_HonorsLlmOverride()
+	{
+		// Arrange — precedence rule: the LLM's explicit orchestra_set_status('success')
+		// override beats failOnToolError. The LLM has acknowledged the failure and
+		// chosen to succeed; trust that decision (the same precedence applies in the
+		// CLI swap-retry path — see ExecuteAsync_LlmDeclaredSuccess_ThenExhaustedCliRetries_*).
+		var setStatusTool = new SetStatusTool();
+		var agentBuilder = new MockAgentBuilder();
+		agentBuilder.WithHandler((prompt, ct) =>
+		{
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			// Push the failed tool-call events into the channel before the result task
+			// completes. The PromptExecutor will see them in eventProcessor.ToolCalls.
+			foreach (var evt in BuildFailedToolCallEvents(finalContent: null))
+			{
+				channel.Writer.TryWrite(evt);
+			}
+			channel.Writer.TryWrite(new AgentEvent
+			{
+				Type = AgentEventType.MessageDelta,
+				Content = "Tool failed but I'm marking this succeeded.",
+			});
+			var resultTask = Task.Run<AgentResult>(async () =>
+			{
+				// Drive set_status(success) on the executor's real EngineToolContext.
+				var ctx = agentBuilder.CapturedEngineToolContext!;
+				setStatusTool.Execute(
+					"""{"status":"success","reason":"Acknowledged the tool failure; using cached data instead."}""",
+					ctx);
+				await Task.Yield();
+				channel.Writer.Complete();
+				return new AgentResult
+				{
+					Content = "Tool failed but I'm marking this succeeded.",
+					ActualModel = "claude-opus-4.6",
+				};
+			}, ct);
+			return new AgentTask(channel.Reader, resultTask);
+		});
+
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = new PromptOrchestrationStep
+		{
+			Name = "llm-waiver",
+			Type = OrchestrationStepType.Prompt,
+			SystemPrompt = "s",
+			UserPrompt = "u",
+			Model = "claude-opus-4.6",
+			FailOnToolError = true,
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded,
+			"the LLM's explicit set_status('success') is an informed waiver of failOnToolError");
+		result.CapturedStatusOverride.Should().Be(ExecutionStatus.Succeeded);
+		result.ErrorCategory.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_FailOnToolErrorTrue_MultipleFailedToolCalls_SummaryListsAll()
+	{
+		// Arrange — the error summary should aggregate every failed tool so an
+		// operator can triage from the top-level error message without opening the
+		// full trace.
+		var events = new[]
+		{
+			new AgentEvent
+			{
+				Type = AgentEventType.ToolExecutionStart,
+				ToolCallId = "call-1",
+				ToolName = "ask_work_iq",
+				McpServerName = "workiq",
+			},
+			new AgentEvent
+			{
+				Type = AgentEventType.ToolExecutionComplete,
+				ToolCallId = "call-1",
+				ToolName = "ask_work_iq",
+				ToolSuccess = false,
+				ToolError = "first error",
+			},
+			new AgentEvent
+			{
+				Type = AgentEventType.ToolExecutionStart,
+				ToolCallId = "call-2",
+				ToolName = "copilot_chat",
+				McpServerName = "m365-copilot",
+			},
+			new AgentEvent
+			{
+				Type = AgentEventType.ToolExecutionComplete,
+				ToolCallId = "call-2",
+				ToolName = "copilot_chat",
+				ToolSuccess = false,
+				ToolError = "Copilot chat failed (408)",
+			},
+			new AgentEvent { Type = AgentEventType.MessageDelta, Content = "Done" },
+		};
+		var agentBuilder = new MockAgentBuilder().WithResponse("Done", events);
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var executor = new PromptExecutor(agentBuilder, reporter, _formatter, _logger);
+
+		var step = new PromptOrchestrationStep
+		{
+			Name = "many-failures",
+			Type = OrchestrationStepType.Prompt,
+			SystemPrompt = "s",
+			UserPrompt = "u",
+			Model = "claude-opus-4.6",
+			FailOnToolError = true,
+		};
+		var context = new OrchestrationExecutionContext
+		{
+			Parameters = new Dictionary<string, string>(),
+			OrchestrationInfo = s_defaultInfo,
+		};
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.ToolError);
+		result.ErrorMessage.Should().Contain("2 tool calls failed");
+		result.ErrorMessage.Should().Contain("ask_work_iq");
+		result.ErrorMessage.Should().Contain("copilot_chat");
+		result.ErrorMessage.Should().Contain("first error");
+		result.ErrorMessage.Should().Contain("Copilot chat failed (408)");
+	}
+
+	#endregion
+
 	#region Reasoning Events
 
 	[Fact]

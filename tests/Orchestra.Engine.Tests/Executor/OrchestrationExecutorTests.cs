@@ -1302,19 +1302,23 @@ public class OrchestrationExecutorTests
 		// D, whose immediate dep was a Skipped step (not a NoAction step). The skip
 		// reason must walk back to the original NoAction root (B).
 		var agentBuilder = new MockAgentBuilder();
-		agentBuilder.WithHandler((prompt, ct) =>
+		agentBuilder.WithHandler((prompt, config, ct) =>
 		{
-			var stepName = agentBuilder.CapturedConfig?.EngineToolCtx?.StepName;
+			// Race-free: `config` is the per-agent AgentBuildConfig closed over by
+			// MockAgentBuilder.BuildAgentAsync. Reading agentBuilder.CapturedConfig here
+			// would race against sibling steps' concurrent BuildAgentAsync calls (it's
+			// a single shared field that the LAST BuildAgentAsync overwrites).
+			var stepName = config?.EngineToolCtx?.StepName;
 			var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
 
 			if (stepName == "B")
 			{
 				// Execute orchestra_set_status no_action against the captured engine tool context
 				// to drive the real PromptExecutor → EngineToolContext.SetStatus(NoAction) path.
-				var engineToolCtx = agentBuilder.CapturedConfig?.EngineToolCtx;
+				var engineToolCtx = config?.EngineToolCtx;
 				if (engineToolCtx is not null)
 				{
-					foreach (var tool in agentBuilder.CapturedConfig?.EngineTools ?? [])
+					foreach (var tool in config?.EngineTools ?? [])
 					{
 						if (string.Equals(tool.Name, "orchestra_set_status", StringComparison.OrdinalIgnoreCase))
 						{
@@ -1392,17 +1396,18 @@ public class OrchestrationExecutorTests
 		// NoAction roots. This guards against the propagation logic over-claiming
 		// "no action" when a real failure is also at play.
 		var agentBuilder = new MockAgentBuilder();
-		agentBuilder.WithHandler((prompt, ct) =>
+		agentBuilder.WithHandler((prompt, config, ct) =>
 		{
-			var stepName = agentBuilder.CapturedConfig?.EngineToolCtx?.StepName;
+			// Race-free: same pattern as ExecuteAsync_GateNoAction_PropagatesNoActionSkipReasonTransitively.
+			var stepName = config?.EngineToolCtx?.StepName;
 			var channel = System.Threading.Channels.Channel.CreateUnbounded<AgentEvent>();
 
 			if (stepName == "B")
 			{
-				var engineToolCtx = agentBuilder.CapturedConfig?.EngineToolCtx;
+				var engineToolCtx = config?.EngineToolCtx;
 				if (engineToolCtx is not null)
 				{
-					foreach (var tool in agentBuilder.CapturedConfig?.EngineTools ?? [])
+					foreach (var tool in config?.EngineTools ?? [])
 					{
 						if (string.Equals(tool.Name, "orchestra_set_status", StringComparison.OrdinalIgnoreCase))
 						{

@@ -28,4 +28,25 @@ public abstract class OrchestrationStep
 	/// When null, the orchestration-level default is used (if any).
 	/// </summary>
 	public RetryPolicy? Retry { get; init; }
+
+	/// <summary>
+	/// When set to <c>true</c>, the step is marked as <see cref="ExecutionStatus.Failed"/>
+	/// with <see cref="StepErrorCategory.ToolError"/> if ANY tool call inside the agent
+	/// loop fails (MCP server error, built-in tool exception, etc.). When <c>false</c>,
+	/// tool failures are recorded in the trace and surfaced to the LLM but do not by
+	/// themselves change the step's terminal status — the LLM may decide to retry,
+	/// adapt, or summarize the failure and the step still completes as
+	/// <see cref="ExecutionStatus.Succeeded"/>.
+	/// <para>
+	/// When <see langword="null"/>, the orchestration-level
+	/// <see cref="Orchestration.DefaultFailOnToolError"/> is used; if that is also unset,
+	/// the historical behavior (tool failures are non-fatal) applies for backward
+	/// compatibility.
+	/// </para>
+	/// <para>
+	/// Only meaningful for step types that drive an agent loop (Prompt). Other step
+	/// types ignore this setting because they have no tool-call concept.
+	/// </para>
+	/// </summary>
+	public bool? FailOnToolError { get; init; }
 }

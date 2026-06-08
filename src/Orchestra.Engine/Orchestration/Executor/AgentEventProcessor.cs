@@ -207,6 +207,14 @@ public class AgentEventProcessor
 			case AgentEventType.QuotaSnapshot:
 				HandleQuotaSnapshot(evt);
 				break;
+
+			case AgentEventType.PermissionRequested:
+				HandlePermissionRequested(evt);
+				break;
+
+			case AgentEventType.PermissionCompleted:
+				HandlePermissionCompleted(evt);
+				break;
 		}
 	}
 
@@ -537,6 +545,40 @@ public class AgentEventProcessor
 			Sequence = 0,
 			EventType = AuditEventType.QuotaSnapshot,
 			Timestamp = DateTimeOffset.UtcNow,
+		});
+	}
+
+	// SDK 1.0.0 per-call permission gate audit. Orchestra approves every request via
+	// PermissionHandler.ApproveAll, so the trace value is forensic: it records the
+	// sequence of side-effectful actions (read X, run Y, write Z) the agent was permitted
+	// to perform. Pairing PermissionRequested with PermissionCompleted via
+	// PermissionRequestId lets downstream tooling reconstruct the gate's decision per
+	// action; PermissionToolCallId stitches the gate back to the originating tool call.
+	private void HandlePermissionRequested(AgentEvent evt)
+	{
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.PermissionRequested,
+			Timestamp = DateTimeOffset.UtcNow,
+			PermissionRequestId = evt.PermissionRequestId,
+			PermissionKind = evt.PermissionKind,
+			PermissionTarget = evt.PermissionTarget,
+			PermissionToolCallId = evt.PermissionToolCallId,
+		});
+	}
+
+	private void HandlePermissionCompleted(AgentEvent evt)
+	{
+		AddAuditLogEntry(new AuditLogEntry
+		{
+			Sequence = 0,
+			EventType = AuditEventType.PermissionCompleted,
+			Timestamp = DateTimeOffset.UtcNow,
+			PermissionRequestId = evt.PermissionRequestId,
+			PermissionDecision = evt.PermissionDecision,
+			PermissionDecisionReason = evt.PermissionDecisionReason,
+			PermissionToolCallId = evt.PermissionToolCallId,
 		});
 	}
 

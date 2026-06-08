@@ -134,6 +134,19 @@ public class Orchestration
 	public string[] DefaultEnableTools { get; init; } = [];
 
 	/// <summary>
+	/// Default value for <see cref="OrchestrationStep.FailOnToolError"/> applied to every
+	/// step that does not specify its own value. When <c>true</c>, any tool-call failure
+	/// inside an agent loop marks the step as
+	/// <see cref="ExecutionStatus.Failed"/> with
+	/// <see cref="StepErrorCategory.ToolError"/>. When <c>false</c> (the default), tool
+	/// failures are surfaced to the LLM but do not fail the step on their own — this
+	/// preserves the historical behavior where the LLM can retry, adapt, or summarize a
+	/// tool error and still complete the step successfully. Individual steps can override
+	/// either way by setting their own <see cref="OrchestrationStep.FailOnToolError"/>.
+	/// </summary>
+	public bool DefaultFailOnToolError { get; init; }
+
+	/// <summary>
 	/// Free-form metadata for the orchestration. Values may be any JSON type
 	/// (string, number, boolean, object, array). Metadata is purely informational
 	/// and does not affect execution; it is intended for orchestration authors

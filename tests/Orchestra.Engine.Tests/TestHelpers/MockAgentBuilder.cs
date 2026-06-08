@@ -17,6 +17,15 @@ public class MockAgentBuilder : AgentBuilder
 	/// <summary>
 	/// Gets the full config that was passed to the last BuildAgentAsync(config) call.
 	/// </summary>
+	/// <remarks>
+	/// WARNING: this is a single shared field, so for orchestrations that run multiple
+	/// steps in parallel (each step calls BuildAgentAsync on the same builder) the value
+	/// will reflect the LAST step's config — not the one currently invoking a handler.
+	/// Tests that need to route a handler based on the per-step config should use the
+	/// <see cref="WithHandler(Func{string, AgentBuildConfig?, CancellationToken, AgentTask})"/>
+	/// overload, which closes over the agent-specific config and is race-free across
+	/// concurrent BuildAgentAsync calls.
+	/// </remarks>
 	public AgentBuildConfig? CapturedConfig => _capturedConfig;
 
 	/// <summary>
@@ -247,10 +256,47 @@ public class MockAgentBuilder : AgentBuilder
 	public MockAgentBuilder WithHandler(Func<string, CancellationToken, AgentTask> handler)
 	{
 		_sendAsyncHandler = handler;
+		_sendAsyncHandlerWithConfig = null;
 		return this;
 	}
 
+	/// <summary>
+	/// Configures a custom handler that also receives the per-agent
+	/// <see cref="AgentBuildConfig"/>. Prefer this overload over
+	/// <see cref="WithHandler(Func{string, CancellationToken, AgentTask})"/> whenever a
+	/// handler needs to inspect the config: every <see cref="BuildAgentAsync(AgentBuildConfig, CancellationToken)"/>
+	/// call returns an <see cref="IAgent"/> whose <c>SendAsync</c> closure captures the
+	/// config that built it, so the handler always sees the right value even when
+	/// multiple steps run <c>BuildAgentAsync</c> concurrently. Reading
+	/// <see cref="CapturedConfig"/> from inside the no-arg handler is RACY in that
+	/// scenario because it is a single shared field.
+	/// </summary>
+	public MockAgentBuilder WithHandler(Func<string, AgentBuildConfig?, CancellationToken, AgentTask> handler)
+	{
+		_sendAsyncHandlerWithConfig = handler;
+		_sendAsyncHandler = null;
+		return this;
+	}
+
+	private Func<string, AgentBuildConfig?, CancellationToken, AgentTask>? _sendAsyncHandlerWithConfig;
+
 	public override Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)
+	{
+		return BuildAgentInternal(config: null);
+	}
+
+	public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
+	{
+		// Capture config for test assertions and engine tool execution. The shared field
+		// is preserved for backward compatibility; new tests should prefer the
+		// WithHandler(prompt, config, ct) overload, which closes over `config` here and
+		// is race-free even when multiple steps call BuildAgentAsync concurrently.
+		_capturedConfig = config;
+
+		return BuildAgentInternal(config);
+	}
+
+	private Task<IAgent> BuildAgentInternal(AgentBuildConfig? config)
 	{
 		var agent = Substitute.For<IAgent>();
 		agent.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
@@ -258,19 +304,17 @@ public class MockAgentBuilder : AgentBuilder
 			{
 				var prompt = callInfo.ArgAt<string>(0);
 				var ct = callInfo.ArgAt<CancellationToken>(1);
+				// Prefer the config-aware handler when set: it closes over the per-agent
+				// config so concurrent BuildAgentAsync calls cannot poison each other.
+				if (_sendAsyncHandlerWithConfig is not null)
+				{
+					return _sendAsyncHandlerWithConfig(prompt, config, ct);
+				}
 				return _sendAsyncHandler?.Invoke(prompt, ct)
 					?? CreateDefaultTask("Default response");
 			});
 
 		return Task.FromResult(agent);
-	}
-
-	public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
-	{
-		// Capture config for test assertions and engine tool execution
-		_capturedConfig = config;
-
-		return BuildAgentAsync(cancellationToken);
 	}
 
 	private static AgentTask CreateDefaultTask(string content)

@@ -820,6 +820,16 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 			autoModeResponse = entry.AutoModeResponse,
 			notificationKind = entry.NotificationKind,
 			notificationMessage = entry.NotificationMessage,
+			// SDK 1.0.0 per-call permission audit fields. Surfaced alongside the existing
+			// PermissionDecision so Portal can render a single PermissionCompleted card
+			// with the decision, reason, and the request id that ties it back to the
+			// matching PermissionRequested entry. PermissionToolCallId lets the Portal
+			// link the gate entry to its originating tool call entry.
+			permissionRequestId = entry.PermissionRequestId,
+			permissionKind = entry.PermissionKind,
+			permissionTarget = entry.PermissionTarget,
+			permissionToolCallId = entry.PermissionToolCallId,
+			permissionDecisionReason = entry.PermissionDecisionReason,
 		});
 	}
 

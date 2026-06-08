@@ -2094,4 +2094,127 @@ public class AgentEventProcessorTests
 	}
 
 	#endregion
+
+	#region Permission Lifecycle Audit (SDK 1.0.0)
+
+	[Fact]
+	public async Task ProcessEventsAsync_PermissionRequested_AddsPermissionRequestedAuditEntry()
+	{
+		// Arrange — Orchestra approves every permission via PermissionHandler.ApproveAll
+		// at session creation, but the audit log still needs the request side so a trace
+		// can reconstruct exactly which side-effectful actions the agent was permitted
+		// to perform (compliance / forensic review).
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var events = CreateAsyncEnumerable(new AgentEvent
+		{
+			Type = AgentEventType.PermissionRequested,
+			PermissionRequestId = "req-1",
+			PermissionKind = "read",
+			PermissionTarget = "/tmp/secret.txt",
+			PermissionToolCallId = "tool-call-42",
+		});
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.PermissionRequested
+			&& e.PermissionRequestId == "req-1"
+			&& e.PermissionKind == "read"
+			&& e.PermissionTarget == "/tmp/secret.txt"
+			&& e.PermissionToolCallId == "tool-call-42");
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_PermissionCompleted_AddsPermissionCompletedAuditEntry()
+	{
+		// Arrange — completion side carries the decision + reason (denial message,
+		// location key, feedback, etc.) and the request id that pairs with the prior
+		// PermissionRequested entry.
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var events = CreateAsyncEnumerable(new AgentEvent
+		{
+			Type = AgentEventType.PermissionCompleted,
+			PermissionRequestId = "req-1",
+			PermissionDecision = "approved",
+			PermissionToolCallId = "tool-call-42",
+		});
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.PermissionCompleted
+			&& e.PermissionRequestId == "req-1"
+			&& e.PermissionDecision == "approved"
+			&& e.PermissionToolCallId == "tool-call-42");
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_PermissionRequestAndCompleted_ShareRequestIdForCorrelation()
+	{
+		// Arrange — the audit log must let downstream consumers pair Requested with
+		// Completed via PermissionRequestId. Without this, a UI rendering the audit
+		// log cannot collapse a request/completion pair into a single "permission
+		// outcome" entry.
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var events = CreateAsyncEnumerable(
+			new AgentEvent
+			{
+				Type = AgentEventType.PermissionRequested,
+				PermissionRequestId = "req-99",
+				PermissionKind = "shell",
+				PermissionTarget = "rm -rf /tmp/cache",
+				PermissionToolCallId = "tc-99",
+			},
+			new AgentEvent
+			{
+				Type = AgentEventType.PermissionCompleted,
+				PermissionRequestId = "req-99",
+				PermissionDecision = "deniedByRules",
+				PermissionDecisionReason = "shell:write",
+				PermissionToolCallId = "tc-99",
+			});
+
+		// Act
+		await processor.ProcessEventsAsync(events);
+
+		// Assert
+		var requested = processor.AuditLog.Single(e => e.EventType == AuditEventType.PermissionRequested);
+		var completed = processor.AuditLog.Single(e => e.EventType == AuditEventType.PermissionCompleted);
+		Assert.Equal(requested.PermissionRequestId, completed.PermissionRequestId);
+		Assert.Equal(requested.PermissionToolCallId, completed.PermissionToolCallId);
+		Assert.Equal("shell", requested.PermissionKind);
+		Assert.Equal("rm -rf /tmp/cache", requested.PermissionTarget);
+		Assert.Equal("deniedByRules", completed.PermissionDecision);
+		Assert.Equal("shell:write", completed.PermissionDecisionReason);
+		// Sequence numbers are monotonic across the audit log.
+		Assert.True(completed.Sequence > requested.Sequence);
+	}
+
+	[Fact]
+	public async Task ProcessEventsAsync_PermissionRequested_DoesNotCallReporterStream()
+	{
+		// Arrange — permission lifecycle entries are audit-only (no live reporter call
+		// on the streaming surface beyond the audit-log entry itself, which is captured
+		// via AddAuditLogEntry → trace). This guards against accidentally surfacing
+		// every permission as a content delta / system warning, which would flood
+		// Portal UIs with one entry per file read or shell command.
+		var processor = new AgentEventProcessor(_reporter, "step-x");
+		var events = CreateAsyncEnumerable(new AgentEvent
+		{
+			Type = AgentEventType.PermissionRequested,
+			PermissionRequestId = "req-1",
+			PermissionKind = "read",
+			PermissionTarget = "/tmp/x",
+		});
+
+		await processor.ProcessEventsAsync(events);
+
+		_reporter.DidNotReceive().ReportContentDelta(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ActorContext>());
+		_reporter.DidNotReceive().ReportSessionWarning(Arg.Any<string>(), Arg.Any<string>());
+		_reporter.DidNotReceive().ReportSessionInfo(Arg.Any<string>(), Arg.Any<string>());
+	}
+
+	#endregion
 }

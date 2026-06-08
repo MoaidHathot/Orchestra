@@ -406,6 +406,58 @@ public class AgentEvent
 	/// the assistant turn that produced it.
 	/// </summary>
 	public string? MessageTurnId { get; init; }
+
+	// ── Per-call permission lifecycle (SDK 1.0.0 — PermissionRequested / PermissionCompleted) ──
+
+	/// <summary>
+	/// SDK 1.0.0 <c>PermissionRequestedData.RequestId</c> / <c>PermissionCompletedData.RequestId</c>:
+	/// correlation id linking a <see cref="AgentEventType.PermissionRequested"/> entry to
+	/// its matching <see cref="AgentEventType.PermissionCompleted"/> entry.
+	/// </summary>
+	public string? PermissionRequestId { get; init; }
+
+	/// <summary>
+	/// Kind discriminator for the permission request: <c>"read"</c>, <c>"write"</c>,
+	/// <c>"shell"</c>, <c>"url"</c>, <c>"mcp"</c>, <c>"memory"</c>, <c>"customTool"</c>,
+	/// <c>"hook"</c>, <c>"extensionManagement"</c>, <c>"extensionPermissionAccess"</c>.
+	/// Stamped on <see cref="AgentEventType.PermissionRequested"/>.
+	/// </summary>
+	public string? PermissionKind { get; init; }
+
+	/// <summary>
+	/// Human-readable summary of the resource the permission applies to. Depends on Kind:
+	/// path for read/write, full command text for shell, URL for url, <c>"server::tool"</c>
+	/// for mcp, subject for memory, tool name for customTool/hook, extension name for the
+	/// extension kinds. Stamped on <see cref="AgentEventType.PermissionRequested"/>.
+	/// </summary>
+	public string? PermissionTarget { get; init; }
+
+	/// <summary>
+	/// The tool call id that triggered the permission request, as reported by the SDK on
+	/// the request subclass. Distinct from <see cref="ToolCallId"/> (left null on permission
+	/// events because permissions are not themselves tool calls). Stamped on both
+	/// <see cref="AgentEventType.PermissionRequested"/> and <see cref="AgentEventType.PermissionCompleted"/>
+	/// when the SDK supplies it.
+	/// </summary>
+	public string? PermissionToolCallId { get; init; }
+
+	/// <summary>
+	/// Result-kind discriminator for <see cref="AgentEventType.PermissionCompleted"/>:
+	/// <c>"approved"</c>, <c>"approvedForLocation"</c>, <c>"approvedForSession"</c>,
+	/// <c>"cancelled"</c>, <c>"deniedByContentExclusionPolicy"</c>,
+	/// <c>"deniedByPermissionRequestHook"</c>, <c>"deniedByRules"</c>,
+	/// <c>"deniedInteractivelyByUser"</c>, <c>"deniedNoApprovalRule"</c>, or <c>"unknown"</c>
+	/// for a future SDK result kind we don't yet recognise.
+	/// </summary>
+	public string? PermissionDecision { get; init; }
+
+	/// <summary>
+	/// Optional human-readable context for a permission decision: location key for
+	/// <c>approvedForLocation</c>, denial message / feedback / rule list for the denied
+	/// results, cancellation reason for <c>cancelled</c>. Null when the SDK supplies no
+	/// additional context (e.g. plain <c>approved</c>).
+	/// </summary>
+	public string? PermissionDecisionReason { get; init; }
 }
 
 /// <summary>

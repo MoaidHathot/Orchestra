@@ -221,6 +221,18 @@ internal sealed partial class CopilotSessionHandler
 			HandleInfo(info);
 			break;
 
+		case SessionPermissionsChangedEvent permissions:
+			HandleSessionPermissionsChanged(permissions);
+			break;
+
+		case PermissionRequestedEvent permissionRequested:
+			HandlePermissionRequested(permissionRequested);
+			break;
+
+		case PermissionCompletedEvent permissionCompleted:
+			HandlePermissionCompleted(permissionCompleted);
+			break;
+
 		case SessionMcpServersLoadedEvent mcpLoaded:
 			HandleMcpServersLoaded(mcpLoaded);
 			break;
@@ -298,10 +310,10 @@ internal sealed partial class CopilotSessionHandler
 		//     add a step-level "fail on MCP tool error" feature (see StepErrorCategory.ToolError,
 		//     which is declared but currently unused).
 		//
-		//   * SessionPermissionsChangedEvent — fires when "always allow" UI grants flip
-		//     AllowAllPermissions. Orchestra sets permissions at session creation in a
-		//     controlled host, so this should never fire in our setup; if it does, it is
-		//     a security-relevant signal worth elevating to a SessionWarning entry.
+		//   * SessionPermissionsChangedEvent — handled explicitly by
+		//     HandleSessionPermissionsChanged. Flipping AllowAllPermissions on
+		//     mid-session is a security-relevant signal we surface as a warning;
+		//     this event is therefore NOT listed below.
 		//
 		// Everything else here is IDE / UI / canvas / scheduling plumbing that does not
 		// apply to Orchestra's automated host execution.
@@ -326,8 +338,6 @@ internal sealed partial class CopilotSessionHandler
 		case McpAppToolCallCompleteEvent:    // SDK 1.0.0 structured MCP tool-call summary (duplicate of ToolExecutionCompleteEvent)
 		case McpOauthCompletedEvent:
 		case McpOauthRequiredEvent:
-		case PermissionCompletedEvent:
-		case PermissionRequestedEvent:
 		case SamplingCompletedEvent:
 		case SamplingRequestedEvent:
 		case SessionAutopilotObjectiveChangedEvent:    // Autopilot mode — Orchestra does not use autopilot
@@ -340,7 +350,6 @@ internal sealed partial class CopilotSessionHandler
 		case SessionExtensionsLoadedEvent:
 		case SessionHandoffEvent:
 		case SessionModeChangedEvent:
-		case SessionPermissionsChangedEvent:           // Permission grant changes — should never fire in Orchestra's controlled host; see comment above
 		case SessionPlanChangedEvent:
 		case SessionRemoteSteerableChangedEvent:
 		case SessionScheduleCancelledEvent:            // SDK scheduling — Orchestra uses its own scheduler
@@ -584,6 +593,15 @@ internal sealed partial class CopilotSessionHandler
 			MessageOutputTokens = evt.MessageOutputTokens,
 			MessageRequestId = evt.MessageRequestId,
 			MessageTurnId = evt.MessageTurnId,
+			// SDK 1.0.0 per-call permission lifecycle audit fields. EmitEvent is the
+			// single funnel for every emission so these must be copied here or they
+			// get silently dropped when the handler stamps actor attribution.
+			PermissionRequestId = evt.PermissionRequestId,
+			PermissionKind = evt.PermissionKind,
+			PermissionTarget = evt.PermissionTarget,
+			PermissionToolCallId = evt.PermissionToolCallId,
+			PermissionDecision = evt.PermissionDecision,
+			PermissionDecisionReason = evt.PermissionDecisionReason,
 			ActorAgentName = ctx.AgentName,
 			ActorAgentDisplayName = ctx.AgentDisplayName,
 			ActorToolCallId = ctx.ToolCallId,
@@ -863,6 +881,194 @@ internal sealed partial class CopilotSessionHandler
 			InfoTip = info.Data.Tip,
 			InfoUrl = info.Data.Url,
 		});
+	}
+
+	// SDK 1.0.0 SessionPermissionsChangedEvent fires when the user (via the CLI's
+	// approval UI) flips the "always allow" master toggle. Orchestra runs unattended
+	// in a controlled host and sets its permission posture at session-creation time,
+	// so any mid-session change is unexpected. The most security-relevant transition
+	// is false -> true (someone or something just lifted the per-call approval gate
+	// for everything in this session); we surface that as a warning so it shows up
+	// in StepExecutionTrace.Warnings and the reporter stream. The reverse transition
+	// (true -> false) goes through the Info channel as an audit breadcrumb, and the
+	// no-op case (value unchanged) is dropped to keep noise out of the trace.
+	private void HandleSessionPermissionsChanged(SessionPermissionsChangedEvent permissions)
+	{
+		var current = permissions.Data.AllowAllPermissions;
+		var previous = permissions.Data.PreviousAllowAllPermissions;
+
+		// Defensive: SDK is expected to only emit on actual transitions, but real-world
+		// SDK events have occasionally fired with unchanged values. Drop the no-op case
+		// rather than spam every step trace with a benign permissions ping.
+		if (current == previous)
+		{
+			return;
+		}
+
+		LogSessionPermissionsChanged(previous, current);
+
+		if (current)
+		{
+			// false -> true: "always allow" was just enabled mid-session. This is the
+			// security-relevant transition — every subsequent tool call (including
+			// destructive ones) will skip the per-call approval gate until the session
+			// ends. Route through the warning channel.
+			var message = "Session permissions widened: AllowAllPermissions flipped from false to true mid-session. " +
+				"All subsequent tool calls will bypass the per-call approval gate.";
+			_reporter.ReportSessionWarning("session_permissions_widened", message);
+			EmitEvent(new AgentEvent
+			{
+				Type = AgentEventType.Warning,
+				DiagnosticType = "session_permissions_widened",
+				ErrorMessage = message,
+			});
+		}
+		else
+		{
+			// true -> false: "always allow" was just disabled. Less alarming, but still
+			// worth an audit breadcrumb so the operator sees that subsequent tool calls
+			// are gated again.
+			var message = "Session permissions narrowed: AllowAllPermissions flipped from true to false mid-session. " +
+				"Subsequent tool calls will require per-call approval again.";
+			_reporter.ReportSessionInfo("session_permissions_narrowed", message);
+			EmitEvent(new AgentEvent
+			{
+				Type = AgentEventType.Info,
+				DiagnosticType = "session_permissions_narrowed",
+				Content = message,
+			});
+		}
+	}
+
+	// SDK 1.0.0 per-call permission gate: every side-effectful action (read, write,
+	// shell, url, mcp, memory, custom tool, hook, extension management) fires
+	// PermissionRequestedEvent before the action runs and PermissionCompletedEvent
+	// after the gate's handler returns. Orchestra wires
+	// OnPermissionRequest = PermissionHandler.ApproveAll at session-creation time, so
+	// every request resolves to "approved" in practice — but the audit entries give
+	// run traces a per-action breadcrumb of exactly what the agent was allowed to do,
+	// which is invaluable for compliance / forensic review.
+	private void HandlePermissionRequested(PermissionRequestedEvent permissionRequested)
+	{
+		var data = permissionRequested.Data;
+		var (kind, target, toolCallId) = SummarizePermissionRequest(data.PermissionRequest);
+		EmitEvent(new AgentEvent
+		{
+			Type = AgentEventType.PermissionRequested,
+			PermissionRequestId = data.RequestId,
+			PermissionKind = kind,
+			PermissionTarget = target,
+			PermissionToolCallId = toolCallId,
+		});
+	}
+
+	private void HandlePermissionCompleted(PermissionCompletedEvent permissionCompleted)
+	{
+		var data = permissionCompleted.Data;
+		var (decision, reason) = SummarizePermissionResult(data.Result);
+		EmitEvent(new AgentEvent
+		{
+			Type = AgentEventType.PermissionCompleted,
+			PermissionRequestId = data.RequestId,
+			PermissionDecision = decision,
+			PermissionDecisionReason = reason,
+			PermissionToolCallId = data.ToolCallId,
+		});
+	}
+
+	/// <summary>
+	/// Maps a SDK <see cref="PermissionRequest"/> subclass to a flat audit-friendly
+	/// (kind, target, toolCallId) tuple. Each subclass surfaces a different "primary"
+	/// resource — path for Read/Write, the full command for Shell, URL for Url, etc. —
+	/// and we collapse them into a single human-readable target string so downstream
+	/// consumers (Portal, audit log) don't need to switch on the request type.
+	/// Unknown future SDK subclasses fall back to <c>kind = "unknown"</c> rather than
+	/// throwing — the audit entry still records the request id and we don't crash the
+	/// session on a SDK change.
+	/// </summary>
+	private static (string Kind, string? Target, string? ToolCallId) SummarizePermissionRequest(PermissionRequest request)
+	{
+		return request switch
+		{
+			PermissionRequestRead read => ("read", read.Path, read.ToolCallId),
+			PermissionRequestWrite write => ("write", write.FileName, write.ToolCallId),
+			PermissionRequestShell shell => ("shell", TruncateForAudit(shell.FullCommandText), shell.ToolCallId),
+			PermissionRequestUrl url => ("url", url.Url, url.ToolCallId),
+			PermissionRequestMcp mcp => ("mcp", FormatMcpTarget(mcp.ServerName, mcp.ToolName), mcp.ToolCallId),
+			PermissionRequestMemory memory => ("memory", TruncateForAudit(memory.Subject), memory.ToolCallId),
+			PermissionRequestCustomTool customTool => ("customTool", customTool.ToolName, customTool.ToolCallId),
+			PermissionRequestHook hook => ("hook", hook.ToolName, hook.ToolCallId),
+			PermissionRequestExtensionManagement extMgmt => ("extensionManagement", FormatExtensionMgmtTarget(extMgmt.ExtensionName, extMgmt.Operation), extMgmt.ToolCallId),
+			PermissionRequestExtensionPermissionAccess extAccess => ("extensionPermissionAccess", extAccess.ExtensionName, extAccess.ToolCallId),
+			_ => ("unknown", null, null),
+		};
+	}
+
+	/// <summary>
+	/// Maps a SDK <see cref="PermissionResult"/> subclass to a flat audit-friendly
+	/// (decision, reason) tuple. Approvals carry a result kind; denials and the
+	/// cancellation case carry an additional human-readable reason (denial message,
+	/// rule list, feedback, cancellation cause). Unknown future SDK subclasses fall
+	/// back to <c>decision = "unknown"</c>.
+	/// </summary>
+	private static (string Decision, string? Reason) SummarizePermissionResult(PermissionResult result)
+	{
+		return result switch
+		{
+			PermissionResultApproved => ("approved", null),
+			PermissionResultApprovedForLocation forLocation => ("approvedForLocation", forLocation.LocationKey),
+			PermissionResultApprovedForSession => ("approvedForSession", null),
+			PermissionResultCancelled cancelled => ("cancelled", cancelled.Reason),
+			PermissionResultDeniedByContentExclusionPolicy excl => ("deniedByContentExclusionPolicy", FormatContentExclusionReason(excl.Message, excl.Path)),
+			PermissionResultDeniedByPermissionRequestHook hook => ("deniedByPermissionRequestHook", hook.Message),
+			PermissionResultDeniedByRules rules => ("deniedByRules", FormatRuleList(rules.Rules)),
+			PermissionResultDeniedInteractivelyByUser interactive => ("deniedInteractivelyByUser", interactive.Feedback),
+			PermissionResultDeniedNoApprovalRuleAndCouldNotRequestFromUser => ("deniedNoApprovalRule", null),
+			_ => ("unknown", null),
+		};
+	}
+
+	private static string? FormatMcpTarget(string? serverName, string? toolName)
+	{
+		if (string.IsNullOrEmpty(serverName) && string.IsNullOrEmpty(toolName)) return null;
+		if (string.IsNullOrEmpty(serverName)) return toolName;
+		if (string.IsNullOrEmpty(toolName)) return serverName;
+		return $"{serverName}::{toolName}";
+	}
+
+	private static string? FormatExtensionMgmtTarget(string? extensionName, string? operation)
+	{
+		if (string.IsNullOrEmpty(extensionName) && string.IsNullOrEmpty(operation)) return null;
+		if (string.IsNullOrEmpty(operation)) return extensionName;
+		if (string.IsNullOrEmpty(extensionName)) return operation;
+		return $"{extensionName} ({operation})";
+	}
+
+	private static string? FormatContentExclusionReason(string? message, string? path)
+	{
+		if (string.IsNullOrEmpty(message) && string.IsNullOrEmpty(path)) return null;
+		if (string.IsNullOrEmpty(path)) return message;
+		if (string.IsNullOrEmpty(message)) return path;
+		return $"{message} (path: {path})";
+	}
+
+	private static string? FormatRuleList(PermissionRule[]? rules)
+	{
+		if (rules is null || rules.Length == 0) return null;
+		return string.Join(", ", rules.Select(r => string.IsNullOrEmpty(r.Argument) ? r.Kind : $"{r.Kind}:{r.Argument}"));
+	}
+
+	/// <summary>
+	/// Truncates a permission target / reason string for audit storage. Shell commands,
+	/// memory subjects, and denial messages can be arbitrarily long; the full payload
+	/// stays in the SDK's own event stream, while the audit-log copy is bounded to keep
+	/// the trace document size predictable.
+	/// </summary>
+	private static string? TruncateForAudit(string? value)
+	{
+		const int MaxChars = 500;
+		if (string.IsNullOrEmpty(value)) return value;
+		return value.Length > MaxChars ? value[..MaxChars] + "…" : value;
 	}
 
 	private void HandleMcpServersLoaded(SessionMcpServersLoadedEvent mcpLoaded)
@@ -1572,6 +1778,16 @@ internal sealed partial class CopilotSessionHandler
 		string model,
 		int? statusCode,
 		string message);
+
+	// EventId 12: SDK 1.0.0 SessionPermissionsChangedEvent — the "always allow" master
+	// toggle was flipped mid-session. We log at Warning regardless of direction so
+	// post-mortem analysis can correlate the host log with the in-trace warning emitted
+	// for false->true transitions (see HandleSessionPermissionsChanged).
+	[LoggerMessage(
+		EventId = 12,
+		Level = LogLevel.Warning,
+		Message = "Session permissions changed mid-session: AllowAllPermissions {Previous} -> {Current}")]
+	private partial void LogSessionPermissionsChanged(bool previous, bool current);
 
 	#endregion
 }
