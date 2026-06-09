@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using McpProxy.Abstractions;
 using McpProxy.Sdk.Configuration;
+using McpProxy.Sdk.Debugging;
 using McpProxy.Sdk.Proxy;
 using McpProxy.Sdk.Sdk;
 using Microsoft.AspNetCore.Builder;
@@ -537,6 +538,31 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 		var probeTimeout = EndpointReachabilityTimeout;
 
+		// Look up the proxy's health tracker once. When present, every probe
+		// result is enriched with the last per-backend error the SDK recorded
+		// (e.g. an auth failure). This is what turns a generic "0 tools" into
+		// a specific cause like "AADSTS50105: …".
+		var healthTracker = TryGetHealthTracker();
+		ProxyHealthStatus? healthSnapshot = null;
+		if (healthTracker is not null)
+		{
+			try
+			{
+				healthSnapshot = await healthTracker.GetHealthStatusAsync(cancellationToken).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				throw;
+			}
+			catch (Exception ex)
+			{
+				// A failed health snapshot must not abort the reachability probe —
+				// the snapshot is enrichment, not the primary signal. Swallow and
+				// continue with a null snapshot so per-backend error fields stay null.
+				LogToolProbeRegistrarFailed("<health-snapshot>", ex.Message);
+			}
+		}
+
 		foreach (var name in requested)
 		{
 			var original = _globalMcpList.FirstOrDefault(m =>
@@ -547,27 +573,51 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 				continue;
 			}
 
-			switch (original)
+			McpEndpointReachability probe = original switch
 			{
-				case LocalMcp:
-					result[name] = new McpEndpointReachability(McpEndpointReachabilityStatus.LocalStdio);
-					break;
+				LocalMcp => new McpEndpointReachability(McpEndpointReachabilityStatus.LocalStdio),
+				RemoteMcp remote => await ProbeRemoteEndpointAsync(name, remote.Endpoint, probeTimeout, cancellationToken).ConfigureAwait(false),
+				// Future Mcp subtype we don't yet know how to probe — surface as Unknown
+				// so the error message can fall back to the generic multi-cause hint
+				// rather than asserting a misleading "reachable" / "unreachable".
+				_ => new McpEndpointReachability(McpEndpointReachabilityStatus.Unknown),
+			};
 
-				case RemoteMcp remote:
-					result[name] = await ProbeRemoteEndpointAsync(name, remote.Endpoint, probeTimeout, cancellationToken)
-						.ConfigureAwait(false);
-					break;
-
-				default:
-					// Future Mcp subtype we don't yet know how to probe — surface as Unknown
-					// so the error message can fall back to the generic multi-cause hint
-					// rather than asserting a misleading "reachable" / "unreachable".
-					result[name] = new McpEndpointReachability(McpEndpointReachabilityStatus.Unknown);
-					break;
-			}
+			result[name] = EnrichWithBackendError(probe, name, healthSnapshot);
 		}
 
 		return result;
+	}
+
+	/// <summary>
+	/// Adds <see cref="McpEndpointReachability.LastBackendError"/> and the matching
+	/// timestamp from the proxy's health snapshot when one is available for
+	/// <paramref name="mcpName"/>. Returns <paramref name="probe"/> unchanged when
+	/// no snapshot exists, no entry exists for the name, or the entry has no
+	/// recorded error.
+	/// </summary>
+	private static McpEndpointReachability EnrichWithBackendError(
+		McpEndpointReachability probe,
+		string mcpName,
+		ProxyHealthStatus? healthSnapshot)
+	{
+		if (healthSnapshot is null)
+			return probe;
+
+		if (!healthSnapshot.Backends.TryGetValue(mcpName, out var backend) || backend is null)
+			return probe;
+
+		if (string.IsNullOrWhiteSpace(backend.LastError))
+			return probe;
+
+		// Pair the error string with whichever timestamp the SDK most recently
+		// updated. Older SDKs may not populate LastFailedRequest, so fall back to
+		// null rather than fabricating a "now" stamp.
+		return probe with
+		{
+			LastBackendError = backend.LastError,
+			LastBackendErrorAtUtc = backend.LastFailedRequest,
+		};
 	}
 
 	/// <summary>
@@ -702,6 +752,39 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		catch (Exception ex)
 		{
 			LogToolProbeRegistrarFailed("<lookup>", ex.Message);
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// Resolves the in-process proxy's health tracker, which records per-backend
+	/// connection state and the most recent error message. Returns
+	/// <see langword="null"/> when the proxy hasn't been started or doesn't expose a
+	/// tracker — callers must tolerate <c>null</c> and fall back to the legacy
+	/// "0 tools / pending OAuth" generic diagnostic.
+	/// </summary>
+	/// <remarks>
+	/// The proxy's <c>IHealthTracker</c> is populated by McpProxy.Sdk's
+	/// <c>McpClientManager</c> when a deferred connection attempt throws. Older
+	/// SDK versions never recorded auth failures here (the catch block only
+	/// logged), so the tracker returns no <c>LastError</c> for missing fixes —
+	/// rendering a <c>null</c> backend error and our fallback diagnostic message.
+	/// Once the SDK fix ships, the tracker carries the actual auth-failure text
+	/// (e.g. <c>"AADSTS50105: ..."</c>), which propagates here unchanged.
+	/// </remarks>
+	private IHealthTracker? TryGetHealthTracker()
+	{
+		var app = _proxyApp;
+		if (app is null)
+			return null;
+
+		try
+		{
+			return app.Services.GetService<IHealthTracker>();
+		}
+		catch (Exception ex)
+		{
+			LogToolProbeRegistrarFailed("<health-tracker-lookup>", ex.Message);
 			return null;
 		}
 	}

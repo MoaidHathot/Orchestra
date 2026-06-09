@@ -2873,5 +2873,124 @@ public class PromptExecutorTests
 		msg.Should().Contain("not-probed: reachability probe did not run");
 	}
 
+	[Fact]
+	public void BuildMcpZeroToolsErrorMessage_Reachable_WithBackendError_RendersTheError()
+	{
+		// Arrange — reachable backend (so the proxy is up and accepting connections)
+		// AND the proxy's health tracker recorded an underlying auth error. This is
+		// the exact scenario the diagnostic-improvement feature targets: instead of
+		// the generic "Likely causes: pending OAuth … or empty backend" hedge, the
+		// operator sees the real cause.
+		var errAt = new DateTimeOffset(2026, 6, 9, 15, 30, 23, TimeSpan.Zero);
+		var reachability = new Dictionary<string, McpEndpointReachability>(StringComparer.OrdinalIgnoreCase)
+		{
+			["mail"] = new(
+				McpEndpointReachabilityStatus.Reachable,
+				Endpoint: "http://localhost:5113/mcp/mail",
+				LastBackendError: "AADSTS50105: The signed-in user is not assigned to a role",
+				LastBackendErrorAtUtc: errAt),
+		};
+
+		// Act
+		var msg = PromptExecutor.BuildMcpZeroToolsErrorMessage(["mail"], reachability);
+
+		// Assert — the per-backend error replaces the generic hedge and carries
+		// the timestamp so the operator can correlate with the proxy logs.
+		msg.Should().Contain("mail: backend reachable");
+		msg.Should().Contain("http://localhost:5113/mcp/mail");
+		msg.Should().Contain("Last connection error: AADSTS50105");
+		msg.Should().Contain("recorded 2026-06-09 15:30:23Z");
+		msg.Should().NotContain("Likely causes:");
+	}
+
+	[Fact]
+	public void BuildMcpZeroToolsErrorMessage_Reachable_WithBackendError_NoTimestamp_StillRenders()
+	{
+		// Arrange — older proxies populate LastError without LastFailedRequest.
+		// The renderer must tolerate a missing timestamp gracefully.
+		var reachability = new Dictionary<string, McpEndpointReachability>(StringComparer.OrdinalIgnoreCase)
+		{
+			["calendar"] = new(
+				McpEndpointReachabilityStatus.Reachable,
+				Endpoint: "http://localhost:5113/mcp/calendar",
+				LastBackendError: "interactive auth required",
+				LastBackendErrorAtUtc: null),
+		};
+
+		// Act
+		var msg = PromptExecutor.BuildMcpZeroToolsErrorMessage(["calendar"], reachability);
+
+		// Assert
+		msg.Should().Contain("calendar: backend reachable");
+		msg.Should().Contain("Last connection error: interactive auth required");
+		msg.Should().NotContain("recorded ");
+		msg.Should().NotContain("Likely causes:");
+	}
+
+	[Fact]
+	public void BuildMcpZeroToolsErrorMessage_Reachable_NoBackendError_KeepsLegacyHedge()
+	{
+		// Arrange — backend is reachable, no recorded error (e.g. SDK version
+		// without the C1 fix, or the backend genuinely returned an empty tool list
+		// with no transport error). The legacy multi-cause hedge is preserved so
+		// callers don't lose information when the tracker is silent.
+		var reachability = new Dictionary<string, McpEndpointReachability>(StringComparer.OrdinalIgnoreCase)
+		{
+			["graph"] = new(
+				McpEndpointReachabilityStatus.Reachable,
+				Endpoint: "http://localhost:5113/mcp/graph"),
+		};
+
+		// Act
+		var msg = PromptExecutor.BuildMcpZeroToolsErrorMessage(["graph"], reachability);
+
+		// Assert
+		msg.Should().Contain("graph: backend reachable");
+		msg.Should().Contain("Likely causes: pending OAuth authentication");
+	}
+
+	[Fact]
+	public void TruncateForMessage_LongString_TruncatedWithEllipsis()
+	{
+		// Arrange
+		var longStr = new string('x', 1500);
+
+		// Act
+		var result = PromptExecutor.TruncateForMessage(longStr, maxChars: 100);
+
+		// Assert
+		result.Length.Should().Be(101); // 100 chars + ellipsis
+		result.Should().EndWith("…");
+	}
+
+	[Fact]
+	public void TruncateForMessage_ShortString_ReturnedUnchanged()
+	{
+		// Arrange
+		var s = "short";
+
+		// Act
+		var result = PromptExecutor.TruncateForMessage(s);
+
+		// Assert
+		result.Should().Be("short");
+	}
+
+	[Fact]
+	public void TruncateForMessage_MultilineString_CollapsesNewlines()
+	{
+		// Arrange — the CLI / step error field renders single-line; preserving
+		// the multi-line layout in the error message would break alignment.
+		var s = "line1\nline2\r\nline3";
+
+		// Act
+		var result = PromptExecutor.TruncateForMessage(s);
+
+		// Assert
+		result.Should().Be("line1 line2 line3");
+		result.Should().NotContain("\n");
+		result.Should().NotContain("\r");
+	}
+
 	#endregion
 }

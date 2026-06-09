@@ -112,10 +112,23 @@ public interface IMcpResolver
 /// <param name="FailureReason">For <see cref="McpEndpointReachabilityStatus.Unreachable"/>,
 /// a short human-readable description of why the connect attempt failed
 /// (e.g. <c>"connection refused"</c>, <c>"timed out after 1s"</c>). Null otherwise.</param>
+/// <param name="LastBackendError">Optional. When the resolver can read backend
+/// health metadata from the in-process proxy (e.g. via <c>IHealthTracker</c>),
+/// the most recent error message the proxy recorded for this backend — typically
+/// the underlying cause of an auth or transport failure that
+/// <see cref="McpEndpointReachabilityStatus.Reachable"/> alone cannot explain
+/// (e.g. <c>"AADSTS50105: ..."</c>, <c>"interactive auth required"</c>).
+/// Null when the proxy hasn't recorded any failure or when the resolver has
+/// no access to a health tracker.</param>
+/// <param name="LastBackendErrorAtUtc">UTC timestamp paired with
+/// <paramref name="LastBackendError"/>, indicating when the proxy last recorded
+/// the failure. Null when <paramref name="LastBackendError"/> is null.</param>
 public sealed record McpEndpointReachability(
 	McpEndpointReachabilityStatus Status,
 	string? Endpoint = null,
-	string? FailureReason = null);
+	string? FailureReason = null,
+	string? LastBackendError = null,
+	DateTimeOffset? LastBackendErrorAtUtc = null);
 
 /// <summary>
 /// Categorical outcome of an MCP endpoint reachability probe.

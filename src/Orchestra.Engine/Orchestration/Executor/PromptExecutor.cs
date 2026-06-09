@@ -1219,7 +1219,30 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					case McpEndpointReachabilityStatus.Reachable:
 						lines.Append("backend reachable at ");
 						lines.Append(probe.Endpoint ?? "(endpoint)");
-						lines.AppendLine(", but tools/list returned 0 tools. Likely causes: pending OAuth authentication, proxy in deferred-connection state, or the backend reports no enabled tools for this account.");
+						if (!string.IsNullOrWhiteSpace(probe.LastBackendError))
+						{
+							// SDK recorded an actual error for this backend (e.g. an Azure AD
+							// auth failure, an HTTP error, or a transport-level exception).
+							// Surface that text instead of guessing — the operator no longer
+							// has to grep proxy logs to find the cause.
+							lines.Append(", but tools/list returned 0 tools. Last connection error: ");
+							lines.Append(TruncateForMessage(probe.LastBackendError!));
+							if (probe.LastBackendErrorAtUtc is { } ts)
+							{
+								lines.Append(" (recorded ");
+								lines.Append(ts.ToString("u", System.Globalization.CultureInfo.InvariantCulture));
+								lines.Append(')');
+							}
+							lines.AppendLine(".");
+						}
+						else
+						{
+							// Tracker had nothing — either the SDK hasn't been upgraded to
+							// the version that records auth failures, or the backend genuinely
+							// returned an empty tool list with no transport error. Keep the
+							// historical multi-cause hint so callers don't lose information.
+							lines.AppendLine(", but tools/list returned 0 tools. Likely causes: pending OAuth authentication, proxy in deferred-connection state, or the backend reports no enabled tools for this account.");
+						}
 						break;
 
 					case McpEndpointReachabilityStatus.LocalStdio:
@@ -1243,6 +1266,21 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		}
 
 		return lines.ToString();
+	}
+
+	/// <summary>
+	/// Trims overly long error strings to keep <see cref="BuildMcpZeroToolsErrorMessage"/>
+	/// readable in the executor's step error field while still preserving enough text
+	/// for an operator to triage. The full text is always available via the proxy's
+	/// health endpoint / structured logs.
+	/// </summary>
+	internal static string TruncateForMessage(string text, int maxChars = 500)
+	{
+		if (string.IsNullOrEmpty(text))
+			return text;
+		// Collapse newlines so the message stays single-line in CLI output.
+		var collapsed = text.ReplaceLineEndings(" ");
+		return collapsed.Length <= maxChars ? collapsed : collapsed[..maxChars] + "…";
 	}
 
 	/// <summary>
