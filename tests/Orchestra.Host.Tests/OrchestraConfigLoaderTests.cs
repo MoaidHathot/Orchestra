@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
+using Orchestra.ProcessHost;
 using Xunit;
 
 namespace Orchestra.Host.Tests;
@@ -1042,5 +1043,194 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.Hooks[0].On.Should().Be(HookEventType.OrchestrationFailure);
 		options.Hooks[0].Payload.Steps!.Selector.Should().Be(HookStepSelector.Failed);
 		options.Hooks[0].Action.ScriptFile.Should().Be(Path.GetFullPath(Path.Combine(_tempDir, "hooks", "archive.ps1")));
+	}
+
+	// ── env-var expansion tests ──
+
+	[Fact]
+	public void LoadAndApply_ExpandsDollarBraceReferenceInDataPath()
+	{
+		// Arrange — the orchestra.json payload uses ${VAR} to name a
+		// host-specific subdirectory inside the config-relative dataPath, the
+		// same pattern users have in their existing mcp-proxy configs. Without
+		// expansion the resolved dataPath would contain a literal "${VAR}" path
+		// component.
+		const string varName = "ORCHESTRA_CFG_TEST_DATA";
+		var savedVar = Environment.GetEnvironmentVariable(varName);
+		Environment.SetEnvironmentVariable(varName, "expanded-data");
+
+		var configPath = Path.Combine(_tempDir, "env-cfg.json");
+		File.WriteAllText(configPath, $$"""
+		{
+			"dataPath": "data/${{{varName}}}"
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		try
+		{
+			var options = new OrchestrationHostOptions();
+
+			// Act
+			OrchestraConfigLoader.LoadAndApply(options);
+
+			// Assert — relative path is resolved against the config-file directory
+			// with the ${VAR} replaced by its env-var value.
+			var expected = Path.GetFullPath(Path.Combine(_tempDir, "data", "expanded-data"));
+			options.DataPath.Should().Be(expected);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(varName, savedVar);
+		}
+	}
+
+	[Fact]
+	public void LoadAndApply_MissingEnvVar_Throws()
+	{
+		// Arrange — referenced var is intentionally unset. Loader must throw so
+		// the host fails fast instead of silently running with garbage values.
+		const string varName = "ORCHESTRA_CFG_TEST_MISSING";
+		var savedVar = Environment.GetEnvironmentVariable(varName);
+		Environment.SetEnvironmentVariable(varName, null);
+
+		var configPath = Path.Combine(_tempDir, "env-missing.json");
+		File.WriteAllText(configPath, $$"""
+		{
+			"dataPath": "/data/${{{varName}}}"
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		try
+		{
+			var options = new OrchestrationHostOptions();
+
+			// Act / Assert
+			var act = () => OrchestraConfigLoader.LoadAndApply(options);
+			var ex = act.Should().Throw<Orchestra.Engine.Serialization.EnvironmentVariableExpansionException>().Which;
+			ex.VariableName.Should().Be(varName);
+			ex.SourcePath.Should().Be(configPath);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(varName, savedVar);
+		}
+	}
+
+	[Fact]
+	public void Load_MissingEnvVar_Throws()
+	{
+		// Arrange — Load() must use the same fail-fast policy as LoadAndApply().
+		const string varName = "ORCHESTRA_CFG_TEST_MISSING_LOAD";
+		var savedVar = Environment.GetEnvironmentVariable(varName);
+		Environment.SetEnvironmentVariable(varName, null);
+
+		var configPath = Path.Combine(_tempDir, "env-missing-load.json");
+		File.WriteAllText(configPath, $$"""
+		{
+			"dataPath": "/x/${{{varName}}}"
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		try
+		{
+			var act = () => OrchestraConfigLoader.Load();
+			act.Should().Throw<Orchestra.Engine.Serialization.EnvironmentVariableExpansionException>()
+				.Which.VariableName.Should().Be(varName);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(varName, savedVar);
+		}
+	}
+
+	[Fact]
+	public void LoadServiceConfig_ExpandsDollarBraceInArguments()
+	{
+		// Arrange — the exact pattern from orchestra.services.json the user has:
+		// arguments[] contains ${XDG_CONFIG_HOME}. Without expansion the spawned
+		// mcpproxy received the literal "${XDG_CONFIG_HOME}/orchestra/..." path
+		// and failed.
+		const string varName = "ORCHESTRA_SVC_TEST_CFGHOME";
+		var savedVar = Environment.GetEnvironmentVariable(varName);
+		Environment.SetEnvironmentVariable(varName, "C:/Users/me/config");
+
+		var configPath = Path.Combine(_tempDir, "svc-env.json");
+		File.WriteAllText(configPath, $$"""
+		{
+			"services": [
+				{
+					"name": "svc-a",
+					"type": "process",
+					"command": "dnx",
+					"arguments": [
+						"mcpproxy",
+						"-c",
+						"${{{varName}}}/orchestra/m365.proxy.json"
+					],
+					"required": true
+				}
+			]
+		}
+		""");
+
+		try
+		{
+			// Act
+			var services = OrchestraConfigLoader.LoadServiceConfig(configPath);
+
+			// Assert
+			services.Should().NotBeNull().And.HaveCount(1);
+			var proc = services![0].Should().BeOfType<ProcessService>().Subject;
+			proc.Arguments.Should().BeEquivalentTo(
+				"mcpproxy",
+				"-c",
+				"C:/Users/me/config/orchestra/m365.proxy.json");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(varName, savedVar);
+		}
+	}
+
+	[Fact]
+	public void LoadServiceConfig_MissingEnvVar_ThrowsWithPath()
+	{
+		// Arrange — missing var must throw with both the variable name and
+		// the file path so operators can find and fix it immediately.
+		const string varName = "ORCHESTRA_SVC_TEST_MISSING";
+		var savedVar = Environment.GetEnvironmentVariable(varName);
+		Environment.SetEnvironmentVariable(varName, null);
+
+		var configPath = Path.Combine(_tempDir, "svc-missing.json");
+		File.WriteAllText(configPath, $$"""
+		{
+			"services": [
+				{
+					"name": "svc-a",
+					"type": "process",
+					"command": "dnx",
+					"arguments": ["mcpproxy", "-c", "${{{varName}}}/x.json"]
+				}
+			]
+		}
+		""");
+
+		try
+		{
+			// Act
+			var act = () => OrchestraConfigLoader.LoadServiceConfig(configPath);
+
+			// Assert
+			var ex = act.Should().Throw<Orchestra.Engine.Serialization.EnvironmentVariableExpansionException>().Which;
+			ex.VariableName.Should().Be(varName);
+			ex.SourcePath.Should().Be(configPath);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable(varName, savedVar);
+		}
 	}
 }

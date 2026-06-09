@@ -4,6 +4,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
+using Orchestra.Engine.Serialization;
 using Orchestra.ProcessHost;
 
 namespace Orchestra.Host.Hosting;
@@ -131,6 +132,12 @@ public static class OrchestraConfigLoader
 	/// Loads and deserializes the orchestra.services.json file into an array of <see cref="ServiceEntry"/>.
 	/// Returns null if the file cannot be parsed.
 	/// </summary>
+	/// <remarks>
+	/// <c>${VAR}</c> and <c>"env:VAR"</c> references inside the JSON are expanded
+	/// against the process environment before deserialization. Missing variables
+	/// surface as load-time errors rather than silently leaking literal
+	/// <c>${VAR}</c> strings into the spawned process command lines.
+	/// </remarks>
 	public static ServiceEntry[]? LoadServiceConfig(string path, ILogger? logger = null)
 	{
 		logger ??= NullLogger.Instance;
@@ -138,8 +145,17 @@ public static class OrchestraConfigLoader
 		try
 		{
 			var json = File.ReadAllText(path);
+			json = EnvironmentVariableExpander.Expand(json, path);
 			var config = JsonSerializer.Deserialize<ServiceConfigFile>(json, JsonOptions);
 			return config?.Services;
+		}
+		catch (EnvironmentVariableExpansionException ex)
+		{
+			// A missing env var is a configuration error, not a transient I/O
+			// problem — log at Error so it shows up in CI/operator triage and
+			// rethrow so the caller can decide whether to fail fast.
+			logger.LogError(ex, "Service configuration {ConfigPath} references unset environment variable '{VariableName}'.", path, ex.VariableName);
+			throw;
 		}
 		catch (Exception ex)
 		{
@@ -171,6 +187,11 @@ public static class OrchestraConfigLoader
 	/// or it cannot be parsed. Useful for consumers that need to read config values (such as LogLevel)
 	/// before calling <see cref="LoadAndApply"/>.
 	/// </summary>
+	/// <remarks>
+	/// <c>${VAR}</c> and <c>"env:VAR"</c> references inside the JSON are expanded
+	/// against the process environment before deserialization. Missing variables
+	/// throw <see cref="EnvironmentVariableExpansionException"/>.
+	/// </remarks>
 	public static OrchestraConfigFile? Load(ILogger? logger = null)
 	{
 		logger ??= NullLogger.Instance;
@@ -185,7 +206,13 @@ public static class OrchestraConfigLoader
 		try
 		{
 			var json = File.ReadAllText(configPath);
+			json = EnvironmentVariableExpander.Expand(json, configPath);
 			return JsonSerializer.Deserialize<OrchestraConfigFile>(json, JsonOptions);
+		}
+		catch (EnvironmentVariableExpansionException ex)
+		{
+			logger.LogError(ex, "Orchestra configuration {ConfigPath} references unset environment variable '{VariableName}'.", configPath, ex.VariableName);
+			throw;
 		}
 		catch (Exception ex)
 		{
@@ -199,6 +226,12 @@ public static class OrchestraConfigLoader
 	/// Values in the config file are applied first, then the programmatic configure action
 	/// runs on top (allowing overrides).
 	/// </summary>
+	/// <remarks>
+	/// <c>${VAR}</c> and <c>"env:VAR"</c> references inside the JSON are expanded
+	/// against the process environment before deserialization. Missing variables
+	/// throw <see cref="EnvironmentVariableExpansionException"/> so the host fails
+	/// fast at startup rather than continuing with partial configuration.
+	/// </remarks>
 	public static void LoadAndApply(OrchestrationHostOptions options, ILogger? logger = null)
 	{
 		logger ??= NullLogger.Instance;
@@ -215,6 +248,7 @@ public static class OrchestraConfigLoader
 		try
 		{
 			var json = File.ReadAllText(configPath);
+			json = EnvironmentVariableExpander.Expand(json, configPath);
 			var config = JsonSerializer.Deserialize<OrchestraConfigFile>(json, JsonOptions);
 			if (config is null)
 			{
@@ -225,6 +259,11 @@ public static class OrchestraConfigLoader
 			var configDirectory = Path.GetDirectoryName(Path.GetFullPath(configPath));
 			ApplyConfig(options, config, configDirectory);
 			logger.LogInformation("Orchestra configuration loaded successfully from {ConfigPath}", configPath);
+		}
+		catch (EnvironmentVariableExpansionException ex)
+		{
+			logger.LogError(ex, "Orchestra configuration {ConfigPath} references unset environment variable '{VariableName}'.", configPath, ex.VariableName);
+			throw;
 		}
 		catch (Exception ex)
 		{

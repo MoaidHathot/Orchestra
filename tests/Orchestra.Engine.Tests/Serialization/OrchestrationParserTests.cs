@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Orchestra.Engine.Serialization;
 
 namespace Orchestra.Engine.Tests.Serialization;
 
@@ -3375,6 +3376,176 @@ public class OrchestrationParserTests
 			.Single(s => s.Name == "code-review");
 		reviewStep.InfiniteSessions.Should().NotBeNull();
 		reviewStep.InfiniteSessions!.Enabled.Should().BeFalse();
+	}
+
+	#endregion
+
+	#region ParseMcpFile env-var expansion
+
+	[Fact]
+	public void ParseMcpFile_LocalMcp_ExpandsDollarBraceInArgumentsAndEnvironment()
+	{
+		// Arrange — the canonical failure case that motivated this feature:
+		// a stdio MCP whose `arguments[]` and `environment{}` contain ${VAR} refs.
+		// Without expansion, the literal `${ORCHESTRA_TEST_TENANT}` would leak
+		// into the spawned child process command line.
+		const string tenantVar = "ORCHESTRA_TEST_TENANT_AAA";
+		const string clientVar = "ORCHESTRA_TEST_CLIENT_AAA";
+		const string audienceVar = "ORCHESTRA_TEST_AUDIENCE_AAA";
+		var saved = SnapshotAndSet(new()
+		{
+			[tenantVar] = "72f988bf-86f1-41af-91ab-2d7cd011db47",
+			[clientVar] = "aebc6443-996d-45c2-90f0-388ff96faa56",
+			[audienceVar] = "ea9ffc3e-8a23-4a7d-836d-234d7c7565c1",
+		});
+
+		var tempFile = Path.Combine(Path.GetTempPath(), $"orchestra-mcp-test-{Guid.NewGuid():N}.json");
+		try
+		{
+			var json = $$"""
+				{
+					"mcps": [
+						{
+							"name": "teams",
+							"type": "local",
+							"command": "dnx",
+							"arguments": [
+								"McpProxy.Samples.Teams.Mcp", "--yes", "--",
+								"--tenant-id=${{{tenantVar}}}",
+								"--public-client-id=${{{clientVar}}}"
+							],
+							"environment": {
+								"AZURE_SCOPES": "${{{audienceVar}}}/.default"
+							}
+						}
+					]
+				}
+				""";
+			File.WriteAllText(tempFile, json);
+
+			// Act
+			var mcps = OrchestrationParser.ParseMcpFile(tempFile);
+
+			// Assert — every reference is resolved to the actual GUID before
+			// the LocalMcp instance is constructed.
+			mcps.Should().HaveCount(1);
+			var local = mcps[0].Should().BeOfType<LocalMcp>().Subject;
+			local.Arguments.Should().BeEquivalentTo(
+				"McpProxy.Samples.Teams.Mcp", "--yes", "--",
+				"--tenant-id=72f988bf-86f1-41af-91ab-2d7cd011db47",
+				"--public-client-id=aebc6443-996d-45c2-90f0-388ff96faa56");
+			local.Environment.Should().NotBeNull();
+			local.Environment!["AZURE_SCOPES"].Should().Be("ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/.default");
+		}
+		finally
+		{
+			File.Delete(tempFile);
+			RestoreEnv(saved);
+		}
+	}
+
+	[Fact]
+	public void ParseMcpFile_RemoteMcp_ExpandsEnvColonValue()
+	{
+		// Arrange — "env:VAR" whole-string indirection on a remote endpoint.
+		const string endpointVar = "ORCHESTRA_TEST_ENDPOINT_AAA";
+		var saved = SnapshotAndSet(new()
+		{
+			[endpointVar] = "https://api.example.com/mcp/data",
+		});
+
+		var tempFile = Path.Combine(Path.GetTempPath(), $"orchestra-mcp-test-{Guid.NewGuid():N}.json");
+		try
+		{
+			var json = $$"""
+				{
+					"mcps": [
+						{
+							"name": "remote-tool",
+							"type": "remote",
+							"endpoint": "env:{{endpointVar}}"
+						}
+					]
+				}
+				""";
+			File.WriteAllText(tempFile, json);
+
+			// Act
+			var mcps = OrchestrationParser.ParseMcpFile(tempFile);
+
+			// Assert — the indirection becomes the actual URL.
+			mcps.Should().HaveCount(1);
+			var remote = mcps[0].Should().BeOfType<RemoteMcp>().Subject;
+			remote.Endpoint.Should().Be("https://api.example.com/mcp/data");
+		}
+		finally
+		{
+			File.Delete(tempFile);
+			RestoreEnv(saved);
+		}
+	}
+
+	[Fact]
+	public void ParseMcpFile_MissingEnvVar_ThrowsWithPathAndVariableName()
+	{
+		// Arrange — variable intentionally absent. The exception must name
+		// both the variable and the source file so operators can fix it.
+		const string varName = "ORCHESTRA_TEST_MISSING_AAA";
+		var saved = SnapshotAndSet(new() { [varName] = null });
+
+		var tempFile = Path.Combine(Path.GetTempPath(), $"orchestra-mcp-test-{Guid.NewGuid():N}.json");
+		try
+		{
+			var json = $$"""
+				{
+					"mcps": [
+						{
+							"name": "broken",
+							"type": "local",
+							"command": "dnx",
+							"arguments": ["--tenant-id=${{{varName}}}"]
+						}
+					]
+				}
+				""";
+			File.WriteAllText(tempFile, json);
+
+			// Act
+			var act = () => OrchestrationParser.ParseMcpFile(tempFile);
+
+			// Assert
+			var ex = act.Should().Throw<EnvironmentVariableExpansionException>().Which;
+			ex.VariableName.Should().Be(varName);
+			ex.SourcePath.Should().Be(tempFile);
+			ex.Syntax.Should().Be("${VAR}");
+		}
+		finally
+		{
+			File.Delete(tempFile);
+			RestoreEnv(saved);
+		}
+	}
+
+	/// <summary>
+	/// Snapshots the current value of each named env var (so we can restore in
+	/// the finally block) and applies the requested values. A null value
+	/// removes the variable.
+	/// </summary>
+	private static Dictionary<string, string?> SnapshotAndSet(Dictionary<string, string?> assignments)
+	{
+		var saved = new Dictionary<string, string?>();
+		foreach (var (name, value) in assignments)
+		{
+			saved[name] = Environment.GetEnvironmentVariable(name);
+			Environment.SetEnvironmentVariable(name, value);
+		}
+		return saved;
+	}
+
+	private static void RestoreEnv(Dictionary<string, string?> saved)
+	{
+		foreach (var (name, value) in saved)
+			Environment.SetEnvironmentVariable(name, value);
 	}
 
 	#endregion

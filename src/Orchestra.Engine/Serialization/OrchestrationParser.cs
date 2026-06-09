@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Orchestra.Engine.Serialization;
 using YamlDotNet.Serialization;
 
 namespace Orchestra.Engine;
@@ -202,6 +203,12 @@ public static class OrchestrationParser
 	public static Mcp[] ParseMcpFile(string path)
 	{
 		var json = File.ReadAllText(path);
+		// Expand `${VAR}` and `"env:VAR"` references *before* deserialization so
+		// fields like `arguments[]` and `environment{}` carry resolved values into
+		// the spawned stdio child. Without this pass, literal `${TENANT_ID}` leaks
+		// into the child process command line, which then silently fails to
+		// authenticate. Missing variables throw — see EnvironmentVariableExpander.
+		json = EnvironmentVariableExpander.Expand(json, path);
 		return ParseMcps(json);
 	}
 
