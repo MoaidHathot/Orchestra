@@ -480,15 +480,26 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		}
 		catch (OperationCanceledException)
 		{
+			// Inner timeout (probe's own per-call budget elapsed). Unknown — the
+			// backend may or may not have tools; let the post-LLM check decide.
 			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
 			LogToolProbeTimedOut(mcpName, elapsedMs, (long)timeout.TotalMilliseconds);
 			return null;
 		}
 		catch (Exception ex)
 		{
+			// Hard exception from the proxy (e.g. McpProxy.Sdk 1.20+ propagates
+			// deferred-connect failures here instead of silently returning an
+			// empty Tools list). Treat as "definitely unavailable, 0 tools" so
+			// the executor's pre-LLM fail-fast triggers with a precise
+			// diagnostic — the matching reachability probe (which queries the
+			// proxy's IHealthTracker) will then surface the underlying cause
+			// in the rendered error message. Returning null here would let the
+			// step proceed to the LLM with no tools available, which would
+			// silently hallucinate.
 			var elapsedMs = (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds;
 			LogToolProbeFailed(mcpName, elapsedMs, ex.Message);
-			return null;
+			return 0;
 		}
 	}
 

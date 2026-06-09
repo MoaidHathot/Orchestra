@@ -1436,10 +1436,14 @@ public class McpManagerTests : IAsyncLifetime
 	}
 
 	[Fact]
-	public async Task GetGlobalMcpToolCountsAsync_ProbeThrows_ReturnsNullForThatName()
+	public async Task GetGlobalMcpToolCountsAsync_ProbeThrows_ReturnsZeroForThatName()
 	{
-		// Arrange — the probe must not surface its own exception to callers; failures
-		// degrade to "unknown" so PromptExecutor falls back to the post-LLM SDK check.
+		// Arrange — a hard exception from the underlying proxy (e.g. McpProxy.Sdk
+		// 1.20+ propagating a deferred-connect failure) must translate to 0
+		// rather than null so the executor's pre-LLM fail-fast triggers with a
+		// precise diagnostic. Returning null would silently let the step proceed
+		// to the LLM with no tools available — exactly the failure mode this
+		// translation is meant to surface.
 		await using var manager = new TestableProbeMcpManager(probeException: new InvalidOperationException("boom"));
 		await manager.InitializeAsync([CreateLocalMcp("calendar")]);
 
@@ -1448,7 +1452,7 @@ public class McpManagerTests : IAsyncLifetime
 
 		// Assert
 		result.Should().ContainKey("calendar");
-		result["calendar"].Should().BeNull();
+		result["calendar"].Should().Be(0);
 	}
 
 	[Fact]
@@ -1679,10 +1683,14 @@ public class McpManagerTests : IAsyncLifetime
 			ProbeCallCount++;
 			if (_probeException is not null)
 			{
-				// Mirror the production behavior: swallow the exception and return null.
-				// (The real impl catches inside ProbeServerToolCountAsync; we simulate
-				// that here so tests of the public API see the same contract.)
-				return Task.FromResult<int?>(null);
+				// Mirror the production behavior: swallow the hard exception and
+				// return 0 (treated as "definitely unavailable" for pre-LLM
+				// fail-fast). The real impl in McpManager.ProbeServerToolCountAsync
+				// catches Exception and returns 0 so the executor's 0-tools
+				// preflight triggers with the reachability-enriched message.
+				// (A timeout returns null — "unknown" — and is exercised via a
+				// separate code path not covered by this harness.)
+				return Task.FromResult<int?>(0);
 			}
 			if (_probeResults is null)
 				return Task.FromResult<int?>(null);
