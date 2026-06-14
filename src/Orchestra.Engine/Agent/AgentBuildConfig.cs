@@ -11,6 +11,19 @@ public sealed record AgentBuildConfig
 	public Mcp[] Mcps { get; init; } = [];
 	public Subagent[] Subagents { get; init; } = [];
 	public ReasoningLevel? ReasoningLevel { get; init; }
+
+	/// <summary>Optional reasoning-summary verbosity (maps to SDK SessionConfig.ReasoningSummary).</summary>
+	public ReasoningSummaryLevel? ReasoningSummary { get; init; }
+
+	/// <summary>Optional context-window tier (maps to SDK SessionConfig.ContextTier).</summary>
+	public ContextTier? ContextTier { get; init; }
+
+	/// <summary>Optional working directory for the agent's tools/config discovery (resolved + validated by the executor).</summary>
+	public string? WorkingDirectory { get; init; }
+
+	/// <summary>Optional per-step GitHub token overriding the host default (maps to SDK SessionConfig.GitHubToken).</summary>
+	public string? GitHubToken { get; init; }
+
 	public SystemPromptMode? SystemPromptMode { get; init; }
 	public IOrchestrationReporter Reporter { get; init; } = NullOrchestrationReporter.Instance;
 	public IReadOnlyCollection<IEngineTool> EngineTools { get; init; } = [];

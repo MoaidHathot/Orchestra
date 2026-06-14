@@ -236,6 +236,44 @@ public class OrchestraConfigLoaderTests : IDisposable
 	}
 
 	[Fact]
+	public void ApplyConfig_CopilotAuth_OverridesDefaults()
+	{
+		// Arrange - orchestra.json copilot.gitHubToken / useLoggedInUser must reach
+		// OrchestrationHostOptions.Copilot so the host can apply deterministic auth.
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile
+		{
+			Copilot = new CopilotProviderConfig
+			{
+				GitHubToken = "ghp_example",
+				UseLoggedInUser = false,
+			},
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.Copilot.GitHubToken.Should().Be("ghp_example");
+		options.Copilot.UseLoggedInUser.Should().BeFalse();
+	}
+
+	[Fact]
+	public void ApplyConfig_CopilotAuth_Unset_KeepsDefaults()
+	{
+		// Arrange
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile { Copilot = new CopilotProviderConfig() };
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert - null token / null flag leave the built-in defaults untouched.
+		options.Copilot.GitHubToken.Should().BeNull();
+		options.Copilot.UseLoggedInUser.Should().BeNull();
+	}
+
+	[Fact]
 	public void ApplyConfig_CopilotSwap_PartialOverride_KeepsDefaults()
 	{
 		// Arrange — only one swap field set in JSON; the rest must remain at defaults

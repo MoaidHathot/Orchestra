@@ -119,6 +119,74 @@ public class OrchestrationParserTests
 	}
 
 	[Fact]
+	public void ParseOrchestration_WithSessionTuningFields_ParsesThem()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "tuned",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "tuned-step",
+						"type": "Prompt",
+						"systemPrompt": "S",
+						"userPrompt": "U",
+						"model": "claude-opus-4.6",
+						"reasoningSummary": "concise",
+						"contextTier": "longContext",
+						"workingDirectory": "C:/work/dir",
+						"githubToken": "${env:GITHUB_TOKEN}"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.ReasoningSummary.Should().Be(ReasoningSummaryLevel.Concise);
+		step.ContextTier.Should().Be(ContextTier.LongContext);
+		step.WorkingDirectory.Should().Be("C:/work/dir");
+		step.GitHubToken.Should().Be("${env:GITHUB_TOKEN}");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WithoutSessionTuningFields_LeavesThemNull()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "untuned",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "untuned-step",
+						"type": "Prompt",
+						"systemPrompt": "S",
+						"userPrompt": "U",
+						"model": "claude-opus-4.6"
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.ReasoningSummary.Should().BeNull();
+		step.ContextTier.Should().BeNull();
+		step.WorkingDirectory.Should().BeNull();
+		step.GitHubToken.Should().BeNull();
+	}
+
+	[Fact]
 	public void ParseOrchestration_WithHooks_ParsesHookDefinition()
 	{
 		var json = """

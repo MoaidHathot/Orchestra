@@ -38,6 +38,18 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			ReasoningLevel = root.TryGetProperty("reasoningLevel", out var rl)
 				? Enum.Parse<ReasoningLevel>(rl.GetString()!, ignoreCase: true)
 				: null,
+			ReasoningSummary = root.TryGetProperty("reasoningSummary", out var rs)
+				? Enum.Parse<ReasoningSummaryLevel>(rs.GetString()!, ignoreCase: true)
+				: null,
+			ContextTier = root.TryGetProperty("contextTier", out var ct)
+				? Enum.Parse<ContextTier>(ct.GetString()!, ignoreCase: true)
+				: null,
+			WorkingDirectory = root.TryGetProperty("workingDirectory", out var wd)
+				? wd.GetString()
+				: null,
+			GitHubToken = root.TryGetProperty("githubToken", out var ght)
+				? ght.GetString()
+				: null,
 			SystemPromptMode = root.TryGetProperty("systemPromptMode", out var spm)
 				? Enum.Parse<SystemPromptMode>(spm.GetString()!, ignoreCase: true)
 				: null,

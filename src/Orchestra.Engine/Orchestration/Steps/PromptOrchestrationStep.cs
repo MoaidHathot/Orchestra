@@ -8,6 +8,35 @@ public class PromptOrchestrationStep : OrchestrationStep
 	public string? OutputHandlerPrompt { get; init; }
 	public required string Model { get; init; }
 	public ReasoningLevel? ReasoningLevel { get; init; }
+
+	/// <summary>
+	/// Optional verbosity for the model's reasoning summary (none / concise / detailed).
+	/// Maps onto the Copilot SDK's <c>SessionConfig.ReasoningSummary</c>. Null = provider default.
+	/// </summary>
+	public ReasoningSummaryLevel? ReasoningSummary { get; init; }
+
+	/// <summary>
+	/// Optional context-window tier (default / longContext). Maps onto the Copilot SDK's
+	/// <c>SessionConfig.ContextTier</c>. Null = provider default.
+	/// </summary>
+	public ContextTier? ContextTier { get; init; }
+
+	/// <summary>
+	/// Optional working directory for the agent's shell/file tools and config discovery
+	/// (custom instructions, <c>.github/agents</c>, <c>.github/mcp.json</c>). Resolved at
+	/// execution time (supports <c>${env:*}</c>/<c>{{vars.*}}</c>) and validated to exist.
+	/// Null = the runtime's default working directory.
+	/// </summary>
+	public string? WorkingDirectory { get; init; }
+
+	/// <summary>
+	/// Optional GitHub token used to authenticate this step's Copilot session, overriding
+	/// the host-level default. Resolved at execution time (e.g. <c>${env:GITHUB_TOKEN}</c>).
+	/// Null = inherit the host's configured auth (orchestra.json <c>copilot.gitHubToken</c>
+	/// / <c>useLoggedInUser</c>, else the CLI's stored credentials).
+	/// </summary>
+	public string? GitHubToken { get; init; }
+
 	public SystemPromptMode? SystemPromptMode { get; init; }
 	public Mcp[] Mcps { get; internal set; } = [];
 

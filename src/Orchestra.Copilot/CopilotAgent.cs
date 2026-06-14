@@ -14,6 +14,10 @@ public partial class CopilotAgent : IAgent
 	private readonly Mcp[] _mcps;
 	private readonly Subagent[] _subagents;
 	private readonly ReasoningLevel? _reasoningLevel;
+	private readonly Engine.ReasoningSummaryLevel? _reasoningSummary;
+	private readonly Engine.ContextTier? _contextTier;
+	private readonly string? _workingDirectory;
+	private readonly string? _gitHubToken;
 	private readonly SystemPromptMode? _systemPromptMode;
 	private readonly Dictionary<string, SystemPromptSectionOverride>? _systemPromptSections;
 	private readonly IOrchestrationReporter _reporter;
@@ -129,7 +133,11 @@ public partial class CopilotAgent : IAgent
 			CopilotAgentSwapOptions? swapOptions,
 			ILogger<CopilotAgent> logger,
 			ILoggerFactory? loggerFactory = null,
-			string[]? excludedTools = null)
+			string[]? excludedTools = null,
+			Engine.ReasoningSummaryLevel? reasoningSummary = null,
+			Engine.ContextTier? contextTier = null,
+			string? workingDirectory = null,
+			string? gitHubToken = null)
 	{
 		_clientPool = clientPool;
 		_model = model;
@@ -137,6 +145,10 @@ public partial class CopilotAgent : IAgent
 		_mcps = mcps;
 		_subagents = subagents;
 		_reasoningLevel = reasoningLevel;
+		_reasoningSummary = reasoningSummary;
+		_contextTier = contextTier;
+		_workingDirectory = workingDirectory;
+		_gitHubToken = gitHubToken;
 		_systemPromptMode = systemPromptMode;
 		_systemPromptSections = systemPromptSections;
 		_reporter = reporter;
@@ -814,6 +826,11 @@ public partial class CopilotAgent : IAgent
 			Streaming = true,
 			OnPermissionRequest = PermissionHandler.ApproveAll,
 			ReasoningEffort = baseConfig.ReasoningEffort,
+			// SDK 1.0.1: carry the reasoning-summary / context-tier / token knobs across a
+			// CLI swap+resume so the resumed session keeps the original per-step tuning.
+			ReasoningSummary = baseConfig.ReasoningSummary,
+			ContextTier = baseConfig.ContextTier,
+			GitHubToken = baseConfig.GitHubToken,
 			SystemMessage = baseConfig.SystemMessage,
 			McpServers = baseConfig.McpServers,
 			CustomAgents = baseConfig.CustomAgents,
@@ -862,6 +879,37 @@ public partial class CopilotAgent : IAgent
 		if (_reasoningLevel is not null)
 		{
 			config.ReasoningEffort = _reasoningLevel.Value.ToString().ToLowerInvariant();
+		}
+
+		// SDK 1.0.1: reasoning-summary verbosity + context-window tier are per-session knobs
+		// on SessionConfigBase. Map Orchestra's engine-neutral enums onto the SDK value types.
+		if (_reasoningSummary is not null)
+		{
+			config.ReasoningSummary = _reasoningSummary.Value switch
+			{
+				Engine.ReasoningSummaryLevel.None => GitHub.Copilot.ReasoningSummary.None,
+				Engine.ReasoningSummaryLevel.Concise => GitHub.Copilot.ReasoningSummary.Concise,
+				_ => GitHub.Copilot.ReasoningSummary.Detailed,
+			};
+		}
+
+		if (_contextTier is not null)
+		{
+			config.ContextTier = _contextTier.Value == Engine.ContextTier.LongContext
+				? GitHub.Copilot.ContextTier.LongContext
+				: GitHub.Copilot.ContextTier.Default;
+		}
+
+		// Per-step working directory for the agent's shell/file tools + config discovery.
+		if (!string.IsNullOrWhiteSpace(_workingDirectory))
+		{
+			config.WorkingDirectory = _workingDirectory;
+		}
+
+		// Per-step GitHub token override (host-level default is applied at the client layer).
+		if (!string.IsNullOrWhiteSpace(_gitHubToken))
+		{
+			config.GitHubToken = _gitHubToken;
 		}
 
 		// Configure system message with Append, Replace, or Customize mode

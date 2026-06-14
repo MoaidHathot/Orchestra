@@ -120,10 +120,14 @@ internal interface ICopilotClientFactory
 internal sealed class CopilotSdkClientFactory : ICopilotClientFactory
 {
 	private readonly string? _baseDirectory;
+	private readonly string? _gitHubToken;
+	private readonly bool? _useLoggedInUser;
 
-	public CopilotSdkClientFactory(string? baseDirectory = null)
+	public CopilotSdkClientFactory(string? baseDirectory = null, string? gitHubToken = null, bool? useLoggedInUser = null)
 	{
 		_baseDirectory = baseDirectory;
+		_gitHubToken = gitHubToken;
+		_useLoggedInUser = useLoggedInUser;
 	}
 
 	public ICopilotClient CreateClient()
@@ -152,6 +156,19 @@ internal sealed class CopilotSdkClientFactory : ICopilotClientFactory
 		if (!string.IsNullOrEmpty(_baseDirectory))
 		{
 			options.BaseDirectory = _baseDirectory;
+		}
+
+		// Host-level Copilot auth (orchestra.json copilot.gitHubToken / useLoggedInUser).
+		// Applied at the client (CLI process) layer so it is the default for every session
+		// in the run; a per-step SessionConfig.GitHubToken still overrides it for that session.
+		if (!string.IsNullOrEmpty(_gitHubToken))
+		{
+			options.GitHubToken = _gitHubToken;
+		}
+
+		if (_useLoggedInUser is not null)
+		{
+			options.UseLoggedInUser = _useLoggedInUser.Value;
 		}
 
 		return new CopilotSdkClientAdapter(new CopilotClient(options));

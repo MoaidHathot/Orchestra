@@ -19,6 +19,23 @@ public sealed class CopilotAgentPoolOptions
 	public int DefaultMaxSessionsPerInstance { get; set; } = 1;
 	public int DefaultIdleTimeoutSeconds { get; set; } = 120;
 
+	// ── Authentication (host-level default; per-step githubToken still overrides) ──
+
+	/// <summary>
+	/// Optional GitHub token applied to every Copilot CLI client in the run, making auth
+	/// deterministic for servers/CI instead of relying solely on the CLI's stored
+	/// credentials. Sourced from <c>orchestra.json</c> <c>copilot.gitHubToken</c>
+	/// (which supports <c>${ENV}</c> expansion). Null = use the CLI's own auth.
+	/// </summary>
+	public string? GitHubToken { get; set; }
+
+	/// <summary>
+	/// When set, controls the SDK's <c>UseLoggedInUser</c> flag — whether the runtime
+	/// attempts to use stored OAuth / gh-CLI auth. Sourced from <c>orchestra.json</c>
+	/// <c>copilot.useLoggedInUser</c>. Null = SDK default.
+	/// </summary>
+	public bool? UseLoggedInUser { get; set; }
+
 	// ── CLI-swap / session-resume recovery (Phase 1–3) ──
 
 	/// <summary>

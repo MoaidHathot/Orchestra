@@ -343,6 +343,22 @@
           "$ref": "#/$defs/reasoningLevel",
           "description": "Reasoning/thinking level for the model. Controls depth of chain-of-thought."
         },
+        "reasoningSummary": {
+          "$ref": "#/$defs/reasoningSummary",
+          "description": "Verbosity of the model's reasoning summary (none/concise/detailed). Maps to the Copilot SDK ReasoningSummary."
+        },
+        "contextTier": {
+          "$ref": "#/$defs/contextTier",
+          "description": "Context-window tier (default/longContext). Opts the step into the model's extended context window where supported."
+        },
+        "workingDirectory": {
+          "type": "string",
+          "description": "Working directory for the agent's shell/file tools and config discovery (custom instructions, .github/agents, .github/mcp.json). Supports ${env:*}/{{vars.*}}; validated to exist at run time."
+        },
+        "githubToken": {
+          "type": "string",
+          "description": "GitHub token for this step's Copilot session, overriding the host default. Supports ${env:GITHUB_TOKEN}. Avoid hardcoding secrets; prefer an env reference."
+        },
         "systemPromptMode": {
           "$ref": "#/$defs/systemPromptMode",
           "description": "How the system prompt interacts with the SDK's default system prompt. Overrides defaultSystemPromptMode."
@@ -1401,6 +1417,18 @@
       "type": "string",
       "description": "Reasoning/thinking level for the LLM model. Controls depth of chain-of-thought reasoning.",
       "enum": ["low", "medium", "high", "Low", "Medium", "High"]
+    },
+
+    "reasoningSummary": {
+      "type": "string",
+      "description": "Verbosity of the model's reasoning summary surfaced during the step.",
+      "enum": ["none", "concise", "detailed", "None", "Concise", "Detailed"]
+    },
+
+    "contextTier": {
+      "type": "string",
+      "description": "Context-window tier for the step. 'longContext' opts into the model's extended context window where supported.",
+      "enum": ["default", "longContext", "Default", "LongContext"]
     }
   }
 }

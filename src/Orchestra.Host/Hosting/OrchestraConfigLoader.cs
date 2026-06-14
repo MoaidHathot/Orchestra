@@ -368,6 +368,15 @@ public static class OrchestraConfigLoader
 				options.Copilot.Swap.ResumeAlreadyInUsePollIntervalMs = swapConfig.ResumeAlreadyInUsePollIntervalMs.Value;
 		}
 
+		if (config.Copilot is { } copilotConfig)
+		{
+			if (!string.IsNullOrWhiteSpace(copilotConfig.GitHubToken))
+				options.Copilot.GitHubToken = copilotConfig.GitHubToken;
+
+			if (copilotConfig.UseLoggedInUser.HasValue)
+				options.Copilot.UseLoggedInUser = copilotConfig.UseLoggedInUser.Value;
+		}
+
 		if (config.Hooks is { Length: > 0 })
 		{
 			HookDefinitionResolver.ApplyBaseDirectory(config.Hooks, configDirectory);
@@ -682,6 +691,17 @@ public class CopilotProviderConfig
 	/// Settings for the CLI-swap-and-resume recovery loop in <c>CopilotAgent</c>.
 	/// </summary>
 	public CopilotSwapConfig? Swap { get; set; }
+
+	/// <summary>
+	/// Optional GitHub token for Copilot authentication. <c>${VAR}</c> / <c>env:VAR</c>
+	/// references are expanded before deserialization, so <c>"${GITHUB_TOKEN}"</c> works.
+	/// </summary>
+	public string? GitHubToken { get; set; }
+
+	/// <summary>
+	/// Optional override for the SDK's <c>UseLoggedInUser</c> flag.
+	/// </summary>
+	public bool? UseLoggedInUser { get; set; }
 }
 
 /// <summary>

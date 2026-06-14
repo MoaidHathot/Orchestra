@@ -89,6 +89,9 @@ builder.Services.AddSingleton<AgentBuilder>(sp =>
 		ResumeOnSwapEnabled = swap.ResumeOnSwap,
 		ResumeAlreadyInUseWait = TimeSpan.FromSeconds(Math.Max(0, swap.ResumeAlreadyInUseWaitSeconds)),
 		ResumeAlreadyInUsePollInterval = TimeSpan.FromMilliseconds(Math.Max(1, swap.ResumeAlreadyInUsePollIntervalMs)),
+		// Host-level Copilot auth from orchestra.json (per-step githubToken still overrides).
+		GitHubToken = options.Copilot.GitHubToken,
+		UseLoggedInUser = options.Copilot.UseLoggedInUser,
 	});
 });
 

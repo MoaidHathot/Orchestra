@@ -14,6 +14,20 @@ public sealed class CopilotProviderOptions
 	/// Settings for the CLI-swap-and-resume recovery loop in <c>CopilotAgent</c>.
 	/// </summary>
 	public CopilotSwapOptions Swap { get; set; } = new();
+
+	/// <summary>
+	/// Optional GitHub token used to authenticate Copilot for every run, making auth
+	/// deterministic for servers/CI. Supports <c>${ENV}</c> expansion (resolved by the
+	/// config loader). Null = rely on the CLI's stored credentials. A per-step
+	/// <c>githubToken</c> still overrides this for that step's session.
+	/// </summary>
+	public string? GitHubToken { get; set; }
+
+	/// <summary>
+	/// When set, controls the SDK's <c>UseLoggedInUser</c> flag (whether the runtime uses
+	/// stored OAuth / gh-CLI auth). Null = SDK default.
+	/// </summary>
+	public bool? UseLoggedInUser { get; set; }
 }
 
 /// <summary>

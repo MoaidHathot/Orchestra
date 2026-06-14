@@ -209,6 +209,8 @@ internal static class ExecProgram
 				ResumeOnSwapEnabled = swap.ResumeOnSwap,
 				ResumeAlreadyInUseWait = TimeSpan.FromSeconds(Math.Max(0, swap.ResumeAlreadyInUseWaitSeconds)),
 				ResumeAlreadyInUsePollInterval = TimeSpan.FromMilliseconds(Math.Max(1, swap.ResumeAlreadyInUsePollIntervalMs)),
+				GitHubToken = hostOptions.Copilot.GitHubToken,
+				UseLoggedInUser = hostOptions.Copilot.UseLoggedInUser,
 			});
 		});
 

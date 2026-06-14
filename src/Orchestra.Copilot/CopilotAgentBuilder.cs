@@ -29,7 +29,9 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	}
 
 	public CopilotAgentBuilder(ILoggerFactory? loggerFactory = null, CopilotAgentPoolOptions? poolOptions = null)
-		: this(loggerFactory, poolOptions, new CopilotSdkClientFactory())
+		: this(loggerFactory, poolOptions, new CopilotSdkClientFactory(
+			gitHubToken: poolOptions?.GitHubToken,
+			useLoggedInUser: poolOptions?.UseLoggedInUser))
 	{
 	}
 
@@ -219,7 +221,11 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			swapOptions: CopilotAgentSwapOptions.FromPoolOptions(_poolOptions),
 			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
 			loggerFactory: _loggerFactory,
-			excludedTools: config.ExcludedTools
+			excludedTools: config.ExcludedTools,
+			reasoningSummary: config.ReasoningSummary,
+			contextTier: config.ContextTier,
+			workingDirectory: config.WorkingDirectory,
+			gitHubToken: config.GitHubToken
 		);
 	}
 

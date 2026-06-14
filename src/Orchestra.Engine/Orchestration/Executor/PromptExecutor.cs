@@ -213,6 +213,25 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			? TemplateResolver.Resolve(step.OutputHandlerPrompt, context.Parameters, context, step.DependsOn, step)
 			: null;
 
+		// Resolve the optional per-step working directory (supports ${env:*}/{{vars.*}}/param)
+		// and fail fast if it is set but does not exist — the agent's shell/file tools and
+		// config discovery would otherwise run against the wrong (or no) directory.
+		string? resolvedWorkingDirectory = null;
+		if (!string.IsNullOrWhiteSpace(step.WorkingDirectory))
+		{
+			resolvedWorkingDirectory = TemplateResolver.ResolveStatic(step.WorkingDirectory, context.Parameters, context);
+			if (!string.IsNullOrWhiteSpace(resolvedWorkingDirectory) && !Directory.Exists(resolvedWorkingDirectory))
+			{
+				throw new InvalidOperationException(
+					$"Step '{step.Name}': workingDirectory '{resolvedWorkingDirectory}' does not exist.");
+			}
+		}
+
+		// Resolve the optional per-step GitHub token (e.g. ${env:GITHUB_TOKEN}). Never logged.
+		var resolvedGitHubToken = string.IsNullOrWhiteSpace(step.GitHubToken)
+			? null
+			: TemplateResolver.ResolveStatic(step.GitHubToken, context.Parameters, context);
+
 		// Probe each requested MCP's tools/list BEFORE the LLM runs. The Copilot SDK's
 		// SessionMcpServersLoadedEvent only carries transport-level connection status —
 		// it cannot tell us whether tools/list actually returned tools. An upstream
@@ -337,6 +356,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				Mcps = resolvedMcps,
 				Subagents = resolvedSubagents,
 				ReasoningLevel = step.ReasoningLevel,
+				ReasoningSummary = step.ReasoningSummary,
+				ContextTier = step.ContextTier,
+				WorkingDirectory = resolvedWorkingDirectory,
+				GitHubToken = resolvedGitHubToken,
 				SystemPromptMode = step.SystemPromptMode ?? context.DefaultSystemPromptMode,
 				Reporter = _reporter,
 				EngineTools = engineTools,
