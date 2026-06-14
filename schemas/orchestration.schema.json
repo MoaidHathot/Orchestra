@@ -128,6 +128,10 @@
     "defaultPermissionPolicy": {
       "$ref": "#/$defs/permissionPolicy",
       "description": "Default Copilot permission policy applied to every Prompt step that does not specify its own permissionPolicy. Omit for auto-approve."
+    },
+    "defaultSandboxPolicy": {
+      "$ref": "#/$defs/sandboxPolicy",
+      "description": "Default opt-in sandbox applied to every Prompt step that does not specify its own sandbox. Omit for no sandbox."
     }
   },
   "$defs": {
@@ -370,6 +374,10 @@
         "permissionPolicy": {
           "$ref": "#/$defs/permissionPolicy",
           "description": "How the agent's permission requests (shell, file read/write, url, mcp, …) are resolved for this step. Overrides defaultPermissionPolicy. Omit for auto-approve."
+        },
+        "sandbox": {
+          "$ref": "#/$defs/sandboxPolicy",
+          "description": "Opt-in sandbox constraining this step's shell/file/network tool access. Overrides defaultSandbox. Omit for no sandbox."
         },
         "systemPromptMode": {
           "$ref": "#/$defs/systemPromptMode",
@@ -1456,6 +1464,38 @@
           "type": "array",
           "description": "Globs (case-insensitive, */? wildcards) matched against a request's kind (read/write/shell/url/mcp/…) or target (path/command/url/tool). Used only when mode is denyList.",
           "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "sandboxPolicy": {
+      "type": "object",
+      "description": "Opt-in sandbox policy constraining a step's shell/file/network tool access.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "When false the policy is ignored (no sandbox). Defaults to true.",
+          "default": true
+        },
+        "filesystem": {
+          "type": "object",
+          "properties": {
+            "readonly": { "type": "array", "items": { "type": "string" }, "description": "Paths the agent may read but not write." },
+            "readwrite": { "type": "array", "items": { "type": "string" }, "description": "Paths the agent may read and write." },
+            "denied": { "type": "array", "items": { "type": "string" }, "description": "Paths the agent may not access." }
+          },
+          "additionalProperties": false
+        },
+        "network": {
+          "type": "object",
+          "properties": {
+            "allowedHosts": { "type": "array", "items": { "type": "string" }, "description": "Hosts the agent's tools may reach (allow-list)." },
+            "blockedHosts": { "type": "array", "items": { "type": "string" }, "description": "Hosts the agent's tools may not reach (deny-list)." },
+            "allowOutbound": { "type": "boolean", "description": "Whether outbound network access is permitted at all." },
+            "allowLocalNetwork": { "type": "boolean", "description": "Whether loopback / private-range access is permitted." }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

@@ -224,6 +224,57 @@ public class OrchestrationParserTests
 	}
 
 	[Fact]
+	public void ParseOrchestration_WithSandbox_ParsesFilesystemAndNetwork()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "boxed",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "boxed-step",
+						"type": "Prompt",
+						"systemPrompt": "S",
+						"userPrompt": "U",
+						"model": "claude-opus-4.6",
+						"sandbox": {
+							"enabled": true,
+							"filesystem": {
+								"readonly": ["/src"],
+								"readwrite": ["/tmp/work"],
+								"denied": ["/etc/secrets"]
+							},
+							"network": {
+								"allowedHosts": ["api.github.com"],
+								"blockedHosts": ["evil.example"],
+								"allowOutbound": false,
+								"allowLocalNetwork": false
+							}
+						}
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.Sandbox.Should().NotBeNull();
+		step.Sandbox!.Enabled.Should().BeTrue();
+		step.Sandbox.Filesystem!.ReadonlyPaths.Should().BeEquivalentTo("/src");
+		step.Sandbox.Filesystem.ReadwritePaths.Should().BeEquivalentTo("/tmp/work");
+		step.Sandbox.Filesystem.DeniedPaths.Should().BeEquivalentTo("/etc/secrets");
+		step.Sandbox.Network!.AllowedHosts.Should().BeEquivalentTo("api.github.com");
+		step.Sandbox.Network.BlockedHosts.Should().BeEquivalentTo("evil.example");
+		step.Sandbox.Network.AllowOutbound.Should().BeFalse();
+		step.Sandbox.Network.AllowLocalNetwork.Should().BeFalse();
+	}
+
+	[Fact]
 	public void ParseOrchestration_WithHooks_ParsesHookDefinition()
 	{
 		var json = """

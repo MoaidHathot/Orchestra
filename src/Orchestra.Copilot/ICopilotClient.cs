@@ -44,6 +44,13 @@ internal interface ICopilotSession : IAsyncDisposable
 	IDisposable On(Action<SessionEvent> handler);
 	Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken);
 	Task AbortAsync(CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Applies an opt-in sandbox policy to the live session via the runtime's options-update RPC.
+	/// Default no-op so non-SDK session fakes (tests) are unaffected; only the real adapter
+	/// patches the session.
+	/// </summary>
+	Task ApplySandboxAsync(Orchestra.Engine.SandboxPolicy policy, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 internal sealed class CopilotSdkClientAdapter : ICopilotClient
@@ -110,6 +117,52 @@ internal sealed class CopilotSdkSessionAdapter : ICopilotSession
 	public Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken) => _session.SendAsync(options, cancellationToken);
 	public Task AbortAsync(CancellationToken cancellationToken = default) => _session.AbortAsync(cancellationToken);
 	public ValueTask DisposeAsync() => _session.DisposeAsync();
+
+	// SandboxConfig + OptionsApi are evaluation-only SDK APIs (GHCP001); the options-update RPC
+	// is the supported way to patch a live session's sandbox, so suppress narrowly here.
+#pragma warning disable GHCP001
+	public async Task ApplySandboxAsync(Orchestra.Engine.SandboxPolicy policy, CancellationToken cancellationToken)
+	{
+		var sandbox = BuildSandboxConfig(policy);
+		await _session.Rpc.Options.UpdateAsync(sandboxConfig: sandbox, cancellationToken: cancellationToken).ConfigureAwait(false);
+	}
+
+	private static GitHub.Copilot.Rpc.SandboxConfig BuildSandboxConfig(Orchestra.Engine.SandboxPolicy policy)
+		=> BuildSandboxConfigCore(policy);
+
+	/// <summary>Maps an Orchestra <see cref="Orchestra.Engine.SandboxPolicy"/> to the SDK's SandboxConfig. Exposed for tests.</summary>
+	internal static GitHub.Copilot.Rpc.SandboxConfig BuildSandboxConfigCore(Orchestra.Engine.SandboxPolicy policy)
+	{
+		var userPolicy = new GitHub.Copilot.Rpc.SandboxConfigUserPolicy();
+
+		if (policy.Filesystem is { } fs)
+		{
+			userPolicy.Filesystem = new GitHub.Copilot.Rpc.SandboxConfigUserPolicyFilesystem
+			{
+				ReadonlyPaths = fs.ReadonlyPaths.Length > 0 ? fs.ReadonlyPaths : null,
+				ReadwritePaths = fs.ReadwritePaths.Length > 0 ? fs.ReadwritePaths : null,
+				DeniedPaths = fs.DeniedPaths.Length > 0 ? fs.DeniedPaths : null,
+			};
+		}
+
+		if (policy.Network is { } net)
+		{
+			userPolicy.Network = new GitHub.Copilot.Rpc.SandboxConfigUserPolicyNetwork
+			{
+				AllowedHosts = net.AllowedHosts.Length > 0 ? net.AllowedHosts : null,
+				BlockedHosts = net.BlockedHosts.Length > 0 ? net.BlockedHosts : null,
+				AllowOutbound = net.AllowOutbound,
+				AllowLocalNetwork = net.AllowLocalNetwork,
+			};
+		}
+
+		return new GitHub.Copilot.Rpc.SandboxConfig
+		{
+			Enabled = true,
+			UserPolicy = userPolicy,
+		};
+	}
+#pragma warning restore GHCP001
 }
 
 internal interface ICopilotClientFactory

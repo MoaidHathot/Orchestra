@@ -227,6 +227,7 @@ public partial class OrchestrationExecutor
 			DefaultStepTimeoutSeconds = orchestration.DefaultStepTimeoutSeconds,
 			DefaultEnableTools = orchestration.DefaultEnableTools,
 			DefaultPermissionPolicy = orchestration.DefaultPermissionPolicy,
+			DefaultSandboxPolicy = orchestration.DefaultSandboxPolicy,
 			DefaultFailOnToolError = orchestration.DefaultFailOnToolError,
 			PauseTimeoutDuringWait = orchestration.PauseTimeoutDuringWait,
 			TempFileStore = tempFileStore,

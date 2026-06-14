@@ -227,7 +227,8 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			workingDirectory: config.WorkingDirectory,
 			gitHubToken: config.GitHubToken,
 			humanInput: config.HumanInput,
-			permissionPolicy: config.PermissionPolicy
+			permissionPolicy: config.PermissionPolicy,
+			sandboxPolicy: config.SandboxPolicy
 		);
 	}
 

@@ -30,6 +30,9 @@ public sealed record AgentBuildConfig
 	/// <summary>Optional policy controlling how Copilot permission requests are resolved (null = approve-all).</summary>
 	public PermissionPolicy? PermissionPolicy { get; init; }
 
+	/// <summary>Optional opt-in sandbox policy applied to the session (null = no sandbox).</summary>
+	public SandboxPolicy? SandboxPolicy { get; init; }
+
 	public SystemPromptMode? SystemPromptMode { get; init; }
 	public IOrchestrationReporter Reporter { get; init; } = NullOrchestrationReporter.Instance;
 	public IReadOnlyCollection<IEngineTool> EngineTools { get; init; } = [];

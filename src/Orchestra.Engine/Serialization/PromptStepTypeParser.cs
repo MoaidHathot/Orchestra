@@ -89,6 +89,9 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			PermissionPolicy = root.TryGetProperty("permissionPolicy", out var permPolicy)
 				? DeserializePermissionPolicy(permPolicy)
 				: null,
+			Sandbox = root.TryGetProperty("sandbox", out var sandbox)
+				? DeserializeSandboxPolicy(sandbox)
+				: null,
 			// null = inherit Orchestration.DefaultFailOnToolError; explicit bool overrides.
 			// Mirror the read pattern of e.g. `Enabled` — TryGetProperty + .GetBoolean — but
 			// preserve null so the step-level value can distinguish "unset" from "false".
@@ -277,6 +280,38 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 				? deny.EnumerateArray().Select(e => e.GetString()!).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray()
 				: [],
 		};
+	}
+
+	private static SandboxPolicy DeserializeSandboxPolicy(JsonElement element)
+	{
+		return new SandboxPolicy
+		{
+			Enabled = !element.TryGetProperty("enabled", out var en) || en.GetBoolean(),
+			Filesystem = element.TryGetProperty("filesystem", out var fs)
+				? new SandboxFilesystemPolicy
+				{
+					ReadonlyPaths = ReadStringArray(fs, "readonly"),
+					ReadwritePaths = ReadStringArray(fs, "readwrite"),
+					DeniedPaths = ReadStringArray(fs, "denied"),
+				}
+				: null,
+			Network = element.TryGetProperty("network", out var net)
+				? new SandboxNetworkPolicy
+				{
+					AllowedHosts = ReadStringArray(net, "allowedHosts"),
+					BlockedHosts = ReadStringArray(net, "blockedHosts"),
+					AllowOutbound = net.TryGetProperty("allowOutbound", out var ao) ? ao.GetBoolean() : null,
+					AllowLocalNetwork = net.TryGetProperty("allowLocalNetwork", out var aln) ? aln.GetBoolean() : null,
+				}
+				: null,
+		};
+	}
+
+	private static string[] ReadStringArray(JsonElement parent, string propertyName)
+	{
+		return parent.TryGetProperty(propertyName, out var arr) && arr.ValueKind == JsonValueKind.Array
+			? arr.EnumerateArray().Select(e => e.GetString()!).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray()
+			: [];
 	}
 
 	private static InfiniteSessionConfig DeserializeInfiniteSessionConfig(JsonElement element)

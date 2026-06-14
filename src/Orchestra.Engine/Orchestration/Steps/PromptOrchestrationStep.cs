@@ -108,4 +108,11 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// <see cref="Orchestration.DefaultPermissionPolicy"/>, then to auto-approve (current behavior).
 	/// </summary>
 	public PermissionPolicy? PermissionPolicy { get; init; }
+
+	/// <summary>
+	/// Optional opt-in sandbox policy constraining this step's shell/file/network tool access.
+	/// Falls back to the orchestration's <see cref="Orchestration.DefaultSandboxPolicy"/>, then to
+	/// no sandbox (current behavior).
+	/// </summary>
+	public SandboxPolicy? Sandbox { get; init; }
 }

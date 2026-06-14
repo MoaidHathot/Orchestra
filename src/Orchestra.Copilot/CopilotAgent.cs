@@ -20,6 +20,7 @@ public partial class CopilotAgent : IAgent
 	private readonly string? _gitHubToken;
 	private readonly bool _humanInput;
 	private readonly Engine.PermissionPolicy? _permissionPolicy;
+	private readonly Engine.SandboxPolicy? _sandboxPolicy;
 	/// <summary>Serializes human-approval permission waits so they don't collide on the per-step waiter key.</summary>
 	private readonly SemaphoreSlim _permissionGate = new(1, 1);
 	private readonly SystemPromptMode? _systemPromptMode;
@@ -143,7 +144,8 @@ public partial class CopilotAgent : IAgent
 			string? workingDirectory = null,
 			string? gitHubToken = null,
 			bool humanInput = false,
-			Engine.PermissionPolicy? permissionPolicy = null)
+			Engine.PermissionPolicy? permissionPolicy = null,
+			Engine.SandboxPolicy? sandboxPolicy = null)
 	{
 		_clientPool = clientPool;
 		_model = model;
@@ -157,6 +159,7 @@ public partial class CopilotAgent : IAgent
 		_gitHubToken = gitHubToken;
 		_humanInput = humanInput;
 		_permissionPolicy = permissionPolicy;
+		_sandboxPolicy = sandboxPolicy;
 		_systemPromptMode = systemPromptMode;
 		_systemPromptSections = systemPromptSections;
 		_reporter = reporter;
@@ -429,6 +432,13 @@ public partial class CopilotAgent : IAgent
 			// over UnhealthyTriggeringSessionId for the resume target.
 			attemptSessionIdBox.Value = session.SessionId;
 			await using var _sessionDispose = session;
+
+			// Opt-in sandbox: constrain the freshly created/resumed session's shell/file/network
+			// tool access via the runtime's options-update RPC. No-op on non-SDK session fakes.
+			if (_sandboxPolicy is { Enabled: true })
+			{
+				await session.ApplySandboxAsync(_sandboxPolicy, cancellationToken).ConfigureAwait(false);
+			}
 
 			// SDK 1.0.0: handler is already wired through SessionConfig.OnEvent (set when
 			// the config was built above), so there is no session.On(...) call here. The

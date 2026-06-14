@@ -140,6 +140,12 @@ public class Orchestration
 	public PermissionPolicy? DefaultPermissionPolicy { get; init; }
 
 	/// <summary>
+	/// Default opt-in sandbox policy applied to every Prompt step that does not specify its own
+	/// <see cref="PromptOrchestrationStep.Sandbox"/>. Null = no sandbox.
+	/// </summary>
+	public SandboxPolicy? DefaultSandboxPolicy { get; init; }
+
+	/// <summary>
 	/// Default value for <see cref="OrchestrationStep.FailOnToolError"/> applied to every
 	/// step that does not specify its own value. When <c>true</c>, any tool-call failure
 	/// inside an agent loop marks the step as
