@@ -1,7 +1,6 @@
 using System.ComponentModel;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Orchestra.Cli.Run;
+using Orchestra.Client;
+using Orchestra.Client.Run;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -127,49 +126,23 @@ public sealed class AttachCommand : AsyncCommand<AttachSettings>
 }
 
 /// <summary>
-/// Shared wiring for <see cref="RunCommand"/> and <see cref="AttachCommand"/>: picks the
-/// right observer (compact / quiet / verbose) and the right prompter (interactive when
-/// stdin is a TTY, non-interactive otherwise) for the supplied flags.
+/// Thin CLI-side adapter over the shared <see cref="RunSessionFactory"/>: maps the CLI's
+/// Spectre settings onto the factory's flags, and keeps the CLI-specific "re-attach" hint
+/// when the user disconnects with Ctrl+C (the server-side run keeps going).
 /// </summary>
 internal static class StreamingSessionFactory
 {
 	public static RunSession Build(OrchestraClient client, StreamingSettings settings)
-	{
-		var loggerFactory = NullLoggerFactory.Instance;
-		var ansi = AnsiConsole.Console;
-
-		IRunObserver observer;
-		if (settings.Verbose)
-		{
-			var compact = new ConsoleRunObserver(ansi, loggerFactory.CreateLogger<ConsoleRunObserver>());
-			observer = new VerboseRunObserver(ansi, loggerFactory.CreateLogger<VerboseRunObserver>(), compact);
-		}
-		else if (settings.Quiet)
-		{
-			observer = new QuietRunObserver(ansi, loggerFactory.CreateLogger<QuietRunObserver>());
-		}
-		else
-		{
-			observer = new ConsoleRunObserver(ansi, loggerFactory.CreateLogger<ConsoleRunObserver>());
-		}
-
-		// Auto-degrade to non-interactive when stdin is redirected (CI / pipes) so scripts
-		// that previously used `orchestra run | jq` still get a deterministic outcome
-		// instead of a hang.
-		var stdinIsTty = !Console.IsInputRedirected;
-		IHumanInputPrompter prompter = (settings.NoInteractive || !stdinIsTty)
-			? new NonInteractiveHumanInputPrompter(ansi, loggerFactory.CreateLogger<NonInteractiveHumanInputPrompter>())
-			: new InteractiveHumanInputPrompter(ansi, settings.RespondedBy, loggerFactory.CreateLogger<InteractiveHumanInputPrompter>());
-
-		var responder = new HumanInputResponder(client, loggerFactory.CreateLogger<HumanInputResponder>());
-		return new RunSession(observer, prompter, responder, loggerFactory.CreateLogger<RunSession>());
-	}
+		=> RunSessionFactory.Build(
+			client,
+			verbose: settings.Verbose,
+			quiet: settings.Quiet,
+			noInteractive: settings.NoInteractive,
+			respondedBy: settings.RespondedBy);
 
 	/// <summary>
-	/// Translates the session outcome into a POSIX-style exit code:
-	/// 0 = succeeded, 1 = errored / non-success terminal / disconnect, 2 = aborted because no
-	/// interactive stdin was available to answer a HITL pause, 130 = the user pressed Ctrl+C
-	/// (so the SIGINT convention is preserved and shell pipelines see it correctly).
+	/// Prints the CLI-specific re-attach hint on a Ctrl+C disconnect, then defers to the
+	/// shared <see cref="RunExitCode.Map"/> for the POSIX-style exit code.
 	/// </summary>
 	public static int MapOutcomeToExitCode(RunSessionResult result, bool ctrlCPressed)
 	{
@@ -181,17 +154,8 @@ internal static class StreamingSessionFactory
 				AnsiConsole.MarkupLine(
 					$"[grey]Re-attach with:[/]  orchestra attach {Markup.Escape(result.OrchestrationName)} {Markup.Escape(result.RunId)}");
 			}
-			return 130;
 		}
 
-		return result.Outcome switch
-		{
-			RunSessionOutcome.Succeeded => 0,
-			RunSessionOutcome.NonSuccessfulTerminal => 1,
-			RunSessionOutcome.Errored => 1,
-			RunSessionOutcome.Disconnected => 1,
-			RunSessionOutcome.NonInteractiveAbort => 2,
-			_ => 1,
-		};
+		return RunExitCode.Map(result, ctrlCPressed);
 	}
 }

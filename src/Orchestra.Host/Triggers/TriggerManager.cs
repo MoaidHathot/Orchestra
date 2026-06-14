@@ -52,6 +52,14 @@ public partial class TriggerManager : BackgroundService
 	public TimeSpan ShutdownTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
 	/// <summary>
+	/// When <c>false</c>, the background scheduling loop does not run: persisted triggers are
+	/// not loaded and scheduler/loop triggers are never evaluated, so nothing auto-fires.
+	/// Manual/registered execution (registry lookups, the REST run endpoint, MCP invokes) is
+	/// unaffected. Set from <see cref="OrchestrationHostOptions.EnableScheduler"/>. Default: true.
+	/// </summary>
+	public bool SchedulingEnabled { get; set; } = true;
+
+	/// <summary>
 	/// Global MCPs (from orchestra.mcp.json) used when parsing orchestration files at trigger fire time.
 	/// Set by the host during initialization.
 	/// </summary>
@@ -651,6 +659,14 @@ public partial class TriggerManager : BackgroundService
 	protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 	{
 		LogTriggerManagerStarted();
+
+		// When scheduling is disabled (API-only server / isolated one-shot exec), do not load
+		// persisted triggers or run the evaluation loop — nothing should auto-fire.
+		if (!SchedulingEnabled)
+		{
+			LogSchedulingDisabled();
+			return;
+		}
 
 		// Load persisted triggers on startup
 		LoadPersistedTriggers();
@@ -1523,6 +1539,9 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "TriggerManager started")]
 	private partial void LogTriggerManagerStarted();
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "TriggerManager scheduling disabled (EnableScheduler=false); persisted triggers not loaded and no triggers will auto-fire")]
+	private partial void LogSchedulingDisabled();
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "TriggerManager stopped")]
 	private partial void LogTriggerManagerStopped();

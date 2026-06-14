@@ -70,9 +70,7 @@ var builder = Host.CreateApplicationBuilder(args);
 // Configure logging to file instead of console (TUI will handle display)
 // Read log level from orchestra.json config (if present) so Debug/Trace can be enabled centrally
 var configFile = OrchestraConfigLoader.Load();
-var fileLogLevel = Enum.TryParse<LogLevel>(configFile?.LogLevel, ignoreCase: true, out var parsedLevel)
-	? parsedLevel
-	: LogLevel.Information;
+var fileLogLevel = configFile.ResolveLogLevel();
 
 builder.Logging.ClearProviders();
 builder.Logging.SetMinimumLevel(fileLogLevel);

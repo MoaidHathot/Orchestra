@@ -6,7 +6,8 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Orchestra.Cli.Run;
+using Orchestra.Client;
+using Orchestra.Client.Run;
 using Orchestra.Engine;
 using Xunit;
 

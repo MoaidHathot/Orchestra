@@ -2,10 +2,12 @@
   <Folder Name="/src/">
     <Project Path="src/Orchestra.Engine/Orchestra.Engine.csproj" />
     <Project Path="src/Orchestra.Cli/Orchestra.Cli.csproj" />
+    <Project Path="src/Orchestra.Client/Orchestra.Client.csproj" />
     <Project Path="src/Orchestra.Copilot/Orchestra.Copilot.csproj" />
     <Project Path="src/Orchestra.Host/Orchestra.Host.csproj" />
     <Project Path="src/Orchestra.ProcessHost/Orchestra.ProcessHost.csproj" />
     <Project Path="src/Orchestra.Server/Orchestra.Server.csproj" />
+    <Project Path="src/Orchestra.Exec/Orchestra.Exec.csproj" />
     <Project Path="src/Orchestra.Tool/Orchestra.Tool.csproj" />
   </Folder>
   <Folder Name="/playground/">
@@ -23,5 +25,7 @@
     <Project Path="tests/Orchestra.Server.Tests/Orchestra.Server.Tests.csproj" />
     <Project Path="tests/Orchestra.Tool.Tests/Orchestra.Tool.Tests.csproj" />
     <Project Path="tests/Orchestra.Cli.Tests/Orchestra.Cli.Tests.csproj" />
+    <Project Path="tests/Orchestra.Client.Tests/Orchestra.Client.Tests.csproj" />
+    <Project Path="tests/Orchestra.Exec.Tests/Orchestra.Exec.Tests.csproj" />
   </Folder>
 </Solution>

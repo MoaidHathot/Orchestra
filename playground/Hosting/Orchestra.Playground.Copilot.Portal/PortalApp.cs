@@ -3,6 +3,7 @@ using Orchestra.Copilot;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
+using Orchestra.Host.Logging;
 using Orchestra.Host.McpServer;
 
 namespace Orchestra.Playground.Copilot.Portal;
@@ -29,6 +30,10 @@ internal static class PortalApp
 			: WebApplication.CreateBuilder(args);
 
 		ApplyUrlBindingFallback(builder.Configuration, orchestraConfig);
+
+		// Make orchestra.json's logLevel the authoritative default minimum level (overrides
+		// appsettings.json's Logging:LogLevel:Default). No-op when logLevel is unset.
+		builder.Configuration.ApplyOrchestraLogLevel(orchestraConfig);
 
 		builder.Logging.AddSimpleConsole(options =>
 		{

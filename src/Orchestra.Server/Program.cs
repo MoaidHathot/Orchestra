@@ -3,6 +3,7 @@ using Orchestra.Copilot;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
+using Orchestra.Host.Logging;
 using Orchestra.Host.McpServer;
 
 // Ensure the thread pool has enough minimum threads to prevent starvation.
@@ -31,6 +32,10 @@ builder.Logging.AddSimpleConsole(options =>
 	options.ColorBehavior = LoggerColorBehavior.Enabled;
 });
 
+// Make orchestra.json's logLevel the authoritative default minimum level (overrides
+// appsettings.json's Logging:LogLevel:Default). No-op when logLevel is unset.
+builder.Configuration.ApplyOrchestraLogLevel(OrchestraConfigLoader.Load());
+
 // Add Orchestra Host services.  The IConfiguration-aware overload ensures that
 // data-path and orchestrations-path are read from the host's IConfiguration
 // (resolved after Build()), so WebApplicationFactory.ConfigureAppConfiguration
@@ -55,6 +60,14 @@ builder.Services.AddOrchestraHost((options, configuration) =>
 	}
 	options.LoadPersistedOrchestrations = true;
 	options.RegisterJsonTriggers = true;
+
+	// Allow running an API-only server (no auto-firing triggers/schedules) without editing
+	// orchestra.json: --enable-scheduler=false or ORCHESTRA_ENABLE_SCHEDULER=false. When unset,
+	// the value from orchestra.json (or the built-in default of true) is preserved.
+	var enableScheduler = configuration["enable-scheduler"]
+		?? Environment.GetEnvironmentVariable("ORCHESTRA_ENABLE_SCHEDULER");
+	if (bool.TryParse(enableScheduler, out var enableSchedulerValue))
+		options.EnableScheduler = enableSchedulerValue;
 });
 
 // Register the Copilot agent builder (required for prompt step execution) after

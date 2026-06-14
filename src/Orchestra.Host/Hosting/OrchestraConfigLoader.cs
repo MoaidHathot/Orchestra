@@ -305,6 +305,9 @@ public static class OrchestraConfigLoader
 		if (config.AutoResumeCheckpointsOnStartup.HasValue)
 			options.AutoResumeCheckpointsOnStartup = config.AutoResumeCheckpointsOnStartup.Value;
 
+		if (config.EnableScheduler.HasValue)
+			options.EnableScheduler = config.EnableScheduler.Value;
+
 		if (config.LogLevel is not null)
 			options.LogLevel = config.LogLevel;
 
@@ -461,6 +464,12 @@ public class OrchestraConfigFile
 	/// Whether to automatically resume persisted orchestration checkpoints on startup.
 	/// </summary>
 	public bool? AutoResumeCheckpointsOnStartup { get; set; }
+
+	/// <summary>
+	/// Whether the background scheduling loops run (trigger scheduler + profile schedules).
+	/// Set to <c>false</c> for an API-only server that never auto-fires anything.
+	/// </summary>
+	public bool? EnableScheduler { get; set; }
 
 	/// <summary>
 	/// Minimum log level for the file logger. Values: Trace, Debug, Information, Warning, Error, Critical.

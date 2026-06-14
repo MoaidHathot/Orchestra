@@ -1,3 +1,5 @@
+using Orchestra.Client;
+
 namespace Orchestra.Cli.Commands;
 
 /// <summary>

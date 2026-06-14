@@ -149,16 +149,57 @@ public class CopilotCliBootstrapTests
 			".nuget", "packages", "github.copilot.sdk");
 		if (!Directory.Exists(nugetRoot)) return null;
 
-		// Pick the highest-named version directory (lexicographic; works for the current
-		// "0.x.y" scheme). We don't know the exact pinned version from the test context
-		// without parsing csproj, so we trust the restore to have laid down the matching one.
-		var versionDir = Directory.EnumerateDirectories(nugetRoot)
-			.OrderByDescending(d => d, StringComparer.Ordinal)
-			.FirstOrDefault();
+		// Resolve the EXACT version the build references from Directory.Packages.props. The
+		// nuget cache routinely holds several SDK versions (including prereleases like
+		// "1.0.0-beta.2"); naively taking the lexicographically-highest directory picks the
+		// wrong one — ordinal order ranks "1.0.0-beta.2" ABOVE the pinned release "1.0.0",
+		// whose $(CopilotCliVersion) is what the bootstrap actually downloads.
+		string? versionDir = null;
+		var pinnedVersion = TryGetPinnedSdkVersion();
+		if (pinnedVersion is not null)
+		{
+			var candidate = Path.Combine(nugetRoot, pinnedVersion);
+			if (Directory.Exists(candidate)) versionDir = candidate;
+		}
+
+		// Fallback when the pinned version can't be resolved (e.g. packed test scenarios):
+		// prefer the highest STABLE (non-prerelease) directory so a stale cached prerelease
+		// never wins over a matching release.
+		if (versionDir is null)
+		{
+			var dirs = Directory.EnumerateDirectories(nugetRoot).ToList();
+			versionDir = dirs
+				.Where(d => !Path.GetFileName(d).Contains('-', StringComparison.Ordinal))
+				.OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal)
+				.FirstOrDefault()
+				?? dirs.OrderByDescending(d => Path.GetFileName(d), StringComparer.Ordinal).FirstOrDefault();
+		}
 		if (versionDir is null) return null;
 
 		var propsPath = Path.Combine(versionDir, "build", "GitHub.Copilot.SDK.props");
 		return File.Exists(propsPath) ? propsPath : null;
+	}
+
+	/// <summary>
+	/// Walks up from the test's base directory to find <c>Directory.Packages.props</c> and reads
+	/// the centrally-managed <c>GitHub.Copilot.SDK</c> version. Returns null if it can't be found.
+	/// </summary>
+	private static string? TryGetPinnedSdkVersion()
+	{
+		var dir = new DirectoryInfo(AppContext.BaseDirectory);
+		while (dir is not null)
+		{
+			var propsPath = Path.Combine(dir.FullName, "Directory.Packages.props");
+			if (File.Exists(propsPath))
+			{
+				var match = System.Text.RegularExpressions.Regex.Match(
+					File.ReadAllText(propsPath),
+					"<PackageVersion\\s+Include=\"GitHub\\.Copilot\\.SDK\"\\s+Version=\"([^\"]+)\"");
+				return match.Success ? match.Groups[1].Value.Trim() : null;
+			}
+			dir = dir.Parent;
+		}
+		return null;
 	}
 
 	private static string? ExtractCopilotCliVersion(string propsPath)

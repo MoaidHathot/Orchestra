@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using Orchestra.Client;
 using Spectre.Console.Cli;
 
 namespace Orchestra.Cli.Commands;

@@ -58,6 +58,17 @@ public class OrchestrationHostOptions
 	public bool AutoResumeCheckpointsOnStartup { get; set; } = true;
 
 	/// <summary>
+	/// Whether the background scheduling loops run. When <c>false</c>, the
+	/// <see cref="Triggers.TriggerManager"/> does not load persisted triggers or evaluate
+	/// scheduler/loop triggers, and the <see cref="Profiles.ProfileManager"/> does not evaluate
+	/// profile schedules — so nothing auto-fires. The REST API, MCP, and explicit/manual runs
+	/// still work. This powers both an "API-only" server and the isolated one-shot
+	/// <c>orchestra-exec</c> runner, where exactly one orchestration should run.
+	/// Default: true
+	/// </summary>
+	public bool EnableScheduler { get; set; } = true;
+
+	/// <summary>
 	/// Retention policy for automatic cleanup of old run records.
 	/// Default: no limits (runs are kept forever).
 	/// </summary>

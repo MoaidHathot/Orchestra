@@ -38,6 +38,14 @@ public partial class ProfileManager : BackgroundService
 	/// </summary>
 	public const string DefaultProfileName = "Default";
 
+	/// <summary>
+	/// When <c>false</c>, the profile schedule-evaluation loop does not run, so scheduled
+	/// profile activations/deactivations never fire. Profiles can still be loaded and queried,
+	/// and the initial effective active set is still computed. Set from
+	/// <see cref="OrchestrationHostOptions.EnableScheduler"/>. Default: true.
+	/// </summary>
+	public bool SchedulingEnabled { get; set; } = true;
+
 	public ProfileManager(
 		ProfileStore store,
 		OrchestrationTagStore tagStore,
@@ -506,6 +514,14 @@ public partial class ProfileManager : BackgroundService
 	{
 		LogScheduleEvaluationStarted();
 
+		// When scheduling is disabled (API-only server / isolated one-shot exec), skip the
+		// evaluation loop entirely so scheduled profiles never activate/deactivate.
+		if (!SchedulingEnabled)
+		{
+			LogScheduleEvaluationDisabled();
+			return;
+		}
+
 		while (!stoppingToken.IsCancellationRequested)
 		{
 			try
@@ -688,6 +704,9 @@ public partial class ProfileManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Debug, Message = "Profile schedule evaluation started")]
 	private partial void LogScheduleEvaluationStarted();
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Profile schedule evaluation disabled (EnableScheduler=false); scheduled profiles will not activate/deactivate")]
+	private partial void LogScheduleEvaluationDisabled();
 
 	[LoggerMessage(Level = LogLevel.Debug, Message = "Profile schedule evaluation stopped")]
 	private partial void LogScheduleEvaluationStopped();

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Orchestra.Client;
 
 namespace Orchestra.Cli.Commands;
 

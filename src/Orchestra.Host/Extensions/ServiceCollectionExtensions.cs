@@ -27,12 +27,18 @@ public static class ServiceCollectionExtensions
 	/// </summary>
 	/// <param name="services">The service collection.</param>
 	/// <param name="configure">Optional configuration action.</param>
+	/// <param name="loadConfigurationFile">
+	/// When <c>true</c> (default), <c>orchestra.json</c> is loaded and applied before the
+	/// <paramref name="configure"/> overrides run. Set to <c>false</c> for a reproducible host
+	/// that ignores the user's <c>orchestra.json</c> entirely (used by <c>orchestra-exec --no-config</c>).
+	/// </param>
 	/// <returns>The service collection for chaining.</returns>
 	public static IServiceCollection AddOrchestraHost(
 		this IServiceCollection services,
-		Action<OrchestrationHostOptions>? configure = null)
+		Action<OrchestrationHostOptions>? configure = null,
+		bool loadConfigurationFile = true)
 	{
-		return services.AddOrchestraHost((options, _) => configure?.Invoke(options));
+		return services.AddOrchestraHost((options, _) => configure?.Invoke(options), loadConfigurationFile);
 	}
 
 	/// <summary>
@@ -44,10 +50,16 @@ public static class ServiceCollectionExtensions
 	/// </summary>
 	/// <param name="services">The service collection.</param>
 	/// <param name="configure">Configuration action receiving options and the host's IConfiguration.</param>
+	/// <param name="loadConfigurationFile">
+	/// When <c>true</c> (default), <c>orchestra.json</c> is loaded and applied before the
+	/// <paramref name="configure"/> overrides run. Set to <c>false</c> for a reproducible host
+	/// that ignores the user's <c>orchestra.json</c> entirely (used by <c>orchestra-exec --no-config</c>).
+	/// </param>
 	/// <returns>The service collection for chaining.</returns>
 	public static IServiceCollection AddOrchestraHost(
 		this IServiceCollection services,
-		Action<OrchestrationHostOptions, IConfiguration> configure)
+		Action<OrchestrationHostOptions, IConfiguration> configure,
+		bool loadConfigurationFile = true)
 	{
 		// Register OrchestrationHostOptions via a factory delegate so creation is
 		// deferred until first resolution.  This is critical for
@@ -65,8 +77,11 @@ public static class ServiceCollectionExtensions
 			var configLogger = sp.GetRequiredService<ILoggerFactory>()
 				.CreateLogger("Orchestra.Host.OrchestraConfigLoader");
 
-			// Load config file first (orchestra.json), then let programmatic overrides win
-			OrchestraConfigLoader.LoadAndApply(options, configLogger);
+			// Load config file first (orchestra.json), then let programmatic overrides win.
+			// Skipping the file (loadConfigurationFile=false) yields a reproducible host that
+			// uses built-in defaults plus only the explicit programmatic overrides.
+			if (loadConfigurationFile)
+				OrchestraConfigLoader.LoadAndApply(options, configLogger);
 			configure.Invoke(options, configuration);
 
 			// Resolve HostBaseUrl: prefer the application's own listening address over
@@ -233,7 +248,10 @@ public static class ServiceCollectionExtensions
 				sp.GetRequiredService<ProfileStore>(),
 				sp.GetRequiredService<OrchestrationTagStore>(),
 				sp.GetRequiredService<OrchestrationRegistry>(),
-				sp.GetRequiredService<ILogger<ProfileManager>>()));
+				sp.GetRequiredService<ILogger<ProfileManager>>())
+			{
+				SchedulingEnabled = sp.GetRequiredService<OrchestrationHostOptions>().EnableScheduler,
+			});
 		services.AddHostedService(sp => sp.GetRequiredService<ProfileManager>());
 
 		// TriggerManager as a hosted background service
@@ -266,6 +284,9 @@ public static class ServiceCollectionExtensions
 
 			// Apply shutdown timeout from configuration
 			triggerManager.ShutdownTimeout = TimeSpan.FromSeconds(opts.ShutdownTimeoutSeconds);
+
+			// Disable the scheduling loop for API-only / isolated one-shot hosts.
+			triggerManager.SchedulingEnabled = opts.EnableScheduler;
 
 			return triggerManager;
 		});
