@@ -1,0 +1,40 @@
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "governed-prompt-step",
+  "description": "Demonstrates the opt-in Copilot governance controls on a Prompt step: a permission policy that denies shell + network tool calls, a filesystem/network sandbox, and human-in-the-loop routing for the agent's elicitation and plan-approval requests. All three are opt-in; remove a field to restore the autonomous default. Note: sandbox paths are passed to the runtime verbatim (not template-resolved), and the sandbox is enforced on Linux/macOS.",
+  "inputs": {
+    "question": {
+      "type": "string",
+      "description": "The review question to ask the read-only agent.",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "name": "review",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a read-only code reviewer. Inspect files under the working directory and answer the question. Do not run shell commands, fetch URLs, or modify files. If you need a decision from the operator, ask.",
+      "userPrompt": "{{param.question}}",
+      "parameters": ["question"],
+      "model": "claude-opus-4.6",
+      "workingDirectory": "/work/repo",
+      "humanInput": true,
+      "permissionPolicy": {
+        "mode": "denyList",
+        "deny": ["shell", "url"]
+      },
+      "sandbox": {
+        "enabled": true,
+        "filesystem": {
+          "readonly": ["/work/repo"],
+          "denied": ["/work/repo/.git", "/etc"]
+        },
+        "network": {
+          "allowOutbound": false,
+          "allowLocalNetwork": false
+        }
+      }
+    }
+  ]
+}

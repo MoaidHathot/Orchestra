@@ -96,6 +96,23 @@ Global hooks let you apply the same lifecycle automation to all orchestrations r
 
 Relative `scriptFile` and `workingDirectory` paths resolve from the directory containing `orchestra.json`.
 
+### Copilot authentication
+
+Set a host-wide GitHub token (and/or the SDK's logged-in-user flag) in `orchestra.json` so
+Copilot auth is deterministic for servers/CI instead of relying solely on the bundled CLI's
+stored credentials. `${VAR}` / `env:VAR` references are expanded when the config file loads,
+so secrets can come from the environment. A per-step `githubToken` still overrides this for
+that step's session.
+
+```json
+{
+  "copilot": {
+    "gitHubToken": "${GITHUB_TOKEN}",
+    "useLoggedInUser": false
+  }
+}
+```
+
 ### Environment Variables
 
 | Variable | Description |

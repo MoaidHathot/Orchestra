@@ -1,0 +1,27 @@
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "tuned-prompt-step",
+  "description": "Demonstrates per-step model tuning and explicit authentication on a Prompt step: a concise reasoning summary, the long-context window, a templated working directory, and a GitHub token sourced from the environment. workingDirectory and githubToken are template-resolved ({{param.*}}/{{env.*}}/{{vars.*}}); omit any field to inherit the host/provider default.",
+  "inputs": {
+    "task": {
+      "type": "string",
+      "description": "The analysis task for the agent.",
+      "required": true
+    }
+  },
+  "steps": [
+    {
+      "name": "analyze",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a senior engineer performing a large-context analysis. Work within the provided directory.",
+      "userPrompt": "{{param.task}}",
+      "parameters": ["task"],
+      "model": "claude-opus-4.6",
+      "reasoningSummary": "concise",
+      "contextTier": "longContext",
+      "workingDirectory": "{{env.PROJECT_DIR}}",
+      "githubToken": "{{env.GITHUB_TOKEN}}"
+    }
+  ]
+}

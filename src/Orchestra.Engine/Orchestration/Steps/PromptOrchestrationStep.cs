@@ -24,14 +24,14 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// <summary>
 	/// Optional working directory for the agent's shell/file tools and config discovery
 	/// (custom instructions, <c>.github/agents</c>, <c>.github/mcp.json</c>). Resolved at
-	/// execution time (supports <c>${env:*}</c>/<c>{{vars.*}}</c>) and validated to exist.
-	/// Null = the runtime's default working directory.
+	/// execution time (supports <c>{{param.*}}</c>/<c>{{env.*}}</c>/<c>{{vars.*}}</c>) and
+	/// validated to exist. Null = the runtime's default working directory.
 	/// </summary>
 	public string? WorkingDirectory { get; init; }
 
 	/// <summary>
 	/// Optional GitHub token used to authenticate this step's Copilot session, overriding
-	/// the host-level default. Resolved at execution time (e.g. <c>${env:GITHUB_TOKEN}</c>).
+	/// the host-level default. Resolved at execution time (e.g. <c>{{env.GITHUB_TOKEN}}</c>).
 	/// Null = inherit the host's configured auth (orchestra.json <c>copilot.gitHubToken</c>
 	/// / <c>useLoggedInUser</c>, else the CLI's stored credentials).
 	/// </summary>

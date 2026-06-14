@@ -361,11 +361,11 @@
         },
         "workingDirectory": {
           "type": "string",
-          "description": "Working directory for the agent's shell/file tools and config discovery (custom instructions, .github/agents, .github/mcp.json). Supports ${env:*}/{{vars.*}}; validated to exist at run time."
+          "description": "Working directory for the agent's shell/file tools and config discovery (custom instructions, .github/agents, .github/mcp.json). Supports {{param.*}}/{{env.*}}/{{vars.*}}; validated to exist at run time."
         },
         "githubToken": {
           "type": "string",
-          "description": "GitHub token for this step's Copilot session, overriding the host default. Supports ${env:GITHUB_TOKEN}. Avoid hardcoding secrets; prefer an env reference."
+          "description": "GitHub token for this step's Copilot session, overriding the host default. Avoid hardcoding secrets; prefer a template reference such as {{env.GITHUB_TOKEN}}."
         },
         "humanInput": {
           "type": "boolean",

@@ -227,7 +227,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			}
 		}
 
-		// Resolve the optional per-step GitHub token (e.g. ${env:GITHUB_TOKEN}). Never logged.
+		// Resolve the optional per-step GitHub token (e.g. {{env.GITHUB_TOKEN}}). Never logged.
 		var resolvedGitHubToken = string.IsNullOrWhiteSpace(step.GitHubToken)
 			? null
 			: TemplateResolver.ResolveStatic(step.GitHubToken, context.Parameters, context);

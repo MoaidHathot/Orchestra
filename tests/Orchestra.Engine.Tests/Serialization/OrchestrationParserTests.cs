@@ -136,7 +136,7 @@ public class OrchestrationParserTests
 						"reasoningSummary": "concise",
 						"contextTier": "longContext",
 						"workingDirectory": "C:/work/dir",
-						"githubToken": "${env:GITHUB_TOKEN}",
+						"githubToken": "{{env.GITHUB_TOKEN}}",
 						"humanInput": true
 					}
 				]
@@ -152,7 +152,7 @@ public class OrchestrationParserTests
 		step!.ReasoningSummary.Should().Be(ReasoningSummaryLevel.Concise);
 		step.ContextTier.Should().Be(ContextTier.LongContext);
 		step.WorkingDirectory.Should().Be("C:/work/dir");
-		step.GitHubToken.Should().Be("${env:GITHUB_TOKEN}");
+		step.GitHubToken.Should().Be("{{env.GITHUB_TOKEN}}");
 		step.HumanInput.Should().BeTrue();
 	}
 	[Fact]

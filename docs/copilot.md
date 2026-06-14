@@ -309,6 +309,85 @@ builder.WithSystemPromptMode(SystemPromptMode.Replace);
 builder.WithSystemPromptMode(SystemPromptMode.Append);
 ```
 
+## Per-step Copilot options (orchestration JSON)
+
+Prompt steps expose several **opt-in** Copilot controls. Each is off by default, so
+existing orchestrations are unchanged; set a field to turn the behavior on. The full
+schema lives in [`schemas/orchestration.schema.json`](../schemas/orchestration.schema.json);
+worked examples are in [`examples/governed-prompt-step.json`](../examples/governed-prompt-step.json)
+and [`examples/tuned-prompt-step.json`](../examples/tuned-prompt-step.json).
+
+```json
+{
+  "name": "review",
+  "type": "Prompt",
+  "systemPrompt": "...",
+  "userPrompt": "...",
+  "model": "claude-opus-4.6",
+
+  "reasoningSummary": "concise",
+  "contextTier": "longContext",
+  "workingDirectory": "{{env.PROJECT_DIR}}",
+  "githubToken": "{{env.GITHUB_TOKEN}}",
+
+  "humanInput": true,
+  "permissionPolicy": { "mode": "denyList", "deny": ["shell", "url"] },
+  "sandbox": {
+    "enabled": true,
+    "filesystem": { "readonly": ["/work/repo"], "denied": ["/etc"] },
+    "network": { "allowOutbound": false }
+  }
+}
+```
+
+### Model tuning
+
+| Field | Values | Effect |
+|-------|--------|--------|
+| `reasoningLevel` | `low` / `medium` / `high` | Reasoning effort (depth of chain-of-thought). |
+| `reasoningSummary` | `none` / `concise` / `detailed` | Verbosity of the model's reasoning summary. |
+| `contextTier` | `default` / `longContext` | Opts into the model's extended context window where supported. |
+
+### Working directory
+
+`workingDirectory` sets the agent's working directory for shell/file tools and config
+discovery (custom instructions, `.github/agents`, `.github/mcp.json`). It is
+template-resolved (`{{param.*}}`/`{{env.*}}`/`{{vars.*}}`) and validated to exist at run time.
+
+### Authentication
+
+`githubToken` authenticates this step's Copilot session, overriding the host default. Prefer
+a template reference such as `{{env.GITHUB_TOKEN}}` over a hardcoded secret. The host-level
+default lives in `orchestra.json` (`copilot.gitHubToken` / `copilot.useLoggedInUser` — see
+[host.md](host.md)); when neither is set, the bundled CLI's own stored credentials are used.
+
+### Human-in-the-loop
+
+`humanInput: true` routes the agent's **elicitation** and **exit-plan-mode (plan approval)**
+requests to Orchestra's human-in-the-loop — the same pending-input surface as
+`request_user_input` and `Approval` steps (Portal/CLI/API). Operators see the request via
+`GET /api/runs/pending` and answer with `POST /api/orchestrations/{name}/runs/{runId}/respond`.
+Default (off) resolves these autonomously.
+
+### Permission policy
+
+`permissionPolicy.mode` controls how the agent's permission requests (shell, file read/write,
+url, mcp, …) are resolved:
+
+| Mode | Behavior |
+|------|----------|
+| `approveAll` | Auto-approve everything (default). |
+| `denyList` | Approve unless a request's kind or target matches a `deny` glob (case-insensitive, `*`/`?` wildcards) — e.g. `["shell", "url", "*.env"]`. |
+| `requireHumanApproval` | Route each request to a human operator (serialized per step); falls back to "user not available" when no operator context exists. |
+
+### Sandbox
+
+`sandbox` constrains the agent's shell/file/network tool access, applied to the live session
+via the runtime's options-update RPC. `filesystem` accepts `readonly` / `readwrite` / `denied`
+path lists; `network` accepts `allowedHosts` / `blockedHosts` / `allowOutbound` /
+`allowLocalNetwork`. Set `enabled: false` to disable. Sandbox paths are passed to the runtime
+verbatim (not template-resolved), and enforcement is provided on Linux/macOS.
+
 ## Model Mismatch Detection
 
 The agent automatically detects when the requested model differs from the actual model used:
