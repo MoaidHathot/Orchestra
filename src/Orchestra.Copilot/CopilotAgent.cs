@@ -18,6 +18,7 @@ public partial class CopilotAgent : IAgent
 	private readonly Engine.ContextTier? _contextTier;
 	private readonly string? _workingDirectory;
 	private readonly string? _gitHubToken;
+	private readonly bool _humanInput;
 	private readonly SystemPromptMode? _systemPromptMode;
 	private readonly Dictionary<string, SystemPromptSectionOverride>? _systemPromptSections;
 	private readonly IOrchestrationReporter _reporter;
@@ -137,7 +138,8 @@ public partial class CopilotAgent : IAgent
 			Engine.ReasoningSummaryLevel? reasoningSummary = null,
 			Engine.ContextTier? contextTier = null,
 			string? workingDirectory = null,
-			string? gitHubToken = null)
+			string? gitHubToken = null,
+			bool humanInput = false)
 	{
 		_clientPool = clientPool;
 		_model = model;
@@ -149,6 +151,7 @@ public partial class CopilotAgent : IAgent
 		_contextTier = contextTier;
 		_workingDirectory = workingDirectory;
 		_gitHubToken = gitHubToken;
+		_humanInput = humanInput;
 		_systemPromptMode = systemPromptMode;
 		_systemPromptSections = systemPromptSections;
 		_reporter = reporter;
@@ -338,7 +341,7 @@ public partial class CopilotAgent : IAgent
 			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 			var handler = new CopilotSessionHandler(writer, _reporter, _model, done, _loggerFactory.CreateLogger<CopilotSessionHandler>());
 
-			var attemptSessionConfig = BuildSessionConfig(handler.HandleEvent);
+			var attemptSessionConfig = BuildSessionConfig(handler.HandleEvent, cancellationToken);
 
 			LogSessionCreating(
 				client.DiagnosticHash,
@@ -847,6 +850,10 @@ public partial class CopilotAgent : IAgent
 			InfiniteSessions = baseConfig.InfiniteSessions,
 			Hooks = baseConfig.Hooks,
 			WorkingDirectory = baseConfig.WorkingDirectory,
+			// Carry the opt-in HITL handlers across a CLI swap+resume so plan/elicitation
+			// gating still routes to the operator on the resumed session.
+			OnElicitationRequest = baseConfig.OnElicitationRequest,
+			OnExitPlanModeRequest = baseConfig.OnExitPlanModeRequest,
 			// SDK 1.0.0 lets us register the event handler at config-time via OnEvent
 			// rather than calling session.On(...) after CreateSessionAsync/ResumeSessionAsync
 			// returns. Closing the window also matters on resume because the runtime starts
@@ -856,7 +863,7 @@ public partial class CopilotAgent : IAgent
 		return config;
 	}
 
-	internal SessionConfig BuildSessionConfig(Action<SessionEvent>? onEvent = null)
+	internal SessionConfig BuildSessionConfig(Action<SessionEvent>? onEvent = null, CancellationToken cancellationToken = default)
 	{
 		var config = new SessionConfig
 		{
@@ -1019,7 +1026,143 @@ public partial class CopilotAgent : IAgent
 			};
 		}
 
+		// Opt-in human-in-the-loop (humanInput=true): route the SDK's elicitation and
+		// exit-plan-mode handshakes to Orchestra's pending-input surface instead of resolving
+		// them autonomously. Left null by default so existing runs are unchanged. Requires the
+		// engine-tool context (run identity + HITL waiter); the internal output-handler sub-call
+		// has no context and falls through to the runtime default.
+		if (_humanInput && _engineToolContext is not null)
+		{
+			config.OnElicitationRequest = ctx => HandleElicitationAsync(ctx, cancellationToken);
+			config.OnExitPlanModeRequest = (req, invocation) => HandleExitPlanModeAsync(req, invocation, cancellationToken);
+		}
+
 		return config;
+	}
+
+	/// <summary>
+	/// Routes a Copilot <c>elicitation.requested</c> handshake to Orchestra's human-in-the-loop.
+	/// Accepts with the operator's reply (a JSON object is passed through verbatim; free-form text
+	/// is wrapped under a <c>response</c> key) or declines on cancellation / missing run identity.
+	/// </summary>
+	// UIElicitationResponseAction is an evaluation-only SDK API (GHCP001); the elicitation
+	// request/response handshake is the SDK's supported integration point, so suppress narrowly.
+#pragma warning disable GHCP001
+	private async Task<ElicitationResult> HandleElicitationAsync(ElicitationContext context, CancellationToken cancellationToken)
+	{
+		var prompt = string.IsNullOrWhiteSpace(context.Message)
+			? "The agent is requesting input to continue."
+			: context.Message;
+
+		try
+		{
+			var response = await _engineToolContext!
+				.RequestHumanInputAsync(prompt, choices: null, Engine.PendingInputKind.Elicitation, cancellationToken)
+				.ConfigureAwait(false);
+
+			if (response is null)
+			{
+				return new ElicitationResult { Action = GitHub.Copilot.Rpc.UIElicitationResponseAction.Decline, Content = new Dictionary<string, object>() };
+			}
+
+			return new ElicitationResult
+			{
+				Action = GitHub.Copilot.Rpc.UIElicitationResponseAction.Accept,
+				Content = BuildElicitationContent(response.ResolveContent()),
+			};
+		}
+		catch (OperationCanceledException)
+		{
+			// Step/orchestration timeout or external cancellation — decline so the turn unwinds.
+			return new ElicitationResult { Action = GitHub.Copilot.Rpc.UIElicitationResponseAction.Decline, Content = new Dictionary<string, object>() };
+		}
+	}
+#pragma warning restore GHCP001
+
+	private static IDictionary<string, object> BuildElicitationContent(string reply)
+	{
+		if (!string.IsNullOrWhiteSpace(reply))
+		{
+			try
+			{
+				var parsed = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(reply);
+				if (parsed is not null)
+				{
+					return parsed;
+				}
+			}
+			catch (System.Text.Json.JsonException)
+			{
+				// Not a JSON object — fall through to the free-form wrapper.
+			}
+		}
+
+		return new Dictionary<string, object> { ["response"] = reply };
+	}
+
+	/// <summary>
+	/// Routes a Copilot <c>exitPlanMode.requested</c> (plan approval) handshake to Orchestra's
+	/// human-in-the-loop. Approves when the operator replies "approve"; otherwise returns the
+	/// operator's feedback so the agent keeps planning.
+	/// </summary>
+	private async Task<ExitPlanModeResult> HandleExitPlanModeAsync(ExitPlanModeRequest request, ExitPlanModeInvocation invocation, CancellationToken cancellationToken)
+	{
+		var prompt = BuildPlanApprovalPrompt(request);
+
+		try
+		{
+			var response = await _engineToolContext!
+				.RequestHumanInputAsync(prompt, choices: ["approve", "reject"], Engine.PendingInputKind.ExitPlanMode, cancellationToken)
+				.ConfigureAwait(false);
+
+			if (response is null)
+			{
+				return new ExitPlanModeResult { Approved = false, Feedback = "No operator available to approve the plan." };
+			}
+
+			var approved = IsApproval(response);
+			return new ExitPlanModeResult
+			{
+				Approved = approved,
+				Feedback = approved ? string.Empty : response.ResolveContent(),
+			};
+		}
+		catch (OperationCanceledException)
+		{
+			return new ExitPlanModeResult { Approved = false, Feedback = "Plan approval cancelled." };
+		}
+	}
+
+	private static bool IsApproval(Engine.UserInputResponse response)
+	{
+		if (!string.IsNullOrWhiteSpace(response.Choice))
+		{
+			return response.Choice.Trim().Equals("approve", StringComparison.OrdinalIgnoreCase);
+		}
+
+		var content = response.ResolveContent().Trim();
+		return content.Equals("approve", StringComparison.OrdinalIgnoreCase)
+			|| content.Equals("approved", StringComparison.OrdinalIgnoreCase)
+			|| content.Equals("yes", StringComparison.OrdinalIgnoreCase);
+	}
+
+	private static string BuildPlanApprovalPrompt(ExitPlanModeRequest request)
+	{
+		var sb = new System.Text.StringBuilder();
+		sb.AppendLine("The agent has finished planning and is requesting approval to proceed.");
+		if (!string.IsNullOrWhiteSpace(request.Summary))
+		{
+			sb.AppendLine();
+			sb.AppendLine(request.Summary);
+		}
+		if (!string.IsNullOrWhiteSpace(request.PlanContent))
+		{
+			sb.AppendLine();
+			sb.AppendLine(request.PlanContent);
+		}
+		sb.AppendLine();
+		sb.Append("Reply 'approve' to proceed, or provide feedback to send the agent back to planning.");
+		return sb.ToString();
 	}
 
 	/// <summary>

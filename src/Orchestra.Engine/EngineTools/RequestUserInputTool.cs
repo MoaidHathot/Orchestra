@@ -107,64 +107,20 @@ public sealed class RequestUserInputTool : IEngineTool
 		var stepName = context.StepName;
 		var orchestrationName = context.OrchestrationName;
 		var runId = context.RunId;
-		var waiter = context.HumanInputWaiter ?? NullHumanInputWaiter.Instance;
 
 		if (string.IsNullOrEmpty(stepName) || string.IsNullOrEmpty(orchestrationName) || string.IsNullOrEmpty(runId))
 		{
 			return "Tool is not available in this context (missing run identity). Cannot request user input.";
 		}
 
-		// Persist a pending input record so the host's response endpoint can route the
-		// reply back to this run/step. We persist BEFORE registering the in-memory wait
-		// so a host crash between persist and wait still leaves a discoverable record.
-		var record = new PendingInputRecord
-		{
-			OrchestrationName = orchestrationName,
-			RunId = runId,
-			StepName = stepName,
-			Kind = PendingInputKind.EngineTool,
-			Prompt = prompt,
-			Choices = choices,
-			CreatedAt = DateTimeOffset.UtcNow,
-			ExpiresAt = null,
-		};
+		// Shared HITL primitive: persist a pending record, fire awaiting-input notifications,
+		// then block until the host completes the wait. Cancellation propagates to Execute's
+		// catch (returns the cancellation message); the agent session is NOT torn down.
+		var response = await context
+			.RequestHumanInputAsync(prompt, choices, PendingInputKind.EngineTool, cancellationToken)
+			.ConfigureAwait(false);
 
-		if (context.PendingInputStore is { } store)
-		{
-			await store.SaveAsync(record, cancellationToken).ConfigureAwait(false);
-		}
-
-		context.OnAwaitingInput?.Invoke(record);
-		context.Reporter?.ReportAwaitingInput(record);
-
-		waiter.BeginWait(runId, stepName);
-		var endedClock = false;
-		try
-		{
-			var response = await waiter.WaitAsync(orchestrationName, runId, stepName, cancellationToken).ConfigureAwait(false);
-			context.OnInputResolved?.Invoke(runId, stepName);
-			endedClock = true;
-			context.Reporter?.ReportInputReceived(orchestrationName, runId, stepName, response);
-			return response.ResolveContent();
-		}
-		finally
-		{
-			waiter.EndWait(runId, stepName);
-			if (!endedClock)
-			{
-				context.OnInputResolved?.Invoke(runId, stepName);
-			}
-			if (context.PendingInputStore is not null)
-			{
-				try
-				{
-					await context.PendingInputStore.DeleteAsync(orchestrationName, runId, stepName, CancellationToken.None).ConfigureAwait(false);
-				}
-				catch
-				{
-					// Persistence cleanup is best-effort; failures here must not surface to the LLM.
-				}
-			}
-		}
+		return response?.ResolveContent()
+			?? "Tool is not available in this context (missing run identity). Cannot request user input.";
 	}
 }

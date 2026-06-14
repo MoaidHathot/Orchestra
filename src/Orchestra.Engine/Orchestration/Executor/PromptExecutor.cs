@@ -360,6 +360,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				ContextTier = step.ContextTier,
 				WorkingDirectory = resolvedWorkingDirectory,
 				GitHubToken = resolvedGitHubToken,
+				HumanInput = step.HumanInput ?? false,
 				SystemPromptMode = step.SystemPromptMode ?? context.DefaultSystemPromptMode,
 				Reporter = _reporter,
 				EngineTools = engineTools,

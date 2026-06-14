@@ -93,4 +93,12 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// <see cref="Orchestration.DefaultEnableTools"/> when null.
 	/// </summary>
 	public string[]? EnableTools { get; init; }
+
+	/// <summary>
+	/// Opt-in: when <c>true</c>, the Copilot SDK's elicitation and exit-plan-mode requests
+	/// for this step are routed to Orchestra's human-in-the-loop (the same pending-input
+	/// surface as <c>request_user_input</c> / Approval steps) instead of the autonomous
+	/// default. Null/false preserves current behavior (no human gate).
+	/// </summary>
+	public bool? HumanInput { get; init; }
 }

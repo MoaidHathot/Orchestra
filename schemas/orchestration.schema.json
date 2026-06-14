@@ -359,6 +359,10 @@
           "type": "string",
           "description": "GitHub token for this step's Copilot session, overriding the host default. Supports ${env:GITHUB_TOKEN}. Avoid hardcoding secrets; prefer an env reference."
         },
+        "humanInput": {
+          "type": "boolean",
+          "description": "When true, the agent's elicitation and exit-plan-mode (plan approval) requests for this step are routed to Orchestra's human-in-the-loop (UI/CLI/API) instead of resolving autonomously."
+        },
         "systemPromptMode": {
           "$ref": "#/$defs/systemPromptMode",
           "description": "How the system prompt interacts with the SDK's default system prompt. Overrides defaultSystemPromptMode."

@@ -589,7 +589,10 @@ public static class ServiceProviderExtensions
 				try
 				{
 					var pending = await pendingInputStore.ListAsync();
-					foreach (var record in pending.Where(r => r.Kind == PendingInputKind.EngineTool))
+					// EngineTool / Elicitation / ExitPlanMode are all session-bound (held inside
+					// the in-memory agent session) and cannot be re-attached across a restart.
+					// Approval records survive (re-driven by checkpoint resume).
+					foreach (var record in pending.Where(r => r.Kind != PendingInputKind.Approval))
 					{
 						initLogger.LogWarning(
 							"Cleaning up orphaned engine-tool wait for orchestration {OrchestrationName}, run {RunId}, step {StepName}: agent session was lost across host restart",

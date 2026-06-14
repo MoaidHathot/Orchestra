@@ -24,6 +24,9 @@ public sealed record AgentBuildConfig
 	/// <summary>Optional per-step GitHub token overriding the host default (maps to SDK SessionConfig.GitHubToken).</summary>
 	public string? GitHubToken { get; init; }
 
+	/// <summary>When true, route Copilot elicitation / exit-plan-mode requests to Orchestra's human-in-the-loop.</summary>
+	public bool HumanInput { get; init; }
+
 	public SystemPromptMode? SystemPromptMode { get; init; }
 	public IOrchestrationReporter Reporter { get; init; } = NullOrchestrationReporter.Instance;
 	public IReadOnlyCollection<IEngineTool> EngineTools { get; init; } = [];

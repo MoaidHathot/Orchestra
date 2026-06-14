@@ -175,4 +175,87 @@ public sealed class EngineToolContext
 		OrchestrationCompleteStatus = status;
 		OrchestrationCompleteReason = reason;
 	}
+
+	/// <summary>
+	/// Shared human-in-the-loop primitive: persists a <see cref="PendingInputRecord"/>,
+	/// fires the awaiting-input notifications, then blocks until the host completes the
+	/// matching wait (via the HumanInput API / MCP). Returns the operator's
+	/// <see cref="UserInputResponse"/>, or <c>null</c> when this context has no run
+	/// identity (e.g. an internal sub-call). Cancellation propagates to the caller.
+	/// <para>
+	/// Used by both the LLM-decided <c>orchestra_request_user_input</c> engine tool and the
+	/// Copilot SDK elicitation / exit-plan-mode handlers so all HITL pause paths share one
+	/// persist → notify → wait → resolve → cleanup implementation. The waiter supports a
+	/// single outstanding wait per (orchestration, run, step); concurrent waits on the same
+	/// step are not supported.
+	/// </para>
+	/// </summary>
+	public async Task<UserInputResponse?> RequestHumanInputAsync(
+		string prompt,
+		string[]? choices,
+		PendingInputKind kind,
+		CancellationToken cancellationToken)
+	{
+		var stepName = StepName;
+		var orchestrationName = OrchestrationName;
+		var runId = RunId;
+
+		if (string.IsNullOrEmpty(stepName) || string.IsNullOrEmpty(orchestrationName) || string.IsNullOrEmpty(runId))
+			return null;
+
+		var waiter = HumanInputWaiter ?? NullHumanInputWaiter.Instance;
+
+		// Persist BEFORE registering the in-memory wait so a host crash between persist and
+		// wait still leaves a discoverable record the response endpoint can route to.
+		var record = new PendingInputRecord
+		{
+			OrchestrationName = orchestrationName,
+			RunId = runId,
+			StepName = stepName,
+			Kind = kind,
+			Prompt = prompt,
+			Choices = choices ?? [],
+			CreatedAt = DateTimeOffset.UtcNow,
+			ExpiresAt = null,
+		};
+
+		if (PendingInputStore is { } store)
+		{
+			await store.SaveAsync(record, cancellationToken).ConfigureAwait(false);
+		}
+
+		OnAwaitingInput?.Invoke(record);
+		Reporter?.ReportAwaitingInput(record);
+
+		waiter.BeginWait(runId, stepName);
+		var resolved = false;
+		try
+		{
+			var response = await waiter.WaitAsync(orchestrationName, runId, stepName, cancellationToken).ConfigureAwait(false);
+			OnInputResolved?.Invoke(runId, stepName);
+			resolved = true;
+			Reporter?.ReportInputReceived(orchestrationName, runId, stepName, response);
+			return response;
+		}
+		finally
+		{
+			waiter.EndWait(runId, stepName);
+			if (!resolved)
+			{
+				OnInputResolved?.Invoke(runId, stepName);
+			}
+
+			if (PendingInputStore is not null)
+			{
+				try
+				{
+					await PendingInputStore.DeleteAsync(orchestrationName, runId, stepName, CancellationToken.None).ConfigureAwait(false);
+				}
+				catch
+				{
+					// Persistence cleanup is best-effort; failures here must not surface to callers.
+				}
+			}
+		}
+	}
 }

@@ -225,7 +225,8 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			reasoningSummary: config.ReasoningSummary,
 			contextTier: config.ContextTier,
 			workingDirectory: config.WorkingDirectory,
-			gitHubToken: config.GitHubToken
+			gitHubToken: config.GitHubToken,
+			humanInput: config.HumanInput
 		);
 	}
 

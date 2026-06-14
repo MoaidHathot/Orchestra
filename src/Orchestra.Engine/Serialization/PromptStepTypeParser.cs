@@ -83,6 +83,9 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			EnableTools = root.TryGetProperty("enableTools", out var enableTools) && enableTools.ValueKind == JsonValueKind.Array
 				? enableTools.EnumerateArray().Select(e => e.GetString()!).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray()
 				: null,
+			HumanInput = root.TryGetProperty("humanInput", out var humanInput)
+				? humanInput.GetBoolean()
+				: null,
 			// null = inherit Orchestration.DefaultFailOnToolError; explicit bool overrides.
 			// Mirror the read pattern of e.g. `Enabled` — TryGetProperty + .GetBoolean — but
 			// preserve null so the step-level value can distinguish "unset" from "false".

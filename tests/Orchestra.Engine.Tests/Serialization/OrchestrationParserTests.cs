@@ -136,7 +136,8 @@ public class OrchestrationParserTests
 						"reasoningSummary": "concise",
 						"contextTier": "longContext",
 						"workingDirectory": "C:/work/dir",
-						"githubToken": "${env:GITHUB_TOKEN}"
+						"githubToken": "${env:GITHUB_TOKEN}",
+						"humanInput": true
 					}
 				]
 			}
@@ -152,8 +153,8 @@ public class OrchestrationParserTests
 		step.ContextTier.Should().Be(ContextTier.LongContext);
 		step.WorkingDirectory.Should().Be("C:/work/dir");
 		step.GitHubToken.Should().Be("${env:GITHUB_TOKEN}");
+		step.HumanInput.Should().BeTrue();
 	}
-
 	[Fact]
 	public void ParseOrchestration_WithoutSessionTuningFields_LeavesThemNull()
 	{
@@ -184,6 +185,7 @@ public class OrchestrationParserTests
 		step.ContextTier.Should().BeNull();
 		step.WorkingDirectory.Should().BeNull();
 		step.GitHubToken.Should().BeNull();
+		step.HumanInput.Should().BeNull();
 	}
 
 	[Fact]

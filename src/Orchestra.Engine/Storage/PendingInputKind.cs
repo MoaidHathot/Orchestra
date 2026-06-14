@@ -18,4 +18,18 @@ public enum PendingInputKind
 {
 	Approval,
 	EngineTool,
+
+	/// <summary>
+	/// Copilot SDK <c>elicitation.requested</c> routed to a human operator (opt-in
+	/// <c>humanInput</c>). Like <see cref="EngineTool"/> the pause is held inside the
+	/// in-memory agent session, so orphaned records are cleaned up on host restart.
+	/// </summary>
+	Elicitation,
+
+	/// <summary>
+	/// Copilot SDK <c>exitPlanMode.requested</c> (plan approval) routed to a human
+	/// operator (opt-in <c>humanInput</c>). Session-bound and volatile like
+	/// <see cref="EngineTool"/>.
+	/// </summary>
+	ExitPlanMode,
 }
