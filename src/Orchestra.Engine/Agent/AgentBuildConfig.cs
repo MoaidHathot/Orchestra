@@ -27,6 +27,9 @@ public sealed record AgentBuildConfig
 	/// <summary>When true, route Copilot elicitation / exit-plan-mode requests to Orchestra's human-in-the-loop.</summary>
 	public bool HumanInput { get; init; }
 
+	/// <summary>Optional policy controlling how Copilot permission requests are resolved (null = approve-all).</summary>
+	public PermissionPolicy? PermissionPolicy { get; init; }
+
 	public SystemPromptMode? SystemPromptMode { get; init; }
 	public IOrchestrationReporter Reporter { get; init; } = NullOrchestrationReporter.Instance;
 	public IReadOnlyCollection<IEngineTool> EngineTools { get; init; } = [];

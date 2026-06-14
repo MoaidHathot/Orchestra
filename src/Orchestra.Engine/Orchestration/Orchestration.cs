@@ -134,6 +134,12 @@ public class Orchestration
 	public string[] DefaultEnableTools { get; init; } = [];
 
 	/// <summary>
+	/// Default Copilot permission policy applied to every Prompt step that does not specify
+	/// its own <see cref="PromptOrchestrationStep.PermissionPolicy"/>. Null = auto-approve.
+	/// </summary>
+	public PermissionPolicy? DefaultPermissionPolicy { get; init; }
+
+	/// <summary>
 	/// Default value for <see cref="OrchestrationStep.FailOnToolError"/> applied to every
 	/// step that does not specify its own value. When <c>true</c>, any tool-call failure
 	/// inside an agent loop marks the step as

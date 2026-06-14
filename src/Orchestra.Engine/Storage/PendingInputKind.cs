@@ -32,4 +32,10 @@ public enum PendingInputKind
 	/// <see cref="EngineTool"/>.
 	/// </summary>
 	ExitPlanMode,
+
+	/// <summary>
+	/// Copilot SDK permission request routed to a human operator (permission policy mode
+	/// <c>requireHumanApproval</c>). Session-bound and volatile like <see cref="EngineTool"/>.
+	/// </summary>
+	Permission,
 }

@@ -65,6 +65,12 @@ public class OrchestrationExecutionContext
 	public string[] DefaultEnableTools { get; init; } = [];
 
 	/// <summary>
+	/// Default Copilot permission policy for Prompt steps that do not specify their own.
+	/// Wired from <see cref="Orchestration.DefaultPermissionPolicy"/>. Null = auto-approve.
+	/// </summary>
+	public PermissionPolicy? DefaultPermissionPolicy { get; init; }
+
+	/// <summary>
 	/// Default value for <see cref="OrchestrationStep.FailOnToolError"/> applied to every
 	/// step that does not specify its own value. Wired from
 	/// <see cref="Orchestration.DefaultFailOnToolError"/>. When <c>true</c>, any tool-call

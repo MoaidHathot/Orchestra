@@ -189,6 +189,41 @@ public class OrchestrationParserTests
 	}
 
 	[Fact]
+	public void ParseOrchestration_WithPermissionPolicy_ParsesModeAndDeny()
+	{
+		// Arrange
+		var json = """
+			{
+				"name": "gated",
+				"description": "Test",
+				"steps": [
+					{
+						"name": "gated-step",
+						"type": "Prompt",
+						"systemPrompt": "S",
+						"userPrompt": "U",
+						"model": "claude-opus-4.6",
+						"permissionPolicy": {
+							"mode": "denyList",
+							"deny": ["shell", "url", "*.env"]
+						}
+					}
+				]
+			}
+			""";
+
+		// Act
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		// Assert
+		var step = orchestration.Steps[0] as PromptOrchestrationStep;
+		step.Should().NotBeNull();
+		step!.PermissionPolicy.Should().NotBeNull();
+		step.PermissionPolicy!.Mode.Should().Be(PermissionMode.DenyList);
+		step.PermissionPolicy.Deny.Should().BeEquivalentTo("shell", "url", "*.env");
+	}
+
+	[Fact]
 	public void ParseOrchestration_WithHooks_ParsesHookDefinition()
 	{
 		var json = """

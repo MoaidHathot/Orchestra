@@ -361,6 +361,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				WorkingDirectory = resolvedWorkingDirectory,
 				GitHubToken = resolvedGitHubToken,
 				HumanInput = step.HumanInput ?? false,
+				PermissionPolicy = step.PermissionPolicy ?? context.DefaultPermissionPolicy,
 				SystemPromptMode = step.SystemPromptMode ?? context.DefaultSystemPromptMode,
 				Reporter = _reporter,
 				EngineTools = engineTools,

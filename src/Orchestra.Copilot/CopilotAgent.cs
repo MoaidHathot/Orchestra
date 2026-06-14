@@ -19,6 +19,9 @@ public partial class CopilotAgent : IAgent
 	private readonly string? _workingDirectory;
 	private readonly string? _gitHubToken;
 	private readonly bool _humanInput;
+	private readonly Engine.PermissionPolicy? _permissionPolicy;
+	/// <summary>Serializes human-approval permission waits so they don't collide on the per-step waiter key.</summary>
+	private readonly SemaphoreSlim _permissionGate = new(1, 1);
 	private readonly SystemPromptMode? _systemPromptMode;
 	private readonly Dictionary<string, SystemPromptSectionOverride>? _systemPromptSections;
 	private readonly IOrchestrationReporter _reporter;
@@ -139,7 +142,8 @@ public partial class CopilotAgent : IAgent
 			Engine.ContextTier? contextTier = null,
 			string? workingDirectory = null,
 			string? gitHubToken = null,
-			bool humanInput = false)
+			bool humanInput = false,
+			Engine.PermissionPolicy? permissionPolicy = null)
 	{
 		_clientPool = clientPool;
 		_model = model;
@@ -152,6 +156,7 @@ public partial class CopilotAgent : IAgent
 		_workingDirectory = workingDirectory;
 		_gitHubToken = gitHubToken;
 		_humanInput = humanInput;
+		_permissionPolicy = permissionPolicy;
 		_systemPromptMode = systemPromptMode;
 		_systemPromptSections = systemPromptSections;
 		_reporter = reporter;
@@ -827,7 +832,7 @@ public partial class CopilotAgent : IAgent
 			ClientName = "orchestra",
 			Model = baseConfig.Model,
 			Streaming = true,
-			OnPermissionRequest = PermissionHandler.ApproveAll,
+			OnPermissionRequest = baseConfig.OnPermissionRequest,
 			ReasoningEffort = baseConfig.ReasoningEffort,
 			// SDK 1.0.1: carry the reasoning-summary / context-tier / token knobs across a
 			// CLI swap+resume so the resumed session keeps the original per-step tuning.
@@ -873,7 +878,7 @@ public partial class CopilotAgent : IAgent
 			ClientName = "orchestra",
 			Model = _model,
 			Streaming = true,
-			OnPermissionRequest = PermissionHandler.ApproveAll,
+			OnPermissionRequest = BuildPermissionHandler(cancellationToken),
 			// SDK 1.0.0 lets us register the event handler at config-time via OnEvent
 			// rather than calling session.On(...) after CreateSessionAsync returns. The
 			// post-create subscription window had a tiny race where events fired between
@@ -1164,6 +1169,133 @@ public partial class CopilotAgent : IAgent
 		sb.Append("Reply 'approve' to proceed, or provide feedback to send the agent back to planning.");
 		return sb.ToString();
 	}
+
+	/// <summary>
+	/// Builds the SDK permission handler from the step's <see cref="Engine.PermissionPolicy"/>:
+	/// auto-approve (default), deny-by-glob, or route to a human operator.
+	/// </summary>
+	// PermissionDecision is an evaluation-only SDK API (GHCP001); the permission handler is the
+	// SDK's supported gate, so suppress narrowly across the policy methods.
+#pragma warning disable GHCP001
+	private Func<PermissionRequest, PermissionInvocation, Task<GitHub.Copilot.Rpc.PermissionDecision>> BuildPermissionHandler(CancellationToken cancellationToken)
+	{
+		var policy = _permissionPolicy;
+		if (policy is null || policy.Mode == Engine.PermissionMode.ApproveAll)
+		{
+			return PermissionHandler.ApproveAll;
+		}
+
+		if (policy.Mode == Engine.PermissionMode.DenyList)
+		{
+			var deny = policy.Deny;
+			return (request, invocation) => Task.FromResult(EvaluateDenyList(request, deny));
+		}
+
+		// RequireHumanApproval
+		return (request, invocation) => EvaluateHumanApprovalAsync(request, cancellationToken);
+	}
+
+	private static GitHub.Copilot.Rpc.PermissionDecision EvaluateDenyList(PermissionRequest request, string[] deny)
+	{
+		var (kind, target) = ExtractPermission(request);
+		if (IsDeniedByPolicy(kind, target, deny))
+		{
+			return GitHub.Copilot.Rpc.PermissionDecision.Reject(
+				$"Denied by orchestration permission policy ({kind}{(target is null ? string.Empty : $": {target}")}).");
+		}
+
+		return GitHub.Copilot.Rpc.PermissionDecision.ApproveOnce();
+	}
+
+	private async Task<GitHub.Copilot.Rpc.PermissionDecision> EvaluateHumanApprovalAsync(PermissionRequest request, CancellationToken cancellationToken)
+	{
+		if (_engineToolContext is null)
+		{
+			return GitHub.Copilot.Rpc.PermissionDecision.UserNotAvailable();
+		}
+
+		var (kind, target) = ExtractPermission(request);
+		var prompt = $"The agent is requesting permission to {kind}{(target is null ? string.Empty : $": {target}")}.\n" +
+			"Reply 'approve' to allow this action once, or provide a reason to deny it.";
+
+		// Serialize approvals so multiple concurrent permission requests don't collide on the
+		// single per-(run,step) pending-input waiter key.
+		await _permissionGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			var response = await _engineToolContext
+				.RequestHumanInputAsync(prompt, choices: ["approve", "deny"], Engine.PendingInputKind.Permission, cancellationToken)
+				.ConfigureAwait(false);
+
+			if (response is null)
+			{
+				return GitHub.Copilot.Rpc.PermissionDecision.UserNotAvailable();
+			}
+
+			return IsApproval(response)
+				? GitHub.Copilot.Rpc.PermissionDecision.ApproveOnce()
+				: GitHub.Copilot.Rpc.PermissionDecision.Reject(response.ResolveContent());
+		}
+		catch (OperationCanceledException)
+		{
+			return GitHub.Copilot.Rpc.PermissionDecision.Reject("Permission request cancelled.");
+		}
+		finally
+		{
+			_permissionGate.Release();
+		}
+	}
+
+	/// <summary>Flattens an SDK permission request to (kind, target) for policy matching.</summary>
+	private static (string Kind, string? Target) ExtractPermission(PermissionRequest request) => request switch
+	{
+		PermissionRequestRead read => ("read", read.Path),
+		PermissionRequestWrite write => ("write", write.FileName),
+		PermissionRequestShell shell => ("shell", shell.FullCommandText),
+		PermissionRequestUrl url => ("url", url.Url),
+		PermissionRequestMcp mcp => ("mcp", mcp.ToolName ?? mcp.ServerName),
+		PermissionRequestMemory memory => ("memory", memory.Subject),
+		PermissionRequestCustomTool customTool => ("customTool", customTool.ToolName),
+		PermissionRequestHook hook => ("hook", hook.ToolName),
+		PermissionRequestExtensionManagement extMgmt => ("extensionManagement", extMgmt.ExtensionName),
+		PermissionRequestExtensionPermissionAccess extAccess => ("extensionPermissionAccess", extAccess.ExtensionName),
+		_ => (request.Kind ?? "unknown", null),
+	};
+
+	private static bool GlobMatches(string pattern, string value)
+	{
+		if (string.IsNullOrEmpty(pattern))
+		{
+			return false;
+		}
+
+		if (!pattern.Contains('*') && !pattern.Contains('?'))
+		{
+			return string.Equals(pattern, value, StringComparison.OrdinalIgnoreCase);
+		}
+
+		var regex = "^" + System.Text.RegularExpressions.Regex.Escape(pattern).Replace("\\*", ".*").Replace("\\?", ".") + "$";
+		return System.Text.RegularExpressions.Regex.IsMatch(value, regex, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+	}
+#pragma warning restore GHCP001
+
+	/// <summary>
+	/// True when a permission request's <paramref name="kind"/> or <paramref name="target"/>
+	/// matches any deny glob. Extracted for unit testing the deny-list policy logic.
+	/// </summary>
+	internal static bool IsDeniedByPolicy(string kind, string? target, string[] deny)
+	{
+		foreach (var pattern in deny)
+		{
+			if (GlobMatches(pattern, kind) || (target is not null && GlobMatches(pattern, target)))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+#pragma warning restore GHCP001
 
 	/// <summary>
 	/// Builds session hooks that capture structured audit log entries.

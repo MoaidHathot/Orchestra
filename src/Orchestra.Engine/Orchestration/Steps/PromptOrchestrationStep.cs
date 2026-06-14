@@ -101,4 +101,11 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// default. Null/false preserves current behavior (no human gate).
 	/// </summary>
 	public bool? HumanInput { get; init; }
+
+	/// <summary>
+	/// Optional policy controlling how the agent's permission requests (shell, file read/write,
+	/// url, mcp, …) are resolved for this step. Falls back to the orchestration's
+	/// <see cref="Orchestration.DefaultPermissionPolicy"/>, then to auto-approve (current behavior).
+	/// </summary>
+	public PermissionPolicy? PermissionPolicy { get; init; }
 }

@@ -86,6 +86,9 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			HumanInput = root.TryGetProperty("humanInput", out var humanInput)
 				? humanInput.GetBoolean()
 				: null,
+			PermissionPolicy = root.TryGetProperty("permissionPolicy", out var permPolicy)
+				? DeserializePermissionPolicy(permPolicy)
+				: null,
 			// null = inherit Orchestration.DefaultFailOnToolError; explicit bool overrides.
 			// Mirror the read pattern of e.g. `Enabled` — TryGetProperty + .GetBoolean — but
 			// preserve null so the step-level value can distinguish "unset" from "false".
@@ -260,6 +263,19 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			Target = element.GetProperty("target").GetString()!,
 			MaxIterations = element.GetProperty("maxIterations").GetInt32(),
 			ExitPattern = element.GetProperty("exitPattern").GetString()!,
+		};
+	}
+
+	private static PermissionPolicy DeserializePermissionPolicy(JsonElement element)
+	{
+		return new PermissionPolicy
+		{
+			Mode = element.TryGetProperty("mode", out var mode)
+				? Enum.Parse<PermissionMode>(mode.GetString()!, ignoreCase: true)
+				: PermissionMode.ApproveAll,
+			Deny = element.TryGetProperty("deny", out var deny) && deny.ValueKind == JsonValueKind.Array
+				? deny.EnumerateArray().Select(e => e.GetString()!).Where(s => !string.IsNullOrWhiteSpace(s)).ToArray()
+				: [],
 		};
 	}
 

@@ -124,6 +124,10 @@
         "enum": ["request_user_input"]
       },
       "default": []
+    },
+    "defaultPermissionPolicy": {
+      "$ref": "#/$defs/permissionPolicy",
+      "description": "Default Copilot permission policy applied to every Prompt step that does not specify its own permissionPolicy. Omit for auto-approve."
     }
   },
   "$defs": {
@@ -362,6 +366,10 @@
         "humanInput": {
           "type": "boolean",
           "description": "When true, the agent's elicitation and exit-plan-mode (plan approval) requests for this step are routed to Orchestra's human-in-the-loop (UI/CLI/API) instead of resolving autonomously."
+        },
+        "permissionPolicy": {
+          "$ref": "#/$defs/permissionPolicy",
+          "description": "How the agent's permission requests (shell, file read/write, url, mcp, …) are resolved for this step. Overrides defaultPermissionPolicy. Omit for auto-approve."
         },
         "systemPromptMode": {
           "$ref": "#/$defs/systemPromptMode",
@@ -1433,6 +1441,24 @@
       "type": "string",
       "description": "Context-window tier for the step. 'longContext' opts into the model's extended context window where supported.",
       "enum": ["default", "longContext", "Default", "LongContext"]
+    },
+
+    "permissionPolicy": {
+      "type": "object",
+      "description": "Policy controlling how the agent's permission requests are resolved.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "description": "approveAll (default): auto-approve. denyList: approve unless kind/target matches a deny glob. requireHumanApproval: route each request to a human operator.",
+          "enum": ["approveAll", "denyList", "requireHumanApproval", "ApproveAll", "DenyList", "RequireHumanApproval"]
+        },
+        "deny": {
+          "type": "array",
+          "description": "Globs (case-insensitive, */? wildcards) matched against a request's kind (read/write/shell/url/mcp/…) or target (path/command/url/tool). Used only when mode is denyList.",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
     }
   }
 }
