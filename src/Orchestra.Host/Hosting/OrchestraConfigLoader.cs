@@ -147,6 +147,21 @@ public static class OrchestraConfigLoader
 			var json = File.ReadAllText(path);
 			json = EnvironmentVariableExpander.Expand(json, path);
 			var config = JsonSerializer.Deserialize<ServiceConfigFile>(json, JsonOptions);
+
+			// Apply the file-level default readiness timeout to any process service that does
+			// not set its own. This keeps the readiness timeout configurable (orchestra.services.json)
+			// rather than hardcoded, while still letting a service override it.
+			if (config?.DefaultReadinessTimeoutSeconds is { } defaultReadinessTimeout)
+			{
+				foreach (var entry in config.Services ?? [])
+				{
+					if (entry is ProcessService { Readiness: { TimeoutSeconds: null } readiness })
+					{
+						readiness.TimeoutSeconds = defaultReadinessTimeout;
+					}
+				}
+			}
+
 			return config?.Services;
 		}
 		catch (EnvironmentVariableExpansionException ex)
@@ -747,6 +762,13 @@ public class ServiceConfigFile
 	/// The list of service entries to manage.
 	/// </summary>
 	public ServiceEntry[]? Services { get; set; }
+
+	/// <summary>
+	/// Default readiness timeout (in seconds) applied to every process service whose own
+	/// <c>readiness.timeoutSeconds</c> is not set. When this is also unset, the built-in
+	/// default (<see cref="ReadinessCheck.DefaultTimeoutSeconds"/>) applies.
+	/// </summary>
+	public int? DefaultReadinessTimeoutSeconds { get; set; }
 }
 
 /// <summary>

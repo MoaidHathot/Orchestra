@@ -123,7 +123,8 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 	private async Task<bool> WaitForReadyAsync(CancellationToken cancellationToken)
 	{
 		var readiness = _config.Readiness!;
-		using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(readiness.TimeoutSeconds));
+		var timeoutSeconds = readiness.TimeoutSeconds ?? ReadinessCheck.DefaultTimeoutSeconds;
+		using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
 		var tasks = new List<Task<bool>>();
@@ -154,7 +155,7 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 		}
 		catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
 		{
-			LogProcessReadinessTimeout(_config.Name, readiness.TimeoutSeconds);
+			LogProcessReadinessTimeout(_config.Name, timeoutSeconds);
 			// If not required, downgrade to Running state with a warning
 			if (!_config.Required)
 			{

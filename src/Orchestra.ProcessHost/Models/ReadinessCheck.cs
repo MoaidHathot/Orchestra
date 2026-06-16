@@ -19,9 +19,18 @@ public class ReadinessCheck
 	public string? HealthCheckUrl { get; init; }
 
 	/// <summary>
-	/// Maximum time in seconds to wait for the process to become ready.
+	/// Built-in default readiness timeout (seconds), used when neither the service's own
+	/// <see cref="TimeoutSeconds"/> nor the global <c>defaultReadinessTimeoutSeconds</c>
+	/// (in orchestra.services.json) is set.
 	/// </summary>
-	public int TimeoutSeconds { get; init; } = 30;
+	public const int DefaultTimeoutSeconds = 30;
+
+	/// <summary>
+	/// Maximum time in seconds to wait for the process to become ready.
+	/// When unset (<see langword="null"/>), the global <c>defaultReadinessTimeoutSeconds</c>
+	/// from orchestra.services.json applies, falling back to <see cref="DefaultTimeoutSeconds"/>.
+	/// </summary>
+	public int? TimeoutSeconds { get; set; }
 
 	/// <summary>
 	/// Poll interval in milliseconds for HTTP health checks.

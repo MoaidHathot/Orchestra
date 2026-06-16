@@ -1234,6 +1234,83 @@ public class OrchestraConfigLoaderTests : IDisposable
 	}
 
 	[Fact]
+	public void LoadServiceConfig_AppliesDefaultReadinessTimeout_WhenServiceUnset()
+	{
+		// Arrange — file-level default, service readiness without its own timeout.
+		var configPath = Path.Combine(_tempDir, "svc-default-readiness.json");
+		File.WriteAllText(configPath, """
+		{
+			"defaultReadinessTimeoutSeconds": 7,
+			"services": [
+				{
+					"name": "svc-a",
+					"type": "process",
+					"command": "dnx",
+					"arguments": ["x"],
+					"readiness": { "stdoutPattern": "ready" }
+				}
+			]
+		}
+		""");
+
+		// Act
+		var services = OrchestraConfigLoader.LoadServiceConfig(configPath);
+
+		// Assert — the service inherits the file-level default.
+		var proc = services![0].Should().BeOfType<ProcessService>().Subject;
+		proc.Readiness!.TimeoutSeconds.Should().Be(7);
+	}
+
+	[Fact]
+	public void LoadServiceConfig_ServiceTimeoutOverridesDefault()
+	{
+		var configPath = Path.Combine(_tempDir, "svc-override-readiness.json");
+		File.WriteAllText(configPath, """
+		{
+			"defaultReadinessTimeoutSeconds": 7,
+			"services": [
+				{
+					"name": "svc-a",
+					"type": "process",
+					"command": "dnx",
+					"arguments": ["x"],
+					"readiness": { "stdoutPattern": "ready", "timeoutSeconds": 50 }
+				}
+			]
+		}
+		""");
+
+		var services = OrchestraConfigLoader.LoadServiceConfig(configPath);
+
+		var proc = services![0].Should().BeOfType<ProcessService>().Subject;
+		proc.Readiness!.TimeoutSeconds.Should().Be(50);
+	}
+
+	[Fact]
+	public void LoadServiceConfig_NoDefault_LeavesReadinessTimeoutNull()
+	{
+		var configPath = Path.Combine(_tempDir, "svc-no-default-readiness.json");
+		File.WriteAllText(configPath, """
+		{
+			"services": [
+				{
+					"name": "svc-a",
+					"type": "process",
+					"command": "dnx",
+					"arguments": ["x"],
+					"readiness": { "stdoutPattern": "ready" }
+				}
+			]
+		}
+		""");
+
+		var services = OrchestraConfigLoader.LoadServiceConfig(configPath);
+
+		var proc = services![0].Should().BeOfType<ProcessService>().Subject;
+		proc.Readiness!.TimeoutSeconds.Should().BeNull();
+	}
+
+	[Fact]
 	public void LoadServiceConfig_MissingEnvVar_ThrowsWithPath()
 	{
 		// Arrange — missing var must throw with both the variable name and
