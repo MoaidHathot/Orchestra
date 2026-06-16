@@ -670,6 +670,26 @@ public class McpServerConfig
 	/// in sync mode. Default: 300 seconds (5 minutes).
 	/// </summary>
 	public int? DefaultInvokeOrchestrationSyncTimeoutSeconds { get; set; }
+
+	/// <summary>
+	/// Per-server timeout (seconds) applied by <c>McpManager.GetGlobalMcpToolCountsAsync</c>
+	/// when probing a required MCP's <c>tools/list</c> at step start. Raise this above the
+	/// default for backends that use deferred-connection / interactive-OAuth: the first
+	/// <c>tools/list</c> blocks while the backend lazily connects and authenticates, which
+	/// can exceed the short default and surface as a spurious "returned 0 tools at pre-flight"
+	/// failure. Maps to <see cref="McpServerOptions.ToolDiscoveryProbeTimeoutSeconds"/>.
+	/// Default: 5. Values &lt; 1 are clamped to 1.
+	/// </summary>
+	public int? ToolDiscoveryProbeTimeoutSeconds { get; set; }
+
+	/// <summary>
+	/// Per-MCP timeout (seconds) applied by <c>McpManager.ProbeEndpointReachabilityAsync</c>
+	/// when TCP-probing a remote MCP endpoint on the pre-flight error path (to distinguish
+	/// "backend offline" from "backend reachable but returned 0 tools"). Maps to
+	/// <see cref="McpServerOptions.EndpointReachabilityProbeTimeoutSeconds"/>. Default: 2.
+	/// Values &lt; 1 are clamped to 1.
+	/// </summary>
+	public int? EndpointReachabilityProbeTimeoutSeconds { get; set; }
 }
 
 /// <summary>

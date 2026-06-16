@@ -810,13 +810,15 @@ public class OrchestraConfigLoaderTests : IDisposable
 	}
 
 	[Fact]
-	public void Load_WithMcpServerTimeouts_ReturnsAllThreeTimeoutFields()
+	public void Load_WithMcpServerTimeouts_ReturnsAllConfiguredTimeoutFields()
 	{
-		// Arrange — exercise the three configurable MCP timeout knobs that the host
+		// Arrange — exercise the configurable MCP timeout knobs that the host
 		// surfaces in orchestra.json:
-		//   - defaultOrchestraInvokeTimeoutSeconds (existing; Orchestra data-plane transport)
+		//   - defaultOrchestraInvokeTimeoutSeconds (Orchestra data-plane transport)
 		//   - defaultMcpToolCallTimeoutSeconds      (catch-all for non-data-plane MCPs)
 		//   - defaultInvokeOrchestrationSyncTimeoutSeconds (default for invoke_orchestration sync mode)
+		//   - toolDiscoveryProbeTimeoutSeconds      (pre-flight tools/list probe budget)
+		//   - endpointReachabilityProbeTimeoutSeconds (pre-flight reachability probe budget)
 		var configPath = Path.Combine(_tempDir, "mcp-server-load.json");
 		File.WriteAllText(configPath, """
 		{
@@ -828,7 +830,9 @@ public class OrchestraConfigLoaderTests : IDisposable
 				"maxNestingDepth": 5,
 				"defaultOrchestraInvokeTimeoutSeconds": 86400,
 				"defaultMcpToolCallTimeoutSeconds": 1800,
-				"defaultInvokeOrchestrationSyncTimeoutSeconds": 600
+				"defaultInvokeOrchestrationSyncTimeoutSeconds": 600,
+				"toolDiscoveryProbeTimeoutSeconds": 20,
+				"endpointReachabilityProbeTimeoutSeconds": 4
 			}
 		}
 		""");
@@ -845,6 +849,8 @@ public class OrchestraConfigLoaderTests : IDisposable
 		result.McpServer.DefaultOrchestraInvokeTimeoutSeconds.Should().Be(86400);
 		result.McpServer.DefaultMcpToolCallTimeoutSeconds.Should().Be(1800);
 		result.McpServer.DefaultInvokeOrchestrationSyncTimeoutSeconds.Should().Be(600);
+		result.McpServer.ToolDiscoveryProbeTimeoutSeconds.Should().Be(20);
+		result.McpServer.EndpointReachabilityProbeTimeoutSeconds.Should().Be(4);
 	}
 
 	[Fact]
@@ -888,6 +894,8 @@ public class OrchestraConfigLoaderTests : IDisposable
 		result!.McpServer!.DefaultMcpToolCallTimeoutSeconds.Should().BeNull();
 		result.McpServer.DefaultInvokeOrchestrationSyncTimeoutSeconds.Should().BeNull();
 		result.McpServer.DefaultOrchestraInvokeTimeoutSeconds.Should().BeNull();
+		result.McpServer.ToolDiscoveryProbeTimeoutSeconds.Should().BeNull();
+		result.McpServer.EndpointReachabilityProbeTimeoutSeconds.Should().BeNull();
 	}
 
 	// ── Scan config tests ──

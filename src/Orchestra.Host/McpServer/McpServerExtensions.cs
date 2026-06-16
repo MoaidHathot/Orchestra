@@ -45,6 +45,10 @@ public static class McpServerExtensions
 				options.DefaultMcpToolCallTimeoutSeconds = mcpConfig.DefaultMcpToolCallTimeoutSeconds.Value;
 			if (mcpConfig.DefaultInvokeOrchestrationSyncTimeoutSeconds.HasValue)
 				options.DefaultInvokeOrchestrationSyncTimeoutSeconds = mcpConfig.DefaultInvokeOrchestrationSyncTimeoutSeconds.Value;
+			if (mcpConfig.ToolDiscoveryProbeTimeoutSeconds.HasValue)
+				options.ToolDiscoveryProbeTimeoutSeconds = mcpConfig.ToolDiscoveryProbeTimeoutSeconds.Value;
+			if (mcpConfig.EndpointReachabilityProbeTimeoutSeconds.HasValue)
+				options.EndpointReachabilityProbeTimeoutSeconds = mcpConfig.EndpointReachabilityProbeTimeoutSeconds.Value;
 		}
 
 		// Then let programmatic overrides win
