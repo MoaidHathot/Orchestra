@@ -23,7 +23,6 @@ public class OpenCodeServerE2ETests
 		FallbackProvider = "github-copilot",
 		// Disable the engine-tool bridge for the basic streaming test to keep it hermetic.
 		EngineToolBridgeEnabled = false,
-		ServerUrl = Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_URL"),
 	};
 
 	[OpenCodeAvailableFact]
@@ -113,26 +112,59 @@ public class OpenCodeServerE2ETests
 	[OpenCodeAvailableFact]
 	public async Task ConfigContent_RegistersAgentsAtSpawn()
 	{
-		// Spawn-only probe (no ServerUrl) validating OPENCODE_CONFIG_CONTENT registers agents.
-		if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_URL")))
-			return;
-
 		var options = new OpenCodeAgentPoolOptions { DefaultMinInstances = 0, EngineToolBridgeEnabled = false };
-		var configContent = """
+		var configFile = Path.Combine(Path.GetTempPath(), $"opencode-e2e-config-{Guid.NewGuid():N}.json");
+		await File.WriteAllTextAsync(configFile, """
 			{ "agent": {
 			  "orchestra-primary": { "mode": "primary", "description": "probe primary", "prompt": "hi", "reasoningEffort": "high" },
 			  "orchestra-sub-probe": { "mode": "subagent", "description": "probe sub", "prompt": "you are a sub" }
 			} }
-			""";
+			""");
 
-		var plan = OpenCodeServerBootstrap.Resolve(options);
-		await using var process = new OpenCodeServerProcess(plan, options, new OpenCodeHttpClientFactory(), NullLogger.Instance, configContent);
-		using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
-		await process.StartAsync(cts.Token);
+		try
+		{
+			var plan = OpenCodeServerBootstrap.Resolve(options);
+			await using var process = new OpenCodeServerProcess(plan, options, new OpenCodeHttpClientFactory(), NullLogger.Instance, configFile);
+			using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+			await process.StartAsync(cts.Token);
 
-		var agents = await process.Client.ListAgentNamesAsync(cts.Token);
-		agents.Should().Contain("orchestra-primary");
-		agents.Should().Contain("orchestra-sub-probe");
+			var agents = await process.Client.ListAgentNamesAsync(cts.Token);
+			agents.Should().Contain("orchestra-primary");
+			agents.Should().Contain("orchestra-sub-probe");
+		}
+		finally
+		{
+			try { File.Delete(configFile); } catch { }
+		}
+	}
+
+	[OpenCodeAvailableFact]
+	public async Task StepMcp_IsForwardedToSpawnedServer()
+	{
+		// A step's MCP server (written into the per-run opencode.json) is loaded by the spawned
+		// server and appears in GET /mcp — proving step `mcps` reach OpenCode.
+		var options = new OpenCodeAgentPoolOptions { DefaultMinInstances = 0, EngineToolBridgeEnabled = false };
+		var mcp = new RemoteMcp { Name = "orchestra-test-mcp", Type = McpType.Remote, Endpoint = "http://127.0.0.1:59999/mcp", Headers = [] };
+		var plan = OpenCodeConfigBuilder.Build(
+			OpenCodeModelRef.Parse(Model, "github-copilot"), systemPrompt: null, reasoningLevel: null,
+			subagents: [], mcps: [mcp], fallbackProvider: "github-copilot");
+		var configFile = Path.Combine(Path.GetTempPath(), $"opencode-e2e-mcp-{Guid.NewGuid():N}.json");
+		await File.WriteAllTextAsync(configFile, System.Text.Json.JsonSerializer.Serialize(plan.Config));
+
+		try
+		{
+			var connect = OpenCodeServerBootstrap.Resolve(options);
+			await using var process = new OpenCodeServerProcess(connect, options, new OpenCodeHttpClientFactory(), NullLogger.Instance, configFile);
+			using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+			await process.StartAsync(cts.Token);
+
+			var mcps = await process.Client.ListMcpNamesAsync(cts.Token);
+			mcps.Should().Contain("orchestra-test-mcp");
+		}
+		finally
+		{
+			try { File.Delete(configFile); } catch { }
+		}
 	}
 
 	private sealed class RecordingLoggerProvider : ILoggerProvider

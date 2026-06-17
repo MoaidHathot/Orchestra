@@ -11,16 +11,9 @@ namespace Orchestra.Host.Hosting;
 public sealed class OpenCodeProviderOptions
 {
 	/// <summary>
-	/// Base URL of an already-running OpenCode server to connect to (e.g.
-	/// <c>http://127.0.0.1:4096</c>). Supports <c>${ENV}</c> expansion. When null, the adapter
-	/// spawns <c>opencode serve</c> using <see cref="CliPath"/> / PATH. Also honoured via the
-	/// <c>ORCHESTRA_OPENCODE_URL</c> environment variable.
-	/// </summary>
-	public string? ServerUrl { get; set; }
-
-	/// <summary>
 	/// Explicit path to the <c>opencode</c> binary. When null, the adapter resolves
-	/// <c>ORCHESTRA_OPENCODE_PATH</c> then <c>opencode</c> on PATH.
+	/// <c>ORCHESTRA_OPENCODE_PATH</c> then <c>opencode</c> on PATH. The OpenCode provider always
+	/// spawns its own server (there is no connect-only mode).
 	/// </summary>
 	public string? CliPath { get; set; }
 

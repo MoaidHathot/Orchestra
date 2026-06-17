@@ -36,6 +36,9 @@ internal interface IOpenCodeClient : IAsyncDisposable
 
 	/// <summary>Lists the agents the server currently knows about (<c>GET /agent</c>).</summary>
 	Task<IReadOnlyList<string>> ListAgentNamesAsync(CancellationToken cancellationToken);
+
+	/// <summary>Lists the MCP server names the instance currently has loaded (<c>GET /mcp</c>).</summary>
+	Task<IReadOnlyList<string>> ListMcpNamesAsync(CancellationToken cancellationToken);
 }
 
 internal interface IOpenCodeClientFactory
@@ -222,6 +225,21 @@ internal sealed class OpenCodeHttpClient : IOpenCodeClient
 				if (el.ValueKind == JsonValueKind.Object && el.TryGetProperty("name", out var n) && n.GetString() is { } name)
 					names.Add(name);
 			}
+		}
+		return names;
+	}
+
+	public async Task<IReadOnlyList<string>> ListMcpNamesAsync(CancellationToken cancellationToken)
+	{
+		using var resp = await _http.GetAsync("mcp", cancellationToken).ConfigureAwait(false);
+		resp.EnsureSuccessStatusCode();
+		using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+		var names = new List<string>();
+		// GET /mcp returns an object keyed by MCP server name.
+		if (doc.RootElement.ValueKind == JsonValueKind.Object)
+		{
+			foreach (var prop in doc.RootElement.EnumerateObject())
+				names.Add(prop.Name);
 		}
 		return names;
 	}

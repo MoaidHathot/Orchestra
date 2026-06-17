@@ -14,17 +14,17 @@ namespace Orchestra.OpenCode;
 /// </summary>
 internal static class OpenCodeServerBootstrap
 {
-	public const string ExplicitUrlEnvVar = "ORCHESTRA_OPENCODE_URL";
 	public const string ExplicitCliPathEnvVar = "ORCHESTRA_OPENCODE_PATH";
 
 	/// <summary>
-	/// Decides the connection plan for a new server instance from options + environment.
+	/// Decides the connection plan for a new server instance. The OpenCode provider is
+	/// spawn-only in production; <see cref="OpenCodeAgentPoolOptions.ServerUrl"/> is an internal
+	/// test seam (connect to a fake instead of spawning) and is not exposed via host config.
 	/// </summary>
 	public static OpenCodeConnectionPlan Resolve(OpenCodeAgentPoolOptions options)
 	{
-		var url = FirstNonEmpty(options.ServerUrl, Environment.GetEnvironmentVariable(ExplicitUrlEnvVar));
-		if (!string.IsNullOrWhiteSpace(url))
-			return OpenCodeConnectionPlan.Connect(url.TrimEnd('/'));
+		if (!string.IsNullOrWhiteSpace(options.ServerUrl))
+			return OpenCodeConnectionPlan.Connect(options.ServerUrl.TrimEnd('/'));
 
 		var cliPath = FirstNonEmpty(options.CliPath, Environment.GetEnvironmentVariable(ExplicitCliPathEnvVar))
 			?? "opencode";
@@ -94,7 +94,8 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 	private readonly OpenCodeAgentPoolOptions _options;
 	private readonly IOpenCodeClientFactory _clientFactory;
 	private readonly ILogger _logger;
-	private readonly string? _configContent;
+	private readonly string? _configFilePath;
+	private readonly string? _workingDirectory;
 	private Process? _process;
 
 	public OpenCodeServerProcess(
@@ -102,13 +103,15 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 		OpenCodeAgentPoolOptions options,
 		IOpenCodeClientFactory clientFactory,
 		ILogger logger,
-		string? configContent = null)
+		string? configFilePath = null,
+		string? workingDirectory = null)
 	{
 		_plan = plan;
 		_options = options;
 		_clientFactory = clientFactory;
 		_logger = logger;
-		_configContent = configContent;
+		_configFilePath = configFilePath;
+		_workingDirectory = workingDirectory;
 	}
 
 	public string BaseUrl { get; private set; } = string.Empty;
@@ -139,6 +142,11 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 			RedirectStandardError = true,
 			CreateNoWindow = true,
 		};
+		// Per-step working directory governs the agent's file tools, project config discovery,
+		// and (critically) skills discovery under <cwd>/.opencode/skills. When unset, inherit
+		// the host process cwd.
+		if (!string.IsNullOrWhiteSpace(_workingDirectory) && Directory.Exists(_workingDirectory))
+			psi.WorkingDirectory = _workingDirectory;
 		psi.ArgumentList.Add("serve");
 		psi.ArgumentList.Add("--hostname");
 		psi.ArgumentList.Add(_options.Hostname);
@@ -149,11 +157,12 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 			psi.Environment["OPENCODE_SERVER_PASSWORD"] = _options.ServerPassword;
 			psi.Environment["OPENCODE_SERVER_USERNAME"] = _options.ServerUsername;
 		}
-		if (!string.IsNullOrWhiteSpace(_configContent))
+		if (!string.IsNullOrWhiteSpace(_configFilePath))
 		{
-			// Inline config loaded at startup — used to register per-run agents (reasoning +
-			// sub-agents), which the runtime resolves at spawn time (not via runtime PATCH).
-			psi.Environment["OPENCODE_CONFIG_CONTENT"] = _configContent;
+			// Per-run opencode.json (agents for reasoning/sub-agents + the step's MCP servers),
+			// resolved at spawn time. A file (not OPENCODE_CONFIG_CONTENT) avoids env-var size
+			// limits and keeps the config alongside the run's other artifacts.
+			psi.Environment["OPENCODE_CONFIG"] = _configFilePath;
 		}
 
 		LogSpawning(_plan.CliPath!, BaseUrl);
@@ -168,8 +177,7 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 				"(spawn)", "spawn_failed",
 				probeDetails: ex.Message,
 				message: $"Failed to launch '{_plan.CliPath} serve'. Ensure OpenCode is installed and on PATH, " +
-						 $"set orchestra.json opencode.cliPath / {OpenCodeServerBootstrap.ExplicitCliPathEnvVar}, " +
-						 $"or point at a running server with {OpenCodeServerBootstrap.ExplicitUrlEnvVar}.",
+						 $"or set orchestra.json opencode.cliPath / {OpenCodeServerBootstrap.ExplicitCliPathEnvVar}.",
 				innerException: ex);
 		}
 

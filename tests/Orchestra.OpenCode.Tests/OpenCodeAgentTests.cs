@@ -137,30 +137,24 @@ public class OpenCodeAgentTests
 	}
 
 	[Fact]
-	public async Task SendAsync_Reasoning_ConnectOnly_Throws()
+	public async Task SendAsync_Reasoning_RoutesThroughDedicatedAgent()
 	{
-		// In connect-only mode (ServerUrl set) the adapter can't reconfigure the external server,
-		// so a step that requires reasoning/sub-agents must fail fast rather than run plainly.
+		// A reasoning step runs on a dedicated server configured with a per-step agent; the prompt
+		// references that agent and the system prompt moves into the agent config (not the body).
 		var client = new FakeOpenCodeClient(Sid)
 		{
 			Events = [TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }""")],
 		};
 
-		var builder = new OpenCodeAgentBuilder(NullLoggerFactory.Instance, ConnectOptions(), new FakeFactory(client));
-		await using var scope = await builder.CreateRunScopeAsync();
-		var agent = await builder.BuildAgentAsync(new AgentBuildConfig
+		await RunAsync(client, new AgentBuildConfig
 		{
 			Model = "github-copilot/claude-opus-4.8",
 			SystemPrompt = "be terse",
 			ReasoningLevel = ReasoningLevel.High,
 		});
 
-		var task = agent.SendAsync("go", CancellationToken.None);
-		await foreach (var _ in task) { }
-		var act = async () => await task.GetResultAsync();
-
-		await act.Should().ThrowAsync<OpenCodeSessionFailedException>().WithMessage("*connect-only*");
-		client.LastPrompt.Should().BeNull("the step should fail before prompting");
+		client.LastPrompt!.Agent.Should().Be("orchestra-primary");
+		client.LastPrompt.System.Should().BeNull();
 	}
 
 	[Fact]
@@ -219,6 +213,9 @@ public class OpenCodeAgentTests
 
 		public Task<IReadOnlyList<string>> ListAgentNamesAsync(CancellationToken cancellationToken)
 			=> Task.FromResult<IReadOnlyList<string>>(["build", "general"]);
+
+		public Task<IReadOnlyList<string>> ListMcpNamesAsync(CancellationToken cancellationToken)
+			=> Task.FromResult<IReadOnlyList<string>>([]);
 
 		public async IAsyncEnumerable<OpenCodeServerEvent> SubscribeAsync([EnumeratorCancellation] CancellationToken cancellationToken)
 		{

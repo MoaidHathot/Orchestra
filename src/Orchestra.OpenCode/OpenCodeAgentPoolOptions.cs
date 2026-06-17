@@ -27,9 +27,9 @@ public sealed class OpenCodeAgentPoolOptions
 	// ── Server discovery / lifecycle ──
 
 	/// <summary>
-	/// When set, the adapter connects to an already-running OpenCode server at this base URL
-	/// instead of spawning <c>opencode serve</c>. Sourced from <c>orchestra.json</c>
-	/// <c>opencode.serverUrl</c> (or the <c>ORCHESTRA_OPENCODE_URL</c> env var). Null = spawn.
+	/// Internal test seam only: when set, the adapter connects to this base URL instead of
+	/// spawning <c>opencode serve</c>. NOT exposed via host config — the OpenCode provider is
+	/// spawn-only in production. Used by tests to drive a fake server without launching a process.
 	/// </summary>
 	public string? ServerUrl { get; set; }
 

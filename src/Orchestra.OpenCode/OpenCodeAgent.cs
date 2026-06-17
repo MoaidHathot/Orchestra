@@ -21,6 +21,10 @@ internal sealed partial class OpenCodeAgent : IAgent
 	private readonly string? _systemPrompt;
 	private readonly ReasoningLevel? _reasoningLevel;
 	private readonly Subagent[] _subagents;
+	private readonly Mcp[] _mcps;
+	private readonly string? _workingDirectory;
+	private readonly string[] _skillDirectories;
+	private readonly string? _runArtifactDirectory;
 	private readonly IReadOnlyCollection<IEngineTool> _engineTools;
 	private readonly EngineToolContext? _engineToolContext;
 	private readonly ImageAttachment[] _attachments;
@@ -46,6 +50,11 @@ internal sealed partial class OpenCodeAgent : IAgent
 		_systemPrompt = config.SystemPrompt;
 		_reasoningLevel = config.ReasoningLevel;
 		_subagents = config.Subagents;
+		_mcps = config.Mcps;
+		_workingDirectory = config.WorkingDirectory;
+		_skillDirectories = config.SkillDirectories;
+		// Per-step config files + skill staging live in the run's artifact (temp) folder.
+		_runArtifactDirectory = config.EngineToolCtx?.TempFileStore?.TempDirectory;
 		_engineTools = config.EngineTools;
 		_engineToolContext = config.EngineToolCtx;
 		_attachments = config.Attachments;
@@ -66,32 +75,20 @@ internal sealed partial class OpenCodeAgent : IAgent
 		ArgumentException.ThrowIfNullOrWhiteSpace(_model);
 		var modelRef = OpenCodeModelRef.Parse(_model, _options.FallbackProvider);
 
-		// Reasoning level + inline sub-agents map onto OpenCode's *spawn-time* agent config
-		// (runtime config patches don't register usable agents), so a step that needs them runs
-		// on a dedicated server spawned with OPENCODE_CONFIG_CONTENT. Plain steps use the pool.
-		// In connect-only mode we cannot reconfigure an external server's agents, so a step that
-		// requires reasoning/sub-agents fails fast rather than silently running without them.
-		var plan = OpenCodeConfigBuilder.Build(modelRef, _systemPrompt, _reasoningLevel, _subagents, _options.FallbackProvider);
-		var canSpawn = OpenCodeServerBootstrap.Resolve(_options).IsSpawn;
+		// OpenCode applies reasoning, sub-agents, and MCP servers via its *spawn-time* config
+		// (runtime config patches don't register usable agents), and skills/working-directory via
+		// the server's cwd. So any step that needs per-step config runs on its own dedicated
+		// server spawned with a generated opencode.json; plain text-prompt steps use the pool.
+		var plan = OpenCodeConfigBuilder.Build(modelRef, _systemPrompt, _reasoningLevel, _subagents, _mcps, _options.FallbackProvider);
+		var needsDedicated = plan.HasConfig
+			|| !string.IsNullOrWhiteSpace(_workingDirectory)
+			|| _skillDirectories.Length > 0;
 
 		try
 		{
-			if (plan is not null)
-			{
-				if (!canSpawn)
-				{
-					throw new OpenCodeSessionFailedException(
-						"This step requires a reasoning level and/or inline sub-agents, which the OpenCode provider " +
-						"can only apply on a server it spawns (via OPENCODE_CONFIG_CONTENT). The provider is in " +
-						"connect-only mode (opencode.serverUrl / ORCHESTRA_OPENCODE_URL is set), so an external " +
-						"server's agents cannot be reconfigured. Remove serverUrl to let Orchestra spawn the server, " +
-						"or remove reasoningLevel/subagents from the step.");
-				}
-
-				return await RunDedicatedAsync(prompt, writer, modelRef, plan, cancellationToken).ConfigureAwait(false);
-			}
-
-			return await RunPooledAsync(prompt, writer, modelRef, cancellationToken).ConfigureAwait(false);
+			return needsDedicated
+				? await RunDedicatedAsync(prompt, writer, modelRef, plan, cancellationToken).ConfigureAwait(false)
+				: await RunPooledAsync(prompt, writer, modelRef, cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -115,17 +112,19 @@ internal sealed partial class OpenCodeAgent : IAgent
 	}
 
 	/// <summary>
-	/// Runs a reasoning/sub-agent step on a dedicated OpenCode server spawned with the step's
-	/// agent config (via <c>OPENCODE_CONFIG_CONTENT</c>), with its own engine-tool MCP bridge.
+	/// Runs a step that needs per-step config on a dedicated OpenCode server: writes the
+	/// generated opencode.json (agents + MCP servers) to the run's artifact folder, stages any
+	/// skill directories under the server's working directory, spawns the server pointed at both,
+	/// and runs the turn (optionally through the per-step agent), with its own engine-tool bridge.
 	/// </summary>
-	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeAgentPlan plan, CancellationToken cancellationToken)
+	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeStepPlan plan, CancellationToken cancellationToken)
 	{
-		var configContent = System.Text.Json.JsonSerializer.Serialize(plan.ConfigPatch, OpenCodeJson.Options);
+		var workspace = OpenCodeWorkspaceBuilder.Prepare(plan.HasConfig ? plan.Config : null, _workingDirectory, _skillDirectories, _runArtifactDirectory);
 		var connectPlan = OpenCodeServerBootstrap.Resolve(_options);
 
 		var holder = new EngineToolContextHolder();
 		OpenCodeEngineToolBridge? bridge = null;
-		var process = new OpenCodeServerProcess(connectPlan, _options, _clientFactory, _loggerFactory.CreateLogger<OpenCodeServerProcess>(), configContent);
+		var process = new OpenCodeServerProcess(connectPlan, _options, _clientFactory, _loggerFactory.CreateLogger<OpenCodeServerProcess>(), workspace.ConfigFilePath, workspace.WorkingDirectory);
 		try
 		{
 			if (_engineTools.Count > 0 && _engineToolContext is not null && _options.EngineToolBridgeEnabled)
@@ -140,6 +139,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 			await process.DisposeAsync().ConfigureAwait(false);
 			if (bridge is not null)
 				await bridge.DisposeAsync().ConfigureAwait(false);
+			workspace.Cleanup(_logger);
 		}
 	}
 

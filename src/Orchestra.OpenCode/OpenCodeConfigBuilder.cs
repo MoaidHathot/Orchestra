@@ -4,31 +4,53 @@ using Orchestra.Engine;
 namespace Orchestra.OpenCode;
 
 /// <summary>
-/// The OpenCode <c>agent</c>-config patch needed to apply a step's reasoning level and/or
-/// sub-agents, plus the name of the primary agent to reference on the prompt request.
+/// The generated <c>opencode.json</c> config for a step (agents for reasoning/sub-agents, the
+/// <c>mcp</c> section for the step's MCP servers, …) plus the primary agent name to reference on
+/// the prompt request. Applied by spawning a dedicated server with this config; see
+/// <see cref="OpenCodeConfigBuilder"/>.
 /// </summary>
-internal sealed record OpenCodeAgentPlan(IReadOnlyDictionary<string, object> ConfigPatch, string PrimaryAgentName);
+internal sealed record OpenCodeStepPlan(IReadOnlyDictionary<string, object> Config, string? PrimaryAgentName)
+{
+	/// <summary>True when this plan contributes any opencode.json config (agents and/or MCPs).</summary>
+	public bool HasConfig => Config.Count > 0;
+}
 
 /// <summary>
-/// Maps Orchestra's per-step <see cref="ReasoningLevel"/> and inline <see cref="Subagent"/>s
-/// onto OpenCode's config surface. OpenCode addresses both through configured agents
-/// (reasoning is a pass-through model option; sub-agents are <c>mode: subagent</c> entries the
-/// primary agent invokes via the Task tool), so this builds a <c>PATCH /config</c> body that
-/// (re)defines a per-run primary agent <c>orchestra-primary</c> carrying the system prompt +
-/// <c>reasoningEffort</c>, plus one <c>orchestra-sub-*</c> entry per sub-agent. The primary
-/// agent's <c>permission.task</c> allow-list scopes delegation to exactly this step's
-/// sub-agents (denying any left over on a reused worker).
+/// Maps a step's OpenCode-relevant <see cref="AgentBuildConfig"/> fields onto an
+/// <c>opencode.json</c> config object:
+/// <list type="bullet">
+///   <item><b>Reasoning + inline sub-agents</b> → an <c>agent</c> section: a primary agent
+///   (<c>orchestra-primary</c>) carrying the system prompt + <c>reasoningEffort</c>, plus one
+///   <c>mode: subagent</c> entry per <see cref="Subagent"/>, with the primary's
+///   <c>permission.task</c> allow-list scoping delegation.</item>
+///   <item><b>Step MCP servers</b> → an <c>mcp</c> section (<c>type:"local"</c> stdio or
+///   <c>type:"remote"</c> http).</item>
+/// </list>
+/// The config is applied by spawning a dedicated server (runtime config patches don't register
+/// usable agents), so any step producing a non-empty config runs on its own server instance.
 /// </summary>
 internal static class OpenCodeConfigBuilder
 {
 	public const string PrimaryAgentName = "orchestra-primary";
 	private const string SubagentPrefix = "orchestra-sub-";
 
-	/// <summary>
-	/// Builds the agent plan, or returns null when the step uses neither reasoning nor
-	/// sub-agents (the simple model+system prompt path is used in that case).
-	/// </summary>
-	public static OpenCodeAgentPlan? Build(
+	public static OpenCodeStepPlan Build(
+		OpenCodeModelRef model,
+		string? systemPrompt,
+		ReasoningLevel? reasoningLevel,
+		IReadOnlyList<Subagent> subagents,
+		IReadOnlyList<Mcp> mcps,
+		string fallbackProvider)
+	{
+		var config = new Dictionary<string, object>(StringComparer.Ordinal);
+		var primaryAgentName = BuildAgentSection(config, model, systemPrompt, reasoningLevel, subagents, fallbackProvider);
+		BuildMcpSection(config, mcps);
+		return new OpenCodeStepPlan(config, primaryAgentName);
+	}
+
+	/// <summary>Adds the <c>agent</c> section; returns the primary agent name, or null when neither reasoning nor sub-agents are used.</summary>
+	private static string? BuildAgentSection(
+		Dictionary<string, object> config,
 		OpenCodeModelRef model,
 		string? systemPrompt,
 		ReasoningLevel? reasoningLevel,
@@ -60,22 +82,15 @@ internal static class OpenCodeConfigBuilder
 			foreach (var sub in subagents)
 			{
 				var name = UniqueSubagentName(sub.Name, usedNames);
-				var subModel = ResolveSubagentModel(sub.Model, model, fallbackProvider);
-
 				var entry = new Dictionary<string, object?>(StringComparer.Ordinal)
 				{
 					["mode"] = "subagent",
-					["model"] = subModel,
-					["description"] = string.IsNullOrWhiteSpace(sub.Description)
-						? (sub.DisplayName ?? sub.Name)
-						: sub.Description,
+					["model"] = ResolveSubagentModel(sub.Model, model, fallbackProvider),
+					["description"] = string.IsNullOrWhiteSpace(sub.Description) ? (sub.DisplayName ?? sub.Name) : sub.Description,
 					["prompt"] = sub.Prompt,
 				};
 				if (sub.Tools is { Length: > 0 })
 				{
-					// Orchestra restricts a sub-agent to a tool allow-list; OpenCode tool flags are
-					// a deny-list, so enable exactly the listed tools. (Unlisted built-ins remain
-					// at their defaults — OpenCode has no "deny all others" tool flag.)
 					var tools = new Dictionary<string, object?>(StringComparer.Ordinal);
 					foreach (var tool in sub.Tools)
 						tools[tool] = true;
@@ -86,23 +101,58 @@ internal static class OpenCodeConfigBuilder
 				taskPermission[name] = "allow";
 			}
 
-			primary["permission"] = new Dictionary<string, object?>(StringComparer.Ordinal)
-			{
-				["task"] = taskPermission,
-			};
+			primary["permission"] = new Dictionary<string, object?>(StringComparer.Ordinal) { ["task"] = taskPermission };
 		}
 
 		agents[PrimaryAgentName] = primary;
-		var patch = new Dictionary<string, object>(StringComparer.Ordinal) { ["agent"] = agents };
-		return new OpenCodeAgentPlan(patch, PrimaryAgentName);
+		config["agent"] = agents;
+		return PrimaryAgentName;
+	}
+
+	/// <summary>Adds the <c>mcp</c> section mapping Orchestra <see cref="Mcp"/>s to OpenCode local/remote MCP entries.</summary>
+	private static void BuildMcpSection(Dictionary<string, object> config, IReadOnlyList<Mcp> mcps)
+	{
+		if (mcps.Count == 0)
+			return;
+
+		var section = new Dictionary<string, object>(StringComparer.Ordinal);
+		foreach (var mcp in mcps)
+		{
+			var entry = new Dictionary<string, object?>(StringComparer.Ordinal) { ["enabled"] = true };
+			if (mcp.Timeout is { } timeout && timeout > TimeSpan.Zero)
+				entry["timeout"] = (long)timeout.TotalMilliseconds;
+
+			switch (mcp)
+			{
+				case LocalMcp local:
+					entry["type"] = "local";
+					entry["command"] = new List<string> { local.Command }.Concat(local.Arguments ?? []).ToList();
+					if (local.Environment is { Count: > 0 })
+						entry["environment"] = local.Environment.ToDictionary(kv => kv.Key, kv => (object?)kv.Value, StringComparer.Ordinal);
+					if (!string.IsNullOrWhiteSpace(local.WorkingDirectory))
+						entry["cwd"] = local.WorkingDirectory;
+					break;
+				case RemoteMcp remote:
+					entry["type"] = "remote";
+					entry["url"] = remote.Endpoint;
+					if (remote.Headers is { Count: > 0 })
+						entry["headers"] = remote.Headers.ToDictionary(kv => kv.Key, kv => (object?)kv.Value, StringComparer.Ordinal);
+					break;
+				default:
+					continue; // unknown MCP type — skip rather than emit an invalid entry
+			}
+
+			section[mcp.Name] = entry;
+		}
+
+		if (section.Count > 0)
+			config["mcp"] = section;
 	}
 
 	private static string ResolveSubagentModel(string? subModel, OpenCodeModelRef mainModel, string fallbackProvider)
-	{
-		if (string.IsNullOrWhiteSpace(subModel))
-			return mainModel.ToString();
-		return OpenCodeModelRef.Parse(subModel, fallbackProvider).ToString();
-	}
+		=> string.IsNullOrWhiteSpace(subModel)
+			? mainModel.ToString()
+			: OpenCodeModelRef.Parse(subModel, fallbackProvider).ToString();
 
 	private static string UniqueSubagentName(string rawName, HashSet<string> used)
 	{

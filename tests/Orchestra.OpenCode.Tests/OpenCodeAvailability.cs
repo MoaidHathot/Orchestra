@@ -11,17 +11,14 @@ internal static class OpenCodeAvailability
 
 	private static bool Detect()
 	{
-		// E2E is opt-in: a reachable server URL, or an explicit opt-in flag (the binary merely
-		// being present on PATH does not mean OpenCode is authenticated / usable, so we don't
-		// auto-run E2E just because `opencode` is installed).
-		if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_URL")))
-			return true;
-
+		// E2E is opt-in: the binary merely being present on PATH does not mean OpenCode is
+		// authenticated / usable, so we only auto-run E2E when explicitly enabled.
 		var optIn = Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_E2E");
-		if (!string.IsNullOrWhiteSpace(optIn) && (optIn == "1" || optIn.Equals("true", StringComparison.OrdinalIgnoreCase)))
-			return ResolveOnPath("opencode") is not null || !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_PATH"));
+		if (string.IsNullOrWhiteSpace(optIn) || (optIn != "1" && !optIn.Equals("true", StringComparison.OrdinalIgnoreCase)))
+			return false;
 
-		return false;
+		return ResolveOnPath("opencode") is not null
+			|| !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_PATH"));
 	}
 
 	private static string? ResolveOnPath(string command)

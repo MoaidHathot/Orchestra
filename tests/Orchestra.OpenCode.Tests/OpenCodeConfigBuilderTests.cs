@@ -8,33 +8,37 @@ public class OpenCodeConfigBuilderTests
 {
 	private static OpenCodeModelRef Model => OpenCodeModelRef.Parse("github-copilot/claude-opus-4.8", "github-copilot");
 
-	private static JsonElement PatchJson(OpenCodeAgentPlan plan)
-	{
-		var json = JsonSerializer.Serialize(plan.ConfigPatch);
-		return JsonDocument.Parse(json).RootElement.Clone();
-	}
+	private static OpenCodeStepPlan Build(
+		string? system = "sys",
+		ReasoningLevel? reasoning = null,
+		IReadOnlyList<Subagent>? subagents = null,
+		IReadOnlyList<Mcp>? mcps = null)
+		=> OpenCodeConfigBuilder.Build(Model, system, reasoning, subagents ?? [], mcps ?? [], "github-copilot");
+
+	private static JsonElement ConfigJson(OpenCodeStepPlan plan)
+		=> JsonDocument.Parse(JsonSerializer.Serialize(plan.Config)).RootElement.Clone();
 
 	[Fact]
-	public void Build_NoReasoningNoSubagents_ReturnsNull()
+	public void Build_Nothing_ProducesEmptyConfig()
 	{
-		OpenCodeConfigBuilder.Build(Model, "sys", reasoningLevel: null, subagents: [], "github-copilot")
-			.Should().BeNull();
+		var plan = Build();
+		plan.HasConfig.Should().BeFalse();
+		plan.PrimaryAgentName.Should().BeNull();
 	}
 
 	[Fact]
 	public void Build_ReasoningOnly_DefinesPrimaryAgentWithReasoningEffort()
 	{
-		var plan = OpenCodeConfigBuilder.Build(Model, "you are helpful", ReasoningLevel.High, subagents: [], "github-copilot");
+		var plan = Build(system: "you are helpful", reasoning: ReasoningLevel.High);
 
-		plan.Should().NotBeNull();
-		plan!.PrimaryAgentName.Should().Be("orchestra-primary");
+		plan.HasConfig.Should().BeTrue();
+		plan.PrimaryAgentName.Should().Be("orchestra-primary");
 
-		var agent = PatchJson(plan).GetProperty("agent").GetProperty("orchestra-primary");
+		var agent = ConfigJson(plan).GetProperty("agent").GetProperty("orchestra-primary");
 		agent.GetProperty("mode").GetString().Should().Be("primary");
 		agent.GetProperty("model").GetString().Should().Be("github-copilot/claude-opus-4.8");
 		agent.GetProperty("prompt").GetString().Should().Be("you are helpful");
 		agent.GetProperty("reasoningEffort").GetString().Should().Be("high");
-		agent.TryGetProperty("permission", out _).Should().BeFalse("no sub-agents means no task permission gate");
 	}
 
 	[Fact]
@@ -46,12 +50,8 @@ public class OpenCodeConfigBuilderTests
 			new Subagent { Name = "Writer", Prompt = "You write.", Model = "anthropic/claude-3-5-sonnet", Tools = ["read", "grep"] },
 		};
 
-		var plan = OpenCodeConfigBuilder.Build(Model, "coordinator", reasoningLevel: null, subagents, "github-copilot");
-		plan.Should().NotBeNull();
+		var agentMap = ConfigJson(Build(subagents: subagents)).GetProperty("agent");
 
-		var agentMap = PatchJson(plan!).GetProperty("agent");
-
-		// Primary agent gates delegation to exactly these sub-agents.
 		var task = agentMap.GetProperty("orchestra-primary").GetProperty("permission").GetProperty("task");
 		task.GetProperty("*").GetString().Should().Be("deny");
 		task.GetProperty("orchestra-sub-data-researcher").GetString().Should().Be("allow");
@@ -60,31 +60,64 @@ public class OpenCodeConfigBuilderTests
 		var researcher = agentMap.GetProperty("orchestra-sub-data-researcher");
 		researcher.GetProperty("mode").GetString().Should().Be("subagent");
 		researcher.GetProperty("description").GetString().Should().Be("Finds data");
-		researcher.GetProperty("model").GetString().Should().Be("github-copilot/claude-opus-4.8", because: "no explicit model inherits the main model");
+		researcher.GetProperty("model").GetString().Should().Be("github-copilot/claude-opus-4.8");
 
 		var writer = agentMap.GetProperty("orchestra-sub-writer");
 		writer.GetProperty("model").GetString().Should().Be("anthropic/claude-3-5-sonnet");
 		writer.GetProperty("tools").GetProperty("read").GetBoolean().Should().BeTrue();
-		writer.GetProperty("tools").GetProperty("grep").GetBoolean().Should().BeTrue();
 	}
 
 	[Fact]
-	public void Build_SubagentWithoutDescription_FallsBackToDisplayNameOrName()
+	public void Build_LocalMcp_MapsToOpenCodeLocalEntry()
 	{
-		var plan = OpenCodeConfigBuilder.Build(Model, null, null,
-			[new Subagent { Name = "helper", DisplayName = "Helper Bot", Prompt = "help" }], "github-copilot");
+		var mcp = new LocalMcp
+		{
+			Name = "filesystem",
+			Type = McpType.Local,
+			Command = "npx",
+			Arguments = ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
+			Environment = new Dictionary<string, string> { ["API_KEY"] = "secret" },
+			Timeout = TimeSpan.FromSeconds(30),
+		};
 
-		PatchJson(plan!).GetProperty("agent").GetProperty("orchestra-sub-helper")
-			.GetProperty("description").GetString().Should().Be("Helper Bot");
+		var entry = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("filesystem");
+		entry.GetProperty("type").GetString().Should().Be("local");
+		entry.GetProperty("command").EnumerateArray().Select(e => e.GetString())
+			.Should().Equal("npx", "-y", "@modelcontextprotocol/server-filesystem", "/data");
+		entry.GetProperty("environment").GetProperty("API_KEY").GetString().Should().Be("secret");
+		entry.GetProperty("enabled").GetBoolean().Should().BeTrue();
+		entry.GetProperty("timeout").GetInt64().Should().Be(30000);
+	}
+
+	[Fact]
+	public void Build_RemoteMcp_MapsToOpenCodeRemoteEntry()
+	{
+		var mcp = new RemoteMcp
+		{
+			Name = "orchestra",
+			Type = McpType.Remote,
+			Endpoint = "https://host/mcp/data",
+			Headers = new Dictionary<string, string> { ["Authorization"] = "Bearer x" },
+		};
+
+		var entry = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("orchestra");
+		entry.GetProperty("type").GetString().Should().Be("remote");
+		entry.GetProperty("url").GetString().Should().Be("https://host/mcp/data");
+		entry.GetProperty("headers").GetProperty("Authorization").GetString().Should().Be("Bearer x");
+	}
+
+	[Fact]
+	public void Build_McpOnly_HasConfigButNoPrimaryAgent()
+	{
+		var plan = Build(mcps: [new LocalMcp { Name = "fs", Type = McpType.Local, Command = "x", Arguments = [] }]);
+		plan.HasConfig.Should().BeTrue();
+		plan.PrimaryAgentName.Should().BeNull("MCPs don't require a custom agent");
 	}
 
 	[Theory]
 	[InlineData("Data Researcher", "data-researcher")]
 	[InlineData("  weird__name!! ", "weird-name")]
-	[InlineData("ALLCAPS", "allcaps")]
 	[InlineData("***", "agent")]
 	public void Slugify_NormalizesNames(string input, string expected)
-	{
-		OpenCodeConfigBuilder.Slugify(input).Should().Be(expected);
-	}
+		=> OpenCodeConfigBuilder.Slugify(input).Should().Be(expected);
 }

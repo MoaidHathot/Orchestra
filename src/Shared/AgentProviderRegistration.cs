@@ -88,7 +88,6 @@ internal static class AgentProviderRegistration
 			DefaultIdleTimeoutSeconds = options.AgentPool.IdleTimeoutSeconds ?? 120,
 		};
 
-		if (!string.IsNullOrWhiteSpace(oc.ServerUrl)) poolOptions.ServerUrl = oc.ServerUrl;
 		if (!string.IsNullOrWhiteSpace(oc.CliPath)) poolOptions.CliPath = oc.CliPath;
 		if (!string.IsNullOrWhiteSpace(oc.Hostname)) poolOptions.Hostname = oc.Hostname!;
 		if (!string.IsNullOrWhiteSpace(oc.ServerPassword)) poolOptions.ServerPassword = oc.ServerPassword;

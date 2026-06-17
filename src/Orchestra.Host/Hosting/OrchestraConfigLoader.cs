@@ -399,8 +399,6 @@ public static class OrchestraConfigLoader
 
 		if (config.OpenCode is { } openCodeConfig)
 		{
-			if (!string.IsNullOrWhiteSpace(openCodeConfig.ServerUrl))
-				options.OpenCode.ServerUrl = openCodeConfig.ServerUrl;
 			if (!string.IsNullOrWhiteSpace(openCodeConfig.CliPath))
 				options.OpenCode.CliPath = openCodeConfig.CliPath;
 			if (!string.IsNullOrWhiteSpace(openCodeConfig.Hostname))
@@ -786,10 +784,7 @@ public class CopilotProviderConfig
 /// </summary>
 public class OpenCodeProviderConfig
 {
-	/// <summary>Base URL of a running OpenCode server to connect to. Supports <c>${VAR}</c>.</summary>
-	public string? ServerUrl { get; set; }
-
-	/// <summary>Path to the <c>opencode</c> binary (else PATH).</summary>
+	/// <summary>Path to the <c>opencode</c> binary (else PATH). The provider always spawns its own server.</summary>
 	public string? CliPath { get; set; }
 
 	/// <summary>Hostname spawned servers bind to (default <c>127.0.0.1</c>).</summary>
