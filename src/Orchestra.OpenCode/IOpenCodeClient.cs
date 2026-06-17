@@ -33,6 +33,9 @@ internal interface IOpenCodeClient : IAsyncDisposable
 
 	/// <summary>Streams the instance-global event bus (<c>GET /event</c>).</summary>
 	IAsyncEnumerable<OpenCodeServerEvent> SubscribeAsync(CancellationToken cancellationToken);
+
+	/// <summary>Lists the agents the server currently knows about (<c>GET /agent</c>).</summary>
+	Task<IReadOnlyList<string>> ListAgentNamesAsync(CancellationToken cancellationToken);
 }
 
 internal interface IOpenCodeClientFactory
@@ -204,6 +207,23 @@ internal sealed class OpenCodeHttpClient : IOpenCodeClient
 		{
 			return null;
 		}
+	}
+
+	public async Task<IReadOnlyList<string>> ListAgentNamesAsync(CancellationToken cancellationToken)
+	{
+		using var resp = await _http.GetAsync("agent", cancellationToken).ConfigureAwait(false);
+		resp.EnsureSuccessStatusCode();
+		using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false));
+		var names = new List<string>();
+		if (doc.RootElement.ValueKind == JsonValueKind.Array)
+		{
+			foreach (var el in doc.RootElement.EnumerateArray())
+			{
+				if (el.ValueKind == JsonValueKind.Object && el.TryGetProperty("name", out var n) && n.GetString() is { } name)
+					names.Add(name);
+			}
+		}
+		return names;
 	}
 
 	public ValueTask DisposeAsync()

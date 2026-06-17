@@ -114,7 +114,7 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(config.Model, nameof(config.Model));
 		var pool = GetActivePool();
-		IAgent agent = new OpenCodeAgent(pool, _options, config, _loggerFactory.CreateLogger<OpenCodeAgent>());
+		IAgent agent = new OpenCodeAgent(pool, _options, _clientFactory, _loggerFactory, config);
 		return Task.FromResult(agent);
 	}
 

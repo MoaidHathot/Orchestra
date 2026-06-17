@@ -153,4 +153,18 @@ public class OpenCodeSessionHandlerTests
 		events[0].PermissionKind.Should().Be("bash");
 		events[0].PermissionTarget.Should().Be("rm -rf /");
 	}
+
+	[Fact]
+	public void TaskTool_EmitsSubagentStartedAndCompleted()
+	{
+		var (handler, reader, _) = Create();
+		handler.Handle(TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t1", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "running", "input": { "subagent_type": "researcher", "description": "find data" } } } }"""));
+		handler.Handle(TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t1", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "completed", "output": "done" } } }"""));
+
+		var events = Drain(reader);
+		events.Should().HaveCount(2);
+		events[0].Type.Should().Be(AgentEventType.SubagentStarted);
+		events[0].SubagentName.Should().Be("researcher");
+		events[1].Type.Should().Be(AgentEventType.SubagentCompleted);
+	}
 }

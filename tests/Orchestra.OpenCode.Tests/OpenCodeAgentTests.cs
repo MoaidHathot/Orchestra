@@ -136,6 +136,41 @@ public class OpenCodeAgentTests
 		OpenCodeAgent.IsDeniedByPolicy("read", "/home/x", ["bash", "write"]).Should().BeFalse();
 	}
 
+	[Fact]
+	public async Task SendAsync_Reasoning_ConnectOnly_FallsBackToPlainPrompt()
+	{
+		// In connect-only mode (ServerUrl set) the adapter can't reconfigure the external server,
+		// so reasoning routes through the plain path: no agent, system prompt inline.
+		var client = new FakeOpenCodeClient(Sid)
+		{
+			Events = [TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }""")],
+		};
+
+		await RunAsync(client, new AgentBuildConfig
+		{
+			Model = "github-copilot/claude-opus-4.8",
+			SystemPrompt = "be terse",
+			ReasoningLevel = ReasoningLevel.High,
+		});
+
+		client.LastPrompt!.Agent.Should().BeNull();
+		client.LastPrompt.System.Should().Be("be terse");
+	}
+
+	[Fact]
+	public async Task SendAsync_NoReasoningNoSubagents_SendsSystemInlineWithoutAgent()
+	{
+		var client = new FakeOpenCodeClient(Sid)
+		{
+			Events = [TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }""")],
+		};
+
+		await RunAsync(client, new AgentBuildConfig { Model = "github-copilot/claude-opus-4.8", SystemPrompt = "plain" });
+
+		client.LastPrompt!.Agent.Should().BeNull();
+		client.LastPrompt.System.Should().Be("plain");
+	}
+
 	private sealed class FakeFactory(FakeOpenCodeClient client) : IOpenCodeClientFactory
 	{
 		public IOpenCodeClient Create(string baseUrl, string? username, string? password) => client;
@@ -175,6 +210,9 @@ public class OpenCodeAgentTests
 		}
 
 		public Task AddMcpAsync(string name, object config, CancellationToken cancellationToken) => Task.CompletedTask;
+
+		public Task<IReadOnlyList<string>> ListAgentNamesAsync(CancellationToken cancellationToken)
+			=> Task.FromResult<IReadOnlyList<string>>(["build", "general"]);
 
 		public async IAsyncEnumerable<OpenCodeServerEvent> SubscribeAsync([EnumeratorCancellation] CancellationToken cancellationToken)
 		{

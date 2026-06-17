@@ -15,8 +15,12 @@ internal sealed partial class OpenCodeAgent : IAgent
 {
 	private readonly OpenCodeServerPool _pool;
 	private readonly OpenCodeAgentPoolOptions _options;
+	private readonly IOpenCodeClientFactory _clientFactory;
+	private readonly ILoggerFactory _loggerFactory;
 	private readonly string _model;
 	private readonly string? _systemPrompt;
+	private readonly ReasoningLevel? _reasoningLevel;
+	private readonly Subagent[] _subagents;
 	private readonly IReadOnlyCollection<IEngineTool> _engineTools;
 	private readonly EngineToolContext? _engineToolContext;
 	private readonly ImageAttachment[] _attachments;
@@ -29,20 +33,25 @@ internal sealed partial class OpenCodeAgent : IAgent
 	public OpenCodeAgent(
 		OpenCodeServerPool pool,
 		OpenCodeAgentPoolOptions options,
-		AgentBuildConfig config,
-		ILogger logger)
+		IOpenCodeClientFactory clientFactory,
+		ILoggerFactory loggerFactory,
+		AgentBuildConfig config)
 	{
 		_pool = pool;
 		_options = options;
+		_clientFactory = clientFactory;
+		_loggerFactory = loggerFactory;
+		_logger = loggerFactory.CreateLogger<OpenCodeAgent>();
 		_model = config.Model;
 		_systemPrompt = config.SystemPrompt;
+		_reasoningLevel = config.ReasoningLevel;
+		_subagents = config.Subagents;
 		_engineTools = config.EngineTools;
 		_engineToolContext = config.EngineToolCtx;
 		_attachments = config.Attachments;
 		_permissionPolicy = config.PermissionPolicy;
 		_humanInput = config.HumanInput;
 		_reporter = config.Reporter;
-		_logger = logger;
 	}
 
 	public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
@@ -57,20 +66,97 @@ internal sealed partial class OpenCodeAgent : IAgent
 		ArgumentException.ThrowIfNullOrWhiteSpace(_model);
 		var modelRef = OpenCodeModelRef.Parse(_model, _options.FallbackProvider);
 
-		IOpenCodeServerLease? lease = null;
+		// Reasoning level + inline sub-agents map onto OpenCode's *spawn-time* agent config
+		// (runtime config patches don't register usable agents), so a step that needs them runs
+		// on a dedicated server spawned with OPENCODE_CONFIG_CONTENT. Plain steps use the pool.
+		// In connect-only mode we can't reconfigure an external server, so those features are
+		// skipped (with a warning) and the step runs plainly.
+		var plan = OpenCodeConfigBuilder.Build(modelRef, _systemPrompt, _reasoningLevel, _subagents, _options.FallbackProvider);
+		var canSpawn = OpenCodeServerBootstrap.Resolve(_options).IsSpawn;
+
+		try
+		{
+			if (plan is not null && canSpawn)
+				return await RunDedicatedAsync(prompt, writer, modelRef, plan, cancellationToken).ConfigureAwait(false);
+
+			if (plan is not null)
+				LogReasoningUnavailableConnectOnly();
+
+			return await RunPooledAsync(prompt, writer, modelRef, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			writer.TryComplete();
+		}
+	}
+
+	/// <summary>Runs a plain step on a pooled, shared OpenCode worker.</summary>
+	private async Task<AgentResult> RunPooledAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, CancellationToken cancellationToken)
+	{
+		var lease = await _pool.AcquireAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			return await RunTurnAsync(lease.Client, lease.ContextHolder, lease.EngineToolMcpUrl, prompt, modelRef, agentName: null, writer, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			lease.ContextHolder.Clear();
+			await lease.DisposeAsync().ConfigureAwait(false);
+		}
+	}
+
+	/// <summary>
+	/// Runs a reasoning/sub-agent step on a dedicated OpenCode server spawned with the step's
+	/// agent config (via <c>OPENCODE_CONFIG_CONTENT</c>), with its own engine-tool MCP bridge.
+	/// </summary>
+	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeAgentPlan plan, CancellationToken cancellationToken)
+	{
+		var configContent = System.Text.Json.JsonSerializer.Serialize(plan.ConfigPatch, OpenCodeJson.Options);
+		var connectPlan = OpenCodeServerBootstrap.Resolve(_options);
+
+		var holder = new EngineToolContextHolder();
+		OpenCodeEngineToolBridge? bridge = null;
+		var process = new OpenCodeServerProcess(connectPlan, _options, _clientFactory, _loggerFactory.CreateLogger<OpenCodeServerProcess>(), configContent);
+		try
+		{
+			if (_engineTools.Count > 0 && _engineToolContext is not null && _options.EngineToolBridgeEnabled)
+				bridge = await OpenCodeEngineToolBridge.StartAsync(holder, _options.Hostname, _loggerFactory, cancellationToken).ConfigureAwait(false);
+
+			await process.StartAsync(cancellationToken).ConfigureAwait(false);
+			return await RunTurnAsync(process.Client, holder, bridge?.McpUrl, prompt, modelRef, plan.PrimaryAgentName, writer, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			holder.Clear();
+			await process.DisposeAsync().ConfigureAwait(false);
+			if (bridge is not null)
+				await bridge.DisposeAsync().ConfigureAwait(false);
+		}
+	}
+
+	/// <summary>
+	/// Shared per-turn logic: bind engine tools, create the session, stream events, send the
+	/// prompt (optionally routed through a named agent), and return the accumulated result.
+	/// </summary>
+	private async Task<AgentResult> RunTurnAsync(
+		IOpenCodeClient client,
+		EngineToolContextHolder holder,
+		string? engineToolMcpUrl,
+		string prompt,
+		OpenCodeModelRef modelRef,
+		string? agentName,
+		ChannelWriter<AgentEvent> writer,
+		CancellationToken cancellationToken)
+	{
 		string? sessionId = null;
 		try
 		{
-			lease = await _pool.AcquireAsync(cancellationToken).ConfigureAwait(false);
-			var client = lease.Client;
-
-			// Bind this step's engine tools so the loopback MCP bridge routes orchestra_* calls
-			// to the right EngineToolContext, then register the bridge with this OpenCode instance.
 			var hasEngineTools = _engineTools.Count > 0 && _engineToolContext is not null && _options.EngineToolBridgeEnabled;
 			if (hasEngineTools)
 			{
-				lease.ContextHolder.Set(_engineTools, _engineToolContext!);
-				await RegisterEngineToolMcpAsync(client, lease, cancellationToken).ConfigureAwait(false);
+				holder.Set(_engineTools, _engineToolContext!);
+				if (engineToolMcpUrl is not null)
+					await RegisterEngineToolMcpAsync(client, engineToolMcpUrl, cancellationToken).ConfigureAwait(false);
 			}
 
 			sessionId = await client.CreateSessionAsync(title: null, cancellationToken).ConfigureAwait(false);
@@ -85,7 +171,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 			using var streamCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 			var pump = PumpEventsAsync(client, sessionId, handler, done, streamCts.Token);
 
-			var request = BuildPromptRequest(prompt, modelRef);
+			var request = BuildPromptRequest(prompt, modelRef, agentName);
 			try
 			{
 				await client.PromptAsync(sessionId, request, cancellationToken).ConfigureAwait(false);
@@ -123,25 +209,17 @@ internal sealed partial class OpenCodeAgent : IAgent
 		}
 		finally
 		{
-			if (lease is not null)
-			{
-				if (sessionId is not null)
-					await lease.Client.DeleteSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
-				lease.ContextHolder.Clear();
-				await lease.DisposeAsync().ConfigureAwait(false);
-			}
-			writer.TryComplete();
+			if (sessionId is not null)
+				await client.DeleteSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
 		}
 	}
 
-	private async Task RegisterEngineToolMcpAsync(IOpenCodeClient client, IOpenCodeServerLease lease, CancellationToken cancellationToken)
+	private async Task RegisterEngineToolMcpAsync(IOpenCodeClient client, string url, CancellationToken cancellationToken)
 	{
-		if (lease.EngineToolMcpUrl is not { } url)
-			return;
 		try
 		{
 			// Idempotent by name: OpenCode overwrites an existing entry, so re-registering each
-			// step is harmless and keeps the worker reusable across steps.
+			// step is harmless and keeps a pooled worker reusable across steps.
 			await client.AddMcpAsync("orchestra-engine-tools", new { type = "remote", url, enabled = true }, cancellationToken).ConfigureAwait(false);
 		}
 		catch (Exception ex)
@@ -182,7 +260,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 		}
 	}
 
-	private OpenCodePromptRequest BuildPromptRequest(string prompt, OpenCodeModelRef modelRef)
+	private OpenCodePromptRequest BuildPromptRequest(string prompt, OpenCodeModelRef modelRef, string? agentName)
 	{
 		var parts = new List<OpenCodePartDto> { OpenCodePartDto.TextPart(prompt) };
 		foreach (var attachment in _attachments)
@@ -211,7 +289,10 @@ internal sealed partial class OpenCodeAgent : IAgent
 		return new OpenCodePromptRequest
 		{
 			Model = new OpenCodeModelDto { ProviderId = modelRef.ProviderId, ModelId = modelRef.ModelId },
-			System = _systemPrompt,
+			// When routing through a per-step agent, the agent's config carries the system
+			// prompt + reasoning; otherwise send the system prompt inline.
+			Agent = agentName,
+			System = agentName is null ? _systemPrompt : null,
 			Parts = parts,
 		};
 	}
@@ -316,4 +397,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 	[LoggerMessage(EventId = 222, Level = LogLevel.Warning, Message = "OpenCode: failed to register engine-tool MCP bridge at {Url}")]
 	private partial void LogMcpRegisterError(Exception ex, string url);
+
+	[LoggerMessage(EventId = 223, Level = LogLevel.Warning, Message = "OpenCode: reasoning level / sub-agents require a spawnable server (OPENCODE_CONFIG_CONTENT); connect-only mode runs the step without them")]
+	private partial void LogReasoningUnavailableConnectOnly();
 }

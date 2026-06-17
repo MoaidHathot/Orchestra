@@ -144,6 +144,14 @@ internal sealed partial class OpenCodeSessionHandler
 			? GetString(state, "status")
 			: null;
 
+		// OpenCode delegates to a sub-agent via the built-in "task" tool; surface those as
+		// Subagent* events (instead of generic tool events) for parity with the Copilot adapter.
+		if (string.Equals(toolName, "task", StringComparison.OrdinalIgnoreCase))
+		{
+			HandleSubagentTask(callId, state, status);
+			return;
+		}
+
 		switch (status)
 		{
 			case "running" or "pending":
@@ -177,6 +185,62 @@ internal sealed partial class OpenCodeSessionHandler
 				}
 				break;
 		}
+	}
+
+	private void HandleSubagentTask(string callId, JsonElement state, string? status)
+	{
+		switch (status)
+		{
+			case "running" or "pending":
+				if (_toolStarted.Add(callId))
+				{
+					Emit(new AgentEvent
+					{
+						Type = AgentEventType.SubagentStarted,
+						ToolCallId = callId,
+						SubagentName = ExtractSubagentName(state),
+					});
+				}
+				break;
+			case "completed" or "error":
+				if (_toolCompleted.Add(callId))
+				{
+					if (status == "completed")
+					{
+						Emit(new AgentEvent
+						{
+							Type = AgentEventType.SubagentCompleted,
+							ToolCallId = callId,
+							SubagentName = ExtractSubagentName(state),
+						});
+					}
+					else
+					{
+						Emit(new AgentEvent
+						{
+							Type = AgentEventType.SubagentFailed,
+							ToolCallId = callId,
+							SubagentName = ExtractSubagentName(state),
+							ErrorMessage = state.TryGetProperty("error", out var e) ? (e.GetString() ?? RawJson(e)) : null,
+						});
+					}
+				}
+				break;
+		}
+	}
+
+	private static string? ExtractSubagentName(JsonElement state)
+	{
+		if (state.ValueKind != JsonValueKind.Object || !state.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.Object)
+			return null;
+		// OpenCode's task tool input names the target agent; field name varies by version.
+		foreach (var key in (string[])["subagent_type", "subagentType", "agent", "agent_type", "name"])
+		{
+			var v = GetString(input, key);
+			if (!string.IsNullOrWhiteSpace(v))
+				return v;
+		}
+		return null;
 	}
 
 	private void HandleMessageUpdated(JsonElement properties)

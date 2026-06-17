@@ -94,18 +94,21 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 	private readonly OpenCodeAgentPoolOptions _options;
 	private readonly IOpenCodeClientFactory _clientFactory;
 	private readonly ILogger _logger;
+	private readonly string? _configContent;
 	private Process? _process;
 
 	public OpenCodeServerProcess(
 		OpenCodeConnectionPlan plan,
 		OpenCodeAgentPoolOptions options,
 		IOpenCodeClientFactory clientFactory,
-		ILogger logger)
+		ILogger logger,
+		string? configContent = null)
 	{
 		_plan = plan;
 		_options = options;
 		_clientFactory = clientFactory;
 		_logger = logger;
+		_configContent = configContent;
 	}
 
 	public string BaseUrl { get; private set; } = string.Empty;
@@ -145,6 +148,12 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 		{
 			psi.Environment["OPENCODE_SERVER_PASSWORD"] = _options.ServerPassword;
 			psi.Environment["OPENCODE_SERVER_USERNAME"] = _options.ServerUsername;
+		}
+		if (!string.IsNullOrWhiteSpace(_configContent))
+		{
+			// Inline config loaded at startup — used to register per-run agents (reasoning +
+			// sub-agents), which the runtime resolves at spawn time (not via runtime PATCH).
+			psi.Environment["OPENCODE_CONFIG_CONTENT"] = _configContent;
 		}
 
 		LogSpawning(_plan.CliPath!, BaseUrl);

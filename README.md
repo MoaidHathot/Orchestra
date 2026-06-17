@@ -673,7 +673,7 @@ A single run may mix providers across steps; the engine opens one per-run worker
 - **Spawn-or-connect**: with no `serverUrl`, the adapter launches `opencode serve` on a loopback port (resolved from `opencode.cliPath`, `ORCHESTRA_OPENCODE_PATH`, or `opencode` on PATH) per run pool. Set `serverUrl` / `ORCHESTRA_OPENCODE_URL` to reuse a running server instead.
 - **Engine tools** (`orchestra_set_status`, `orchestra_complete`, file save/read, `request_user_input`) are exposed to OpenCode via a loopback HTTP MCP bridge that calls back into the per-step `EngineToolContext`. Disable with `opencode.engineToolBridgeEnabled: false`.
 - **Permissions / HITL** map to OpenCode's `permission.updated` events and the `POST /session/{id}/permissions/{id}` reply (auto-approve, deny-list, or human approval).
-- **Known gaps** (vs. the Copilot adapter): inline `subagents` and per-step `reasoningLevel` are not yet mapped to OpenCode (OpenCode governs sub-agents via its own config and reasoning via model selection).
+- **Reasoning + sub-agents**: per-step `reasoningLevel` and inline `subagents` are supported by spawning a *dedicated* OpenCode server for that step, configured (via `OPENCODE_CONFIG_CONTENT`) with a primary agent that carries the system prompt + `reasoningEffort`, plus one `subagent` per `subagents[]` entry (the model delegates via OpenCode's Task tool, scoped by a `permission.task` allow-list). This requires spawn mode; in **connect-only** mode (`opencode.serverUrl` set) these two features are skipped with a warning, since an external server's agents can't be reconfigured.
 
 
 ## MCP Integration
