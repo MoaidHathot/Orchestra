@@ -193,100 +193,52 @@ public partial class CopilotAgent : IAgent
 	/// <see cref="CopilotAgentSwapOptions.CliSwapBudgetPerStep"/>; non-recoverable errors
 	/// short-circuit immediately.
 	/// </summary>
-	private async Task<AgentResult> RunSessionAsync(
+	private Task<AgentResult> RunSessionAsync(
 			string prompt,
 			ChannelWriter<AgentEvent> writer,
 			CancellationToken cancellationToken)
 	{
-		try
-		{
-			string? priorSessionId = null;
-			int swapAttempt = 0;
+		// The provider-neutral swap loop owns the budget loop, failure classification,
+		// swap-event emission, and reporter/metrics signalling. Copilot supplies the
+		// per-attempt work (acquire lease → create/resume session → send → await) and a
+		// Copilot-specific classifier for the SDK's abnormal-shutdown shape.
+		var swapLoop = new AgentSwapLoop(
+			new SwapPolicy(_swapOptions.CliSwapBudgetPerStep, _swapOptions.ResumeOnSwapEnabled),
+			_reporter,
+			_stepName,
+			_loggerFactory.CreateLogger<AgentSwapLoop>(),
+			new PoolSwapMetricsSink(_clientPool));
 
-			while (true)
-			{
-				// Box that the inner attempt updates as soon as CreateSession/Resume succeeds.
-				// We can't rely on the exception's TriggeringSessionId because the fault
-				// broker may have been latched by a SIBLING session (e.g. another concurrent
-				// step on the same CLI) — that id belongs to someone else and must NOT
-				// become this step's resume target.
-				var attemptSessionIdBox = new SessionIdBox();
-
-				try
-				{
-					return await RunOneAttemptAsync(
-						prompt,
-						writer,
-						priorSessionId,
-						swapAttempt,
-						attemptSessionIdBox,
-						cancellationToken).ConfigureAwait(false);
-				}
-				catch (OperationCanceledException)
-				{
-					throw;
-				}
-				catch (Exception ex) when (TryClassifySwapEligibleFailure(ex, out var reason))
-				{
-					// We saw a CLI-class failure. Decide whether we still have budget,
-					// and figure out the recovery mode (resume vs cold restart).
-					var attemptedSessionId = attemptSessionIdBox.Value ?? priorSessionId;
-					if (swapAttempt >= _swapOptions.CliSwapBudgetPerStep)
-					{
-						LogSwapBudgetExhausted(
-							attemptedSessionId ?? "(none)",
-							swapAttempt,
-							_swapOptions.CliSwapBudgetPerStep,
-							reason);
-						throw;
-					}
-
-					swapAttempt++;
-					// resume_locked / resume_session_missing both mean the prior session can't
-					// be replayed (lock contention or the CLI no longer has the session id).
-					// Force a cold restart so we don't loop on the same dead id; everything
-					// else honours the resume policy.
-					var nextMode = reason is "resume_locked" or "resume_session_missing"
-						? SwapMode.ColdRestart
-						: ResolveSwapMode(attemptedSessionId);
-					LogSwapTriggered(
-						attemptedSessionId ?? "(none)",
-						swapAttempt,
-						_swapOptions.CliSwapBudgetPerStep,
-						reason,
-						nextMode);
-
-					EmitSwapEvent(
-						writer,
-						priorSessionId: attemptedSessionId,
-						swapAttempt: swapAttempt,
-						swapBudget: _swapOptions.CliSwapBudgetPerStep,
-						reason: reason,
-						mode: nextMode);
-
-					_clientPool.RecordSwapTriggered();
-					_reporter.ReportCliSwapTriggered(
-						_stepName,
-						priorSessionId: attemptedSessionId,
-						swapAttempt: swapAttempt,
-						swapBudget: _swapOptions.CliSwapBudgetPerStep,
-						reason: reason,
-						mode: nextMode == SwapMode.Resume ? "resume" : "cold_restart");
-
-					priorSessionId = nextMode == SwapMode.Resume ? attemptedSessionId : null;
-					// Loop back for another attempt on a fresh worker.
-				}
-			}
-		}
-		catch (OperationCanceledException)
-		{
-			throw;
-		}
-		finally
-		{
-			writer.TryComplete();
-		}
+		return swapLoop.RunAsync(
+			runAttempt: (ctx, ct) => RunOneAttemptAsync(prompt, writer, ctx.PriorSessionId, ctx.SwapAttempt, ctx.SessionIdBox, ct),
+			writer: writer,
+			providerClassifier: ClassifyAbnormalShutdown,
+			cancellationToken: cancellationToken);
 	}
+
+	/// <summary>
+	/// Copilot-specific swap classifier: an abnormal CLI shutdown (SessionShutdownEvent with
+	/// an error reason) is swap-eligible. All other failure shapes fall through to the swap
+	/// loop's neutral classifier (client-unhealthy / exhausted-retries / transient-upstream).
+	/// </summary>
+	private static bool ClassifyAbnormalShutdown(Exception ex, out string reason)
+	{
+		if (ex is CopilotSessionFailedException { Kind: CopilotSessionFailureKind.AbnormalShutdown })
+		{
+			reason = "abnormal_shutdown";
+			return true;
+		}
+
+		reason = string.Empty;
+		return false;
+	}
+
+	/// <summary>Adapts the Copilot client pool's swap counter to the neutral metrics sink.</summary>
+	private sealed class PoolSwapMetricsSink(ICopilotClientPool pool) : ISwapMetricsSink
+	{
+		public void RecordSwapTriggered() => pool.RecordSwapTriggered();
+	}
+
 
 	/// <summary>
 	/// One pass of acquire-lease → create-or-resume-session → send → await-completion.
@@ -303,7 +255,7 @@ public partial class CopilotAgent : IAgent
 		ChannelWriter<AgentEvent> writer,
 		string? priorSessionId,
 		int swapAttempt,
-		SessionIdBox attemptSessionIdBox,
+		SwapSessionIdBox attemptSessionIdBox,
 		CancellationToken cancellationToken)
 	{
 		ICopilotClientLease? lease = null;
@@ -583,17 +535,6 @@ public partial class CopilotAgent : IAgent
 	}
 
 	/// <summary>
-	/// Recovery mode used by the swap loop. Resume preserves conversation history by
-	/// reattaching to the prior session id on a fresh CLI worker; ColdRestart re-creates
-	/// the session from scratch and re-sends the original prompt.
-	/// </summary>
-	private enum SwapMode
-	{
-		Resume,
-		ColdRestart,
-	}
-
-	/// <summary>
 	/// Outcome of waiting for the SDK's <c>SessionResumeEvent</c> on a resume attempt.
 	/// </summary>
 	private enum ResumeOutcome
@@ -605,11 +546,6 @@ public partial class CopilotAgent : IAgent
 		/// <summary>No resume event observed before the grace window expired; treat as clean (the SDK may simply not emit one when the session has no replayable state).</summary>
 		NoEventObserved,
 	}
-
-	private SwapMode ResolveSwapMode(string? attemptedSessionId)
-		=> _swapOptions.ResumeOnSwapEnabled && !string.IsNullOrEmpty(attemptedSessionId)
-			? SwapMode.Resume
-			: SwapMode.ColdRestart;
 
 	/// <summary>
 	/// Returns true if the exception from <c>ResumeSessionAsync</c> indicates the CLI no
@@ -623,65 +559,6 @@ public partial class CopilotAgent : IAgent
 		var message = ex.Message ?? string.Empty;
 		return message.Contains("Session not found", StringComparison.OrdinalIgnoreCase)
 			|| message.Contains("session.resume failed", StringComparison.OrdinalIgnoreCase);
-	}
-
-	/// <summary>
-	/// Classifies an exception thrown from <see cref="RunOneAttemptAsync"/> as a CLI-class
-	/// swap-eligible failure. Returns true for: <see cref="CopilotClientUnhealthyException"/>
-	/// (transport / fault-broker latched), <see cref="CopilotSessionFailedException"/> with
-	/// the CLI's own "retried N times" exhaustion pattern, <see cref="CopilotSessionFailedException"/>
-	/// with <c>Kind == AbnormalShutdown</c>, and <see cref="CopilotSessionFailedException"/>
-	/// whose <see cref="AgentSessionErrorDetails.TransientUpstreamFailure"/> flag is set
-	/// (5xx broker error, 403/permission_denied identity-handshake error, 429 rate limit).
-	/// Returns false for everything else (validation errors, cancellation, plain model
-	/// errors) so they propagate without being retried.
-	/// </summary>
-	private static bool TryClassifySwapEligibleFailure(Exception ex, out string reason)
-	{
-		reason = string.Empty;
-
-		switch (ex)
-		{
-			case CopilotClientUnhealthyException unhealthy:
-				reason = unhealthy.TriggeringFailureReason switch
-				{
-					"resume_locked" => "resume_locked",
-					"resume_session_missing" => "resume_session_missing",
-					_ => "transport_lost",
-				};
-				return true;
-
-			case CopilotSessionFailedException sessionFailed:
-				if (sessionFailed.Kind == CopilotSessionFailureKind.AbnormalShutdown)
-				{
-					reason = "abnormal_shutdown";
-					return true;
-				}
-				if (sessionFailed.Details?.ExhaustedCliRetries == true)
-				{
-					reason = "cli_exhausted_retries";
-					return true;
-				}
-				if (sessionFailed.Details?.TransientUpstreamFailure == true)
-				{
-					reason = "transient_upstream";
-					return true;
-				}
-				return false;
-
-			default:
-				return false;
-		}
-	}
-
-	/// <summary>
-	/// Small mutable wrapper used to thread the session id of the current attempt back to
-	/// the outer swap loop without throwing it through the exception. The outer loop reads
-	/// <see cref="Value"/> after a failed attempt; resume swaps use it as the resume target.
-	/// </summary>
-	private sealed class SessionIdBox
-	{
-		public string? Value;
 	}
 
 	/// <summary>
@@ -744,25 +621,6 @@ public partial class CopilotAgent : IAgent
 		}
 
 		return ResumeOutcome.AlreadyInUseLocked;
-	}
-
-	private static void EmitSwapEvent(
-		ChannelWriter<AgentEvent> writer,
-		string? priorSessionId,
-		int swapAttempt,
-		int swapBudget,
-		string reason,
-		SwapMode mode)
-	{
-		writer.TryWrite(new AgentEvent
-		{
-			Type = AgentEventType.CliInstanceSwapped,
-			PriorSessionId = priorSessionId,
-			SwapAttempt = swapAttempt,
-			SwapBudget = swapBudget,
-			SwapReason = reason,
-			SwapMode = mode == SwapMode.Resume ? "resume" : "cold_restart",
-		});
 	}
 
 	private async Task ProbeAfterSdkFailureAsync(
@@ -1827,21 +1685,11 @@ public partial class CopilotAgent : IAgent
 		Message = "Session '{SessionId}': SendAsync FAILED (model={Model})")]
 	private partial void LogSessionSendFailed(Exception ex, string sessionId, string model);
 
-	// ── CLI-swap / session-resume recovery logs (EventIds 16–20) ──
+	// ── CLI-swap / session-resume recovery logs (EventIds 18–20) ──
 	//
-	// These logs are the operator-visible signal that the agent recovered (or tried to
-	// recover) from a CLI-class failure mid-step. Information level by design — a swap
-	// is a notable event that should appear in default-verbosity host logs alongside the
-	// existing session-creation pair so a post-mortem can read the recovery sequence
-	// without enabling Debug.
-
-	[LoggerMessage(EventId = 16, Level = LogLevel.Warning,
-		Message = "CLI swap triggered (priorSessionId={PriorSessionId}, attempt={SwapAttempt}/{SwapBudget}, reason={Reason}, mode={Mode})")]
-	private partial void LogSwapTriggered(string priorSessionId, int swapAttempt, int swapBudget, string reason, SwapMode mode);
-
-	[LoggerMessage(EventId = 17, Level = LogLevel.Error,
-		Message = "CLI swap budget exhausted (priorSessionId={PriorSessionId}, attempts={SwapAttempt}/{SwapBudget}, lastReason={Reason}); failing the step")]
-	private partial void LogSwapBudgetExhausted(string priorSessionId, int swapAttempt, int swapBudget, string reason);
+	// The swap-trigger and budget-exhausted logs now live on the shared AgentSwapLoop
+	// (Orchestra.Engine); the resume-specific logs below remain Copilot-only because they
+	// describe SDK SessionResumeEvent handling that has no neutral equivalent.
 
 	[LoggerMessage(EventId = 18, Level = LogLevel.Warning,
 		Message = "Resume session '{SessionId}' remained AlreadyInUse past {GraceWindow}; falling back to cold restart")]
