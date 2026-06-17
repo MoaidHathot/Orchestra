@@ -201,6 +201,8 @@ public sealed class DurableOrchestrationRecoveryTests : IDisposable
 
 		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 			=> throw new InvalidOperationException("Prompt steps should not execute in this test.");
+
+		public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("throwing");
 	}
 
 	private sealed class NullReporterFactory : IOrchestrationReporterFactory

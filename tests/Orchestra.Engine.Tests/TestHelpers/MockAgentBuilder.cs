@@ -285,6 +285,8 @@ public class MockAgentBuilder : AgentBuilder
 		return BuildAgentInternal(config: null);
 	}
 
+	public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("mock");
+
 	public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 	{
 		// Capture config for test assertions and engine tool execution. The shared field

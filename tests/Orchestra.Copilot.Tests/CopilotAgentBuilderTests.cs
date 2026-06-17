@@ -10,6 +10,18 @@ public class CopilotAgentBuilderTests
 	#region BuildAgentAsync
 
 	[Fact]
+	public void GetCapabilities_DeclaresFullSupport()
+	{
+		var builder = new CopilotAgentBuilder();
+
+		var caps = builder.GetCapabilities();
+
+		caps.Provider.Should().Be("copilot");
+		// Copilot is the reference provider — every step-level feature is supported.
+		caps.Should().BeEquivalentTo(AgentProviderCapabilities.All("copilot"));
+	}
+
+	[Fact]
 	public async Task BuildAgentAsync_WithNullModel_ThrowsArgumentException()
 	{
 		// Arrange

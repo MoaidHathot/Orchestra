@@ -118,6 +118,27 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 		return Task.FromResult(agent);
 	}
 
+	/// <summary>
+	/// OpenCode honors the model, system prompt, MCP servers, inline sub-agents, reasoning level,
+	/// working directory, skill directories, engine tools, attachments, human-input routing, and
+	/// permission policy. Copilot-specific knobs (reasoning summary, context tier, GitHub token,
+	/// sandbox policy, system-prompt mode/sections, infinite sessions, excluded tools) are not yet
+	/// supported and are reported as warnings when a step requests them.
+	/// </summary>
+	public override AgentProviderCapabilities GetCapabilities() => new()
+	{
+		Provider = "opencode",
+		Mcps = true,
+		Subagents = true,
+		ReasoningLevel = true,
+		WorkingDirectory = true,
+		SkillDirectories = true,
+		EngineTools = true,
+		Attachments = true,
+		HumanInput = true,
+		PermissionPolicy = true,
+	};
+
 	public override Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)
 	{
 		ArgumentException.ThrowIfNullOrWhiteSpace(Model, nameof(Model));

@@ -405,6 +405,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			// provider so a step's input + output transforms run on one backend.
 			var agentBuilder = _providerRegistry.Resolve(step.Provider ?? context.DefaultProvider);
 
+			// Surface any step configuration the resolved provider cannot honor as a warning,
+			// rather than silently dropping it. Providers declare support via GetCapabilities().
+			WarnOnUnsupportedProviderFeatures(step.Name, agentBuilder, config);
+
 			var agent = await agentBuilder
 				.BuildAgentAsync(config, cancellationToken);
 
@@ -1124,7 +1128,28 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		OrchestrationCompleteStepName = result.OrchestrationCompleteStepName,
 	};
 
+	/// <summary>
+	/// Compares the resolved provider's declared capabilities against the step configuration and
+	/// logs a warning for each requested feature the provider does not support, so silently-dropped
+	/// settings are visible instead of producing surprising behavior.
+	/// </summary>
+	private void WarnOnUnsupportedProviderFeatures(string stepName, AgentBuilder agentBuilder, AgentBuildConfig config)
+	{
+		var capabilities = agentBuilder.GetCapabilities();
+		var unsupported = capabilities.FindUnsupported(config).ToArray();
+		if (unsupported.Length > 0)
+		{
+			LogUnsupportedProviderFeatures(stepName, capabilities.Provider, string.Join(", ", unsupported));
+		}
+	}
+
 	#region Source-Generated Logging
+
+	[LoggerMessage(
+		EventId = 17,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' requests feature(s) [{Features}] that provider '{Provider}' does not support; they will be ignored.")]
+	private partial void LogUnsupportedProviderFeatures(string stepName, string provider, string features);
 
 	[LoggerMessage(
 		EventId = 1,

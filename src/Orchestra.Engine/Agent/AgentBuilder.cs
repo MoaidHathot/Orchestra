@@ -173,6 +173,14 @@ public abstract class AgentBuilder
 	public abstract Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default);
 
 	/// <summary>
+	/// Declares which step-level features this provider supports. The executor compares the result
+	/// against each step's <see cref="AgentBuildConfig"/> and warns when a step requests a feature the
+	/// provider cannot honor — preventing silent configuration drops. Every provider must declare its
+	/// capabilities explicitly so newly added features surface as warnings until they are wired up.
+	/// </summary>
+	public abstract AgentProviderCapabilities GetCapabilities();
+
+	/// <summary>
 	/// Creates a run-scoped resource scope for an orchestration run.
 	/// The returned scope manages shared resources (e.g., CLI client) that all steps
 	/// within a single orchestration run should share. Dispose the scope when the run ends.

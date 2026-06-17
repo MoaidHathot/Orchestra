@@ -30,6 +30,8 @@ internal sealed class FakeAgentBuilder : AgentBuilder
 	public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 		=> Task.FromResult<IAgent>(new FakeAgent(_content, _throws));
 
+	public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("fake");
+
 	private sealed class FakeAgent : IAgent
 	{
 		private readonly string _content;

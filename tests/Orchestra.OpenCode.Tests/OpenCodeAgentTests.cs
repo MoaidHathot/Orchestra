@@ -40,6 +40,35 @@ public class OpenCodeAgentTests
 	}
 
 	[Fact]
+	public void GetCapabilities_DeclaresSupportedAndUnsupportedFeatures()
+	{
+		var builder = new OpenCodeAgentBuilder(NullLoggerFactory.Instance, ConnectOptions(), new FakeFactory(new FakeOpenCodeClient(Sid)));
+
+		var caps = builder.GetCapabilities();
+
+		caps.Provider.Should().Be("opencode");
+		// Honored by the OpenCode adapter.
+		caps.Mcps.Should().BeTrue();
+		caps.Subagents.Should().BeTrue();
+		caps.ReasoningLevel.Should().BeTrue();
+		caps.WorkingDirectory.Should().BeTrue();
+		caps.SkillDirectories.Should().BeTrue();
+		caps.EngineTools.Should().BeTrue();
+		caps.Attachments.Should().BeTrue();
+		caps.HumanInput.Should().BeTrue();
+		caps.PermissionPolicy.Should().BeTrue();
+		// Not yet supported — must be declared false so steps using them get a warning.
+		caps.SandboxPolicy.Should().BeFalse();
+		caps.SystemPromptMode.Should().BeFalse();
+		caps.SystemPromptSections.Should().BeFalse();
+		caps.ExcludedTools.Should().BeFalse();
+		caps.ReasoningSummary.Should().BeFalse();
+		caps.ContextTier.Should().BeFalse();
+		caps.GitHubToken.Should().BeFalse();
+		caps.InfiniteSession.Should().BeFalse();
+	}
+
+	[Fact]
 	public async Task SendAsync_StreamsDeltas_AndReturnsFinalContentAndUsage()
 	{
 		var client = new FakeOpenCodeClient(Sid)

@@ -1953,6 +1953,8 @@ public class OrchestrationExecutorTests
 			_capturedConfigs.Add(config);
 			return BuildAgentAsync(cancellationToken);
 		}
+
+		public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("concurrent-capturing");
 	}
 
 	#endregion

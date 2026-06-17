@@ -912,6 +912,8 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 
 		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 			=> throw new NotImplementedException("TestAgentBuilder should not be invoked for Transform-only orchestrations.");
+
+		public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("test");
 	}
 
 	private sealed class CapturingAgentBuilder : AgentBuilder
@@ -926,6 +928,8 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 			CapturedSystemPrompt = config.SystemPrompt;
 			return BuildAgentAsync(cancellationToken);
 		}
+
+		public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("capturing");
 
 		private sealed class StaticAgent : IAgent
 		{
@@ -954,6 +958,8 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 
 		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 			=> Task.FromResult<IAgent>(new HangingAgent());
+
+		public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("hanging");
 
 		private sealed class HangingAgent : IAgent
 		{

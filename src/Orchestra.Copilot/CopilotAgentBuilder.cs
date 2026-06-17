@@ -102,6 +102,12 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 	public override string? GetRunScopedClientDiagnostic()
 		=> _runScopedClient.Value?.Pool?.Diagnostic;
 
+	/// <summary>
+	/// Copilot is the reference provider and supports every step-level feature.
+	/// </summary>
+	public override AgentProviderCapabilities GetCapabilities()
+		=> AgentProviderCapabilities.All("copilot");
+
 	public override AgentRuntimeStatus GetRuntimeStatus()
 	{
 		CopilotClientPool[] pools;

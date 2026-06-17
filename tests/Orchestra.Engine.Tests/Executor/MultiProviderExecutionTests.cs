@@ -161,6 +161,8 @@ public class MultiProviderExecutionTests
 		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default)
 			=> Task.FromResult<IAgent>(new EchoAgent(name));
 
+		public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All(name);
+
 		public override AgentRuntimeStatus? GetRuntimeStatus() => new(name, _runScopeOpenCount, 0, 0);
 
 		private sealed class Scope(RecordingAgentBuilder owner) : IAsyncDisposable
