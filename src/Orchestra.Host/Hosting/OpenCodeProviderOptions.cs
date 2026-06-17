@@ -41,4 +41,11 @@ public sealed class OpenCodeProviderOptions
 	/// (orchestra_set_status / complete / save_file / read_file / request_user_input). Default true.
 	/// </summary>
 	public bool? EngineToolBridgeEnabled { get; set; }
+
+	/// <summary>
+	/// Maximum in-provider worker swaps a single step may attempt after a transport-class failure.
+	/// OpenCode has no session-resume primitive, so every swap is a cold restart on a fresh server.
+	/// Default 1; 0 disables in-provider swapping (the executor-level fallback still applies).
+	/// </summary>
+	public int? SwapBudgetPerStep { get; set; }
 }

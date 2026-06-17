@@ -67,4 +67,14 @@ public sealed class OpenCodeAgentPoolOptions
 	/// Default true. Set false to run OpenCode steps without Orchestra engine tools.
 	/// </summary>
 	public bool EngineToolBridgeEnabled { get; set; } = true;
+
+	/// <summary>
+	/// Maximum in-provider worker swaps a single step may attempt after a transport-class
+	/// failure (event-stream loss or a transient upstream session error). OpenCode has no
+	/// session-resume primitive, so every swap is a cold restart on a fresh server: the failed
+	/// attempt's session is deleted and the original prompt is re-sent. Default <c>1</c> — one
+	/// fresh-worker retry clears most transient transport faults; <c>0</c> disables in-provider
+	/// swapping (the executor-level fallback still applies).
+	/// </summary>
+	public int SwapBudgetPerStep { get; set; } = 1;
 }

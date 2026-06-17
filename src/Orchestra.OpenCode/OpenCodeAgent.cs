@@ -84,25 +84,33 @@ internal sealed partial class OpenCodeAgent : IAgent
 			|| !string.IsNullOrWhiteSpace(_workingDirectory)
 			|| _skillDirectories.Length > 0;
 
-		try
-		{
-			return needsDedicated
-				? await RunDedicatedAsync(prompt, writer, modelRef, plan, cancellationToken).ConfigureAwait(false)
-				: await RunPooledAsync(prompt, writer, modelRef, cancellationToken).ConfigureAwait(false);
-		}
-		finally
-		{
-			writer.TryComplete();
-		}
+		// OpenCode has no session-resume primitive, so swaps are cold-restart only: a
+		// transport-class failure abandons the worker and re-runs the turn on a fresh one.
+		// The shared loop owns the budget, classification, swap events, and reporter signal.
+		var swapLoop = new AgentSwapLoop(
+			SwapPolicy.ColdRestartOnly(_options.SwapBudgetPerStep),
+			_reporter,
+			_stepName,
+			_loggerFactory.CreateLogger<AgentSwapLoop>());
+
+		return await swapLoop.RunAsync(
+			runAttempt: (ctx, ct) => needsDedicated
+				? RunDedicatedAsync(prompt, writer, modelRef, plan, ctx.SessionIdBox, ct)
+				: RunPooledAsync(prompt, writer, modelRef, ctx.SessionIdBox, ct),
+			writer: writer,
+			cancellationToken: cancellationToken).ConfigureAwait(false);
 	}
 
+	/// <summary>Step name for swap reporting: the engine-tool step name, else the model.</summary>
+	private string _stepName => _engineToolContext?.StepName ?? _model;
+
 	/// <summary>Runs a plain step on a pooled, shared OpenCode worker.</summary>
-	private async Task<AgentResult> RunPooledAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, CancellationToken cancellationToken)
+	private async Task<AgentResult> RunPooledAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, SwapSessionIdBox sessionIdBox, CancellationToken cancellationToken)
 	{
 		var lease = await _pool.AcquireAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			return await RunTurnAsync(lease.Client, lease.ContextHolder, lease.EngineToolMcpUrl, prompt, modelRef, agentName: null, writer, cancellationToken).ConfigureAwait(false);
+			return await RunTurnAsync(lease.Client, lease.ContextHolder, lease.EngineToolMcpUrl, prompt, modelRef, agentName: null, sessionIdBox, writer, cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -117,7 +125,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 	/// skill directories under the server's working directory, spawns the server pointed at both,
 	/// and runs the turn (optionally through the per-step agent), with its own engine-tool bridge.
 	/// </summary>
-	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeStepPlan plan, CancellationToken cancellationToken)
+	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeStepPlan plan, SwapSessionIdBox sessionIdBox, CancellationToken cancellationToken)
 	{
 		var workspace = OpenCodeWorkspaceBuilder.Prepare(plan.HasConfig ? plan.Config : null, _workingDirectory, _skillDirectories, _runArtifactDirectory);
 		var connectPlan = OpenCodeServerBootstrap.Resolve(_options);
@@ -131,7 +139,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 				bridge = await OpenCodeEngineToolBridge.StartAsync(holder, _options.Hostname, _loggerFactory, cancellationToken).ConfigureAwait(false);
 
 			await process.StartAsync(cancellationToken).ConfigureAwait(false);
-			return await RunTurnAsync(process.Client, holder, bridge?.McpUrl, prompt, modelRef, plan.PrimaryAgentName, writer, cancellationToken).ConfigureAwait(false);
+			return await RunTurnAsync(process.Client, holder, bridge?.McpUrl, prompt, modelRef, plan.PrimaryAgentName, sessionIdBox, writer, cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -154,6 +162,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 		string prompt,
 		OpenCodeModelRef modelRef,
 		string? agentName,
+		SwapSessionIdBox sessionIdBox,
 		ChannelWriter<AgentEvent> writer,
 		CancellationToken cancellationToken)
 	{
@@ -169,6 +178,8 @@ internal sealed partial class OpenCodeAgent : IAgent
 			}
 
 			sessionId = await client.CreateSessionAsync(title: null, cancellationToken).ConfigureAwait(false);
+			// Tell the swap loop this attempt's session id (for swap-event attribution).
+			sessionIdBox.Value = sessionId;
 			LogSessionCreated(sessionId, modelRef.ToString());
 
 			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -413,6 +413,8 @@ public static class OrchestraConfigLoader
 				options.OpenCode.StartupTimeoutSeconds = openCodeConfig.StartupTimeoutSeconds.Value;
 			if (openCodeConfig.EngineToolBridgeEnabled.HasValue)
 				options.OpenCode.EngineToolBridgeEnabled = openCodeConfig.EngineToolBridgeEnabled.Value;
+			if (openCodeConfig.SwapBudgetPerStep.HasValue)
+				options.OpenCode.SwapBudgetPerStep = openCodeConfig.SwapBudgetPerStep.Value;
 		}
 
 		if (config.Hooks is { Length: > 0 })
@@ -804,6 +806,9 @@ public class OpenCodeProviderConfig
 
 	/// <summary>Whether the engine-tool MCP bridge is enabled (default true).</summary>
 	public bool? EngineToolBridgeEnabled { get; set; }
+
+	/// <summary>Max in-provider cold-restart swaps per step after a transport failure (default 1).</summary>
+	public int? SwapBudgetPerStep { get; set; }
 }
 
 /// <summary>
