@@ -347,7 +347,12 @@ export interface ServerStatus {
   orchestrationCount: number;
   activeTriggers: number;
   runningExecutions: number;
+  // Singular agentRuntime is the default provider's status (back-compat); agentRuntimes
+  // lists every registered provider (copilot, opencode, …) for multi-provider hosts.
   agentRuntime?: AgentRuntimeStatus | null;
+  agentRuntimes?: AgentRuntimeStatus[];
+  defaultProvider?: string;
+  providers?: string[];
 }
 
 export interface AgentRuntimeStatus {

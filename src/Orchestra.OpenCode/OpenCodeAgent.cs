@@ -69,18 +69,27 @@ internal sealed partial class OpenCodeAgent : IAgent
 		// Reasoning level + inline sub-agents map onto OpenCode's *spawn-time* agent config
 		// (runtime config patches don't register usable agents), so a step that needs them runs
 		// on a dedicated server spawned with OPENCODE_CONFIG_CONTENT. Plain steps use the pool.
-		// In connect-only mode we can't reconfigure an external server, so those features are
-		// skipped (with a warning) and the step runs plainly.
+		// In connect-only mode we cannot reconfigure an external server's agents, so a step that
+		// requires reasoning/sub-agents fails fast rather than silently running without them.
 		var plan = OpenCodeConfigBuilder.Build(modelRef, _systemPrompt, _reasoningLevel, _subagents, _options.FallbackProvider);
 		var canSpawn = OpenCodeServerBootstrap.Resolve(_options).IsSpawn;
 
 		try
 		{
-			if (plan is not null && canSpawn)
-				return await RunDedicatedAsync(prompt, writer, modelRef, plan, cancellationToken).ConfigureAwait(false);
-
 			if (plan is not null)
-				LogReasoningUnavailableConnectOnly();
+			{
+				if (!canSpawn)
+				{
+					throw new OpenCodeSessionFailedException(
+						"This step requires a reasoning level and/or inline sub-agents, which the OpenCode provider " +
+						"can only apply on a server it spawns (via OPENCODE_CONFIG_CONTENT). The provider is in " +
+						"connect-only mode (opencode.serverUrl / ORCHESTRA_OPENCODE_URL is set), so an external " +
+						"server's agents cannot be reconfigured. Remove serverUrl to let Orchestra spawn the server, " +
+						"or remove reasoningLevel/subagents from the step.");
+				}
+
+				return await RunDedicatedAsync(prompt, writer, modelRef, plan, cancellationToken).ConfigureAwait(false);
+			}
 
 			return await RunPooledAsync(prompt, writer, modelRef, cancellationToken).ConfigureAwait(false);
 		}
@@ -397,7 +406,4 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 	[LoggerMessage(EventId = 222, Level = LogLevel.Warning, Message = "OpenCode: failed to register engine-tool MCP bridge at {Url}")]
 	private partial void LogMcpRegisterError(Exception ex, string url);
-
-	[LoggerMessage(EventId = 223, Level = LogLevel.Warning, Message = "OpenCode: reasoning level / sub-agents require a spawnable server (OPENCODE_CONFIG_CONTENT); connect-only mode runs the step without them")]
-	private partial void LogReasoningUnavailableConnectOnly();
 }

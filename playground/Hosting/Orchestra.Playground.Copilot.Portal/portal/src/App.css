@@ -1805,6 +1805,12 @@
       align-items: center;
       gap: 6px;
     }
+    .status-bar-item .status-bar-provider {
+      text-transform: uppercase;
+      font-size: 0.7em;
+      letter-spacing: 0.04em;
+      opacity: 0.65;
+    }
     .status-bar-item .status-indicator {
       width: 8px;
       height: 8px;

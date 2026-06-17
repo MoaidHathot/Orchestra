@@ -111,15 +111,22 @@ export default function StatusBar({ status, onlineStatus }: Props): React.JSX.El
           <span>{status.runningExecutions} running</span>
         </div>
       )}
-      {status.agentRuntime && (
+      {(status.agentRuntimes && status.agentRuntimes.length > 0
+        ? status.agentRuntimes
+        : status.agentRuntime
+          ? [status.agentRuntime]
+          : []
+      ).map((runtime) => (
         <div
+          key={runtime.provider}
           className="status-bar-item"
-          title={`${status.agentRuntime.activePools} active ${status.agentRuntime.provider} pool(s)`}
+          title={`${runtime.activePools} active ${runtime.provider} pool(s)`}
         >
-          <span>{status.agentRuntime.cliInstances} CLI</span>
-          <span>{status.agentRuntime.activeSessions} sessions</span>
+          <span className="status-bar-provider">{runtime.provider}</span>
+          <span>{runtime.cliInstances} CLI</span>
+          <span>{runtime.activeSessions} sessions</span>
         </div>
-      )}
+      ))}
     </div>
   );
 }

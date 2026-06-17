@@ -137,24 +137,30 @@ public class OpenCodeAgentTests
 	}
 
 	[Fact]
-	public async Task SendAsync_Reasoning_ConnectOnly_FallsBackToPlainPrompt()
+	public async Task SendAsync_Reasoning_ConnectOnly_Throws()
 	{
 		// In connect-only mode (ServerUrl set) the adapter can't reconfigure the external server,
-		// so reasoning routes through the plain path: no agent, system prompt inline.
+		// so a step that requires reasoning/sub-agents must fail fast rather than run plainly.
 		var client = new FakeOpenCodeClient(Sid)
 		{
 			Events = [TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }""")],
 		};
 
-		await RunAsync(client, new AgentBuildConfig
+		var builder = new OpenCodeAgentBuilder(NullLoggerFactory.Instance, ConnectOptions(), new FakeFactory(client));
+		await using var scope = await builder.CreateRunScopeAsync();
+		var agent = await builder.BuildAgentAsync(new AgentBuildConfig
 		{
 			Model = "github-copilot/claude-opus-4.8",
 			SystemPrompt = "be terse",
 			ReasoningLevel = ReasoningLevel.High,
 		});
 
-		client.LastPrompt!.Agent.Should().BeNull();
-		client.LastPrompt.System.Should().Be("be terse");
+		var task = agent.SendAsync("go", CancellationToken.None);
+		await foreach (var _ in task) { }
+		var act = async () => await task.GetResultAsync();
+
+		await act.Should().ThrowAsync<OpenCodeSessionFailedException>().WithMessage("*connect-only*");
+		client.LastPrompt.Should().BeNull("the step should fail before prompting");
 	}
 
 	[Fact]

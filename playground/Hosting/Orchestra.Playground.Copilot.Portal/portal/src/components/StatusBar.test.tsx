@@ -46,4 +46,23 @@ describe('StatusBar', () => {
     expect(screen.getByText('5 sessions')).toBeInTheDocument();
     expect(screen.getByTitle('2 active copilot pool(s)')).toBeInTheDocument();
   });
+
+  it('renders one item per provider when agentRuntimes is present', () => {
+    render(
+      <StatusBar
+        status={makeStatus({
+          agentRuntimes: [
+            { provider: 'copilot', activePools: 1, cliInstances: 2, activeSessions: 3 },
+            { provider: 'opencode', activePools: 1, cliInstances: 1, activeSessions: 1 },
+          ],
+        })}
+        onlineStatus={onlineStatus}
+      />,
+    );
+
+    expect(screen.getByText('copilot')).toBeInTheDocument();
+    expect(screen.getByText('opencode')).toBeInTheDocument();
+    expect(screen.getByTitle('1 active copilot pool(s)')).toBeInTheDocument();
+    expect(screen.getByTitle('1 active opencode pool(s)')).toBeInTheDocument();
+  });
 });

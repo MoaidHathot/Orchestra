@@ -661,6 +661,9 @@ function App(): React.JSX.Element {
           activeTriggers: status.activeTriggers || 0,
           runningExecutions: status.runningExecutions || 0,
           agentRuntime: status.agentRuntime ?? null,
+          agentRuntimes: status.agentRuntimes ?? undefined,
+          defaultProvider: status.defaultProvider,
+          providers: status.providers,
         });
       } catch (err) {
         console.error('Failed to fetch server status:', err);
