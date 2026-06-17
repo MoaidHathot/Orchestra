@@ -51,6 +51,13 @@ public class OrchestrationExecutionContext
 	public string? DefaultModel { get; init; }
 
 	/// <summary>
+	/// Default agent provider from the orchestration. Applied to Prompt steps that don't
+	/// define their own provider. When null, the host's configured default provider is used.
+	/// Wired from <see cref="Orchestration.DefaultProvider"/>.
+	/// </summary>
+	public string? DefaultProvider { get; init; }
+
+	/// <summary>
 	/// Default per-step timeout from the orchestration.
 	/// Applied to steps that don't define their own TimeoutSeconds.
 	/// When null, no default per-step timeout is applied.

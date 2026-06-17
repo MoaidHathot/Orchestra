@@ -120,6 +120,21 @@ public class OrchestrationHostOptions
 	public CopilotProviderOptions Copilot { get; set; } = new();
 
 	/// <summary>
+	/// OpenCode-provider-specific runtime settings (server URL / binary path, fallback
+	/// provider, engine-tool bridge). Applied at <c>OpenCodeAgentBuilder</c> construction time
+	/// by the composition root. Leave empty to use the built-in defaults.
+	/// </summary>
+	public OpenCodeProviderOptions OpenCode { get; set; } = new();
+
+	/// <summary>
+	/// Default agent provider for orchestrations that do not declare their own
+	/// <c>defaultProvider</c> (and steps that do not declare a <c>provider</c>). One of the
+	/// registered provider names, e.g. <c>"copilot"</c> or <c>"opencode"</c>. When null, the
+	/// composition root's built-in default (<c>copilot</c>) is used.
+	/// </summary>
+	public string? Provider { get; set; }
+
+	/// <summary>
 	/// Optional global lifecycle hooks applied to all orchestrations executed by this host.
 	/// </summary>
 	public HookDefinition[] Hooks { get; set; } = [];

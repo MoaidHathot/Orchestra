@@ -4,6 +4,7 @@
     <Project Path="src/Orchestra.Cli/Orchestra.Cli.csproj" />
     <Project Path="src/Orchestra.Client/Orchestra.Client.csproj" />
     <Project Path="src/Orchestra.Copilot/Orchestra.Copilot.csproj" />
+    <Project Path="src/Orchestra.OpenCode/Orchestra.OpenCode.csproj" />
     <Project Path="src/Orchestra.Host/Orchestra.Host.csproj" />
     <Project Path="src/Orchestra.ProcessHost/Orchestra.ProcessHost.csproj" />
     <Project Path="src/Orchestra.Server/Orchestra.Server.csproj" />
@@ -19,6 +20,7 @@
     <Project Path="tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj" />
     <Project Path="tests/Orchestra.Engine.Tests/Orchestra.Engine.Tests.csproj" />
     <Project Path="tests/Orchestra.Copilot.Tests/Orchestra.Copilot.Tests.csproj" />
+    <Project Path="tests/Orchestra.OpenCode.Tests/Orchestra.OpenCode.Tests.csproj" />
     <Project Path="tests/Orchestra.Host.Tests/Orchestra.Host.Tests.csproj" />
     <Project Path="tests/Orchestra.ProcessHost.Tests/Orchestra.ProcessHost.Tests.csproj" />
     <Project Path="tests/Orchestra.Terminal.Tests/Orchestra.Terminal.Tests.csproj" />

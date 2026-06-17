@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Orchestra.Engine\Orchestra.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <!-- Engine-tool bridge: a loopback HTTP MCP endpoint the OpenCode server calls back into
+         so orchestra_set_status / complete / save_file / read_file / request_user_input run
+         against the per-step EngineToolContext. -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Orchestra.OpenCode.Tests" />
+  </ItemGroup>
+
+</Project>

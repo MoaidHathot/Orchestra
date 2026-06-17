@@ -6,7 +6,7 @@ namespace Orchestra.Engine;
 public partial class OrchestrationExecutor
 {
 	private readonly IScheduler _scheduler;
-	private readonly AgentBuilder _agentBuilder;
+	private readonly IAgentProviderRegistry _providerRegistry;
 	private readonly IOrchestrationReporter _reporter;
 	private readonly IPromptFormatter _promptFormatter;
 	private readonly ILoggerFactory _loggerFactory;
@@ -21,6 +21,12 @@ public partial class OrchestrationExecutor
 	private readonly string? _serverUrl;
 	private readonly HookDefinition[] _globalHooks;
 
+	/// <summary>
+	/// Single-provider convenience constructor. Wraps <paramref name="agentBuilder"/> in a
+	/// <see cref="SingleAgentProviderRegistry"/> so every step resolves to the one builder —
+	/// the historical behaviour. Prefer the <see cref="IAgentProviderRegistry"/> overload for
+	/// multi-provider hosts that want per-step / per-orchestration provider selection.
+	/// </summary>
 	public OrchestrationExecutor(
 		IScheduler scheduler,
 		AgentBuilder agentBuilder,
@@ -38,9 +44,46 @@ public partial class OrchestrationExecutor
 		string? serverUrl = null,
 		IPendingInputStore? pendingInputStore = null,
 		IHumanInputWaiter? humanInputWaiter = null)
+		: this(
+			scheduler,
+			new SingleAgentProviderRegistry(agentBuilder),
+			reporter,
+			loggerFactory,
+			promptFormatter,
+			runStore,
+			checkpointStore,
+			stepExecutorRegistry,
+			engineToolRegistry,
+			mcpResolver,
+			childLauncher,
+			globalHooks,
+			dataPath,
+			serverUrl,
+			pendingInputStore,
+			humanInputWaiter)
+	{
+	}
+
+	public OrchestrationExecutor(
+		IScheduler scheduler,
+		IAgentProviderRegistry providerRegistry,
+		IOrchestrationReporter reporter,
+		ILoggerFactory loggerFactory,
+		IPromptFormatter? promptFormatter = null,
+		IRunStore? runStore = null,
+		ICheckpointStore? checkpointStore = null,
+		StepExecutorRegistry? stepExecutorRegistry = null,
+		EngineToolRegistry? engineToolRegistry = null,
+		IMcpResolver? mcpResolver = null,
+		IChildOrchestrationLauncher? childLauncher = null,
+		HookDefinition[]? globalHooks = null,
+		string? dataPath = null,
+		string? serverUrl = null,
+		IPendingInputStore? pendingInputStore = null,
+		IHumanInputWaiter? humanInputWaiter = null)
 	{
 		_scheduler = scheduler;
-		_agentBuilder = agentBuilder;
+		_providerRegistry = providerRegistry;
 		_reporter = reporter;
 		_promptFormatter = promptFormatter ?? DefaultPromptFormatter.Instance;
 		_loggerFactory = loggerFactory;
@@ -61,7 +104,7 @@ public partial class OrchestrationExecutor
 		}
 		else
 		{
-			var promptExecutor = new PromptExecutor(agentBuilder, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>(), _engineToolRegistry, mcpResolver,
+			var promptExecutor = new PromptExecutor(_providerRegistry, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>(), _engineToolRegistry, mcpResolver,
 				pendingInputStore: _pendingInputStore,
 				humanInputWaiter: _humanInputWaiter,
 				serverUrl: _serverUrl);
@@ -79,10 +122,89 @@ public partial class OrchestrationExecutor
 			{
 				_stepExecutorRegistry.Register(new OrchestrationStepExecutor(
 					childLauncher,
-					agentBuilder,
+					_providerRegistry,
 					reporter,
 					loggerFactory.CreateLogger<OrchestrationStepExecutor>()));
 			}
+		}
+	}
+
+	/// <summary>
+	/// Resolves the distinct set of agent builders whose run scopes must be opened for this
+	/// run: one per provider referenced by a Prompt step, plus the host default provider when
+	/// this executor will itself run a transform agent (a trigger input handler, or a
+	/// parent-supplied child-orchestration input handler — both arrive as
+	/// <c>preExecutionParameterTransform</c> and execute inside this run scope). Child
+	/// orchestrations open their own scopes, so an invocation step in this orchestration does
+	/// not require a scope here. Pure non-agent orchestrations open zero scopes.
+	/// Reference-distinct so aliases collapse to one scope.
+	/// </summary>
+	private List<AgentBuilder> ResolveRunScopeBuilders(Orchestration orchestration, bool needsHostDefaultProvider)
+	{
+		var seen = new HashSet<AgentBuilder>();
+		var builders = new List<AgentBuilder>();
+
+		void Add(string? providerName)
+		{
+			var builder = _providerRegistry.Resolve(providerName);
+			if (seen.Add(builder))
+				builders.Add(builder);
+		}
+
+		foreach (var step in orchestration.Steps)
+		{
+			if (step is PromptOrchestrationStep prompt)
+				Add(prompt.Provider ?? orchestration.DefaultProvider);
+		}
+
+		// Trigger / child-orchestration input-handler transforms run inside THIS scope on the
+		// host default provider (a small JSON-shaping call). We do NOT open the default scope
+		// unconditionally: an all-OpenCode orchestration on a Copilot-default host must not
+		// spin up (or fail to spin up) an unused Copilot pool.
+		if (needsHostDefaultProvider)
+			Add(null);
+
+		return builders;
+	}
+
+	/// <summary>
+	/// Aggregates the run-scoped client diagnostic across every registered provider builder
+	/// for the AsyncLocal-flow trace logs. Best-effort; null diagnostics render as "null".
+	/// </summary>
+	private string RunScopedClientDiagnostics()
+		=> string.Join("; ", _providerRegistry.Builders.Select(b => b.GetRunScopedClientDiagnostic() ?? "null"));
+
+	/// <summary>
+	/// Disposes a set of run scopes (one per provider) as a single <see cref="IAsyncDisposable"/>.
+	/// Disposal is best-effort across all scopes: a fault disposing one scope does not prevent
+	/// the others from being disposed; the first fault is rethrown after all have been attempted.
+	/// </summary>
+	private sealed class CompositeAsyncDisposable : IAsyncDisposable
+	{
+		private readonly IReadOnlyList<IAsyncDisposable> _disposables;
+
+		public CompositeAsyncDisposable(IReadOnlyList<IAsyncDisposable> disposables)
+		{
+			_disposables = disposables;
+		}
+
+		public async ValueTask DisposeAsync()
+		{
+			Exception? first = null;
+			foreach (var disposable in _disposables)
+			{
+				try
+				{
+					await disposable.DisposeAsync().ConfigureAwait(false);
+				}
+				catch (Exception ex)
+				{
+					first ??= ex;
+				}
+			}
+
+			if (first is not null)
+				System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
 		}
 	}
 
@@ -155,11 +277,26 @@ public partial class OrchestrationExecutor
 		var runId = retryMetadata?.OverrideRunId ?? checkpoint?.RunId ?? executionIdOverride ?? Guid.NewGuid().ToString("N")[..12];
 		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
 
-		// Create a run-scoped client for isolation: each orchestration run gets its own
-		// CLI process. All steps within this run share the client (each gets its own session).
-		// The client is disposed when the run ends, preventing stale connections across runs.
+		// Create run-scoped agent pools for isolation: each orchestration run gets its own
+		// per-provider worker pool(s). All steps within this run share the pool for their
+		// provider (each step gets its own session). Pools are disposed when the run ends.
+		//
+		// Multi-provider: a single run may mix providers across steps, so we open one run
+		// scope per distinct provider the run will actually use. The CreateRunScopeAsync calls
+		// MUST be made synchronously here (before the first await) so each builder's AsyncLocal
+		// run-scope holder propagates to the step-execution continuation; calling them inside a
+		// nested async helper would lose the holder. We therefore start all scopes synchronously,
+		// collect their hot tasks, and only then await them together.
 		LogRunScopeAboutToCreate(runId, Environment.CurrentManagedThreadId);
-		await using var runScope = await _agentBuilder.CreateRunScopeAsync(orchestration.AgentPool, cancellationToken).ConfigureAwait(false);
+		var runScopeBuilders = ResolveRunScopeBuilders(orchestration, needsHostDefaultProvider: preExecutionParameterTransform is not null);
+		var runScopeStartTasks = new List<Task<IAsyncDisposable>>(runScopeBuilders.Count);
+		foreach (var scopeBuilder in runScopeBuilders)
+		{
+			// Synchronous call installs the builder's AsyncLocal holder in THIS execution context.
+			runScopeStartTasks.Add(scopeBuilder.CreateRunScopeAsync(orchestration.AgentPool, cancellationToken));
+		}
+		var openedRunScopes = await Task.WhenAll(runScopeStartTasks).ConfigureAwait(false);
+		await using var runScope = new CompositeAsyncDisposable(openedRunScopes);
 		LogRunScopeReady(runId, Environment.CurrentManagedThreadId);
 
 		// Pre-execution parameter transform (e.g. trigger InputHandlerPrompt) runs INSIDE the
@@ -224,6 +361,7 @@ public partial class OrchestrationExecutor
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
 			DefaultModel = orchestration.DefaultModel,
+			DefaultProvider = orchestration.DefaultProvider,
 			DefaultStepTimeoutSeconds = orchestration.DefaultStepTimeoutSeconds,
 			DefaultEnableTools = orchestration.DefaultEnableTools,
 			DefaultPermissionPolicy = orchestration.DefaultPermissionPolicy,
@@ -424,12 +562,12 @@ public partial class OrchestrationExecutor
 				return;
 
 			LogStepLaunchScheduled(stepName, Environment.CurrentManagedThreadId);
-			LogAsyncLocalDiagnostic("before-StartNew", _agentBuilder.GetRunScopedClientDiagnostic() ?? "null", Environment.CurrentManagedThreadId);
+			LogAsyncLocalDiagnostic("before-StartNew", RunScopedClientDiagnostics(), Environment.CurrentManagedThreadId);
 
 			_ = Task.Factory.StartNew(async () =>
 			{
 				LogStepTaskStarted(stepName, Environment.CurrentManagedThreadId);
-				LogAsyncLocalDiagnostic("inside-StartNew", _agentBuilder.GetRunScopedClientDiagnostic() ?? "null", Environment.CurrentManagedThreadId);
+				LogAsyncLocalDiagnostic("inside-StartNew", RunScopedClientDiagnostics(), Environment.CurrentManagedThreadId);
 				var step = allSteps[stepName];
 				var stepExecutor = _stepExecutorRegistry.Resolve(step.Type);
 				var stepStartedAt = DateTimeOffset.UtcNow;

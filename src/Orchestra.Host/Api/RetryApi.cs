@@ -54,7 +54,7 @@ public static partial class RetryApi
 			string orchestrationName,
 			string runId,
 			OrchestrationRegistry registry,
-			AgentBuilder agentBuilder,
+			IAgentProviderRegistry providerRegistry,
 			IScheduler scheduler,
 			ILoggerFactory loggerFactory,
 			ICheckpointStore checkpointStore,
@@ -242,7 +242,7 @@ public static partial class RetryApi
 				"retry");
 
 			var executor = new OrchestrationExecutor(
-				scheduler, agentBuilder, reporter, loggerFactory,
+				scheduler, providerRegistry, reporter, loggerFactory,
 				runStore: runStore,
 				checkpointStore: checkpointStore,
 				engineToolRegistry: engineToolRegistry,

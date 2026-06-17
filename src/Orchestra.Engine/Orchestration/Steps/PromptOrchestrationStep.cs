@@ -7,6 +7,15 @@ public class PromptOrchestrationStep : OrchestrationStep
 	public string? InputHandlerPrompt { get; init; }
 	public string? OutputHandlerPrompt { get; init; }
 	public required string Model { get; init; }
+
+	/// <summary>
+	/// Optional agent provider for this step (for example <c>"copilot"</c> or
+	/// <c>"opencode"</c>). When null, falls back to the orchestration's
+	/// <see cref="Orchestration.DefaultProvider"/>, then to the host's configured default
+	/// provider. Lets a single orchestration mix providers across steps.
+	/// </summary>
+	public string? Provider { get; init; }
+
 	public ReasoningLevel? ReasoningLevel { get; init; }
 
 	/// <summary>

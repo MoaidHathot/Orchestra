@@ -392,6 +392,31 @@ public static class OrchestraConfigLoader
 				options.Copilot.UseLoggedInUser = copilotConfig.UseLoggedInUser.Value;
 		}
 
+		// Default agent provider (top-level "provider" or "defaultProvider").
+		var providerDefault = config.Provider ?? config.DefaultProvider;
+		if (!string.IsNullOrWhiteSpace(providerDefault))
+			options.Provider = providerDefault.Trim();
+
+		if (config.OpenCode is { } openCodeConfig)
+		{
+			if (!string.IsNullOrWhiteSpace(openCodeConfig.ServerUrl))
+				options.OpenCode.ServerUrl = openCodeConfig.ServerUrl;
+			if (!string.IsNullOrWhiteSpace(openCodeConfig.CliPath))
+				options.OpenCode.CliPath = openCodeConfig.CliPath;
+			if (!string.IsNullOrWhiteSpace(openCodeConfig.Hostname))
+				options.OpenCode.Hostname = openCodeConfig.Hostname;
+			if (!string.IsNullOrWhiteSpace(openCodeConfig.ServerPassword))
+				options.OpenCode.ServerPassword = openCodeConfig.ServerPassword;
+			if (!string.IsNullOrWhiteSpace(openCodeConfig.ServerUsername))
+				options.OpenCode.ServerUsername = openCodeConfig.ServerUsername;
+			if (!string.IsNullOrWhiteSpace(openCodeConfig.FallbackProvider))
+				options.OpenCode.FallbackProvider = openCodeConfig.FallbackProvider;
+			if (openCodeConfig.StartupTimeoutSeconds.HasValue)
+				options.OpenCode.StartupTimeoutSeconds = openCodeConfig.StartupTimeoutSeconds.Value;
+			if (openCodeConfig.EngineToolBridgeEnabled.HasValue)
+				options.OpenCode.EngineToolBridgeEnabled = openCodeConfig.EngineToolBridgeEnabled.Value;
+		}
+
 		if (config.Hooks is { Length: > 0 })
 		{
 			HookDefinitionResolver.ApplyBaseDirectory(config.Hooks, configDirectory);
@@ -521,6 +546,21 @@ public class OrchestraConfigFile
 	/// the built-in defaults defined in <c>CopilotAgentPoolOptions</c>.
 	/// </summary>
 	public CopilotProviderConfig? Copilot { get; set; }
+
+	/// <summary>
+	/// OpenCode-provider-specific runtime settings. See <see cref="OpenCodeProviderOptions"/>
+	/// for the schema. Leaving this null uses the built-in defaults.
+	/// </summary>
+	public OpenCodeProviderConfig? OpenCode { get; set; }
+
+	/// <summary>
+	/// Default agent provider name (e.g. <c>"copilot"</c> or <c>"opencode"</c>) applied to
+	/// orchestrations/steps that do not declare their own provider.
+	/// </summary>
+	public string? Provider { get; set; }
+
+	/// <summary>Alias for <see cref="Provider"/>.</summary>
+	public string? DefaultProvider { get; set; }
 
 	/// <summary>
 	/// MCP server endpoint configuration.
@@ -737,6 +777,38 @@ public class CopilotProviderConfig
 	/// Optional override for the SDK's <c>UseLoggedInUser</c> flag.
 	/// </summary>
 	public bool? UseLoggedInUser { get; set; }
+}
+
+/// <summary>
+/// OpenCode provider section of the config file. All fields are nullable — only non-null
+/// values override the built-in <c>OpenCodeAgentPoolOptions</c> defaults. See
+/// <see cref="OpenCodeProviderOptions"/> for full semantics.
+/// </summary>
+public class OpenCodeProviderConfig
+{
+	/// <summary>Base URL of a running OpenCode server to connect to. Supports <c>${VAR}</c>.</summary>
+	public string? ServerUrl { get; set; }
+
+	/// <summary>Path to the <c>opencode</c> binary (else PATH).</summary>
+	public string? CliPath { get; set; }
+
+	/// <summary>Hostname spawned servers bind to (default <c>127.0.0.1</c>).</summary>
+	public string? Hostname { get; set; }
+
+	/// <summary>HTTP basic-auth password (OpenCode <c>OPENCODE_SERVER_PASSWORD</c>). Supports <c>${VAR}</c>.</summary>
+	public string? ServerPassword { get; set; }
+
+	/// <summary>HTTP basic-auth username (default <c>opencode</c>).</summary>
+	public string? ServerUsername { get; set; }
+
+	/// <summary>Provider applied to bare model ids (default <c>github-copilot</c>).</summary>
+	public string? FallbackProvider { get; set; }
+
+	/// <summary>Seconds to wait for a spawned server to become healthy (default 60).</summary>
+	public int? StartupTimeoutSeconds { get; set; }
+
+	/// <summary>Whether the engine-tool MCP bridge is enabled (default true).</summary>
+	public bool? EngineToolBridgeEnabled { get; set; }
 }
 
 /// <summary>

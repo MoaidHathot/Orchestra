@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
@@ -205,8 +206,24 @@ public static class ServiceCollectionExtensions
 		// ChildOrchestrationLauncher: centralized in-process child orchestration launcher.
 		// Used by DataPlaneTools.InvokeOrchestration, TriggerManager, and the manual SSE run
 		// endpoint to share a single code path for execution-id generation, nesting, cancellation
-		// linking, and ActiveExecutionInfo registration.
-		services.AddSingleton<IChildOrchestrationLauncher, ChildOrchestrationLauncher>();
+		// linking, and ActiveExecutionInfo registration. Registered via an explicit factory so the
+		// IAgentProviderRegistry constructor is selected unambiguously (the type also exposes a
+		// back-compat AgentBuilder constructor for tests).
+		services.AddSingleton<IChildOrchestrationLauncher>(sp => new ChildOrchestrationLauncher(
+			sp.GetRequiredService<OrchestrationRegistry>(),
+			sp.GetRequiredService<IAgentProviderRegistry>(),
+			sp.GetRequiredService<IScheduler>(),
+			sp.GetRequiredService<ILoggerFactory>(),
+			sp.GetRequiredService<FileSystemRunStore>(),
+			sp.GetRequiredService<OrchestrationHostOptions>(),
+			sp.GetRequiredService<EngineToolRegistry>(),
+			sp.GetRequiredService<McpServerOptions>(),
+			sp.GetRequiredService<IOrchestrationReporterFactory>(),
+			sp.GetRequiredService<McpManager>(),
+			sp.GetRequiredService<ConcurrentDictionary<string, CancellationTokenSource>>(),
+			sp.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>(),
+			sp.GetRequiredService<IPendingInputStore>(),
+			sp.GetRequiredService<IHumanInputWaiter>()));
 
 		// ServiceManager: manages external processes and hooks from orchestra.services.json
 		services.AddSingleton<ProcessTracker>(sp =>
@@ -254,6 +271,14 @@ public static class ServiceCollectionExtensions
 			});
 		services.AddHostedService(sp => sp.GetRequiredService<ProfileManager>());
 
+		// Agent provider registry: resolves the AgentBuilder per provider name for per-step /
+		// per-orchestration provider selection. Multi-provider composition roots (Server, Exec)
+		// register a real AgentProviderRegistry (last registration wins). Single-provider hosts
+		// (playgrounds, tests) register only an AgentBuilder, so this fallback wraps it so the
+		// engine's IAgentProviderRegistry seam still resolves.
+		services.TryAddSingleton<IAgentProviderRegistry>(sp =>
+			new SingleAgentProviderRegistry(sp.GetRequiredService<AgentBuilder>()));
+
 		// TriggerManager as a hosted background service
 		services.AddSingleton<TriggerManager>(sp =>
 		{
@@ -264,7 +289,7 @@ public static class ServiceCollectionExtensions
 			var triggerManager = new TriggerManager(
 				sp.GetRequiredService<ConcurrentDictionary<string, CancellationTokenSource>>(),
 				sp.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>(),
-				sp.GetRequiredService<AgentBuilder>(),
+				sp.GetRequiredService<IAgentProviderRegistry>(),
 				sp.GetRequiredService<IScheduler>(),
 				sp.GetRequiredService<ILoggerFactory>(),
 				sp.GetRequiredService<ILogger<TriggerManager>>(),

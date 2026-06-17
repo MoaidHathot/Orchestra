@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
@@ -35,7 +36,7 @@ namespace Orchestra.Host.Services;
 public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLauncher
 {
 	private readonly OrchestrationRegistry _registry;
-	private readonly AgentBuilder _agentBuilder;
+	private readonly IAgentProviderRegistry _providerRegistry;
 	private readonly IScheduler _scheduler;
 	private readonly ILoggerFactory _loggerFactory;
 	private readonly ILogger<ChildOrchestrationLauncher> _logger;
@@ -72,9 +73,31 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 		IPendingInputStore? pendingInputStore = null,
 		IHumanInputWaiter? humanInputWaiter = null)
+		: this(
+			registry, new SingleAgentProviderRegistry(agentBuilder), scheduler, loggerFactory, runStore,
+			hostOptions, engineToolRegistry, mcpOptions, reporterFactory, mcpManager, activeExecutions,
+			activeExecutionInfos, pendingInputStore, humanInputWaiter)
+	{
+	}
+
+	public ChildOrchestrationLauncher(
+		OrchestrationRegistry registry,
+		IAgentProviderRegistry providerRegistry,
+		IScheduler scheduler,
+		ILoggerFactory loggerFactory,
+		FileSystemRunStore runStore,
+		OrchestrationHostOptions hostOptions,
+		EngineToolRegistry engineToolRegistry,
+		McpServerOptions mcpOptions,
+		IOrchestrationReporterFactory reporterFactory,
+		McpManager mcpManager,
+		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		IPendingInputStore? pendingInputStore = null,
+		IHumanInputWaiter? humanInputWaiter = null)
 	{
 		_registry = registry;
-		_agentBuilder = agentBuilder;
+		_providerRegistry = providerRegistry;
 		_scheduler = scheduler;
 		_loggerFactory = loggerFactory;
 		_logger = loggerFactory.CreateLogger<ChildOrchestrationLauncher>();
@@ -255,7 +278,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		// 8. Build executor (host-supplied configuration)
 		var executor = new OrchestrationExecutor(
 			_scheduler,
-			_agentBuilder,
+			_providerRegistry,
 			reporter,
 			_loggerFactory,
 			runStore: _runStore,

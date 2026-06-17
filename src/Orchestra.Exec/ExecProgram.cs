@@ -9,7 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 using Orchestra.Client;
 using Orchestra.Client.Run;
-using Orchestra.Copilot;
+using Orchestra.Composition;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
@@ -193,26 +193,9 @@ internal static class ExecProgram
 			o.LoadPersistedOrchestrations = true;
 		}, loadConfigurationFile: !options.NoConfig);
 
-		// Default agent builder (Copilot). Tests override this via hooks.ConfigureServices.
-		builder.Services.AddSingleton<AgentBuilder>(sp =>
-		{
-			var hostOptions = sp.GetRequiredService<OrchestrationHostOptions>();
-			var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-			var swap = hostOptions.Copilot.Swap;
-			return new CopilotAgentBuilder(loggerFactory, new CopilotAgentPoolOptions
-			{
-				DefaultMinInstances = hostOptions.AgentPool.MinInstances ?? 1,
-				DefaultMaxInstancesPerRun = hostOptions.AgentPool.MaxInstances ?? 4,
-				DefaultMaxSessionsPerInstance = hostOptions.AgentPool.MaxSessionsPerInstance ?? 1,
-				DefaultIdleTimeoutSeconds = hostOptions.AgentPool.IdleTimeoutSeconds ?? 120,
-				CliSwapBudgetPerStep = swap.BudgetPerStep,
-				ResumeOnSwapEnabled = swap.ResumeOnSwap,
-				ResumeAlreadyInUseWait = TimeSpan.FromSeconds(Math.Max(0, swap.ResumeAlreadyInUseWaitSeconds)),
-				ResumeAlreadyInUsePollInterval = TimeSpan.FromMilliseconds(Math.Max(1, swap.ResumeAlreadyInUsePollIntervalMs)),
-				GitHubToken = hostOptions.Copilot.GitHubToken,
-				UseLoggedInUser = hostOptions.Copilot.UseLoggedInUser,
-			});
-		});
+		// Register agent providers (copilot + opencode) keyed + the provider registry for
+		// per-step / per-orchestration selection. Tests override this via hooks.ConfigureServices.
+		builder.Services.AddOrchestraAgentProviders();
 
 		builder.Services.AddOrchestraMcpServer();
 

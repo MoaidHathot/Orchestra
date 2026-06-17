@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Logging.Console;
-using Orchestra.Copilot;
+using Orchestra.Composition;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
@@ -70,30 +70,10 @@ builder.Services.AddOrchestraHost((options, configuration) =>
 		options.EnableScheduler = enableSchedulerValue;
 });
 
-// Register the Copilot agent builder (required for prompt step execution) after
-// host options so the provider pool defaults can come from orchestra.json.
-builder.Services.AddSingleton<AgentBuilder>(sp =>
-{
-	var options = sp.GetRequiredService<OrchestrationHostOptions>();
-	var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-	var swap = options.Copilot.Swap;
-	return new CopilotAgentBuilder(loggerFactory, new CopilotAgentPoolOptions
-	{
-		DefaultMinInstances = options.AgentPool.MinInstances ?? 1,
-		DefaultMaxInstancesPerRun = options.AgentPool.MaxInstances ?? 4,
-		DefaultMaxSessionsPerInstance = options.AgentPool.MaxSessionsPerInstance ?? 1,
-		DefaultIdleTimeoutSeconds = options.AgentPool.IdleTimeoutSeconds ?? 120,
-		// Map the JSON-configurable Copilot swap/resume policy onto the pool defaults
-		// that get baked into every CopilotAgentSwapOptions snapshot.
-		CliSwapBudgetPerStep = swap.BudgetPerStep,
-		ResumeOnSwapEnabled = swap.ResumeOnSwap,
-		ResumeAlreadyInUseWait = TimeSpan.FromSeconds(Math.Max(0, swap.ResumeAlreadyInUseWaitSeconds)),
-		ResumeAlreadyInUsePollInterval = TimeSpan.FromMilliseconds(Math.Max(1, swap.ResumeAlreadyInUsePollIntervalMs)),
-		// Host-level Copilot auth from orchestra.json (per-step githubToken still overrides).
-		GitHubToken = options.Copilot.GitHubToken,
-		UseLoggedInUser = options.Copilot.UseLoggedInUser,
-	});
-});
+// Register the agent providers (copilot + opencode) keyed, plus the provider registry used by
+// the engine for per-step / per-orchestration provider selection. Registered after host options
+// so the provider pool defaults can come from orchestra.json.
+builder.Services.AddOrchestraAgentProviders();
 
 // Add Orchestra MCP server (data-plane enabled by default, control-plane disabled by default)
 builder.Services.AddOrchestraMcpServer();

@@ -29,11 +29,16 @@ public static class UtilityApi
 			OrchestrationRegistry registry,
 			TriggerManager triggerManager,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
-			AgentBuilder agentBuilder,
+			IAgentProviderRegistry providerRegistry,
 			OrchestrationHostOptions options) =>
 		{
 			var triggers = triggerManager.GetAllTriggers();
-			var agentRuntime = agentBuilder.GetRuntimeStatus();
+			// Aggregate runtime status across every registered agent provider (copilot,
+			// opencode, …); null statuses (providers with no live pools) are omitted.
+			var agentRuntimes = providerRegistry.Builders
+				.Select(b => b.GetRuntimeStatus())
+				.Where(s => s is not null)
+				.ToArray();
 			return Results.Json(new
 			{
 				status = "running",
@@ -41,7 +46,12 @@ public static class UtilityApi
 				orchestrationCount = registry.Count,
 				activeTriggers = triggers.Count(t => t.Config.Enabled),
 				runningExecutions = activeExecutions.Count,
-				agentRuntime,
+				defaultProvider = providerRegistry.DefaultProviderName,
+				providers = providerRegistry.ProviderNames,
+				// Back-compat: keep the singular `agentRuntime` (first provider) alongside the
+				// new `agentRuntimes` array so existing clients keep working.
+				agentRuntime = agentRuntimes.FirstOrDefault(),
+				agentRuntimes,
 				dataPath = options.DataPath
 			}, jsonOptions);
 		});

@@ -23,8 +23,13 @@
   <ItemGroup>
     <ProjectReference Include="..\Orchestra.Engine\Orchestra.Engine.csproj" />
     <ProjectReference Include="..\Orchestra.Copilot\Orchestra.Copilot.csproj" />
+    <ProjectReference Include="..\Orchestra.OpenCode\Orchestra.OpenCode.csproj" />
     <ProjectReference Include="..\Orchestra.Host\Orchestra.Host.csproj" />
     <ProjectReference Include="..\Orchestra.Client\Orchestra.Client.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Shared\AgentProviderRegistration.cs" Link="Composition\AgentProviderRegistration.cs" />
   </ItemGroup>
 
   <ItemGroup>

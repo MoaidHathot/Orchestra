@@ -14,7 +14,7 @@ namespace Orchestra.Engine;
 public sealed partial class OrchestrationStepExecutor : IStepExecutor
 {
 	private readonly IChildOrchestrationLauncher _launcher;
-	private readonly AgentBuilder _agentBuilder;
+	private readonly IAgentProviderRegistry _providerRegistry;
 	private readonly IOrchestrationReporter _reporter;
 	private readonly ILogger<OrchestrationStepExecutor> _logger;
 
@@ -29,9 +29,18 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 		AgentBuilder agentBuilder,
 		IOrchestrationReporter reporter,
 		ILogger<OrchestrationStepExecutor> logger)
+		: this(launcher, new SingleAgentProviderRegistry(agentBuilder), reporter, logger)
+	{
+	}
+
+	public OrchestrationStepExecutor(
+		IChildOrchestrationLauncher launcher,
+		IAgentProviderRegistry providerRegistry,
+		IOrchestrationReporter reporter,
+		ILogger<OrchestrationStepExecutor> logger)
 	{
 		_launcher = launcher;
-		_agentBuilder = agentBuilder;
+		_providerRegistry = providerRegistry;
 		_reporter = reporter;
 		_logger = logger;
 	}
@@ -630,7 +639,10 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			var rawInputJson = JsonSerializer.Serialize(resolvedParameters, s_jsonOptions);
 			var fullPrompt = $"{step.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
-			var agent = await _agentBuilder
+			// Child-orchestration input transforms run on the host default agent provider.
+			// They execute inside the child's run scope, which opens the host-default scope
+			// whenever a preExecutionParameterTransform is supplied.
+			var agent = await _providerRegistry.Resolve(null)
 				.BuildAgentAsync(new AgentBuildConfig
 				{
 					Model = step.InputHandlerModel ?? defaultModel ?? "claude-opus-4.6",

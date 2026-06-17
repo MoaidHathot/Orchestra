@@ -5,6 +5,7 @@ Orchestra is a deterministic AI orchestration engine for .NET. Define multi-step
 ## Features
 
 - **Declarative JSON Pipelines** - Define complex LLM workflows as JSON files with a comprehensive schema
+- **Pluggable Agent Providers** - Run Prompt steps on GitHub Copilot or OpenCode, selectable per orchestration or per step
 - **DAG-Based Execution** - Automatic parallel execution of independent steps with cycle detection
 - **Five Step Types** - Prompt (LLM), Command (shell), Script (inline/file scripts), Http (REST calls), and Transform (string interpolation)
 - **Typed Input Schema** - Strongly-typed parameters with types, descriptions, defaults, and enum constraints
@@ -37,10 +38,11 @@ Orchestra is built as a layered .NET architecture:
 
 | Layer | Project | Description |
 |-------|---------|-------------|
-| **Engine** | `Orchestra.Engine` | Core orchestration runtime: step executors, DAG scheduler, template resolution, MCP, triggers, storage abstractions |
+| **Engine** | `Orchestra.Engine` | Core orchestration runtime: step executors, DAG scheduler, template resolution, MCP, triggers, storage abstractions, agent-provider registry |
 | **Host** | `Orchestra.Host` | ASP.NET Core hosting: REST API, SSE streaming, trigger management, MCP server, profiles, tags, versioning, retention |
 | **Copilot** | `Orchestra.Copilot` | GitHub Copilot SDK adapter implementing the `AgentBuilder`/`IAgent` abstractions |
-| **Server** | `Orchestra.Server` | Standalone ASP.NET Core server composing Engine + Host + Copilot with CORS and OpenAPI |
+| **OpenCode** | `Orchestra.OpenCode` | [OpenCode](https://opencode.ai) adapter: drives an `opencode serve` HTTP+SSE server, with an engine-tool MCP bridge |
+| **Server** | `Orchestra.Server` | Standalone ASP.NET Core server composing Engine + Host + Copilot + OpenCode with CORS and OpenAPI |
 | **CLI** | `Orchestra.Cli` | Command-line client for managing orchestrations via the REST API |
 | **Portal** | `Orchestra.Playground.Copilot.Portal` | React + TypeScript web portal with DAG visualization and execution streaming |
 
@@ -200,6 +202,7 @@ Flags:
 - [Subagents](#subagents)
 - [Retry Policy](#retry-policy)
 - [Engine Tools](#engine-tools)
+- [Agent Providers](#agent-providers)
 - [MCP Integration](#mcp-integration)
 - [MCP Server](#mcp-server)
 - [Triggers](#triggers)
@@ -626,6 +629,53 @@ Built-in tools available to the LLM during Prompt step execution:
 | `orchestra_set_status` | Set step status: `success`, `failed`, or `no_action` (skips downstream steps) |
 | `orchestra_complete` | Halt the entire orchestration immediately |
 
+## Agent Providers
+
+Orchestra runs Prompt steps through a pluggable agent provider. Two are built in:
+
+| Provider | Name | Backend |
+|----------|------|---------|
+| GitHub Copilot | `copilot` | Spawns the Copilot CLI per run and drives it via the GitHub Copilot SDK (JSON-RPC over stdio). |
+| OpenCode | `opencode` | Spawns (or connects to) an [`opencode serve`](https://opencode.ai/docs/server) HTTP server and drives it over REST + the `/event` SSE bus. |
+
+### Selecting a provider
+
+Resolution precedence for each Prompt step is **step `provider` → orchestration `defaultProvider` → host default**:
+
+```jsonc
+{
+  "defaultProvider": "opencode",          // default for every Prompt step in this orchestration
+  "defaultModel": "github-copilot/claude-opus-4.8",
+  "steps": [
+    { "name": "research", "type": "Prompt", "model": "github-copilot/claude-opus-4.8", "systemPrompt": "...", "userPrompt": "..." },
+    { "name": "draft",    "type": "Prompt", "provider": "copilot", "model": "claude-opus-4.8", "systemPrompt": "...", "userPrompt": "..." }
+  ]
+}
+```
+
+A single run may mix providers across steps; the engine opens one per-run worker pool per provider actually used. The host's default provider comes from `orchestra.json`:
+
+```jsonc
+{
+  "provider": "copilot",                  // host default when an orchestration/step doesn't specify one
+  "opencode": {
+    "serverUrl": "http://127.0.0.1:4096", // optional: connect to a running server instead of spawning
+    "cliPath": "opencode",                // optional: path to the opencode binary (else PATH)
+    "fallbackProvider": "github-copilot", // bare model ids (e.g. claude-opus-4.8) get this provider prefix
+    "serverPassword": "${OPENCODE_SERVER_PASSWORD}"
+  }
+}
+```
+
+### OpenCode notes
+
+- **Models** are addressed as `provider/model` (e.g. `github-copilot/claude-opus-4.8`). A bare model id is paired with `opencode.fallbackProvider` (default `github-copilot`), so existing Copilot-style ids keep working. OpenCode must already be authenticated to the target provider (e.g. its GitHub Copilot connection).
+- **Spawn-or-connect**: with no `serverUrl`, the adapter launches `opencode serve` on a loopback port (resolved from `opencode.cliPath`, `ORCHESTRA_OPENCODE_PATH`, or `opencode` on PATH) per run pool. Set `serverUrl` / `ORCHESTRA_OPENCODE_URL` to reuse a running server instead.
+- **Engine tools** (`orchestra_set_status`, `orchestra_complete`, file save/read, `request_user_input`) are exposed to OpenCode via a loopback HTTP MCP bridge that calls back into the per-step `EngineToolContext`. Disable with `opencode.engineToolBridgeEnabled: false`.
+- **Permissions / HITL** map to OpenCode's `permission.updated` events and the `POST /session/{id}/permissions/{id}` reply (auto-approve, deny-list, or human approval).
+- **Known gaps** (vs. the Copilot adapter): inline `subagents` and per-step `reasoningLevel` are not yet mapped to OpenCode (OpenCode governs sub-agents via its own config and reasoning via model selection).
+
+
 ## MCP Integration
 
 Orchestra supports [Model Context Protocol](https://modelcontextprotocol.io/) servers for extending LLM capabilities with tools.
@@ -955,6 +1005,8 @@ See the `examples/` folder for complete orchestration examples, including:
 | `hooks-orchestration-failure.json` | Orchestration failure hook with filtered failed steps |
 | `code-review-azure-devops.json` | Code review workflow |
 | `weather-roads-seattle.json` | Parallel prompt execution |
+| `opencode-content-pipeline.json` | Research-then-write pipeline running on the OpenCode provider |
+| `mixed-provider-pipeline.json` | Per-step provider selection (Copilot + OpenCode in one run) |
 
 See `orchestration-composing.md` for the complete orchestration schema reference.
 

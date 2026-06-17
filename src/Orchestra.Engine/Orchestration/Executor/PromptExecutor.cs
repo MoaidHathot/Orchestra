@@ -4,7 +4,7 @@ namespace Orchestra.Engine;
 
 public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 {
-	private readonly AgentBuilder _agentBuilder;
+	private readonly IAgentProviderRegistry _providerRegistry;
 	private readonly IOrchestrationReporter _reporter;
 	private readonly IPromptFormatter _formatter;
 	private readonly EngineToolRegistry _engineToolRegistry;
@@ -36,8 +36,33 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		IHumanInputWaiter? humanInputWaiter = null,
 		string? serverUrl = null,
 		int maxAgentSwapAttempts = DefaultMaxAgentSwapAttempts)
+		: this(
+			new SingleAgentProviderRegistry(agentBuilder),
+			reporter,
+			formatter,
+			logger,
+			engineToolRegistry,
+			mcpResolver,
+			pendingInputStore,
+			humanInputWaiter,
+			serverUrl,
+			maxAgentSwapAttempts)
 	{
-		_agentBuilder = agentBuilder;
+	}
+
+	public PromptExecutor(
+		IAgentProviderRegistry providerRegistry,
+		IOrchestrationReporter reporter,
+		IPromptFormatter formatter,
+		ILogger<PromptExecutor> logger,
+		EngineToolRegistry? engineToolRegistry = null,
+		IMcpResolver? mcpResolver = null,
+		IPendingInputStore? pendingInputStore = null,
+		IHumanInputWaiter? humanInputWaiter = null,
+		string? serverUrl = null,
+		int maxAgentSwapAttempts = DefaultMaxAgentSwapAttempts)
+	{
+		_providerRegistry = providerRegistry;
 		_reporter = reporter;
 		_formatter = formatter;
 		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
@@ -375,7 +400,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				Attachments = ResolveAttachments(step.Attachments, context, step),
 			};
 
-			var agent = await _agentBuilder
+			// Resolve the agent provider for this step: step.provider → orchestration
+			// defaultProvider → host default. The output handler (if any) reuses the same
+			// provider so a step's input + output transforms run on one backend.
+			var agentBuilder = _providerRegistry.Resolve(step.Provider ?? context.DefaultProvider);
+
+			var agent = await agentBuilder
 				.BuildAgentAsync(config, cancellationToken);
 
 			var task = agent.SendAsync(userPrompt, linkedCts.Token);
@@ -443,7 +473,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			if (resolvedOutputHandlerPrompt is not null)
 			{
 				rawContent = content;
-				var handlerResult = await RunHandlerAsync(resolvedOutputHandlerPrompt, content, resolvedModel, step.Name, cancellationToken);
+				var handlerResult = await RunHandlerAsync(agentBuilder, resolvedOutputHandlerPrompt, content, resolvedModel, step.Name, cancellationToken);
 				content = handlerResult.Content;
 				outputHandlerResult = handlerResult.FellBackToOriginal
 					? $"[OUTPUT HANDLER FALLBACK] Original content used — handler returned empty/whitespace. Original: {rawContent}"
@@ -963,6 +993,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	}
 
 	private async Task<OutputHandlerResult> RunHandlerAsync(
+		AgentBuilder agentBuilder,
 		string handlerPrompt,
 		string content,
 		string model,
@@ -982,7 +1013,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				Reporter = _reporter,
 			};
 
-			var agent = await _agentBuilder
+			var agent = await agentBuilder
 				.BuildAgentAsync(config, cancellationToken);
 
 			var wrappedContent = _formatter.WrapContentForTransformation(content);

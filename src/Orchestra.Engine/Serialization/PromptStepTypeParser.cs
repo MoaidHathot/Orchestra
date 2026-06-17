@@ -32,6 +32,9 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			Model = root.TryGetProperty("model", out var model)
 				? model.GetString()!
 				: null!,
+			Provider = root.TryGetProperty("provider", out var provider)
+				? provider.GetString()
+				: null,
 			McpNames = root.TryGetProperty("mcps", out var mcps)
 				? mcps.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],

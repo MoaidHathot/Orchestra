@@ -19,7 +19,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly ConcurrentDictionary<string, TriggerRegistration> _triggers = new();
 	private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeExecutions;
 	private readonly ConcurrentDictionary<string, ActiveExecutionInfo> _activeExecutionInfos;
-	private readonly AgentBuilder _agentBuilder;
+	private readonly IAgentProviderRegistry _providerRegistry;
 	private readonly IScheduler _scheduler;
 	private readonly ILoggerFactory _loggerFactory;
 	private readonly ILogger<TriggerManager> _logger;
@@ -85,10 +85,38 @@ public partial class TriggerManager : BackgroundService
 		HookDefinition[]? globalHooks = null,
 		IPendingInputStore? pendingInputStore = null,
 		IHumanInputWaiter? humanInputWaiter = null)
+		: this(
+			activeExecutions, activeExecutionInfos, new SingleAgentProviderRegistry(agentBuilder), scheduler,
+			loggerFactory, logger, runsDir, runStore, checkpointStore, launcher, executionCallback,
+			engineToolRegistry, mcpResolver, dataPath, serverUrl, defaultModel, globalHooks,
+			pendingInputStore, humanInputWaiter)
+	{
+	}
+
+	public TriggerManager(
+		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		IAgentProviderRegistry providerRegistry,
+		IScheduler scheduler,
+		ILoggerFactory loggerFactory,
+		ILogger<TriggerManager> logger,
+		string runsDir,
+		IRunStore runStore,
+		ICheckpointStore checkpointStore,
+		IChildOrchestrationLauncher launcher,
+		ITriggerExecutionCallback? executionCallback = null,
+		EngineToolRegistry? engineToolRegistry = null,
+		IMcpResolver? mcpResolver = null,
+		string? dataPath = null,
+		string? serverUrl = null,
+		string? defaultModel = null,
+		HookDefinition[]? globalHooks = null,
+		IPendingInputStore? pendingInputStore = null,
+		IHumanInputWaiter? humanInputWaiter = null)
 	{
 		_activeExecutions = activeExecutions;
 		_activeExecutionInfos = activeExecutionInfos;
-		_agentBuilder = agentBuilder;
+		_providerRegistry = providerRegistry;
 		_scheduler = scheduler;
 		_loggerFactory = loggerFactory;
 		_logger = logger;
@@ -431,7 +459,7 @@ public partial class TriggerManager : BackgroundService
 		}
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-		var executor = new OrchestrationExecutor(_scheduler, _agentBuilder, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, childLauncher: _launcher, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl, pendingInputStore: _pendingInputStore, humanInputWaiter: _humanInputWaiter);
+		var executor = new OrchestrationExecutor(_scheduler, _providerRegistry, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, childLauncher: _launcher, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl, pendingInputStore: _pendingInputStore, humanInputWaiter: _humanInputWaiter);
 
 		var executionInfo = new ActiveExecutionInfo
 		{
@@ -1012,7 +1040,8 @@ public partial class TriggerManager : BackgroundService
 					var rawInputJson = JsonSerializer.Serialize(capturedParameters, _jsonOptions);
 					var fullPrompt = $"{capturedReg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
-					var agent = await _agentBuilder
+					// Trigger input-handler transforms run on the host default agent provider.
+					var agent = await _providerRegistry.Resolve(null)
 						.BuildAgentAsync(new AgentBuildConfig
 						{
 							Model = capturedReg.Config.InputHandlerModel ?? _defaultModel ?? "claude-opus-4.6",

@@ -1,0 +1,34 @@
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "mixed-provider-pipeline",
+  "description": "Demonstrates per-step agent provider selection: the research step runs on the default Copilot provider while the drafting step is routed to OpenCode. Each provider gets its own per-run worker pool; the engine opens one run scope per provider used.",
+  "defaultProvider": "copilot",
+  "defaultModel": "claude-opus-4.8",
+  "steps": [
+    {
+      "name": "research",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a research assistant. Produce a tight, factual brief.",
+      "userPrompt": "Research the topic: {{param.topic}} and list the key points.",
+      "parameters": ["topic"]
+    },
+    {
+      "name": "draft",
+      "type": "Prompt",
+      "dependsOn": ["research"],
+      "provider": "opencode",
+      "model": "github-copilot/claude-opus-4.8",
+      "systemPrompt": "You are a content writer.",
+      "userPrompt": "Write a short article about {{param.topic}} using the research above.",
+      "parameters": ["topic"]
+    }
+  ],
+  "inputs": {
+    "topic": {
+      "type": "string",
+      "description": "The topic to research and write about",
+      "required": true
+    }
+  }
+}

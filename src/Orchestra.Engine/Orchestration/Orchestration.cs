@@ -56,6 +56,15 @@ public class Orchestration
 	public string? DefaultModel { get; init; }
 
 	/// <summary>
+	/// Default agent provider applied to all Prompt steps that don't define their own
+	/// <see cref="PromptOrchestrationStep.Provider"/> (for example <c>"copilot"</c> or
+	/// <c>"opencode"</c>). When null, the host's configured default provider is used.
+	/// Resolution precedence per step: step <c>provider</c> → this <c>defaultProvider</c>
+	/// → host default provider.
+	/// </summary>
+	public string? DefaultProvider { get; init; }
+
+	/// <summary>
 	/// Optional provider-neutral agent worker pool settings for this orchestration run.
 	/// Providers decide how to map these settings to their own resources (for example,
 	/// Copilot maps instances to CLI clients).

@@ -1,0 +1,32 @@
+{
+  "$schema": "../schemas/orchestration.schema.json",
+  "name": "opencode-content-pipeline",
+  "description": "Two-step research-then-write pipeline that runs entirely on the OpenCode agent provider. OpenCode connects to its configured GitHub Copilot models, so the model ids are provider-qualified as 'github-copilot/<model>'.",
+  "defaultProvider": "opencode",
+  "defaultModel": "github-copilot/claude-opus-4.8",
+  "steps": [
+    {
+      "name": "research",
+      "type": "Prompt",
+      "dependsOn": [],
+      "systemPrompt": "You are a meticulous research assistant. Produce a concise, well-structured brief with key facts and sources.",
+      "userPrompt": "Research the topic: {{param.topic}}. Summarize the most important points a writer would need.",
+      "parameters": ["topic"]
+    },
+    {
+      "name": "write-article",
+      "type": "Prompt",
+      "dependsOn": ["research"],
+      "systemPrompt": "You are a content writer. Write clear, engaging prose grounded in the supplied research.",
+      "userPrompt": "Write a 400-word article about {{param.topic}} using the research above.",
+      "parameters": ["topic"]
+    }
+  ],
+  "inputs": {
+    "topic": {
+      "type": "string",
+      "description": "The topic to research and write about",
+      "required": true
+    }
+  }
+}

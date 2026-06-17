@@ -100,7 +100,7 @@ public static class CheckpointApi
 			string id,
 			string runId,
 			OrchestrationRegistry registry,
-			AgentBuilder agentBuilder,
+			IAgentProviderRegistry providerRegistry,
 			IScheduler scheduler,
 			ILoggerFactory loggerFactory,
 			ICheckpointStore checkpointStore,
@@ -203,7 +203,7 @@ public static class CheckpointApi
 			}, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
-			var executor = new OrchestrationExecutor(scheduler, agentBuilder, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, childLauncher: childLauncher, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl, pendingInputStore: pendingInputStore, humanInputWaiter: humanInputWaiter);
+			var executor = new OrchestrationExecutor(scheduler, providerRegistry, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, childLauncher: childLauncher, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl, pendingInputStore: pendingInputStore, humanInputWaiter: humanInputWaiter);
 			var cancellationToken = cts.Token;
 
 			// Execute resume in background

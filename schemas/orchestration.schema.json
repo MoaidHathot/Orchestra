@@ -59,6 +59,11 @@
       "description": "Default model applied to all Prompt steps that don't define their own model. When absent, each Prompt step must specify its own model.",
       "minLength": 1
     },
+    "defaultProvider": {
+      "type": "string",
+      "description": "Default agent provider applied to Prompt steps that don't define their own provider (e.g. 'copilot' or 'opencode'). When absent, the host's configured default provider is used. Resolution per step: step provider -> defaultProvider -> host default.",
+      "minLength": 1
+    },
     "agentPool": {
       "$ref": "#/$defs/agentPoolConfig",
       "description": "Provider-neutral agent worker pool settings for this orchestration run. Providers decide how to map instances to resources such as CLI clients. Values are treated as requests and may be capped by host/provider configuration."
@@ -328,7 +333,12 @@
         },
         "model": {
           "type": "string",
-          "description": "LLM model identifier (e.g., 'claude-opus-4.6', 'claude-sonnet-4', 'gpt-4o').",
+          "description": "LLM model identifier (e.g., 'claude-opus-4.6', 'claude-sonnet-4', 'gpt-4o'). For the 'opencode' provider, use a provider-qualified id such as 'github-copilot/claude-opus-4.8' (bare ids fall back to the OpenCode fallback provider).",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "description": "Agent provider for this step (e.g. 'copilot' or 'opencode'). Overrides the orchestration's defaultProvider and the host default. Lets a single orchestration mix providers across steps.",
           "minLength": 1
         },
         "inputHandlerPrompt": {
