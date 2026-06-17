@@ -636,7 +636,25 @@ Orchestra runs Prompt steps through a pluggable agent provider. Two are built in
 | Provider | Name | Backend |
 |----------|------|---------|
 | GitHub Copilot | `copilot` | Spawns the Copilot CLI per run and drives it via the GitHub Copilot SDK (JSON-RPC over stdio). |
-| OpenCode | `opencode` | Spawns (or connects to) an [`opencode serve`](https://opencode.ai/docs/server) HTTP server and drives it over REST + the `/event` SSE bus. |
+| OpenCode | `opencode` | Spawns an [`opencode serve`](https://opencode.ai/docs/server) HTTP server per run and drives it over REST + the `/event` SSE bus. |
+
+### Provider capability matrix
+
+Every provider declares which step-level features it supports via `AgentBuilder.GetCapabilities()`. When a step requests a feature the resolved provider does **not** support, the engine logs a warning and ignores that field (it never silently changes behavior). Cross-provider conformance tests keep this matrix honest.
+
+| Step feature | `copilot` | `opencode` |
+|---|---|---|
+| `model`, `systemPrompt` (Replace) | ✅ | ✅ |
+| `mcps` (step MCP servers) | ✅ | ✅ |
+| `subagents` (inline) | ✅ | ✅ |
+| `reasoningLevel` | ✅ | ✅ |
+| `workingDirectory` | ✅ | ✅ |
+| `skillDirectories` | ✅ | ✅ |
+| engine tools / `attachments` / `humanInput` / `permissionPolicy` | ✅ | ✅ |
+| CLI/worker **swap + cold restart** on transport failure | ✅ | ✅ |
+| session **resume** on swap | ✅ | ❌ (cold restart only) |
+| `systemPromptMode` **Append/Customize** + sections | ✅ | ❌ (warns; Replace works) |
+| `reasoningSummary`, `contextTier`, `gitHubToken`, `sandbox`, `infiniteSessions`, `excludedTools` | ✅ | ❌ (warns) |
 
 ### Selecting a provider
 
@@ -659,9 +677,9 @@ A single run may mix providers across steps; the engine opens one per-run worker
 {
   "provider": "copilot",                  // host default when an orchestration/step doesn't specify one
   "opencode": {
-    "serverUrl": "http://127.0.0.1:4096", // optional: connect to a running server instead of spawning
     "cliPath": "opencode",                // optional: path to the opencode binary (else PATH)
     "fallbackProvider": "github-copilot", // bare model ids (e.g. claude-opus-4.8) get this provider prefix
+    "swapBudgetPerStep": 1,               // optional: max cold-restart swaps per step on transport failure (default 1)
     "serverPassword": "${OPENCODE_SERVER_PASSWORD}"
   }
 }
@@ -670,10 +688,13 @@ A single run may mix providers across steps; the engine opens one per-run worker
 ### OpenCode notes
 
 - **Models** are addressed as `provider/model` (e.g. `github-copilot/claude-opus-4.8`). A bare model id is paired with `opencode.fallbackProvider` (default `github-copilot`), so existing Copilot-style ids keep working. OpenCode must already be authenticated to the target provider (e.g. its GitHub Copilot connection).
-- **Spawn-or-connect**: with no `serverUrl`, the adapter launches `opencode serve` on a loopback port (resolved from `opencode.cliPath`, `ORCHESTRA_OPENCODE_PATH`, or `opencode` on PATH) per run pool. Set `serverUrl` / `ORCHESTRA_OPENCODE_URL` to reuse a running server instead.
+- **Spawn-only**: the adapter always launches its own `opencode serve` on a loopback port (resolved from `opencode.cliPath`, `ORCHESTRA_OPENCODE_PATH`, or `opencode` on PATH). There is no connect-only mode — steps that need per-step config get a dedicated server with a generated `opencode.json`.
+- **Per-step config in the artifact folder**: steps using `reasoningLevel`, `subagents`, `mcps`, `workingDirectory`, or `skillDirectories` spawn a *dedicated* server pointed (via `OPENCODE_CONFIG`) at a generated `opencode.json` written into the run's artifact folder, with skills staged under `<cwd>/.opencode/skills/<name>/`. Plain text-prompt steps share the run pool. The primary agent carries the system prompt + `reasoningEffort`; each `subagents[]` entry becomes a `subagent` the model delegates to via OpenCode's Task tool (scoped by a `permission.task` allow-list); each `mcps[]` entry becomes a `local`/`remote` MCP server.
+- **Swap & resume**: a transport-class failure (event-stream loss or a transient upstream session error) is retried on a fresh server via the shared swap loop, bounded by `opencode.swapBudgetPerStep` (default 1). OpenCode has no session-resume primitive, so every swap is a **cold restart** (the failed session is deleted and the prompt re-sent) — Copilot additionally resumes the prior session to preserve history.
+- **MCP fail-fast**: declared MCP servers that don't load on the server (absent from `GET /mcp`) are reported as failed so the step fails fast instead of running without its tools. Global (proxy-routed) MCPs are additionally tool-count-probed by the engine before the LLM runs, the same as for Copilot.
 - **Engine tools** (`orchestra_set_status`, `orchestra_complete`, file save/read, `request_user_input`) are exposed to OpenCode via a loopback HTTP MCP bridge that calls back into the per-step `EngineToolContext`. Disable with `opencode.engineToolBridgeEnabled: false`.
 - **Permissions / HITL** map to OpenCode's `permission.updated` events and the `POST /session/{id}/permissions/{id}` reply (auto-approve, deny-list, or human approval).
-- **Reasoning + sub-agents**: per-step `reasoningLevel` and inline `subagents` are supported by spawning a *dedicated* OpenCode server for that step, configured (via `OPENCODE_CONFIG_CONTENT`) with a primary agent that carries the system prompt + `reasoningEffort`, plus one `subagent` per `subagents[]` entry (the model delegates via OpenCode's Task tool, scoped by a `permission.task` allow-list). This requires spawn mode; in **connect-only** mode (`opencode.serverUrl` set) these two features are skipped with a warning, since an external server's agents can't be reconfigured.
+- **System prompt**: `systemPromptMode: replace` (the default) is honored. `append` / `customize` are not supported (OpenCode's API can't compose with its built-in base prompt) and are reported as warnings.
 
 
 ## MCP Integration
