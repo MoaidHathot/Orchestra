@@ -405,9 +405,28 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			// provider so a step's input + output transforms run on one backend.
 			var agentBuilder = _providerRegistry.Resolve(step.Provider ?? context.DefaultProvider);
 
-			// Surface any step configuration the resolved provider cannot honor as a warning,
-			// rather than silently dropping it. Providers declare support via GetCapabilities().
-			WarnOnUnsupportedProviderFeatures(step.Name, agentBuilder, config);
+			// Compare the step config against the provider's declared capabilities. Features that
+			// degrade gracefully are logged as warnings; features whose silent omission is unsafe
+			// or contract-breaking (MCPs, engine tools, human-input/permission gating, sandbox,
+			// excluded-tools) fail the step here rather than running with the control dropped.
+			var unsupportedErrors = CheckProviderCapabilities(step.Name, agentBuilder, config);
+			if (unsupportedErrors.Length > 0)
+			{
+				var errorMessage =
+					$"Provider '{agentBuilder.GetCapabilities().Provider}' does not support required feature(s) " +
+					$"[{string.Join(", ", unsupportedErrors)}] requested by step '{step.Name}'. These govern security " +
+					$"or tool availability and must not be silently ignored — route this step to a provider that " +
+					$"supports them, or remove the setting.";
+				var capTrace = eventProcessor.BuildPartialTrace(resolvedSystemPrompt, userPrompt, mcpServerDescriptions);
+				_reporter.ReportStepTrace(step.Name, capTrace);
+				_reporter.ReportStepError(step.Name, errorMessage);
+				return ExecutionResult.Failed(
+					errorMessage,
+					rawDependencyOutputs,
+					trace: capTrace,
+					errorCategory: StepErrorCategory.ValidationError,
+					savedFiles: context.TempFileStore?.GetFilesForStep(step.Name));
+			}
 
 			var agent = await agentBuilder
 				.BuildAgentAsync(config, cancellationToken);
@@ -1129,18 +1148,33 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	};
 
 	/// <summary>
-	/// Compares the resolved provider's declared capabilities against the step configuration and
-	/// logs a warning for each requested feature the provider does not support, so silently-dropped
-	/// settings are visible instead of producing surprising behavior.
+	/// Compares the resolved provider's declared capabilities against the step configuration.
+	/// Gaps that degrade gracefully are logged as warnings; gaps whose silent omission is unsafe or
+	/// contract-breaking are logged at error level and their feature names returned so the caller
+	/// can fail the step. Returns an empty array when the provider supports everything requested.
 	/// </summary>
-	private void WarnOnUnsupportedProviderFeatures(string stepName, AgentBuilder agentBuilder, AgentBuildConfig config)
+	private string[] CheckProviderCapabilities(string stepName, AgentBuilder agentBuilder, AgentBuildConfig config)
 	{
 		var capabilities = agentBuilder.GetCapabilities();
-		var unsupported = capabilities.FindUnsupported(config).ToArray();
-		if (unsupported.Length > 0)
+		var gaps = capabilities.FindUnsupported(config).ToArray();
+		if (gaps.Length == 0)
 		{
-			LogUnsupportedProviderFeatures(stepName, capabilities.Provider, string.Join(", ", unsupported));
+			return [];
 		}
+
+		var warnings = gaps.Where(g => g.Severity == CapabilityGapSeverity.Warning).Select(g => g.Feature).ToArray();
+		if (warnings.Length > 0)
+		{
+			LogUnsupportedProviderFeatures(stepName, capabilities.Provider, string.Join(", ", warnings));
+		}
+
+		var errors = gaps.Where(g => g.Severity == CapabilityGapSeverity.Error).Select(g => g.Feature).ToArray();
+		if (errors.Length > 0)
+		{
+			LogUnsupportedProviderFeaturesError(stepName, capabilities.Provider, string.Join(", ", errors));
+		}
+
+		return errors;
 	}
 
 	#region Source-Generated Logging
@@ -1150,6 +1184,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' requests feature(s) [{Features}] that provider '{Provider}' does not support; they will be ignored.")]
 	private partial void LogUnsupportedProviderFeatures(string stepName, string provider, string features);
+
+	[LoggerMessage(
+		EventId = 18,
+		Level = LogLevel.Error,
+		Message = "Step '{StepName}' requires feature(s) [{Features}] that provider '{Provider}' does not support; failing the step because silently dropping them is unsafe.")]
+	private partial void LogUnsupportedProviderFeaturesError(string stepName, string provider, string features);
 
 	[LoggerMessage(
 		EventId = 1,

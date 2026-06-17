@@ -640,7 +640,17 @@ Orchestra runs Prompt steps through a pluggable agent provider. Two are built in
 
 ### Provider capability matrix
 
-Every provider declares which step-level features it supports via `AgentBuilder.GetCapabilities()`. When a step requests a feature the resolved provider does **not** support, the engine logs a warning and ignores that field (it never silently changes behavior). Cross-provider conformance tests keep this matrix honest.
+Every provider declares which step-level features it supports via `AgentBuilder.GetCapabilities()`. When a step requests a feature the resolved provider does **not** support, the engine reacts by severity (it never silently changes behavior):
+
+- **Warning** — the feature degrades gracefully, so the engine logs a warning and runs the step anyway.
+- **Error** — silently dropping the feature would be unsafe (a security boundary) or break the step's contract, so the engine **fails the step** before it runs (category `ValidationError`). All error-severity features are user-explicit opt-ins, so they never fire spuriously.
+
+| Severity when unsupported | Features |
+|---|---|
+| **Error** (fails the step) | `mcps`, `humanInput`, `permissionPolicy`, `sandbox`, `excludedTools` |
+| **Warning** (logs + proceeds) | `subagents`, `reasoningLevel`, `reasoningSummary`, `contextTier`, `workingDirectory`, `gitHubToken`, `systemPromptMode` (Append/Customize), `skillDirectories`, `infiniteSessions`, `attachments`, engine tools |
+
+Cross-provider conformance tests keep this matrix honest.
 
 | Step feature | `copilot` | `opencode` |
 |---|---|---|
@@ -653,8 +663,9 @@ Every provider declares which step-level features it supports via `AgentBuilder.
 | engine tools / `attachments` / `humanInput` / `permissionPolicy` | ✅ | ✅ |
 | CLI/worker **swap + cold restart** on transport failure | ✅ | ✅ |
 | session **resume** on swap | ✅ | ❌ (cold restart only) |
-| `systemPromptMode` **Append/Customize** + sections | ✅ | ❌ (warns; Replace works) |
-| `reasoningSummary`, `contextTier`, `gitHubToken`, `sandbox`, `infiniteSessions`, `excludedTools` | ✅ | ❌ (warns) |
+| `systemPromptMode` **Append/Customize** + sections | ✅ | ⚠️ warns; Replace works |
+| `reasoningSummary`, `contextTier`, `gitHubToken`, `infiniteSessions` | ✅ | ⚠️ warns |
+| `sandbox`, `excludedTools` | ✅ | ⛔ **fails the step** (security/least-privilege) |
 
 ### Selecting a provider
 

@@ -1,13 +1,36 @@
 namespace Orchestra.Engine;
 
 /// <summary>
+/// How the engine reacts when a step requests a feature the resolved provider does not support.
+/// </summary>
+public enum CapabilityGapSeverity
+{
+	/// <summary>Log a warning and proceed — the feature degrades gracefully when omitted.</summary>
+	Warning,
+
+	/// <summary>
+	/// Fail the step before it runs — silently omitting the feature is unsafe (security boundary)
+	/// or breaks the step's contract (it would run without tools/controls it explicitly required).
+	/// </summary>
+	Error,
+}
+
+/// <summary>
+/// A requested step feature the resolved provider cannot honor, plus how severely the engine treats it.
+/// </summary>
+/// <param name="Feature">The <see cref="AgentBuildConfig"/> field name (e.g. <c>"Mcps"</c>).</param>
+/// <param name="Severity">Whether the gap fails the step (<see cref="CapabilityGapSeverity.Error"/>) or warns.</param>
+public sealed record CapabilityGap(string Feature, CapabilityGapSeverity Severity);
+
+/// <summary>
 /// Declares which step-level features an agent provider supports.
 ///
 /// Every <see cref="AgentBuilder"/> must return one of these from
 /// <see cref="AgentBuilder.GetCapabilities"/>. The executor compares the declared capabilities
-/// against each step's <see cref="AgentBuildConfig"/> and warns when a step requests a feature the
-/// resolved provider cannot honor — so a provider that forgets to wire a field (e.g. <c>Mcps</c>)
-/// surfaces as a visible warning instead of silently dropping the configuration.
+/// against each step's <see cref="AgentBuildConfig"/> and, for any requested-but-unsupported
+/// feature, either fails the step (security / contract-breaking features) or logs a warning and
+/// proceeds (features that degrade gracefully) — so a provider that forgets to wire a field
+/// (e.g. <c>Mcps</c>) surfaces visibly instead of silently dropping the configuration.
 ///
 /// Flags default to <c>false</c>: a provider opts in to each feature it actually implements.
 /// </summary>
@@ -98,14 +121,53 @@ public sealed record AgentProviderCapabilities
 	};
 
 	/// <summary>
-	/// Enumerates the human-readable names of features that <paramref name="config"/> requests but
-	/// this provider does not support. The executor logs these so a silently-dropped step setting
-	/// becomes a visible warning.
+	/// Features whose silent omission is unsafe (a security boundary) or breaks the step's
+	/// contract (it would run without tools/controls it explicitly required). A provider that does
+	/// not support one of these fails the step; every other gap degrades with a warning.
+	///
+	/// All error features are <b>user-explicit opt-ins</b> — they only appear in a step's config
+	/// when the author deliberately set them — so they never fire spuriously. (Engine tools, by
+	/// contrast, are injected into every step by the engine, so an unsupported-engine-tools gap is a
+	/// warning: the step still runs, the model just can't call <c>set_status</c> and friends.)
+	///
+	/// <list type="bullet">
+	///   <item><c>Mcps</c> — the step would run without the tool servers it requires.</item>
+	///   <item><c>HumanInput</c> — human approval gating would be bypassed.</item>
+	///   <item><c>PermissionPolicy</c> — the permission allow/deny policy would be bypassed.</item>
+	///   <item><c>SandboxPolicy</c> — the requested sandbox boundary would not be applied.</item>
+	///   <item><c>ExcludedTools</c> — forbidden tools would remain available (least-privilege violation).</item>
+	/// </list>
 	/// </summary>
-	public IEnumerable<string> FindUnsupported(AgentBuildConfig config)
+	private static readonly HashSet<string> ErrorFeatures = new(StringComparer.Ordinal)
+	{
+		nameof(AgentBuildConfig.Mcps),
+		nameof(AgentBuildConfig.HumanInput),
+		nameof(AgentBuildConfig.PermissionPolicy),
+		nameof(AgentBuildConfig.SandboxPolicy),
+		nameof(AgentBuildConfig.ExcludedTools),
+	};
+
+	/// <summary>Classifies a capability gap: error for unsafe / contract-breaking features, else warning.</summary>
+	public static CapabilityGapSeverity SeverityOf(string feature)
+		=> ErrorFeatures.Contains(feature) ? CapabilityGapSeverity.Error : CapabilityGapSeverity.Warning;
+
+	/// <summary>
+	/// Enumerates the features that <paramref name="config"/> requests but this provider does not
+	/// support, each tagged with its <see cref="CapabilityGapSeverity"/>. The executor fails the
+	/// step on any <see cref="CapabilityGapSeverity.Error"/> gap and warns on the rest.
+	/// </summary>
+	public IEnumerable<CapabilityGap> FindUnsupported(AgentBuildConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(config);
 
+		foreach (var feature in FindUnsupportedNames(config))
+		{
+			yield return new CapabilityGap(feature, SeverityOf(feature));
+		}
+	}
+
+	private IEnumerable<string> FindUnsupportedNames(AgentBuildConfig config)
+	{
 		if (!Mcps && config.Mcps.Length > 0)
 		{
 			yield return nameof(config.Mcps);
