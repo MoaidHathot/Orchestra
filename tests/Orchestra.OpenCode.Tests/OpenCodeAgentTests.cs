@@ -57,15 +57,15 @@ public class OpenCodeAgentTests
 		caps.Attachments.Should().BeTrue();
 		caps.HumanInput.Should().BeTrue();
 		caps.PermissionPolicy.Should().BeTrue();
-		// Not yet supported — must be declared false so steps using them get a warning.
+		caps.ExcludedTools.Should().BeTrue();
+		caps.InfiniteSession.Should().BeTrue();
+		// Not yet supported — must be declared false so steps using them get a warning/error.
 		caps.SandboxPolicy.Should().BeFalse();
 		caps.SystemPromptMode.Should().BeFalse();
 		caps.SystemPromptSections.Should().BeFalse();
-		caps.ExcludedTools.Should().BeFalse();
 		caps.ReasoningSummary.Should().BeFalse();
 		caps.ContextTier.Should().BeFalse();
 		caps.GitHubToken.Should().BeFalse();
-		caps.InfiniteSession.Should().BeFalse();
 	}
 
 	[Fact]
@@ -247,11 +247,12 @@ public class OpenCodeAgentTests
 	}
 
 	[Fact]
-	public async Task SendAsync_TransportLost_SwapsToFreshWorker_ColdRestart_AndSucceeds()
+	public async Task SendAsync_TransportLost_Swaps_ResumesPriorSession_AndSucceeds()
 	{
 		// First attempt: the event stream dies → OpenCodeClientUnhealthyException (transport-class).
-		// The shared swap loop must cold-restart on a fresh worker (budget defaults to 1) and the
-		// second attempt — a clean session.idle — succeeds.
+		// The shared swap loop resumes the prior session (budget defaults to 1, resume on by
+		// default) and the second attempt — a clean session.idle — succeeds without creating a new
+		// session.
 		var client = new SwapScriptedClient(Sid);
 		var builder = new OpenCodeAgentBuilder(NullLoggerFactory.Instance, ConnectOptions(), new FakeFactory(client));
 		await using var scope = await builder.CreateRunScopeAsync();
@@ -267,13 +268,39 @@ public class OpenCodeAgentTests
 		var result = await task.GetResultAsync();
 
 		result.Should().NotBeNull();
-		client.CreateCount.Should().Be(2, "the first transport failure must be retried on a fresh worker");
+		client.CreateCount.Should().Be(1, "a resume reuses the prior session instead of creating a new one");
+		client.PromptSessionIds.Should().OnlyContain(id => id == Sid);
 
 		var swaps = events.Where(e => e.Type == AgentEventType.CliInstanceSwapped).ToList();
 		swaps.Should().ContainSingle();
 		swaps[0].SwapReason.Should().Be("transport_lost");
-		swaps[0].SwapMode.Should().Be("cold_restart");
+		swaps[0].SwapMode.Should().Be("resume");
 		swaps[0].SwapAttempt.Should().Be(1);
+	}
+
+	[Fact]
+	public async Task SendAsync_TransportLost_WithResumeDisabled_ColdRestarts_AndSucceeds()
+	{
+		var client = new SwapScriptedClient(Sid);
+		var options = ConnectOptions();
+		options.ResumeOnSwapEnabled = false;
+		var builder = new OpenCodeAgentBuilder(NullLoggerFactory.Instance, options, new FakeFactory(client));
+		await using var scope = await builder.CreateRunScopeAsync();
+		var agent = await builder.BuildAgentAsync(new AgentBuildConfig { Model = "github-copilot/claude-opus-4.8" });
+
+		var task = agent.SendAsync("go", CancellationToken.None);
+		var events = new List<AgentEvent>();
+		await foreach (var e in task)
+		{
+			events.Add(e);
+		}
+
+		var result = await task.GetResultAsync();
+
+		result.Should().NotBeNull();
+		client.CreateCount.Should().Be(2, "with resume disabled, the swap cold-restarts on a fresh session");
+		events.Should().ContainSingle(e => e.Type == AgentEventType.CliInstanceSwapped)
+			.Which.SwapMode.Should().Be("cold_restart");
 	}
 
 	[Fact]
@@ -294,7 +321,7 @@ public class OpenCodeAgentTests
 		var act = async () => await task.GetResultAsync();
 
 		await act.Should().ThrowAsync<OpenCodeClientUnhealthyException>();
-		client.CreateCount.Should().Be(1, "a zero budget must not retry on a fresh worker");
+		client.CreateCount.Should().Be(1, "a zero budget must not retry");
 	}
 
 	private sealed class FakeOpenCodeClient(string sessionId) : IOpenCodeClient
@@ -359,6 +386,8 @@ public class OpenCodeAgentTests
 	private sealed class SwapScriptedClient(string sessionId) : IOpenCodeClient
 	{
 		public int CreateCount { get; private set; }
+		public int SubscribeCount { get; private set; }
+		public List<string> PromptSessionIds { get; } = [];
 
 		public string BaseUrl => "http://fake-opencode";
 
@@ -372,7 +401,11 @@ public class OpenCodeAgentTests
 
 		public Task DeleteSessionAsync(string sessionIdArg, CancellationToken cancellationToken) => Task.CompletedTask;
 
-		public Task PromptAsync(string sessionIdArg, OpenCodePromptRequest request, CancellationToken cancellationToken) => Task.CompletedTask;
+		public Task PromptAsync(string sessionIdArg, OpenCodePromptRequest request, CancellationToken cancellationToken)
+		{
+			PromptSessionIds.Add(sessionIdArg);
+			return Task.CompletedTask;
+		}
 
 		public Task AbortSessionAsync(string sessionIdArg, CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -388,7 +421,8 @@ public class OpenCodeAgentTests
 
 		public async IAsyncEnumerable<OpenCodeServerEvent> SubscribeAsync([EnumeratorCancellation] CancellationToken cancellationToken)
 		{
-			if (CreateCount <= 1)
+			SubscribeCount++;
+			if (SubscribeCount == 1)
 			{
 				// First attempt: simulate a lost event stream. PumpEventsAsync converts this into
 				// an OpenCodeClientUnhealthyException("event_stream_lost") → "transport_lost".
@@ -396,7 +430,7 @@ public class OpenCodeAgentTests
 				throw new IOException("event stream lost");
 			}
 
-			// Second attempt: a clean idle completes the turn.
+			// Recovery attempt: a clean idle completes the turn.
 			yield return TestEvents.Event("session.idle", $$"""{ "sessionID": "{{sessionId}}" }""");
 			await Task.Yield();
 		}

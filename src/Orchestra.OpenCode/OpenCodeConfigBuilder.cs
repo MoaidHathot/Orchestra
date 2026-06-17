@@ -40,25 +40,28 @@ internal static class OpenCodeConfigBuilder
 		ReasoningLevel? reasoningLevel,
 		IReadOnlyList<Subagent> subagents,
 		IReadOnlyList<Mcp> mcps,
+		IReadOnlyList<string> excludedTools,
 		string fallbackProvider)
 	{
 		var config = new Dictionary<string, object>(StringComparer.Ordinal);
-		var primaryAgentName = BuildAgentSection(config, model, systemPrompt, reasoningLevel, subagents, fallbackProvider);
+		var primaryAgentName = BuildAgentSection(config, model, systemPrompt, reasoningLevel, subagents, excludedTools, fallbackProvider);
 		BuildMcpSection(config, mcps);
 		return new OpenCodeStepPlan(config, primaryAgentName);
 	}
 
-	/// <summary>Adds the <c>agent</c> section; returns the primary agent name, or null when neither reasoning nor sub-agents are used.</summary>
+	/// <summary>Adds the <c>agent</c> section; returns the primary agent name, or null when no reasoning, sub-agents, or excluded tools are requested.</summary>
 	private static string? BuildAgentSection(
 		Dictionary<string, object> config,
 		OpenCodeModelRef model,
 		string? systemPrompt,
 		ReasoningLevel? reasoningLevel,
 		IReadOnlyList<Subagent> subagents,
+		IReadOnlyList<string> excludedTools,
 		string fallbackProvider)
 	{
 		var hasSubagents = subagents.Count > 0;
-		if (reasoningLevel is null && !hasSubagents)
+		var hasExcludedTools = excludedTools.Count > 0;
+		if (reasoningLevel is null && !hasSubagents && !hasExcludedTools)
 			return null;
 
 		var agents = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -73,6 +76,20 @@ internal static class OpenCodeConfigBuilder
 			primary["prompt"] = systemPrompt;
 		if (reasoningLevel is { } level)
 			primary["reasoningEffort"] = level.ToString().ToLowerInvariant();
+		if (hasExcludedTools)
+		{
+			// OpenCode disables a tool for an agent via `tools: { <name>: false }`. Tool names use
+			// OpenCode's vocabulary (bash, edit, write, read, webfetch, …) — distinct from Copilot's.
+			var tools = new Dictionary<string, object?>(StringComparer.Ordinal);
+			foreach (var tool in excludedTools)
+			{
+				if (!string.IsNullOrWhiteSpace(tool))
+					tools[tool] = false;
+			}
+
+			if (tools.Count > 0)
+				primary["tools"] = tools;
+		}
 
 		if (hasSubagents)
 		{

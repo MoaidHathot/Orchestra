@@ -96,6 +96,7 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 	private readonly ILogger _logger;
 	private readonly string? _configFilePath;
 	private readonly string? _workingDirectory;
+	private readonly IReadOnlyDictionary<string, string>? _extraEnvironment;
 	private Process? _process;
 
 	public OpenCodeServerProcess(
@@ -104,7 +105,8 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 		IOpenCodeClientFactory clientFactory,
 		ILogger logger,
 		string? configFilePath = null,
-		string? workingDirectory = null)
+		string? workingDirectory = null,
+		IReadOnlyDictionary<string, string>? extraEnvironment = null)
 	{
 		_plan = plan;
 		_options = options;
@@ -112,6 +114,7 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 		_logger = logger;
 		_configFilePath = configFilePath;
 		_workingDirectory = workingDirectory;
+		_extraEnvironment = extraEnvironment;
 	}
 
 	public string BaseUrl { get; private set; } = string.Empty;
@@ -163,6 +166,11 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 			// resolved at spawn time. A file (not OPENCODE_CONFIG_CONTENT) avoids env-var size
 			// limits and keeps the config alongside the run's other artifacts.
 			psi.Environment["OPENCODE_CONFIG"] = _configFilePath;
+		}
+		if (_extraEnvironment is not null)
+		{
+			foreach (var (key, value) in _extraEnvironment)
+				psi.Environment[key] = value;
 		}
 
 		LogSpawning(_plan.CliPath!, BaseUrl);

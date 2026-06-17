@@ -24,6 +24,8 @@ internal sealed partial class OpenCodeAgent : IAgent
 	private readonly Mcp[] _mcps;
 	private readonly string? _workingDirectory;
 	private readonly string[] _skillDirectories;
+	private readonly string[] _excludedTools;
+	private readonly InfiniteSessionConfig? _infiniteSession;
 	private readonly string? _runArtifactDirectory;
 	private readonly IReadOnlyCollection<IEngineTool> _engineTools;
 	private readonly EngineToolContext? _engineToolContext;
@@ -53,6 +55,8 @@ internal sealed partial class OpenCodeAgent : IAgent
 		_mcps = config.Mcps;
 		_workingDirectory = config.WorkingDirectory;
 		_skillDirectories = config.SkillDirectories;
+		_excludedTools = config.ExcludedTools;
+		_infiniteSession = config.InfiniteSessionConfig;
 		// Per-step config files + skill staging live in the run's artifact (temp) folder.
 		_runArtifactDirectory = config.EngineToolCtx?.TempFileStore?.TempDirectory;
 		_engineTools = config.EngineTools;
@@ -79,24 +83,29 @@ internal sealed partial class OpenCodeAgent : IAgent
 		// (runtime config patches don't register usable agents), and skills/working-directory via
 		// the server's cwd. So any step that needs per-step config runs on its own dedicated
 		// server spawned with a generated opencode.json; plain text-prompt steps use the pool.
-		var plan = OpenCodeConfigBuilder.Build(modelRef, _systemPrompt, _reasoningLevel, _subagents, _mcps, _options.FallbackProvider);
+		var plan = OpenCodeConfigBuilder.Build(modelRef, _systemPrompt, _reasoningLevel, _subagents, _mcps, _excludedTools, _options.FallbackProvider);
+		// Auto-compaction is disabled via a spawn-time env var, and excluded tools / skills /
+		// working directory all need a dedicated server too.
+		var disableAutoCompact = _infiniteSession?.Enabled == false;
 		var needsDedicated = plan.HasConfig
 			|| !string.IsNullOrWhiteSpace(_workingDirectory)
-			|| _skillDirectories.Length > 0;
+			|| _skillDirectories.Length > 0
+			|| disableAutoCompact;
 
-		// OpenCode has no session-resume primitive, so swaps are cold-restart only: a
-		// transport-class failure abandons the worker and re-runs the turn on a fresh one.
-		// The shared loop owns the budget, classification, swap events, and reporter signal.
+		// On a transport-class failure the shared loop retries on a fresh worker. OpenCode
+		// persists sessions in its data dir (shared across server processes), so a swap can
+		// resume the prior session — re-prompting its id to preserve tool-call progress — or
+		// cold-restart on a new session when resume is disabled or the session is unreachable.
 		var swapLoop = new AgentSwapLoop(
-			SwapPolicy.ColdRestartOnly(_options.SwapBudgetPerStep),
+			new SwapPolicy(_options.SwapBudgetPerStep, ResumeEnabled: _options.ResumeOnSwapEnabled),
 			_reporter,
 			_stepName,
 			_loggerFactory.CreateLogger<AgentSwapLoop>());
 
 		return await swapLoop.RunAsync(
 			runAttempt: (ctx, ct) => needsDedicated
-				? RunDedicatedAsync(prompt, writer, modelRef, plan, ctx.SessionIdBox, ct)
-				: RunPooledAsync(prompt, writer, modelRef, ctx.SessionIdBox, ct),
+				? RunDedicatedAsync(prompt, writer, modelRef, plan, disableAutoCompact, ctx.PriorSessionId, ctx.SessionIdBox, ct)
+				: RunPooledAsync(prompt, writer, modelRef, ctx.PriorSessionId, ctx.SessionIdBox, ct),
 			writer: writer,
 			cancellationToken: cancellationToken).ConfigureAwait(false);
 	}
@@ -105,12 +114,12 @@ internal sealed partial class OpenCodeAgent : IAgent
 	private string _stepName => _engineToolContext?.StepName ?? _model;
 
 	/// <summary>Runs a plain step on a pooled, shared OpenCode worker.</summary>
-	private async Task<AgentResult> RunPooledAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, SwapSessionIdBox sessionIdBox, CancellationToken cancellationToken)
+	private async Task<AgentResult> RunPooledAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, string? priorSessionId, SwapSessionIdBox sessionIdBox, CancellationToken cancellationToken)
 	{
 		var lease = await _pool.AcquireAsync(cancellationToken).ConfigureAwait(false);
 		try
 		{
-			return await RunTurnAsync(lease.Client, lease.ContextHolder, lease.EngineToolMcpUrl, prompt, modelRef, agentName: null, sessionIdBox, writer, cancellationToken).ConfigureAwait(false);
+			return await RunTurnAsync(lease.Client, lease.ContextHolder, lease.EngineToolMcpUrl, prompt, modelRef, agentName: null, priorSessionId, sessionIdBox, writer, cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -125,21 +134,26 @@ internal sealed partial class OpenCodeAgent : IAgent
 	/// skill directories under the server's working directory, spawns the server pointed at both,
 	/// and runs the turn (optionally through the per-step agent), with its own engine-tool bridge.
 	/// </summary>
-	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeStepPlan plan, SwapSessionIdBox sessionIdBox, CancellationToken cancellationToken)
+	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeStepPlan plan, bool disableAutoCompact, string? priorSessionId, SwapSessionIdBox sessionIdBox, CancellationToken cancellationToken)
 	{
 		var workspace = OpenCodeWorkspaceBuilder.Prepare(plan.HasConfig ? plan.Config : null, _workingDirectory, _skillDirectories, _runArtifactDirectory);
 		var connectPlan = OpenCodeServerBootstrap.Resolve(_options);
 
+		// Infinite sessions (Enabled=false) disable OpenCode's automatic context compaction.
+		var extraEnv = disableAutoCompact
+			? new Dictionary<string, string> { ["OPENCODE_DISABLE_AUTOCOMPACT"] = "true" }
+			: null;
+
 		var holder = new EngineToolContextHolder();
 		OpenCodeEngineToolBridge? bridge = null;
-		var process = new OpenCodeServerProcess(connectPlan, _options, _clientFactory, _loggerFactory.CreateLogger<OpenCodeServerProcess>(), workspace.ConfigFilePath, workspace.WorkingDirectory);
+		var process = new OpenCodeServerProcess(connectPlan, _options, _clientFactory, _loggerFactory.CreateLogger<OpenCodeServerProcess>(), workspace.ConfigFilePath, workspace.WorkingDirectory, extraEnv);
 		try
 		{
 			if (_engineTools.Count > 0 && _engineToolContext is not null && _options.EngineToolBridgeEnabled)
 				bridge = await OpenCodeEngineToolBridge.StartAsync(holder, _options.Hostname, _loggerFactory, cancellationToken).ConfigureAwait(false);
 
 			await process.StartAsync(cancellationToken).ConfigureAwait(false);
-			return await RunTurnAsync(process.Client, holder, bridge?.McpUrl, prompt, modelRef, plan.PrimaryAgentName, sessionIdBox, writer, cancellationToken).ConfigureAwait(false);
+			return await RunTurnAsync(process.Client, holder, bridge?.McpUrl, prompt, modelRef, plan.PrimaryAgentName, priorSessionId, sessionIdBox, writer, cancellationToken).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -152,8 +166,12 @@ internal sealed partial class OpenCodeAgent : IAgent
 	}
 
 	/// <summary>
-	/// Shared per-turn logic: bind engine tools, create the session, stream events, send the
-	/// prompt (optionally routed through a named agent), and return the accumulated result.
+	/// Shared per-turn logic: bind engine tools, create or resume the session, stream events, send
+	/// the prompt (optionally routed through a named agent), and return the accumulated result.
+	/// On a resume attempt (<paramref name="priorSessionId"/> set) the prior session is re-prompted;
+	/// if it can't be reached, a <c>resume_session_missing</c> signal forces the swap loop to
+	/// cold-restart. The session is deleted only when the turn completes, so a failed attempt's
+	/// session survives for the next swap to resume.
 	/// </summary>
 	private async Task<AgentResult> RunTurnAsync(
 		IOpenCodeClient client,
@@ -162,11 +180,13 @@ internal sealed partial class OpenCodeAgent : IAgent
 		string prompt,
 		OpenCodeModelRef modelRef,
 		string? agentName,
+		string? priorSessionId,
 		SwapSessionIdBox sessionIdBox,
 		ChannelWriter<AgentEvent> writer,
 		CancellationToken cancellationToken)
 	{
 		string? sessionId = null;
+		var completed = false;
 		try
 		{
 			var hasEngineTools = _engineTools.Count > 0 && _engineToolContext is not null && _options.EngineToolBridgeEnabled;
@@ -177,10 +197,21 @@ internal sealed partial class OpenCodeAgent : IAgent
 					await RegisterEngineToolMcpAsync(client, engineToolMcpUrl, cancellationToken).ConfigureAwait(false);
 			}
 
-			sessionId = await client.CreateSessionAsync(title: null, cancellationToken).ConfigureAwait(false);
-			// Tell the swap loop this attempt's session id (for swap-event attribution).
+			var isResume = !string.IsNullOrEmpty(priorSessionId);
+			if (isResume)
+			{
+				// Resume the prior session (OpenCode persists it across server processes).
+				sessionId = priorSessionId!;
+				LogSessionResumed(sessionId, modelRef.ToString());
+			}
+			else
+			{
+				sessionId = await client.CreateSessionAsync(title: null, cancellationToken).ConfigureAwait(false);
+				LogSessionCreated(sessionId, modelRef.ToString());
+			}
+
+			// Tell the swap loop this attempt's session id (for swap-event attribution + resume).
 			sessionIdBox.Value = sessionId;
-			LogSessionCreated(sessionId, modelRef.ToString());
 
 			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 			var handler = new OpenCodeSessionHandler(sessionId, writer, _reporter, _model, done, _logger);
@@ -206,6 +237,20 @@ internal sealed partial class OpenCodeAgent : IAgent
 			}
 			catch (Exception ex) when (ex is not OperationCanceledException)
 			{
+				streamCts.Cancel();
+				try { await pump.ConfigureAwait(false); } catch { /* pump cancellation */ }
+
+				if (isResume)
+				{
+					// The resume target is unreachable (e.g. a fresh dedicated server that doesn't
+					// have this session). Signal resume_session_missing so the swap loop cold-restarts.
+					LogResumeSessionMissing(sessionId, ex.Message);
+					throw new OpenCodeClientUnhealthyException(
+						sessionId, "resume_session_missing", probeDetails: ex.Message,
+						message: $"Resume of OpenCode session '{sessionId}' failed; falling back to a new session.",
+						innerException: ex);
+				}
+
 				throw new OpenCodeSessionFailedException($"OpenCode prompt failed: {ex.Message}", innerException: ex);
 			}
 
@@ -227,6 +272,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 				try { await pump.ConfigureAwait(false); } catch { /* pump cancellation */ }
 			}
 
+			completed = true;
 			return new AgentResult
 			{
 				Content = handler.FinalContent ?? string.Empty,
@@ -237,7 +283,10 @@ internal sealed partial class OpenCodeAgent : IAgent
 		}
 		finally
 		{
-			if (sessionId is not null)
+			// Delete the session only when the turn completed. A failed attempt's session is left
+			// in place so the next swap can resume it; orphans from a final failure are pruned by
+			// OpenCode's own session pruning.
+			if (sessionId is not null && completed)
 				await client.DeleteSessionAsync(sessionId, CancellationToken.None).ConfigureAwait(false);
 		}
 	}
@@ -472,4 +521,10 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 	[LoggerMessage(EventId = 224, Level = LogLevel.Debug, Message = "OpenCode: MCP load-status probe failed; proceeding without it")]
 	private partial void LogMcpLoadProbeFailed(Exception ex);
+
+	[LoggerMessage(EventId = 225, Level = LogLevel.Information, Message = "OpenCode: resuming session {SessionId} for model {Model} after a swap")]
+	private partial void LogSessionResumed(string sessionId, string model);
+
+	[LoggerMessage(EventId = 226, Level = LogLevel.Warning, Message = "OpenCode: resume of session {SessionId} failed ({Reason}); cold-restarting on a new session")]
+	private partial void LogResumeSessionMissing(string sessionId, string reason);
 }

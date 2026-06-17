@@ -122,16 +122,15 @@ public sealed record AgentProviderCapabilities
 
 	/// <summary>
 	/// Features whose silent omission is unsafe (a security boundary) or breaks the step's
-	/// contract (it would run without tools/controls it explicitly required). A provider that does
-	/// not support one of these fails the step; every other gap degrades with a warning.
-	///
-	/// All error features are <b>user-explicit opt-ins</b> — they only appear in a step's config
-	/// when the author deliberately set them — so they never fire spuriously. (Engine tools, by
-	/// contrast, are injected into every step by the engine, so an unsupported-engine-tools gap is a
-	/// warning: the step still runs, the model just can't call <c>set_status</c> and friends.)
+	/// contract (it would run without behavior/tools/controls it explicitly required). A provider
+	/// that does not support one of these fails the step; every other gap degrades with a warning.
 	///
 	/// <list type="bullet">
 	///   <item><c>Mcps</c> — the step would run without the tool servers it requires.</item>
+	///   <item><c>Subagents</c> — the step's delegation design would not work.</item>
+	///   <item><c>ReasoningLevel</c> — the requested reasoning effort would not be applied.</item>
+	///   <item><c>SkillDirectories</c> — the agent would run without the skills it was given.</item>
+	///   <item><c>EngineTools</c> — orchestration control tools (set_status / complete / save_file) would be missing.</item>
 	///   <item><c>HumanInput</c> — human approval gating would be bypassed.</item>
 	///   <item><c>PermissionPolicy</c> — the permission allow/deny policy would be bypassed.</item>
 	///   <item><c>SandboxPolicy</c> — the requested sandbox boundary would not be applied.</item>
@@ -141,6 +140,10 @@ public sealed record AgentProviderCapabilities
 	private static readonly HashSet<string> ErrorFeatures = new(StringComparer.Ordinal)
 	{
 		nameof(AgentBuildConfig.Mcps),
+		nameof(AgentBuildConfig.Subagents),
+		nameof(AgentBuildConfig.ReasoningLevel),
+		nameof(AgentBuildConfig.SkillDirectories),
+		nameof(AgentBuildConfig.EngineTools),
 		nameof(AgentBuildConfig.HumanInput),
 		nameof(AgentBuildConfig.PermissionPolicy),
 		nameof(AgentBuildConfig.SandboxPolicy),

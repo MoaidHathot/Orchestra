@@ -12,8 +12,9 @@ public class OpenCodeConfigBuilderTests
 		string? system = "sys",
 		ReasoningLevel? reasoning = null,
 		IReadOnlyList<Subagent>? subagents = null,
-		IReadOnlyList<Mcp>? mcps = null)
-		=> OpenCodeConfigBuilder.Build(Model, system, reasoning, subagents ?? [], mcps ?? [], "github-copilot");
+		IReadOnlyList<Mcp>? mcps = null,
+		IReadOnlyList<string>? excludedTools = null)
+		=> OpenCodeConfigBuilder.Build(Model, system, reasoning, subagents ?? [], mcps ?? [], excludedTools ?? [], "github-copilot");
 
 	private static JsonElement ConfigJson(OpenCodeStepPlan plan)
 		=> JsonDocument.Parse(JsonSerializer.Serialize(plan.Config)).RootElement.Clone();
@@ -39,6 +40,19 @@ public class OpenCodeConfigBuilderTests
 		agent.GetProperty("model").GetString().Should().Be("github-copilot/claude-opus-4.8");
 		agent.GetProperty("prompt").GetString().Should().Be("you are helpful");
 		agent.GetProperty("reasoningEffort").GetString().Should().Be("high");
+	}
+
+	[Fact]
+	public void Build_ExcludedTools_DisablesNamedToolsOnPrimaryAgent()
+	{
+		var plan = Build(system: null, excludedTools: ["bash", "edit"]);
+
+		plan.HasConfig.Should().BeTrue();
+		plan.PrimaryAgentName.Should().Be("orchestra-primary");
+
+		var tools = ConfigJson(plan).GetProperty("agent").GetProperty("orchestra-primary").GetProperty("tools");
+		tools.GetProperty("bash").GetBoolean().Should().BeFalse();
+		tools.GetProperty("edit").GetBoolean().Should().BeFalse();
 	}
 
 	[Fact]

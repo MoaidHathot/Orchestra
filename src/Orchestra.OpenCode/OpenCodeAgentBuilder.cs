@@ -121,10 +121,11 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 	/// <summary>
 	/// OpenCode honors the model, system prompt (Replace semantics — the universal baseline),
 	/// MCP servers, inline sub-agents, reasoning level, working directory, skill directories,
-	/// engine tools, attachments, human-input routing, and permission policy. Unsupported knobs are
-	/// surfaced by the engine per severity: reasoning summary, context tier, GitHub token,
-	/// Append/Customize system-prompt modes + sections, and infinite sessions warn and proceed;
-	/// sandbox policy and excluded-tools (security / least-privilege) fail the step.
+	/// engine tools, attachments, human-input routing, permission policy, excluded tools (mapped to
+	/// OpenCode's agent <c>tools</c> deny map; names use OpenCode's vocabulary), and infinite
+	/// sessions (the enable/disable toggle, via OPENCODE_DISABLE_AUTOCOMPACT). Unsupported knobs are
+	/// surfaced by the engine per severity: reasoning summary, context tier, GitHub token, and
+	/// Append/Customize system-prompt modes + sections warn and proceed; sandbox policy fails the step.
 	/// </summary>
 	public override AgentProviderCapabilities GetCapabilities() => new()
 	{
@@ -138,6 +139,8 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 		Attachments = true,
 		HumanInput = true,
 		PermissionPolicy = true,
+		ExcludedTools = true,
+		InfiniteSession = true,
 	};
 
 	public override Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)

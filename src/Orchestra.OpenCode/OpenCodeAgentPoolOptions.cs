@@ -77,4 +77,12 @@ public sealed class OpenCodeAgentPoolOptions
 	/// swapping (the executor-level fallback still applies).
 	/// </summary>
 	public int SwapBudgetPerStep { get; set; } = 1;
+
+	/// <summary>
+	/// When true (default), a swap resumes the prior OpenCode session (which persists in OpenCode's
+	/// data dir, shared across server processes) by re-prompting its id, preserving any tool-call
+	/// progress from the failed attempt. When false, every swap cold-restarts on a brand-new session.
+	/// If the prior session can't be reached, the attempt falls back to a fresh session automatically.
+	/// </summary>
+	public bool ResumeOnSwapEnabled { get; set; } = true;
 }

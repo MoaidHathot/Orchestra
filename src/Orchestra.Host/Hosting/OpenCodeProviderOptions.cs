@@ -48,4 +48,10 @@ public sealed class OpenCodeProviderOptions
 	/// Default 1; 0 disables in-provider swapping (the executor-level fallback still applies).
 	/// </summary>
 	public int? SwapBudgetPerStep { get; set; }
+
+	/// <summary>
+	/// When true (default), a swap resumes the prior OpenCode session (re-prompting its id to
+	/// preserve tool-call progress). When false, every swap cold-restarts on a new session.
+	/// </summary>
+	public bool? ResumeOnSwapEnabled { get; set; }
 }

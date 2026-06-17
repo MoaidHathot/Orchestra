@@ -96,6 +96,7 @@ internal static class AgentProviderRegistration
 		if (oc.StartupTimeoutSeconds is > 0) poolOptions.StartupTimeout = TimeSpan.FromSeconds(oc.StartupTimeoutSeconds.Value);
 		if (oc.EngineToolBridgeEnabled.HasValue) poolOptions.EngineToolBridgeEnabled = oc.EngineToolBridgeEnabled.Value;
 		if (oc.SwapBudgetPerStep is >= 0) poolOptions.SwapBudgetPerStep = oc.SwapBudgetPerStep.Value;
+		if (oc.ResumeOnSwapEnabled.HasValue) poolOptions.ResumeOnSwapEnabled = oc.ResumeOnSwapEnabled.Value;
 
 		return new OpenCodeAgentBuilder(loggerFactory, poolOptions);
 	}

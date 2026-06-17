@@ -101,21 +101,24 @@ public class AgentProviderCapabilitiesTests
 	[Fact]
 	public void SeverityOf_ClassifiesSecurityAndContractFeaturesAsError_RestAsWarning()
 	{
-		// Unsafe / contract-breaking to drop silently → Error (all user-explicit opt-ins).
+		// Unsafe / contract-breaking to drop silently → Error.
 		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.Mcps)).Should().Be(CapabilityGapSeverity.Error);
+		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.Subagents)).Should().Be(CapabilityGapSeverity.Error);
+		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ReasoningLevel)).Should().Be(CapabilityGapSeverity.Error);
+		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.SkillDirectories)).Should().Be(CapabilityGapSeverity.Error);
+		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.EngineTools)).Should().Be(CapabilityGapSeverity.Error);
 		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.HumanInput)).Should().Be(CapabilityGapSeverity.Error);
 		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.PermissionPolicy)).Should().Be(CapabilityGapSeverity.Error);
 		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.SandboxPolicy)).Should().Be(CapabilityGapSeverity.Error);
 		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ExcludedTools)).Should().Be(CapabilityGapSeverity.Error);
 
-		// Degrade gracefully → Warning (engine tools are engine-injected, so they warn rather than fail).
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.EngineTools)).Should().Be(CapabilityGapSeverity.Warning);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ReasoningLevel)).Should().Be(CapabilityGapSeverity.Warning);
+		// Degrade gracefully → Warning.
 		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ReasoningSummary)).Should().Be(CapabilityGapSeverity.Warning);
 		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ContextTier)).Should().Be(CapabilityGapSeverity.Warning);
+		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.WorkingDirectory)).Should().Be(CapabilityGapSeverity.Warning);
+		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.GitHubToken)).Should().Be(CapabilityGapSeverity.Warning);
 		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.SystemPromptMode)).Should().Be(CapabilityGapSeverity.Warning);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.SkillDirectories)).Should().Be(CapabilityGapSeverity.Warning);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.Subagents)).Should().Be(CapabilityGapSeverity.Warning);
+		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.Attachments)).Should().Be(CapabilityGapSeverity.Warning);
 	}
 
 	[Fact]
@@ -126,13 +129,13 @@ public class AgentProviderCapabilitiesTests
 		{
 			Model = "m",
 			SandboxPolicy = new SandboxPolicy(),
-			ReasoningLevel = ReasoningLevel.High,
+			ContextTier = ContextTier.LongContext,
 		};
 
 		var gaps = caps.FindUnsupported(config).ToArray();
 
 		gaps.Single(g => g.Feature == nameof(AgentBuildConfig.SandboxPolicy)).Severity.Should().Be(CapabilityGapSeverity.Error);
-		gaps.Single(g => g.Feature == nameof(AgentBuildConfig.ReasoningLevel)).Severity.Should().Be(CapabilityGapSeverity.Warning);
+		gaps.Single(g => g.Feature == nameof(AgentBuildConfig.ContextTier)).Severity.Should().Be(CapabilityGapSeverity.Warning);
 	}
 
 	[Fact]
@@ -161,14 +164,14 @@ public class AgentProviderCapabilitiesTests
 					SystemPrompt = "sys",
 					UserPrompt = "user",
 					Model = "claude-opus-4.8",
-					ReasoningLevel = ReasoningLevel.High,
+					ContextTier = ContextTier.LongContext,
 				},
 			],
 		});
 
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
 		logger.Warnings.Should().ContainSingle(w =>
-			w.Contains(nameof(AgentBuildConfig.ReasoningLevel)) && w.Contains("limited"));
+			w.Contains(nameof(AgentBuildConfig.ContextTier)) && w.Contains("limited"));
 	}
 
 	[Fact]

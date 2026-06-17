@@ -147,7 +147,7 @@ public class OpenCodeServerE2ETests
 		var mcp = new RemoteMcp { Name = "orchestra-test-mcp", Type = McpType.Remote, Endpoint = "http://127.0.0.1:59999/mcp", Headers = [] };
 		var plan = OpenCodeConfigBuilder.Build(
 			OpenCodeModelRef.Parse(Model, "github-copilot"), systemPrompt: null, reasoningLevel: null,
-			subagents: [], mcps: [mcp], fallbackProvider: "github-copilot");
+			subagents: [], mcps: [mcp], excludedTools: [], fallbackProvider: "github-copilot");
 		var configFile = Path.Combine(Path.GetTempPath(), $"opencode-e2e-mcp-{Guid.NewGuid():N}.json");
 		await File.WriteAllTextAsync(configFile, System.Text.Json.JsonSerializer.Serialize(plan.Config));
 

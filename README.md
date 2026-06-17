@@ -647,8 +647,8 @@ Every provider declares which step-level features it supports via `AgentBuilder.
 
 | Severity when unsupported | Features |
 |---|---|
-| **Error** (fails the step) | `mcps`, `humanInput`, `permissionPolicy`, `sandbox`, `excludedTools` |
-| **Warning** (logs + proceeds) | `subagents`, `reasoningLevel`, `reasoningSummary`, `contextTier`, `workingDirectory`, `gitHubToken`, `systemPromptMode` (Append/Customize), `skillDirectories`, `infiniteSessions`, `attachments`, engine tools |
+| **Error** (fails the step) | `mcps`, `subagents`, `reasoningLevel`, `skillDirectories`, engine tools, `humanInput`, `permissionPolicy`, `sandbox`, `excludedTools` |
+| **Warning** (logs + proceeds) | `reasoningSummary`, `contextTier`, `workingDirectory`, `gitHubToken`, `systemPromptMode` (Append/Customize), `attachments` |
 
 Cross-provider conformance tests keep this matrix honest.
 
@@ -661,11 +661,13 @@ Cross-provider conformance tests keep this matrix honest.
 | `workingDirectory` | ✅ | ✅ |
 | `skillDirectories` | ✅ | ✅ |
 | engine tools / `attachments` / `humanInput` / `permissionPolicy` | ✅ | ✅ |
-| CLI/worker **swap + cold restart** on transport failure | ✅ | ✅ |
-| session **resume** on swap | ✅ | ❌ (cold restart only) |
+| `excludedTools` | ✅ | ✅ (OpenCode tool names) |
+| `infiniteSessions` (enable/disable) | ✅ | ✅ (toggle via OPENCODE_DISABLE_AUTOCOMPACT) |
+| CLI/worker **swap** on transport failure | ✅ | ✅ |
+| session **resume** on swap | ✅ | ✅ (re-prompts the persisted session) |
 | `systemPromptMode` **Append/Customize** + sections | ✅ | ⚠️ warns; Replace works |
-| `reasoningSummary`, `contextTier`, `gitHubToken`, `infiniteSessions` | ✅ | ⚠️ warns |
-| `sandbox`, `excludedTools` | ✅ | ⛔ **fails the step** (security/least-privilege) |
+| `reasoningSummary`, `contextTier`, `gitHubToken` | ✅ | ⚠️ warns |
+| `sandbox` | ✅ | ⛔ **fails the step** (no equivalent) |
 
 ### Selecting a provider
 
@@ -700,8 +702,8 @@ A single run may mix providers across steps; the engine opens one per-run worker
 
 - **Models** are addressed as `provider/model` (e.g. `github-copilot/claude-opus-4.8`). A bare model id is paired with `opencode.fallbackProvider` (default `github-copilot`), so existing Copilot-style ids keep working. OpenCode must already be authenticated to the target provider (e.g. its GitHub Copilot connection).
 - **Spawn-only**: the adapter always launches its own `opencode serve` on a loopback port (resolved from `opencode.cliPath`, `ORCHESTRA_OPENCODE_PATH`, or `opencode` on PATH). There is no connect-only mode — steps that need per-step config get a dedicated server with a generated `opencode.json`.
-- **Per-step config in the artifact folder**: steps using `reasoningLevel`, `subagents`, `mcps`, `workingDirectory`, or `skillDirectories` spawn a *dedicated* server pointed (via `OPENCODE_CONFIG`) at a generated `opencode.json` written into the run's artifact folder, with skills staged under `<cwd>/.opencode/skills/<name>/`. Plain text-prompt steps share the run pool. The primary agent carries the system prompt + `reasoningEffort`; each `subagents[]` entry becomes a `subagent` the model delegates to via OpenCode's Task tool (scoped by a `permission.task` allow-list); each `mcps[]` entry becomes a `local`/`remote` MCP server.
-- **Swap & resume**: a transport-class failure (event-stream loss or a transient upstream session error) is retried on a fresh server via the shared swap loop, bounded by `opencode.swapBudgetPerStep` (default 1). OpenCode has no session-resume primitive, so every swap is a **cold restart** (the failed session is deleted and the prompt re-sent) — Copilot additionally resumes the prior session to preserve history.
+- **Per-step config in the artifact folder**: steps using `reasoningLevel`, `subagents`, `mcps`, `excludedTools`, `workingDirectory`, `skillDirectories`, or `infiniteSessions` (disable) spawn a *dedicated* server pointed (via `OPENCODE_CONFIG`) at a generated `opencode.json` written into the run's artifact folder, with skills staged under `<cwd>/.opencode/skills/<name>/`. Plain text-prompt steps share the run pool. The primary agent carries the system prompt + `reasoningEffort`; each `subagents[]` entry becomes a `subagent` the model delegates to via OpenCode's Task tool (scoped by a `permission.task` allow-list); each `mcps[]` entry becomes a `local`/`remote` MCP server; `excludedTools` become `tools:{name:false}` on the agent (OpenCode tool names — `bash`, `edit`, `write`, …); `infiniteSessions.enabled:false` sets `OPENCODE_DISABLE_AUTOCOMPACT`.
+- **Swap & resume**: a transport-class failure (event-stream loss or a transient upstream session error) is retried on a fresh server via the shared swap loop, bounded by `opencode.swapBudgetPerStep` (default 1). OpenCode persists sessions in its data dir (shared across server processes), so a swap **resumes** the prior session by re-prompting its id (preserving tool-call progress); if the session is unreachable it cold-restarts on a new one. Set `opencode.resumeOnSwapEnabled:false` to always cold-restart. The session is deleted only when the turn completes; a failed attempt's session is left for the next swap to resume (orphans are pruned by OpenCode).
 - **MCP fail-fast**: declared MCP servers that don't load on the server (absent from `GET /mcp`) are reported as failed so the step fails fast instead of running without its tools. Global (proxy-routed) MCPs are additionally tool-count-probed by the engine before the LLM runs, the same as for Copilot.
 - **Engine tools** (`orchestra_set_status`, `orchestra_complete`, file save/read, `request_user_input`) are exposed to OpenCode via a loopback HTTP MCP bridge that calls back into the per-step `EngineToolContext`. Disable with `opencode.engineToolBridgeEnabled: false`.
 - **Permissions / HITL** map to OpenCode's `permission.updated` events and the `POST /session/{id}/permissions/{id}` reply (auto-approve, deny-list, or human approval).

@@ -415,6 +415,8 @@ public static class OrchestraConfigLoader
 				options.OpenCode.EngineToolBridgeEnabled = openCodeConfig.EngineToolBridgeEnabled.Value;
 			if (openCodeConfig.SwapBudgetPerStep.HasValue)
 				options.OpenCode.SwapBudgetPerStep = openCodeConfig.SwapBudgetPerStep.Value;
+			if (openCodeConfig.ResumeOnSwapEnabled.HasValue)
+				options.OpenCode.ResumeOnSwapEnabled = openCodeConfig.ResumeOnSwapEnabled.Value;
 		}
 
 		if (config.Hooks is { Length: > 0 })
@@ -809,6 +811,9 @@ public class OpenCodeProviderConfig
 
 	/// <summary>Max in-provider cold-restart swaps per step after a transport failure (default 1).</summary>
 	public int? SwapBudgetPerStep { get; set; }
+
+	/// <summary>Whether a swap resumes the prior session vs cold-restarting (default true).</summary>
+	public bool? ResumeOnSwapEnabled { get; set; }
 }
 
 /// <summary>
