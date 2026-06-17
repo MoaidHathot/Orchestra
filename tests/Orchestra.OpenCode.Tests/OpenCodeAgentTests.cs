@@ -200,6 +200,47 @@ public class OpenCodeAgentTests
 		client.LastPrompt.System.Should().Be("plain");
 	}
 
+	[Fact]
+	public async Task SendAsync_DeclaredMcpMissingFromServer_EmitsFailedMcpStatus()
+	{
+		// "present-mcp" loaded on the server, "missing-mcp" not — the latter must be reported
+		// Failed so the engine's post-turn check fails the step instead of running toolless.
+		var client = new FakeOpenCodeClient(Sid)
+		{
+			McpNames = ["present-mcp"],
+			Events = [TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }""")],
+		};
+
+		var config = new AgentBuildConfig
+		{
+			Model = "github-copilot/claude-opus-4.8",
+			Mcps =
+			[
+				new LocalMcp { Name = "present-mcp", Type = McpType.Local, Command = "x", Arguments = [] },
+				new LocalMcp { Name = "missing-mcp", Type = McpType.Local, Command = "y", Arguments = [] },
+			],
+		};
+
+		var (_, events) = await RunAsync(client, config);
+
+		var loaded = events.Should().ContainSingle(e => e.Type == AgentEventType.McpServersLoaded).Subject;
+		loaded.McpServerStatuses!.Single(s => s.Name == "present-mcp").Status.Should().Be("Connected");
+		loaded.McpServerStatuses!.Single(s => s.Name == "missing-mcp").Status.Should().Be("Failed");
+	}
+
+	[Fact]
+	public async Task SendAsync_NoDeclaredMcps_DoesNotEmitMcpServersLoaded()
+	{
+		var client = new FakeOpenCodeClient(Sid)
+		{
+			Events = [TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }""")],
+		};
+
+		var (_, events) = await RunAsync(client, new AgentBuildConfig { Model = "github-copilot/claude-opus-4.8", SystemPrompt = "plain" });
+
+		events.Should().NotContain(e => e.Type == AgentEventType.McpServersLoaded);
+	}
+
 	private sealed class FakeFactory(IOpenCodeClient client) : IOpenCodeClientFactory
 	{
 		public IOpenCodeClient Create(string baseUrl, string? username, string? password) => client;
@@ -260,6 +301,7 @@ public class OpenCodeAgentTests
 	{
 		public string BaseUrl => "http://fake-opencode";
 		public List<OpenCodeServerEvent> Events { get; init; } = [];
+		public List<string> McpNames { get; init; } = ["build", "general"];
 		public OpenCodePromptRequest? LastPrompt { get; private set; }
 		public List<(string PermissionId, string Response)> PermissionResponses { get; } = [];
 		public bool SessionDeleted { get; private set; }
@@ -295,7 +337,7 @@ public class OpenCodeAgentTests
 			=> Task.FromResult<IReadOnlyList<string>>(["build", "general"]);
 
 		public Task<IReadOnlyList<string>> ListMcpNamesAsync(CancellationToken cancellationToken)
-			=> Task.FromResult<IReadOnlyList<string>>([]);
+			=> Task.FromResult<IReadOnlyList<string>>([.. McpNames]);
 
 		public async IAsyncEnumerable<OpenCodeServerEvent> SubscribeAsync([EnumeratorCancellation] CancellationToken cancellationToken)
 		{

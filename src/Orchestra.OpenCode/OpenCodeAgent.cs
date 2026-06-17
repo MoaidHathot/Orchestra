@@ -187,6 +187,14 @@ internal sealed partial class OpenCodeAgent : IAgent
 			_reporter.ReportSessionStarted(_model, modelRef.ToString());
 			writer.TryWrite(new AgentEvent { Type = AgentEventType.SessionStart, Model = modelRef.ToString() });
 
+			// MCP load-status fail-fast: emit a McpServersLoaded event marking any declared MCP
+			// that did not load on the server as Failed. The executor's post-turn check then fails
+			// the step rather than letting the LLM run without its required tools. (OpenCode's API
+			// exposes loaded MCP *names* only — not tool counts — so a connected-but-zero-tools
+			// inline server is not observable here; global MCPs are covered by the engine's
+			// provider-agnostic pre-LLM proxy probe.)
+			await EmitMcpLoadStatusAsync(client, writer, cancellationToken).ConfigureAwait(false);
+
 			// Subscribe BEFORE prompting so no events between session-create and send are missed.
 			using var streamCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 			var pump = PumpEventsAsync(client, sessionId, handler, done, streamCts.Token);
@@ -245,6 +253,47 @@ internal sealed partial class OpenCodeAgent : IAgent
 		catch (Exception ex)
 		{
 			LogMcpRegisterError(ex, url);
+		}
+	}
+
+	/// <summary>
+	/// Compares the step's declared MCP servers against the set OpenCode actually loaded
+	/// (<c>GET /mcp</c>) and emits a <see cref="AgentEventType.McpServersLoaded"/> event marking
+	/// each as Connected (present) or Failed (declared but absent). The engine's post-turn check
+	/// then fails the step when a required server failed to load. A probe failure is non-fatal —
+	/// the step proceeds and the engine's other MCP safety nets still apply.
+	/// </summary>
+	private async Task EmitMcpLoadStatusAsync(IOpenCodeClient client, ChannelWriter<AgentEvent> writer, CancellationToken cancellationToken)
+	{
+		if (_mcps.Length == 0)
+		{
+			return;
+		}
+
+		try
+		{
+			var loaded = await client.ListMcpNamesAsync(cancellationToken).ConfigureAwait(false);
+			var loadedSet = new HashSet<string>(loaded, StringComparer.OrdinalIgnoreCase);
+
+			var statuses = _mcps
+				.Select(m => new McpServerStatusInfo(
+					Name: m.Name,
+					Status: loadedSet.Contains(m.Name) ? "Connected" : "Failed",
+					Source: "opencode"))
+				.ToList();
+
+			var missing = statuses.Where(s => s.Status == "Failed").Select(s => s.Name).ToList();
+			if (missing.Count > 0)
+			{
+				LogMcpServersMissing(string.Join(", ", missing));
+			}
+
+			_reporter.ReportMcpServersLoaded(statuses);
+			writer.TryWrite(new AgentEvent { Type = AgentEventType.McpServersLoaded, McpServerStatuses = statuses });
+		}
+		catch (Exception ex)
+		{
+			LogMcpLoadProbeFailed(ex);
 		}
 	}
 
@@ -417,4 +466,10 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 	[LoggerMessage(EventId = 222, Level = LogLevel.Warning, Message = "OpenCode: failed to register engine-tool MCP bridge at {Url}")]
 	private partial void LogMcpRegisterError(Exception ex, string url);
+
+	[LoggerMessage(EventId = 223, Level = LogLevel.Warning, Message = "OpenCode: declared MCP server(s) did not load: {Servers}")]
+	private partial void LogMcpServersMissing(string servers);
+
+	[LoggerMessage(EventId = 224, Level = LogLevel.Debug, Message = "OpenCode: MCP load-status probe failed; proceeding without it")]
+	private partial void LogMcpLoadProbeFailed(Exception ex);
 }
