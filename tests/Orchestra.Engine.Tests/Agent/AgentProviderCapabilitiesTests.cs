@@ -52,7 +52,7 @@ public class AgentProviderCapabilitiesTests
 			ExcludedTools = ["shell"],
 		};
 
-		var unsupported = caps.FindUnsupported(config).Select(g => g.Feature).ToArray();
+		var unsupported = caps.FindUnsupported(config).ToArray();
 
 		unsupported.Should().Contain(nameof(AgentBuildConfig.Mcps));
 		unsupported.Should().Contain(nameof(AgentBuildConfig.ReasoningLevel));
@@ -77,53 +77,31 @@ public class AgentProviderCapabilitiesTests
 	}
 
 	[Fact]
-	public void FindUnsupported_SystemPromptMode_OnlyWarnsForAppendOrCustomize_NotReplace()
+	public void FindUnsupported_SystemPromptMode_OnlyReportsAppendOrCustomize_NotReplace()
 	{
 		// A provider that does not support non-Replace modes (e.g. OpenCode).
 		var caps = new AgentProviderCapabilities { Provider = "replace-only" };
 
 		// Replace is the universal baseline — never reported.
 		caps.FindUnsupported(new AgentBuildConfig { Model = "m", SystemPromptMode = SystemPromptMode.Replace })
-			.Select(g => g.Feature).Should().NotContain(nameof(AgentBuildConfig.SystemPromptMode));
+			.Should().NotContain(nameof(AgentBuildConfig.SystemPromptMode));
 
-		// Append and Customize are reported as unsupported.
+		// Append and Customize are reported as unsupported (the step fails).
 		caps.FindUnsupported(new AgentBuildConfig { Model = "m", SystemPromptMode = SystemPromptMode.Append })
-			.Select(g => g.Feature).Should().Contain(nameof(AgentBuildConfig.SystemPromptMode));
+			.Should().Contain(nameof(AgentBuildConfig.SystemPromptMode));
 		caps.FindUnsupported(new AgentBuildConfig { Model = "m", SystemPromptMode = SystemPromptMode.Customize })
-			.Select(g => g.Feature).Should().Contain(nameof(AgentBuildConfig.SystemPromptMode));
+			.Should().Contain(nameof(AgentBuildConfig.SystemPromptMode));
 
 		// A provider that supports them never reports any mode.
 		var full = AgentProviderCapabilities.All("full");
 		full.FindUnsupported(new AgentBuildConfig { Model = "m", SystemPromptMode = SystemPromptMode.Customize })
-			.Select(g => g.Feature).Should().NotContain(nameof(AgentBuildConfig.SystemPromptMode));
+			.Should().NotContain(nameof(AgentBuildConfig.SystemPromptMode));
 	}
 
 	[Fact]
-	public void SeverityOf_ClassifiesSecurityAndContractFeaturesAsError_RestAsWarning()
+	public void FindUnsupported_ReportsEveryUsedUnsupportedFeature_RegardlessOfKind()
 	{
-		// Unsafe / contract-breaking to drop silently → Error.
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.Mcps)).Should().Be(CapabilityGapSeverity.Error);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.Subagents)).Should().Be(CapabilityGapSeverity.Error);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ReasoningLevel)).Should().Be(CapabilityGapSeverity.Error);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.SkillDirectories)).Should().Be(CapabilityGapSeverity.Error);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.EngineTools)).Should().Be(CapabilityGapSeverity.Error);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.HumanInput)).Should().Be(CapabilityGapSeverity.Error);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.PermissionPolicy)).Should().Be(CapabilityGapSeverity.Error);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.SandboxPolicy)).Should().Be(CapabilityGapSeverity.Error);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ExcludedTools)).Should().Be(CapabilityGapSeverity.Error);
-
-		// Degrade gracefully → Warning.
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ReasoningSummary)).Should().Be(CapabilityGapSeverity.Warning);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.ContextTier)).Should().Be(CapabilityGapSeverity.Warning);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.WorkingDirectory)).Should().Be(CapabilityGapSeverity.Warning);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.GitHubToken)).Should().Be(CapabilityGapSeverity.Warning);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.SystemPromptMode)).Should().Be(CapabilityGapSeverity.Warning);
-		AgentProviderCapabilities.SeverityOf(nameof(AgentBuildConfig.Attachments)).Should().Be(CapabilityGapSeverity.Warning);
-	}
-
-	[Fact]
-	public void FindUnsupported_TagsEachGapWithItsSeverity()
-	{
+		// Every used-but-unsupported feature is reported (the executor fails the step on any).
 		var caps = new AgentProviderCapabilities { Provider = "nothing" };
 		var config = new AgentBuildConfig
 		{
@@ -132,27 +110,27 @@ public class AgentProviderCapabilitiesTests
 			ContextTier = ContextTier.LongContext,
 		};
 
-		var gaps = caps.FindUnsupported(config).ToArray();
+		var unsupported = caps.FindUnsupported(config).ToArray();
 
-		gaps.Single(g => g.Feature == nameof(AgentBuildConfig.SandboxPolicy)).Severity.Should().Be(CapabilityGapSeverity.Error);
-		gaps.Single(g => g.Feature == nameof(AgentBuildConfig.ContextTier)).Severity.Should().Be(CapabilityGapSeverity.Warning);
+		unsupported.Should().Contain(nameof(AgentBuildConfig.SandboxPolicy));
+		unsupported.Should().Contain(nameof(AgentBuildConfig.ContextTier));
 	}
 
 	[Fact]
-	public async Task Executor_Warns_WhenStepUsesFeatureProviderDoesNotSupport()
+	public async Task Executor_FailsStep_WhenStepUsesAnyUnsupportedFeature()
 	{
-		// Provider declares no reasoning support; the step asks for High reasoning.
+		// Even a non-security feature (context tier) fails the step when the provider lacks it —
+		// the engine fails fast on any used-but-unsupported feature rather than dropping it.
 		var builder = new ConfigurableCapabilityAgentBuilder(
 			new AgentProviderCapabilities { Provider = "limited", EngineTools = true });
 		var registry = new AgentProviderRegistry(
 			new Dictionary<string, AgentBuilder> { ["limited"] = builder },
 			defaultProviderName: "limited");
-		var logger = new CapturingLoggerFactory();
-		var executor = new OrchestrationExecutor(_scheduler, registry, _reporter, logger);
+		var executor = new OrchestrationExecutor(_scheduler, registry, _reporter, new CapturingLoggerFactory());
 
 		var result = await executor.ExecuteAsync(new Orchestration
 		{
-			Name = "warn",
+			Name = "fail",
 			Description = "unsupported feature",
 			DefaultProvider = "limited",
 			Steps =
@@ -169,18 +147,17 @@ public class AgentProviderCapabilitiesTests
 			],
 		});
 
-		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		logger.Warnings.Should().ContainSingle(w =>
-			w.Contains(nameof(AgentBuildConfig.ContextTier)) && w.Contains("limited"));
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["a"].ErrorMessage.Should().Contain(nameof(AgentBuildConfig.ContextTier));
+		result.StepResults["a"].ErrorCategory.Should().Be(StepErrorCategory.ValidationError);
 	}
 
 	[Fact]
-	public async Task Executor_FailsStep_WhenProviderLacksAnErrorSeverityFeature()
+	public async Task Executor_FailsStep_WhenProviderLacksRequestedFeature()
 	{
-		// Sandbox is an Error-severity feature: silently running unsandboxed is unsafe, so a
-		// provider that doesn't support it must fail the step rather than warn-and-proceed.
+		// A provider that doesn't support the requested feature (here sandbox) must fail the step.
 		var builder = new ConfigurableCapabilityAgentBuilder(
-			new AgentProviderCapabilities { Provider = "limited" });
+			new AgentProviderCapabilities { Provider = "limited", EngineTools = true });
 		var registry = new AgentProviderRegistry(
 			new Dictionary<string, AgentBuilder> { ["limited"] = builder },
 			defaultProviderName: "limited");
@@ -212,7 +189,7 @@ public class AgentProviderCapabilitiesTests
 	}
 
 	[Fact]
-	public async Task Executor_DoesNotWarn_WhenProviderSupportsTheRequestedFeature()
+	public async Task Executor_Succeeds_WhenProviderSupportsTheRequestedFeature()
 	{
 		var builder = new ConfigurableCapabilityAgentBuilder(
 			new AgentProviderCapabilities { Provider = "reasoner", ReasoningLevel = true, EngineTools = true });

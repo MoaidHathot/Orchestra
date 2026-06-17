@@ -640,17 +640,7 @@ Orchestra runs Prompt steps through a pluggable agent provider. Two are built in
 
 ### Provider capability matrix
 
-Every provider declares which step-level features it supports via `AgentBuilder.GetCapabilities()`. When a step requests a feature the resolved provider does **not** support, the engine reacts by severity (it never silently changes behavior):
-
-- **Warning** — the feature degrades gracefully, so the engine logs a warning and runs the step anyway.
-- **Error** — silently dropping the feature would be unsafe (a security boundary) or break the step's contract, so the engine **fails the step** before it runs (category `ValidationError`). All error-severity features are user-explicit opt-ins, so they never fire spuriously.
-
-| Severity when unsupported | Features |
-|---|---|
-| **Error** (fails the step) | `mcps`, `subagents`, `reasoningLevel`, `skillDirectories`, engine tools, `humanInput`, `permissionPolicy`, `sandbox`, `excludedTools` |
-| **Warning** (logs + proceeds) | `reasoningSummary`, `contextTier`, `workingDirectory`, `gitHubToken`, `systemPromptMode` (Append/Customize), `attachments` |
-
-Cross-provider conformance tests keep this matrix honest.
+Every provider declares which step-level features it supports via `AgentBuilder.GetCapabilities()`. When a step **uses** a feature the resolved provider does **not** support, the engine **fails the step before it runs** (category `ValidationError`) — it never silently drops configuration. The check only fires for features the step actually sets, so it never trips spuriously. Cross-provider conformance tests keep this matrix honest.
 
 | Step feature | `copilot` | `opencode` |
 |---|---|---|
@@ -665,8 +655,8 @@ Cross-provider conformance tests keep this matrix honest.
 | `infiniteSessions` (enable/disable) | ✅ | ✅ (toggle via OPENCODE_DISABLE_AUTOCOMPACT) |
 | CLI/worker **swap** on transport failure | ✅ | ✅ |
 | session **resume** on swap | ✅ | ✅ (re-prompts the persisted session) |
-| `systemPromptMode` **Append/Customize** + sections | ✅ | ⚠️ warns; Replace works |
-| `reasoningSummary`, `contextTier`, `gitHubToken` | ✅ | ⚠️ warns |
+| `systemPromptMode` **Append/Customize** + sections | ✅ | ⛔ **fails the step** (Replace works) |
+| `reasoningSummary`, `contextTier`, `gitHubToken` | ✅ | ⛔ **fails the step** |
 | `sandbox` | ✅ | ⛔ **fails the step** (no equivalent) |
 
 ### Selecting a provider
@@ -707,7 +697,7 @@ A single run may mix providers across steps; the engine opens one per-run worker
 - **MCP fail-fast**: declared MCP servers that don't load on the server (absent from `GET /mcp`) are reported as failed so the step fails fast instead of running without its tools. Global (proxy-routed) MCPs are additionally tool-count-probed by the engine before the LLM runs, the same as for Copilot.
 - **Engine tools** (`orchestra_set_status`, `orchestra_complete`, file save/read, `request_user_input`) are exposed to OpenCode via a loopback HTTP MCP bridge that calls back into the per-step `EngineToolContext`. Disable with `opencode.engineToolBridgeEnabled: false`.
 - **Permissions / HITL** map to OpenCode's `permission.updated` events and the `POST /session/{id}/permissions/{id}` reply (auto-approve, deny-list, or human approval).
-- **System prompt**: `systemPromptMode: replace` (the default) is honored. `append` / `customize` are not supported (OpenCode's API can't compose with its built-in base prompt) and are reported as warnings.
+- **System prompt**: `systemPromptMode: replace` (the default) is honored. `append` / `customize` are not supported (OpenCode's API can't compose with its built-in base prompt); a step that uses them fails fast.
 
 
 ## MCP Integration

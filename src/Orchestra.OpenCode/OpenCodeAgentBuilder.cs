@@ -123,9 +123,9 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 	/// MCP servers, inline sub-agents, reasoning level, working directory, skill directories,
 	/// engine tools, attachments, human-input routing, permission policy, excluded tools (mapped to
 	/// OpenCode's agent <c>tools</c> deny map; names use OpenCode's vocabulary), and infinite
-	/// sessions (the enable/disable toggle, via OPENCODE_DISABLE_AUTOCOMPACT). Unsupported knobs are
-	/// surfaced by the engine per severity: reasoning summary, context tier, GitHub token, and
-	/// Append/Customize system-prompt modes + sections warn and proceed; sandbox policy fails the step.
+	/// sessions (the enable/disable toggle, via OPENCODE_DISABLE_AUTOCOMPACT). Anything not listed
+	/// here — reasoning summary, context tier, GitHub token, sandbox policy, and Append/Customize
+	/// system-prompt modes + sections — is not supported, and a step that uses one fails fast.
 	/// </summary>
 	public override AgentProviderCapabilities GetCapabilities() => new()
 	{
