@@ -77,6 +77,28 @@ public class AgentProviderCapabilitiesTests
 	}
 
 	[Fact]
+	public void FindUnsupported_SystemPromptMode_OnlyWarnsForAppendOrCustomize_NotReplace()
+	{
+		// A provider that does not support non-Replace modes (e.g. OpenCode).
+		var caps = new AgentProviderCapabilities { Provider = "replace-only" };
+
+		// Replace is the universal baseline — never reported.
+		caps.FindUnsupported(new AgentBuildConfig { Model = "m", SystemPromptMode = SystemPromptMode.Replace })
+			.Should().NotContain(nameof(AgentBuildConfig.SystemPromptMode));
+
+		// Append and Customize are reported as unsupported.
+		caps.FindUnsupported(new AgentBuildConfig { Model = "m", SystemPromptMode = SystemPromptMode.Append })
+			.Should().Contain(nameof(AgentBuildConfig.SystemPromptMode));
+		caps.FindUnsupported(new AgentBuildConfig { Model = "m", SystemPromptMode = SystemPromptMode.Customize })
+			.Should().Contain(nameof(AgentBuildConfig.SystemPromptMode));
+
+		// A provider that supports them never reports any mode.
+		var full = AgentProviderCapabilities.All("full");
+		full.FindUnsupported(new AgentBuildConfig { Model = "m", SystemPromptMode = SystemPromptMode.Customize })
+			.Should().NotContain(nameof(AgentBuildConfig.SystemPromptMode));
+	}
+
+	[Fact]
 	public async Task Executor_Warns_WhenStepUsesFeatureProviderDoesNotSupport()
 	{
 		// Provider declares no reasoning support; the step asks for High reasoning.

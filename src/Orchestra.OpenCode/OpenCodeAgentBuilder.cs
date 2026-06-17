@@ -119,11 +119,12 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 	}
 
 	/// <summary>
-	/// OpenCode honors the model, system prompt, MCP servers, inline sub-agents, reasoning level,
-	/// working directory, skill directories, engine tools, attachments, human-input routing, and
-	/// permission policy. Copilot-specific knobs (reasoning summary, context tier, GitHub token,
-	/// sandbox policy, system-prompt mode/sections, infinite sessions, excluded tools) are not yet
-	/// supported and are reported as warnings when a step requests them.
+	/// OpenCode honors the model, system prompt (Replace semantics — the universal baseline),
+	/// MCP servers, inline sub-agents, reasoning level, working directory, skill directories,
+	/// engine tools, attachments, human-input routing, and permission policy. Copilot-specific
+	/// knobs (reasoning summary, context tier, GitHub token, sandbox policy, Append/Customize
+	/// system-prompt modes + sections, infinite sessions, excluded tools) are not supported and
+	/// are reported as warnings when a step requests them.
 	/// </summary>
 	public override AgentProviderCapabilities GetCapabilities() => new()
 	{

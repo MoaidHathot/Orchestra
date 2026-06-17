@@ -46,7 +46,11 @@ public sealed record AgentProviderCapabilities
 	/// <summary>Sandbox policy (<see cref="AgentBuildConfig.SandboxPolicy"/>).</summary>
 	public bool SandboxPolicy { get; init; }
 
-	/// <summary>System-prompt mode append/replace/customize (<see cref="AgentBuildConfig.SystemPromptMode"/>).</summary>
+	/// <summary>
+	/// Non-Replace system-prompt modes (<see cref="AgentBuildConfig.SystemPromptMode"/> set to
+	/// <c>Append</c> or <c>Customize</c>). <c>Replace</c> is the universal baseline — every provider
+	/// sends the step system prompt as-is — so it never counts as unsupported.
+	/// </summary>
 	public bool SystemPromptMode { get; init; }
 
 	/// <summary>Section-level system-prompt overrides (<see cref="AgentBuildConfig.SystemPromptSections"/>).</summary>
@@ -152,7 +156,7 @@ public sealed record AgentProviderCapabilities
 			yield return nameof(config.SandboxPolicy);
 		}
 
-		if (!SystemPromptMode && config.SystemPromptMode is not null)
+		if (!SystemPromptMode && config.SystemPromptMode is Engine.SystemPromptMode.Append or Engine.SystemPromptMode.Customize)
 		{
 			yield return nameof(config.SystemPromptMode);
 		}
