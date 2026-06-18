@@ -17,12 +17,11 @@ public sealed class PendingSettings : JsonOutputSettings
 public sealed class PendingCommand : AsyncCommand<PendingSettings>
 {
 	public override async Task<int> ExecuteAsync(CommandContext context, PendingSettings settings)
-	{
-		using var client = ClientFactory.Create(settings);
-		var result = await client.ListPendingAsync(settings.Orchestration);
-		OutputWriter.Write(result, settings.Format);
-		return 0;
-	}
+		=> await LiveServerCommand.RunAsync(settings, "pending", async client =>
+		{
+			var result = await client.ListPendingAsync(settings.Orchestration);
+			OutputWriter.Write(result, settings.Format);
+		});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,16 +67,15 @@ public sealed class RespondSettings : JsonOutputSettings
 public sealed class RespondCommand : AsyncCommand<RespondSettings>
 {
 	public override async Task<int> ExecuteAsync(CommandContext context, RespondSettings settings)
-	{
-		using var client = ClientFactory.Create(settings);
-		var result = await client.RespondAsync(
-			settings.OrchestrationName,
-			settings.RunId,
-			settings.StepName,
-			settings.Choice,
-			settings.Reply,
-			settings.RespondedBy);
-		OutputWriter.Write(result, settings.Format);
-		return 0;
-	}
+		=> await LiveServerCommand.RunAsync(settings, "respond", async client =>
+		{
+			var result = await client.RespondAsync(
+				settings.OrchestrationName,
+				settings.RunId,
+				settings.StepName,
+				settings.Choice,
+				settings.Reply,
+				settings.RespondedBy);
+			OutputWriter.Write(result, settings.Format);
+		});
 }

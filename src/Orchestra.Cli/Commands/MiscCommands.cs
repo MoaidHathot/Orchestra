@@ -10,12 +10,11 @@ namespace Orchestra.Cli.Commands;
 public sealed class ActiveCommand : AsyncCommand<JsonOutputSettings>
 {
 	public override async Task<int> ExecuteAsync(CommandContext context, JsonOutputSettings settings)
-	{
-		using var client = ClientFactory.Create(settings);
-		var result = await client.GetActiveExecutionsAsync();
-		OutputWriter.Write(result, settings.Format);
-		return 0;
-	}
+		=> await LiveServerCommand.RunAsync(settings, "active", async client =>
+		{
+			var result = await client.GetActiveExecutionsAsync();
+			OutputWriter.Write(result, settings.Format);
+		});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,15 +39,14 @@ public sealed class CancelSettings : JsonOutputSettings
 public sealed class CancelCommand : AsyncCommand<CancelSettings>
 {
 	public override async Task<int> ExecuteAsync(CommandContext context, CancelSettings settings)
-	{
-		using var client = ClientFactory.Create(settings);
-		var result = await client.CancelExecutionAsync(
-			settings.ExecutionId,
-			reason: settings.Reason,
-			source: settings.Source ?? "cli");
-		OutputWriter.Write(result, settings.Format);
-		return 0;
-	}
+		=> await LiveServerCommand.RunAsync(settings, "cancel", async client =>
+		{
+			var result = await client.CancelExecutionAsync(
+				settings.ExecutionId,
+				reason: settings.Reason,
+				source: settings.Source ?? "cli");
+			OutputWriter.Write(result, settings.Format);
+		});
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -58,10 +56,9 @@ public sealed class CancelCommand : AsyncCommand<CancelSettings>
 public sealed class ServerStatusCommand : AsyncCommand<JsonOutputSettings>
 {
 	public override async Task<int> ExecuteAsync(CommandContext context, JsonOutputSettings settings)
-	{
-		using var client = ClientFactory.Create(settings);
-		var result = await client.GetStatusAsync();
-		OutputWriter.Write(result, settings.Format);
-		return 0;
-	}
+		=> await LiveServerCommand.RunAsync(settings, "server-status", async client =>
+		{
+			var result = await client.GetStatusAsync();
+			OutputWriter.Write(result, settings.Format);
+		});
 }

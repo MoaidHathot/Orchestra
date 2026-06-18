@@ -1,20 +1,12 @@
-using System.Net;
-using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Console;
 using Orchestra.Cli.Commands;
+using Orchestra.Cli.Hosting;
 using Orchestra.Client;
 using Orchestra.Client.Run;
-using Orchestra.Composition;
 using Orchestra.Engine;
-using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
-using Orchestra.Host.McpServer;
 using Spectre.Console;
 
 namespace Orchestra.Exec;
@@ -115,160 +107,89 @@ internal static class ExecProgram
 			return LaunchErrorExitCode;
 		}
 
-		var serverUrl = ResolveServerUrl(options);
-
-		// ── Connect to a running instance? ────────────────────────────────────────────
-		// Detection is conservative: we only probe when we know a server URL — from --server,
-		// ORCHESTRA_URL, or the configured hostBaseUrl/urls in the discovered orchestra.json
-		// (XDG_CONFIG_HOME / ORCHESTRA_CONFIG_PATH / %APPDATA% aware). 'isolated' skips detection.
-		if (options.Mode != ExecMode.Isolated && serverUrl is not null)
+		// Attach to a running instance or spawn a throwaway one-shot host — the shared
+		// connect-or-spawn machinery used by the managed verbs too.
+		var request = new HostSessionRequest
 		{
-			if (await ProbeServerHealthyAsync(serverUrl, TimeSpan.FromSeconds(2)))
-			{
-				WarnIgnoredSpawnOptions(options, usingExisting: true);
-				var registerTags = DefaultRegistrationTags.Concat(options.Tags).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-				return await DriveRunAsync(serverUrl, runTarget, runFileFullPath, registerTags, removeAfterRun: !options.KeepRegistered, options, hooks);
-			}
+			ServerUrl = ResolveServerUrl(options),
+			Mode = options.Mode,
+			NoConfig = options.NoConfig,
+			DataPath = options.DataPath,
+			OrchestrationsPath = options.OrchestrationsPath,
+			SpawnedInstanceNoun = "one-shot instance",
+			SpawnOnlyOptionLabels = SpawnOnlyOptionsInEffect(options),
+			ConfigureIsolation = ConfigureOneShotHost,
+			ConfigureBuilder = hooks?.ConfigureBuilder,
+			ConfigureServices = hooks?.ConfigureServices,
+			OnHostStarted = hooks?.OnHostStarted,
+		};
 
-			if (options.Mode == ExecMode.Existing)
-			{
-				AnsiConsole.MarkupLine($"[red]Error:[/] no healthy Orchestra instance reachable at {Markup.Escape(serverUrl)}.");
-				return LaunchErrorExitCode;
-			}
-
-			// auto: configured server is down — fall back to spawning a throwaway instance.
-			AnsiConsole.MarkupLine($"[yellow]No running Orchestra at {Markup.Escape(serverUrl)}; spawning a one-shot instance.[/]");
-		}
-		else if (options.Mode == ExecMode.Existing)
+		var sessionResult = await OrchestraHostSessionFactory.ConnectOrSpawnAsync(request);
+		if (!sessionResult.Ok)
 		{
-			AnsiConsole.MarkupLine("[red]Error:[/] --mode existing requires a server URL (set --server, ORCHESTRA_URL, or hostBaseUrl in orchestra.json).");
+			AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(sessionResult.ErrorMessage!)}");
 			return LaunchErrorExitCode;
 		}
 
-		// ── Spawn an isolated, one-shot instance ───────────────────────────────────────
-		if (options.Mode == ExecMode.Isolated && options.ServerUrl is not null)
+		foreach (var note in sessionResult.Notes)
 		{
-			AnsiConsole.MarkupLine("[yellow]--server is ignored in isolated mode.[/]");
+			AnsiConsole.MarkupLine($"[yellow]{Markup.Escape(note)}[/]");
 		}
 
-		return await RunSpawnedAsync(runTarget, runFileFullPath, options, hooks);
+		await using var session = sessionResult.Session!;
+
+		// Only tag/clean up registrations on a shared running instance; a throwaway instance is
+		// discarded wholesale, so there is nothing to tag or remove afterward.
+		IReadOnlyList<string> registerTags = session.Spawned
+			? []
+			: DefaultRegistrationTags.Concat(options.Tags).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+
+		return await DriveRunAsync(
+			session.Client,
+			runTarget,
+			runFileFullPath,
+			registerTags,
+			removeAfterRun: !session.Spawned && !options.KeepRegistered,
+			options,
+			hooks);
+	}
+
+	/// <summary>Isolation profile for the one-shot exec host: load the registry so <c>--run</c>
+	/// resolves, but disable everything that could auto-fire or resume so only the requested
+	/// orchestration runs.</summary>
+	private static void ConfigureOneShotHost(OrchestrationHostOptions o)
+	{
+		o.EnableScheduler = false;
+		o.RegisterJsonTriggers = false;
+		o.LoadPersistedTriggers = false;
+		o.AutoResumeCheckpointsOnStartup = false;
+		o.LoadPersistedOrchestrations = true;
+	}
+
+	/// <summary>Spawn-only option labels in effect, surfaced as an "ignored when using a running
+	/// instance" note if we end up attaching to one.</summary>
+	private static IReadOnlyList<string> SpawnOnlyOptionsInEffect(ExecOptions options)
+	{
+		var labels = new List<string>();
+		if (options.NoConfig) labels.Add("--no-config");
+		if (options.DataPath is not null) labels.Add("--data-path");
+		if (options.OrchestrationsPath is not null) labels.Add("--orchestrations-path");
+		return labels;
 	}
 
 	/// <summary>
 	/// Resolves the candidate server URL to attach to (auto/existing modes): explicit
 	/// <c>--server</c> → <c>ORCHESTRA_URL</c> → the configured <c>hostBaseUrl</c> (or first
 	/// <c>urls</c> entry) from the discovered <c>orchestra.json</c>. Returns null when nothing is
-	/// configured, or when <c>--no-config</c> opts out of config discovery. The config step is
-	/// shared with the CLI's client verbs via <see cref="ClientFactory.ReadConfiguredServerUrl"/>
-	/// so <c>run</c>/<c>exec</c> and <c>list</c>/<c>get</c>/… all resolve the same instance.
+	/// configured, or when <c>--no-config</c> opts out of config discovery. Shared with the CLI's
+	/// managed client verbs via <see cref="ClientFactory.ResolveServerUrlOrNull"/> so
+	/// <c>run</c>/<c>exec</c> and <c>list</c>/<c>get</c>/… all resolve the same instance.
 	/// </summary>
 	private static string? ResolveServerUrl(ExecOptions options)
-	{
-		var explicitUrl = (options.ServerUrl ?? Environment.GetEnvironmentVariable("ORCHESTRA_URL"))?.Trim();
-		if (!string.IsNullOrWhiteSpace(explicitUrl))
-		{
-			return explicitUrl;
-		}
-
-		// --no-config means "ignore orchestra.json"; honor that for server discovery too.
-		if (options.NoConfig)
-		{
-			return null;
-		}
-
-		return ClientFactory.ReadConfiguredServerUrl();
-	}
-
-	private static async Task<int> RunSpawnedAsync(
-		string runTarget,
-		string? runFileFullPath,
-		ExecOptions options,
-		ExecHooks? hooks)
-	{
-		// Pick a free loopback port BEFORE building so the host's HostBaseUrl (used for
-		// self-referential /mcp/data callbacks) resolves to the real listening address.
-		var url = $"http://127.0.0.1:{GetFreeLoopbackPort()}";
-
-		var builder = WebApplication.CreateBuilder();
-		builder.Logging.AddSimpleConsole(o =>
-		{
-			o.SingleLine = true;
-			o.IncludeScopes = false;
-			o.TimestampFormat = "HH:mm:ss ";
-			o.ColorBehavior = LoggerColorBehavior.Enabled;
-		});
-		// Keep the console focused on the orchestration's own streamed output; host
-		// chatter stays at Warning+ unless the operator opts into more.
-		builder.Logging.SetMinimumLevel(LogLevel.Warning);
-		builder.WebHost.UseUrls(url);
-
-		// --no-config: also skip the co-located orchestra.services.json / orchestra.mcp.json so
-		// the spawned instance is fully reproducible (orchestra.json itself is skipped via the
-		// loadConfigurationFile:false argument to AddOrchestraHost below).
-		if (options.NoConfig)
-		{
-			builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["skip-services"] = "true" });
-		}
-
-		builder.Services.AddOrchestraHost(o =>
-		{
-			if (options.DataPath is not null)
-			{
-				o.DataPath = Path.GetFullPath(options.DataPath);
-			}
-
-			if (options.OrchestrationsPath is not null)
-			{
-				o.Scan = new ScanConfig
-				{
-					Directory = Path.GetFullPath(options.OrchestrationsPath),
-					Watch = false,
-					Recursive = true,
-				};
-			}
-
-			// Isolated one-shot: nothing auto-fires, nothing auto-resumes; only the requested
-			// orchestration runs. The registry is still loaded so --run <id|name> resolves.
-			o.EnableScheduler = false;
-			o.RegisterJsonTriggers = false;
-			o.LoadPersistedTriggers = false;
-			o.AutoResumeCheckpointsOnStartup = false;
-			o.LoadPersistedOrchestrations = true;
-		}, loadConfigurationFile: !options.NoConfig);
-
-		// Register agent providers (copilot + opencode) keyed + the provider registry for
-		// per-step / per-orchestration selection. Tests override this via hooks.ConfigureServices.
-		builder.Services.AddOrchestraAgentProviders();
-
-		builder.Services.AddOrchestraMcpServer();
-
-		hooks?.ConfigureBuilder?.Invoke(builder);
-		hooks?.ConfigureServices?.Invoke(builder.Services);
-
-		var app = builder.Build();
-
-		await app.Services.InitializeOrchestraHostAsync();
-
-		app.UseOrchestraHostProblemDetails();
-		app.MapOrchestraHostEndpoints();
-		app.MapOrchestraMcpEndpoints();
-
-		await app.StartAsync();
-
-		try
-		{
-			hooks?.OnHostStarted?.Invoke(app.Services);
-			// A throwaway instance is discarded after the run, so there is nothing to tag or clean up.
-			return await DriveRunAsync(url, runTarget, runFileFullPath, registerTags: [], removeAfterRun: false, options, hooks);
-		}
-		finally
-		{
-			await app.StopAsync();
-		}
-	}
+		=> ClientFactory.ResolveServerUrlOrNull(options.ServerUrl, options.NoConfig);
 
 	private static async Task<int> DriveRunAsync(
-		string url,
+		OrchestraClient client,
 		string runTarget,
 		string? runFileFullPath,
 		IReadOnlyList<string> registerTags,
@@ -276,9 +197,7 @@ internal static class ExecProgram
 		ExecOptions options,
 		ExecHooks? hooks)
 	{
-		using var http = new HttpClient { BaseAddress = new Uri(url.TrimEnd('/') + "/") };
-		using var client = new OrchestraClient(http);
-
+		// The client is owned by the OrchestraHostSession; this method must not dispose it.
 		// --run-file: register the file so the run endpoint can resolve it by name. When running
 		// against a shared instance, also tag the registration so it can be pruned later.
 		var createdByUs = false;
@@ -536,63 +455,6 @@ internal static class ExecProgram
 		catch (Exception ex)
 		{
 			AnsiConsole.MarkupLine($"[yellow]Warning:[/] could not tag orchestration: {Markup.Escape(ex.Message)}");
-		}
-	}
-
-	/// <summary>
-	/// Probes <c>GET {baseUrl}/api/health</c> with a short timeout. Returns true only on a 2xx
-	/// response; any error (connection refused, timeout, non-Orchestra service) is treated as
-	/// "not running".
-	/// </summary>
-	private static async Task<bool> ProbeServerHealthyAsync(string baseUrl, TimeSpan timeout)
-	{
-		try
-		{
-			using var http = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"), Timeout = timeout };
-			using var response = await http.GetAsync("api/health");
-			return response.IsSuccessStatusCode;
-		}
-		catch
-		{
-			return false;
-		}
-	}
-
-	private static void WarnIgnoredSpawnOptions(ExecOptions options, bool usingExisting)
-	{
-		if (!usingExisting)
-		{
-			return;
-		}
-
-		var ignored = new List<string>();
-		if (options.NoConfig) ignored.Add("--no-config");
-		if (options.DataPath is not null) ignored.Add("--data-path");
-		if (options.OrchestrationsPath is not null) ignored.Add("--orchestrations-path");
-
-		if (ignored.Count > 0)
-		{
-			AnsiConsole.MarkupLine(
-				$"[yellow]Note:[/] {Markup.Escape(string.Join(", ", ignored))} only apply to a spawned instance and are ignored when using a running one.");
-		}
-	}
-
-	/// <summary>
-	/// Reserves an ephemeral loopback TCP port by binding a listener to port 0 and reading the
-	/// assigned port. There is a small TOCTOU window before Kestrel binds, but on loopback it is
-	/// effectively immediate and collisions are vanishingly rare.
-	/// </summary>
-	private static int GetFreeLoopbackPort()
-	{
-		var listener = new TcpListener(IPAddress.Loopback, 0);
-		listener.Start();
-		try
-		{
-			return ((IPEndPoint)listener.LocalEndpoint).Port;
-		}
-		finally
-		{
-			listener.Stop();
 		}
 	}
 }

@@ -248,4 +248,72 @@ public class ClientFactoryTests : IDisposable
 	{
 		ClientFactory.FirstUrl(urls).Should().Be(expected);
 	}
+
+	// ── ResolveServerUrlOrNull (connect-or-spawn precedence: flag > env > config > null) ──
+
+	[Fact]
+	public void ResolveServerUrlOrNull_ExplicitFlag_Wins()
+	{
+		ClientFactory.ResolveServerUrlOrNull(
+			explicitFlag: "  http://flag:1  ",
+			envReader: _ => "http://env:2",
+			configuredUrlReader: () => "http://config:3")
+			.Should().Be("http://flag:1");
+	}
+
+	[Fact]
+	public void ResolveServerUrlOrNull_NoFlag_UsesEnv()
+	{
+		ClientFactory.ResolveServerUrlOrNull(
+			explicitFlag: null,
+			envReader: _ => "http://env:2",
+			configuredUrlReader: () => "http://config:3")
+			.Should().Be("http://env:2");
+	}
+
+	[Fact]
+	public void ResolveServerUrlOrNull_NoFlagNoEnv_UsesConfig()
+	{
+		ClientFactory.ResolveServerUrlOrNull(
+			explicitFlag: null,
+			envReader: _ => null,
+			configuredUrlReader: () => "  http://config:3 ")
+			.Should().Be("http://config:3");
+	}
+
+	[Fact]
+	public void ResolveServerUrlOrNull_NothingConfigured_ReturnsNull()
+	{
+		// The key difference from ResolveServerUrl: no localhost:5000 fallback. Null means
+		// "nothing configured", which the connect-or-spawn callers treat as "spawn".
+		ClientFactory.ResolveServerUrlOrNull(
+			explicitFlag: null,
+			envReader: _ => null,
+			configuredUrlReader: () => null)
+			.Should().BeNull();
+	}
+
+	[Fact]
+	public void ResolveServerUrlOrNull_NoConfig_SkipsConfigLookup()
+	{
+		// --no-config: the orchestra.json step is skipped entirely, so even a configured URL is
+		// ignored and we fall through to null (→ spawn an isolated, reproducible instance).
+		var configRead = false;
+		ClientFactory.ResolveServerUrlOrNull(
+			explicitFlag: null,
+			noConfig: true,
+			envReader: _ => null,
+			configuredUrlReader: () => { configRead = true; return "http://config:3"; })
+			.Should().BeNull();
+		configRead.Should().BeFalse("--no-config must not even consult orchestra.json");
+	}
+
+	[Fact]
+	public void ResolveServerUrlOrNull_NoConfig_StillHonorsExplicitFlagAndEnv()
+	{
+		ClientFactory.ResolveServerUrlOrNull("http://flag:1", noConfig: true, envReader: _ => "http://env:2")
+			.Should().Be("http://flag:1");
+		ClientFactory.ResolveServerUrlOrNull(null, noConfig: true, envReader: _ => "http://env:2")
+			.Should().Be("http://env:2");
+	}
 }

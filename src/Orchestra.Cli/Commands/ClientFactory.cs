@@ -53,6 +53,36 @@ public static class ClientFactory
 	}
 
 	/// <summary>
+	/// Like <see cref="ResolveServerUrl"/> but returns <c>null</c> instead of falling back to
+	/// <see cref="DefaultServerUrl"/> when nothing is configured. Used by the connect-or-spawn
+	/// callers (<c>run</c>/<c>exec</c> and the managed Group-A verbs) where "nothing configured"
+	/// means "spawn an isolated host" rather than blindly probing <c>localhost:5000</c>.
+	/// Precedence: explicit flag → <c>$ORCHESTRA_URL</c> → <c>orchestra.json</c> → null.
+	/// <paramref name="noConfig"/> skips the orchestra.json step (mirrors <c>--no-config</c>).
+	/// </summary>
+	public static string? ResolveServerUrlOrNull(
+		string? explicitFlag,
+		bool noConfig = false,
+		Func<string, string?>? envReader = null,
+		Func<string?>? configuredUrlReader = null)
+	{
+		var reader = envReader ?? Environment.GetEnvironmentVariable;
+		var explicitUrl = (explicitFlag ?? reader(ServerUrlEnvVar))?.Trim();
+		if (!string.IsNullOrWhiteSpace(explicitUrl))
+		{
+			return explicitUrl;
+		}
+
+		if (noConfig)
+		{
+			return null;
+		}
+
+		var fromConfig = (configuredUrlReader ?? ReadConfiguredServerUrl)();
+		return string.IsNullOrWhiteSpace(fromConfig) ? null : fromConfig.Trim();
+	}
+
+	/// <summary>
 	/// Best-effort read of the server URL configured in the discovered <c>orchestra.json</c>
 	/// (<c>hostBaseUrl</c>, else the first <c>urls</c> entry). Honors the same discovery order as
 	/// the host — <c>ORCHESTRA_CONFIG_PATH</c> → <c>XDG_CONFIG_HOME</c> → <c>%APPDATA%</c>/<c>~/.config</c>.

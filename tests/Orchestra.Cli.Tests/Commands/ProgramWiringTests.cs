@@ -149,4 +149,47 @@ public class ProgramWiringTests
 		act.Should().Throw<CommandRuntimeException>()
 			.Where(ex => ex.Message.Contains("--enabled") && ex.Message.Contains("--disabled"));
 	}
+
+	[Theory]
+	[InlineData("list")]
+	[InlineData("get")]
+	[InlineData("register")]
+	[InlineData("runs", "list")]
+	[InlineData("triggers", "list")]
+	[InlineData("tags", "list")]
+	public void ManagedVerbHelp_AdvertisesModeFlag(params string[] command)
+	{
+		// The managed Group-A verbs all inherit the connect-or-spawn --mode flag.
+		var tester = NewTester();
+
+		var result = tester.Run([.. command, "--help"]);
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--mode");
+	}
+
+	[Fact]
+	public void ListWithInvalidMode_FailsValidation()
+	{
+		// ManagedCommandSettings.Validate() rejects an unknown --mode value.
+		var tester = NewTester();
+
+		Action act = () => tester.Run("list", "--mode", "bogus");
+
+		act.Should().Throw<CommandRuntimeException>()
+			.Where(ex => ex.Message.Contains("auto, existing, or isolated"));
+	}
+
+	[Fact]
+	public void LiveVerbHelp_DoesNotAdvertiseModeFlag()
+	{
+		// Live-runtime verbs (active/cancel/server-status/…) are server-required and must NOT
+		// inherit the spawn-capable --mode flag.
+		var tester = NewTester();
+
+		var result = tester.Run("server-status", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().NotContain("--mode");
+	}
 }
