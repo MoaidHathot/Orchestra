@@ -2341,7 +2341,10 @@ public partial class OrchestrationExecutor
 	[LoggerMessage(Level = LogLevel.Information, Message = "Run record for orchestration '{Name}', run '{RunId}' was not saved because the host is shutting down; checkpoint remains resumable.")]
 	private partial void LogRunStoreSkippedForHostShutdown(string name, string runId);
 
-	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' cancelled before starting.")]
+	// A step cancelled before it ran is an expected outcome of the orchestration wrapping up —
+	// e.g. an upstream step called orchestra_complete / set_status to finish early, or the run was
+	// cancelled. It is not an error, so log at Information rather than paging operators with a warning.
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' cancelled before starting.")]
 	private partial void LogStepCancelledBeforeStart(string stepName);
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Skipping step '{StepName}': {Reason}")]
