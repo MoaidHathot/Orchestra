@@ -21,14 +21,42 @@ namespace Orchestra.Exec.Tests;
 public sealed class ExecRunTests : IDisposable
 {
 	private readonly List<string> _tempDirs = [];
+	private readonly Dictionary<string, string?> _savedEnvVars = new();
+
+	public ExecRunTests()
+	{
+		// Hermetic config discovery. These tests assert the behavior of exec's *isolated* spawned
+		// host (and auto-mode's spawn-when-nothing-is-configured fallback). Without this, a
+		// developer who happens to have a real Orchestra configured in orchestra.json / via
+		// $ORCHESTRA_URL — and running — would have auto-mode resolve and connect to THAT server
+		// instead of spawning the test host, bypassing the fake agent and onStarted hook and
+		// failing the assertions. Plant an empty config and clear the discovery env vars so
+		// "nothing is configured" is guaranteed regardless of the host machine. Mutating process
+		// env here is safe: this collection is serialized (DisableParallelization) and runs in the
+		// Exec.Tests assembly's own test process.
+		SaveAndSet("ORCHESTRA_URL", null);
+		SaveAndSet("XDG_CONFIG_HOME", null);
+		var emptyConfig = Path.Combine(NewTempDir(), "orchestra.json");
+		File.WriteAllText(emptyConfig, "{}");
+		SaveAndSet("ORCHESTRA_CONFIG_PATH", emptyConfig);
+	}
 
 	public void Dispose()
 	{
+		foreach (var kv in _savedEnvVars)
+			Environment.SetEnvironmentVariable(kv.Key, kv.Value);
+
 		foreach (var dir in _tempDirs)
 		{
 			try { Directory.Delete(dir, recursive: true); }
 			catch { /* best-effort */ }
 		}
+	}
+
+	private void SaveAndSet(string name, string? value)
+	{
+		_savedEnvVars[name] = Environment.GetEnvironmentVariable(name);
+		Environment.SetEnvironmentVariable(name, value);
 	}
 
 	private string NewTempDir()

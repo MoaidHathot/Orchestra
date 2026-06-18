@@ -1,4 +1,5 @@
 using Orchestra.Client;
+using Orchestra.Host.Hosting;
 
 namespace Orchestra.Cli.Commands;
 
@@ -14,11 +15,21 @@ public static class ClientFactory
 	public const string ServerUrlEnvVar = "ORCHESTRA_URL";
 
 	/// <summary>
-	/// Returns the effective server URL the CLI will hit. Pure: no I/O beyond reading the
-	/// environment variable supplied by the caller (the real <c>Environment</c> by default,
-	/// or a stub in tests).
+	/// Returns the effective server URL the CLI will hit. Precedence: explicit <c>--server</c>
+	/// flag → <c>$ORCHESTRA_URL</c> → the configured <c>hostBaseUrl</c> (or first <c>urls</c>
+	/// entry) from the discovered <c>orchestra.json</c> → the built-in default. The config step
+	/// mirrors <c>orchestra run</c>/<c>exec</c> so every verb targets the same instance the
+	/// operator configured instead of blindly assuming <see cref="DefaultServerUrl"/>.
 	/// </summary>
-	public static string ResolveServerUrl(string? explicitFlag, Func<string, string?>? envReader = null)
+	/// <remarks>
+	/// The <paramref name="envReader"/> and <paramref name="configuredUrlReader"/> seams keep the
+	/// rule unit-testable: tests can stub the environment and config lookup without touching the
+	/// real process environment or a developer's on-disk <c>orchestra.json</c>.
+	/// </remarks>
+	public static string ResolveServerUrl(
+		string? explicitFlag,
+		Func<string, string?>? envReader = null,
+		Func<string?>? configuredUrlReader = null)
 	{
 		if (!string.IsNullOrWhiteSpace(explicitFlag))
 		{
@@ -32,7 +43,53 @@ public static class ClientFactory
 			return fromEnv.Trim();
 		}
 
+		var fromConfig = (configuredUrlReader ?? ReadConfiguredServerUrl)();
+		if (!string.IsNullOrWhiteSpace(fromConfig))
+		{
+			return fromConfig.Trim();
+		}
+
 		return DefaultServerUrl;
+	}
+
+	/// <summary>
+	/// Best-effort read of the server URL configured in the discovered <c>orchestra.json</c>
+	/// (<c>hostBaseUrl</c>, else the first <c>urls</c> entry). Honors the same discovery order as
+	/// the host — <c>ORCHESTRA_CONFIG_PATH</c> → <c>XDG_CONFIG_HOME</c> → <c>%APPDATA%</c>/<c>~/.config</c>.
+	/// Returns null when no config file is found, nothing relevant is set, or the file can't be
+	/// parsed: config discovery must never throw out of a simple client command. Shared with
+	/// <c>orchestra run</c>/<c>exec</c> so both resolve the target instance identically.
+	/// </summary>
+	internal static string? ReadConfiguredServerUrl()
+	{
+		try
+		{
+			var config = OrchestraConfigLoader.Load();
+			var configured = config?.HostBaseUrl ?? FirstUrl(config?.Urls);
+			return string.IsNullOrWhiteSpace(configured) ? null : configured.Trim();
+		}
+		catch
+		{
+			// A missing/malformed orchestra.json (or an unset ${VAR} reference inside it) must not
+			// block a plain `orchestra list`; fall back to the env/default precedence above.
+			return null;
+		}
+	}
+
+	/// <summary>Returns the first semicolon/comma-separated entry of a <c>urls</c> binding string, or null.</summary>
+	internal static string? FirstUrl(string? urls)
+	{
+		if (string.IsNullOrWhiteSpace(urls))
+		{
+			return null;
+		}
+
+		foreach (var part in urls.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		{
+			return part;
+		}
+
+		return null;
 	}
 
 	public static OrchestraClient Create(GlobalSettings settings)

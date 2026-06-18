@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
+using Orchestra.Cli.Commands;
 using Orchestra.Client;
 using Orchestra.Client.Run;
 using Orchestra.Composition;
@@ -157,7 +158,9 @@ internal static class ExecProgram
 	/// Resolves the candidate server URL to attach to (auto/existing modes): explicit
 	/// <c>--server</c> → <c>ORCHESTRA_URL</c> → the configured <c>hostBaseUrl</c> (or first
 	/// <c>urls</c> entry) from the discovered <c>orchestra.json</c>. Returns null when nothing is
-	/// configured, or when <c>--no-config</c> opts out of config discovery.
+	/// configured, or when <c>--no-config</c> opts out of config discovery. The config step is
+	/// shared with the CLI's client verbs via <see cref="ClientFactory.ReadConfiguredServerUrl"/>
+	/// so <c>run</c>/<c>exec</c> and <c>list</c>/<c>get</c>/… all resolve the same instance.
 	/// </summary>
 	private static string? ResolveServerUrl(ExecOptions options)
 	{
@@ -173,32 +176,7 @@ internal static class ExecProgram
 			return null;
 		}
 
-		try
-		{
-			var config = OrchestraConfigLoader.Load();
-			var configured = (config?.HostBaseUrl ?? FirstUrl(config?.Urls))?.Trim();
-			return string.IsNullOrWhiteSpace(configured) ? null : configured;
-		}
-		catch
-		{
-			// Config discovery is best-effort; a malformed file must not block a run.
-			return null;
-		}
-	}
-
-	private static string? FirstUrl(string? urls)
-	{
-		if (string.IsNullOrWhiteSpace(urls))
-		{
-			return null;
-		}
-
-		foreach (var part in urls.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-		{
-			return part;
-		}
-
-		return null;
+		return ClientFactory.ReadConfiguredServerUrl();
 	}
 
 	private static async Task<int> RunSpawnedAsync(
