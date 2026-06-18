@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Orchestra.Tool\Orchestra.Tool.csproj" />
+    <ProjectReference Include="..\..\src\Orchestra.Cli\Orchestra.Cli.csproj" />
   </ItemGroup>
 
 </Project>

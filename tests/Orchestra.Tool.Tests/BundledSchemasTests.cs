@@ -81,7 +81,7 @@ public class BundledSchemasTests
 	private static string LocateOrchestraToolOutputDirectory()
 	{
 		// Walk up from the test assembly location to the repo root, then
-		// look in src/Orchestra.Tool/bin/<config>/<tfm>/.
+		// look in src/Orchestra.Cli/bin/<config>/<tfm>/ (the unified `orchestra` tool).
 		var current = new DirectoryInfo(AppContext.BaseDirectory);
 		DirectoryInfo? repoRoot = null;
 		while (current is not null)
@@ -96,8 +96,8 @@ public class BundledSchemasTests
 
 		repoRoot.Should().NotBeNull("test must be running inside the Orchestra repository");
 
-		var toolBin = Path.Combine(repoRoot!.FullName, "src", "Orchestra.Tool", "bin");
-		Directory.Exists(toolBin).Should().BeTrue($"Orchestra.Tool bin directory missing: {toolBin}");
+		var toolBin = Path.Combine(repoRoot!.FullName, "src", "Orchestra.Cli", "bin");
+		Directory.Exists(toolBin).Should().BeTrue($"Orchestra.Cli bin directory missing: {toolBin}");
 
 		// Find the most-recently-built TFM directory under any configuration.
 		var tfmDirs = Directory.GetDirectories(toolBin, "*", SearchOption.AllDirectories)
@@ -105,7 +105,7 @@ public class BundledSchemasTests
 			.OrderByDescending(d => new DirectoryInfo(d).LastWriteTimeUtc)
 			.ToList();
 
-		tfmDirs.Should().NotBeEmpty("Orchestra.Tool must be built before this test runs");
+		tfmDirs.Should().NotBeEmpty("Orchestra.Cli must be built before this test runs");
 
 		return tfmDirs[0];
 	}

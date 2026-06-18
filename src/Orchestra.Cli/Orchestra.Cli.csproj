@@ -1,21 +1,68 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <RootNamespace>Orchestra.Cli</RootNamespace>
-    <IsTestProject>false</IsTestProject>
-    <IsPackable>false</IsPackable>
+    <PackageId>Orchestra</PackageId>
+    <Description>Deterministic AI orchestrations for .NET with declarative workflows, DAG execution, MCP integration, triggers, a one-shot runner, and a built-in portal — all under a single `orchestra` command.</Description>
+    <IsPackable>true</IsPackable>
+    <PackAsTool>true</PackAsTool>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <ToolCommandName>orchestra</ToolCommandName>
+
+    <!--
+      Ship the tool nupkg SMALL. Bundling the Copilot CLI for every supported RID
+      pushed the package well over NuGet.org's 250 MB limit. Instead the tool fetches
+      just the host's Copilot CLI on first run via Orchestra.Copilot.CopilotCliBootstrap,
+      caching it in the user's local app data. CopilotSkipCliDownload=true keeps the SDK's
+      per-host build-time download from baking the binary into the publish output.
+    -->
+    <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Spectre.Console" />
     <PackageReference Include="Spectre.Console.Cli" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Orchestra.Client\Orchestra.Client.csproj" />
+    <ProjectReference Include="..\Orchestra.Engine\Orchestra.Engine.csproj" />
+    <ProjectReference Include="..\Orchestra.Copilot\Orchestra.Copilot.csproj" />
+    <ProjectReference Include="..\Orchestra.OpenCode\Orchestra.OpenCode.csproj" />
+    <ProjectReference Include="..\Orchestra.Host\Orchestra.Host.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Keyed copilot + opencode provider registration, shared with Orchestra.Server. -->
+    <Compile Include="..\Shared\AgentProviderRegistration.cs" Link="Composition\AgentProviderRegistration.cs" />
+    <!-- Portal host + UI (the `orchestra portal` subcommand), shared with the playground portal. -->
+    <Compile Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\PortalApp.cs" Link="Portal\PortalApp.cs" />
+    <Compile Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\PortalStatusService.cs" Link="Portal\PortalStatusService.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Link="README.md" Pack="true" PackagePath="\" />
+    <Content Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\appsettings.json"
+             Link="appsettings.json"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Pack="false" />
+    <Content Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\wwwroot\**\*"
+             Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Pack="false" />
+    <Content Include="..\..\schemas\*.json"
+             Link="schemas\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Pack="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Orchestra.Cli.Tests" />
+    <InternalsVisibleTo Include="Orchestra.Exec.Tests" />
   </ItemGroup>
 
 </Project>

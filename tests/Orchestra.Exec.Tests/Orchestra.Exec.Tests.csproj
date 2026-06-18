@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Orchestra.Exec\Orchestra.Exec.csproj" />
+    <ProjectReference Include="..\..\src\Orchestra.Cli\Orchestra.Cli.csproj" />
   </ItemGroup>
 
 </Project>

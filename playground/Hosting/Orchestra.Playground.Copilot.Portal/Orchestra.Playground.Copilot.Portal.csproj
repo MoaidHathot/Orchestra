@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Orchestra.Tool" />
+    <InternalsVisibleTo Include="Orchestra.Cli" />
   </ItemGroup>
 
   <!-- Collect portal source files for incremental build detection -->

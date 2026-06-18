@@ -39,11 +39,12 @@ internal sealed class ExecHooks
 }
 
 /// <summary>
-/// Entry logic for <c>orchestra-exec</c>. Runs exactly one orchestration and returns a
-/// POSIX-style exit code. Depending on <see cref="ExecMode"/> it either connects to an
-/// already-running Orchestra instance (leaving it untouched) or spawns an isolated, one-shot
-/// in-process host (scheduling/triggers/auto-resume disabled), runs over a loopback connection
-/// — reusing the same interactive run stack as the <c>orchestra</c> CLI — then shuts it down.
+/// Core run engine behind <c>orchestra run</c> / <c>orchestra exec</c>. Runs exactly one
+/// orchestration and returns a POSIX-style exit code. Depending on <see cref="ExecMode"/> it
+/// either connects to an already-running Orchestra instance (leaving it untouched) or spawns an
+/// isolated, one-shot in-process host (scheduling/triggers/auto-resume disabled), runs over a
+/// loopback connection — reusing the same interactive run stack as the CLI's remote-streaming
+/// commands — then shuts it down.
 /// </summary>
 internal static class ExecProgram
 {
@@ -54,6 +55,10 @@ internal static class ExecProgram
 	/// so these one-shot registrations can be found and pruned later.</summary>
 	public static readonly string[] DefaultRegistrationTags = ["ephemeral", "run-once"];
 
+	/// <summary>
+	/// argv entry used by tests and the legacy parser. Parses, handles <c>--help</c>/errors, then
+	/// delegates to <see cref="RunCoreAsync"/>.
+	/// </summary>
 	public static async Task<int> RunAsync(string[] args, ExecHooks? hooks = null)
 	{
 		var options = ExecOptions.Parse(args);
@@ -70,6 +75,15 @@ internal static class ExecProgram
 			return LaunchErrorExitCode;
 		}
 
+		return await RunCoreAsync(options, hooks);
+	}
+
+	/// <summary>
+	/// Runs a single orchestration from an already-validated <see cref="ExecOptions"/>. This is the
+	/// shared core called by both the argv entry above and the Spectre <c>run</c>/<c>exec</c> commands.
+	/// </summary>
+	public static async Task<int> RunCoreAsync(ExecOptions options, ExecHooks? hooks = null)
+	{
 		// Resolve --run-file to a concrete orchestration name up front so we fail fast on a
 		// missing/unparseable file before paying to boot the host or hit the network.
 		string? runFileFullPath = null;
@@ -94,22 +108,25 @@ internal static class ExecProgram
 			}
 		}
 
-		var serverUrl = (options.ServerUrl ?? Environment.GetEnvironmentVariable("ORCHESTRA_URL"))?.Trim();
-		if (string.IsNullOrWhiteSpace(serverUrl))
+		if (runTarget is null)
 		{
-			serverUrl = null;
+			AnsiConsole.MarkupLine("[red]Error:[/] specify the orchestration to run (a name, or --run-file <path>).");
+			return LaunchErrorExitCode;
 		}
 
+		var serverUrl = ResolveServerUrl(options);
+
 		// ── Connect to a running instance? ────────────────────────────────────────────
-		// Detection is conservative: we only probe when the user pointed us at a server
-		// (via --server or ORCHESTRA_URL). 'isolated' skips detection entirely.
+		// Detection is conservative: we only probe when we know a server URL — from --server,
+		// ORCHESTRA_URL, or the configured hostBaseUrl/urls in the discovered orchestra.json
+		// (XDG_CONFIG_HOME / ORCHESTRA_CONFIG_PATH / %APPDATA% aware). 'isolated' skips detection.
 		if (options.Mode != ExecMode.Isolated && serverUrl is not null)
 		{
 			if (await ProbeServerHealthyAsync(serverUrl, TimeSpan.FromSeconds(2)))
 			{
 				WarnIgnoredSpawnOptions(options, usingExisting: true);
 				var registerTags = DefaultRegistrationTags.Concat(options.Tags).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
-				return await DriveRunAsync(serverUrl, runTarget!, runFileFullPath, registerTags, removeAfterRun: !options.KeepRegistered, options, hooks);
+				return await DriveRunAsync(serverUrl, runTarget, runFileFullPath, registerTags, removeAfterRun: !options.KeepRegistered, options, hooks);
 			}
 
 			if (options.Mode == ExecMode.Existing)
@@ -123,17 +140,65 @@ internal static class ExecProgram
 		}
 		else if (options.Mode == ExecMode.Existing)
 		{
-			AnsiConsole.MarkupLine("[red]Error:[/] --mode existing requires a server URL (set --server or ORCHESTRA_URL).");
+			AnsiConsole.MarkupLine("[red]Error:[/] --mode existing requires a server URL (set --server, ORCHESTRA_URL, or hostBaseUrl in orchestra.json).");
 			return LaunchErrorExitCode;
 		}
 
 		// ── Spawn an isolated, one-shot instance ───────────────────────────────────────
-		if (options.Mode == ExecMode.Isolated && serverUrl is not null)
+		if (options.Mode == ExecMode.Isolated && options.ServerUrl is not null)
 		{
 			AnsiConsole.MarkupLine("[yellow]--server is ignored in isolated mode.[/]");
 		}
 
-		return await RunSpawnedAsync(runTarget!, runFileFullPath, options, hooks);
+		return await RunSpawnedAsync(runTarget, runFileFullPath, options, hooks);
+	}
+
+	/// <summary>
+	/// Resolves the candidate server URL to attach to (auto/existing modes): explicit
+	/// <c>--server</c> → <c>ORCHESTRA_URL</c> → the configured <c>hostBaseUrl</c> (or first
+	/// <c>urls</c> entry) from the discovered <c>orchestra.json</c>. Returns null when nothing is
+	/// configured, or when <c>--no-config</c> opts out of config discovery.
+	/// </summary>
+	private static string? ResolveServerUrl(ExecOptions options)
+	{
+		var explicitUrl = (options.ServerUrl ?? Environment.GetEnvironmentVariable("ORCHESTRA_URL"))?.Trim();
+		if (!string.IsNullOrWhiteSpace(explicitUrl))
+		{
+			return explicitUrl;
+		}
+
+		// --no-config means "ignore orchestra.json"; honor that for server discovery too.
+		if (options.NoConfig)
+		{
+			return null;
+		}
+
+		try
+		{
+			var config = OrchestraConfigLoader.Load();
+			var configured = (config?.HostBaseUrl ?? FirstUrl(config?.Urls))?.Trim();
+			return string.IsNullOrWhiteSpace(configured) ? null : configured;
+		}
+		catch
+		{
+			// Config discovery is best-effort; a malformed file must not block a run.
+			return null;
+		}
+	}
+
+	private static string? FirstUrl(string? urls)
+	{
+		if (string.IsNullOrWhiteSpace(urls))
+		{
+			return null;
+		}
+
+		foreach (var part in urls.Split([';', ','], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		{
+			return part;
+		}
+
+		return null;
 	}
 
 	private static async Task<int> RunSpawnedAsync(
@@ -425,7 +490,7 @@ internal static class ExecProgram
 
 		AnsiConsole.WriteLine();
 		AnsiConsole.MarkupLine("[bold]Result:[/]");
-		// Raw content (no markup) so `orchestra-exec ... | …` pipes the output cleanly.
+		// Raw content (no markup) so `orchestra run ... | …` pipes the output cleanly.
 		Console.Out.WriteLine(finalContent);
 	}
 

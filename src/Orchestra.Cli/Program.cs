@@ -92,9 +92,14 @@ public class Program
 
 		// ── Execution ────────────────────────────────────────────────────────────
 		config.AddCommand<RunCommand>("run")
-			.WithDescription("Start a new run and stream live SSE events. Prompts inline on HITL pauses.")
+			.WithDescription("Run a single orchestration to completion. Uses a running instance when one is configured and healthy (auto), else spawns an isolated one-shot host.")
 			.WithExample("run", "research-assistant", "--param", "topic=AI")
-			.WithExample("run", "deploy-pipeline", "--no-interactive", "-q");
+			.WithExample("run", "--run-file", "./pipeline.yaml", "--report", "markdown")
+			.WithExample("run", "deploy-pipeline", "--mode", "existing", "-q");
+
+		config.AddCommand<ExecCommand>("exec")
+			.WithDescription("Run a single orchestration in a self-contained, throwaway host (alias of `run --mode isolated`).")
+			.WithExample("exec", "--run-file", "./pipeline.yaml", "--report", "markdown");
 
 		config.AddCommand<AttachCommand>("attach")
 			.WithDescription("Re-attach to a still-running run and stream the remaining events.")
@@ -109,6 +114,16 @@ public class Program
 
 		config.AddCommand<ServerStatusCommand>("server-status")
 			.WithDescription("Show the Orchestra server's status.");
+
+		// ── Host / tooling ───────────────────────────────────────────────────────
+		config.AddCommand<PortalCommand>("portal")
+			.WithDescription("Launch the Orchestra host + Portal web UI (long-running).")
+			.WithExample("portal")
+			.WithExample("portal", "--urls", "http://localhost:5100");
+
+		config.AddCommand<SchemasCliCommand>("schemas")
+			.WithDescription("Copy the bundled JSON schemas into a local directory for editor $schema validation.")
+			.WithExample("schemas", "--output", "./.orchestra/schemas");
 
 		// ── Run history (branch) ─────────────────────────────────────────────────
 		config.AddBranch("runs", branch =>

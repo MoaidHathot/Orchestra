@@ -31,54 +31,6 @@ public abstract class StreamingSettings : GlobalSettings
 }
 
 /// <summary>
-/// Settings for <see cref="RunCommand"/>: start a new run.
-/// </summary>
-public sealed class RunSettings : StreamingSettings
-{
-	[CommandArgument(0, "<ID>")]
-	[Description("Orchestration ID (or declared name) to run")]
-	public string Id { get; set; } = string.Empty;
-
-	[CommandOption("--param <KEY=VALUE>")]
-	[Description("Repeated runtime parameter. Example: --param topic=AI --param length=short")]
-	public string[] Params { get; set; } = [];
-}
-
-public sealed class RunCommand : AsyncCommand<RunSettings>
-{
-	public override async Task<int> ExecuteAsync(CommandContext context, RunSettings settings)
-	{
-		using var client = ClientFactory.Create(settings);
-
-		using var cts = new CancellationTokenSource();
-		var ctrlCPressed = false;
-		Console.CancelKeyPress += OnCancelKeyPress;
-		void OnCancelKeyPress(object? _, ConsoleCancelEventArgs e)
-		{
-			// Don't kill the process; let us disconnect cleanly so the server's run keeps going.
-			e.Cancel = true;
-			ctrlCPressed = true;
-			cts.Cancel();
-		}
-
-		try
-		{
-			using var response = await client.OpenRunStreamAsync(
-				settings.Id,
-				ParameterParser.Parse(settings.Params),
-				cts.Token);
-			var session = StreamingSessionFactory.Build(client, settings);
-			var result = await session.RunAsync(response, settings.Id, cts.Token);
-			return StreamingSessionFactory.MapOutcomeToExitCode(result, ctrlCPressed);
-		}
-		finally
-		{
-			Console.CancelKeyPress -= OnCancelKeyPress;
-		}
-	}
-}
-
-/// <summary>
 /// Settings for <see cref="AttachCommand"/>: re-attach to a still-running run.
 /// </summary>
 public sealed class AttachSettings : StreamingSettings

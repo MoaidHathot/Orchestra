@@ -43,8 +43,8 @@ Orchestra is built as a layered .NET architecture:
 | **Copilot** | `Orchestra.Copilot` | GitHub Copilot SDK adapter implementing the `AgentBuilder`/`IAgent` abstractions |
 | **OpenCode** | `Orchestra.OpenCode` | [OpenCode](https://opencode.ai) adapter: drives an `opencode serve` HTTP+SSE server, with an engine-tool MCP bridge |
 | **Server** | `Orchestra.Server` | Standalone ASP.NET Core server composing Engine + Host + Copilot + OpenCode with CORS and OpenAPI |
-| **CLI** | `Orchestra.Cli` | Command-line client for managing orchestrations via the REST API |
-| **Portal** | `Orchestra.Playground.Copilot.Portal` | React + TypeScript web portal with DAG visualization and execution streaming |
+| **CLI / tool** | `Orchestra.Cli` | The single `orchestra` tool (NuGet id `Orchestra`): portal, one-shot `run`/`exec`, and the HTTP/SSE client verbs |
+| **Portal UI** | `Orchestra.Playground.Copilot.Portal` | React + TypeScript web portal (DAG visualization, execution streaming); served by `orchestra portal` |
 
 ```
 +----------------------------------------------------------+
@@ -908,16 +908,47 @@ The Portal (`Orchestra.Playground.Copilot.Portal`) is a full React 18 + TypeScri
 - **Import/Export** - Import and export orchestrations and profiles
 - **Step Details** - Drill into individual step results and outputs
 
-## CLI Client
+## CLI (`orchestra`)
 
-The CLI (`Orchestra.Cli`, executable name `orchestra`) provides a command-line interface
-for managing orchestrations against a running Orchestra server. It's a thin HTTP/SSE
-client built on **Spectre.Console.Cli** — every subcommand has its own `--help` with
-typed arguments, examples, and tab-completion–friendly options.
+Everything ships as a single .NET tool — package id **`Orchestra`**, command **`orchestra`** —
+built on **Spectre.Console.Cli**, so every subcommand has its own `--help` with typed
+arguments and examples. Running `orchestra` with no command prints the help.
 
-> The CLI requires a running Orchestra server (Portal/Host). The server URL resolves from
-> `--server <URL>`, then the `ORCHESTRA_URL` environment variable, then
-> `http://localhost:5000`.
+```bash
+dotnet tool install --global Orchestra        # then: orchestra ...
+# or run without installing:  dnx Orchestra --yes -- <command> [options]
+```
+
+The tool covers four things under one command:
+
+- **`orchestra portal`** — launch the long-running host + Portal web UI (REST API, MCP endpoints, dashboard).
+- **`orchestra run` / `orchestra exec`** — run a single orchestration to completion (see below).
+- **client verbs** — manage a *running* server over HTTP/SSE (`list`, `get`, `register`, `attach`, …).
+- **`orchestra schemas`** — copy the bundled JSON schemas locally for editor `$schema` validation.
+
+### Running an orchestration: `run` / `exec`
+
+`orchestra run` runs one orchestration to completion. Its `--mode` decides where it runs:
+
+- **`auto` (default)** — attach to a running Orchestra instance when one is configured (via `--server`, `ORCHESTRA_URL`, or the `hostBaseUrl`/`urls` in the discovered `orchestra.json`) **and** healthy; otherwise spawn a throwaway isolated in-process host for the run.
+- **`existing`** — require a healthy configured instance (error if none).
+- **`isolated`** — always spawn a self-contained throwaway host. `orchestra exec` is an alias for `run --mode isolated`.
+
+```bash
+# Run a registered orchestration (auto: uses your running server if reachable, else self-hosts)
+orchestra run research-assistant --param topic=AI
+
+# Run an ad-hoc file in a self-contained host and print a report
+orchestra exec --run-file ./pipeline.yaml --report markdown
+
+# Force talking to your server (never self-host)
+orchestra run deploy-pipeline --mode existing -q
+```
+
+### Managing a running server
+
+These verbs are a thin HTTP/SSE client; the server URL resolves from `--server <URL>`, then
+`ORCHESTRA_URL`, then `http://localhost:5000`.
 
 ```bash
 # Discover orchestrations
@@ -929,9 +960,6 @@ orchestra get research-assistant --format table
 orchestra register ./orchestrations/hello-world.json
 orchestra scan ./orchestrations
 orchestra remove research-assistant
-
-# Run and watch it live (SSE)
-orchestra run research-assistant --param topic=AI
 
 # Re-attach to an in-flight run, or inspect past ones
 orchestra attach research-assistant run-abc123
@@ -946,9 +974,9 @@ orchestra pending
 orchestra respond research-assistant run-abc123 review --choice approve --by alice
 ```
 
-Command groups: `list`, `get`, `register`, `remove`, `scan`, `enable`, `disable`,
-`run`, `attach`, `active`, `cancel`, `runs`, `triggers`, `profiles`, `tags`,
-`pending`, `respond`, `server-status`.
+Command groups: `portal`, `run`, `exec`, `schemas`, `list`, `get`, `register`, `remove`,
+`scan`, `enable`, `disable`, `attach`, `active`, `cancel`, `runs`, `triggers`, `profiles`,
+`tags`, `pending`, `respond`, `server-status`.
 
 See [`docs/cli.md`](docs/cli.md) for the full command reference, exit-code mapping, and
 HITL workflow walkthrough.

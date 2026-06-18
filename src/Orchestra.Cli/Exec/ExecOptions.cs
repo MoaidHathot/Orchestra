@@ -1,7 +1,7 @@
 namespace Orchestra.Exec;
 
 /// <summary>
-/// How <c>orchestra-exec</c> obtains the Orchestra host it runs against.
+/// How a one-shot run obtains the Orchestra host it runs against.
 /// </summary>
 internal enum ExecMode
 {
@@ -35,14 +35,15 @@ internal enum ReportFormat
 }
 
 /// <summary>
-/// Parsed command-line options for <c>orchestra-exec</c>.
+/// Parsed options for a one-shot run (<c>orchestra run</c> / <c>orchestra exec</c>). Constructed
+/// either by the Spectre command (from typed settings) or by <see cref="Parse"/> (argv / tests).
 /// </summary>
 internal sealed class ExecOptions
 {
 	/// <summary>How to obtain the host (connect to a running instance vs spawn a throwaway one).</summary>
 	public ExecMode Mode { get; init; } = ExecMode.Auto;
 
-	/// <summary>Explicit Orchestra server URL to connect to. Falls back to <c>ORCHESTRA_URL</c>.</summary>
+	/// <summary>Explicit Orchestra server URL to connect to. Falls back to <c>ORCHESTRA_URL</c> then orchestra.json.</summary>
 	public string? ServerUrl { get; init; }
 
 	/// <summary>Ignore the user's <c>orchestra.json</c> / services / global MCP for the spawned instance.</summary>
@@ -104,24 +105,28 @@ internal sealed class ExecOptions
 	public string? Error { get; init; }
 
 	public const string HelpText = """
-		orchestra-exec — run a single orchestration in an isolated, one-shot Orchestra host.
+		orchestra run / orchestra exec — run a single orchestration to completion.
 
-		Boots an in-process Orchestra host with scheduling/triggers/auto-resume disabled,
-		runs exactly one orchestration (streaming progress; prompts inline on HITL pauses),
-		then shuts the host down and exits with a status code.
+		Connects to a running Orchestra instance when one is configured and healthy (auto),
+		otherwise boots an in-process host with scheduling/triggers/auto-resume disabled, runs
+		exactly one orchestration (streaming progress; prompts inline on HITL pauses), then shuts
+		the host down and exits with a status code.
 
 		USAGE:
-		  orchestra-exec --run <id|name> [options]
-		  orchestra-exec --run-file <path> [options]
+		  orchestra run <name> [options]
+		  orchestra run --run-file <path> [options]
+		  orchestra exec ...                (= run --mode isolated)
 
 		TARGET (one required):
-		  --run <id|name>        Run a registered orchestration (resolved from --orchestrations-path).
+		  <name>                 Run a registered orchestration (resolved from --orchestrations-path
+		                         when isolated, or from the running instance's registry).
 		  --run-file <path>      Register the orchestration file, then run it.
 
 		HOST SELECTION:
 		  --mode <auto|isolated|existing>
-		                         auto (default): use a running instance when --server/ORCHESTRA_URL
-		                           is set and healthy; otherwise spawn a throwaway isolated one.
+		                         auto (default): use a running instance when one is configured
+		                           (via --server, ORCHESTRA_URL, or orchestra.json hostBaseUrl/urls)
+		                           and healthy; otherwise spawn a throwaway isolated one.
 		                         isolated: always spawn a throwaway instance; never reuse.
 		                         existing: require a configured, healthy running instance.
 		  --server <url>         Orchestra server URL to connect to (or set ORCHESTRA_URL).
