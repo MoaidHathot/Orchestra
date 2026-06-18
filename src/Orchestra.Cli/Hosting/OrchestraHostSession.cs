@@ -79,6 +79,15 @@ internal sealed record HostSessionRequest
 	/// (a fully reproducible instance). Mirrors <c>--no-config</c>.</summary>
 	public bool NoConfig { get; init; }
 
+	/// <summary>
+	/// Whether the spawned host sets the <c>skip-services</c> flag (don't load/start
+	/// orchestra.services.json + orchestra.mcp.json). Null (default) mirrors <see cref="NoConfig"/>.
+	/// A management host sets this <c>false</c> so global MCP <em>definitions</em> still load for
+	/// correct parsing, while <c>StartExternalServices=false</c> (applied via
+	/// <see cref="ConfigureIsolation"/>) keeps the proxies/processes from actually starting.
+	/// </summary>
+	public bool? SkipExternalServices { get; init; }
+
 	/// <summary>Optional data-path override for the spawned host (else config/default).</summary>
 	public string? DataPath { get; init; }
 
@@ -202,6 +211,9 @@ internal static class OrchestraHostSessionFactory
 			o.TimestampFormat = "HH:mm:ss ";
 			o.ColorBehavior = LoggerColorBehavior.Enabled;
 		});
+		// Spawned-host diagnostics go to stderr so the command's own stdout stays a clean JSON
+		// document (or run stream) for piping.
+		builder.Services.Configure<ConsoleLoggerOptions>(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 		if (request.QuietHostLogs)
 		{
 			// Keep the console focused on the command's own output; host chatter stays at Warning+.
@@ -209,10 +221,11 @@ internal static class OrchestraHostSessionFactory
 		}
 		builder.WebHost.UseUrls(url);
 
-		// --no-config: also skip the co-located orchestra.services.json / orchestra.mcp.json so the
-		// spawned instance is fully reproducible (orchestra.json itself is skipped via the
-		// loadConfigurationFile:false argument to AddOrchestraHost below).
-		if (request.NoConfig)
+		// skip-services controls whether the host loads/starts orchestra.services.json + orchestra.mcp.json.
+		// Defaults to mirroring NoConfig (a fully reproducible instance); a management host opts out
+		// (SkipExternalServices = false) so global MCP definitions still load for correct parsing, while
+		// StartExternalServices (via ConfigureIsolation) keeps the proxies/processes from starting.
+		if (request.SkipExternalServices ?? request.NoConfig)
 		{
 			builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?> { ["skip-services"] = "true" });
 		}

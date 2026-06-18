@@ -439,20 +439,11 @@ public static class ServiceProviderExtensions
 		ServiceEntry[] serviceEntries = [];
 		Engine.Mcp[] globalMcps = [];
 
-		if (!skipExternalServices)
-		{
-			var serviceConfigPath = OrchestraConfigLoader.ResolveServiceConfigPath();
-			if (serviceConfigPath is not null)
-			{
-				serviceEntries = OrchestraConfigLoader.LoadServiceConfig(serviceConfigPath, initLogger) ?? [];
-				initLogger.LogInformation("Loaded {Count} service(s) from {Path}", serviceEntries.Length, serviceConfigPath);
-			}
-		}
-		else
-		{
-			initLogger.LogInformation("Skipping external service config (orchestra.services.json) in test environment");
-		}
-
+		// Global MCP DEFINITIONS feed orchestration parsing (registry.GlobalMcps / triggerManager.GlobalMcps):
+		// an orchestration that references a global MCP fails to parse without them. They are cheap to
+		// parse and carry no side effects, so load them whenever config is available — even for a
+		// read-only management host that starts no external infrastructure. Only the reproducible
+		// Testing / skip-services mode skips them.
 		if (!skipExternalServices)
 		{
 			var globalMcpPath = OrchestraConfigLoader.ResolveGlobalMcpPath();
@@ -466,12 +457,40 @@ public static class ServiceProviderExtensions
 			initLogger.LogInformation("Skipping external MCP config (orchestra.mcp.json) in test environment");
 		}
 
-		await OrchestraInfrastructureLifecycle.InitializeAsync(
-			serviceManager,
-			mcpManager,
-			serviceEntries,
-			globalMcps,
-			shutdownToken);
+		// Starting external infrastructure — the processes in orchestra.services.json and the MCP proxy
+		// connections — is the expensive, side-effecting part (it can take tens of seconds). A read-only
+		// management host (StartExternalServices = false) skips it entirely; the definitions loaded above
+		// are enough to parse and list orchestrations. The skip-services / Testing path keeps its prior
+		// behavior (it still calls the lifecycle with empty arrays).
+		if (options.StartExternalServices)
+		{
+			if (!skipExternalServices)
+			{
+				var serviceConfigPath = OrchestraConfigLoader.ResolveServiceConfigPath();
+				if (serviceConfigPath is not null)
+				{
+					serviceEntries = OrchestraConfigLoader.LoadServiceConfig(serviceConfigPath, initLogger) ?? [];
+					initLogger.LogInformation("Loaded {Count} service(s) from {Path}", serviceEntries.Length, serviceConfigPath);
+				}
+			}
+			else
+			{
+				initLogger.LogInformation("Skipping external service config (orchestra.services.json) in test environment");
+			}
+
+			await OrchestraInfrastructureLifecycle.InitializeAsync(
+				serviceManager,
+				mcpManager,
+				serviceEntries,
+				globalMcps,
+				shutdownToken);
+		}
+		else
+		{
+			initLogger.LogInformation(
+				"StartExternalServices=false: loaded {Count} global MCP definition(s) for parsing only; not starting services or MCP proxies",
+				globalMcps.Length);
+		}
 
 		// Make global MCPs available to the registry for parsing orchestration files
 		registry.GlobalMcps = globalMcps;

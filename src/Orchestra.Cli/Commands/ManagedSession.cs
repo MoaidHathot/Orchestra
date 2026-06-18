@@ -20,12 +20,22 @@ internal static class ManagedSession
 
 	public static async Task<int> RunAsync(ManagedCommandSettings settings, Func<OrchestraClient, Task> action)
 	{
+		// The management host never loads the user's orchestra.json into the spawned instance:
+		// scanning the workspace and starting orchestra.services.json / orchestra.mcp.json processes
+		// can take tens of seconds and is pure overhead for a read-only registry operation. We
+		// resolve only the data path from config (so it reads the same files the server uses) and
+		// inject it into an otherwise reproducible, side-effect-free host (NoConfig = true).
+		var dataPath = settings.DataPath ?? (settings.NoConfig ? null : SafeConfiguredDataPath());
+
 		var request = new HostSessionRequest
 		{
 			ServerUrl = ClientFactory.ResolveServerUrlOrNull(settings.Server, settings.NoConfig),
 			Mode = settings.ResolveMode(),
-			NoConfig = settings.NoConfig,
-			DataPath = settings.DataPath,
+			NoConfig = true,
+			// Load global MCP DEFINITIONS (so MCP-referencing orchestrations parse and list) but never
+			// START the services/proxies — that's the slow, side-effecting part the management host skips.
+			SkipExternalServices = false,
+			DataPath = dataPath,
 			ConfigureIsolation = ConfigureManagementHost,
 			SpawnOnlyOptionLabels = SpawnOnlyOptionsInEffect(settings),
 		};
@@ -53,13 +63,16 @@ internal static class ManagedSession
 
 	/// <summary>
 	/// Inert management host profile: load the registry (and register JSON-declared triggers so
-	/// <c>triggers list</c> can show them) but disable the scheduler and auto-resume so the
-	/// throwaway instance never fires or resumes anything during its brief lifetime.
+	/// <c>triggers list</c> can show them) but disable the scheduler, auto-resume, and external
+	/// infrastructure startup so the throwaway instance never fires, resumes, or boots services/MCP
+	/// proxies during its brief lifetime. Global MCP definitions are still loaded (for parsing) via
+	/// <c>SkipExternalServices = false</c> on the request.
 	/// </summary>
 	private static void ConfigureManagementHost(OrchestrationHostOptions o)
 	{
 		o.EnableScheduler = false;
 		o.AutoResumeCheckpointsOnStartup = false;
+		o.StartExternalServices = false;
 		o.LoadPersistedOrchestrations = true;
 		o.RegisterJsonTriggers = true;
 	}
@@ -70,5 +83,13 @@ internal static class ManagedSession
 		if (settings.NoConfig) labels.Add("--no-config");
 		if (settings.DataPath is not null) labels.Add("--data-path");
 		return labels;
+	}
+
+	/// <summary>Best-effort read of the configured data path; a malformed/absent orchestra.json
+	/// must not block a management command (it falls back to the host default).</summary>
+	private static string? SafeConfiguredDataPath()
+	{
+		try { return OrchestraConfigLoader.ResolveConfiguredDataPath(); }
+		catch { return null; }
 	}
 }

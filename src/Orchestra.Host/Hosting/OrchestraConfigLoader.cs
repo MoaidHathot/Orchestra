@@ -237,6 +237,28 @@ public static class OrchestraConfigLoader
 	}
 
 	/// <summary>
+	/// Resolves the effective <c>dataPath</c> configured in the discovered <c>orchestra.json</c>,
+	/// applying the same relative-to-config-directory resolution as <see cref="ApplyConfig"/>.
+	/// Returns null when no config file is found or it sets no <c>dataPath</c> (so the caller should
+	/// fall back to the host default). Useful for lightweight tools (e.g. the CLI's management verbs)
+	/// that need to read/write the same data path as the host <em>without</em> loading the rest of
+	/// orchestra.json (scan/services/MCP), which can be expensive and has side effects.
+	/// </summary>
+	public static string? ResolveConfiguredDataPath(ILogger? logger = null)
+	{
+		var configPath = ResolveConfigPath();
+		if (configPath is null)
+			return null;
+
+		var config = Load(logger);
+		if (config?.DataPath is not { } dataPath)
+			return null;
+
+		var configDirectory = Path.GetDirectoryName(Path.GetFullPath(configPath));
+		return ResolvePath(dataPath, configDirectory);
+	}
+
+	/// <summary>
 	/// Loads configuration from the resolved config file path and applies it to the options.
 	/// Values in the config file are applied first, then the programmatic configure action
 	/// runs on top (allowing overrides).

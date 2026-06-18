@@ -69,6 +69,17 @@ public class OrchestrationHostOptions
 	public bool EnableScheduler { get; set; } = true;
 
 	/// <summary>
+	/// Whether to start external infrastructure on startup: the processes declared in
+	/// <c>orchestra.services.json</c> and the MCP proxy connections from <c>orchestra.mcp.json</c>.
+	/// When <c>false</c>, the host still <em>loads</em> the global MCP definitions (so orchestrations
+	/// that reference them parse and list correctly) but does not start any service process or MCP
+	/// proxy — the expensive, side-effecting part. This powers a fast, read-only "management" host
+	/// (e.g. the CLI's <c>list</c>/<c>get</c>/… verbs) that must inspect persisted state without
+	/// paying to boot the whole environment. Default: true.
+	/// </summary>
+	public bool StartExternalServices { get; set; } = true;
+
+	/// <summary>
 	/// Retention policy for automatic cleanup of old run records.
 	/// Default: no limits (runs are kept forever).
 	/// </summary>
