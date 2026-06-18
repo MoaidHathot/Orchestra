@@ -1,10 +1,10 @@
 # Orchestra
 
-**Deterministic AI orchestrations for .NET.** Describe a workflow as a declarative DAG of
+**Deterministic AI agent orchestrations.** Describe a workflow as a declarative DAG of
 steps in a single JSON/YAML file, and Orchestra runs it — resolving dependencies, streaming
 progress, and driving each `Prompt` step on a real coding agent (GitHub Copilot or OpenCode).
-It ships as one self-contained .NET tool with a built-in web portal, a one-shot runner, MCP
-integration, triggers, checkpointing, and human-in-the-loop pauses.
+It ships as one self-contained command-line tool with a built-in web portal, a one-shot runner,
+MCP integration, triggers, checkpointing, and human-in-the-loop pauses.
 
 ```text
 inputs ─▶ ┌─ research ─┐                      orchestra run research-assistant
@@ -22,13 +22,14 @@ inputs ─▶ ┌─ research ─┐                      orchestra run research
 
 ## Install
 
-Orchestra is published to NuGet as the **`Orchestra`** .NET tool (command: `orchestra`).
+Orchestra is distributed as the **`Orchestra`** command-line tool (command: `orchestra`) on NuGet.
+Your orchestrations are just JSON/YAML — no C# required.
 
 ```bash
-# Run without installing (recommended for trying it out) — needs the .NET 10 SDK:
+# Run without installing (recommended for trying it out) — requires the `dnx` launcher:
 dnx Orchestra --yes -- <command> [options]
 
-# …or install globally:
+# …or install it as a global tool:
 dotnet tool install --global Orchestra
 orchestra <command> [options]
 ```
