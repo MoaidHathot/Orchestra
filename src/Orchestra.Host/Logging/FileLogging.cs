@@ -40,30 +40,43 @@ public sealed class FileLoggerProvider : ILoggerProvider, IAsyncDisposable
 
 	private async Task WriteLoopAsync()
 	{
+		// Open the file lazily on the first actual message so that a logger which never writes
+		// anything (e.g. everything is below the minimum level) does not create an empty log file.
+		StreamWriter? writer = null;
 		try
 		{
-			await using var writer = new StreamWriter(_path, append: true) { AutoFlush = false };
 			var reader = _channel.Reader;
 
 			// WaitToReadAsync returns false when the channel is completed and drained
 			while (await reader.WaitToReadAsync(_cts.Token))
 			{
+				var wrote = false;
 				while (reader.TryRead(out var message))
 				{
+					writer ??= new StreamWriter(_path, append: true) { AutoFlush = false };
 					await writer.WriteLineAsync(message);
+					wrote = true;
 				}
-				await writer.FlushAsync();
+				if (wrote)
+					await writer!.FlushAsync();
 			}
 
 			// Drain any remaining items after channel completion signal
 			while (reader.TryRead(out var remaining))
 			{
+				writer ??= new StreamWriter(_path, append: true) { AutoFlush = false };
 				await writer.WriteLineAsync(remaining);
 			}
-			await writer.FlushAsync();
+			if (writer is not null)
+				await writer.FlushAsync();
 		}
 		catch (OperationCanceledException) { }
 		catch (ChannelClosedException) { }
+		finally
+		{
+			if (writer is not null)
+				await writer.DisposeAsync();
+		}
 	}
 
 	public void Dispose()
