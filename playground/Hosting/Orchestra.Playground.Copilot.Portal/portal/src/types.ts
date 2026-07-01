@@ -190,6 +190,10 @@ export interface StepResultData {
   requestedModelInfo?: ModelInfo;
   selectedModelInfo?: ModelInfo;
   actualModelInfo?: ModelInfo;
+  /** Agent provider this step was configured to run on. */
+  configuredProvider?: string;
+  /** Agent provider that actually ran this step. */
+  actualProvider?: string;
   usage?: UsageData;
   trace?: TraceData;
   errorCategory?: string;
@@ -626,6 +630,10 @@ export interface SnapshotStepState {
   requestedModel?: string | null;
   selectedModel?: string | null;
   actualModel?: string | null;
+  /** Agent provider this step was configured to run on. */
+  configuredProvider?: string | null;
+  /** Agent provider that actually ran this step. */
+  actualProvider?: string | null;
   activeSubagents?: number;
   retryCount?: number;
 }

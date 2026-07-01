@@ -10,6 +10,8 @@ internal static class StepExecutionTraceExtensions
 	{
 		return new StepExecutionTrace
 		{
+			ConfiguredProvider = trace.ConfiguredProvider,
+			ActualProvider = trace.ActualProvider,
 			Parameters = new Dictionary<string, string>(context.Parameters),
 			DependencyOutputs = context.GetDependencyOutputs(step.DependsOn),
 			RawDependencyOutputs = context.GetRawDependencyOutputs(step.DependsOn),

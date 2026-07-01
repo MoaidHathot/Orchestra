@@ -9,7 +9,17 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Orchestra.Engine\Orchestra.Engine.csproj" />
     <ProjectReference Include="..\..\..\src\Orchestra.Copilot\Orchestra.Copilot.csproj" />
+    <ProjectReference Include="..\..\..\src\Orchestra.OpenCode\Orchestra.OpenCode.csproj" />
     <ProjectReference Include="..\..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
+  </ItemGroup>
+
+  <!-- Shared composition helper that registers every agent provider (copilot + opencode) as a
+       keyed AgentBuilder plus the multi-provider AgentProviderRegistry. Compiled in (rather than
+       referenced) because it is internal; mirrors Orchestra.Server / Orchestra.Cli. Without this
+       the Portal would fall back to a SingleAgentProviderRegistry that ignores each step's
+       `provider` and routes everything to one builder. -->
+  <ItemGroup>
+    <Compile Include="..\..\..\src\Shared\AgentProviderRegistration.cs" Link="Composition\AgentProviderRegistration.cs" />
   </ItemGroup>
 
   <!-- Exclude unrelated sample/reference checkouts that may be cloned into the project

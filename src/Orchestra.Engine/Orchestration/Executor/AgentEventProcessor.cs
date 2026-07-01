@@ -52,6 +52,19 @@ public class AgentEventProcessor
 	}
 
 	/// <summary>
+	/// The agent provider the step was configured to run on (step <c>provider</c> →
+	/// orchestration <c>defaultProvider</c> → host default). Set by the executor before
+	/// building traces so every trace carries the configured-vs-actual provider pair.
+	/// </summary>
+	public string? ConfiguredProvider { get; set; }
+
+	/// <summary>
+	/// The agent provider that actually ran the step (resolved builder capability key).
+	/// Set by the executor once the provider is resolved.
+	/// </summary>
+	public string? ActualProvider { get; set; }
+
+	/// <summary>
 	/// Gets the collected reasoning content.
 	/// </summary>
 	public string? Reasoning => _reasoningBuilder.Length > 0 ? _reasoningBuilder.ToString() : null;
@@ -779,6 +792,8 @@ public class AgentEventProcessor
 
 		return new StepExecutionTrace
 		{
+			ConfiguredProvider = ConfiguredProvider,
+			ActualProvider = ActualProvider,
 			SystemPrompt = systemPrompt,
 			UserPromptRaw = userPromptRaw,
 			UserPromptProcessed = userPromptProcessed,
@@ -811,6 +826,8 @@ public class AgentEventProcessor
 
 		return new StepExecutionTrace
 		{
+			ConfiguredProvider = ConfiguredProvider,
+			ActualProvider = ActualProvider,
 			SystemPrompt = systemPrompt,
 			UserPromptRaw = userPromptRaw,
 			UserPromptProcessed = userPromptProcessed,

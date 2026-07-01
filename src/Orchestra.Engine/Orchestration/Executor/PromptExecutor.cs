@@ -196,6 +196,15 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Create event processor to handle agent events and collect trace data
 		var eventProcessor = new AgentEventProcessor(_reporter, step.Name);
 
+		// The provider the author configured for this step: step.provider →
+		// orchestration defaultProvider → host default provider name. Recorded on the
+		// trace so live + historical views can label "configured vs actual" provider,
+		// and so the resolve-time guardrail can detect a silent substitution.
+		var configuredProvider = step.Provider
+			?? context.DefaultProvider
+			?? _providerRegistry.DefaultProviderName;
+		eventProcessor.ConfiguredProvider = configuredProvider;
+
 		// Resolve template expressions in MCP configurations (param, env, vars, orchestration,
 		// AND — for `mcps[].timeoutSeconds` only — step-output references such as
 		// {{validate-inputs.output.controllerMcpTimeoutSeconds}}) before building diagnostics
@@ -404,6 +413,40 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			// defaultProvider → host default. The output handler (if any) reuses the same
 			// provider so a step's input + output transforms run on one backend.
 			var agentBuilder = _providerRegistry.Resolve(step.Provider ?? context.DefaultProvider);
+
+			// The provider that will actually run this step — the resolved builder's capability
+			// key (e.g. "copilot", "opencode"). Record it on the trace next to ConfiguredProvider.
+			var actualProvider = agentBuilder.GetCapabilities().Provider;
+			eventProcessor.ActualProvider = actualProvider;
+
+			// Guardrail: fail fast when the author EXPLICITLY requested a provider (on the step or
+			// the orchestration) but the resolved builder is a different backend. This happens when
+			// a host registers a single-provider registry that ignores per-step `provider` and
+			// silently routes every step to one builder (the exact Portal misconfiguration where a
+			// `provider: opencode` step ran on Copilot). A multi-provider registry would instead
+			// throw on an unknown name; this catches the *substitution* case the registry cannot.
+			var explicitlyRequestedProvider = step.Provider ?? context.DefaultProvider;
+			if (!string.IsNullOrWhiteSpace(explicitlyRequestedProvider)
+				&& !string.Equals(explicitlyRequestedProvider.Trim(), actualProvider, StringComparison.OrdinalIgnoreCase))
+			{
+				var source = step.Provider is not null ? "step" : "orchestration defaultProvider";
+				var errorMessage =
+					$"Step '{step.Name}' requested provider '{explicitlyRequestedProvider.Trim()}' (via {source}) but the host " +
+					$"resolved it to provider '{actualProvider}'. The engine fails fast rather than silently running the step on " +
+					$"the wrong backend. This usually means the host registered only a single agent provider (a " +
+					$"SingleAgentProviderRegistry that ignores per-step 'provider'). Register all providers via " +
+					$"AddOrchestraAgentProviders(), or route this step to '{actualProvider}'.";
+				LogProviderSubstitutionRejected(step.Name, explicitlyRequestedProvider.Trim(), actualProvider);
+				var provTrace = eventProcessor.BuildPartialTrace(resolvedSystemPrompt, userPrompt, mcpServerDescriptions);
+				_reporter.ReportStepTrace(step.Name, provTrace);
+				_reporter.ReportStepError(step.Name, errorMessage);
+				return ExecutionResult.Failed(
+					errorMessage,
+					rawDependencyOutputs,
+					trace: provTrace,
+					errorCategory: StepErrorCategory.ValidationError,
+					savedFiles: context.TempFileStore?.GetFilesForStep(step.Name));
+			}
 
 			// Fail fast on any step configuration the resolved provider cannot honor. The engine
 			// never silently drops a requested feature: a step that uses a feature the provider
@@ -1170,6 +1213,12 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Error,
 		Message = "Step '{StepName}' uses feature(s) [{Features}] that provider '{Provider}' does not support; failing the step (the engine does not silently drop unsupported configuration).")]
 	private partial void LogUnsupportedProviderFeatures(string stepName, string provider, string features);
+
+	[LoggerMessage(
+		EventId = 18,
+		Level = LogLevel.Error,
+		Message = "Step '{StepName}' requested provider '{Requested}' but the host resolved it to '{Actual}'; failing the step rather than running on the wrong backend (host likely registered a single-provider registry).")]
+	private partial void LogProviderSubstitutionRejected(string stepName, string requested, string actual);
 
 	[LoggerMessage(
 		EventId = 1,

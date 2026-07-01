@@ -295,6 +295,8 @@ public static partial class RunsApi
 					requestedModelInfo = kv.Value.RequestedModelInfo,
 					selectedModelInfo = kv.Value.SelectedModelInfo,
 					actualModelInfo = kv.Value.ActualModelInfo,
+					configuredProvider = kv.Value.ConfiguredProvider,
+					actualProvider = kv.Value.ActualProvider,
 					savedFiles = kv.Value.SavedFiles.Length > 0 ? kv.Value.SavedFiles : null,
 					usage = kv.Value.Usage is { } u ? new
 					{

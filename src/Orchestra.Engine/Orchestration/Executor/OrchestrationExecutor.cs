@@ -436,6 +436,8 @@ public partial class OrchestrationExecutor
 						RequestedModelInfo = result.RequestedModelInfo,
 						SelectedModelInfo = result.SelectedModelInfo,
 						ActualModelInfo = result.ActualModelInfo,
+						ConfiguredProvider = result.Trace?.ConfiguredProvider,
+						ActualProvider = result.Trace?.ActualProvider,
 						SavedFiles = result.SavedFiles,
 						// Preserve child-orchestration lineage through restore so the
 						// retry's own run.json carries the pointer triple — symmetric
@@ -1683,6 +1685,10 @@ public partial class OrchestrationExecutor
 			RequestedModelInfo = result.RequestedModelInfo,
 			SelectedModelInfo = result.SelectedModelInfo,
 			ActualModelInfo = result.ActualModelInfo,
+			// Provider labels come from the trace (only Prompt steps set them); a
+			// configured≠actual pair signals a silent substitution the engine rejected.
+			ConfiguredProvider = result.Trace?.ConfiguredProvider,
+			ActualProvider = result.Trace?.ActualProvider,
 			Usage = result.Usage,
 			Trace = result.Trace,
 			SavedFiles = result.SavedFiles,
@@ -1992,6 +1998,8 @@ public partial class OrchestrationExecutor
 		RequestedModelInfo = record.RequestedModelInfo,
 		SelectedModelInfo = record.SelectedModelInfo,
 		ActualModelInfo = record.ActualModelInfo,
+		ConfiguredProvider = record.ConfiguredProvider,
+		ActualProvider = record.ActualProvider,
 		Usage = record.Usage,
 		Trace = record.Trace,
 		SavedFiles = record.SavedFiles,

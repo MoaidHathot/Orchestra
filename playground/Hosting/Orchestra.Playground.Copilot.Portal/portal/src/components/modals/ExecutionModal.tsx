@@ -122,6 +122,10 @@ interface StepModelState {
   requestedModelInfo?: ModelInfo;
   selectedModelInfo?: ModelInfo;
   actualModelInfo?: ModelInfo;
+  /** Provider the step was configured to run on (step/orchestration/host default). */
+  configuredProvider?: string;
+  /** Provider that actually ran the step (resolved builder). */
+  actualProvider?: string;
 }
 
 function formatNumber(value: number | undefined): string | null {
@@ -653,6 +657,8 @@ export default function ExecutionModal({
     let requestedModelInfo: ModelInfo | undefined;
     let selectedModelInfo: ModelInfo | undefined;
     let actualModelInfo: ModelInfo | undefined;
+    let configuredProvider: string | undefined;
+    let actualProvider: string | undefined;
 
     if (selectedStepData?.model) {
       requestedModel = selectedStepData.model;
@@ -666,6 +672,12 @@ export default function ExecutionModal({
         if (event.requestedModelInfo) requestedModelInfo = event.requestedModelInfo as ModelInfo;
         if (event.selectedModelInfo) selectedModelInfo = event.selectedModelInfo as ModelInfo;
         if (event.actualModelInfo) actualModelInfo = event.actualModelInfo as ModelInfo;
+        if (event.configuredProvider) configuredProvider = event.configuredProvider as string;
+        if (event.actualProvider) actualProvider = event.actualProvider as string;
+      } else if (event.type === 'step-trace') {
+        // step-trace is the live carrier of the provider pair (configured vs actual).
+        if (event.configuredProvider) configuredProvider = event.configuredProvider as string;
+        if (event.actualProvider) actualProvider = event.actualProvider as string;
       } else if (event.type === 'usage' && !actualModel) {
         if (event.model) actualModel = event.model as string;
       } else if (event.type === 'model-mismatch') {
@@ -673,7 +685,7 @@ export default function ExecutionModal({
       }
     }
 
-    if (!requestedModel && !actualModel && !selectedModel && !requestedModelInfo && !selectedModelInfo && !actualModelInfo) {
+    if (!requestedModel && !actualModel && !selectedModel && !requestedModelInfo && !selectedModelInfo && !actualModelInfo && !configuredProvider && !actualProvider) {
       return null;
     }
 
@@ -684,6 +696,8 @@ export default function ExecutionModal({
       requestedModelInfo,
       selectedModelInfo,
       actualModelInfo,
+      configuredProvider,
+      actualProvider,
     };
   }, [selectedStep, selectedStepData, stepEvents]);
 
@@ -1680,6 +1694,57 @@ export default function ExecutionModal({
                               <span style={{ color: 'var(--text-secondary)' }}>
                                 {selectedStepData.type}
                               </span>
+                            </div>
+                          )}
+                          {stepModelInfo?.configuredProvider && (
+                            <div>
+                              <span style={{ color: 'var(--text-dim)' }}>
+                                Provider:
+                              </span>{' '}
+                              <span
+                                style={{ color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}
+                                title="The agent provider this step was configured to run on."
+                              >
+                                {stepModelInfo.configuredProvider}
+                              </span>
+                            </div>
+                          )}
+                          {stepModelInfo?.actualProvider && (
+                            <div>
+                              <span style={{ color: 'var(--text-dim)' }}>
+                                Ran on:
+                              </span>{' '}
+                              <span
+                                style={{
+                                  color:
+                                    stepModelInfo.configuredProvider &&
+                                    stepModelInfo.actualProvider.toLowerCase() !== stepModelInfo.configuredProvider.toLowerCase()
+                                      ? 'var(--warning)'
+                                      : 'var(--text-secondary)',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.04em',
+                                }}
+                                title="The agent provider that actually ran this step."
+                              >
+                                {stepModelInfo.actualProvider}
+                              </span>
+                              {stepModelInfo.configuredProvider &&
+                                stepModelInfo.actualProvider.toLowerCase() !== stepModelInfo.configuredProvider.toLowerCase() && (
+                                  <span
+                                    style={{
+                                      marginLeft: '6px',
+                                      fontSize: '10px',
+                                      padding: '1px 5px',
+                                      borderRadius: '3px',
+                                      background: 'rgba(210, 153, 34, 0.15)',
+                                      border: '1px solid rgba(210, 153, 34, 0.3)',
+                                      color: 'var(--warning)',
+                                    }}
+                                    title={`Configured provider "${stepModelInfo.configuredProvider}" but the step ran on "${stepModelInfo.actualProvider}".`}
+                                  >
+                                    substituted
+                                  </span>
+                                )}
                             </div>
                           )}
                           {stepModelInfo?.requestedModel && (

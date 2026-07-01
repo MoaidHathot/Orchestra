@@ -63,6 +63,12 @@ public sealed record StepStateSnapshot
 	public string? SelectedModel { get; init; }
 	public string? ActualModel { get; init; }
 
+	/// <summary>The agent provider this step was configured to run on.</summary>
+	public string? ConfiguredProvider { get; init; }
+
+	/// <summary>The agent provider that actually ran this step.</summary>
+	public string? ActualProvider { get; init; }
+
 	/// <summary>
 	/// Number of currently-running sub-agents (subagent-started minus subagent-completed/failed).
 	/// </summary>

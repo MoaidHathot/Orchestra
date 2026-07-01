@@ -131,6 +131,66 @@ describe('ExecutionModal model metadata', () => {
   });
 });
 
+describe('ExecutionModal provider labels', () => {
+  it('labels the configured and actual provider when they match', async () => {
+    const event: StepEvent = {
+      type: 'step-completed',
+      timestamp: new Date().toISOString(),
+      actualModel: 'gpt-5-high',
+      configuredProvider: 'copilot',
+      actualProvider: 'copilot',
+    };
+    render(<ExecutionModal {...makeProps({ stepEvents: { analyze: [event] } })} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Provider:')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Ran on:')).toBeInTheDocument();
+    // Matching providers → no "substituted" warning badge.
+    expect(screen.queryByText('substituted')).not.toBeInTheDocument();
+  });
+
+  it('flags a substituted provider when configured differs from actual', async () => {
+    // Reproduces the Portal misconfiguration surfaced to the user: the step asked for
+    // opencode but the host ran it on copilot.
+    const event: StepEvent = {
+      type: 'step-completed',
+      timestamp: new Date().toISOString(),
+      actualModel: 'claude-opus-4.8',
+      configuredProvider: 'opencode',
+      actualProvider: 'copilot',
+    };
+    render(<ExecutionModal {...makeProps({ stepEvents: { analyze: [event] } })} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Provider:')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('opencode')).toBeInTheDocument();
+    expect(screen.getByText('copilot')).toBeInTheDocument();
+    expect(screen.getByText('substituted')).toBeInTheDocument();
+  });
+
+  it('reads the provider pair from a step-trace event (live path)', async () => {
+    const event: StepEvent = {
+      type: 'step-trace',
+      timestamp: new Date().toISOString(),
+      hasTrace: true,
+      configuredProvider: 'opencode',
+      actualProvider: 'opencode',
+    };
+    render(<ExecutionModal {...makeProps({ stepEvents: { analyze: [event] } })} />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Provider:')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Ran on:')).toBeInTheDocument();
+    expect(screen.queryByText('substituted')).not.toBeInTheDocument();
+  });
+});
+
 describe('ExecutionModal saved files', () => {
   it('renders orchestration and selected step saved file paths', async () => {
     render(<ExecutionModal {...makeProps({

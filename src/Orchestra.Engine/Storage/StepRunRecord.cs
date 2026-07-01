@@ -75,6 +75,23 @@ public class StepRunRecord
 	public AvailableModelInfo? ActualModelInfo { get; init; }
 
 	/// <summary>
+	/// The agent provider this step was <i>configured</i> to run on — the step's
+	/// <c>provider</c>, else the orchestration's <c>defaultProvider</c>, else the host's
+	/// default provider name. This is what the orchestration author asked for.
+	/// </summary>
+	public string? ConfiguredProvider { get; init; }
+
+	/// <summary>
+	/// The agent provider that <i>actually</i> ran this step — the capability key of the
+	/// builder the registry resolved (e.g. <c>copilot</c>, <c>opencode</c>). When this
+	/// differs from <see cref="ConfiguredProvider"/> the host silently substituted a
+	/// provider (e.g. a single-provider host that ignores per-step <c>provider</c>); the
+	/// engine now fails fast on that mismatch, but the pair is still surfaced for
+	/// historical runs and diagnostics.
+	/// </summary>
+	public string? ActualProvider { get; init; }
+
+	/// <summary>
 	/// Token usage statistics for this step (input tokens, output tokens, total).
 	/// </summary>
 	public TokenUsage? Usage { get; init; }
@@ -243,6 +260,19 @@ public enum StepErrorCategory
 /// </summary>
 public class StepExecutionTrace
 {
+	/// <summary>
+	/// The agent provider this step was configured to run on (step <c>provider</c> →
+	/// orchestration <c>defaultProvider</c> → host default). Mirrors
+	/// <see cref="StepRunRecord.ConfiguredProvider"/> so live trace views can label it.
+	/// </summary>
+	public string? ConfiguredProvider { get; init; }
+
+	/// <summary>
+	/// The agent provider that actually ran this step (resolved builder's capability key).
+	/// Mirrors <see cref="StepRunRecord.ActualProvider"/>.
+	/// </summary>
+	public string? ActualProvider { get; init; }
+
 	/// <summary>
 	/// The orchestration parameter values available to this step.
 	/// </summary>

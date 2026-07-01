@@ -136,6 +136,69 @@ public class MultiProviderExecutionTests
 			.WithMessage("*Unknown agent provider 'coppilot'*");
 	}
 
+	[Fact]
+	public async Task ProviderSubstitution_FailsFast_WhenSingleProviderHostIgnoresRequestedProvider()
+	{
+		// Reproduces the Portal misconfiguration: the host registered a single (Copilot) builder
+		// behind a SingleAgentProviderRegistry, which ignores per-step `provider` and returns the
+		// one builder for ANY name. A step asking for `opencode` must NOT silently run on Copilot —
+		// the engine fails it fast.
+		var copilot = new RecordingAgentBuilder("copilot");
+		var registry = new SingleAgentProviderRegistry(copilot, providerName: "copilot");
+		var executor = new OrchestrationExecutor(_scheduler, registry, _reporter, NullLoggerFactory.Instance);
+
+		var orchestration = new Orchestration
+		{
+			Name = "single-provider-host",
+			Description = "opencode step on a copilot-only host",
+			Steps = [Step("research-opencode", provider: "opencode")],
+		};
+
+		var result = await executor.ExecuteAsync(orchestration);
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		var step = result.StepResults["research-opencode"];
+		step.Status.Should().Be(ExecutionStatus.Failed);
+		step.ErrorCategory.Should().Be(StepErrorCategory.ValidationError);
+		step.ErrorMessage.Should().Contain("requested provider 'opencode'");
+		step.ErrorMessage.Should().Contain("resolved it to provider 'copilot'");
+		// The step must never reach the agent: Copilot's echo content would be "copilot".
+		step.Content.Should().NotBe("copilot");
+	}
+
+	[Fact]
+	public async Task StepRecord_CapturesConfiguredAndActualProvider_OnSuccess()
+	{
+		var copilot = new RecordingAgentBuilder("copilot");
+		var opencode = new RecordingAgentBuilder("opencode");
+		var registry = new AgentProviderRegistry(
+			new Dictionary<string, AgentBuilder> { ["copilot"] = copilot, ["opencode"] = opencode },
+			defaultProviderName: "copilot");
+		var executor = new OrchestrationExecutor(_scheduler, registry, _reporter, NullLoggerFactory.Instance);
+
+		var orchestration = new Orchestration
+		{
+			Name = "labeled",
+			Description = "provider labels on the trace",
+			DefaultProvider = "copilot",
+			Steps =
+			[
+				Step("a", provider: null),        // configured = default (copilot), actual = copilot
+				Step("b", provider: "opencode"),  // configured = opencode, actual = opencode
+			],
+		};
+
+		var result = await executor.ExecuteAsync(orchestration);
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+
+		result.StepResults["a"].Trace!.ConfiguredProvider.Should().Be("copilot");
+		result.StepResults["a"].Trace!.ActualProvider.Should().Be("copilot");
+
+		result.StepResults["b"].Trace!.ConfiguredProvider.Should().Be("opencode");
+		result.StepResults["b"].Trace!.ActualProvider.Should().Be("opencode");
+	}
+
 	/// <summary>
 	/// Minimal <see cref="AgentBuilder"/> that records run-scope open/dispose counts and the
 	/// models it built, and whose agent echoes the builder's provider name so a test can assert

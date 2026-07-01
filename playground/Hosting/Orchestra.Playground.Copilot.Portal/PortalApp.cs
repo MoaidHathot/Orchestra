@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Logging.Console;
-using Orchestra.Copilot;
+using Orchestra.Composition;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
@@ -43,7 +43,12 @@ internal static class PortalApp
 			options.ColorBehavior = LoggerColorBehavior.Enabled;
 		});
 
-		builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
+		// Register every agent provider (copilot + opencode) as a keyed AgentBuilder plus the
+		// multi-provider AgentProviderRegistry, so a step's `provider` field is honored. A single
+		// non-keyed CopilotAgentBuilder would instead fall back to SingleAgentProviderRegistry,
+		// which ignores `provider` and silently routes every step (e.g. `provider: opencode`) to
+		// Copilot.
+		builder.Services.AddOrchestraAgentProviders();
 
 		builder.Services.AddOrchestraHost((options, configuration) =>
 		{

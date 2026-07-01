@@ -1173,6 +1173,19 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 		agentRuntime.TryGetProperty("activePools", out _).Should().BeTrue();
 		agentRuntime.TryGetProperty("cliInstances", out _).Should().BeTrue();
 		agentRuntime.TryGetProperty("activeSessions", out _).Should().BeTrue();
+
+		// The registered agent providers must be advertised so the status bar / clients can see
+		// which backends a step can be routed to. A single-provider misconfiguration (the Portal
+		// bug where `provider: opencode` silently ran on Copilot) would show up here as a missing
+		// 'opencode' entry.
+		result.TryGetProperty("defaultProvider", out var defaultProvider).Should().BeTrue(
+			"Status response should have 'defaultProvider'");
+		defaultProvider.GetString().Should().NotBeNullOrWhiteSpace();
+		result.TryGetProperty("providers", out var providers).Should().BeTrue(
+			"Status response should list all registered providers");
+		providers.ValueKind.Should().Be(JsonValueKind.Array);
+		providers.EnumerateArray().Select(p => p.GetString())
+			.Should().Contain("copilot").And.Contain("opencode");
 	}
 
 	[Fact]

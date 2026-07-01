@@ -75,6 +75,32 @@ public sealed class OrchestraHostSessionTests : IDisposable
 	}
 
 	[Fact]
+	public async Task SpawnedHost_StatusEndpoint_AdvertisesAllRegisteredProviders()
+	{
+		// Black-box check that a CLI-spawned host composes the multi-provider registry: its
+		// /api/status must list both built-in providers (copilot + opencode) and a default
+		// provider. A single-provider misconfiguration (like the Portal bug that silently ran
+		// `provider: opencode` on Copilot) would surface here as a missing 'opencode' entry.
+		var result = await OrchestraHostSessionFactory.ConnectOrSpawnAsync(SpawnRequest(ExecMode.Auto));
+
+		result.Ok.Should().BeTrue();
+		await using var session = result.Session!;
+
+		var status = await session.Client.GetStatusAsync();
+
+		status.TryGetProperty("defaultProvider", out var defaultProvider).Should().BeTrue(
+			"status must report the host's default agent provider");
+		defaultProvider.GetString().Should().NotBeNullOrWhiteSpace();
+
+		status.TryGetProperty("providers", out var providers).Should().BeTrue(
+			"status must list every registered agent provider");
+		providers.ValueKind.Should().Be(JsonValueKind.Array);
+		var providerNames = providers.EnumerateArray().Select(p => p.GetString()).ToArray();
+		providerNames.Should().Contain("copilot").And.Contain("opencode",
+			"a spawned host must register both built-in providers so per-step `provider` is honored");
+	}
+
+	[Fact]
 	public async Task Isolated_IgnoresServerUrl_AndAlwaysSpawns()
 	{
 		var result = await OrchestraHostSessionFactory.ConnectOrSpawnAsync(

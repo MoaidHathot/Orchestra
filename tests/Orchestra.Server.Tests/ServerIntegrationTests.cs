@@ -91,6 +91,19 @@ public class ServerIntegrationTests : IClassFixture<ServerWebApplicationFactory>
 		result.TryGetProperty("orchestrationCount", out _).Should().BeTrue();
 		result.TryGetProperty("activeTriggers", out _).Should().BeTrue();
 		result.TryGetProperty("runningExecutions", out _).Should().BeTrue();
+
+		// The status endpoint must advertise the registered agent providers so clients (Portal
+		// status bar, CLI) can see which backends a running host can route steps to. A
+		// single-provider misconfiguration would surface here as a missing 'opencode'.
+		result.TryGetProperty("defaultProvider", out var defaultProvider).Should().BeTrue(
+			"status must report the host's default agent provider");
+		defaultProvider.GetString().Should().NotBeNullOrWhiteSpace();
+
+		result.TryGetProperty("providers", out var providers).Should().BeTrue(
+			"status must report all registered agent providers");
+		providers.ValueKind.Should().Be(JsonValueKind.Array);
+		var providerNames = providers.EnumerateArray().Select(p => p.GetString()).ToArray();
+		providerNames.Should().Contain("copilot").And.Contain("opencode");
 	}
 
 	[Fact]

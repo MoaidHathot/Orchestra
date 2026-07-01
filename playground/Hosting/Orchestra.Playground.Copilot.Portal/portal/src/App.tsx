@@ -82,6 +82,10 @@ interface ExecutionDetailStep {
   requestedModelInfo?: ModelInfo;
   selectedModelInfo?: ModelInfo;
   actualModelInfo?: ModelInfo;
+  /** Agent provider this step was configured to run on. */
+  configuredProvider?: string;
+  /** Agent provider that actually ran this step. */
+  actualProvider?: string;
   errorMessage?: string;
   savedFiles?: string[] | null;
   usage?: {
@@ -1237,7 +1241,13 @@ function App(): React.JSX.Element {
       try {
         const data: SSEEventData = JSON.parse(e.data);
         updateStepTrace(data.stepName, data as unknown as TraceData);
-        addStepEvent(data.stepName, 'step-trace', { hasTrace: true });
+        // Forward the configured-vs-actual provider pair so the step detail can label it
+        // live (the trace event is the first place the resolved provider is known).
+        addStepEvent(data.stepName, 'step-trace', {
+          hasTrace: true,
+          configuredProvider: data.configuredProvider,
+          actualProvider: data.actualProvider,
+        });
       } catch { /* ignore */ }
     });
 
@@ -2048,6 +2058,8 @@ function App(): React.JSX.Element {
               requestedModelInfo: step.requestedModelInfo,
               selectedModelInfo: step.selectedModelInfo,
               actualModelInfo: step.actualModelInfo,
+              configuredProvider: step.configuredProvider,
+              actualProvider: step.actualProvider,
               contentPreview: step.content
                 ? step.content.substring(0, 200) + (step.content.length > 200 ? '...' : '')
                 : undefined,
@@ -2061,6 +2073,8 @@ function App(): React.JSX.Element {
               requestedModelInfo: step.requestedModelInfo,
               selectedModelInfo: step.selectedModelInfo,
               actualModelInfo: step.actualModelInfo,
+              configuredProvider: step.configuredProvider,
+              actualProvider: step.actualProvider,
             } as StepEvent);
           } else if (step.errorMessage) {
             stepEvents[step.name].push({

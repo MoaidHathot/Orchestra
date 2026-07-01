@@ -618,6 +618,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 			workingDirectory = trace.WorkingDirectory,
 			environment = trace.Environment.Count > 0 ? trace.Environment : null,
 			stdin = trace.Stdin,
+			configuredProvider = trace.ConfiguredProvider,
+			actualProvider = trace.ActualProvider,
 			systemPrompt = trace.SystemPrompt,
 			userPromptRaw = trace.UserPromptRaw,
 			userPromptProcessed = trace.UserPromptProcessed,
@@ -1336,6 +1338,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 						if (stepName is null) break;
 						var state = GetOrAddStep(stepName);
 						state.Trace = doc.RootElement.Clone();
+						state.ConfiguredProvider = GetString(doc.RootElement, "configuredProvider") ?? state.ConfiguredProvider;
+						state.ActualProvider = GetString(doc.RootElement, "actualProvider") ?? state.ActualProvider;
 					}
 					break;
 
@@ -1538,6 +1542,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		public string? RequestedModel { get; set; }
 		public string? SelectedModel { get; set; }
 		public string? ActualModel { get; set; }
+		public string? ConfiguredProvider { get; set; }
+		public string? ActualProvider { get; set; }
 		public int ActiveSubagents { get; set; }
 		public int RetryCount { get; set; }
 
@@ -1556,6 +1562,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 			RequestedModel = RequestedModel,
 			SelectedModel = SelectedModel,
 			ActualModel = ActualModel,
+			ConfiguredProvider = ConfiguredProvider,
+			ActualProvider = ActualProvider,
 			ActiveSubagents = ActiveSubagents,
 			RetryCount = RetryCount,
 		};

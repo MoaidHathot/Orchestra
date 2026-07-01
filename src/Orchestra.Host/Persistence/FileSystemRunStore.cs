@@ -123,6 +123,8 @@ public partial class FileSystemRunStore : IRunStore
 					RequestedModelInfo = stepRecord.RequestedModelInfo,
 					SelectedModelInfo = stepRecord.SelectedModelInfo,
 					ActualModelInfo = stepRecord.ActualModelInfo,
+					ConfiguredProvider = stepRecord.ConfiguredProvider,
+					ActualProvider = stepRecord.ActualProvider,
 					Usage = stepRecord.Usage,
 					SavedFiles = stepRecord.SavedFiles,
 				};
@@ -878,6 +880,13 @@ public class StepOutputsRecord
 	public AvailableModelInfo? RequestedModelInfo { get; init; }
 	public AvailableModelInfo? SelectedModelInfo { get; init; }
 	public AvailableModelInfo? ActualModelInfo { get; init; }
+
+	/// <summary>The agent provider this step was configured to run on.</summary>
+	public string? ConfiguredProvider { get; init; }
+
+	/// <summary>The agent provider that actually ran this step.</summary>
+	public string? ActualProvider { get; init; }
+
 	public TokenUsage? Usage { get; init; }
 	public string[] SavedFiles { get; init; } = [];
 }
