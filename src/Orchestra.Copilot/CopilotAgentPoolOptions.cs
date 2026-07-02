@@ -19,6 +19,19 @@ public sealed class CopilotAgentPoolOptions
 	public int DefaultMaxSessionsPerInstance { get; set; } = 1;
 	public int DefaultIdleTimeoutSeconds { get; set; } = 120;
 
+	/// <summary>
+	/// Upper bound on how long a single <c>CreateSessionAsync</c>/<c>ResumeSessionAsync</c> call
+	/// may take. This call spawns the session's inline MCP stdio servers and performs their
+	/// <c>initialize</c> handshake inside the Copilot SDK; a misconfigured or unresponsive MCP
+	/// server (e.g. a command that never starts, or one that never answers <c>initialize</c>)
+	/// would otherwise leave the step "running" indefinitely with no output until manually
+	/// cancelled. When the deadline elapses the attempt fails with a clear diagnostic and the
+	/// swap loop can retry on a fresh worker. Default 120s — generous enough to absorb a
+	/// first-run package restore (e.g. <c>dnx</c>/NuGet acquiring a tool) while still bounding a
+	/// true hang. Set to <see cref="TimeSpan.Zero"/> to disable the guard.
+	/// </summary>
+	public TimeSpan McpStartupTimeout { get; set; } = TimeSpan.FromSeconds(120);
+
 	// ── Authentication (host-level default; per-step githubToken still overrides) ──
 
 	/// <summary>

@@ -143,7 +143,12 @@ internal static class OpenCodeConfigBuilder
 			{
 				case LocalMcp local:
 					entry["type"] = "local";
-					entry["command"] = new List<string> { local.Command }.Concat(local.Arguments ?? []).ToList();
+					// Resolve bare shim commands (e.g. dnx.cmd/npx.cmd) to a full path. The
+					// opencode server spawns this stdio command without a shell, which on Windows
+					// does not search PATH/PATHEXT — a bare "dnx" would fail to start, the MCP
+					// initialize handshake would never complete, and the turn would hang.
+					entry["command"] = new List<string> { ExecutableResolver.Resolve(local.Command) }
+						.Concat(local.Arguments ?? []).ToList();
 					if (local.Environment is { Count: > 0 })
 						entry["environment"] = local.Environment.ToDictionary(kv => kv.Key, kv => (object?)kv.Value, StringComparer.Ordinal);
 					if (!string.IsNullOrWhiteSpace(local.WorkingDirectory))

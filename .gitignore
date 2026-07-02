@@ -436,3 +436,10 @@ FodyWeavers.xsd
 
 # OpenCode working directory
 .opencode/
+
+# Local scratch / throwaway files at the repo root (ad-hoc data dumps and one-off
+# scripts prefixed with an underscore). Scoped to the root so nested source files
+# named with a leading underscore are unaffected.
+/_*.json
+/_*.txt
+/_*.py

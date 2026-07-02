@@ -10,7 +10,8 @@ internal sealed record CopilotAgentSwapOptions(
 	int CliSwapBudgetPerStep,
 	bool ResumeOnSwapEnabled,
 	TimeSpan ResumeAlreadyInUseWait,
-	TimeSpan ResumeAlreadyInUsePollInterval)
+	TimeSpan ResumeAlreadyInUsePollInterval,
+	TimeSpan McpStartupTimeout)
 {
 	public static CopilotAgentSwapOptions FromPoolOptions(CopilotAgentPoolOptions options) => new(
 		CliSwapBudgetPerStep: Math.Max(0, options.CliSwapBudgetPerStep),
@@ -20,7 +21,10 @@ internal sealed record CopilotAgentSwapOptions(
 			: options.ResumeAlreadyInUseWait,
 		ResumeAlreadyInUsePollInterval: options.ResumeAlreadyInUsePollInterval <= TimeSpan.Zero
 			? TimeSpan.FromMilliseconds(250)
-			: options.ResumeAlreadyInUsePollInterval);
+			: options.ResumeAlreadyInUsePollInterval,
+		McpStartupTimeout: options.McpStartupTimeout < TimeSpan.Zero
+			? TimeSpan.Zero
+			: options.McpStartupTimeout);
 
 	/// <summary>
 	/// Default options for test / fallback paths where the builder isn't involved.

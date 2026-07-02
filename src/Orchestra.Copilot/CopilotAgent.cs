@@ -229,6 +229,12 @@ public partial class CopilotAgent : IAgent
 			return true;
 		}
 
+		if (ex is CopilotSessionFailedException { Kind: CopilotSessionFailureKind.McpStartupTimeout })
+		{
+			reason = "mcp_startup_timeout";
+			return true;
+		}
+
 		reason = string.Empty;
 		return false;
 	}
@@ -313,23 +319,66 @@ public partial class CopilotAgent : IAgent
 
 			var sw = System.Diagnostics.Stopwatch.StartNew();
 			ICopilotSession session;
+
+			// Bound the session-creation call. CreateSessionAsync/ResumeSessionAsync spawns the
+			// session's inline MCP stdio servers and performs their initialize handshake inside
+			// the SDK; a command that never starts or never answers initialize would otherwise
+			// hang here forever (the step stays "running" with no output until manually
+			// cancelled). The guard converts that into a clean, diagnosable failure the swap loop
+			// can retry. Disabled when McpStartupTimeout is zero.
+			var startupTimeout = _swapOptions.McpStartupTimeout;
+			using var startupCts = startupTimeout > TimeSpan.Zero
+				? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+				: null;
+			startupCts?.CancelAfter(startupTimeout);
+			var createToken = startupCts?.Token ?? cancellationToken;
 			try
 			{
 				if (isResumeAttempt)
 				{
 					var resumeConfig = BuildResumeSessionConfig(attemptSessionConfig, handler.HandleEvent);
-					session = await client.ResumeSessionAsync(priorSessionId!, resumeConfig, cancellationToken)
+					session = await client.ResumeSessionAsync(priorSessionId!, resumeConfig, createToken)
 						.ConfigureAwait(false);
 				}
 				else
 				{
-					session = await client.CreateSessionAsync(attemptSessionConfig, cancellationToken)
+					session = await client.CreateSessionAsync(attemptSessionConfig, createToken)
 						.ConfigureAwait(false);
 				}
 			}
 			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 			{
 				throw;
+			}
+			catch (OperationCanceledException) when (startupCts is not null && startupCts.IsCancellationRequested)
+			{
+				// The startup guard elapsed (not the caller's token). Surface a loud, structured
+				// failure naming the likely culprit (a hung MCP server) so the swap loop retries
+				// on a fresh worker instead of the step hanging indefinitely.
+				LogMcpStartupTimeout(
+					client.DiagnosticHash,
+					sw.ElapsedMilliseconds,
+					startupTimeout.TotalSeconds,
+					isResumeAttempt ? "resume" : "create",
+					_mcps.Length);
+
+				var timeoutMessage =
+					$"Copilot session {(isResumeAttempt ? "resume" : "creation")} did not complete within " +
+					$"{startupTimeout.TotalSeconds:0.#}s. This usually means an MCP server failed to start or " +
+					$"never answered the initialize handshake ({_mcps.Length} MCP server(s) configured). " +
+					$"Verify each MCP 'command' launches non-interactively.";
+
+				await ProbeAfterSdkFailureAsync(
+					faultBroker,
+					failedSessionId: isResumeAttempt
+						? $"(session-resume:{priorSessionId})"
+						: "(session-create)",
+					failureReason: timeoutMessage).ConfigureAwait(false);
+
+				throw new CopilotSessionFailedException(
+					CopilotSessionFailureKind.McpStartupTimeout,
+					_model,
+					timeoutMessage);
 			}
 			catch (Exception ex)
 			{
@@ -1523,7 +1572,11 @@ public partial class CopilotAgent : IAgent
 				case LocalMcp local:
 					var stdio = new McpStdioServerConfig
 					{
-						Command = local.Command,
+						// Resolve bare shim commands (e.g. dnx.cmd/npx.cmd) to a full path. The
+						// Copilot SDK spawns this stdio server with UseShellExecute=false, which on
+						// Windows does not search PATH/PATHEXT — a bare "dnx" would fail to start,
+						// the MCP initialize handshake would never complete, and the turn would hang.
+						Command = ExecutableResolver.Resolve(local.Command),
 						Args = [.. local.Arguments],
 						// SDK 1.0.0 renamed Cwd -> WorkingDirectory on McpStdioServerConfig
 						// (cross-SDK naming consolidation). Same semantics; only the property
@@ -1684,6 +1737,10 @@ public partial class CopilotAgent : IAgent
 	[LoggerMessage(EventId = 15, Level = LogLevel.Error,
 		Message = "Session '{SessionId}': SendAsync FAILED (model={Model})")]
 	private partial void LogSessionSendFailed(Exception ex, string sessionId, string model);
+
+	[LoggerMessage(EventId = 16, Level = LogLevel.Error,
+		Message = "Session {Operation} on client {ClientHash} exceeded the MCP-startup timeout of {TimeoutSeconds}s after {ElapsedMs}ms ({McpCount} MCP server(s) configured). An MCP server likely failed to start or never answered initialize.")]
+	private partial void LogMcpStartupTimeout(int clientHash, long elapsedMs, double timeoutSeconds, string operation, int mcpCount);
 
 	// ── CLI-swap / session-resume recovery logs (EventIds 18–20) ──
 	//

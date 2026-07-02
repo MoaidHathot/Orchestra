@@ -28,6 +28,16 @@ public sealed class CopilotProviderOptions
 	/// stored OAuth / gh-CLI auth). Null = SDK default.
 	/// </summary>
 	public bool? UseLoggedInUser { get; set; }
+
+	/// <summary>
+	/// Upper bound (seconds) on a single Copilot session create/resume call, which spawns the
+	/// step's inline MCP stdio servers and performs their initialize handshake. A misconfigured
+	/// or unresponsive MCP (a command that never starts, or never answers initialize) would
+	/// otherwise leave the step "running" indefinitely until manually cancelled; the guard turns
+	/// that into a clear, retryable failure. Null = use the built-in default (120s). Set to 0 to
+	/// disable the guard entirely.
+	/// </summary>
+	public int? McpStartupTimeoutSeconds { get; set; }
 }
 
 /// <summary>

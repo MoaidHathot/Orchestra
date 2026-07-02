@@ -112,12 +112,15 @@ public class OrchestrationHostOptions
 
 	/// <summary>
 	/// Default provider-neutral agent worker pool settings applied when an
-	/// orchestration does not specify agentPool values.
+	/// orchestration does not specify agentPool values. <c>MaxInstances</c> is 8 to match both
+	/// providers' options-class defaults (Copilot and OpenCode); it is a ceiling, not a static
+	/// count — workers are created on demand up to it. Override in <c>orchestra.json</c> under
+	/// <c>agentPool</c>.
 	/// </summary>
 	public AgentPoolConfig AgentPool { get; set; } = new()
 	{
 		MinInstances = 1,
-		MaxInstances = 4,
+		MaxInstances = 8,
 		MaxSessionsPerInstance = 1,
 		IdleTimeoutSeconds = 120,
 	};

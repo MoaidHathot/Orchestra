@@ -833,7 +833,11 @@ public class CopilotAgentTests
 		// Assert
 		config.McpServers.Should().ContainKey("icm");
 		var serverConfig = config.McpServers!["icm"].Should().BeOfType<McpStdioServerConfig>().Subject;
-		serverConfig.Command.Should().Be("dnx");
+		// The command is passed through ExecutableResolver so a bare shim (dnx -> dnx.cmd) can be
+		// spawned by the SDK on Windows without PATHEXT resolution. Depending on the host PATH it
+		// is either left as "dnx" or rewritten to a full ...\dnx.cmd path — both are valid.
+		var resolvedCommand = System.IO.Path.GetFileNameWithoutExtension(serverConfig.Command);
+		resolvedCommand.Should().Be("dnx");
 		serverConfig.Args.Should().BeEquivalentTo(["IcM.Mcp"]);
 		serverConfig.Tools.Should().ContainSingle().Which.Should().Be("*");
 	}
@@ -1034,6 +1038,49 @@ public class CopilotAgentTests
 		// Assert
 		var serverConfig = config.McpServers!["no-timeout"].Should().BeOfType<McpHttpServerConfig>().Subject;
 		serverConfig.Timeout.Should().BeNull();
+	}
+
+	[Fact]
+	public void BuildSessionConfig_LocalMcpBareShimOnWindows_ResolvesCommandToFullPath()
+	{
+		if (!System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+			return;
+
+		// A bare .cmd shim (like dnx.cmd) must be rewritten to a full path, because the Copilot SDK
+		// spawns the stdio MCP with UseShellExecute=false and CreateProcess does not search
+		// PATH/PATHEXT on Windows. Without this, the child never starts, the initialize handshake
+		// never completes, and the step hangs forever — the inline-MCP bug this fixes.
+		var tempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "orchestra-copilotmcp-" + Guid.NewGuid().ToString("N"));
+		System.IO.Directory.CreateDirectory(tempDir);
+		var shimPath = System.IO.Path.Combine(tempDir, "recallshim.cmd");
+		System.IO.File.WriteAllText(shimPath, "@echo off\r\n");
+
+		var originalPath = Environment.GetEnvironmentVariable("PATH");
+		try
+		{
+			Environment.SetEnvironmentVariable("PATH", tempDir + System.IO.Path.PathSeparator + originalPath);
+
+			var agent = CreateAgentWithMcps(new LocalMcp
+			{
+				Name = "recall",
+				Type = McpType.Local,
+				Command = "recallshim",
+				Arguments = ["mcp"],
+			});
+
+			var config = agent.BuildSessionConfig();
+
+			var serverConfig = config.McpServers!["recall"].Should().BeOfType<McpStdioServerConfig>().Subject;
+			// PATHEXT casing may differ from the on-disk .cmd casing; Windows FS is case-insensitive.
+			string.Equals(serverConfig.Command, shimPath, StringComparison.OrdinalIgnoreCase)
+				.Should().BeTrue($"resolved command '{serverConfig.Command}' should equal shim path '{shimPath}' (case-insensitive)");
+			serverConfig.Args.Should().BeEquivalentTo(["mcp"]);
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("PATH", originalPath);
+			try { System.IO.Directory.Delete(tempDir, recursive: true); } catch { /* best effort */ }
+		}
 	}
 
 	#endregion

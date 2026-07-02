@@ -412,6 +412,9 @@ public static class OrchestraConfigLoader
 
 			if (copilotConfig.UseLoggedInUser.HasValue)
 				options.Copilot.UseLoggedInUser = copilotConfig.UseLoggedInUser.Value;
+
+			if (copilotConfig.McpStartupTimeoutSeconds.HasValue)
+				options.Copilot.McpStartupTimeoutSeconds = copilotConfig.McpStartupTimeoutSeconds.Value;
 		}
 
 		// Default agent provider (top-level "provider" or "defaultProvider").
@@ -801,6 +804,13 @@ public class CopilotProviderConfig
 	/// Optional override for the SDK's <c>UseLoggedInUser</c> flag.
 	/// </summary>
 	public bool? UseLoggedInUser { get; set; }
+
+	/// <summary>
+	/// Optional bound (seconds) on a Copilot session create/resume, covering inline MCP stdio
+	/// server startup + initialize handshake. Null = built-in default (120s); 0 disables.
+	/// See <see cref="CopilotProviderOptions.McpStartupTimeoutSeconds"/>.
+	/// </summary>
+	public int? McpStartupTimeoutSeconds { get; set; }
 }
 
 /// <summary>

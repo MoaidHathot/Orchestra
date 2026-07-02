@@ -59,19 +59,26 @@ internal static class AgentProviderRegistration
 		var options = sp.GetRequiredService<OrchestrationHostOptions>();
 		var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
 		var swap = options.Copilot.Swap;
-		return new CopilotAgentBuilder(loggerFactory, new CopilotAgentPoolOptions
+		var copilotPoolOptions = new CopilotAgentPoolOptions
 		{
-			DefaultMinInstances = options.AgentPool.MinInstances ?? 1,
-			DefaultMaxInstancesPerRun = options.AgentPool.MaxInstances ?? 4,
-			DefaultMaxSessionsPerInstance = options.AgentPool.MaxSessionsPerInstance ?? 1,
-			DefaultIdleTimeoutSeconds = options.AgentPool.IdleTimeoutSeconds ?? 120,
+			// Only override the built-in defaults when the host actually set a value; otherwise the
+			// options-class defaults (kept in sync across providers) are the single source of truth.
 			CliSwapBudgetPerStep = swap.BudgetPerStep,
 			ResumeOnSwapEnabled = swap.ResumeOnSwap,
 			ResumeAlreadyInUseWait = TimeSpan.FromSeconds(Math.Max(0, swap.ResumeAlreadyInUseWaitSeconds)),
 			ResumeAlreadyInUsePollInterval = TimeSpan.FromMilliseconds(Math.Max(1, swap.ResumeAlreadyInUsePollIntervalMs)),
 			GitHubToken = options.Copilot.GitHubToken,
 			UseLoggedInUser = options.Copilot.UseLoggedInUser,
-		});
+			McpStartupTimeout = options.Copilot.McpStartupTimeoutSeconds is { } mcpStartupSeconds
+				? TimeSpan.FromSeconds(Math.Max(0, mcpStartupSeconds))
+				: new CopilotAgentPoolOptions().McpStartupTimeout,
+		};
+		if (options.AgentPool.MinInstances is { } copilotMin) copilotPoolOptions.DefaultMinInstances = copilotMin;
+		if (options.AgentPool.MaxInstances is { } copilotMax) copilotPoolOptions.DefaultMaxInstancesPerRun = copilotMax;
+		if (options.AgentPool.MaxSessionsPerInstance is { } copilotSessions) copilotPoolOptions.DefaultMaxSessionsPerInstance = copilotSessions;
+		if (options.AgentPool.IdleTimeoutSeconds is { } copilotIdle) copilotPoolOptions.DefaultIdleTimeoutSeconds = copilotIdle;
+
+		return new CopilotAgentBuilder(loggerFactory, copilotPoolOptions);
 	}
 
 	private static OpenCodeAgentBuilder CreateOpenCodeBuilder(IServiceProvider sp)
@@ -80,13 +87,13 @@ internal static class AgentProviderRegistration
 		var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
 		var oc = options.OpenCode;
 
-		var poolOptions = new OpenCodeAgentPoolOptions
-		{
-			DefaultMinInstances = options.AgentPool.MinInstances ?? 1,
-			DefaultMaxInstancesPerRun = options.AgentPool.MaxInstances ?? 4,
-			DefaultMaxSessionsPerInstance = options.AgentPool.MaxSessionsPerInstance ?? 1,
-			DefaultIdleTimeoutSeconds = options.AgentPool.IdleTimeoutSeconds ?? 120,
-		};
+		var poolOptions = new OpenCodeAgentPoolOptions();
+		// Only override the built-in defaults when the host actually set a value; otherwise the
+		// options-class defaults (kept in sync across providers) are the single source of truth.
+		if (options.AgentPool.MinInstances is { } ocMin) poolOptions.DefaultMinInstances = ocMin;
+		if (options.AgentPool.MaxInstances is { } ocMax) poolOptions.DefaultMaxInstancesPerRun = ocMax;
+		if (options.AgentPool.MaxSessionsPerInstance is { } ocSessions) poolOptions.DefaultMaxSessionsPerInstance = ocSessions;
+		if (options.AgentPool.IdleTimeoutSeconds is { } ocIdle) poolOptions.DefaultIdleTimeoutSeconds = ocIdle;
 
 		if (!string.IsNullOrWhiteSpace(oc.CliPath)) poolOptions.CliPath = oc.CliPath;
 		if (!string.IsNullOrWhiteSpace(oc.Hostname)) poolOptions.Hostname = oc.Hostname!;

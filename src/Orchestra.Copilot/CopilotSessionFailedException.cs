@@ -63,4 +63,11 @@ public enum CopilotSessionFailureKind
 
 	/// <summary>SDK emitted a SessionShutdownEvent with a non-null ErrorReason (CLI shutting down due to error).</summary>
 	AbnormalShutdown,
+
+	/// <summary>
+	/// Session creation/resume exceeded the MCP-startup timeout — an inline MCP stdio server
+	/// failed to start or never completed its initialize handshake. Swap-eligible: retrying on a
+	/// fresh CLI worker may succeed if the stall was transient (e.g. a slow first-run restore).
+	/// </summary>
+	McpStartupTimeout,
 }

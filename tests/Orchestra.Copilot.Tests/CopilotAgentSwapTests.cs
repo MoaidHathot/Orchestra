@@ -317,7 +317,8 @@ public class CopilotAgentSwapTests
 			CliSwapBudgetPerStep: swapBudgetOverride ?? 3,
 			ResumeOnSwapEnabled: ResumeEnabled,
 			ResumeAlreadyInUseWait: TimeSpan.FromMilliseconds(100),
-			ResumeAlreadyInUsePollInterval: TimeSpan.FromMilliseconds(50));
+			ResumeAlreadyInUsePollInterval: TimeSpan.FromMilliseconds(50),
+			McpStartupTimeout: TimeSpan.Zero);
 
 		return new CopilotAgent(
 			clientPool: pool,

@@ -11,9 +11,13 @@ public sealed class OpenCodeAgentPoolOptions
 	public int DefaultMinInstances { get; set; } = 1;
 
 	/// <summary>
-	/// Default cap on <c>opencode serve</c> processes per orchestration run.
+	/// Default cap on <c>opencode serve</c> processes per orchestration run. Kept in sync with
+	/// <c>Orchestra.Copilot.CopilotAgentPoolOptions.DefaultMaxInstancesPerRun</c> (8) so both
+	/// providers behave identically when an orchestration/host does not request explicit
+	/// <c>agentPool</c> values. Each instance is a real server process; tune via
+	/// <c>orchestra.json</c> <c>agentPool.maxInstances</c> if host memory is a concern.
 	/// </summary>
-	public int DefaultMaxInstancesPerRun { get; set; } = 4;
+	public int DefaultMaxInstancesPerRun { get; set; } = 8;
 
 	/// <summary>
 	/// Sessions per OpenCode instance. Defaults to <c>1</c> so each prompt step gets its own

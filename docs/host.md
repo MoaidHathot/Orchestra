@@ -113,6 +113,29 @@ that step's session.
 }
 ```
 
+### Copilot MCP-startup timeout
+
+A Copilot session's `create`/`resume` call spawns the step's inline `type: local` MCP stdio
+servers and performs their `initialize` handshake inside the SDK. If an MCP command never starts
+(for example a bare shim that can't be resolved) or never answers `initialize`, that call would
+otherwise block until the step is manually cancelled. `copilot.mcpStartupTimeoutSeconds` bounds it
+and turns a stuck MCP into a clear, retryable failure (the CLI-swap loop can then try a fresh
+worker). Omit the key to use the built-in default (120s — generous enough to absorb a first-run
+`dnx`/NuGet package restore); set it to `0` to disable the guard.
+
+```json
+{
+  "copilot": {
+    "mcpStartupTimeoutSeconds": 120
+  }
+}
+```
+
+> Note: on Windows, bare shim commands such as `dnx`/`npx` (which are really `dnx.cmd`/`npx.cmd`)
+> are automatically resolved to their full path before being handed to the provider runtime, so an
+> inline `type: local` MCP with `"command": "dnx"` launches correctly. The timeout above is a
+> secondary safety net for MCP servers that start but never complete their handshake.
+
 ### Environment Variables
 
 | Variable | Description |

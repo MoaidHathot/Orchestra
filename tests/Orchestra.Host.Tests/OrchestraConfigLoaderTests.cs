@@ -274,6 +274,52 @@ public class OrchestraConfigLoaderTests : IDisposable
 	}
 
 	[Fact]
+	public void ApplyConfig_CopilotMcpStartupTimeout_MapsToHostOptions()
+	{
+		// Arrange - orchestra.json copilot.mcpStartupTimeoutSeconds bounds session create/resume so
+		// a hung inline MCP stdio server can't leave a step running forever.
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile
+		{
+			Copilot = new CopilotProviderConfig { McpStartupTimeoutSeconds = 90 },
+		};
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert
+		options.Copilot.McpStartupTimeoutSeconds.Should().Be(90);
+	}
+
+	[Fact]
+	public void ApplyConfig_CopilotMcpStartupTimeout_Unset_LeavesNull()
+	{
+		// Arrange
+		var options = new OrchestrationHostOptions();
+		var config = new OrchestraConfigFile { Copilot = new CopilotProviderConfig() };
+
+		// Act
+		OrchestraConfigLoader.ApplyConfig(options, config);
+
+		// Assert - null means "use the provider's built-in default" (120s), not zero.
+		options.Copilot.McpStartupTimeoutSeconds.Should().BeNull();
+	}
+
+	[Fact]
+	public void DefaultAgentPool_MaxInstances_Is8_ForProviderParity()
+	{
+		// The provider-neutral host default is the ceiling applied when neither orchestra.json nor
+		// an orchestration sets agentPool. It must be 8 so Copilot and OpenCode behave identically
+		// out of the box (both providers' options-class defaults are also 8).
+		var options = new OrchestrationHostOptions();
+
+		options.AgentPool.MinInstances.Should().Be(1);
+		options.AgentPool.MaxInstances.Should().Be(8);
+		options.AgentPool.MaxSessionsPerInstance.Should().Be(1);
+		options.AgentPool.IdleTimeoutSeconds.Should().Be(120);
+	}
+
+	[Fact]
 	public void ApplyConfig_CopilotSwap_PartialOverride_KeepsDefaults()
 	{
 		// Arrange — only one swap field set in JSON; the rest must remain at defaults

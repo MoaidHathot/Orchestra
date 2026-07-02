@@ -88,7 +88,10 @@ public class OpenCodeConfigBuilderTests
 		{
 			Name = "filesystem",
 			Type = McpType.Local,
-			Command = "npx",
+			// Use a command that will not resolve on PATH so the assertion is stable across
+			// platforms/CI. Real shim commands (npx/dnx) may be rewritten to a full path on
+			// Windows by ExecutableResolver — see Build_LocalMcp_ResolvesBareCommandOnWindows.
+			Command = "orchestra-fs-mcp-xyz",
 			Arguments = ["-y", "@modelcontextprotocol/server-filesystem", "/data"],
 			Environment = new Dictionary<string, string> { ["API_KEY"] = "secret" },
 			Timeout = TimeSpan.FromSeconds(30),
@@ -97,10 +100,54 @@ public class OpenCodeConfigBuilderTests
 		var entry = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("filesystem");
 		entry.GetProperty("type").GetString().Should().Be("local");
 		entry.GetProperty("command").EnumerateArray().Select(e => e.GetString())
-			.Should().Equal("npx", "-y", "@modelcontextprotocol/server-filesystem", "/data");
+			.Should().Equal("orchestra-fs-mcp-xyz", "-y", "@modelcontextprotocol/server-filesystem", "/data");
 		entry.GetProperty("environment").GetProperty("API_KEY").GetString().Should().Be("secret");
 		entry.GetProperty("enabled").GetBoolean().Should().BeTrue();
 		entry.GetProperty("timeout").GetInt64().Should().Be(30000);
+	}
+
+	[Fact]
+	public void Build_LocalMcp_ResolvesBareCommandOnWindows()
+	{
+		if (!System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(System.Runtime.InteropServices.OSPlatform.Windows))
+			return;
+
+		// A .cmd shim on PATH must be rewritten to a full path in the generated command array,
+		// because the opencode server spawns it without a shell (no PATHEXT resolution). This is
+		// the fix for inline `type: local` MCPs like `dnx` hanging on Windows.
+		var tempDir = Path.Combine(Path.GetTempPath(), "orchestra-occfg-" + Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(tempDir);
+		var shimPath = Path.Combine(tempDir, "recallshim.cmd");
+		File.WriteAllText(shimPath, "@echo off\r\n");
+
+		var originalPath = Environment.GetEnvironmentVariable("PATH");
+		try
+		{
+			Environment.SetEnvironmentVariable("PATH", tempDir + Path.PathSeparator + originalPath);
+
+			var mcp = new LocalMcp
+			{
+				Name = "recall",
+				Type = McpType.Local,
+				Command = "recallshim",
+				Arguments = ["mcp"],
+			};
+
+			var command = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("recall")
+				.GetProperty("command").EnumerateArray().Select(e => e.GetString()).ToArray();
+
+			command.Should().HaveCount(2);
+			// PATHEXT casing may differ from the file's on-disk casing (.CMD vs .cmd); the Windows
+			// filesystem is case-insensitive, so compare the resolved path case-insensitively.
+			string.Equals(command[0], shimPath, StringComparison.OrdinalIgnoreCase)
+				.Should().BeTrue($"resolved command '{command[0]}' should equal shim path '{shimPath}' (case-insensitive)");
+			command[1].Should().Be("mcp");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("PATH", originalPath);
+			try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort */ }
+		}
 	}
 
 	[Fact]
