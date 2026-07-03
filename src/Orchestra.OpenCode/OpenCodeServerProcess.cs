@@ -189,6 +189,13 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 				innerException: ex);
 		}
 
+		// Bind the child to the host's kill-on-close job object so it can never outlive the host —
+		// even on hard termination (crash, force-kill, terminal close) where DisposeAsync never
+		// runs. This is the primary defense against leaked `opencode serve` orphans; DisposeAsync
+		// remains the clean-shutdown path. No-op on non-Windows / when the job is unavailable.
+		if (!ChildProcessGuard.Guard(_process))
+			LogGuardSkipped(_process.Id, BaseUrl);
+
 		// Drain stdout/stderr so the child never blocks on a full pipe buffer.
 		DrainAsync(_process.StandardOutput, isError: false);
 		DrainAsync(_process.StandardError, isError: true);
@@ -292,4 +299,7 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 
 	[LoggerMessage(EventId = 203, Level = LogLevel.Warning, Message = "OpenCode: error killing server at {BaseUrl}")]
 	private partial void LogKillError(Exception ex, string baseUrl);
+
+	[LoggerMessage(EventId = 204, Level = LogLevel.Debug, Message = "OpenCode: kill-on-close job guard unavailable for server PID {ProcessId} at {BaseUrl}; relying on dispose-time cleanup")]
+	private partial void LogGuardSkipped(int processId, string baseUrl);
 }
