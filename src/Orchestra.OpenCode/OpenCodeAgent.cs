@@ -146,6 +146,10 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 		var holder = new EngineToolContextHolder();
 		OpenCodeEngineToolBridge? bridge = null;
+		// Reserve a pool capacity slot before spawning so dedicated servers are bounded by the run's
+		// maxInstances cap and are counted in the pool snapshot (one instance / one session) while
+		// this step runs; the slot is released in the finally when the server is torn down.
+		var slot = await _pool.AcquireDedicatedSlotAsync(cancellationToken).ConfigureAwait(false);
 		var process = new OpenCodeServerProcess(connectPlan, _options, _clientFactory, _loggerFactory.CreateLogger<OpenCodeServerProcess>(), workspace.ConfigFilePath, workspace.WorkingDirectory, extraEnv);
 		try
 		{
@@ -162,6 +166,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 			if (bridge is not null)
 				await bridge.DisposeAsync().ConfigureAwait(false);
 			workspace.Cleanup(_logger);
+			await slot.DisposeAsync().ConfigureAwait(false);
 		}
 	}
 

@@ -102,6 +102,33 @@ public class OpenCodeAgentTests
 	}
 
 	[Fact]
+	public async Task SendAsync_TaskTool_SurfacesSubagentOutput_WithoutPollutingContent()
+	{
+		var client = new FakeOpenCodeClient(Sid)
+		{
+			Events =
+			[
+				TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t1", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "running", "input": { "subagent_type": "researcher", "description": "find data" } } } }"""),
+				TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t1", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "completed", "output": "the answer is 42" } } }"""),
+				TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }"""),
+			],
+		};
+
+		var (result, events) = await RunAsync(client, new AgentBuildConfig { Model = "github-copilot/claude-opus-4.8" });
+
+		// Sub-agent lifecycle + actor-attributed output surfaced through the full agent pipeline.
+		events.Should().Contain(e => e.Type == AgentEventType.SubagentStarted && e.SubagentName == "researcher");
+		var outputDelta = events.Single(e => e.Type == AgentEventType.MessageDelta);
+		outputDelta.Content.Should().Be("the answer is 42");
+		outputDelta.ActorAgentName.Should().Be("researcher");
+		outputDelta.ActorToolCallId.Should().Be("t1");
+		events.Should().Contain(e => e.Type == AgentEventType.SubagentCompleted && e.SubagentName == "researcher");
+
+		// The sub-agent output must NOT leak into the parent step's final content.
+		result.Content.Should().NotContain("the answer is 42");
+	}
+
+	[Fact]
 	public async Task SendAsync_BareModel_UsesFallbackProvider()
 	{
 		var client = new FakeOpenCodeClient(Sid)

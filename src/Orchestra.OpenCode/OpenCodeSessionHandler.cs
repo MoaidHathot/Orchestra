@@ -30,6 +30,14 @@ internal sealed partial class OpenCodeSessionHandler
 	private readonly HashSet<string> _toolStarted = [];
 	private readonly HashSet<string> _toolCompleted = [];
 
+	// Sub-agent invocations opened via the built-in "task" tool, keyed by the task tool-call id.
+	// OpenCode runs each sub-agent in a separate child session whose events are filtered out in
+	// Handle(), so the invocation's name/description captured at start is remembered here to
+	// attribute the completion output (the sub-agent's visible result) to the right sub-agent.
+	private readonly Dictionary<string, SubagentInvocation> _subagents = [];
+
+	private sealed record SubagentInvocation(string? AgentName, string? Description);
+
 	private string? _actualModel;
 	private AgentUsage? _usage;
 
@@ -194,24 +202,51 @@ internal sealed partial class OpenCodeSessionHandler
 			case "running" or "pending":
 				if (_toolStarted.Add(callId))
 				{
+					var (name, description) = ExtractSubagentInfo(state);
+					_subagents[callId] = new SubagentInvocation(name, description);
 					Emit(new AgentEvent
 					{
 						Type = AgentEventType.SubagentStarted,
 						ToolCallId = callId,
-						SubagentName = ExtractSubagentName(state),
+						SubagentName = name,
+						SubagentDescription = description,
 					});
 				}
 				break;
 			case "completed" or "error":
 				if (_toolCompleted.Add(callId))
 				{
+					// Prefer the name captured at start (the completed state often omits input).
+					var invocation = _subagents.TryGetValue(callId, out var f) ? f : null;
+					var name = invocation?.AgentName ?? ExtractSubagentInfo(state).Name;
+
 					if (status == "completed")
 					{
+						// OpenCode runs the sub-agent in a child session whose streamed events are
+						// filtered out (they would otherwise pollute the parent step's content), so
+						// the task tool's completion output is the sub-agent's visible result. Emit it
+						// as actor-attributed content so the Portal renders it inside the sub-agent's
+						// card instead of showing "No output produced".
+						var output = state.TryGetProperty("output", out var o) ? (o.GetString() ?? RawJson(o)) : null;
+						if (!string.IsNullOrEmpty(output))
+						{
+							var actor = new ActorContext(name, name, callId, Depth: 1);
+							Emit(new AgentEvent
+							{
+								Type = AgentEventType.MessageDelta,
+								Content = output,
+								ActorAgentName = actor.AgentName,
+								ActorAgentDisplayName = actor.AgentDisplayName,
+								ActorToolCallId = actor.ToolCallId,
+								ActorDepth = actor.Depth,
+							});
+						}
+
 						Emit(new AgentEvent
 						{
 							Type = AgentEventType.SubagentCompleted,
 							ToolCallId = callId,
-							SubagentName = ExtractSubagentName(state),
+							SubagentName = name,
 						});
 					}
 					else
@@ -220,27 +255,40 @@ internal sealed partial class OpenCodeSessionHandler
 						{
 							Type = AgentEventType.SubagentFailed,
 							ToolCallId = callId,
-							SubagentName = ExtractSubagentName(state),
+							SubagentName = name,
 							ErrorMessage = state.TryGetProperty("error", out var e) ? (e.GetString() ?? RawJson(e)) : null,
 						});
 					}
+
+					_subagents.Remove(callId);
 				}
 				break;
 		}
 	}
 
-	private static string? ExtractSubagentName(JsonElement state)
+	/// <summary>
+	/// Extracts the target sub-agent name and task description from an OpenCode <c>task</c> tool
+	/// part's <c>state.input</c>. The agent-name field varies by OpenCode version; the description
+	/// is the delegated instruction. Returns nulls when the state carries no input (e.g. some
+	/// completion frames).
+	/// </summary>
+	private static (string? Name, string? Description) ExtractSubagentInfo(JsonElement state)
 	{
 		if (state.ValueKind != JsonValueKind.Object || !state.TryGetProperty("input", out var input) || input.ValueKind != JsonValueKind.Object)
-			return null;
-		// OpenCode's task tool input names the target agent; field name varies by version.
+			return (null, null);
+
+		string? name = null;
 		foreach (var key in (string[])["subagent_type", "subagentType", "agent", "agent_type", "name"])
 		{
 			var v = GetString(input, key);
 			if (!string.IsNullOrWhiteSpace(v))
-				return v;
+			{
+				name = v;
+				break;
+			}
 		}
-		return null;
+
+		return (name, GetString(input, "description"));
 	}
 
 	private void HandleMessageUpdated(JsonElement properties)

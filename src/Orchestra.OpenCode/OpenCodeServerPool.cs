@@ -45,6 +45,7 @@ internal sealed partial class OpenCodeServerPool : IAsyncDisposable
 	private readonly object _lock = new();
 	private readonly List<Worker> _workers = [];
 	private int _pendingSpawns;
+	private int _dedicatedInstances;
 	private bool _disposed;
 
 	private static int s_poolCounter;
@@ -176,11 +177,50 @@ internal sealed partial class OpenCodeServerPool : IAsyncDisposable
 		_capacity.Release();
 	}
 
+	/// <summary>
+	/// Reserves a capacity slot for a dedicated (per-step, config-having) OpenCode server spawned
+	/// directly by <c>OpenCodeAgent.RunDedicatedAsync</c> rather than leased from the worker list.
+	/// Blocks until the run's capacity has a free slot so dedicated servers are bounded by the same
+	/// <c>maxInstances</c> cap as pooled workers, and counts the server in <see cref="GetSnapshot"/>
+	/// (as one instance and one active session) until the returned handle is disposed. Each
+	/// dedicated server hosts exactly one session, so instance count tracks session count.
+	/// </summary>
+	public async Task<IAsyncDisposable> AcquireDedicatedSlotAsync(CancellationToken cancellationToken)
+	{
+		await _capacity.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{
+			lock (_lock)
+			{
+				ObjectDisposedException.ThrowIf(_disposed, this);
+				_dedicatedInstances++;
+			}
+			return new DedicatedSlot(this);
+		}
+		catch
+		{
+			_capacity.Release();
+			throw;
+		}
+	}
+
+	private void ReleaseDedicated()
+	{
+		lock (_lock)
+		{
+			_dedicatedInstances = Math.Max(0, _dedicatedInstances - 1);
+		}
+		_capacity.Release();
+	}
+
 	public OpenCodeServerPoolSnapshot GetSnapshot()
 	{
 		lock (_lock)
 		{
-			return new OpenCodeServerPoolSnapshot(_workers.Count, _workers.Sum(w => w.Active), _maxInstances);
+			return new OpenCodeServerPoolSnapshot(
+				_workers.Count + _dedicatedInstances,
+				_workers.Sum(w => w.Active) + _dedicatedInstances,
+				_maxInstances);
 		}
 	}
 
@@ -231,6 +271,22 @@ internal sealed partial class OpenCodeServerPool : IAsyncDisposable
 		{
 			if (Interlocked.Exchange(ref _disposed, 1) == 0)
 				pool.Release(worker);
+			return ValueTask.CompletedTask;
+		}
+	}
+
+	/// <summary>
+	/// Handle for a reserved dedicated-server capacity slot. Disposing it releases the capacity
+	/// permit and decrements the pool's dedicated-instance count.
+	/// </summary>
+	private sealed class DedicatedSlot(OpenCodeServerPool pool) : IAsyncDisposable
+	{
+		private int _disposed;
+
+		public ValueTask DisposeAsync()
+		{
+			if (Interlocked.Exchange(ref _disposed, 1) == 0)
+				pool.ReleaseDedicated();
 			return ValueTask.CompletedTask;
 		}
 	}

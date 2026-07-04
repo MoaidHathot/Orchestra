@@ -155,16 +155,58 @@ public class OpenCodeSessionHandlerTests
 	}
 
 	[Fact]
-	public void TaskTool_EmitsSubagentStartedAndCompleted()
+	public void TaskTool_EmitsSubagentStarted_OutputDelta_AndCompleted()
 	{
 		var (handler, reader, _) = Create();
 		handler.Handle(TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t1", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "running", "input": { "subagent_type": "researcher", "description": "find data" } } } }"""));
 		handler.Handle(TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t1", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "completed", "output": "done" } } }"""));
 
 		var events = Drain(reader);
-		events.Should().HaveCount(2);
+		events.Should().HaveCount(3);
+
 		events[0].Type.Should().Be(AgentEventType.SubagentStarted);
 		events[0].SubagentName.Should().Be("researcher");
+		events[0].SubagentDescription.Should().Be("find data");
+
+		// The sub-agent's result (task output) is surfaced as actor-attributed content so the
+		// Portal renders it in the sub-agent card rather than showing "No output produced".
+		events[1].Type.Should().Be(AgentEventType.MessageDelta);
+		events[1].Content.Should().Be("done");
+		events[1].ActorAgentName.Should().Be("researcher");
+		events[1].ActorToolCallId.Should().Be("t1");
+		events[1].ActorDepth.Should().Be(1);
+
+		events[2].Type.Should().Be(AgentEventType.SubagentCompleted);
+		events[2].SubagentName.Should().Be("researcher");
+	}
+
+	[Fact]
+	public void TaskTool_CompletedWithoutOutput_EmitsNoContentDelta()
+	{
+		var (handler, reader, _) = Create();
+		handler.Handle(TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t2", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "running", "input": { "subagent_type": "researcher" } } } }"""));
+		handler.Handle(TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t2", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "completed" } } }"""));
+
+		var events = Drain(reader);
+		events.Should().HaveCount(2);
+		events[0].Type.Should().Be(AgentEventType.SubagentStarted);
 		events[1].Type.Should().Be(AgentEventType.SubagentCompleted);
+		events.Should().NotContain(e => e.Type == AgentEventType.MessageDelta);
+	}
+
+	[Fact]
+	public void TaskTool_Error_EmitsSubagentFailed_WithNameFromStart()
+	{
+		var (handler, reader, _) = Create();
+		// The completion frame omits input; the sub-agent name must come from the start frame.
+		handler.Handle(TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t3", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "running", "input": { "subagent_type": "researcher", "description": "find data" } } } }"""));
+		handler.Handle(TestEvents.Event("message.part.updated", $$"""{ "part": { "type": "tool", "callID": "t3", "tool": "task", "sessionID": "{{Sid}}", "state": { "status": "error", "error": "boom" } } }"""));
+
+		var events = Drain(reader);
+		events.Should().HaveCount(2);
+		events[0].Type.Should().Be(AgentEventType.SubagentStarted);
+		events[1].Type.Should().Be(AgentEventType.SubagentFailed);
+		events[1].SubagentName.Should().Be("researcher");
+		events[1].ErrorMessage.Should().Be("boom");
 	}
 }

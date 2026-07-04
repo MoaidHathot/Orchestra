@@ -21,7 +21,9 @@ public class OpenCodeAgentPoolOptionsTests
     {
         var options = new OpenCodeAgentPoolOptions();
 
-        options.DefaultMinInstances.Should().Be(1);
+        // No idle prewarm by default: dedicated (config) steps spawn their own server and plain
+        // steps spawn lazily, so an idle run reports 0 instances / 0 sessions.
+        options.DefaultMinInstances.Should().Be(0);
         options.DefaultMaxSessionsPerInstance.Should().Be(1);
         options.DefaultIdleTimeoutSeconds.Should().Be(120);
     }

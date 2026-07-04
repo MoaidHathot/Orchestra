@@ -8,7 +8,15 @@ namespace Orchestra.OpenCode;
 /// </summary>
 public sealed class OpenCodeAgentPoolOptions
 {
-	public int DefaultMinInstances { get; set; } = 1;
+	/// <summary>
+	/// Prewarmed idle instances per run. Defaults to <c>0</c>: OpenCode steps that need per-step
+	/// config (MCP servers, skills, working directory, excluded tools, disabled auto-compaction)
+	/// run on their own dedicated server anyway, so a prewarmed pool worker is usually wasted. With
+	/// no prewarm an idle run reports 0 instances / 0 sessions and instances materialize per
+	/// in-flight step (instance count tracks session count). Plain text-prompt steps still spawn a
+	/// pooled worker lazily on first use and reuse it within the run.
+	/// </summary>
+	public int DefaultMinInstances { get; set; } = 0;
 
 	/// <summary>
 	/// Default cap on <c>opencode serve</c> processes per orchestration run. Kept in sync with
