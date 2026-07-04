@@ -342,8 +342,10 @@ internal sealed partial class CopilotSessionHandler
 		case SamplingRequestedEvent:
 		case SessionAutopilotObjectiveChangedEvent:    // Autopilot mode — Orchestra does not use autopilot
 		case SessionBackgroundTasksChangedEvent:
+#pragma warning disable GHCP001 // SessionCanvas* events are experimental in the SDK; Orchestra deliberately ignores them (headless host, no IDE canvas UI).
 		case SessionCanvasOpenedEvent:                 // IDE canvas UI — N/A for headless host
 		case SessionCanvasRegistryChangedEvent:        // IDE canvas UI — N/A for headless host
+#pragma warning restore GHCP001
 		case SessionContextChangedEvent:
 		case SessionCustomNotificationEvent:           // Extension-defined notifications — none configured today
 		case SessionExtensionsAttachmentsPushedEvent:  // Extension attachments — N/A for orchestrated steps
@@ -444,22 +446,24 @@ internal sealed partial class CopilotSessionHandler
 
 	// ── Obsolete-API isolation helpers ──
 	//
-	// SDK 0.3.0 marked the four ParentToolCallId properties below as `[Obsolete]` with the
-	// generic message "This member is deprecated and will be removed in a future version."
-	// but does NOT yet ship a replacement (no ActorContext / lineage struct, no Subagent*
-	// event surfaces a parentToolCallId in lieu of these). Until the SDK provides one, we
-	// continue to read the property — it is the only signal that lets us pin a streaming
-	// event to a specific sub-agent invocation when the active stack is ambiguous.
+	// The SDK marks these four ParentToolCallId properties obsolete (diagnostic id GHCP001 as of
+	// SDK 1.0.5; CS0618 in earlier versions) with "This member is deprecated and will be removed in
+	// a future version." SDK 1.0.5 introduces a first-class replacement lineage signal on the
+	// SessionEvent base — `AgentId` (the agent that produced the event) plus `ParentId` — so a
+	// future change can pin every streaming event to its sub-agent without this per-shape property.
+	// Migrating actor attribution onto AgentId/ParentId is tracked separately; until it lands we
+	// still read ParentToolCallId — it remains the signal that pins a streaming event to a specific
+	// sub-agent invocation when the active stack is ambiguous.
 	//
-	// The reads are isolated in these helpers so a future migration touches one place per
-	// data shape rather than every emission site.
+	// The reads are isolated in these helpers so a future migration touches one place per data
+	// shape rather than every emission site.
 
-#pragma warning disable CS0618 // Type or member is obsolete
+#pragma warning disable CS0618, GHCP001 // ParentToolCallId is obsolete (CS0618 before SDK 1.0.5, GHCP001 from 1.0.5).
 	private static string? ReadParentToolCallId(AssistantMessageDeltaData data) => data.ParentToolCallId;
 	private static string? ReadParentToolCallId(AssistantMessageData data) => data.ParentToolCallId;
 	private static string? ReadParentToolCallId(ToolExecutionStartData data) => data.ParentToolCallId;
 	private static string? ReadParentToolCallId(ToolExecutionCompleteData data) => data.ParentToolCallId;
-#pragma warning restore CS0618
+#pragma warning restore CS0618, GHCP001
 
 	private ActorContext CreateActorContext(SubagentFrame frame, int depth) => new(
 		AgentName: frame.AgentName,

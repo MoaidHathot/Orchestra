@@ -2161,17 +2161,19 @@ public class CopilotSessionHandlerTests
 	public void HandleEvent_SessionCanvasOpened_DoesNotWriteEvent()
 	{
 		// Arrange — Canvas is an IDE UI surface for extension previews. N/A in a headless host.
+		// SessionCanvas* are experimental SDK surfaces (GHCP001); we only assert the handler ignores
+		// them, so construct a minimal valid instance.
+#pragma warning disable GHCP001
 		var evt = new SessionCanvasOpenedEvent
 		{
 			Data = new SessionCanvasOpenedData
 			{
-				Availability = CanvasOpenedAvailability.Ready,
 				CanvasId = "canvas-1",
 				ExtensionId = "ext-1",
 				InstanceId = "inst-1",
-				Reopen = false,
 			}
 		};
+#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -2184,6 +2186,7 @@ public class CopilotSessionHandlerTests
 	public void HandleEvent_SessionCanvasRegistryChanged_DoesNotWriteEvent()
 	{
 		// Arrange — Companion to SessionCanvasOpenedEvent; tracks the canvas registry.
+#pragma warning disable GHCP001
 		var evt = new SessionCanvasRegistryChangedEvent
 		{
 			Data = new SessionCanvasRegistryChangedData
@@ -2191,6 +2194,7 @@ public class CopilotSessionHandlerTests
 				Canvases = [],
 			}
 		};
+#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);

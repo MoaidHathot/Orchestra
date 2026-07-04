@@ -50,9 +50,9 @@ public class CopilotSessionHandlerActorContextTests
 		{
 			MessageId = "msg-id",
 			DeltaContent = content,
-#pragma warning disable CS0618 // ParentToolCallId is obsolete in SDK 0.3.0 but no replacement yet; see CopilotSessionHandler.cs:322-339.
+#pragma warning disable CS0618, GHCP001 // ParentToolCallId obsolete (CS0618 pre-1.0.5, GHCP001 from 1.0.5); replacement is SessionEvent.AgentId/ParentId. See CopilotSessionHandler.cs isolation helpers.
 			ParentToolCallId = parentToolCallId!,
-#pragma warning restore CS0618
+#pragma warning restore CS0618, GHCP001
 		},
 	};
 
@@ -62,9 +62,9 @@ public class CopilotSessionHandlerActorContextTests
 		{
 			MessageId = "msg-id",
 			Content = content,
-#pragma warning disable CS0618 // ParentToolCallId is obsolete in SDK 0.3.0 but no replacement yet; see CopilotSessionHandler.cs:322-339.
+#pragma warning disable CS0618, GHCP001 // ParentToolCallId obsolete (CS0618 pre-1.0.5, GHCP001 from 1.0.5); replacement is SessionEvent.AgentId/ParentId. See CopilotSessionHandler.cs isolation helpers.
 			ParentToolCallId = parentToolCallId!,
-#pragma warning restore CS0618
+#pragma warning restore CS0618, GHCP001
 		},
 	};
 
@@ -92,9 +92,9 @@ public class CopilotSessionHandlerActorContextTests
 		{
 			ToolCallId = toolCallId,
 			ToolName = toolName,
-#pragma warning disable CS0618 // ParentToolCallId is obsolete in SDK 0.3.0 but no replacement yet; see CopilotSessionHandler.cs:322-339.
+#pragma warning disable CS0618, GHCP001 // ParentToolCallId obsolete (CS0618 pre-1.0.5, GHCP001 from 1.0.5); replacement is SessionEvent.AgentId/ParentId. See CopilotSessionHandler.cs isolation helpers.
 			ParentToolCallId = parentToolCallId!,
-#pragma warning restore CS0618
+#pragma warning restore CS0618, GHCP001
 		},
 	};
 
@@ -104,9 +104,9 @@ public class CopilotSessionHandlerActorContextTests
 		{
 			ToolCallId = toolCallId,
 			Success = true,
-#pragma warning disable CS0618 // ParentToolCallId is obsolete in SDK 0.3.0 but no replacement yet; see CopilotSessionHandler.cs:322-339.
+#pragma warning disable CS0618, GHCP001 // ParentToolCallId obsolete (CS0618 pre-1.0.5, GHCP001 from 1.0.5); replacement is SessionEvent.AgentId/ParentId. See CopilotSessionHandler.cs isolation helpers.
 			ParentToolCallId = parentToolCallId!,
-#pragma warning restore CS0618
+#pragma warning restore CS0618, GHCP001
 		},
 	};
 
