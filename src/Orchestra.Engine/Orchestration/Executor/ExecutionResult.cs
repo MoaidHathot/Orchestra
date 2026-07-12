@@ -238,4 +238,35 @@ public class ExecutionResult
 		Trace = trace,
 		SavedFiles = savedFiles ?? [],
 	};
+
+	/// <summary>
+	/// Creates a result that BOTH sets this step's terminal status AND requests early
+	/// completion of the entire orchestration — the non-LLM equivalent of the
+	/// <c>orchestra_complete</c> engine tool. Used by executors (e.g. Script steps) that
+	/// discover a completion request outside the LLM engine-tool channel. The
+	/// <see cref="OrchestrationCompleteRequested"/> flag is consumed generically by the
+	/// orchestration executor, so the source step type is irrelevant.
+	/// </summary>
+	/// <param name="completionStatus">Must be <see cref="ExecutionStatus.Succeeded"/> or
+	/// <see cref="ExecutionStatus.Failed"/>.</param>
+	public static ExecutionResult Complete(
+		ExecutionStatus completionStatus,
+		string content,
+		string reason,
+		string stepName,
+		Dictionary<string, string>? rawDependencyOutputs = null,
+		StepExecutionTrace? trace = null,
+		string[]? savedFiles = null) => new()
+	{
+		Content = completionStatus == ExecutionStatus.Failed ? string.Empty : content,
+		Status = completionStatus,
+		ErrorMessage = completionStatus == ExecutionStatus.Failed ? reason : null,
+		RawDependencyOutputs = rawDependencyOutputs ?? [],
+		Trace = trace,
+		SavedFiles = savedFiles ?? [],
+		OrchestrationCompleteRequested = true,
+		OrchestrationCompleteStatus = completionStatus,
+		OrchestrationCompleteReason = reason,
+		OrchestrationCompleteStepName = stepName,
+	};
 }

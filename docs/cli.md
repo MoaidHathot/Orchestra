@@ -212,6 +212,22 @@ orchestra respond deploy-pipeline run-abc123 review --choice approve --by alice
 orchestra respond draft-post run-xyz789 clarify --reply "AI angle, ~200 words"
 ```
 
+### Script step control
+
+Called from *inside* a Script step to signal orchestration control (the non-LLM equivalent of the `orchestra_complete` / `orchestra_set_status` engine tools). These are local-only: they write the JSON payload to the `ORCHESTRA_CONTROL_FILE` the engine sets for the step, and need no server connection.
+
+| Command | Purpose |
+|---|---|
+| `orchestra step complete --status <success\|failed> [--reason "..."]` | Halt the whole orchestration, cancelling remaining steps. |
+| `orchestra step set-status --status <success\|failed\|no_action> [--reason "..."]` | Set this step's status; `no_action` skips dependent steps. |
+
+```bash
+# Stop the tick early when there's nothing to process
+orchestra step complete --status success --reason "Inbox is empty, nothing to dispatch."
+```
+
+pwsh scripts can use the injected `Orchestra-Complete` / `Orchestra-SetStatus` helpers instead. See [Script step control channel](engine.md) for the full contract.
+
 ### Server
 
 | Command | Purpose |

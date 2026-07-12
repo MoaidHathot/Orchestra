@@ -685,7 +685,7 @@
         },
         "script": {
           "type": "string",
-          "description": "Inline script content to execute. Supports template expressions. Mutually exclusive with scriptFile."
+          "description": "Inline script content to execute. Supports template expressions. Mutually exclusive with scriptFile. Control channel: the engine sets ORCHESTRA_CONTROL_FILE (plus ORCHESTRA_RUN_ID and ORCHESTRA_STEP_NAME) in the script's environment. Write a JSON object {\"action\":\"complete\"|\"set_status\",\"status\":\"success\"|\"failed\"|\"no_action\",\"reason\":\"...\"} to that file to halt the whole orchestration (action=complete) or set this step's terminal status (action=set_status; no_action skips dependents) — the non-LLM equivalent of orchestra_complete / orchestra_set_status. pwsh scripts can use the injected helpers Orchestra-Complete / Orchestra-SetStatus; any shell can use `orchestra step complete|set-status`. Read only on exit code 0."
         },
         "scriptFile": {
           "type": "string",
@@ -722,7 +722,7 @@
         },
         "strictMode": {
           "type": "boolean",
-          "description": "Controls how the executor wraps a PowerShell script (shell=pwsh|powershell) with an error-handling prologue. When unset (auto), the executor injects `$ErrorActionPreference='Stop'; trap { Write-Error -ErrorRecord $_; exit 1 };` so terminating errors cause the step to be reported Failed instead of silently succeeding. When set to true, the executor additionally injects `Set-StrictMode -Version Latest` (catches uninitialized variables, missing properties, and out-of-bounds indexing) — use this for scripts written with strict-mode discipline. When set to false, no prologue is injected and the script runs verbatim. Non-PowerShell shells ignore this setting."
+          "description": "Controls how the executor wraps a PowerShell script (shell=pwsh|powershell) with an error-handling prologue. When unset (auto), the executor injects `$ErrorActionPreference='Stop'; trap { Write-Error -ErrorRecord $_; exit 1 };` so terminating errors cause the step to be reported Failed instead of silently succeeding. When set to true, the executor additionally injects `Set-StrictMode -Version Latest` (catches uninitialized variables, missing properties, and out-of-bounds indexing) — use this for scripts written with strict-mode discipline. When set to false, the error-handling prologue is not injected and the script runs verbatim (the Orchestra-Complete / Orchestra-SetStatus control helpers are still injected). Non-PowerShell shells ignore this setting."
         }
       },
       "oneOf": [

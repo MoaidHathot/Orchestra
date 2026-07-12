@@ -121,7 +121,33 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	/// (e.g., <c>$obj.PSObject.Properties['Name']?.Value</c>) before enabling this.</para>
 	/// </remarks>
 	internal const string PowerShellStrictPrologue =
-		"$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; " + PowerShellArgSpillResolver + " trap { $r=$_; [Console]::Error.WriteLine(\"ORCHESTRA-PWSH-ERROR: $($r.InvocationInfo.ScriptName):$($r.InvocationInfo.ScriptLineNumber):$($r.InvocationInfo.OffsetInLine): $($r.Exception.Message)\"); if ($r.InvocationInfo.Line) { [Console]::Error.WriteLine('  | ' + $r.InvocationInfo.Line.TrimEnd()) }; if ($r.ScriptStackTrace) { [Console]::Error.WriteLine($r.ScriptStackTrace) }; exit 1 };";	public ScriptStepExecutor(
+		"$ErrorActionPreference='Stop'; Set-StrictMode -Version Latest; " + PowerShellArgSpillResolver + " trap { $r=$_; [Console]::Error.WriteLine(\"ORCHESTRA-PWSH-ERROR: $($r.InvocationInfo.ScriptName):$($r.InvocationInfo.ScriptLineNumber):$($r.InvocationInfo.OffsetInLine): $($r.Exception.Message)\"); if ($r.InvocationInfo.Line) { [Console]::Error.WriteLine('  | ' + $r.InvocationInfo.Line.TrimEnd()) }; if ($r.ScriptStackTrace) { [Console]::Error.WriteLine($r.ScriptStackTrace) }; exit 1 };";
+
+	/// <summary>
+	/// Environment variable naming the engine-owned control file a Script step may write to
+	/// request early orchestration completion or a terminal status (the non-LLM equivalent of
+	/// the <c>orchestra_complete</c> / <c>orchestra_set_status</c> engine tools).
+	/// </summary>
+	internal const string ControlFileEnvVar = "ORCHESTRA_CONTROL_FILE";
+
+	/// <summary>
+	/// Upper bound on the control file we will read back. The payload is a tiny JSON object; a
+	/// larger file indicates a misdirected write, so we refuse it rather than read unbounded data.
+	/// </summary>
+	internal const int ControlFileMaxBytes = 64 * 1024;
+
+	/// <summary>
+	/// PowerShell helper functions injected for every pwsh/powershell Script step (independent of
+	/// <see cref="ScriptOrchestrationStep.StrictMode"/>) so authors can signal control without
+	/// hand-writing JSON: <c>Orchestra-Complete -Status success|failed [-Reason ...]</c> and
+	/// <c>Orchestra-SetStatus -Status success|failed|no_action [-Reason ...]</c>. Each writes the
+	/// validated payload to <see cref="ControlFileEnvVar"/>. Kept on a single physical line so the
+	/// user's script preserves its original line numbers in runtime error messages.
+	/// </summary>
+	internal const string PowerShellControlHelpers =
+		"function Orchestra-Complete { param([Parameter(Mandatory)][ValidateSet('success','failed')][string]$Status,[string]$Reason='') if (-not $env:ORCHESTRA_CONTROL_FILE) { throw 'ORCHESTRA_CONTROL_FILE is not set; Orchestra control helpers only work inside an Orchestra Script step.' }; (@{ action='complete'; status=$Status; reason=$Reason } | ConvertTo-Json -Compress) | Set-Content -LiteralPath $env:ORCHESTRA_CONTROL_FILE -NoNewline -Encoding utf8 }; function Orchestra-SetStatus { param([Parameter(Mandatory)][ValidateSet('success','failed','no_action')][string]$Status,[string]$Reason='') if (-not $env:ORCHESTRA_CONTROL_FILE) { throw 'ORCHESTRA_CONTROL_FILE is not set; Orchestra control helpers only work inside an Orchestra Script step.' }; (@{ action='set_status'; status=$Status; reason=$Reason } | ConvertTo-Json -Compress) | Set-Content -LiteralPath $env:ORCHESTRA_CONTROL_FILE -NoNewline -Encoding utf8 };";
+
+	public ScriptStepExecutor(
 		IOrchestrationReporter reporter,
 		ILogger<ScriptStepExecutor> logger)
 	{
@@ -143,6 +169,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 
 		var rawDependencyOutputs = context.GetRawDependencyOutputs(step.DependsOn);
 		string? tempScriptPath = null;
+		string? controlFilePath = null;
 
 		try
 		{
@@ -164,9 +191,9 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				// then write to a temp file.
 				var resolvedScript = TemplateResolver.Resolve(scriptStep.Script, context.Parameters, context, step.DependsOn, step);
 
-				if (GetPowerShellPrologue(shell, scriptStep.StrictMode) is { } prologue)
+				if (BuildPowerShellPreamble(shell, scriptStep.StrictMode) is { } preamble)
 				{
-					resolvedScript = InjectPowerShellPrologue(resolvedScript, prologue);
+					resolvedScript = InjectPowerShellPrologue(resolvedScript, preamble);
 					LogStrictPrologueInjected(step.Name, shell);
 				}
 
@@ -287,6 +314,20 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				startInfo.Environment[key] = resolvedValue;
 			}
 
+			// Control channel: hand the script a private file it can write to request early
+			// orchestration completion or a terminal status — the non-LLM equivalent of the
+			// orchestra_complete / orchestra_set_status engine tools. The file is engine-owned
+			// (created here, read after exit, deleted in finally). Set AFTER the user environment
+			// loop so an author cannot accidentally redirect the engine's control path. The
+			// injected pwsh helpers (Orchestra-Complete / Orchestra-SetStatus) and the
+			// `orchestra step` CLI both write to this path; any shell can also write the JSON
+			// directly. ORCHESTRA_RUN_ID / ORCHESTRA_STEP_NAME are provided for diagnostics and
+			// future transports.
+			controlFilePath = Path.Combine(Path.GetTempPath(), $"orchestra-control-{Guid.NewGuid():N}.json");
+			startInfo.Environment[ControlFileEnvVar] = controlFilePath;
+			startInfo.Environment["ORCHESTRA_RUN_ID"] = context.OrchestrationInfo.RunId;
+			startInfo.Environment["ORCHESTRA_STEP_NAME"] = step.Name;
+
 			var displayArgs = arguments.Length > 0
 				? " " + string.Join(' ', arguments.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))
 				: string.Empty;
@@ -376,6 +417,16 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				var trace = BuildTrace(shell, scriptStep.Script is not null ? "(inline)" : scriptFilePath, processArguments, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
 				_reporter.ReportStepTrace(step.Name, trace);
 
+				// Control channel: if the script wrote ORCHESTRA_CONTROL_FILE, map the requested
+				// action (set_status / complete) onto the result. Only honoured on exit 0 — a
+				// failing script cannot request "complete success".
+				if (controlFilePath is not null && File.Exists(controlFilePath))
+				{
+					var controlResult = ApplyControlSignal(controlFilePath, step, context, output, rawDependencyOutputs, trace);
+					if (controlResult is not null)
+						return controlResult;
+				}
+
 				return ExecutionResult.Succeeded(
 					output,
 					rawDependencyOutputs: rawDependencyOutputs,
@@ -422,6 +473,21 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 					// Best effort cleanup — don't fail the step for this
 				}
 			}
+
+			// Clean up the engine-owned control file. The signal it carried (if any) has already
+			// been read and applied above and, when present, persisted to the run's temp store for
+			// history — so the working file itself is safe to delete.
+			if (controlFilePath is not null)
+			{
+				try
+				{
+					File.Delete(controlFilePath);
+				}
+				catch
+				{
+					// Best effort cleanup — don't fail the step for this
+				}
+			}
 		}
 	}
 
@@ -448,6 +514,112 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			true => PowerShellStrictPrologue,
 			false => null,
 			null => PowerShellDefaultPrologue,
+		};
+	}
+
+	/// <summary>
+	/// Builds the full PowerShell preamble to inject at the top of the user's script: the
+	/// always-on <see cref="PowerShellControlHelpers"/> (so <c>Orchestra-Complete</c> /
+	/// <c>Orchestra-SetStatus</c> exist regardless of <see cref="ScriptOrchestrationStep.StrictMode"/>),
+	/// followed by the strict/default error-handling prologue when one applies. Returns
+	/// <c>null</c> for non-PowerShell shells (they get no injection).
+	/// </summary>
+	internal static string? BuildPowerShellPreamble(string shell, bool? explicitOptIn)
+	{
+		if (!s_strictByDefaultShells.Contains(shell))
+			return null;
+
+		var prologue = GetPowerShellPrologue(shell, explicitOptIn);
+		return prologue is null
+			? PowerShellControlHelpers
+			: PowerShellControlHelpers + " " + prologue;
+	}
+
+	/// <summary>
+	/// Reads and applies the Script step's control file (<see cref="ControlFileEnvVar"/>) after a
+	/// successful (exit 0) run. Returns the mapped <see cref="ExecutionResult"/> when the script
+	/// requested a terminal status or early orchestration completion, a failed result when the
+	/// file is malformed/oversized, or <c>null</c> when there is nothing to apply (empty file) so
+	/// the caller falls back to a normal success. The raw payload is persisted to the run's temp
+	/// store so the signal survives in run history.
+	/// </summary>
+	private ExecutionResult? ApplyControlSignal(
+		string controlFilePath,
+		OrchestrationStep step,
+		OrchestrationExecutionContext context,
+		string stdout,
+		Dictionary<string, string> rawDependencyOutputs,
+		StepExecutionTrace trace)
+	{
+		string raw;
+		try
+		{
+			var info = new FileInfo(controlFilePath);
+			if (info.Length == 0)
+				return null;
+
+			if (info.Length > ControlFileMaxBytes)
+			{
+				var tooBig = $"{ControlFileEnvVar} is {info.Length} bytes (max {ControlFileMaxBytes}); refusing to read an oversized control payload.";
+				LogControlFileInvalid(step.Name, tooBig);
+				_reporter.ReportStepError(step.Name, tooBig);
+				return ExecutionResult.Failed(tooBig, rawDependencyOutputs, trace: trace);
+			}
+
+			raw = File.ReadAllText(controlFilePath);
+		}
+		catch (Exception ex)
+		{
+			// If we cannot read the file at all, don't punish an otherwise-successful script;
+			// log and fall through to a normal success.
+			LogControlFileInvalid(step.Name, ex.Message);
+			return null;
+		}
+
+		if (string.IsNullOrWhiteSpace(raw))
+			return null;
+
+		if (!ScriptControlSignal.TryParse(raw, out var signal, out var parseError))
+		{
+			var msg = $"Invalid {ControlFileEnvVar} contents: {parseError}";
+			LogControlFileInvalid(step.Name, msg);
+			_reporter.ReportStepError(step.Name, msg);
+			return ExecutionResult.Failed(msg, rawDependencyOutputs, trace: trace);
+		}
+
+		// Persist the raw payload to run history (best-effort) so the signal is auditable, then
+		// collect the step's saved files (which now includes that copy).
+		context.TempFileStore?.SaveFile(raw, step.Name, "json");
+		var savedFiles = context.TempFileStore?.GetFilesForStep(step.Name);
+
+		var reason = string.IsNullOrWhiteSpace(signal!.Reason)
+			? (signal.Action == ScriptControlAction.Complete
+				? "Script requested orchestration completion."
+				: "Script set step status.")
+			: signal.Reason!;
+
+		var statusText = signal.Status switch
+		{
+			ExecutionStatus.Succeeded => "success",
+			ExecutionStatus.Failed => "failed",
+			ExecutionStatus.NoAction => "no_action",
+			_ => signal.Status.ToString().ToLowerInvariant(),
+		};
+		_reporter.ReportStepStatusSet(step.Name, statusText, reason);
+
+		if (signal.Action == ScriptControlAction.Complete)
+		{
+			LogControlComplete(step.Name, statusText, reason);
+			return ExecutionResult.Complete(signal.Status, stdout, reason, step.Name, rawDependencyOutputs, trace, savedFiles);
+		}
+
+		LogControlSetStatus(step.Name, statusText, reason);
+		return signal.Status switch
+		{
+			ExecutionStatus.Failed => ExecutionResult.Failed(reason, rawDependencyOutputs, trace: trace, savedFiles: savedFiles),
+			ExecutionStatus.NoAction => ExecutionResult.NoAction(reason, rawDependencyOutputs, trace: trace, savedFiles: savedFiles),
+			// success: preserve the script's stdout as the step output.
+			_ => ExecutionResult.Succeeded(stdout, rawDependencyOutputs: rawDependencyOutputs, trace: trace, savedFiles: savedFiles),
 		};
 	}
 
@@ -1019,6 +1191,24 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' script process did not exit within {GraceSeconds}s after kill; the temp script file may leak")]
 	private partial void LogScriptKillDrainTimeout(string stepName, int graceSeconds);
+
+	[LoggerMessage(
+		EventId = 11,
+		Level = LogLevel.Information,
+		Message = "Step '{StepName}' requested orchestration completion via control file (status={Status}, reason={Reason})")]
+	private partial void LogControlComplete(string stepName, string status, string reason);
+
+	[LoggerMessage(
+		EventId = 12,
+		Level = LogLevel.Information,
+		Message = "Step '{StepName}' set status via control file (status={Status}, reason={Reason})")]
+	private partial void LogControlSetStatus(string stepName, string status, string reason);
+
+	[LoggerMessage(
+		EventId = 13,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' control file was ignored or rejected: {Error}")]
+	private partial void LogControlFileInvalid(string stepName, string error);
 
 	#endregion
 }

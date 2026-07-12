@@ -160,6 +160,50 @@ public class PromptOrchestrationStep : OrchestrationStep
 }
 ```
 
+### Script step control channel
+
+A **Script** step (`shell: pwsh|bash|python|node`) is deterministic — it only reports success (exit 0) or failure (non-zero). To let a script decide the orchestration's fate the way a Prompt step can with the `orchestra_complete` / `orchestra_set_status` engine tools, the engine gives every Script step a **control channel**: an engine-owned file whose path is exported as the `ORCHESTRA_CONTROL_FILE` environment variable (alongside `ORCHESTRA_RUN_ID` and `ORCHESTRA_STEP_NAME`).
+
+The script writes a single JSON object to that file:
+
+```json
+{ "action": "complete" | "set_status", "status": "success" | "failed" | "no_action", "reason": "…" }
+```
+
+- **`action: "set_status"`** sets this step's terminal status — `success`, `failed`, or `no_action` (a `no_action` step skips every step that depends on it).
+- **`action: "complete"`** halts the *entire* orchestration immediately (`success` or `failed`), cancelling all remaining steps — the non-LLM equivalent of `orchestra_complete`.
+
+The signal is read only when the script exits `0`. The engine deletes the working file afterward but persists a copy of the raw payload to the run's temp directory and records the decision in the run history. Malformed contents fail the step loudly. `stdout` stays the step's normal output, so a script can emit data **and** signal control in the same run.
+
+Three ways to write the signal:
+
+```yaml
+# 1. PowerShell helpers (injected automatically for pwsh/powershell, any strictMode):
+- name: gate
+  type: Script
+  shell: pwsh
+  script: |
+    if ($count -eq 0) { Orchestra-Complete -Status success -Reason 'Nothing to do'; return }
+    # ... otherwise emit data on stdout ...
+
+# 2. The orchestra CLI (any shell):
+- name: gate
+  type: Script
+  shell: bash
+  script: |
+    if [ "$count" -eq 0 ]; then orchestra step complete --status success --reason 'Nothing to do'; exit 0; fi
+
+# 3. Write the JSON directly (any language):
+- name: gate
+  type: Script
+  shell: python
+  script: |
+    import os, json
+    if count == 0:
+        open(os.environ["ORCHESTRA_CONTROL_FILE"], "w").write(
+            json.dumps({"action": "complete", "status": "success", "reason": "Nothing to do"}))
+```
+
 ### Dependencies
 
 Steps can depend on other steps using the `DependsOn` property. The engine:

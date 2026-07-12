@@ -196,6 +196,21 @@ public class Program
 			.WithDescription("Submit a response to a pending HITL wait.")
 			.WithExample("respond", "deploy-pipeline", "run-abc123", "approve", "--choice", "approve")
 			.WithExample("respond", "draft-summary", "run-xyz789", "clarify", "--reply", "AI angle");
+
+		// ── Script-step control channel ───────────────────────────────────────────
+		// Local-only verbs a Script step calls to signal orchestration control (writes
+		// $ORCHESTRA_CONTROL_FILE, which the engine sets for every Script step). The
+		// non-LLM equivalent of the orchestra_complete / orchestra_set_status engine tools.
+		config.AddBranch("step", branch =>
+		{
+			branch.SetDescription("Signal orchestration control from inside a Script step (writes $ORCHESTRA_CONTROL_FILE).");
+			branch.AddCommand<StepCompleteCommand>("complete")
+				.WithDescription("Halt the whole orchestration (success|failed) — the non-LLM orchestra_complete.")
+				.WithExample("step", "complete", "--status", "success", "--reason", "Inbox is empty, nothing to dispatch.");
+			branch.AddCommand<StepSetStatusCommand>("set-status")
+				.WithDescription("Set this step's status (success|failed|no_action); no_action skips dependent steps.")
+				.WithExample("step", "set-status", "--status", "no_action", "--reason", "Nothing to do this tick.");
+		});
 	}
 }
 
