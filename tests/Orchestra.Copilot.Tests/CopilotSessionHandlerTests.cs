@@ -190,6 +190,11 @@ public class CopilotSessionHandlerTests
 		Data = new SessionIdleData()
 	};
 
+	private static AssistantIdleEvent CreateAssistantIdleEvent(bool? aborted = null) => new()
+	{
+		Data = new AssistantIdleData { Aborted = aborted }
+	};
+
 	private static SubagentSelectedEvent CreateSubagentSelectedEvent(
 		string agentName,
 		string? displayName = null,
@@ -669,6 +674,64 @@ public class CopilotSessionHandlerTests
 		_handler.HandleEvent(idleEvent);
 
 		// Assert
+		_done.Task.IsCompleted.Should().BeTrue();
+	}
+
+	[Fact]
+	public void HandleEvent_AssistantIdle_RootAgent_CompletesTaskCompletionSource()
+	{
+		// No sub-agent frame is active, so an AssistantIdle belongs to the root agent and
+		// acts as a completion fallback (some CLI flows emit it without a SessionIdle).
+		_handler.HandleEvent(CreateAssistantIdleEvent());
+
+		_done.Task.IsCompleted.Should().BeTrue();
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.SessionIdle);
+	}
+
+	[Fact]
+	public void HandleEvent_AssistantIdle_Aborted_CompletesWithAbortedMarker()
+	{
+		_handler.HandleEvent(CreateAssistantIdleEvent(aborted: true));
+
+		_done.Task.IsCompleted.Should().BeTrue();
+		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
+		agentEvent!.Type.Should().Be(AgentEventType.SessionIdle);
+		agentEvent.Content.Should().Contain("aborted");
+	}
+
+	[Fact]
+	public void HandleEvent_AssistantIdle_WhileSubagentActive_DoesNotComplete()
+	{
+		// A sub-agent is mid-flight. The root agent is blocked awaiting the sub-agent's
+		// tool result and cannot be idle, so this AssistantIdle belongs to the sub-agent and
+		// must NOT complete the parent session (doing so would truncate the root output).
+		_handler.HandleEvent(CreateSubagentStartedEvent(agentName: "researcher", toolCallId: "sub-1"));
+		while (_channel.Reader.TryRead(out _))
+		{
+			// drain the SubagentStarted AgentEvent
+		}
+
+		_handler.HandleEvent(CreateAssistantIdleEvent());
+
+		_done.Task.IsCompleted.Should().BeFalse("a sub-agent going idle must not complete the parent session");
+		_channel.Reader.TryRead(out _).Should().BeFalse("no SessionIdle should be emitted for a sub-agent idle");
+	}
+
+	[Fact]
+	public void HandleEvent_AssistantIdle_AfterSubagentCompletes_CompletesRoot()
+	{
+		// Sub-agent starts then completes → no active frames → a subsequent AssistantIdle is
+		// the root agent finishing and completes the session.
+		_handler.HandleEvent(CreateSubagentStartedEvent(agentName: "researcher", toolCallId: "sub-1"));
+		_handler.HandleEvent(CreateSubagentCompletedEvent(agentName: "researcher", toolCallId: "sub-1"));
+		while (_channel.Reader.TryRead(out _))
+		{
+			// drain sub-agent lifecycle AgentEvents
+		}
+
+		_handler.HandleEvent(CreateAssistantIdleEvent());
+
 		_done.Task.IsCompleted.Should().BeTrue();
 	}
 

@@ -418,7 +418,7 @@ public partial class CopilotAgent : IAgent
 						triggeringSessionId: priorSessionId ?? "(unknown)",
 						triggeringFailureReason: "resume_session_missing",
 						probeDetails: ex.Message,
-						message: $"Resume of session '{priorSessionId}' failed because the CLI no longer has that session; falling back to cold restart.");
+						message: $"Resume of session '{priorSessionId}' failed because the CLI no longer has that session (it is not replayable on a fresh worker).");
 				}
 
 				throw;
@@ -483,7 +483,7 @@ public partial class CopilotAgent : IAgent
 						triggeringSessionId: session.SessionId,
 						triggeringFailureReason: "resume_locked",
 						probeDetails: $"SessionResumeEvent.AlreadyInUse=true persisted past {_swapOptions.ResumeAlreadyInUseWait.TotalSeconds:0.#}s grace window",
-						message: $"Resumed session '{session.SessionId}' remained AlreadyInUse past the grace window; falling back to cold restart.");
+						message: $"Resumed session '{session.SessionId}' remained AlreadyInUse past the grace window (the previous CLI still holds the session lock).");
 				}
 			}
 

@@ -186,7 +186,7 @@ public class CopilotAgentSwapTests
 	}
 
 	[Fact]
-	public async Task SwapBudgetExceeded_LogsSwapBudgetExhausted_AndRethrowsClientUnhealthyException()
+	public async Task SwapBudgetExceeded_LogsSwapBudgetExhausted_AndThrowsBudgetExhausted()
 	{
 		var pool = new ScriptedPool(
 			new ScriptedLease(new ScriptedCopilotClient(new ScriptedCopilotSession("a", sendThrows: new InvalidOperationException("transport gone"))), new ProbeLatchingFaultBroker()),
@@ -197,10 +197,13 @@ public class CopilotAgentSwapTests
 		await DrainEventsAsync(task);
 
 		var act = () => task.GetResultAsync();
-		// After the broker latches we surface a structured CopilotClientUnhealthyException
-		// so the engine can categorize it correctly. The original SDK InvalidOperationException
-		// is preserved in Data["InnerSdkException"].
-		await act.Should().ThrowAsync<CopilotClientUnhealthyException>();
+		// On budget exhaustion the loop surfaces a terminal AgentSwapBudgetExhaustedException
+		// whose message makes the give-up explicit. The structured CopilotClientUnhealthyException
+		// is preserved as InnerException so the engine still categorizes the step as
+		// ClientUnhealthy; the original SDK InvalidOperationException remains in Data["InnerSdkException"].
+		var ex = (await act.Should().ThrowAsync<AgentSwapBudgetExhaustedException>()).Which;
+		ex.InnerException.Should().BeOfType<CopilotClientUnhealthyException>();
+		ex.Message.Should().NotContain("falling back to cold restart");
 		pool.AcquireCount.Should().Be(2);
 		pool.SwapsRecorded.Should().Be(1);
 	}

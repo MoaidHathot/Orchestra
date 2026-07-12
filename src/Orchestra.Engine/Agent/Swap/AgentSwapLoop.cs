@@ -142,6 +142,20 @@ public sealed partial class AgentSwapLoop
 					if (swapAttempt >= _policy.BudgetPerStep)
 					{
 						LogSwapBudgetExhausted(attemptedSessionId ?? "(none)", swapAttempt, _policy.BudgetPerStep, reason);
+
+						// When at least one swap actually ran, the inner failure's message often
+						// describes an intended-but-now-abandoned recovery (e.g. a resume failure
+						// ending with "...falling back to cold restart"). Wrap it so the terminal
+						// message makes the give-up explicit while keeping the original as
+						// InnerException — the engine categorises the step by walking the inner
+						// chain, so ClientUnhealthy / session-error details are preserved. When no
+						// swap ran (budget 0 / swaps disabled) there is no such narrative to
+						// correct, so the original first failure propagates unchanged.
+						if (swapAttempt > 0)
+						{
+							throw new AgentSwapBudgetExhaustedException(swapAttempt, _policy.BudgetPerStep, reason, ex);
+						}
+
 						throw;
 					}
 

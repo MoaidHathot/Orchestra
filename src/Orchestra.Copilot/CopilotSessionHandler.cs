@@ -387,6 +387,12 @@ internal sealed partial class CopilotSessionHandler
 			HandleTaskComplete(taskComplete);
 			break;
 
+		// SDK 1.0.0 per-agent idle marker. Used as a completion fallback for the ROOT
+		// agent only (sub-agent idles are ignored) — see HandleAssistantIdle for why.
+		case AssistantIdleEvent assistantIdle:
+			HandleAssistantIdle(assistantIdle);
+			break;
+
 			case SessionIdleEvent:
 				HandleIdle();
 				break;
@@ -1569,6 +1575,52 @@ internal sealed partial class CopilotSessionHandler
 	}
 
 	/// <summary>
+	/// SDK 1.0.0 emits <c>AssistantIdleEvent</c> when an individual agent (the root agent
+	/// or a sub-agent) finishes its work and goes idle for the current prompt. It carries
+	/// the same <c>Aborted</c> flag as <see cref="SessionIdleEvent"/> but is scoped to a
+	/// single <c>AgentId</c> and can fire more than once per prompt (the bundled CLI's
+	/// internal retry loop emits one per aborted attempt — observed when the CLI has lost
+	/// its Copilot auth, which is exactly the "two unhandled AssistantIdleEvent" shape that
+	/// motivated handling it here).
+	///
+	/// Completion authority still rests primarily with the session-level
+	/// <see cref="SessionIdleEvent"/> / <c>SessionTaskCompleteEvent</c> /
+	/// <c>SessionShutdownEvent</c>. This handler adds a <em>fallback</em> completion for the
+	/// ROOT agent only: some CLI flows emit <c>AssistantIdle</c> without a following
+	/// <c>SessionIdle</c>, which previously left the step waiting for its per-step timeout
+	/// with no final event. Completing here closes that gap.
+	///
+	/// Guard: while any sub-agent frame is active the root agent is blocked awaiting the
+	/// sub-agent's tool result and therefore cannot itself be idle, so an <c>AssistantIdle</c>
+	/// seen in that window belongs to the sub-agent and must NOT complete the parent session
+	/// (doing so would truncate the root agent's output). The completion is idempotent
+	/// (<see cref="TaskCompletionSource.TrySetResult()"/>), so a later <c>SessionIdle</c>, a
+	/// repeated <c>AssistantIdle</c>, or a preceding error event (which faults the completion
+	/// first) all remain correct.
+	/// </summary>
+	private void HandleAssistantIdle(AssistantIdleEvent assistantIdle)
+	{
+		var agentId = assistantIdle.AgentId ?? "(root)";
+
+		// Sub-agent idle: informational only. Attribution is by active-frame count because
+		// the root agent cannot be idle while it is awaiting a sub-agent tool call.
+		if (_activeSubagentFrames.Count > 0)
+		{
+			LogAssistantIdleIgnoredForSubagent(agentId, _activeSubagentFrames.Count);
+			return;
+		}
+
+		var aborted = assistantIdle.Data?.Aborted == true;
+		LogAssistantIdleCompletingRoot(agentId, aborted);
+		EmitEvent(new AgentEvent
+		{
+			Type = AgentEventType.SessionIdle,
+			Content = aborted ? "Assistant idle (aborted)" : "Assistant idle",
+		});
+		_done.TrySetResult();
+	}
+
+	/// <summary>
 	/// Recognises the bundled CLI's "I exhausted my internal retries" error message so
 	/// the agent can route this error class to the swap loop instead of failing the step.
 	/// The CLI emits messages of the form:
@@ -1792,6 +1844,24 @@ internal sealed partial class CopilotSessionHandler
 		Level = LogLevel.Warning,
 		Message = "Session permissions changed mid-session: AllowAllPermissions {Previous} -> {Current}")]
 	private partial void LogSessionPermissionsChanged(bool previous, bool current);
+
+	// EventId 13: an AssistantIdleEvent attributed to an active sub-agent frame. Ignored for
+	// completion (the root agent owns the session outcome); Debug so it stays out of default
+	// logs but is available when triaging sub-agent lifecycles.
+	[LoggerMessage(
+		EventId = 13,
+		Level = LogLevel.Debug,
+		Message = "AssistantIdle ignored for sub-agent (agentId={AgentId}); {ActiveFrames} sub-agent frame(s) active")]
+	private partial void LogAssistantIdleIgnoredForSubagent(string agentId, int activeFrames);
+
+	// EventId 14: a root-agent AssistantIdleEvent used as a completion fallback. Information
+	// level — a session completing via AssistantIdle (rather than a session-level idle) is a
+	// notable signal that the CLI emitted no SessionIdle, worth seeing in default logs.
+	[LoggerMessage(
+		EventId = 14,
+		Level = LogLevel.Information,
+		Message = "Root-agent AssistantIdle completed the session (agentId={AgentId}, aborted={Aborted}); no session-level idle was required")]
+	private partial void LogAssistantIdleCompletingRoot(string agentId, bool aborted);
 
 	#endregion
 }

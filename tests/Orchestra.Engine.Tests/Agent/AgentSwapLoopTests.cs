@@ -140,7 +140,7 @@ public class AgentSwapLoopTests
 	}
 
 	[Fact]
-	public async Task RunAsync_BudgetExhausted_RethrowsOriginalException()
+	public async Task RunAsync_BudgetExhausted_ThrowsBudgetExhausted_PreservingInner()
 	{
 		var metrics = new CountingMetrics();
 		var channel = Channel.CreateUnbounded<AgentEvent>();
@@ -156,7 +156,16 @@ public class AgentSwapLoopTests
 			writer: channel.Writer,
 			cancellationToken: CancellationToken.None);
 
-		await act.Should().ThrowAsync<FakeClientUnhealthy>();
+		// The terminal exception makes the give-up explicit rather than leaving the inner
+		// failure's (potentially misleading) message as the last word, but the original
+		// exception is preserved as InnerException so the engine still categorises the step
+		// via the marker interface.
+		var ex = (await act.Should().ThrowAsync<AgentSwapBudgetExhaustedException>()).Which;
+		ex.InnerException.Should().BeOfType<FakeClientUnhealthy>();
+		ex.SwapBudget.Should().Be(1);
+		ex.SwapAttempts.Should().Be(1);
+		ex.Reason.Should().Be("transport_lost");
+		ex.Message.Should().Contain("swap budget").And.NotContain("falling back to cold restart");
 		metrics.Count.Should().Be(1, "one swap consumed before the budget was exhausted");
 	}
 
