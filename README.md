@@ -98,7 +98,7 @@ verbs (`orchestra list`, `get`, `register`, `attach`, `runs`, `triggers`, `profi
 |------|---------|
 | `Prompt` | Run a coding agent (Copilot/OpenCode) with a system/user prompt, optional MCPs, subagents, skills, attachments. |
 | `Command` | Execute a shell/CLI command and capture its output. |
-| `Script` | Run an inline PowerShell/bash script. |
+| `Script` | Run an inline PowerShell/bash/python/node script. Can deterministically set its status or halt the run (`orchestra_complete`/`set_status` equivalent) via the control channel. |
 | `Http` | Make an HTTP request (templated URL/headers/body). |
 | `Transform` | Render a template — pure string shaping, no agent call. |
 | `Approval` | Pause for human approval (HITL). |
