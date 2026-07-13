@@ -18,6 +18,7 @@ namespace Orchestra.Host.Tests;
 /// never <em>starting</em> the MCP proxies or <c>orchestra.services.json</c> processes (the slow,
 /// side-effecting part). The reproducible skip-services path keeps loading nothing.
 /// </summary>
+[Collection(HostConfigEnvironmentCollection.Name)]
 public class StartExternalServicesTests : IDisposable
 {
 	private readonly string _tempDir;

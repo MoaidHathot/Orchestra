@@ -9,6 +9,7 @@ namespace Orchestra.Host.Tests;
 /// <summary>
 /// Unit tests for OrchestraConfigLoader and RetentionPolicy.
 /// </summary>
+[Collection(HostConfigEnvironmentCollection.Name)]
 public class OrchestraConfigLoaderTests : IDisposable
 {
 	private readonly string _tempDir;

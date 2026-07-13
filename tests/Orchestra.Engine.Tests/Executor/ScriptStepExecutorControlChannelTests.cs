@@ -11,6 +11,7 @@ namespace Orchestra.Engine.Tests.Executor;
 /// <see cref="ScriptStepExecutorTests"/> file for focus. The integration tests shell out to a
 /// real pwsh, which is already a prerequisite of the existing script-executor tests.
 /// </summary>
+[Collection(ScriptProcessExecutionCollection.Name)]
 public class ScriptStepExecutorControlChannelTests
 {
 	private static readonly OrchestrationInfo s_info = new("test-orchestration", "1.0.0", "run123", DateTimeOffset.UtcNow);

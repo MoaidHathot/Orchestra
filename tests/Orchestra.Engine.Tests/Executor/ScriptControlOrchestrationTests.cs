@@ -10,6 +10,7 @@ namespace Orchestra.Engine.Tests.Executor;
 /// <c>complete</c> halts the whole run (remaining steps Cancelled) and <c>no_action</c> skips
 /// dependents — exactly like the LLM engine tools, but from a deterministic pwsh script.
 /// </summary>
+[Collection(ScriptProcessExecutionCollection.Name)]
 public class ScriptControlOrchestrationTests
 {
 	private readonly IScheduler _scheduler = new OrchestrationScheduler();
