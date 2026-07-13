@@ -84,7 +84,9 @@ public class CopilotAgentHumanInputTests
 		var result = await resultTask;
 		result.Action.Value.Should().Be(GitHub.Copilot.Rpc.UIElicitationResponseAction.Accept.Value);
 		result.Content.Should().ContainKey("response");
-		result.Content["response"].ToString().Should().Be("friendly");
+		var response = result.Content!["response"];
+		response.Should().NotBeNull();
+		response!.ToString().Should().Be("friendly");
 	}
 
 	[Fact]
