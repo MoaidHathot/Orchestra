@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry, StepActorStreams, HookExecution, ModelInfo } from '../../types';
+import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry, StepActorStreams, HookExecution, ModelInfo, StepTiming } from '../../types';
 import { Icons } from '../../icons';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import ZoomableDag from '../ZoomableDag';
 import SubagentCard from '../SubagentCard';
+import StepTimingBadge from '../StepTimingBadge';
 import MarkdownContent from '../MarkdownContent';
 
 /** Extract a display name from a step MCP reference (string or object). */
@@ -256,6 +257,12 @@ interface Props {
    * sub-agent activity as inline indented cards.
    */
   stepActorStreams: Record<string, StepActorStreams>;
+  /**
+   * Per-step wall-clock timing for the historical view (startedAt/completedAt/
+   * durationSeconds from the run detail endpoint). For live runs this is omitted
+   * and timing is derived from <c>stepActorStreams[step].main</c>.
+   */
+  stepTimings?: Record<string, StepTiming>;
   streamingContent: string;
   finalResult: string;
   status: string;
@@ -301,6 +308,7 @@ export default function ExecutionModal({
   stepTraces,
   stepAuditLogs,
   stepActorStreams,
+  stepTimings,
   streamingContent,
   finalResult,
   status,
@@ -487,6 +495,21 @@ export default function ExecutionModal({
 
   const selectedStepStatus: string | null =
     selectedStep && stepStatuses ? stepStatuses[selectedStep] || 'pending' : null;
+
+  // Per-step timing for the selected step. Prefer the explicit historical stepTimings
+  // map (authoritative startedAt/completedAt/durationSeconds from the run detail); for
+  // live runs fall back to the actor-stream main, whose timestamps are server-stamped
+  // and replay-safe, so the elapsed counter doesn't reset when the modal is reopened.
+  const selectedStepTiming: StepTiming | undefined = (() => {
+    if (!selectedStep) return undefined;
+    const explicit = stepTimings?.[selectedStep];
+    if (explicit) return explicit;
+    const main = stepActorStreams[selectedStep]?.main;
+    if (main?.startedAt) {
+      return { startedAt: main.startedAt, completedAt: main.completedAt ?? null };
+    }
+    return undefined;
+  })();
 
   // Determine what content to show in the output panel
   const displayContent = useMemo<DisplayContent>(() => {
@@ -1501,6 +1524,8 @@ export default function ExecutionModal({
                               : selectedStepStatus}
                           </span>
                         )}
+                        {/* How long the step has been running (live) or took (final). */}
+                        <StepTimingBadge status={selectedStepStatus} timing={selectedStepTiming} />
                         {/* Child-run badge: when this step invoked another orchestration,
                             render a clickable link to navigate to the child run. The data
                             is populated by App.tsx from the /api/history step projection

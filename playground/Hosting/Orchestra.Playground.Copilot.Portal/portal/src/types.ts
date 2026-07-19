@@ -372,6 +372,22 @@ export interface OutlookStatus {
 }
 
 // Execution modal state
+/**
+ * Per-step wall-clock timing used to render "running for Xs" (live) and the final
+ * step duration (completed) in the execution modal.
+ */
+export interface StepTiming {
+  /** ISO-8601 time the step started, or null/absent if not started yet. */
+  startedAt?: string | null;
+  /** ISO-8601 time the step reached a terminal state, or null/absent while running. */
+  completedAt?: string | null;
+  /**
+   * Authoritative duration in seconds when the server provides it (historical runs).
+   * When absent, the duration is derived from completedAt − startedAt.
+   */
+  durationSeconds?: number | null;
+}
+
 export interface ExecutionModalState {
   open: boolean;
   orchestration: Orchestration | null;
@@ -387,6 +403,14 @@ export interface ExecutionModalState {
    * of merging everything into a single flat <c>streamingContent</c> string.
    */
   stepActorStreams: Record<string, StepActorStreams>;
+  /**
+   * Per-step wall-clock timing. Populated for historical runs from the run
+   * detail endpoint (which carries authoritative startedAt/completedAt/duration).
+   * For live runs this is omitted — the modal derives timing from
+   * <c>stepActorStreams[step].main</c>, whose timestamps are server-stamped and
+   * replay-safe.
+   */
+  stepTimings?: Record<string, StepTiming>;
   streamingContent: string;
   finalResult: string;
   status: string;

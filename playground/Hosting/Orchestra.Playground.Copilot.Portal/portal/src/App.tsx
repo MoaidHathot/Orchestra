@@ -30,6 +30,7 @@ import type {
   ActorStream,
   StepActorStreams,
   ExecutionStateSnapshot,
+  StepTiming,
 } from './types';
 import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
 import type { CardExecution } from './components/ActiveOrchestrationCard';
@@ -78,6 +79,8 @@ interface ExecutionDetailStep {
   content?: string;
   startedAt?: string;
   completedAt?: string;
+  /** Server-computed step duration in seconds (rounded). */
+  durationSeconds?: number;
   actualModel?: string;
   selectedModel?: string;
   requestedModelInfo?: ModelInfo;
@@ -1940,6 +1943,7 @@ function App(): React.JSX.Element {
       const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
       const stepSavedFiles: Record<string, string[]> = {};
       const stepChildRuns: Record<string, { executionId: string; orchestrationName: string; status?: string | null }> = {};
+      const stepTimings: Record<string, StepTiming> = {};
       const finalResult = details.finalContent || '';
       const hookExecutions = details.hookExecutions || [];
       const savedFiles = details.savedFiles || [];
@@ -1956,6 +1960,14 @@ function App(): React.JSX.Element {
             'NoAction': 'noaction',
           };
           stepStatuses[step.name] = statusMap[step.status] || 'pending';
+
+          // Retain the authoritative per-step timing so the modal can show each step's
+          // real duration (and the Timeline/Gantt can plot it) for historical runs.
+          stepTimings[step.name] = {
+            startedAt: step.startedAt ?? null,
+            completedAt: step.completedAt ?? null,
+            durationSeconds: typeof step.durationSeconds === 'number' ? step.durationSeconds : null,
+          };
 
           if (step.content !== undefined) {
             stepResults[step.name] = step.content;
@@ -1990,6 +2002,7 @@ function App(): React.JSX.Element {
           // Add step started event
           stepEvents[step.name].push({
             time: step.startedAt ? new Date(step.startedAt).toLocaleTimeString() : '',
+            timestamp: step.startedAt,
             type: 'step-started',
           } as StepEvent);
 
@@ -2021,6 +2034,7 @@ function App(): React.JSX.Element {
           if (step.status === 'Succeeded') {
             stepEvents[step.name].push({
               time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
+              timestamp: step.completedAt,
               type: 'step-completed',
               actualModel: step.actualModel,
               selectedModel: step.selectedModel,
@@ -2036,6 +2050,7 @@ function App(): React.JSX.Element {
           } else if (step.status === 'NoAction') {
             stepEvents[step.name].push({
               time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
+              timestamp: step.completedAt,
               type: 'step-completed',
               actualModel: step.actualModel,
               selectedModel: step.selectedModel,
@@ -2048,6 +2063,7 @@ function App(): React.JSX.Element {
           } else if (step.errorMessage) {
             stepEvents[step.name].push({
               time: step.completedAt ? new Date(step.completedAt).toLocaleTimeString() : '',
+              timestamp: step.completedAt,
               type: 'step-error',
               error: step.errorMessage,
             } as StepEvent);
@@ -2081,6 +2097,7 @@ function App(): React.JSX.Element {
         stepTraces,
         stepAuditLogs,
         stepActorStreams: {},
+        stepTimings,
         streamingContent: finalResult,
         finalResult,
         status: modalStatus,

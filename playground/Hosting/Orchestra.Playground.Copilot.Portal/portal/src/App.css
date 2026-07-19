@@ -1758,6 +1758,17 @@
     .step-status-badge.cancelled { background: rgba(210, 153, 34, 0.2); color: var(--warning); }
     .step-status-badge.skipped { background: var(--bg-secondary); color: var(--text-muted); }
     .step-status-badge.noaction { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+    /* Per-step timing shown next to the status badge: live "running Xs" while a step
+       runs, or the final duration once it finishes. tabular-nums stops the live
+       counter from shifting width as digits change. */
+    .step-timing {
+      margin-left: 8px;
+      font-size: 11px;
+      color: var(--text-muted, #8b949e);
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+    .step-timing.running { color: var(--accent); }
     /* States unique to the orchestration cards (ActiveOrchestrationCard). Keep next
        to the pill family above so the visual language stays consistent across the
        Portal (Execution Modal step list, History rows, etc.). */

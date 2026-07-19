@@ -96,6 +96,28 @@ function makeProps(overrides: Partial<ExecutionModalState> = {}) {
   };
 }
 
+describe('ExecutionModal step timing', () => {
+  it('shows the selected step duration in the header for a historical completed step', () => {
+    render(
+      <ExecutionModal
+        {...makeProps({
+          stepStatuses: { analyze: 'completed' },
+          stepTimings: {
+            analyze: {
+              startedAt: '2026-07-20T10:00:00.000Z',
+              completedAt: '2026-07-20T10:00:12.400Z',
+              durationSeconds: 12.4,
+            },
+          },
+        })}
+      />,
+    );
+
+    // The mermaid mock auto-selects the first step ('analyze'), so its header renders.
+    expect(screen.getByText('12.4s')).toBeInTheDocument();
+  });
+});
+
 describe('ExecutionModal model metadata', () => {
   it('renders configured, selected, and actual model metadata', async () => {
     render(<ExecutionModal {...makeProps()} />);
