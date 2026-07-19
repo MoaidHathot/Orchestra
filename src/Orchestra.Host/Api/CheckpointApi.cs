@@ -114,7 +114,8 @@ public static class CheckpointApi
 			IPendingInputStore pendingInputStore,
 			IHumanInputWaiter humanInputWaiter,
 			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
-			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos) =>
+			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+			DashboardEventBroadcaster dashboardBroadcaster) =>
 		{
 			// Accept ID or declared name (parity with GET /api/orchestrations/{id}).
 			// ActiveExecutionInfo.OrchestrationId is the canonical key dashboards index by,
@@ -203,6 +204,15 @@ public static class CheckpointApi
 			}, jsonOptions)}\n\n");
 			await httpContext.Response.Body.FlushAsync();
 
+			// Notify dashboard subscribers so the Portal's Active/Recent lists reflect the
+			// resumed run without waiting for a poll. Resume reuses the original run ID as the
+			// execution ID and keys by the canonical registry ID (resolvedId).
+			dashboardBroadcaster.BroadcastExecutionStarted(
+				executionId,
+				resolvedId,
+				entry.Orchestration.Name,
+				"resume");
+
 			var executor = new OrchestrationExecutor(scheduler, providerRegistry, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, childLauncher: childLauncher, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl, pendingInputStore: pendingInputStore, humanInputWaiter: humanInputWaiter);
 			var cancellationToken = cts.Token;
 
@@ -240,6 +250,15 @@ public static class CheckpointApi
 				finally
 				{
 					reporter.Complete();
+
+					// Notify dashboard subscribers that the resumed run reached a terminal state
+					// so the Portal moves it from Active to Recent Executions without polling.
+					dashboardBroadcaster.BroadcastExecutionCompleted(
+						executionId,
+						resolvedId,
+						entry.Orchestration.Name,
+						executionInfo.Status.ToString());
+
 					_ = Task.Run(async () =>
 					{
 						await Task.Delay(TimeSpan.FromSeconds(5));

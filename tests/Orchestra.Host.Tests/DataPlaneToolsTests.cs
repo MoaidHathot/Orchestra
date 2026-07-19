@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Orchestra.Engine;
+using Orchestra.Host.Api;
 using Orchestra.Host.McpServer;
 using Orchestra.Host.Triggers;
+using System.Threading.Channels;
 using Xunit;
 
 namespace Orchestra.Host.Tests;
@@ -79,6 +81,42 @@ public class DataPlaneToolsTests
 		return (launcher, () => captured);
 	}
 
+	/// <summary>
+	/// Shared no-subscriber broadcaster for the parent-context/timeout tests that don't care
+	/// about dashboard fan-out. Publishing to zero subscribers is a no-op.
+	/// </summary>
+	private static readonly DashboardEventBroadcaster Broadcaster =
+		new(NullLogger<DashboardEventBroadcaster>.Instance);
+
+	/// <summary>
+	/// Thin wrapper that supplies the injected <see cref="DashboardEventBroadcaster"/> so the
+	/// existing tests keep their original argument shape. The MCP runtime injects the broadcaster
+	/// as a service; unit tests pass one explicitly.
+	/// </summary>
+	private static Task<string> InvokeTool(
+		IChildOrchestrationLauncher launcher,
+		IHttpContextAccessor httpContextAccessor,
+		McpServerOptions mcpServerOptions,
+		string orchestrationId,
+		string? parameters = null,
+		string mode = "async",
+		int? timeoutSeconds = null,
+		string? metadata = null,
+		string? parentExecutionId = null,
+		string detail = "compact")
+		=> DataPlaneTools.InvokeOrchestration(
+			launcher,
+			httpContextAccessor,
+			mcpServerOptions,
+			Broadcaster,
+			orchestrationId,
+			parameters,
+			mode,
+			timeoutSeconds,
+			metadata,
+			parentExecutionId,
+			detail);
+
 	[Fact]
 	public async Task InvokeOrchestration_WithParentHeaders_PopulatesParentContextOnRequest()
 	{
@@ -92,7 +130,7 @@ public class DataPlaneToolsTests
 		var (launcher, captured) = FakeLauncher();
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(launcher, accessor, DefaultOptions, "child-orchestration");
+		await InvokeTool(launcher, accessor, DefaultOptions, "child-orchestration");
 
 		// Assert
 		var req = captured();
@@ -121,7 +159,7 @@ public class DataPlaneToolsTests
 		var (launcher, captured) = FakeLauncher();
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(
+		await InvokeTool(
 			launcher,
 			accessor,
 			DefaultOptions,
@@ -144,7 +182,7 @@ public class DataPlaneToolsTests
 		var (launcher, captured) = FakeLauncher();
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(launcher, accessor, DefaultOptions, "child-orchestration");
+		await InvokeTool(launcher, accessor, DefaultOptions, "child-orchestration");
 
 		// Assert
 		var req = captured();
@@ -162,7 +200,7 @@ public class DataPlaneToolsTests
 		var (launcher, captured) = FakeLauncher();
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(launcher, accessor, DefaultOptions, "child-orchestration");
+		await InvokeTool(launcher, accessor, DefaultOptions, "child-orchestration");
 
 		// Assert
 		var req = captured();
@@ -180,7 +218,7 @@ public class DataPlaneToolsTests
 		var options = new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 60 };
 
 		// Act
-		var json = await DataPlaneTools.InvokeOrchestration(
+		var json = await InvokeTool(
 			launcher,
 			accessor,
 			options,
@@ -206,7 +244,7 @@ public class DataPlaneToolsTests
 		var options = new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 0 };
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(
+		await InvokeTool(
 			launcher,
 			accessor,
 			options,
@@ -229,7 +267,7 @@ public class DataPlaneToolsTests
 		var options = new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 60 };
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(
+		await InvokeTool(
 			launcher,
 			accessor,
 			options,
@@ -256,7 +294,7 @@ public class DataPlaneToolsTests
 		};
 
 		// Act — note: NO timeoutSeconds argument
-		await DataPlaneTools.InvokeOrchestration(
+		await InvokeTool(
 			launcher,
 			accessor,
 			options,
@@ -283,7 +321,7 @@ public class DataPlaneToolsTests
 		};
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(
+		await InvokeTool(
 			launcher,
 			accessor,
 			options,
@@ -309,7 +347,7 @@ public class DataPlaneToolsTests
 		};
 
 		// Act
-		await DataPlaneTools.InvokeOrchestration(
+		await InvokeTool(
 			launcher,
 			accessor,
 			options,
@@ -334,7 +372,7 @@ public class DataPlaneToolsTests
 		};
 
 		// Act — no explicit timeoutSeconds, so the resolved default is 600 which exceeds 60-60.
-		var json = await DataPlaneTools.InvokeOrchestration(
+		var json = await InvokeTool(
 			launcher,
 			accessor,
 			options,
@@ -347,6 +385,57 @@ public class DataPlaneToolsTests
 		json.Should().Contain("\"requestedSyncTimeoutSeconds\":600",
 			"the error must surface the RESOLVED sync timeout, not a hardcoded value");
 		json.Should().Contain("\"transportTimeoutSeconds\":60");
+	}
+
+	[Fact]
+	public async Task InvokeOrchestration_BroadcastsExecutionStartedAndCompleted_ToDashboard()
+	{
+		// Regression guard: invoke_orchestration previously never notified the dashboard SSE
+		// stream, so runs dispatched via MCP (e.g. a tracker's fan-out prompt step calling
+		// invoke_orchestration) stayed invisible in the Portal's Active/Recent lists until a
+		// manual refresh. The tool must broadcast execution-started on launch and
+		// execution-completed on terminal state (the terminal one is fire-and-forget so it
+		// covers async callers too).
+		var accessor = HttpContextWith();
+		var (launcher, _) = FakeLauncher(completeImmediately: true);
+		using var broadcaster = new DashboardEventBroadcaster(NullLogger<DashboardEventBroadcaster>.Instance);
+		var reader = broadcaster.Subscribe();
+		reader.Should().NotBeNull("subscribing to a fresh broadcaster must succeed");
+
+		// Act — async mode returns immediately; the completion broadcast fires in the background.
+		await DataPlaneTools.InvokeOrchestration(
+			launcher, accessor, DefaultOptions, broadcaster, "child-orchestration", mode: "async");
+
+		// Assert — collect events until we've seen both lifecycle events or the window elapses.
+		var seen = await CollectEventTypesAsync(
+			reader!,
+			TimeSpan.FromSeconds(2),
+			stop: s => s.Contains("execution-started") && s.Contains("execution-completed"));
+
+		seen.Should().Contain("execution-started", "the run must appear in the Active list without polling");
+		seen.Should().Contain("execution-completed", "terminal state must move the run to Recent Executions");
+	}
+
+	private static async Task<HashSet<string>> CollectEventTypesAsync(
+		ChannelReader<SseEvent> reader,
+		TimeSpan timeout,
+		Func<HashSet<string>, bool> stop)
+	{
+		var seen = new HashSet<string>(StringComparer.Ordinal);
+		using var cts = new CancellationTokenSource(timeout);
+		try
+		{
+			while (await reader.WaitToReadAsync(cts.Token))
+			{
+				while (reader.TryRead(out var evt))
+				{
+					seen.Add(evt.Type);
+					if (stop(seen)) return seen;
+				}
+			}
+		}
+		catch (OperationCanceledException) { /* window elapsed — return whatever we saw */ }
+		return seen;
 	}
 
 	[Fact]
@@ -459,7 +548,7 @@ public class DataPlaneToolsTests
 			CompletedAt = DateTimeOffset.UtcNow,
 		});
 
-		var json = await DataPlaneTools.InvokeOrchestration(
+		var json = await InvokeTool(
 			launcher,
 			HttpContextWith(),
 			new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 0 },
@@ -501,7 +590,7 @@ public class DataPlaneToolsTests
 			CompletedAt = DateTimeOffset.UtcNow,
 		});
 
-		var json = await DataPlaneTools.InvokeOrchestration(
+		var json = await InvokeTool(
 			launcher,
 			HttpContextWith(),
 			new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 0 },
@@ -541,7 +630,7 @@ public class DataPlaneToolsTests
 			CompletedAt = DateTimeOffset.UtcNow,
 		});
 
-		var json = await DataPlaneTools.InvokeOrchestration(
+		var json = await InvokeTool(
 			launcher,
 			HttpContextWith(),
 			new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 0 },
@@ -565,7 +654,7 @@ public class DataPlaneToolsTests
 	public async Task InvokeOrchestration_Sync_InvalidDetail_ReturnsError()
 	{
 		var launcher = FakeLauncher(completeImmediately: true).Launcher;
-		var json = await DataPlaneTools.InvokeOrchestration(
+		var json = await InvokeTool(
 			launcher, HttpContextWith(), new McpServerOptions { DefaultOrchestraInvokeTimeoutSeconds = 0 },
 			"child", detail: "verbose");
 		json.Should().Contain("Invalid detail level");

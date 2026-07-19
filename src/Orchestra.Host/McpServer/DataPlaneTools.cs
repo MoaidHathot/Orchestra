@@ -93,6 +93,7 @@ public sealed partial class DataPlaneTools
 		IChildOrchestrationLauncher launcher,
 		IHttpContextAccessor httpContextAccessor,
 		McpServerOptions mcpServerOptions,
+		DashboardEventBroadcaster dashboardBroadcaster,
 		[Description("The orchestration ID to invoke.")] string orchestrationId,
 		[Description("JSON object with parameter key-value pairs. All values must be strings.")] string? parameters = null,
 		[Description("Execution mode: 'async' (default, returns immediately with execution ID) or 'sync' (blocks until completion).")] string mode = "async",
@@ -251,6 +252,27 @@ public sealed partial class DataPlaneTools
 		{
 			return JsonSerializer.Serialize(new { error = ex.Message }, s_jsonOptions);
 		}
+
+		// Notify dashboard subscribers so the Portal's Active/Recent lists reflect this run
+		// without polling. The manual /run and trigger paths already broadcast; the MCP invoke
+		// path previously left these runs (including orchestrations dispatched from a prompt
+		// step) invisible to the live dashboard stream. The terminal broadcast is fire-and-forget
+		// so async callers return immediately - the launcher always drives Completion in the
+		// background even when unawaited, and Completion never throws.
+		dashboardBroadcaster.BroadcastExecutionStarted(
+			handle.ExecutionId,
+			handle.OrchestrationId,
+			handle.OrchestrationName,
+			triggeredBy);
+		_ = Task.Run(async () =>
+		{
+			var completed = await handle.Completion.ConfigureAwait(false);
+			dashboardBroadcaster.BroadcastExecutionCompleted(
+				handle.ExecutionId,
+				handle.OrchestrationId,
+				handle.OrchestrationName,
+				completed.Status.ToString());
+		});
 
 		if (!isSync)
 		{

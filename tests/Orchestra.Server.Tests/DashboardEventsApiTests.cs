@@ -4,6 +4,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Profiles;
 using Xunit;
@@ -253,6 +254,85 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 			.EnumerateArray()
 			.Select(e => e.GetString())
 			.Should().Contain(orchestrationId);
+	}
+
+	[Fact]
+	public async Task Resume_Broadcasts_ExecutionStarted_And_Completed_ToDashboard()
+	{
+		// Regression guard: resuming a checkpoint updated the run store + active registry but
+		// never broadcast to /api/events, so the Portal's Active/Recent lists stayed stale until
+		// a manual refresh. Seed a checkpoint whose only step is already complete so ResumeAsync
+		// finishes instantly (no agent), then assert both lifecycle events reach the dashboard.
+		using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+
+		// 1. Register a no-LLM Transform orchestration (single "echo" step).
+		var name = $"resume-broadcast-{Guid.NewGuid():N}";
+		var registerJson = $$"""
+		{
+			"name": "{{name}}",
+			"description": "Resume broadcast test (Transform-only, no LLM).",
+			"steps": [ { "name": "echo", "type": "Transform", "template": "hi" } ]
+		}
+		""";
+		var registerResp = await _client.PostAsJsonAsync("/api/orchestrations/json", new { json = registerJson }, cts.Token);
+		registerResp.StatusCode.Should().Be(HttpStatusCode.OK);
+		var registered = await registerResp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: cts.Token);
+		var orchestrationId = registered.GetProperty("id").GetString()!;
+
+		// 2. Seed a checkpoint whose only step is already completed → resume finishes immediately.
+		var runId = $"run-{Guid.NewGuid():N}";
+		var checkpointStore = _factory.Services.GetRequiredService<ICheckpointStore>();
+		await checkpointStore.SaveCheckpointAsync(new CheckpointData
+		{
+			RunId = runId,
+			OrchestrationName = name,
+			StartedAt = DateTimeOffset.UtcNow,
+			CheckpointedAt = DateTimeOffset.UtcNow,
+			CompletedSteps = new Dictionary<string, CheckpointStepResult>
+			{
+				["echo"] = new CheckpointStepResult { Status = ExecutionStatus.Succeeded, Content = "hi" },
+			},
+		}, cts.Token);
+
+		// 3. Subscribe to the dashboard stream.
+		var broadcaster = _factory.Services.GetRequiredService<DashboardEventBroadcaster>();
+		using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events");
+		using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+		using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
+		using var reader = new StreamReader(stream);
+		(await ReadSseFrameAsync(reader, cts.Token)).Type.Should().Be("connected");
+
+		var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(2);
+		while (broadcaster.SubscriberCount == 0 && DateTime.UtcNow < deadline)
+			await Task.Delay(25, cts.Token);
+		broadcaster.SubscriberCount.Should().BeGreaterThan(0);
+
+		// 4. Fire the resume (SSE) endpoint in the background; we don't consume its own stream —
+		//    the run executes on a background task server-side and broadcasts either way.
+		using var resumeCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+		var resumeTask = _client.GetAsync(
+			$"/api/orchestrations/{Uri.EscapeDataString(orchestrationId)}/resume/{Uri.EscapeDataString(runId)}",
+			HttpCompletionOption.ResponseHeadersRead,
+			resumeCts.Token);
+
+		// 5. Read dashboard frames until we see start + completion for THIS run.
+		var started = false;
+		var completed = false;
+		while (!(started && completed))
+		{
+			var frame = await ReadSseFrameAsync(reader, cts.Token);
+			if (frame.Type is not ("execution-started" or "execution-completed")) continue;
+			using var doc = JsonDocument.Parse(frame.Data);
+			if (doc.RootElement.GetProperty("executionId").GetString() != runId) continue;
+			if (frame.Type == "execution-started") started = true;
+			if (frame.Type == "execution-completed") completed = true;
+		}
+
+		started.Should().BeTrue("resume must broadcast execution-started so the run appears in Active");
+		completed.Should().BeTrue("resume must broadcast execution-completed so the run moves to Recent");
+
+		resumeCts.Cancel();
+		try { (await resumeTask).Dispose(); } catch { /* cancelled or streaming — fine */ }
 	}
 
 	// ── SSE parsing helper ────────────────────────────────────────────────
