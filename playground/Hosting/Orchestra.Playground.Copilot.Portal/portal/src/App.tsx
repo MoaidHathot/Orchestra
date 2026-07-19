@@ -49,6 +49,7 @@ import ProfileSelector from './components/ProfileSelector';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useOnlineStatus } from './hooks/useOnlineStatus';
 import { useDashboardEvents } from './hooks/useDashboardEvents';
+import { createDashboardEventHandlers } from './dashboardEventHandlers';
 import { usePendingInputs } from './hooks/usePendingInputs';
 
 // ── API response types ──────────────────────────────────────────────────────
@@ -492,51 +493,19 @@ function App(): React.JSX.Element {
 
   // Subscribe to the backend dashboard-events SSE stream so the UI reflects changes
   // driven by schedulers / triggers immediately, without waiting for the next poll.
-  useDashboardEvents({
-    onConnected: () => {
-      // The SSE stream just (re)connected. Any state changes that happened while we were
-      // disconnected (network blip, server restart, sleep/wake) were not delivered. Do a
-      // full re-sync of the profile selector so its IsActive flags don't go stale.
-      loadProfiles();
-      refreshOrchestrations();
-      // Re-sync the pending-input list too: the canonical state lives on the server
-      // and a missed awaiting-input/input-received pair would otherwise leave us stale.
-      void pendingInputs.refresh();
-    },
-    onProfileActiveSetChanged: () => {
-      // A profile's active state flipped (scheduled transition, manual toggle from another
-      // tab/client). Refresh profiles (for the "Active Orchestrations" dropdown) and
-      // orchestrations (for the enabled/disabled state shown on cards).
-      loadProfiles();
-      refreshOrchestrations();
-    },
-    onProfilesChanged: () => {
-      // The profile list itself changed (file added, updated, or deleted in the watched
-      // directory). Refresh profiles so the selector shows the new/updated profiles.
-      loadProfiles();
-    },
-    onExecutionStarted: () => {
-      // A new execution started somewhere (trigger, manual, resume). Refresh the Active
-      // list so it appears immediately.
-      refreshActive();
-    },
-    onExecutionCompleted: () => {
-      // An execution finished — move it from Active to Recent Executions.
-      refreshActive();
-      refreshHistory();
-    },
-    onAwaitingInput: (evt) => {
-      // Forward to the pending-inputs store so the sidebar badge, modal, and any
-      // active-card chips refresh in real time.
-      pendingInputs.applyAwaitingInput(evt);
-    },
-    onInputReceived: (evt) => {
-      pendingInputs.applyInputReceived(evt);
-    },
-    onInputTimeout: (evt) => {
-      pendingInputs.applyInputTimeout(evt);
-    },
-  });
+  // On (re)connect we do a FULL snapshot re-sync (including the Active + Recent lists),
+  // because the backend keeps no event replay — see createDashboardEventHandlers.
+  useDashboardEvents(createDashboardEventHandlers({
+    reloadAll: () => { void loadData(); },
+    reloadProfiles: () => { void loadProfiles(); },
+    refreshOrchestrations: () => { void refreshOrchestrations(); },
+    refreshActive: () => { void refreshActive(); },
+    refreshHistory: () => { void refreshHistory(); },
+    refreshPendingInputs: () => { void pendingInputs.refresh(); },
+    applyAwaitingInput: pendingInputs.applyAwaitingInput,
+    applyInputReceived: pendingInputs.applyInputReceived,
+    applyInputTimeout: pendingInputs.applyInputTimeout,
+  }));
 
   // Defense-in-depth polling fallback for /api/profiles.
   // SSE is the primary update mechanism, but if a `profile-active-set-changed` event is
