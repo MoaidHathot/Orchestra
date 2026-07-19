@@ -230,7 +230,7 @@ function HistoryModal({ open, onClose, onAttachToExecution, onViewExecution, onR
   const isSearching = serverSearchLoading;
 
   return (
-    <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef}>
       <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label="Execution history">
         <div className="modal-header">
           <div className="modal-title">Execution History</div>

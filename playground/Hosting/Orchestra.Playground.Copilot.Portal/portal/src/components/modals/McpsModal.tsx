@@ -56,9 +56,6 @@ export default function McpsModal({ open, onClose }: Props): React.JSX.Element {
     <div
       className={`modal-overlay ${open ? 'visible' : ''}`}
       ref={trapRef}
-      onClick={(e: React.MouseEvent<HTMLDivElement>) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label="MCP tools">
         <div className="modal-header">

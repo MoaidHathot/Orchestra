@@ -35,7 +35,8 @@ interface Props {
 }
 
 function ExportModal({ open, onClose, title, endpoint, ids, idsField }: Props): React.JSX.Element {
-  const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
+  // No Escape/backdrop dismissal — holds export selections. Explicit close only.
+  const trapRef = useFocusTrap<HTMLDivElement>(open);
   const [directory, setDirectory] = useState('');
   const [overwriteExisting, setOverwriteExisting] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -92,7 +93,7 @@ function ExportModal({ open, onClose, title, endpoint, ids, idsField }: Props): 
   const totalErrors = result?.errors?.length ?? 0;
 
   return (
-    <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef} onClick={(e) => e.target === e.currentTarget && handleClose()}>
+    <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef}>
       <div className="modal" role="dialog" aria-modal="true" aria-label={title} style={{ maxWidth: '550px' }}>
         <div className="modal-header">
           <div className="modal-title"><Icons.Download /> {title}</div>

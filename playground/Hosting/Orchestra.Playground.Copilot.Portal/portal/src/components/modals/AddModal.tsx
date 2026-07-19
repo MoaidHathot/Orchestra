@@ -94,7 +94,8 @@ interface Props {
 }
 
 function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
-  const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
+  // No Escape/backdrop dismissal — holds unsaved input (JSON/paste/upload). Explicit close only.
+  const trapRef = useFocusTrap<HTMLDivElement>(open);
   const [activeTab, setActiveTab] = useState<'browse' | 'paste'>('browse');
   const [path, setPath] = useState('');
   const [files, setFiles] = useState<ScannedFile[]>([]);
@@ -249,7 +250,7 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
   };
 
   return (
-    <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef}>
       <div className="modal" role="dialog" aria-modal="true" aria-label="Orchestrations" style={{ maxWidth: previewFile ? '1000px' : '600px', transition: 'max-width 0.2s ease' }}>
         <div className="modal-header">
           <div className="modal-title"><Icons.Workflow /> Orchestrations</div>

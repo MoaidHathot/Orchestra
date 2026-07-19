@@ -73,7 +73,8 @@ function fmtDate(iso: string | undefined): string {
 }
 
 export default function ProfilesModal({ open, onClose }: Props): React.JSX.Element {
-  const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
+  // No Escape/backdrop dismissal — holds unsaved profile/tag edits. Explicit close only.
+  const trapRef = useFocusTrap<HTMLDivElement>(open);
 
   // ── Data state ──
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -986,7 +987,6 @@ export default function ProfilesModal({ open, onClose }: Props): React.JSX.Eleme
     <div
       className={`modal-overlay ${open ? 'visible' : ''}`}
       ref={trapRef}
-      onClick={(e: React.MouseEvent<HTMLDivElement>) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label="Profiles & Tags">
         <div className="modal-header">

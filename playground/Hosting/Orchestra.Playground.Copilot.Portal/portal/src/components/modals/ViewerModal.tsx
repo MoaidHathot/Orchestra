@@ -154,7 +154,7 @@ function ViewerModal({ open, orchestration, onClose, onRun, onTagsChanged }: Pro
   };
 
   return (
-    <div ref={trapRef} className={`modal-overlay ${open ? 'visible' : ''}`} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div ref={trapRef} className={`modal-overlay ${open ? 'visible' : ''}`}>
       <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label={`${displayOrch.name} orchestration viewer`}>
         <div className="modal-header">
           <div>

@@ -34,7 +34,9 @@ interface Props {
 }
 
 export default function RunModal({ open, orchestration, onClose, onRun, initialValues, title, submitLabel }: Props): React.JSX.Element | null {
-  const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
+  // No Escape-to-close and no backdrop-click-to-close: this modal holds unsaved user
+  // input (run parameters). It closes only via explicit Run/Cancel/X. Focus trap stays.
+  const trapRef = useFocusTrap<HTMLDivElement>(open);
   const [params, setParams] = useState<Record<string, string>>({});
 
   // Build the list of inputs to render: prefer typed inputs, fall back to legacy parameters
@@ -85,9 +87,6 @@ export default function RunModal({ open, orchestration, onClose, onRun, initialV
     <div
       className={`modal-overlay ${open ? 'visible' : ''}`}
       ref={trapRef}
-      onClick={(e: React.MouseEvent<HTMLDivElement>) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div
         className={hasAnyMultiline ? 'modal modal-lg' : 'modal modal-sm'}

@@ -484,7 +484,8 @@ const BUILDER_CSS = `
 /* ------------------------------------------------------------------ */
 
 function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
-  const modalRef = useFocusTrap<HTMLDivElement>(open, onClose);
+  // No Escape-to-close — the builder holds substantial unsaved orchestration state. Explicit close only.
+  const modalRef = useFocusTrap<HTMLDivElement>(open);
 
   /* ---- state ---- */
   const [steps, setSteps] = useState<BuilderStep[]>([]);

@@ -216,4 +216,39 @@ describe('RunModal', () => {
       expect(onRun).toHaveBeenCalledWith({ topic: 'AI' });
     });
   });
+
+  describe('dismissal behavior (no accidental data loss)', () => {
+    // Regression guard: this modal holds unsaved run parameters. Clicking the backdrop
+    // must NOT discard them — only the explicit Cancel/X/Run controls close the modal.
+    // (Escape is disabled via useFocusTrap(open) with no handler; that mechanism is
+    // covered directly in hooks/useFocusTrap.test.tsx since this suite mocks the hook.)
+    it('does NOT close when the backdrop overlay is clicked', () => {
+      const onClose = vi.fn();
+      const { container } = render(
+        <RunModal open={true} orchestration={makeOrchestration()} onClose={onClose} onRun={vi.fn()} />,
+      );
+      const overlay = container.querySelector('.modal-overlay');
+      expect(overlay).not.toBeNull();
+      fireEvent.click(overlay!);
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('closes via the Cancel button', () => {
+      const onClose = vi.fn();
+      render(
+        <RunModal open={true} orchestration={makeOrchestration()} onClose={onClose} onRun={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+
+    it('closes via the X (Close) button', () => {
+      const onClose = vi.fn();
+      render(
+        <RunModal open={true} orchestration={makeOrchestration()} onClose={onClose} onRun={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Close' }));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
 });

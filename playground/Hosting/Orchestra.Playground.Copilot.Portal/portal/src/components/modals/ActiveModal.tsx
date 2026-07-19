@@ -60,7 +60,7 @@ function ActiveModal({
   const pending = (data?.pending ?? []) as unknown as PendingTrigger[];
 
   return (
-    <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef} onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <div className={`modal-overlay ${open ? 'visible' : ''}`} ref={trapRef}>
       <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label="Active orchestrations">
         <div className="modal-header">
           <div className="modal-title">

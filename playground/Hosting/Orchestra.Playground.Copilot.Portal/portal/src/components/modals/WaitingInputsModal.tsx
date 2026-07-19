@@ -63,7 +63,8 @@ export default function WaitingInputsModal({
 	loading,
 	onResponded,
 }: Props): React.JSX.Element {
-	const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
+	// No Escape/backdrop dismissal — holds unsaved human-input replies. Explicit close only.
+	const trapRef = useFocusTrap<HTMLDivElement>(open);
 
 	// Selected record key (composite). When null, defaults to the first record.
 	const [selectedKey, setSelectedKey] = useState<string | null>(null);
@@ -144,9 +145,6 @@ export default function WaitingInputsModal({
 		<div
 			className={`modal-overlay ${open ? 'visible' : ''}`}
 			ref={trapRef}
-			onClick={(e: React.MouseEvent<HTMLDivElement>) => {
-				if (e.target === e.currentTarget) onClose();
-			}}
 		>
 			<div className="modal modal-lg" role="dialog" aria-modal="true" aria-label="Orchestrations waiting for input">
 				<div className="modal-header">

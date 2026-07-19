@@ -947,9 +947,6 @@ export default function ExecutionModal({
     <div
       ref={trapRef}
       className={`modal-overlay ${open ? 'visible' : ''}`}
-      onClick={(e: React.MouseEvent<HTMLDivElement>) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
     >
       <div className="modal modal-lg" role="dialog" aria-modal="true" aria-label="Execution details">
         <div className="modal-header">
