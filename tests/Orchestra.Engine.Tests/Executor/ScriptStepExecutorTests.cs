@@ -1070,6 +1070,91 @@ public class ScriptStepExecutorTests
 	}
 
 	[Fact]
+	public void BuildPowerShellPreamble_Pwsh_PrependsUtf8OutputEncodingForEveryStrictModeSetting()
+	{
+		// Regression guard for the raindrop-tracker failure (run bb4e5c787a0a): every
+		// pwsh/powershell step must switch its output streams to UTF-8 BEFORE any user output,
+		// independent of the strict-mode setting (including strictMode:false, where the
+		// error-handling prologue is null). Otherwise pwsh encodes stdout with the Windows OEM
+		// code page and best-fit mangles non-ASCII characters — collapsing curly quotes into an
+		// unescaped ASCII '"' that breaks downstream JSON parsing.
+		foreach (var shell in new[] { "pwsh", "powershell" })
+		{
+			foreach (var strict in new bool?[] { null, true, false })
+			{
+				var preamble = ScriptStepExecutor.BuildPowerShellPreamble(shell, strict);
+				preamble.Should().NotBeNull($"pwsh-family shells always get a preamble (shell={shell}, strict={strict})");
+				preamble!.Should().StartWith(ScriptStepExecutor.PowerShellOutputEncodingPrologue,
+					"the encoding switch must run before the control helpers and error-handling prologue");
+				preamble.Should().Contain("[Console]::OutputEncoding");
+				preamble.Should().Contain("UTF8Encoding");
+			}
+		}
+	}
+
+	[Fact]
+	public void BuildPowerShellPreamble_NonPowerShellShell_ReturnsNull()
+	{
+		// Non-pwsh shells (bash/python/node) are UTF-8 by default and receive no injection.
+		ScriptStepExecutor.BuildPowerShellPreamble("bash", null).Should().BeNull();
+		ScriptStepExecutor.BuildPowerShellPreamble("python", true).Should().BeNull();
+		ScriptStepExecutor.BuildPowerShellPreamble("node", false).Should().BeNull();
+	}
+
+	[Fact]
+	public void PowerShellOutputEncodingPrologue_IsSinglePhysicalLine()
+	{
+		// Same one-physical-line contract as the other prologues so injecting it shifts the
+		// user's script by exactly one line, preserving line:col references in error output.
+		ScriptStepExecutor.PowerShellOutputEncodingPrologue.Should().NotContain("\n");
+		ScriptStepExecutor.PowerShellOutputEncodingPrologue.Should().NotContain("\r");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_PwshEmitsJsonWithNonAsciiPunctuation_RoundTripsAsValidUtf8Json()
+	{
+		// End-to-end regression guard for the raindrop-tracker failure (run bb4e5c787a0a): a pwsh
+		// step serialized a raindrop whose excerpt contained curly quotes U+201C/U+201D. With the
+		// child's stdout left on the Windows OEM code page, best-fit mapping collapsed those smart
+		// quotes to an unescaped ASCII '"', producing invalid JSON that the next step's
+		// ConvertFrom-Json rejected ("unexpected character 'p'" at [8].excerpt). Building the string
+		// from code points (not the .ps1 file bytes) isolates the OUTPUT encoding path: the payload
+		// must round-trip byte-lossless and parse as valid JSON.
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(
+			shell: "pwsh",
+			script: """
+				$smartOpen = [char]0x201C
+				$smartClose = [char]0x201D
+				$check = [char]0x2705
+				$pin = [System.Char]::ConvertFromUtf32(0x1F4CC)
+				$item = [ordered]@{
+				    title = 'Movies That Were Left Unrated For Being Too Extreme'
+				    excerpt = "the Hays Code was used for a simplistic ${smartOpen}pass/fail${smartClose} system $check $pin end"
+				}
+				$item | ConvertTo-Json -Compress
+				""");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert — the step succeeds and its stdout is valid, lossless UTF-8 JSON.
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		var json = result.Content.Trim();
+
+		var parse = () => System.Text.Json.JsonDocument.Parse(json);
+		parse.Should().NotThrow(
+			"smart quotes must survive as UTF-8 rather than best-fit to an unescaped ASCII quote");
+
+		using var doc = System.Text.Json.JsonDocument.Parse(json);
+		var excerpt = doc.RootElement.GetProperty("excerpt").GetString();
+		excerpt.Should().Contain("\u201Cpass/fail\u201D", "curly quotes must be preserved verbatim");
+		excerpt.Should().Contain("\u2705", "the check-mark emoji must not be flattened to '?'");
+		excerpt.Should().Contain("\U0001F4CC", "the surrogate-pair pushpin emoji must round-trip intact");
+	}
+
+	[Fact]
 	public async Task ExecuteAsync_PwshWriteError_ByDefault_ReturnsFailed()
 	{
 		// Arrange — by default for pwsh, the executor injects

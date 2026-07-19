@@ -45,6 +45,14 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
+	/// UTF-8 without a byte-order mark, used to decode child-process stdout/stderr. A shared
+	/// instance because <see cref="System.Text.Encoding"/> is immutable and thread-safe. Emitting
+	/// no BOM keeps the captured text byte-clean so downstream JSON parsing does not trip over a
+	/// leading U+FEFF.
+	/// </summary>
+	private static readonly Encoding s_utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+	/// <summary>
 	/// Marker prefix used to indicate that an argument has been spilled to a file
 	/// due to size constraints (Windows CreateProcess ~32K limit). The value after
 	/// the prefix is the absolute path to a file containing the original argument
@@ -146,6 +154,30 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	/// </summary>
 	internal const string PowerShellControlHelpers =
 		"function Orchestra-Complete { param([Parameter(Mandatory)][ValidateSet('success','failed')][string]$Status,[string]$Reason='') if (-not $env:ORCHESTRA_CONTROL_FILE) { throw 'ORCHESTRA_CONTROL_FILE is not set; Orchestra control helpers only work inside an Orchestra Script step.' }; (@{ action='complete'; status=$Status; reason=$Reason } | ConvertTo-Json -Compress) | Set-Content -LiteralPath $env:ORCHESTRA_CONTROL_FILE -NoNewline -Encoding utf8 }; function Orchestra-SetStatus { param([Parameter(Mandatory)][ValidateSet('success','failed','no_action')][string]$Status,[string]$Reason='') if (-not $env:ORCHESTRA_CONTROL_FILE) { throw 'ORCHESTRA_CONTROL_FILE is not set; Orchestra control helpers only work inside an Orchestra Script step.' }; (@{ action='set_status'; status=$Status; reason=$Reason } | ConvertTo-Json -Compress) | Set-Content -LiteralPath $env:ORCHESTRA_CONTROL_FILE -NoNewline -Encoding utf8 };";
+
+	/// <summary>
+	/// PowerShell statement injected ahead of every pwsh/powershell prologue (independent of
+	/// <see cref="ScriptOrchestrationStep.StrictMode"/>) that forces the child's output streams to
+	/// UTF-8 without a BOM.
+	/// </summary>
+	/// <remarks>
+	/// <para>When a pwsh child's stdout is redirected, PowerShell encodes success-stream text using
+	/// <c>[Console]::OutputEncoding</c>, which on Windows defaults to the OEM console code page
+	/// (e.g. CP437/CP850). That code page cannot represent most non-ASCII characters, so its
+	/// best-fit fallback transliterates them — turning curly quotes <c>U+201C</c>/<c>U+201D</c>
+	/// into a plain ASCII <c>"</c>. Because a JSON serializer only escapes ASCII quotes, those
+	/// smart quotes were emitted unescaped and any downstream <c>ConvertFrom-Json</c> failed with
+	/// an "unexpected character" error. Pinning both <c>[Console]::OutputEncoding</c> (stdout/stderr
+	/// writers) and <c>$OutputEncoding</c> (native-command pipe) to UTF-8 keeps the bytes lossless;
+	/// the host-side <c>StandardOutputEncoding</c>/<c>StandardErrorEncoding</c> read them back the
+	/// same way.</para>
+	/// <para>Wrapped in <c>try/catch</c> and placed before <c>$ErrorActionPreference='Stop'</c> so a
+	/// rare headless environment that rejects the assignment degrades gracefully instead of failing
+	/// the step. The assignment itself emits nothing to the success stream. Kept on a single
+	/// physical line so the user's script preserves its original line numbers.</para>
+	/// </remarks>
+	internal const string PowerShellOutputEncodingPrologue =
+		"try { [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { };";
 
 	public ScriptStepExecutor(
 		IOrchestrationReporter reporter,
@@ -270,6 +302,14 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				RedirectStandardInput = resolvedStdin is not null,
 				UseShellExecute = false,
 				CreateNoWindow = true,
+				// Decode the child's stdout/stderr as UTF-8 (no BOM). Without this .NET falls
+				// back to Console.OutputEncoding, which on Windows is the OEM console code page
+				// (e.g. CP437/CP850). That best-fit mapping silently transliterates non-ASCII
+				// characters — most destructively, curly double-quotes U+201C/U+201D collapse to
+				// an unescaped ASCII '"', corrupting any JSON a step emits (see the paired
+				// child-side PowerShellOutputEncodingPrologue that makes pwsh WRITE UTF-8).
+				StandardOutputEncoding = s_utf8NoBom,
+				StandardErrorEncoding = s_utf8NoBom,
 			};
 
 			// Add run-file args (e.g., -NoProfile -File for pwsh)
@@ -530,9 +570,13 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			return null;
 
 		var prologue = GetPowerShellPrologue(shell, explicitOptIn);
-		return prologue is null
+		var body = prologue is null
 			? PowerShellControlHelpers
 			: PowerShellControlHelpers + " " + prologue;
+
+		// Force UTF-8 output first so it applies regardless of the strict-mode setting (including
+		// strictMode:false, where GetPowerShellPrologue returns null) and before any user output.
+		return PowerShellOutputEncodingPrologue + " " + body;
 	}
 
 	/// <summary>
