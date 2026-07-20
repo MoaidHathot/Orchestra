@@ -1721,6 +1721,25 @@ internal sealed partial class CopilotSessionHandler
 			&& message.Contains("authentication", StringComparison.OrdinalIgnoreCase))
 			return true;
 
+		// Transient failures while the bundled CLI fetches the GitHub OAuth user at
+		// session.create/resume time (it must call api.github.com/copilot_internal/user to
+		// establish the session). When GitHub is briefly unavailable ("(503): ... No server is
+		// currently available") or the network call itself fails, the CLI surfaces
+		// "Authentication failed: Failed to fetch OAuth user login (...)". A fresh CLI worker
+		// re-runs that fetch from scratch, so a swap + short backoff clears the transient window.
+		// These are TRANSIENT signals only — permanent auth failures (bad/expired token, 401,
+		// "unauthorized") are deliberately NOT matched so we never retry unrecoverable creds.
+		if (message.Contains("Failed to fetch OAuth user login", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("No server is currently available", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("copilot_internal/user", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("network fetch failed", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("error sending request for url", StringComparison.OrdinalIgnoreCase))
+			return true;
+
 		return false;
 	}
 

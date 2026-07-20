@@ -11,7 +11,8 @@ internal sealed record CopilotAgentSwapOptions(
 	bool ResumeOnSwapEnabled,
 	TimeSpan ResumeAlreadyInUseWait,
 	TimeSpan ResumeAlreadyInUsePollInterval,
-	TimeSpan McpStartupTimeout)
+	TimeSpan McpStartupTimeout,
+	TimeSpan SwapBackoffBase = default)
 {
 	public static CopilotAgentSwapOptions FromPoolOptions(CopilotAgentPoolOptions options) => new(
 		CliSwapBudgetPerStep: Math.Max(0, options.CliSwapBudgetPerStep),
@@ -24,7 +25,11 @@ internal sealed record CopilotAgentSwapOptions(
 			: options.ResumeAlreadyInUsePollInterval,
 		McpStartupTimeout: options.McpStartupTimeout < TimeSpan.Zero
 			? TimeSpan.Zero
-			: options.McpStartupTimeout);
+			: options.McpStartupTimeout,
+		// Base delay for the exponential backoff the swap loop applies before retrying an
+		// UPSTREAM-transient failure (transient_upstream / cli_exhausted_retries) so we don't
+		// immediately re-hit a brief provider/network outage. 1s → 1s/2s/4s across swaps.
+		SwapBackoffBase: TimeSpan.FromSeconds(1));
 
 	/// <summary>
 	/// Default options for test / fallback paths where the builder isn't involved.

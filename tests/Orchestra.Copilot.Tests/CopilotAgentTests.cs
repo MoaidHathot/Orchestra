@@ -533,6 +533,17 @@ public class CopilotAgentTests
 			FailureReasons.Add(failureReason);
 			return Task.FromResult(true);
 		}
+
+		public int ForceUnhealthyCalls { get; private set; }
+
+		public void ForceUnhealthy(string triggeringSessionId, string triggeringFailureReason, string? details)
+		{
+			ForceUnhealthyCalls++;
+			IsClientUnhealthy = true;
+			UnhealthyTriggeringSessionId = triggeringSessionId;
+			UnhealthyTriggeringFailureReason = triggeringFailureReason;
+			UnhealthyReason = details;
+		}
 	}
 
 	private sealed class ThrowingCopilotClient : ICopilotClient

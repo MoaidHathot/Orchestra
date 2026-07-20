@@ -61,6 +61,17 @@ internal interface ISessionFaultBroker
 		string failedSessionId,
 		string failureReason,
 		CancellationToken cancellationToken);
+
+	/// <summary>
+	/// Force-latches the client unhealthy WITHOUT running the health probe. Used when a failure
+	/// warrants recreating the CLI worker even though the transport is still responsive — e.g. a
+	/// transient upstream auth/OAuth failure at session.create: the process is alive (the probe
+	/// would report healthy) but should be replaced so the next attempt re-authenticates on a
+	/// clean worker. Latches one-way like the probe path and is a no-op once already latched.
+	/// Does NOT fault sibling sessions: the transport is alive, so any in-flight siblings are
+	/// unaffected and are left to finish (the pool evicts this worker once it is idle).
+	/// </summary>
+	void ForceUnhealthy(string triggeringSessionId, string triggeringFailureReason, string? details);
 }
 
 /// <summary>
@@ -81,6 +92,7 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 	private string? _unhealthyReason;
 	private string? _unhealthyTriggeringSessionId;
 	private string? _unhealthyTriggeringFailureReason;
+	private readonly object _forceLatchGate = new();
 
 	public bool IsClientUnhealthy => _isClientUnhealthy;
 	public string? UnhealthyReason => _unhealthyReason;
@@ -186,6 +198,26 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 		}
 	}
 
+	public void ForceUnhealthy(string triggeringSessionId, string triggeringFailureReason, string? details)
+	{
+		// Fast path: one-way latch — never downgrade or overwrite an existing unhealthy record.
+		if (_isClientUnhealthy)
+			return;
+
+		lock (_forceLatchGate)
+		{
+			if (_isClientUnhealthy)
+				return;
+
+			_unhealthyReason = details;
+			_unhealthyTriggeringSessionId = triggeringSessionId;
+			_unhealthyTriggeringFailureReason = triggeringFailureReason;
+			_isClientUnhealthy = true;
+		}
+
+		LogForcedUnhealthy(_scopeId, triggeringSessionId, triggeringFailureReason, details ?? "(no details)");
+	}
+
 	private void Unregister(string sessionId)
 	{
 		if (_registry.TryRemove(sessionId, out _))
@@ -248,6 +280,10 @@ internal sealed partial class SessionFaultBroker : ISessionFaultBroker
 	[LoggerMessage(EventId = 207, Level = LogLevel.Debug,
 		Message = "FaultBroker#{ScopeId}: client already latched unhealthy; skipping probe for session '{SessionId}'")]
 	private partial void LogProbeCachedUnhealthy(int scopeId, string sessionId);
+
+	[LoggerMessage(EventId = 208, Level = LogLevel.Warning,
+		Message = "FaultBroker#{ScopeId}: force-latching client UNHEALTHY (transport still alive) after session '{SessionId}' failure (reason={FailureReason}, details={Details}). The pool will recreate this worker once idle.")]
+	private partial void LogForcedUnhealthy(int scopeId, string sessionId, string failureReason, string details);
 
 	#endregion
 }

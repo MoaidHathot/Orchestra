@@ -898,6 +898,22 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			&& message.Contains("authentication", StringComparison.OrdinalIgnoreCase))
 			return true;
 
+		// Transient GitHub OAuth-user fetch failures at Copilot session.create/resume time
+		// (503 "No server is currently available" or a network blip reaching
+		// api.github.com/copilot_internal/user). A fresh CLI worker re-authenticates and clears
+		// it. Transient signals only — permanent auth (401/expired token) is NOT matched.
+		// Mirrors CopilotSessionHandler.LooksLikeTransientUpstreamFailure.
+		if (message.Contains("Failed to fetch OAuth user login", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("No server is currently available", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("copilot_internal/user", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("network fetch failed", StringComparison.OrdinalIgnoreCase))
+			return true;
+		if (message.Contains("error sending request for url", StringComparison.OrdinalIgnoreCase))
+			return true;
+
 		return false;
 	}
 

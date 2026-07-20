@@ -207,7 +207,8 @@ public partial class CopilotAgent : IAgent
 			_reporter,
 			_stepName,
 			_loggerFactory.CreateLogger<AgentSwapLoop>(),
-			new PoolSwapMetricsSink(_clientPool));
+			new PoolSwapMetricsSink(_clientPool),
+			swapBackoff: AgentSwapLoop.ExponentialUpstreamBackoff(_swapOptions.SwapBackoffBase));
 
 		return swapLoop.RunAsync(
 			runAttempt: (ctx, ct) => RunOneAttemptAsync(prompt, writer, ctx.PriorSessionId, ctx.SwapAttempt, ctx.SessionIdBox, ct),
@@ -403,6 +404,33 @@ public partial class CopilotAgent : IAgent
 						triggeringSessionId: priorSessionId ?? "(session-create)");
 				}
 
+				// Transient upstream failure while ESTABLISHING the session (e.g. a GitHub OAuth
+				// 503 "No server is currently available", or a network blip reaching
+				// api.github.com/copilot_internal/user when the CLI fetches the Copilot user at
+				// session.create/resume). The transport is alive, so the probe above stayed
+				// healthy and did NOT latch — but the reliable fix is a FRESH worker that
+				// re-authenticates from scratch. Force-latch this worker unhealthy so the pool
+				// recreates it, and surface a transient_upstream-classified exception so the swap
+				// loop retries on that fresh worker (with a short backoff). Checked BEFORE the
+				// resume-missing fallback so a transient resume failure (whose message contains
+				// "session.resume failed") is routed here rather than to a plain cold restart.
+				if (IsTransientSessionCreateFailure(ex))
+				{
+					var op = isResumeAttempt ? "ResumeSessionAsync" : "CreateSessionAsync";
+					LogTransientSessionSetupFailure(op, client.DiagnosticHash, ex.Message);
+					faultBroker?.ForceUnhealthy(
+						triggeringSessionId: priorSessionId ?? "(session-create)",
+						triggeringFailureReason: "session_setup_transient",
+						details: ex.Message);
+					throw new CopilotSessionFailedException(
+						kind: CopilotSessionFailureKind.SessionError,
+						model: _model,
+						message: $"Transient upstream failure while establishing the Copilot session ({op}); " +
+								 $"recreating the CLI worker and retrying. Underlying error: {ex.Message}",
+						reason: "session_setup_transient",
+						details: new AgentSessionErrorDetails { TransientUpstreamFailure = true, ErrorType = "authentication" });
+				}
+
 				// Resume-specific fallback: if ResumeSessionAsync failed because the CLI no
 				// longer knows about the prior session id ("Session not found"), the worker
 				// itself is fine — the saved session just isn't replayable anymore (e.g. the
@@ -525,6 +553,25 @@ public partial class CopilotAgent : IAgent
 					throw NewClientUnhealthyFromBroker(faultBroker, ex,
 						triggeringSessionId: session.SessionId);
 				}
+
+				// Transient upstream failure surfaced as a SendAsync exception (rather than a
+				// session.error event). Same treatment as the create/resume path: recreate the
+				// worker and retry on a fresh one via the transient_upstream swap classification.
+				if (IsTransientSessionCreateFailure(ex))
+				{
+					LogTransientSessionSetupFailure("SendAsync", client.DiagnosticHash, ex.Message);
+					faultBroker?.ForceUnhealthy(
+						triggeringSessionId: session.SessionId,
+						triggeringFailureReason: "session_send_transient",
+						details: ex.Message);
+					throw new CopilotSessionFailedException(
+						kind: CopilotSessionFailureKind.SessionError,
+						model: _model,
+						message: $"Transient upstream failure while sending to the Copilot session; " +
+								 $"recreating the CLI worker and retrying. Underlying error: {ex.Message}",
+						reason: "session_send_transient",
+						details: new AgentSessionErrorDetails { TransientUpstreamFailure = true });
+				}
 				throw;
 			}
 
@@ -609,6 +656,21 @@ public partial class CopilotAgent : IAgent
 		return message.Contains("Session not found", StringComparison.OrdinalIgnoreCase)
 			|| message.Contains("session.resume failed", StringComparison.OrdinalIgnoreCase);
 	}
+
+	/// <summary>
+	/// Returns true if a <c>CreateSessionAsync</c>/<c>ResumeSessionAsync</c>/<c>SendAsync</c>
+	/// exception carries a TRANSIENT upstream signal — e.g. a GitHub OAuth 503 or a network
+	/// blip while the bundled CLI fetches the Copilot user at session.create
+	/// (<c>"Authentication failed: Failed to fetch OAuth user login (503)/network fetch failed"</c>).
+	/// Such failures are not the CLI's fault and clear on a fresh worker, so we classify them as
+	/// <c>transient_upstream</c> (swap-eligible) and force-recreate the worker. Delegates to the
+	/// shared <see cref="CopilotSessionHandler.LooksLikeTransientUpstreamFailure"/> matcher so the
+	/// create/resume/send EXCEPTION path and the <c>session.error</c> EVENT path stay in sync.
+	/// Permanent auth failures (401 / expired-or-bad token) are intentionally excluded by that
+	/// matcher, so they still fail fast instead of burning the swap budget.
+	/// </summary>
+	private static bool IsTransientSessionCreateFailure(Exception ex)
+		=> CopilotSessionHandler.LooksLikeTransientUpstreamFailure(ex.Message, statusCode: null);
 
 	/// <summary>
 	/// Waits for the SDK's <c>SessionResumeEvent</c> with a bounded grace window. When
@@ -1763,6 +1825,10 @@ public partial class CopilotAgent : IAgent
 	[LoggerMessage(EventId = 21, Level = LogLevel.Warning,
 		Message = "ResumeSessionAsync reported the prior session '{PriorSessionId}' is missing on the CLI ({SdkMessage}); falling back to cold restart of the step")]
 	private partial void LogResumeSessionMissingFallback(string priorSessionId, string sdkMessage);
+
+	[LoggerMessage(EventId = 24, Level = LogLevel.Warning,
+		Message = "Transient upstream failure during {Operation} on CLI client {ClientHash} ({SdkMessage}); recreating the worker and retrying on a fresh CLI.")]
+	private partial void LogTransientSessionSetupFailure(string operation, int clientHash, string sdkMessage);
 
 	// EventId 22: SDK 1.0.0 added SessionId to every hook input (PR #1306). Logging the
 	// SDK-reported session id alongside the source ("startup" / "resume" / "new") and the

@@ -88,19 +88,47 @@ public sealed partial class AgentSwapLoop
 	private readonly ISwapMetricsSink _metrics;
 	private readonly string _stepName;
 	private readonly ILogger _logger;
+	private readonly Func<string, int, TimeSpan> _swapBackoff;
 
 	public AgentSwapLoop(
 		SwapPolicy policy,
 		IOrchestrationReporter reporter,
 		string stepName,
 		ILogger logger,
-		ISwapMetricsSink? metrics = null)
+		ISwapMetricsSink? metrics = null,
+		Func<string, int, TimeSpan>? swapBackoff = null)
 	{
 		_policy = policy;
 		_reporter = reporter;
 		_stepName = stepName;
 		_logger = logger;
 		_metrics = metrics ?? NullSwapMetricsSink.Instance;
+		// Default: no backoff (immediate retry) — preserves historical behavior for providers
+		// that don't opt in. Copilot passes ExponentialUpstreamBackoff so upstream-transient
+		// swaps wait briefly before re-attempting.
+		_swapBackoff = swapBackoff ?? (static (_, _) => TimeSpan.Zero);
+	}
+
+	/// <summary>
+	/// Builds a reason-gated exponential backoff: it delays only before retrying an
+	/// UPSTREAM-transient failure (<c>transient_upstream</c> / <c>cli_exhausted_retries</c>),
+	/// where a brief provider/network outage is likely and an immediate retry would just
+	/// re-hit it. Local transport failures (<c>transport_lost</c> / <c>resume_*</c>) retry
+	/// immediately — there is nothing upstream to wait on. Delay grows as
+	/// <paramref name="baseDelay"/> × 2^(swap-1), capped at 4×. A non-positive
+	/// <paramref name="baseDelay"/> disables backoff entirely (used by tests).
+	/// </summary>
+	public static Func<string, int, TimeSpan> ExponentialUpstreamBackoff(TimeSpan baseDelay)
+	{
+		if (baseDelay <= TimeSpan.Zero)
+			return static (_, _) => TimeSpan.Zero;
+
+		var baseMs = baseDelay.TotalMilliseconds;
+		var capMs = baseMs * 4;
+		return (reason, swapAttempt) =>
+			reason is "transient_upstream" or "cli_exhausted_retries"
+				? TimeSpan.FromMilliseconds(Math.Min(capMs, baseMs * Math.Pow(2, Math.Max(0, swapAttempt - 1))))
+				: TimeSpan.Zero;
 	}
 
 	/// <summary>
@@ -182,6 +210,15 @@ public sealed partial class AgentSwapLoop
 						mode: nextMode == SwapMode.Resume ? "resume" : "cold_restart");
 
 					priorSessionId = nextMode == SwapMode.Resume ? attemptedSessionId : null;
+
+					// Brief, reason-gated backoff before retrying so an upstream-transient
+					// failure isn't immediately re-hit (no-op for local transport failures).
+					var backoff = _swapBackoff(reason, swapAttempt);
+					if (backoff > TimeSpan.Zero)
+					{
+						LogSwapBackoff(reason, swapAttempt, backoff.TotalMilliseconds);
+						await Task.Delay(backoff, cancellationToken).ConfigureAwait(false);
+					}
 					// Loop back for another attempt on a fresh worker.
 				}
 			}
@@ -283,4 +320,10 @@ public sealed partial class AgentSwapLoop
 		Level = LogLevel.Information,
 		Message = "Swap #{SwapAttempt}/{SwapBudget} triggered for session '{SessionId}' (reason: {Reason}, mode: {Mode}).")]
 	private partial void LogSwapTriggered(string sessionId, int swapAttempt, int swapBudget, string reason, string mode);
+
+	[LoggerMessage(
+		EventId = 3,
+		Level = LogLevel.Information,
+		Message = "Backing off {BackoffMs}ms before swap #{SwapAttempt} (reason: {Reason}) to let the upstream transient clear.")]
+	private partial void LogSwapBackoff(string reason, int swapAttempt, double backoffMs);
 }

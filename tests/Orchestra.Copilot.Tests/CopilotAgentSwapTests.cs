@@ -308,6 +308,99 @@ public class CopilotAgentSwapTests
 		pool.SwapsRecorded.Should().BeLessThanOrEqualTo(3);
 	}
 
+	[Fact]
+	public async Task SessionCreateTransientUpstream_SwapsAndRecreatesInstance_ThenSucceeds()
+	{
+		// Reproduces the observed production failure: the CLI process is ALIVE but session.create
+		// failed because GitHub's OAuth user-fetch returned a transient 503. The health probe
+		// stays healthy (transport up), so previously this rethrew raw and failed the whole step.
+		// Now it must force-recreate this worker (latch it unhealthy so the pool replaces it) and
+		// swap to a fresh CLI that re-authenticates and succeeds.
+		const string transient =
+			"Communication error with Copilot CLI: Request session.create failed with message: " +
+			"Authentication failed: Failed to fetch OAuth user login (503): GitHub returned: " +
+			"No server is currently available to service your request.";
+
+		var failingClient = new ScriptedCopilotClient(createSessionThrows: new Exception(transient));
+		var failingBroker = new HealthyForceableFaultBroker();
+
+		var recoverySession = new ScriptedCopilotSession("session-recovered", completeImmediately: true);
+		var recoveryClient = new ScriptedCopilotClient(recoverySession);
+
+		var pool = new ScriptedPool(
+			new ScriptedLease(failingClient, failingBroker),
+			new ScriptedLease(recoveryClient, faultBroker: null));
+		var reporter = Substitute.For<IOrchestrationReporter>();
+		var agent = CreateAgent(pool, reporter, ResumeEnabled: true);
+
+		var task = agent.SendAsync(Prompt);
+		var events = await DrainEventsAsync(task);
+		var result = await task.GetResultAsync();
+
+		result.Should().NotBeNull("a transient session-create auth failure must recover on a fresh CLI worker");
+		pool.AcquireCount.Should().Be(2);
+		pool.SwapsRecorded.Should().Be(1);
+
+		// The failing worker was force-latched unhealthy so the pool recreates it (rather than
+		// re-selecting the same still-alive-but-transiently-failing CLI process).
+		failingBroker.ForceUnhealthyCalls.Should().Be(1);
+		failingBroker.IsClientUnhealthy.Should().BeTrue();
+		failingBroker.UnhealthyTriggeringFailureReason.Should().Be("session_setup_transient");
+
+		var swaps = events.Where(e => e.Type == AgentEventType.CliInstanceSwapped).ToList();
+		swaps.Should().ContainSingle();
+		swaps[0].SwapReason.Should().Be("transient_upstream");
+		swaps[0].SwapMode.Should().Be("cold_restart", "the session was never created, so there is no id to resume");
+
+		recoveryClient.CreateCalls.Should().HaveCount(1);
+		reporter.Received().ReportCliSwapTriggered(
+			Arg.Any<string>(), Arg.Any<string?>(), 1, Arg.Any<int>(), "transient_upstream", "cold_restart");
+	}
+
+	[Fact]
+	public async Task SessionCreatePermanentAuthFailure_DoesNotSwap_AndFailsFast()
+	{
+		// A PERMANENT auth failure (401 / bad credentials) must NOT be treated as transient —
+		// retrying can't fix bad creds, so we fail fast without burning swap budget or churning
+		// CLI workers. Guards the conservative classification.
+		var failingClient = new ScriptedCopilotClient(createSessionThrows: new Exception(
+			"Communication error with Copilot CLI: Request session.create failed with message: " +
+			"Authentication failed: 401 Unauthorized: Bad credentials"));
+		var failingBroker = new HealthyForceableFaultBroker();
+
+		var pool = new ScriptedPool(new ScriptedLease(failingClient, failingBroker));
+		var agent = CreateAgent(pool, Substitute.For<IOrchestrationReporter>(), ResumeEnabled: true);
+
+		var task = agent.SendAsync(Prompt);
+		await DrainEventsAsync(task);
+		var act = () => task.GetResultAsync();
+
+		await act.Should().ThrowAsync<Exception>();
+		pool.AcquireCount.Should().Be(1, "a permanent auth failure must not trigger a swap");
+		pool.SwapsRecorded.Should().Be(0);
+		failingBroker.ForceUnhealthyCalls.Should().Be(0, "the worker must not be recreated for an unrecoverable auth error");
+	}
+
+	[Theory]
+	[InlineData("Authentication failed: Failed to fetch OAuth user login (503): GitHub returned: No server is currently available to service your request.")]
+	[InlineData("Authentication failed: Failed to fetch OAuth user login: network fetch failed: request failed: error sending request for url (https://api.github.com/copilot_internal/user)")]
+	public void LooksLikeTransientUpstream_MatchesTransientSessionCreateAuthFailures(string message)
+	{
+		CopilotSessionHandler.LooksLikeTransientUpstreamFailure(message, statusCode: null)
+			.Should().BeTrue("transient GitHub OAuth/network failures at session.create must be swap-eligible");
+	}
+
+	[Theory]
+	[InlineData("Authentication failed: 401 Unauthorized: Bad credentials")]
+	[InlineData("Authentication failed: token has expired")]
+	[InlineData("invalid model")]
+	[InlineData(null)]
+	public void LooksLikeTransientUpstream_DoesNotMatchPermanentOrUnrelatedFailures(string? message)
+	{
+		CopilotSessionHandler.LooksLikeTransientUpstreamFailure(message, statusCode: null)
+			.Should().BeFalse("permanent auth / unrelated errors must not be retried as transient");
+	}
+
 	#region Helpers
 
 	private static CopilotAgent CreateAgent(
@@ -548,6 +641,7 @@ public class CopilotAgentSwapTests
 		public IDisposable RegisterSession(string sessionId, Action<Exception> onFault) => new NoopDisposable();
 		public Task<bool> ProbeAndMaybeFaultSiblingsAsync(string failedSessionId, string failureReason, CancellationToken cancellationToken)
 			=> Task.FromResult(false);
+		public void ForceUnhealthy(string triggeringSessionId, string triggeringFailureReason, string? details) { }
 	}
 
 	/// <summary>
@@ -573,6 +667,50 @@ public class CopilotAgentSwapTests
 			UnhealthyTriggeringFailureReason = failureReason;
 			UnhealthyReason = $"ping failed; probe latched after '{failedSessionId}' failed with: {failureReason}";
 			return Task.FromResult(false); // unhealthy → false return
+		}
+
+		public void ForceUnhealthy(string triggeringSessionId, string triggeringFailureReason, string? details)
+		{
+			_latched = true;
+			UnhealthyTriggeringSessionId = triggeringSessionId;
+			UnhealthyTriggeringFailureReason = triggeringFailureReason;
+			UnhealthyReason = details;
+		}
+	}
+
+	/// <summary>
+	/// Fault broker whose health probe always reports HEALTHY (the CLI transport is alive) —
+	/// reproducing the transient-upstream reality where session.create failed only because an
+	/// upstream dependency (GitHub OAuth) was briefly down. It latches unhealthy ONLY when
+	/// <see cref="ForceUnhealthy"/> is called, so a test can assert the agent force-recreated
+	/// the worker for this error class instead of reusing the still-alive process.
+	/// </summary>
+	private sealed class HealthyForceableFaultBroker : ISessionFaultBroker
+	{
+		public bool IsClientUnhealthy { get; private set; }
+		public string? UnhealthyReason { get; private set; }
+		public string? UnhealthyTriggeringSessionId { get; private set; }
+		public string? UnhealthyTriggeringFailureReason { get; private set; }
+		public int ForceUnhealthyCalls { get; private set; }
+		public int ProbeCalls { get; private set; }
+
+		public IDisposable RegisterSession(string sessionId, Action<Exception> onFault) => new NoopDisposable();
+
+		public Task<bool> ProbeAndMaybeFaultSiblingsAsync(string failedSessionId, string failureReason, CancellationToken cancellationToken)
+		{
+			ProbeCalls++;
+			return Task.FromResult(true); // transport healthy → do NOT latch
+		}
+
+		public void ForceUnhealthy(string triggeringSessionId, string triggeringFailureReason, string? details)
+		{
+			ForceUnhealthyCalls++;
+			if (IsClientUnhealthy)
+				return;
+			IsClientUnhealthy = true;
+			UnhealthyTriggeringSessionId = triggeringSessionId;
+			UnhealthyTriggeringFailureReason = triggeringFailureReason;
+			UnhealthyReason = details;
 		}
 	}
 
