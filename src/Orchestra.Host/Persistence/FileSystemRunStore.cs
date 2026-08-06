@@ -18,22 +18,22 @@ namespace Orchestra.Host.Persistence;
 ///     {step-name}-result.json          - final result or exception
 ///     result.md                        - human-readable final output
 /// </summary>
-public partial class FileSystemRunStore : IRunStore
+public partial class FileSystemRunStore : IRunStore, IDisposable
 {
 	private readonly string _rootPath;
 	private readonly JsonSerializerOptions _jsonOptions;
 	private readonly ILogger<FileSystemRunStore> _logger;
 
-	// In-memory index for fast lookups - populated on first access.
-	// A single lock protects all mutations to the inner List<RunIndex> values.
-	// ConcurrentDictionary is still used for lock-free reads of the dictionary itself,
-	// but ALL reads/writes to the inner lists must hold _indexWriteLock.
-	private readonly ConcurrentDictionary<string, List<RunIndex>> _indexByOrchestration = new();
-	private readonly ConcurrentDictionary<string, List<RunIndex>> _indexByTrigger = new();
 	private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileWriteLocks = new();
-	private readonly Lock _indexWriteLock = new();
 	private volatile bool _indexLoaded;
 	private readonly SemaphoreSlim _indexLoadLock = new(1, 1);
+
+	/// <summary>
+	/// SQLite projection of the run history. Derived and always rebuildable — the run artifacts on
+	/// disk remain the source of truth. Replaces the in-memory dictionaries that used to be
+	/// rebuilt by deserializing every <c>run.json</c> on every process start.
+	/// </summary>
+	private readonly SqliteRunIndex _index;
 
 	/// <summary>
 	/// User-curated run annotations. Optional: when absent (tests, embedded hosts) favorites
@@ -55,6 +55,10 @@ public partial class FileSystemRunStore : IRunStore
 		};
 
 		Directory.CreateDirectory(_rootPath);
+
+		// Kept beside the executions it describes, so copying or deleting that directory keeps the
+		// index consistent with its contents.
+		_index = new SqliteRunIndex(Path.Combine(_rootPath, ".index.db"), _logger);
 	}
 
 	/// <summary>
@@ -191,19 +195,9 @@ public partial class FileSystemRunStore : IRunStore
 			NestingDepth = record.NestingDepth,
 		};
 
-		lock (_indexWriteLock)
-		{
-			_indexByOrchestration
-				.GetOrAdd(record.OrchestrationName, _ => [])
-				.Add(index);
-
-			if (record.TriggerId is { } tid)
-			{
-				_indexByTrigger
-					.GetOrAdd(tid, _ => [])
-					.Add(index);
-			}
-		}
+		// Upsert (not append) keyed on folder path: re-saving the same record overwrites its row
+		// instead of producing the duplicate history entry the in-memory index used to.
+		_index.Upsert(index);
 	}
 
 	// IRunStore implementation (delegates to enhanced method)
@@ -215,19 +209,7 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		List<RunIndex> snapshot;
-		lock (_indexWriteLock)
-		{
-			if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-				return [];
-			snapshot = [.. indices];
-		}
-
-		var sorted = snapshot
-			.OrderByDescending(i => i.StartedAt)
-			.Take(limit ?? int.MaxValue);
-
-		return await LoadRecordsAsync(sorted, cancellationToken);
+		return await LoadRecordsAsync(_index.ListByOrchestration(orchestrationName, limit), cancellationToken);
 	}
 
 	public async Task<IReadOnlyList<OrchestrationRunRecord>> ListAllRunsAsync(
@@ -235,19 +217,7 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		List<RunIndex> snapshot;
-		lock (_indexWriteLock)
-		{
-			snapshot = _indexByOrchestration.Values
-				.SelectMany(v => v)
-				.ToList();
-		}
-
-		var sorted = snapshot
-			.OrderByDescending(i => i.StartedAt)
-			.Take(limit ?? int.MaxValue);
-
-		return await LoadRecordsAsync(sorted, cancellationToken);
+		return await LoadRecordsAsync(_index.ListAll(limit), cancellationToken);
 	}
 
 	public async Task<IReadOnlyList<OrchestrationRunRecord>> ListRunsByTriggerAsync(
@@ -255,19 +225,7 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		List<RunIndex> snapshot;
-		lock (_indexWriteLock)
-		{
-			if (!_indexByTrigger.TryGetValue(triggerId, out var indices))
-				return [];
-			snapshot = [.. indices];
-		}
-
-		var sorted = snapshot
-			.OrderByDescending(i => i.StartedAt)
-			.Take(limit ?? int.MaxValue);
-
-		return await LoadRecordsAsync(sorted, cancellationToken);
+		return await LoadRecordsAsync(_index.ListByTrigger(triggerId, limit), cancellationToken);
 	}
 
 	public async Task<OrchestrationRunRecord?> GetRunAsync(
@@ -275,14 +233,7 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		RunIndex? match;
-		lock (_indexWriteLock)
-		{
-			if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-				return null;
-			match = indices.FirstOrDefault(i => i.RunId == runId);
-		}
-
+		var match = _index.FindRun(orchestrationName, runId);
 		if (match is null)
 			return null;
 
@@ -297,27 +248,12 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		RunIndex? match;
-		lock (_indexWriteLock)
-		{
-			if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-				return false;
+		var match = _index.FindRun(orchestrationName, runId);
+		if (match is null)
+			return false;
 
-			match = indices.FirstOrDefault(i => i.RunId == runId);
-			if (match is null)
-				return false;
-
-			// Remove from indices while holding the lock
-			indices.Remove(match);
-
-			// Also remove from trigger index if applicable
-			if (match.TriggerId is { } tid && _indexByTrigger.TryGetValue(tid, out var triggerIndices))
-			{
-				triggerIndices.RemoveAll(i => i.RunId == runId);
-			}
-		}
-
-		// Delete the folder and all its contents (outside lock to avoid holding it during I/O)
+		// Delete the folder and all its contents before dropping the index row, so a failure
+		// leaves the index describing what is actually still on disk.
 		if (Directory.Exists(match.FolderPath))
 		{
 			try
@@ -330,6 +266,8 @@ public partial class FileSystemRunStore : IRunStore
 				return false;
 			}
 		}
+
+		_index.DeleteByFolderPaths([match.FolderPath]);
 
 		// An annotation must not outlive the run it describes.
 		_annotations?.Remove(runId, orchestrationName);
@@ -358,14 +296,7 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		lock (_indexWriteLock)
-		{
-			return _indexByOrchestration.Values
-				.SelectMany(v => v)
-				.OrderByDescending(i => i.StartedAt)
-				.Take(limit ?? int.MaxValue)
-				.ToList();
-		}
+		return _index.ListAll(limit);
 	}
 
 	/// <summary>
@@ -376,12 +307,7 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		lock (_indexWriteLock)
-		{
-			return _indexByOrchestration.Values
-				.SelectMany(v => v)
-				.FirstOrDefault(i => string.Equals(i.RunId, runId, StringComparison.OrdinalIgnoreCase));
-		}
+		return _index.FindByRunId(runId);
 	}
 
 	/// <summary>
@@ -392,16 +318,7 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		lock (_indexWriteLock)
-		{
-			if (!_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-				return [];
-
-			return indices
-				.OrderByDescending(i => i.StartedAt)
-				.Take(limit ?? int.MaxValue)
-				.ToList();
-		}
+		return _index.ListByOrchestration(orchestrationName, limit);
 	}
 
 	/// <summary>
@@ -427,31 +344,8 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		lock (_indexWriteLock)
-		{
-			var stats = new Dictionary<string, OrchestrationRunStats>(
-				_indexByOrchestration.Count,
-				StringComparer.OrdinalIgnoreCase);
-
-			foreach (var (name, indices) in _indexByOrchestration)
-			{
-				if (indices.Count == 0)
-					continue;
-
-				// indices may be appended to concurrently; snapshot length and iterate by index.
-				var count = indices.Count;
-				DateTimeOffset latest = indices[0].StartedAt;
-				for (var i = 1; i < count; i++)
-				{
-					var started = indices[i].StartedAt;
-					if (started > latest) latest = started;
-				}
-
-				stats[name] = new OrchestrationRunStats(count, latest);
-			}
-
-			return stats;
-		}
+		// COUNT/MAX in SQL rather than a full scan of every index entry.
+		return _index.GetOrchestrationStats();
 	}
 
 	/// <summary>
@@ -476,43 +370,14 @@ public partial class FileSystemRunStore : IRunStore
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		lock (_indexWriteLock)
-		{
-			IEnumerable<RunIndex> query = _indexByOrchestration.Values.SelectMany(v => v);
-
-			if (!string.IsNullOrWhiteSpace(parentExecutionId))
-			{
-				query = query.Where(i => string.Equals(i.ParentExecutionId, parentExecutionId, StringComparison.OrdinalIgnoreCase));
-			}
-			else if (!string.IsNullOrWhiteSpace(rootExecutionId))
-			{
-				query = query.Where(i => string.Equals(i.RootExecutionId, rootExecutionId, StringComparison.OrdinalIgnoreCase));
-			}
-			else
-			{
-				// No scope supplied — return empty rather than the entire history.
-				return [];
-			}
-
-			if (statusFilter is not null)
-			{
-				query = query.Where(i => i.Status == statusFilter);
-			}
-
-			query = query.OrderByDescending(i => i.StartedAt);
-
-			if (offset is > 0)
-			{
-				query = query.Skip(offset.Value);
-			}
-
-			if (limit is > 0)
-			{
-				query = query.Take(limit.Value);
-			}
-
-			return query.ToList();
-		}
+		// Note the guards: `limit is > 0` / `offset is > 0` matched the previous LINQ behaviour,
+		// where a zero or negative value meant "no clause" rather than "return nothing".
+		return _index.FindChildRuns(
+			parentExecutionId,
+			rootExecutionId,
+			statusFilter,
+			limit is > 0 ? limit : null,
+			offset is > 0 ? offset : null);
 	}
 
 	private async Task EnsureIndexLoadedAsync(CancellationToken cancellationToken)
@@ -524,85 +389,63 @@ public partial class FileSystemRunStore : IRunStore
 		{
 			if (_indexLoaded) return;
 
-			if (!Directory.Exists(_rootPath)) return;
+			if (!Directory.Exists(_rootPath)) { _indexLoaded = true; return; }
 
-			// Collect all run.json paths first, then read them in parallel.
-			var runPaths = new List<(string RunDir, string RunJsonPath)>();
+			// Reconcile the index against the filesystem. Run folders are write-once, so an
+			// existing row can never be stale -- only additions and deletions matter, and a
+			// directory walk finds both without opening a single run.json.
+			var onDisk = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 			foreach (var orchestrationDir in Directory.EnumerateDirectories(_rootPath))
 			{
 				foreach (var runDir in Directory.EnumerateDirectories(orchestrationDir))
 				{
 					var runJsonPath = Path.Combine(runDir, "run.json");
 					if (File.Exists(runJsonPath))
-						runPaths.Add((runDir, runJsonPath));
+						onDisk[runDir] = runJsonPath;
 				}
 			}
 
-			// Read and deserialize all run records in parallel.
-			var tasks = runPaths.Select(async entry =>
+			var indexed = _index.GetIndexedFolderPaths();
+
+			var removed = indexed.Where(p => !onDisk.ContainsKey(p)).ToList();
+			if (removed.Count > 0)
+				_index.DeleteByFolderPaths(removed);
+
+			var missing = onDisk.Where(kvp => !indexed.Contains(kvp.Key)).ToList();
+			if (missing.Count > 0)
 			{
-				try
-				{
-					var json = await File.ReadAllTextAsync(entry.RunJsonPath, cancellationToken);
-					var record = JsonSerializer.Deserialize<OrchestrationRunRecord>(json, _jsonOptions);
-					if (record is null) return null;
+				var sw = System.Diagnostics.Stopwatch.StartNew();
 
-					var (failedStep2, errorMsg2) = ExtractFailureInfo(record);
-					return new RunIndex
+				// Only unindexed runs are read, and each is projected with a streaming reader that
+				// skips step traces and content. After the first pass this list is empty.
+				var projected = await Task.WhenAll(missing.Select(async entry =>
+				{
+					try
 					{
-						RunId = record.RunId,
-						OrchestrationName = record.OrchestrationName,
-						OrchestrationVersion = record.OrchestrationVersion,
-						TriggeredBy = record.TriggeredBy,
-						StartedAt = record.StartedAt,
-						CompletedAt = record.CompletedAt,
-						Status = record.Status,
-						TriggerId = record.TriggerId,
-						FolderPath = entry.RunDir,
-						FailedStepName = failedStep2,
-						ErrorMessage = errorMsg2,
-						CompletionReason = record.CompletionReason,
-						CompletedByStep = record.CompletedByStep,
-						IsIncomplete = record.IsIncomplete,
-						Cancellation = record.Cancellation,
-						HookExecutionCount = record.HookExecutions.Count,
-						RetriedFromRunId = record.RetriedFromRunId,
-						RetryMode = record.RetryMode,
-						ParentExecutionId = record.ParentExecutionId,
-						ParentStepName = record.ParentStepName,
-						RootExecutionId = record.RootExecutionId,
-						NestingDepth = record.NestingDepth,
-					};
-				}
-				catch (Exception ex)
-				{
-					LogCorruptRunRecord(entry.RunJsonPath, ex);
-					return null;
-				}
-			});
-
-			var results = await Task.WhenAll(tasks);
-
-			// Insert all results into the index under a single lock.
-			lock (_indexWriteLock)
-			{
-				foreach (var index in results)
-				{
-					if (index is null) continue;
-
-					_indexByOrchestration
-						.GetOrAdd(index.OrchestrationName, _ => [])
-						.Add(index);
-
-					if (index.TriggerId is { } tid)
-					{
-						_indexByTrigger
-							.GetOrAdd(tid, _ => [])
-							.Add(index);
+						var bytes = await File.ReadAllBytesAsync(entry.Value, cancellationToken);
+						var projection = RunIndexProjector.Project(bytes, entry.Key);
+						if (projection is null)
+							LogCorruptRunRecord(entry.Value, new InvalidDataException("run.json could not be projected"));
+						return projection;
 					}
-				}
-			}
+					catch (Exception ex)
+					{
+						LogCorruptRunRecord(entry.Value, ex);
+						return null;
+					}
+				}));
 
+				var usable = projected.Where(p => p is not null).Select(p => p!).ToList();
+				if (usable.Count > 0)
+					_index.UpsertMany(usable);
+
+				sw.Stop();
+				LogIndexBuilt(usable.Count, removed.Count, _index.Count, sw.ElapsedMilliseconds);
+			}
+			else if (removed.Count > 0)
+			{
+				LogIndexBuilt(0, removed.Count, _index.Count, 0);
+			}
 			_indexLoaded = true;
 		}
 		finally
@@ -694,72 +537,53 @@ public partial class FileSystemRunStore : IRunStore
 
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		var toDelete = new List<(string OrchestrationName, RunIndex Index)>();
+		var toDelete = new List<RunIndex>();
 
-		lock (_indexWriteLock)
+		foreach (var (orchestrationName, _) in _index.GetOrchestrationStats())
 		{
-			foreach (var (orchestrationName, indices) in _indexByOrchestration)
+			// Favorited runs are exempt from retention entirely, and are excluded from the
+			// ranking below rather than merely skipped. The max-count rule deletes by
+			// position (i >= N), so leaving favorites in the ranking would let N favorites
+			// permanently occupy every keep-slot and block all pruning for the orchestration.
+			var sorted = _index.ListByOrchestration(orchestrationName)
+				.Where(i => !IsFavorite(i.RunId))
+				.ToList();
+
+			for (var i = 0; i < sorted.Count; i++)
 			{
-				// Favorited runs are exempt from retention entirely, and are excluded from the
-				// ranking below rather than merely skipped. The max-count rule deletes by
-				// position (i >= N), so leaving favorites in the ranking would let N favorites
-				// permanently occupy every keep-slot and block all pruning for the orchestration.
-				var sorted = indices
-					.Where(i => !IsFavorite(i.RunId))
-					.OrderByDescending(i => i.StartedAt)
-					.ToList();
+				var run = sorted[i];
+				var shouldDelete = false;
 
-				for (var i = 0; i < sorted.Count; i++)
+				// Check max age
+				if (policy.MaxRunAgeDays is > 0)
 				{
-					var run = sorted[i];
-					var shouldDelete = false;
-
-					// Check max age
-					if (policy.MaxRunAgeDays is > 0)
-					{
-						var age = DateTimeOffset.UtcNow - run.StartedAt;
-						if (age.TotalDays > policy.MaxRunAgeDays.Value)
-							shouldDelete = true;
-					}
-
-					// Check max count per orchestration (keep only the newest N)
-					if (policy.MaxRunsPerOrchestration is > 0 && i >= policy.MaxRunsPerOrchestration.Value)
-					{
+					var age = DateTimeOffset.UtcNow - run.StartedAt;
+					if (age.TotalDays > policy.MaxRunAgeDays.Value)
 						shouldDelete = true;
-					}
+				}
 
-					if (shouldDelete)
-					{
-						toDelete.Add((orchestrationName, run));
-					}
+				// Check max count per orchestration (keep only the newest N)
+				if (policy.MaxRunsPerOrchestration is > 0 && i >= policy.MaxRunsPerOrchestration.Value)
+				{
+					shouldDelete = true;
+				}
+
+				if (shouldDelete)
+				{
+					toDelete.Add(run);
 				}
 			}
 		}
 
-		// Delete outside the lock to avoid holding it during I/O
 		var deleted = 0;
 		var deletedRunIds = new List<string>();
-		foreach (var (orchestrationName, run) in toDelete)
+		var deletedFolders = new List<string>();
+		foreach (var run in toDelete)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
 
 			try
 			{
-				// Remove from indices
-				lock (_indexWriteLock)
-				{
-					if (_indexByOrchestration.TryGetValue(orchestrationName, out var indices))
-					{
-						indices.RemoveAll(i => i.RunId == run.RunId);
-					}
-
-					if (run.TriggerId is { } tid && _indexByTrigger.TryGetValue(tid, out var triggerIndices))
-					{
-						triggerIndices.RemoveAll(i => i.RunId == run.RunId);
-					}
-				}
-
-				// Delete the folder
 				if (Directory.Exists(run.FolderPath))
 				{
 					Directory.Delete(run.FolderPath, recursive: true);
@@ -767,12 +591,18 @@ public partial class FileSystemRunStore : IRunStore
 
 				deleted++;
 				deletedRunIds.Add(run.RunId);
+				deletedFolders.Add(run.FolderPath);
 			}
 			catch (Exception ex)
 			{
 				LogRetentionDeleteFailed(run.FolderPath, ex);
 			}
 		}
+
+		// Drop index rows only for folders that were actually removed, so a failed delete leaves
+		// the index describing what is still on disk.
+		if (deletedFolders.Count > 0)
+			_index.DeleteByFolderPaths(deletedFolders);
 
 		// Annotations must not outlive their run. Only reached for runs that were not favorited,
 		// since favorites are never queued for deletion above.
@@ -781,6 +611,22 @@ public partial class FileSystemRunStore : IRunStore
 
 		return deleted;
 	}
+
+	/// <summary>
+	/// Releases the index database handle. Registered as a singleton, so the DI container disposes
+	/// it at shutdown; tests and embedded hosts that create stores directly must dispose them, or
+	/// the database file stays locked.
+	/// </summary>
+	public void Dispose()
+	{
+		_index.Dispose();
+		_indexLoadLock.Dispose();
+		GC.SuppressFinalize(this);
+	}
+
+	[LoggerMessage(Level = LogLevel.Information,
+		Message = "Run index reconciled: +{Added} new, -{Removed} stale, {Total} total ({ElapsedMs} ms)")]
+	private partial void LogIndexBuilt(int added, int removed, int total, long elapsedMs);
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to delete run folder '{FolderPath}'")]
 	private partial void LogRunFolderDeleteFailed(string folderPath, Exception ex);

@@ -470,6 +470,7 @@ builder.Services.AddTriggerExecutionCallback<MyExecutionCallback>();
 │   └── {orchestration-name}/
 │       └── {runId}.json               # favorite / title / tags / note
 └── executions/                        # Run history
+    ├── .index.db                      # SQLite index over the runs below (derived, rebuildable)
     └── {orchestration-name}/
         └── {name}_{version}_{trigger}_{timestamp}_{id}/
             ├── orchestration.json     # Copy of orchestration at execution
@@ -483,6 +484,11 @@ builder.Services.AddTriggerExecutionCallback<MyExecutionCallback>();
 `executions/` is an immutable record. Mutable per-run state lives in parallel roots —
 `annotations/` alongside `checkpoints/`, `pending/` and `temp/`. Favorited runs are exempt
 from retention deletion; see the [run storage reference](run-storage.md).
+
+`.index.db` is a SQLite projection of the runs beside it, used to answer history, search and
+lineage queries without opening any `run.json`. It is derived and safe to delete — the host
+rebuilds it, and discards it automatically if it is ever unreadable. See
+[the run index](run-storage.md#the-run-index).
 
 For a deep-dive on `run.json`'s structure, what each field contains, sizes you can expect,
 and the design decisions behind how parent → child orchestration links are persisted (and

@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <PackageReference Include="Cronos" />
+    <PackageReference Include="Microsoft.Data.Sqlite" />
     <PackageReference Include="McpProxy.Sdk" />
     <PackageReference Include="ModelContextProtocol.AspNetCore" />
     <PackageReference Include="OpenTelemetry.Api" />

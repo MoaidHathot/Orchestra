@@ -27,6 +27,10 @@
     <!-- Serialization -->
     <PackageVersion Include="Nerdbank.MessagePack" Version="1.2.4" />
     <PackageVersion Include="YamlDotNet" Version="17.0.1" />
+    <!-- Run-history index. A derived, always-rebuildable sidecar over the plain-on-disk run
+         artifacts; never a source of truth. Microsoft.Data.Sqlite (not .Core) so the native
+         e_sqlite3 bundle ships with the tool and no system SQLite is required. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.10" />
     <!-- Scheduling -->
     <PackageVersion Include="Cronos" Version="0.8.4" />
     <!-- UI -->

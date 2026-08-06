@@ -249,6 +249,61 @@ child via the data-plane MCP), the lookup will fail with a "no run found" error 
 The same trade-off applies to `retriedFromRunId`: if you delete the source run, the
 retry's lineage is broken.
 
+## The run index
+
+Queries against run history (the history panel, search, lineage lookups, retention) are served
+from a SQLite index at:
+
+```
+<dataPath>/executions/.index.db
+```
+
+**It is derived, never authoritative.** Every column is a projection of a `run.json` that remains
+plain on disk exactly as before. Delete the file and it is rebuilt; corrupt it and the host
+discards it and rebuilds rather than failing to start. Nothing is stored there that cannot be
+recomputed.
+
+### Why it exists
+
+The index used to be an in-memory dictionary rebuilt on every process start by deserializing every
+`run.json`. On a real store of **5,421 runs / 5,748 MB** that produced roughly twenty scalar fields
+per run at a cost of **~7 s of wall clock and the entire 5.7 GB read**, and every CLI command that
+spawns a throwaway host paid it too.
+
+Measured on that store, through the CLI:
+
+| | index cost |
+|---|---|
+| before | **~7 s**, on every host start and every CLI invocation |
+| first start after upgrade | ~5.3 s, once |
+| every start after that | **~0.15 s** |
+
+The database is ~6 MB. The steady-state win is larger than the ~35x wall-clock ratio suggests: the
+I/O drops from 5,748 MB to 6 MB, so the gap widens further whenever the file cache is cold.
+
+### Why a folder path is the key
+
+Run folders are **write-once** — `SaveRunAsync` creates one and never modifies it, and mutable
+per-run state (annotations, checkpoints, temp files) lives in separate roots. An index row keyed on
+folder path therefore cannot go stale. Only additions and deletions need reconciling, and a
+directory walk finds both in ~250 ms without opening a single `run.json`.
+
+Startup does exactly that: walk `executions/`, drop rows whose folder is gone, and project only
+folders that are not yet indexed. After the first pass that set is empty.
+
+### Streaming projection
+
+Runs that *do* need projecting are read with a `Utf8JsonReader` that skips the subtrees dominating
+the file — per-step `trace`, `conversationHistory` and `content`. Only `allStepRecords` is descended
+into, and only for the four fields needed to reproduce the failure summary. This avoids
+materializing the whole object graph (recall p99 is 9 MB, with a 52 MB outlier).
+
+### Schema changes
+
+`.index.db` carries a schema version. A mismatch drops the table and rebuilds rather than
+migrating — correct by construction for derived data, and cheaper to reason about than a migration
+path.
+
 ## Reading and writing
 
 - **Writer:** `FileSystemRunStore.SaveRunAsync(record, orchestration?, ct)` writes all the
@@ -256,8 +311,12 @@ retry's lineage is broken.
   to avoid Windows file locking conflicts under concurrent saves).
 - **Reader:** `FileSystemRunStore.GetRunAsync(orchestrationName, runId)` deserializes
   `run.json` and returns the full `OrchestrationRunRecord`. Other methods (
-  `GetRunSummariesAsync`, `FindRunByIdAsync`, `FindChildRunsAsync`) read from the
-  in-memory index that's populated by scanning all `run.json` files at startup.
+  `GetRunSummariesAsync`, `FindRunByIdAsync`, `FindChildRunsAsync`,
+  `GetOrchestrationRunStatsAsync`) are answered by the SQLite index described above and never
+  open a `run.json`.
+- **Lifetime:** `FileSystemRunStore` owns the index handle and implements `IDisposable`. The DI
+  container disposes the singleton at shutdown; embedded hosts and tests that construct one
+  directly must dispose it, or `.index.db` stays locked.
 
 ## Retention and favorites
 
@@ -297,5 +356,7 @@ See [`orchestra runs export`](cli.md#run-export) and
 - Source: `src/Orchestra.Host/Persistence/FileSystemRunStore.cs`
 - Source: `src/Orchestra.Host/Persistence/RunAnnotationStore.cs`
 - Source: `src/Orchestra.Host/Export/RunExporter.cs`
+- Source: `src/Orchestra.Host/Persistence/SqliteRunIndex.cs`
+- Source: `src/Orchestra.Host/Persistence/RunIndexProjector.cs`
 - Source: `src/Orchestra.Engine/Storage/OrchestrationRunRecord.cs`
 - Source: `src/Orchestra.Engine/Storage/StepRunRecord.cs`
