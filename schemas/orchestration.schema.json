@@ -661,7 +661,7 @@
         },
         "stdin": {
           "type": "string",
-          "description": "Content to pipe to the command's standard input. Supports template expressions."
+          "description": "Content to pipe to the command's standard input. Supports template expressions. Both ends of the pipe are UTF-8, so non-ASCII content round-trips intact."
         }
       }
     },
@@ -718,7 +718,7 @@
         },
         "stdin": {
           "type": "string",
-          "description": "Content to pipe to the script's standard input. Supports template expressions."
+          "description": "Content to pipe to the script's standard input. Supports template expressions. Both ends of the pipe are UTF-8, so non-ASCII content round-trips intact. In pwsh/powershell read it with [Console]::In.ReadToEnd() -- the $input automatic variable is not encoding-safe and consumes the same stream."
         },
         "strictMode": {
           "type": "boolean",

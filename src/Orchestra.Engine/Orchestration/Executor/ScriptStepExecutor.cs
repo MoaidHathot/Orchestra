@@ -45,6 +45,23 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
+	/// Shells whose interpreter decodes stdin using the ambient locale rather than the byte stream,
+	/// and therefore need <c>PYTHONIOENCODING</c>-style coaxing to read the UTF-8 the host writes.
+	/// </summary>
+	/// <remarks>
+	/// Measured round-trip of <c>U+2014 U+00E9 U+201C U+201D U+4E2D</c> through a file-based script:
+	/// python produced <c>- ‚ " " ?</c> before the host started encoding stdin as UTF-8, and
+	/// mojibake after — it only round-trips once <c>PYTHONIOENCODING=utf-8</c> is also set. node
+	/// needs nothing (it decodes the raw buffer itself) and neither do bash/sh, which pass bytes
+	/// through untouched.
+	/// </remarks>
+	private static readonly FrozenSet<string> s_utf8StdinEnvShells = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+	{
+		"python",
+		"python3",
+	}.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+	/// <summary>
 	/// UTF-8 without a byte-order mark, used to decode child-process stdout/stderr. A shared
 	/// instance because <see cref="System.Text.Encoding"/> is immutable and thread-safe. Emitting
 	/// no BOM keeps the captured text byte-clean so downstream JSON parsing does not trip over a
@@ -179,6 +196,40 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	internal const string PowerShellOutputEncodingPrologue =
 		"try { [Console]::OutputEncoding = $OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { };";
 
+	/// <summary>
+	/// PowerShell statement injected ahead of every pwsh/powershell prologue (independent of
+	/// <see cref="ScriptOrchestrationStep.StrictMode"/>) that forces the child to DECODE stdin as
+	/// UTF-8 without a BOM. The exact mirror of <see cref="PowerShellOutputEncodingPrologue"/>.
+	/// </summary>
+	/// <remarks>
+	/// <para>The same OEM best-fit problem applies in the inbound direction. A script that reads
+	/// piped content via <c>[Console]::In.ReadToEnd()</c> decodes it using
+	/// <c>[Console]::InputEncoding</c>, which on Windows defaults to the OEM console code page.
+	/// Measured round-trip of <c>U+2014 U+00E9 U+201C U+201D U+4E2D</c> through a redirected stdin
+	/// produced <c>- é " " ?</c> — the em-dash flattened to a hyphen, both curly quotes collapsed to
+	/// an unescaped ASCII <c>"</c>, and the CJK character replaced outright.</para>
+	/// <para><b>This prologue only works paired with the host-side
+	/// <c>StandardInputEncoding</c>.</b> Setting either one alone is worse than setting neither:
+	/// host-only leaves the child decoding UTF-8 bytes as OEM (mojibake), and child-only cannot
+	/// recover bytes the host already transliterated. Both are set together, deliberately.</para>
+	/// <para>Note that PowerShell's <c>$input</c> automatic variable cannot be fixed this way, and
+	/// the two idioms are mutually exclusive: merely referencing <c>$input</c> makes PowerShell
+	/// materialise the input pipeline through its own reader, draining the stream before the script
+	/// body runs — after which <c>[Console]::In.ReadToEnd()</c> returns empty. <c>$input</c> also
+	/// decodes with the OEM code page regardless of this prologue, because that materialisation
+	/// happens before any statement in the script executes.</para>
+	/// <para>Consequently <c>[Console]::In.ReadToEnd()</c> is the supported way to read
+	/// <c>stdin</c> in a pwsh script or hook. ASCII payloads are unaffected either way (ASCII is
+	/// identical in UTF-8 and every OEM/ANSI code page), so existing scripts keep working; only
+	/// non-ASCII content — which <c>$input</c> already corrupted — requires the supported idiom.</para>
+	/// <para>Wrapped in <c>try/catch</c>: the <c>[Console]::InputEncoding</c> setter throws when
+	/// stdin is not a real console handle, and a step that does not read stdin must not fail
+	/// because of a prologue it never needed.</para>
+	/// </remarks>
+	internal const string PowerShellInputEncodingPrologue =
+		"try { [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { };";
+
+
 	public ScriptStepExecutor(
 		IOrchestrationReporter reporter,
 		ILogger<ScriptStepExecutor> logger)
@@ -310,6 +361,13 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				// child-side PowerShellOutputEncodingPrologue that makes pwsh WRITE UTF-8).
 				StandardOutputEncoding = s_utf8NoBom,
 				StandardErrorEncoding = s_utf8NoBom,
+				// ...and ENCODE stdin the same way. Omitting this is the inbound twin of the bug
+				// above: .NET falls back to Console.InputEncoding, so a `stdin:` payload gets
+				// best-fit transliterated on the way IN — U+2014 to '-', curly quotes to an
+				// unescaped ASCII '"', anything outside the code page to '?'. Paired with the
+				// child-side PowerShellInputEncodingPrologue that makes pwsh READ UTF-8; setting
+				// only one of the two is worse than setting neither.
+				StandardInputEncoding = resolvedStdin is not null ? s_utf8NoBom : null,
 			};
 
 			// Add run-file args (e.g., -NoProfile -File for pwsh)
@@ -336,6 +394,15 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			// the step's Environment section if they truly want raw ANSI bytes.
 			startInfo.Environment["NO_COLOR"] = "1";
 			startInfo.Environment["TERM"] = "dumb";
+
+			// Interpreters that decode stdin/stdout via the ambient locale need telling that the
+			// host writes UTF-8; without this, pinning StandardInputEncoding makes them WORSE
+			// (mojibake instead of best-fit transliteration). Set before the user's environment
+			// loop so an author can still override it deliberately.
+			if (s_utf8StdinEnvShells.Contains(shell))
+			{
+				startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
+			}
 
 			// Surface arg-spill env vars before user-provided env so authors can override
 			// them if they really want to. ORCHESTRA_ARGS_FILE points to a JSON manifest
@@ -574,9 +641,10 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			? PowerShellControlHelpers
 			: PowerShellControlHelpers + " " + prologue;
 
-		// Force UTF-8 output first so it applies regardless of the strict-mode setting (including
-		// strictMode:false, where GetPowerShellPrologue returns null) and before any user output.
-		return PowerShellOutputEncodingPrologue + " " + body;
+		// Force UTF-8 on both directions first so it applies regardless of the strict-mode setting
+		// (including strictMode:false, where GetPowerShellPrologue returns null) and before any
+		// user output or stdin read.
+		return PowerShellOutputEncodingPrologue + " " + PowerShellInputEncodingPrologue + " " + body;
 	}
 
 	/// <summary>

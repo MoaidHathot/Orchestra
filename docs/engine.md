@@ -103,6 +103,19 @@ Payload shaping is also preset-based rather than field-by-field:
 
 In v1, hooks support `script` actions. The hook payload is serialized as JSON and sent to the script on stdin.
 
+Both ends of that pipe are UTF-8, so payloads containing non-ASCII text — an em-dash in a run
+title, a curly quote in an error message — arrive intact. In `pwsh`/`powershell`, read stdin with
+`[Console]::In.ReadToEnd()`:
+
+```powershell
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+```
+
+> **Do not use `$input`.** PowerShell materialises its input pipeline before the script body runs,
+> using the OEM code page regardless of the encoding Orchestra sets, so non-ASCII content is
+> corrupted. Referencing `$input` also drains the stream, after which
+> `[Console]::In.ReadToEnd()` returns empty — the two idioms are mutually exclusive.
+
 ```yaml
 hooks:
   - name: archive-run-failure
@@ -159,6 +172,25 @@ public class PromptOrchestrationStep : OrchestrationStep
     public LoopConfig? Loop { get; init; }
 }
 ```
+
+### Script step stdin encoding
+
+Script and Command steps can pipe content to the child via `stdin:`. Orchestra pins **UTF-8 on
+both ends** of that pipe, so non-ASCII content round-trips byte-for-byte:
+
+- host side — `StandardInputEncoding` is set alongside the existing stdout/stderr encodings;
+- child side — `pwsh`/`powershell` get an injected `[Console]::InputEncoding` prologue (applied for
+  every `strictMode` setting), and `python`/`python3` get `PYTHONIOENCODING=utf-8`.
+
+Without both halves the Windows OEM code page best-fit-transliterates the payload on the way in:
+`U+2014` flattens to `-`, the curly quotes `U+201C`/`U+201D` collapse to an unescaped ASCII `"`
+(which silently breaks any JSON carrying them), and anything outside the code page becomes `?`.
+Setting only one half is worse than neither — the child then decodes UTF-8 bytes as OEM and
+produces mojibake.
+
+Read stdin with `[Console]::In.ReadToEnd()` in PowerShell. **`$input` is not encoding-safe** and
+consumes the same stream, so the two idioms are mutually exclusive. `bash`/`sh` and `node` need
+nothing — they handle the raw bytes themselves.
 
 ### Script step control channel
 

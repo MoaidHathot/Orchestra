@@ -3,7 +3,7 @@ param(
     [string]$OutputPath
 )
 
-$payload = $input | Out-String
+$payload = [Console]::In.ReadToEnd()
 $fullPath = [System.IO.Path]::GetFullPath($OutputPath)
 $directory = Split-Path -Parent $fullPath
 
