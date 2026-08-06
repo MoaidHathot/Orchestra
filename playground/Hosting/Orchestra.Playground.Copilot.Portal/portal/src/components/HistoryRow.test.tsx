@@ -184,4 +184,95 @@ describe('HistoryRow', () => {
     const iconSpan = screen.getByTitle('Origin: orchestration:parent:abc');
     expect(iconSpan.className).toContain('history-origin-orchestration');
   });
+  // ── Run annotations ──
+
+  describe('annotations', () => {
+    it('shows the annotation title as the primary label and demotes the orchestration name', () => {
+      render(
+        <HistoryRow
+          exec={makeExec({ title: 'Connect evidence pack' })}
+          onSelect={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText('Connect evidence pack')).toBeInTheDocument();
+      // The machine name is still shown, but as a subtitle.
+      expect(screen.getByText('test-orch')).toBeInTheDocument();
+      expect(screen.getByRole('listitem'))
+        .toHaveAttribute('aria-label', expect.stringContaining('Connect evidence pack'));
+    });
+
+    it('falls back to the orchestration name when no title is set', () => {
+      render(<HistoryRow exec={makeExec()} onSelect={vi.fn()} />);
+
+      expect(screen.getByText('test-orch')).toBeInTheDocument();
+      expect(screen.getByRole('listitem'))
+        .toHaveAttribute('aria-label', expect.stringContaining('test-orch'));
+    });
+
+    it('treats a whitespace-only title as absent', () => {
+      render(<HistoryRow exec={makeExec({ title: '   ' })} onSelect={vi.fn()} />);
+
+      expect(screen.getByRole('listitem'))
+        .toHaveAttribute('aria-label', expect.stringContaining('test-orch'));
+    });
+
+    it('renders a star that reflects the favorite state', () => {
+      render(
+        <HistoryRow exec={makeExec({ favorite: true })} onSelect={vi.fn()} onToggleFavorite={vi.fn()} />,
+      );
+
+      const star = screen.getByRole('button', { name: /remove favorite/i });
+      expect(star).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    it('requests the opposite favorite state and does not open the run', () => {
+      const onToggleFavorite = vi.fn();
+      const onSelect = vi.fn();
+      render(
+        <HistoryRow exec={makeExec({ favorite: false })} onSelect={onSelect} onToggleFavorite={onToggleFavorite} />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /mark .* as favorite/i }));
+
+      expect(onToggleFavorite).toHaveBeenCalledWith(expect.objectContaining({ runId: 'run-abc12345' }), true);
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('renders a favorited star even without a handler, but disabled', () => {
+      render(<HistoryRow exec={makeExec({ favorite: true })} onSelect={vi.fn()} />);
+
+      expect(screen.getByRole('button', { name: /remove favorite/i })).toBeDisabled();
+    });
+
+    it('omits the star entirely for unfavorited rows with no handler', () => {
+      render(<HistoryRow exec={makeExec()} onSelect={vi.fn()} />);
+
+      expect(screen.queryByRole('button', { name: /favorite/i })).not.toBeInTheDocument();
+    });
+
+    it('renders tag chips and reports clicks without opening the run', () => {
+      const onSelectTag = vi.fn();
+      const onSelect = vi.fn();
+      render(
+        <HistoryRow
+          exec={makeExec({ tags: ['connect', 'keep'] })}
+          onSelect={onSelect}
+          onSelectTag={onSelectTag}
+        />,
+      );
+
+      expect(screen.getByText('keep')).toBeInTheDocument();
+      fireEvent.click(screen.getByText('connect'));
+
+      expect(onSelectTag).toHaveBeenCalledWith('connect');
+      expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('renders tag chips as disabled when no handler is supplied', () => {
+      render(<HistoryRow exec={makeExec({ tags: ['connect'] })} onSelect={vi.fn()} />);
+
+      expect(screen.getByText('connect').closest('button')).toBeDisabled();
+    });
+  });
 });

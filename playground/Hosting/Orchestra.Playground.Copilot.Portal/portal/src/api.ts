@@ -184,6 +184,20 @@ export const api = {
   },
 
   /**
+   * PATCH with retry (not queued offline - used for immediate partial updates).
+   * Distinct from PUT: omitted fields are left untouched rather than cleared.
+   */
+  async patch<T = unknown>(url: string, body?: unknown): Promise<T> {
+    const res = await fetchWithRetry(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  /**
    * DELETE with retry. Queues the request if offline.
    */
   async delete<T = unknown>(url: string): Promise<T> {

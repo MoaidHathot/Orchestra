@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text.Json;
 using ModelContextProtocol.Server;
 using Orchestra.Engine;
+using Orchestra.Host.Export;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Profiles;
 using Orchestra.Host.Registry;
@@ -388,10 +389,13 @@ public sealed class ControlPlaneTools
 		"Optionally filter by orchestration name, parent execution id (direct children only), or root execution id (whole subtree).")]
 	public static async Task<string> ListRuns(
 		FileSystemRunStore runStore,
+		RunAnnotationStore annotations,
 		[Description("Maximum number of runs to return. Default: 20.")] int limit = 20,
 		[Description("Optional orchestration name to filter runs.")] string? orchestrationName = null,
 		[Description("Optional parent execution id. When set, returns only direct children of that execution. Mutually exclusive with rootExecutionId.")] string? parentExecutionId = null,
-		[Description("Optional root execution id. When set (and parentExecutionId is not), returns every run in the named execution subtree.")] string? rootExecutionId = null)
+		[Description("Optional root execution id. When set (and parentExecutionId is not), returns every run in the named execution subtree.")] string? rootExecutionId = null,
+		[Description("When true, returns only runs marked as favorites.")] bool favoritesOnly = false,
+		[Description("Optional comma-separated annotation tags. Returns runs carrying ANY of them (OR).")] string? tags = null)
 	{
 		IReadOnlyList<RunIndex> runs;
 		if (!string.IsNullOrWhiteSpace(parentExecutionId) || !string.IsNullOrWhiteSpace(rootExecutionId))
@@ -407,6 +411,25 @@ public sealed class ControlPlaneTools
 		else
 		{
 			runs = await runStore.GetRunSummariesAsync(limit);
+		}
+
+		// Annotation filters mirror the REST history endpoint: favorites is a narrowing
+		// switch, tags are OR.
+		if (favoritesOnly || !string.IsNullOrWhiteSpace(tags))
+		{
+			var wanted = string.IsNullOrWhiteSpace(tags)
+				? null
+				: new HashSet<string>(
+					tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+					StringComparer.OrdinalIgnoreCase);
+
+			runs = [.. runs.Where(r =>
+			{
+				var a = annotations.Get(r.RunId);
+				if (a is null) return false;
+				if (favoritesOnly && !a.Favorite) return false;
+				return wanted is null || a.Tags.Any(wanted.Contains);
+			})];
 		}
 
 		return Json(new
@@ -438,6 +461,12 @@ public sealed class ControlPlaneTools
 					kind = r.Cancellation.Kind.ToString(),
 					detail = r.Cancellation.Detail,
 				},
+				// User curation. A title is often the only human-meaningful identifier a run
+				// has, since orchestration names are frequently machine-generated.
+				favorite = annotations.Get(r.RunId)?.Favorite ?? false,
+				title = annotations.Get(r.RunId)?.Title,
+				tags = annotations.Get(r.RunId)?.Tags ?? [],
+				note = annotations.Get(r.RunId)?.Note,
 			}).ToArray(),
 		});
 	}
@@ -499,6 +528,133 @@ public sealed class ControlPlaneTools
 	{
 		if (string.IsNullOrWhiteSpace(value)) return [];
 		return value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+	}
+
+	// ── Run Annotations & Export ──
+
+	[McpServerTool(Name = "annotate_run"), Description(
+		"Sets a run's curation: favorite, title, tags and note. " +
+		"Run records are immutable, so this metadata is stored separately and merged into run listings. " +
+		"A title is the main way to make a run findable later - orchestration names are often machine-generated " +
+		"and carry no meaning. Favorited runs are also exempt from retention deletion. " +
+		"Only the fields you supply are changed; omit a field to leave it untouched, or pass an empty string to clear it.")]
+	public static async Task<string> AnnotateRun(
+		FileSystemRunStore runStore,
+		RunAnnotationStore annotations,
+		[Description("The orchestration name.")] string orchestrationName,
+		[Description("The run ID.")] string runId,
+		[Description("Mark or unmark as a favorite. Omit to leave unchanged.")] bool? favorite = null,
+		[Description("Human-readable title for the run. Empty string clears it.")] string? title = null,
+		[Description("Comma-separated tags. Replaces the existing tag set. Empty string clears all tags.")] string? tags = null,
+		[Description("Free-form note - caveats, findings, or why the run was kept. Empty string clears it.")] string? note = null)
+	{
+		if (await runStore.GetRunAsync(orchestrationName, runId) is null)
+			return Error($"Run '{runId}' not found for orchestration '{orchestrationName}'.");
+
+		string[]? tagList = tags is null
+			? null
+			: tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+		var saved = annotations.Patch(runId, favorite, title, tagList, note, orchestrationName);
+
+		return Json(new
+		{
+			runId,
+			orchestrationName,
+			favorite = saved?.Favorite ?? false,
+			title = saved?.Title,
+			tags = saved?.Tags ?? [],
+			note = saved?.Note,
+			annotatedAt = saved?.AnnotatedAt,
+		});
+	}
+
+	[McpServerTool(Name = "list_run_annotations"), Description(
+		"Lists every annotated run with its favorite flag, title, tags and note, plus tag usage counts. " +
+		"Use this to discover which runs have been deliberately kept and how they are labelled.")]
+	public static async Task<string> ListRunAnnotations(
+		FileSystemRunStore runStore,
+		RunAnnotationStore annotations,
+		[Description("When true, returns only annotations whose run no longer exists.")] bool orphansOnly = false)
+	{
+		var summaries = await runStore.GetRunSummariesAsync();
+		var live = new HashSet<string>(summaries.Select(s => s.RunId), StringComparer.OrdinalIgnoreCase);
+		var orphanIds = new HashSet<string>(annotations.FindOrphans(live), StringComparer.OrdinalIgnoreCase);
+
+		var items = annotations.GetAll()
+			.Where(kvp => !orphansOnly || orphanIds.Contains(kvp.Key))
+			.OrderByDescending(kvp => kvp.Value.AnnotatedAt)
+			.Select(kvp => new
+			{
+				runId = kvp.Key,
+				orchestrationName = kvp.Value.OrchestrationName,
+				favorite = kvp.Value.Favorite,
+				title = kvp.Value.Title,
+				tags = kvp.Value.Tags,
+				note = kvp.Value.Note,
+				annotatedAt = kvp.Value.AnnotatedAt,
+				orphaned = orphanIds.Contains(kvp.Key),
+			})
+			.ToArray();
+
+		// Same shape as the REST GET /api/tags-style listing: an array of {tag,count}
+		// objects rather than a map, so both surfaces deserialize identically.
+		var tagCounts = annotations.GetAllTagsWithCounts()
+			.OrderByDescending(kvp => kvp.Value)
+			.ThenBy(kvp => kvp.Key, StringComparer.Ordinal)
+			.Select(kvp => new { tag = kvp.Key, count = kvp.Value })
+			.ToArray();
+
+		return Json(new
+		{
+			count = items.Length,
+			orphanCount = orphanIds.Count,
+			annotations = items,
+			tags = tagCounts,
+		});
+	}
+
+	[McpServerTool(Name = "export_run"), Description(
+		"Exports a run to a directory on the host, gathering both the execution record and the files the run " +
+		"saved via orchestra_save_file. Those saved files live outside the execution folder and are usually the " +
+		"run's real deliverable, so a plain copy of the run folder would miss them. " +
+		"Formats: 'bundle' (default - README, run record, definition, step payloads, saved artifacts), " +
+		"'report' (a single markdown file), 'data' (step payloads as JSON only).")]
+	public static async Task<string> ExportRun(
+		RunExporter exporter,
+		[Description("The orchestration name.")] string orchestrationName,
+		[Description("The run ID.")] string runId,
+		[Description("Directory to write the export into.")] string outputDirectory,
+		[Description("Export shape: bundle (default), report, or data.")] string format = "bundle",
+		[Description("When true, compresses the export into a .zip and removes the directory.")] bool zip = false)
+	{
+		if (!Enum.TryParse<RunExportFormat>(format, ignoreCase: true, out var parsed) || !Enum.IsDefined(parsed))
+			return Error($"Unknown export format '{format}'. Use bundle, report, or data.");
+
+		if (string.IsNullOrWhiteSpace(outputDirectory))
+			return Error("outputDirectory is required.");
+
+		try
+		{
+			var result = await exporter.ExportAsync(orchestrationName, runId, parsed, outputDirectory);
+			var path = zip && parsed != RunExportFormat.Report
+				? RunExporter.CompressExport(result.Path)
+				: result.Path;
+
+			return Json(new
+			{
+				runId = result.RunId,
+				orchestrationName = result.OrchestrationName,
+				path,
+				fileCount = result.FileCount,
+				totalBytes = result.TotalBytes,
+				warnings = result.Warnings,
+			});
+		}
+		catch (FileNotFoundException)
+		{
+			return Error($"Run '{runId}' not found for orchestration '{orchestrationName}'.");
+		}
 	}
 
 	private static string Error(string message) =>

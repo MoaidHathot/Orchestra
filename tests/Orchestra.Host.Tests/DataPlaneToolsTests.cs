@@ -1210,19 +1210,32 @@ public class DataPlaneToolsTests
 internal sealed class TempRunStore : IDisposable
 {
 	public Orchestra.Host.Persistence.FileSystemRunStore Store { get; }
+	public Orchestra.Host.Persistence.RunAnnotationStore Annotations { get; }
 	public string Root { get; }
 
-	private TempRunStore(string root, Orchestra.Host.Persistence.FileSystemRunStore store)
+	private TempRunStore(
+		string root,
+		Orchestra.Host.Persistence.FileSystemRunStore store,
+		Orchestra.Host.Persistence.RunAnnotationStore annotations)
 	{
 		Root = root;
 		Store = store;
+		Annotations = annotations;
 	}
 
 	public static TempRunStore Empty()
 	{
 		var root = Path.Combine(Path.GetTempPath(), "orchestra-temprunstore-" + Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(root);
-		return new TempRunStore(root, new Orchestra.Host.Persistence.FileSystemRunStore(root));
+		var annotations = new Orchestra.Host.Persistence.RunAnnotationStore(
+			root, Microsoft.Extensions.Logging.Abstractions.NullLogger<Orchestra.Host.Persistence.RunAnnotationStore>.Instance);
+		return new TempRunStore(
+			root,
+			new Orchestra.Host.Persistence.FileSystemRunStore(
+				root,
+				Microsoft.Extensions.Logging.Abstractions.NullLogger<Orchestra.Host.Persistence.FileSystemRunStore>.Instance,
+				annotations),
+			annotations);
 	}
 
 	public static async Task<TempRunStore> WithSampleRunAsync(

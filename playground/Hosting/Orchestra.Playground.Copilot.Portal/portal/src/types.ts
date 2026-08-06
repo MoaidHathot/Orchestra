@@ -585,6 +585,48 @@ export interface TagCount {
   count: number;
 }
 
+// ── Run annotations ──
+
+/**
+ * User-curated metadata attached to a run: favorite, title, tags, note.
+ *
+ * Run records themselves are immutable, so annotations are stored separately
+ * (keyed by run id) and merged into history rows at read time. Their purpose is
+ * findability — machine-named runs carry no meaning, and a title makes them
+ * searchable by the words a human would actually type. Favorited runs are also
+ * exempt from retention deletion.
+ *
+ * Mirrors the payload of
+ * <c>GET/PUT/PATCH /api/history/{name}/{runId}/annotation</c>.
+ */
+export interface RunAnnotation {
+  runId: string;
+  orchestrationName?: string | null;
+  favorite: boolean;
+  title?: string | null;
+  tags: string[];
+  note?: string | null;
+  annotatedAt?: string | null;
+  /** True when the annotation's run no longer exists. */
+  orphaned?: boolean;
+}
+
+/** Fields a run row carries from its annotation, if any. */
+export interface RunAnnotationFields {
+  favorite?: boolean;
+  title?: string | null;
+  tags?: string[];
+  note?: string | null;
+}
+
+/** Response of <c>GET /api/history/annotations</c>. */
+export interface RunAnnotationsResponse {
+  count: number;
+  orphanCount: number;
+  annotations: RunAnnotation[];
+  tags: TagCount[];
+}
+
 // ── Human-in-the-loop (HITL) ──
 
 /**

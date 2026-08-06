@@ -155,6 +155,14 @@ export default function HistoryFilterSelector({
     onChange({ ...state, hideIncomplete: !state.hideIncomplete });
   }, [state, onChange]);
 
+  const toggleFavoritesOnly = useCallback(() => {
+    onChange({ ...state, favoritesOnly: !state.favoritesOnly });
+  }, [state, onChange]);
+
+  const removeTag = useCallback((tag: string) => {
+    onChange({ ...state, tags: state.tags.filter(t => t !== tag) });
+  }, [state, onChange]);
+
   const clearAll = useCallback(() => {
     onChange(DEFAULT_FILTER_STATE);
   }, [onChange]);
@@ -174,6 +182,8 @@ export default function HistoryFilterSelector({
     else if (state.statuses.length < ALL_RUN_STATUS_FILTERS.length) parts.push(`${state.statuses.length} statuses`);
 
     if (state.hideIncomplete) parts.push('completed');
+    if (state.favoritesOnly) parts.push('favorites');
+    if (state.tags.length > 0) parts.push(state.tags.length === 1 ? `#${state.tags[0]}` : `${state.tags.length} tags`);
     return parts.length === 0 ? 'All runs' : parts.join(' · ');
   })();
 
@@ -194,6 +204,37 @@ export default function HistoryFilterSelector({
           layout rather than relying on `position: sticky`, which can lose the race
           against sticky section-headers in the same scroll container. */}
       <div className="history-filter-scroll">
+        {/* Curation. Placed first because favorites/tags are the fastest way to
+            get back to a run you deliberately kept. */}
+        <div className="history-filter-section">
+          <div className="history-filter-section-header">Curation</div>
+          <label className="history-filter-option">
+            <input
+              type="checkbox"
+              checked={state.favoritesOnly}
+              onChange={toggleFavoritesOnly}
+            />
+            <span>Favorites only</span>
+          </label>
+          {state.tags.length > 0 && (
+            <div className="history-filter-tags">
+              {state.tags.map(tag => (
+                <span key={tag} className="tag-chip tag-chip-small">
+                  {tag}
+                  <button
+                    type="button"
+                    className="tag-chip-remove"
+                    onClick={() => removeTag(tag)}
+                    aria-label={`Remove tag filter ${tag}`}
+                  >
+                    &times;
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Scope (radio) */}
         <div className="history-filter-section">
           <div className="history-filter-section-header">Scope</div>

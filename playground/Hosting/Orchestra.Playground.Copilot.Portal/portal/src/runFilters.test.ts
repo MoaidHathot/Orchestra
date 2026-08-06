@@ -103,6 +103,8 @@ describe('buildFilterQueryString', () => {
       origins: ['manual'],
       statuses: ['Succeeded'],
       hideIncomplete: true,
+      favoritesOnly: false,
+      tags: [],
     };
     const qs = buildFilterQueryString(state);
     expect(qs.startsWith('&')).toBe(true);
@@ -115,6 +117,8 @@ describe('buildFilterQueryString', () => {
     const state: HistoryFilterState = {
       ...DEFAULT_FILTER_STATE,
       hideIncomplete: false,
+      favoritesOnly: false,
+      tags: [],
     };
     expect(buildFilterQueryString(state)).not.toContain('incomplete');
   });
@@ -156,6 +160,8 @@ describe('loadFilterState / saveFilterState', () => {
       origins: ['manual', 'retry'],
       statuses: ['Failed', 'Cancelled'],
       hideIncomplete: false,
+      favoritesOnly: false,
+      tags: [],
     };
     saveFilterState(state);
 
@@ -169,6 +175,8 @@ describe('loadFilterState / saveFilterState', () => {
       origins: ['manual', 'garbage', 'scheduler'],
       statuses: [...ALL_RUN_STATUS_FILTERS],
       hideIncomplete: true,
+      favoritesOnly: false,
+      tags: [],
     }));
 
     const loaded = loadFilterState();
@@ -181,6 +189,8 @@ describe('loadFilterState / saveFilterState', () => {
       origins: [...ALL_RUN_ORIGINS],
       statuses: ['Succeeded', 'Botched'],
       hideIncomplete: true,
+      favoritesOnly: false,
+      tags: [],
     }));
 
     const loaded = loadFilterState();
@@ -193,8 +203,103 @@ describe('loadFilterState / saveFilterState', () => {
       origins: [...ALL_RUN_ORIGINS],
       statuses: [...ALL_RUN_STATUS_FILTERS],
       hideIncomplete: true,
+      favoritesOnly: false,
+      tags: [],
     }));
 
     expect(loadFilterState().scope).toBe(DEFAULT_FILTER_STATE.scope);
+  });
+});
+
+describe('buildFilterQueryString - annotation filters', () => {
+  it('omits favorites and tags by default', () => {
+    expect(buildFilterQueryString(DEFAULT_FILTER_STATE)).not.toContain('favorites');
+    expect(buildFilterQueryString(DEFAULT_FILTER_STATE)).not.toContain('tags');
+  });
+
+  it('emits favorites=true only when narrowing', () => {
+    const q = buildFilterQueryString({ ...DEFAULT_FILTER_STATE, favoritesOnly: true });
+
+    expect(q).toContain('favorites=true');
+  });
+
+  it('never emits favorites=false, which would exclude favorites rather than ignore them', () => {
+    const q = buildFilterQueryString({ ...DEFAULT_FILTER_STATE, favoritesOnly: false });
+
+    expect(q).not.toContain('favorites');
+  });
+
+  it('emits comma-separated tags', () => {
+    const q = buildFilterQueryString({ ...DEFAULT_FILTER_STATE, tags: ['connect', 'keep'] });
+
+    expect(q).toContain('tags=connect,keep');
+  });
+
+  it('url-encodes tag values', () => {
+    const q = buildFilterQueryString({ ...DEFAULT_FILTER_STATE, tags: ['a b', 'c&d'] });
+
+    expect(q).toContain('tags=a%20b,c%26d');
+  });
+
+  it('combines annotation filters with the existing ones', () => {
+    const q = buildFilterQueryString({
+      ...DEFAULT_FILTER_STATE,
+      scope: 'roots',
+      favoritesOnly: true,
+      tags: ['connect'],
+    });
+
+    expect(q).toContain('roots=true');
+    expect(q).toContain('favorites=true');
+    expect(q).toContain('tags=connect');
+  });
+});
+
+describe('isFilterStateDefault - annotation filters', () => {
+  it('is not default when favorites-only is on', () => {
+    expect(isFilterStateDefault({ ...DEFAULT_FILTER_STATE, favoritesOnly: true })).toBe(false);
+  });
+
+  it('is not default when a tag filter is applied', () => {
+    expect(isFilterStateDefault({ ...DEFAULT_FILTER_STATE, tags: ['connect'] })).toBe(false);
+  });
+
+  it('is default with no curation filters', () => {
+    expect(isFilterStateDefault(DEFAULT_FILTER_STATE)).toBe(true);
+  });
+});
+
+describe('loadFilterState - annotation filters', () => {
+  it('defaults the curation fields for state saved before they existed', () => {
+    localStorage.setItem(
+      FILTER_STORAGE_KEY,
+      JSON.stringify({ scope: 'roots', origins: ['manual'], statuses: ['Failed'], hideIncomplete: false }),
+    );
+
+    const state = loadFilterState();
+
+    expect(state.favoritesOnly).toBe(false);
+    expect(state.tags).toEqual([]);
+  });
+
+  it('restores persisted curation filters', () => {
+    localStorage.setItem(
+      FILTER_STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_FILTER_STATE, favoritesOnly: true, tags: ['connect'] }),
+    );
+
+    const state = loadFilterState();
+
+    expect(state.favoritesOnly).toBe(true);
+    expect(state.tags).toEqual(['connect']);
+  });
+
+  it('drops malformed tag entries', () => {
+    localStorage.setItem(
+      FILTER_STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_FILTER_STATE, tags: ['ok', '', '   ', 42, null] }),
+    );
+
+    expect(loadFilterState().tags).toEqual(['ok']);
   });
 });

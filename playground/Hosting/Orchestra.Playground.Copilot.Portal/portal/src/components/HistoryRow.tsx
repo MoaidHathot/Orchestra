@@ -26,6 +26,11 @@ export interface HistoryRowEntry {
   parentExecutionId?: string | null;
   parentStepName?: string | null;
   parentOrchestrationName?: string | null;
+  /** Curation, merged in server-side from the run's annotation. */
+  favorite?: boolean;
+  title?: string | null;
+  tags?: string[];
+  note?: string | null;
 }
 
 export interface HistoryRowProps {
@@ -44,14 +49,28 @@ export interface HistoryRowProps {
    * the badge is rendered as a non-interactive label.
    */
   onViewParentRun?: (parentRunId: string) => void;
+  /**
+   * Click on the star. Receives the row and the favorite state being requested.
+   * When omitted the star is only rendered for already-favorited rows, as a
+   * non-interactive marker.
+   */
+  onToggleFavorite?: (exec: HistoryRowEntry, favorite: boolean) => void;
+  /** Click on a tag chip. When omitted, chips are non-interactive labels. */
+  onSelectTag?: (tag: string) => void;
 }
 
 /**
  * Single row in the sidebar's "Recent Executions" list.
  *
  * Layout (left-to-right):
- *   [status icon] [origin icon] orchestration-name [retry badge] [parent badge]
- *                               started-at · duration                  [delete]
+ *   [status icon] [origin icon] title-or-name [retry badge] [parent badge] [star]
+ *                 orchestration-name (when a title is set)
+ *                 started-at · duration · [tags]                          [delete]
+ *
+ * When the run has been given a title, that becomes the primary label and the
+ * orchestration name is demoted to a subtitle. This is the point of annotations:
+ * a machine-generated name like `ephemeral-efca835904b6-attempt-3` tells you
+ * nothing, and most rows in a busy history are exactly that.
  *
  * The component is purely presentational. It does not poll, fetch, or filter —
  * the parent passes pre-filtered data and click handlers.
@@ -62,6 +81,8 @@ export default function HistoryRow({
   onDelete,
   onViewSourceRun,
   onViewParentRun,
+  onToggleFavorite,
+  onSelectTag,
 }: HistoryRowProps): React.JSX.Element {
   const origin = exec.origin ?? classifyRunOrigin(exec.triggeredBy);
   const statusClass = (exec.isIncomplete || exec.completionReason) && exec.status === 'Succeeded'
@@ -90,7 +111,16 @@ export default function HistoryRow({
     }
   };
 
-  const ariaLabel = `${exec.orchestrationName} - ${exec.status || 'Running'} - ${formatTime(exec.startedAt)}`;
+  const handleFavoriteClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleFavorite?.(exec, !exec.favorite);
+  };
+
+  const title = exec.title?.trim();
+  const primaryLabel = title && title.length > 0 ? title : exec.orchestrationName;
+  const tags = exec.tags ?? [];
+
+  const ariaLabel = `${primaryLabel} - ${exec.status || 'Running'} - ${formatTime(exec.startedAt)}`;
   const durationText = !exec.isActive ? formatDuration(exec.durationSeconds) : '';
 
   return (
@@ -127,7 +157,7 @@ export default function HistoryRow({
           >
             {getOriginIcon(origin)}
           </span>
-          <span className="history-name-text">{exec.orchestrationName}</span>
+          <span className="history-name-text">{primaryLabel}</span>
           {exec.isActive && (
             <span
               className="step-status-badge running"
@@ -158,7 +188,29 @@ export default function HistoryRow({
               {'\u21B3'} {exec.parentOrchestrationName ?? exec.parentExecutionId.slice(0, 8)}
             </button>
           )}
+          {(exec.favorite || onToggleFavorite) && (
+            <button
+              type="button"
+              className={`history-favorite-btn ${exec.favorite ? 'is-favorite' : ''}`}
+              onClick={handleFavoriteClick}
+              disabled={!onToggleFavorite}
+              aria-pressed={!!exec.favorite}
+              title={exec.favorite
+                ? 'Favorited - exempt from retention deletion'
+                : 'Mark as favorite'}
+              aria-label={exec.favorite
+                ? `Remove favorite from ${primaryLabel}`
+                : `Mark ${primaryLabel} as favorite`}
+            >
+              <Icons.Star />
+            </button>
+          )}
         </div>
+        {title && title.length > 0 && (
+          <div className="history-subtitle" title={exec.orchestrationName}>
+            {exec.orchestrationName}
+          </div>
+        )}
         <div className="history-time">
           <span>{formatTime(exec.startedAt)}</span>
           {durationText && (
@@ -168,6 +220,22 @@ export default function HistoryRow({
             </>
           )}
         </div>
+        {tags.length > 0 && (
+          <div className="history-tags">
+            {tags.map(tag => (
+              <button
+                key={tag}
+                type="button"
+                className={`tag-chip tag-chip-small ${onSelectTag ? 'tag-chip-clickable' : ''}`}
+                disabled={!onSelectTag}
+                onClick={(e: React.MouseEvent) => { e.stopPropagation(); onSelectTag?.(tag); }}
+                title={onSelectTag ? `Filter by tag "${tag}"` : tag}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {!exec.isActive && onDelete && (

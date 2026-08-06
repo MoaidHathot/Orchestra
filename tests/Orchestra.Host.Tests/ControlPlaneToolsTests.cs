@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Orchestra.Engine;
 using Orchestra.Host.McpServer;
+using Orchestra.Host.Persistence;
 using Xunit;
 
 namespace Orchestra.Host.Tests;
@@ -22,7 +23,7 @@ public class ControlPlaneToolsTests
 		using var store = await TempRunStore.WithChildrenOfRootAsync("root-LR1",
 			(executionId: "kid-1", parent: "root-LR1", root: "root-LR1", orchestrationName: "child-orch"));
 
-		var json = await ControlPlaneTools.ListRuns(store.Store, limit: 20);
+		var json = await ControlPlaneTools.ListRuns(store.Store, store.Annotations, limit: 20);
 		using var doc = System.Text.Json.JsonDocument.Parse(json);
 
 		var run = doc.RootElement.GetProperty("runs").EnumerateArray()
@@ -41,7 +42,7 @@ public class ControlPlaneToolsTests
 			(executionId: "in-subtree-2", parent: "in-subtree-1", root: "root-LR2", orchestrationName: "c2"),
 			(executionId: "unrelated", parent: "other-root", root: "other-root", orchestrationName: "c3"));
 
-		var json = await ControlPlaneTools.ListRuns(store.Store, rootExecutionId: "root-LR2");
+		var json = await ControlPlaneTools.ListRuns(store.Store, store.Annotations, rootExecutionId: "root-LR2");
 		using var doc = System.Text.Json.JsonDocument.Parse(json);
 
 		doc.RootElement.GetProperty("count").GetInt32().Should().Be(2,
@@ -58,7 +59,7 @@ public class ControlPlaneToolsTests
 			(executionId: "direct-child", parent: "root-LR3", root: "root-LR3", orchestrationName: "c1"),
 			(executionId: "grandchild",   parent: "direct-child", root: "root-LR3", orchestrationName: "c2"));
 
-		var json = await ControlPlaneTools.ListRuns(store.Store, parentExecutionId: "root-LR3");
+		var json = await ControlPlaneTools.ListRuns(store.Store, store.Annotations, parentExecutionId: "root-LR3");
 		using var doc = System.Text.Json.JsonDocument.Parse(json);
 
 		doc.RootElement.GetProperty("count").GetInt32().Should().Be(1,

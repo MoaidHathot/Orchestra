@@ -15,6 +15,8 @@ function defaultState(): HistoryFilterState {
     origins: [...ALL_RUN_ORIGINS],
     statuses: [...ALL_RUN_STATUS_FILTERS],
     hideIncomplete: DEFAULT_FILTER_STATE.hideIncomplete,
+    favoritesOnly: DEFAULT_FILTER_STATE.favoritesOnly,
+    tags: [],
   };
 }
 
@@ -103,6 +105,8 @@ describe('HistoryFilterSelector', () => {
       origins: ['manual'],
       statuses: ['Failed'],
       hideIncomplete: false,
+      favoritesOnly: false,
+      tags: [],
     };
     const { rerender } = render(<HistoryFilterSelector state={customized} onChange={onChange} />);
 
@@ -139,6 +143,8 @@ describe('HistoryFilterSelector', () => {
       origins: [...ALL_RUN_ORIGINS],
       statuses: [...ALL_RUN_STATUS_FILTERS],
       hideIncomplete: true,
+      favoritesOnly: false,
+      tags: [],
     };
 
     const { container } = render(<HistoryFilterSelector state={customized} onChange={vi.fn()} />);
@@ -157,6 +163,8 @@ describe('HistoryFilterSelector', () => {
       origins: ['manual', 'scheduler'],
       statuses: ['Failed'],
       hideIncomplete: false,
+      favoritesOnly: false,
+      tags: [],
     };
     render(<HistoryFilterSelector state={partial} onChange={vi.fn()} />);
 

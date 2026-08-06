@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry, StepActorStreams, HookExecution, ModelInfo, StepTiming } from '../../types';
 import { Icons } from '../../icons';
+import RunAnnotationEditor from '../RunAnnotationEditor';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
@@ -296,6 +297,8 @@ interface Props {
   onViewSourceRun?: (sourceRunId: string) => void;
   /** Invoked when the user clicks the child-run badge next to a step name. */
   onViewChildRun?: (orchestrationName: string, executionId: string) => void;
+  /** Invoked after the run's annotation changes, so lists can refresh. */
+  onAnnotationChanged?: () => void;
 }
 
 export default function ExecutionModal({
@@ -327,11 +330,14 @@ export default function ExecutionModal({
   onRetry,
   onViewSourceRun,
   onViewChildRun,
+  onAnnotationChanged,
 }: Props): React.JSX.Element {
   const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
   const dagRef = useRef<HTMLDivElement | null>(null);
   const streamingEndRef = useRef<HTMLDivElement | null>(null);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
+  /** Whether the run-annotation editor panel is expanded (historical runs only). */
+  const [annotationOpen, setAnnotationOpen] = useState(false);
   const [showTracePanel, setShowTracePanel] = useState(true);
   const [showRunContext, setShowRunContext] = useState(false);
   const [expandedTraceSections, setExpandedTraceSections] = useState<
@@ -1016,6 +1022,33 @@ export default function ExecutionModal({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {historicalRun && (
+              <>
+                <button
+                  type="button"
+                  className={`btn btn-sm btn-secondary run-annotation-toggle ${annotationOpen ? 'is-open' : ''}`}
+                  onClick={() => setAnnotationOpen(o => !o)}
+                  aria-expanded={annotationOpen}
+                  title="Give this run a title, tags and a note so you can find it later"
+                >
+                  <Icons.Tag /> Annotate
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-secondary"
+                  onClick={() => {
+                    // Streams a zip (bundle) containing the run record, step payloads and
+                    // the artifacts from the run's temp store - which is usually where the
+                    // real deliverable lives.
+                    const url = `/api/history/${encodeURIComponent(historicalRun.name)}/${encodeURIComponent(historicalRun.runId)}/export?format=bundle`;
+                    window.open(url, '_blank', 'noopener');
+                  }}
+                  title="Download this run: record, step payloads, and every saved artifact"
+                >
+                  <Icons.Download /> Export
+                </button>
+              </>
+            )}
             {(() => {
               // Show Retry buttons whenever we are looking at a terminal run
               // and we know how to identify it (orchestration name + run id).
@@ -1088,6 +1121,15 @@ export default function ExecutionModal({
           </div>
         </div>
         <div className="modal-body" style={{ padding: 0 }}>
+          {historicalRun && annotationOpen && (
+            <div className="run-annotation-panel">
+              <RunAnnotationEditor
+                orchestrationName={historicalRun.name}
+                runId={historicalRun.runId}
+                onChanged={onAnnotationChanged}
+              />
+            </div>
+          )}
           {/* Error Message Display */}
           {status === 'error' && errorMessage && (
             <div

@@ -93,6 +93,13 @@ export interface HistoryFilterState {
   statuses: RunStatusFilterValue[];
   /** Mirrors the previous standalone "Hide incomplete" button. */
   hideIncomplete: boolean;
+  /** When true, only runs marked as favorites are returned (`?favorites=true`). */
+  favoritesOnly: boolean;
+  /**
+   * Annotation tags to filter by. Matching is OR — a run matches when it carries
+   * any of these — which mirrors the server (`?tags=a,b`) and the CLI.
+   */
+  tags: string[];
 }
 
 export const DEFAULT_FILTER_STATE: HistoryFilterState = {
@@ -100,6 +107,8 @@ export const DEFAULT_FILTER_STATE: HistoryFilterState = {
   origins: [...ALL_RUN_ORIGINS],
   statuses: [...ALL_RUN_STATUS_FILTERS],
   hideIncomplete: true,
+  favoritesOnly: false,
+  tags: [],
 };
 
 export const FILTER_STORAGE_KEY = 'orchestra-history-filters.v1';
@@ -110,7 +119,9 @@ export function isFilterStateDefault(state: HistoryFilterState): boolean {
     state.scope === DEFAULT_FILTER_STATE.scope &&
     state.hideIncomplete === DEFAULT_FILTER_STATE.hideIncomplete &&
     state.origins.length === ALL_RUN_ORIGINS.length &&
-    state.statuses.length === ALL_RUN_STATUS_FILTERS.length
+    state.statuses.length === ALL_RUN_STATUS_FILTERS.length &&
+    !state.favoritesOnly &&
+    state.tags.length === 0
   );
 }
 
@@ -138,6 +149,15 @@ export function buildFilterQueryString(state: HistoryFilterState): string {
     parts.push('roots=true');
   } else if (state.scope === 'children') {
     parts.push('roots=false');
+  }
+
+  // Annotation filters. Only emitted when narrowing; `favoritesOnly: false` means
+  // "no filter", not "exclude favorites".
+  if (state.favoritesOnly) {
+    parts.push('favorites=true');
+  }
+  if (state.tags.length > 0) {
+    parts.push(`tags=${state.tags.map(encodeURIComponent).join(',')}`);
   }
 
   return parts.length === 0 ? '' : `&${parts.join('&')}`;
@@ -172,7 +192,15 @@ export function loadFilterState(): HistoryFilterState {
       ? parsed.hideIncomplete
       : DEFAULT_FILTER_STATE.hideIncomplete;
 
-    return { scope, origins, statuses, hideIncomplete };
+    const favoritesOnly = typeof parsed.favoritesOnly === 'boolean'
+      ? parsed.favoritesOnly
+      : DEFAULT_FILTER_STATE.favoritesOnly;
+
+    const tags = Array.isArray(parsed.tags)
+      ? parsed.tags.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      : [];
+
+    return { scope, origins, statuses, hideIncomplete, favoritesOnly, tags };
   } catch {
     return DEFAULT_FILTER_STATE;
   }

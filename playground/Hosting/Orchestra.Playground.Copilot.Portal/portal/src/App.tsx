@@ -201,6 +201,11 @@ interface HistoryListEntry {
   parentOrchestrationName?: string | null;
   rootExecutionId?: string | null;
   nestingDepth?: number;
+  // ── Curation (merged in from the run's annotation) ──────────────
+  favorite?: boolean;
+  title?: string | null;
+  tags?: string[];
+  note?: string | null;
 }
 
 // ── Helpers for SSE event handling ──────────────────────────────────────────
@@ -2508,6 +2513,29 @@ function App(): React.JSX.Element {
                       } as HistoryListEntry);
                       setSidebarOpen(false);
                     }
+                  }}
+                  onToggleFavorite={(target, favorite) => {
+                    void (async () => {
+                      const base = `/api/history/${encodeURIComponent(target.orchestrationName)}/${encodeURIComponent(target.runId)}/favorite`;
+                      try {
+                        if (favorite) {
+                          await api.post(base, {});
+                        } else {
+                          await api.delete(base);
+                        }
+                      } catch (err) {
+                        console.error('Failed to update favorite', err);
+                      }
+                      await refreshHistory();
+                    })();
+                  }}
+                  onSelectTag={(tag) => {
+                    // Clicking a chip narrows the list to that tag; clicking the
+                    // active tag again clears the filter.
+                    setHistoryFilters(prev => ({
+                      ...prev,
+                      tags: prev.tags.includes(tag) ? prev.tags.filter(t => t !== tag) : [tag],
+                    }));
                   }}
                 />
               ))

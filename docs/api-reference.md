@@ -821,8 +821,11 @@ builder.Services.AddOrchestraMcpServer(options =>
 | `ListTriggers` | List all triggers |
 | `EnableTrigger` | Enable a trigger |
 | `DisableTrigger` | Disable a trigger |
-| `ListRuns` | List recent run history |
+| `ListRuns` | List recent run history. Projects each run's annotation (`favorite`, `title`, `tags`, `note`) and accepts `favoritesOnly` / `tags` filters (tags are OR) |
 | `GetRun` | Get full run details |
+| `AnnotateRun` | Set a run's favorite / title / tags / note. Omitted fields are left untouched |
+| `ListRunAnnotations` | List every annotated run plus tag usage counts; `orphansOnly` narrows to annotations whose run is gone |
+| `ExportRun` | Export a run to a directory on the host (`bundle` / `report` / `data`, optional `zip`), including the artifacts from its temp store |
 
 ### Configuration
 
