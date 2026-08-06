@@ -733,6 +733,13 @@ public static class ServiceProviderExtensions
 			try
 			{
 				await runStore.PreloadIndexAsync();
+
+				// Then read run output into the search index for any runs that were already on
+				// disk. This is a whole-store read and can take minutes on a large history from a
+				// cold file cache, which is exactly why it runs behind the host instead of
+				// delaying startup. Search covers progressively more of the history as it
+				// proceeds, and resumes where it left off if the process restarts.
+				await runStore.BackfillSearchContentAsync(shutdownToken);
 			}
 			catch (Exception ex)
 			{

@@ -321,6 +321,56 @@ Two details the SQL has to get right:
   recomputed from `triggeredBy` in SQL, so the C# classifier stays the single definition of what
   an origin is.
 
+### Full-text search over run output
+
+Run names are frequently machine-generated (`ephemeral-efca835904b6-attempt-3`), and annotations
+only help for runs someone already went back and labelled. Searching what a run actually
+*produced* is the only way to find a run you did not know you would need again — so `.index.db`
+also carries an FTS5 index over run content.
+
+What is indexed, measured across a real 5,421-run / 5,748 MB store:
+
+| | size | share of store |
+|---|---|---|
+| `finalContent` + per-step `content` + error messages | **299 MB** | **5.2%** |
+| `trace` subtrees | 4,804 MB | 83.6% |
+| `promptSent` | 218 MB | 3.8% |
+| `rawContent` | 18 MB | 0.3% |
+
+Traces are skipped — they are the bulk of the store and nobody searches for them. So is
+`promptSent`: a prompt is input the user wrote, not a result they are trying to find again.
+Content is **stored** in the index rather than merely referenced, which is what allows `snippet()`
+to return the matching excerpt with the search terms wrapped in `<mark>`. A list of run ids with
+no excerpt is not a usable search result. The cost of that choice is index size: 142 MB rather
+than the ~7 MB the metadata alone needs.
+
+Tokenizer is `unicode61` without stemming, because run output is full of identifiers, paths and
+log lines where stemming produces matches the user cannot predict. Query words are matched as
+prefixes, so `recon` finds `reconciliation`.
+
+**User input never reaches `MATCH` directly.** FTS5 has its own query grammar, so a bare `AND`, an
+unbalanced quote or a stray `*` would be a syntax error thrown back at whoever typed it.
+`RunIndexQuery.ToFtsQuery` quotes each word into a literal phrase and ANDs them; words containing
+no letter or digit are dropped, since they tokenize to nothing and FTS5 rejects that outright.
+
+### When content gets indexed
+
+Two paths, because they have very different costs:
+
+- **As runs complete** — the record is already in memory, so its text is indexed synchronously.
+  A run is searchable the moment it finishes.
+- **For runs already on disk** (after an upgrade, a restore, or a deleted index) — the text has
+  to be read back out of every `run.json`. That is a whole-store read, and it runs **in the
+  background** after startup rather than in front of it. Measured on the 5,421-run store: metadata
+  4.8 s (blocking), content 9.6 s more (background) with a warm file cache; from a cold cache the
+  content pass has been observed at over two minutes. A host that did that work before answering
+  its first request would look hung after an upgrade.
+
+Progress is recorded per run in `runs.fts_indexed`, so a host killed part-way resumes where it
+stopped instead of starting over, and search simply covers progressively more of the history
+while it catches up. Runs whose file is missing or unreadable are marked done rather than retried
+on every start.
+
 ### Annotations are not indexed
 
 Favorites, tags, titles and notes stay in `annotations/` and are deliberately **not** mirrored

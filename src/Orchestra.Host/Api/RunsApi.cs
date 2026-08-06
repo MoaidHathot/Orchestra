@@ -53,7 +53,7 @@ public static partial class RunsApi
 				.ToList();
 
 			var remainingLimit = Math.Max(0, requestedLimit - runningRuns.Count);
-			var (completedRuns, _) = await runStore.QueryRunsAsync(
+			var (completedRuns, _, _) = await runStore.QueryRunsAsync(
 				filters.ToIndexQuery(annotations), offset: 0, limit: remainingLimit);
 
 			var runIdToOrchName = await BuildParentLookupAsync(
@@ -97,7 +97,7 @@ public static partial class RunsApi
 
 			var runningPage = runningRuns.Skip(requestedOffset).Take(requestedLimit).ToList();
 
-			var (completedPage, completedTotal) = await runStore.QueryRunsAsync(
+			var (completedPage, completedTotal, _) = await runStore.QueryRunsAsync(
 				filters.ToIndexQuery(annotations),
 				offset: Math.Max(0, requestedOffset - runningCount),
 				limit: requestedLimit - runningPage.Count);
@@ -151,7 +151,7 @@ public static partial class RunsApi
 
 			var activePage = matchingActive.Skip(requestedOffset).Take(requestedLimit).ToList();
 
-			var (completedPage, completedTotal) = await runStore.QueryRunsAsync(
+			var (completedPage, completedTotal, snippets) = await runStore.QueryRunsAsync(
 				filters.ToIndexQuery(annotations, searchQuery),
 				offset: Math.Max(0, requestedOffset - matchingActive.Count),
 				limit: requestedLimit - activePage.Count);
@@ -161,7 +161,8 @@ public static partial class RunsApi
 
 			var allResults = activePage
 				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
-				.Concat(completedPage.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId))))
+				.Concat(completedPage.Select(s => ProjectCompletedRow(
+					s, runIdToOrchName, annotations.Get(s.RunId), Snippet(snippets, s))))
 				.ToList();
 
 			return Results.Json(new
@@ -1032,10 +1033,15 @@ public static partial class RunsApi
 	/// Projects a stored <see cref="RunIndex"/> (a completed/failed/cancelled run) into the
 	/// JSON shape expected by the history list endpoints.
 	/// </summary>
+	/// <param name="snippet">
+	/// The excerpt of the run's output that matched a content search, with the matching terms
+	/// wrapped in <c>&lt;mark&gt;</c>. Null unless the row was found by searching content.
+	/// </param>
 	private static object ProjectCompletedRow(
 		RunIndex s,
 		IReadOnlyDictionary<string, string> runIdToOrchName,
-		RunAnnotation? annotation = null)
+		RunAnnotation? annotation = null,
+		string? snippet = null)
 	{
 		string? parentOrchName = null;
 		if (s.ParentExecutionId is not null && runIdToOrchName.TryGetValue(s.ParentExecutionId, out var name))
@@ -1073,6 +1079,12 @@ public static partial class RunsApi
 			title = annotation?.Title,
 			tags = annotation?.Tags ?? [],
 			note = annotation?.Note,
+			// Only present on content-search hits; the serializer elides it otherwise.
+			snippet,
 		};
 	}
+
+	/// <summary>Looks up the content-match excerpt for a row, if the query produced one.</summary>
+	private static string? Snippet(IReadOnlyDictionary<string, string>? snippets, RunIndex row) =>
+		snippets is not null && snippets.TryGetValue(row.FolderPath, out var value) ? value : null;
 }

@@ -345,7 +345,7 @@ curl -X POST http://localhost:5000/api/webhooks/{id} \
 |--------|----------|-------------|
 | `GET` | `/api/history` | Get recent execution summaries |
 | `GET` | `/api/history/all` | Get all executions (paginated; `total` counts every match) |
-| `GET` | `/api/history/search` | Search by name, run id, or annotation (paginated) |
+| `GET` | `/api/history/search` | Search by name, run id, annotation, or run output (paginated) |
 | `GET` | `/api/history/{name}/{runId}` | Get full execution details |
 | `DELETE` | `/api/history/{name}/{runId}` | Delete execution record |
 

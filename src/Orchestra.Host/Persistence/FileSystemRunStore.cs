@@ -197,7 +197,57 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 
 		// Upsert (not append) keyed on folder path: re-saving the same record overwrites its row
 		// instead of producing the duplicate history entry the in-memory index used to.
-		_index.Upsert(index);
+		// The searchable text is built from the record we already hold rather than by re-reading
+		// the run.json just written, so a run is findable by its content the moment it lands.
+		_index.UpsertMany([new RunProjection(index, BuildSearchText(record))]);
+	}
+
+	/// <summary>
+	/// Concatenates a run's human-readable output into the blob handed to the full-text index.
+	/// </summary>
+	/// <remarks>
+	/// Must stay equivalent to <see cref="RunIndexProjector.ProjectWithContent"/>'s version, which
+	/// derives the same text from <c>run.json</c> when an existing store is indexed. A test asserts
+	/// the two agree, since a drift would make a run's searchability depend on whether it was
+	/// indexed at save time or during a rebuild.
+	/// </remarks>
+	internal static string? BuildSearchText(OrchestrationRunRecord record)
+	{
+		var builder = new System.Text.StringBuilder();
+
+		void Append(string? text)
+		{
+			if (string.IsNullOrWhiteSpace(text))
+				return;
+			if (builder.Length > 0)
+				builder.Append('\n');
+			builder.Append(text);
+		}
+
+		Append(record.FinalContent);
+
+		// Keyed by step name so the overlap between the two dictionaries collapses, exactly as
+		// the streaming projector does.
+		var stepContent = new Dictionary<string, string>(StringComparer.Ordinal);
+		foreach (var (key, step) in record.AllStepRecords)
+		{
+			if (!string.IsNullOrEmpty(step.Content))
+				stepContent[key] = step.Content;
+		}
+		foreach (var (key, step) in record.StepRecords)
+		{
+			if (!string.IsNullOrEmpty(step.Content))
+				stepContent[key] = step.Content;
+		}
+
+		foreach (var (_, text) in stepContent.OrderBy(kv => kv.Key, StringComparer.Ordinal))
+			Append(text);
+
+		var (_, errorMessage) = ExtractFailureInfo(record);
+		Append(errorMessage);
+		Append(record.CompletionReason);
+
+		return builder.Length == 0 ? null : builder.ToString();
 	}
 
 	// IRunStore implementation (delegates to enhanced method)
@@ -308,7 +358,7 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 	/// user-facing: it filters, counts and pages in SQL, so cost tracks the size of the page
 	/// rather than the size of the history.
 	/// </remarks>
-	public async Task<(IReadOnlyList<RunIndex> Rows, int Total)> QueryRunsAsync(
+	public async Task<(IReadOnlyList<RunIndex> Rows, int Total, IReadOnlyDictionary<string, string>? Snippets)> QueryRunsAsync(
 		RunIndexQuery query, int offset, int limit, CancellationToken cancellationToken = default)
 	{
 		await EnsureIndexLoadedAsync(cancellationToken);
@@ -447,32 +497,40 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 			if (missing.Count > 0)
 			{
 				var sw = System.Diagnostics.Stopwatch.StartNew();
+				var added = 0;
 
-				// Only unindexed runs are read, and each is projected with a streaming reader that
-				// skips step traces and content. After the first pass this list is empty.
-				var projected = await Task.WhenAll(missing.Select(async entry =>
+				// Batched rather than one Task.WhenAll over the whole backlog: that held every
+				// file's bytes in memory at once, which a 5.7 GB store does not survive.
+				// Content is deliberately not read here — see BackfillSearchContentAsync.
+				foreach (var batch in Chunk(missing, IndexBatchSize))
 				{
-					try
+					var projected = await Task.WhenAll(batch.Select(async entry =>
 					{
-						var bytes = await File.ReadAllBytesAsync(entry.Value, cancellationToken);
-						var projection = RunIndexProjector.Project(bytes, entry.Key);
-						if (projection is null)
-							LogCorruptRunRecord(entry.Value, new InvalidDataException("run.json could not be projected"));
-						return projection;
-					}
-					catch (Exception ex)
-					{
-						LogCorruptRunRecord(entry.Value, ex);
-						return null;
-					}
-				}));
+						try
+						{
+							var bytes = await File.ReadAllBytesAsync(entry.Value, cancellationToken);
+							var projection = RunIndexProjector.Project(bytes, entry.Key);
+							if (projection is null)
+								LogCorruptRunRecord(entry.Value, new InvalidDataException("run.json could not be projected"));
+							return projection;
+						}
+						catch (Exception ex)
+						{
+							LogCorruptRunRecord(entry.Value, ex);
+							return null;
+						}
+					}));
 
-				var usable = projected.Where(p => p is not null).Select(p => p!).ToList();
-				if (usable.Count > 0)
-					_index.UpsertMany(usable);
+					var usable = projected.Where(p => p is not null).Select(p => p!).ToList();
+					if (usable.Count > 0)
+					{
+						_index.UpsertMany(usable);
+						added += usable.Count;
+					}
+				}
 
 				sw.Stop();
-				LogIndexBuilt(usable.Count, removed.Count, _index.Count, sw.ElapsedMilliseconds);
+				LogIndexBuilt(added, removed.Count, _index.Count, sw.ElapsedMilliseconds);
 			}
 			else if (removed.Count > 0)
 			{
@@ -484,6 +542,114 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 		{
 			_indexLoadLock.Release();
 		}
+	}
+
+	/// <summary>
+	/// How many runs are read, projected and indexed per batch during reconciliation. Sized so a
+	/// batch's worth of run content stays well inside a normal working set even at the p99 run
+	/// size (~320 KB of indexable text).
+	/// </summary>
+	private const int IndexBatchSize = 128;
+
+	/// <summary>
+	/// Reads run output into the full-text index for runs discovered on disk, a batch at a time,
+	/// until none are left. Safe to call repeatedly and safe to abandon part-way.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Runs indexed as they complete already have their content, taken from the record in hand.
+	/// This covers the other case: a store that already existed — after an upgrade, a restore, or
+	/// a deleted index — where the text has to come back off disk. That is a whole-store read,
+	/// measured at 142 s for 5,421 runs, so it happens behind the host rather than in front of it.
+	/// </para>
+	/// <para>
+	/// Progress is recorded per run, so a host that is killed half way through resumes where it
+	/// stopped instead of starting over. Runs whose file is missing or unreadable are marked done
+	/// rather than retried forever.
+	/// </para>
+	/// </remarks>
+	/// <returns>The number of runs whose content was examined.</returns>
+	public async Task<int> BackfillSearchContentAsync(CancellationToken cancellationToken = default)
+	{
+		await EnsureIndexLoadedAsync(cancellationToken);
+
+		var pendingAtStart = _index.PendingContentIndexCount;
+		if (pendingAtStart == 0)
+			return 0;
+
+		var sw = System.Diagnostics.Stopwatch.StartNew();
+		var processed = 0;
+
+		while (!cancellationToken.IsCancellationRequested && !_disposed)
+		{
+			IReadOnlyList<string> pending;
+			try
+			{
+				pending = _index.GetFoldersPendingContentIndex(IndexBatchSize);
+			}
+			catch (Exception ex) when (IsShutdownRace(ex, cancellationToken))
+			{
+				break;
+			}
+
+			if (pending.Count == 0)
+				break;
+
+			var results = await Task.WhenAll(pending.Select(async folderPath =>
+			{
+				var runJsonPath = Path.Combine(folderPath, "run.json");
+				try
+				{
+					if (!File.Exists(runJsonPath))
+						return (folderPath, RunId: "", SearchText: (string?)null);
+
+					var bytes = await File.ReadAllBytesAsync(runJsonPath, cancellationToken);
+					var projection = RunIndexProjector.ProjectWithContent(bytes, folderPath, includeContent: true);
+					return projection is null
+						? (folderPath, RunId: "", SearchText: (string?)null)
+						: (folderPath, projection.Value.Index.RunId, projection.Value.SearchText);
+				}
+				catch (Exception ex) when (ex is not OperationCanceledException)
+				{
+					LogCorruptRunRecord(runJsonPath, ex);
+					return (folderPath, RunId: "", SearchText: (string?)null);
+				}
+			}));
+
+			try
+			{
+				_index.SetSearchContent(results);
+			}
+			catch (Exception ex) when (IsShutdownRace(ex, cancellationToken))
+			{
+				break;
+			}
+
+			processed += results.Length;
+		}
+
+		sw.Stop();
+		if (processed > 0 && !_disposed)
+			LogContentIndexed(processed, _index.PendingContentIndexCount, sw.ElapsedMilliseconds);
+
+		return processed;
+	}
+
+	/// <summary>
+	/// Whether a failure is just the host shutting down underneath the background backfill.
+	/// </summary>
+	/// <remarks>
+	/// The work is resumable — every run it did not reach is still marked unexamined — so losing
+	/// the race is not an error worth reporting. Anything else is, and propagates.
+	/// </remarks>
+	private bool IsShutdownRace(Exception ex, CancellationToken cancellationToken) =>
+		(_disposed || cancellationToken.IsCancellationRequested)
+		&& ex is ObjectDisposedException or InvalidOperationException or Microsoft.Data.Sqlite.SqliteException;
+
+	private static IEnumerable<List<T>> Chunk<T>(IReadOnlyList<T> source, int size)
+	{
+		for (var i = 0; i < source.Count; i += size)
+			yield return [.. source.Skip(i).Take(size)];
 	}
 
 	/// <summary>
@@ -651,14 +817,25 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 	/// </summary>
 	public void Dispose()
 	{
+		_disposed = true;
 		_index.Dispose();
 		_indexLoadLock.Dispose();
 		GC.SuppressFinalize(this);
 	}
 
+	/// <summary>
+	/// Set on disposal so the background content backfill stops touching the index instead of
+	/// failing against a closed connection. The backfill outlives nothing; it just has to notice.
+	/// </summary>
+	private volatile bool _disposed;
+
 	[LoggerMessage(Level = LogLevel.Information,
 		Message = "Run index reconciled: +{Added} new, -{Removed} stale, {Total} total ({ElapsedMs} ms)")]
 	private partial void LogIndexBuilt(int added, int removed, int total, long elapsedMs);
+
+	[LoggerMessage(Level = LogLevel.Information,
+		Message = "Run content indexed for search: {Processed} runs, {Remaining} remaining ({ElapsedMs} ms)")]
+	private partial void LogContentIndexed(int processed, int remaining, long elapsedMs);
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to delete run folder '{FolderPath}'")]
 	private partial void LogRunFolderDeleteFailed(string folderPath, Exception ex);

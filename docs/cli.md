@@ -197,7 +197,8 @@ orchestra runs list --favorites
 ```
 
 Search (`GET /api/history/search`) also matches the title, tags and note, so the words you
-wrote are the words you can search for.
+wrote are the words you can search for — and it matches the run's own output too, so a run
+nobody labelled is still findable by something it said.
 
 ### Run export
 

@@ -419,10 +419,37 @@ each run appears on exactly one page.
 GET /api/history/search?query=connect&offset=0&limit=100
 ```
 
-Substring, case-insensitive. Matches the orchestration name, the run id, **and the
-run's annotation title, tags and note** — which is what makes machine-named runs
-(ephemeral and self-healing) findable by the words a human would actually search for.
-SQL wildcards in `query` (`%`, `_`) are matched literally.
+Substring, case-insensitive. Matches the orchestration name, the run id, the run's annotation
+title, tags and note, **and the run's own output** — final content, per-step content, and error
+messages. That last one is what makes a run findable when nobody thought to label it and its name
+is machine-generated. SQL wildcards in `query` (`%`, `_`) are matched literally.
+
+Content matching is word-based with prefix support, so `recon` finds `reconciliation`, but it
+cannot match inside a word. Multiple words must all be present. Name and id matching remains
+substring, so the two are unioned rather than exclusive.
+
+Rows matched on content carry a `snippet` field: the surrounding excerpt with the matching terms
+wrapped in `<mark>`. Rows matched only by name, id or annotation have no `snippet` property.
+
+```json
+{
+  "total": 9,
+  "offset": 0,
+  "limit": 300,
+  "count": 9,
+  "runs": [
+    {
+      "runId": "a1b2c3d4e5f6",
+      "orchestrationName": "pr-code-reviewer",
+      "snippet": "…There's no migration/<mark>reconciliation</mark> path.\n- `CreateOrUpdateAsync` is already…"
+    }
+  ]
+}
+```
+
+Run output is indexed in the background after startup for stores that already existed, so search
+coverage of old runs grows for a short while after an upgrade. Runs indexed as they complete are
+searchable immediately.
 
 **Query Parameters:**
 - `query`: Text to search for. An empty query returns no rows.

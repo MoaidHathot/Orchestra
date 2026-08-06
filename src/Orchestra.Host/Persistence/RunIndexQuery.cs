@@ -58,4 +58,51 @@ public sealed record RunIndexQuery
 	/// <see cref="NameOrIdContains"/> match.
 	/// </summary>
 	public IReadOnlyCollection<string>? AlsoMatchRunIds { get; init; }
+
+	/// <summary>
+	/// An FTS5 <c>MATCH</c> expression run against the indexed run output, ORed into the same
+	/// text-match group as <see cref="NameOrIdContains"/>. Build it with
+	/// <see cref="ToFtsQuery"/> rather than passing user input directly.
+	/// </summary>
+	public string? ContentMatch { get; init; }
+
+	/// <summary>
+	/// Converts free text into an FTS5 <c>MATCH</c> expression, or <see langword="null"/> when it
+	/// contains nothing searchable.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// User input cannot reach <c>MATCH</c> unescaped: FTS5 has its own query grammar, so a bare
+	/// <c>AND</c>, an unbalanced quote or a stray <c>*</c> is at best a surprise and at worst a
+	/// syntax error thrown at the user. Each word is therefore quoted into a literal phrase and
+	/// the phrases are ANDed, giving "runs whose output contains all of these words".
+	/// </para>
+	/// <para>
+	/// Words are matched as prefixes, so typing <c>conn</c> finds <c>connect</c>. That keeps the
+	/// content search close to the substring behaviour of the name and id search beside it,
+	/// though FTS5 indexes whole tokens and so cannot match inside a word.
+	/// </para>
+	/// <para>
+	/// Terms with no letter or digit are dropped. They tokenize to nothing, which FTS5 rejects as
+	/// a syntax error, and a search for <c>%</c> should return no content matches rather than
+	/// failing the request.
+	/// </para>
+	/// </remarks>
+	public static string? ToFtsQuery(string? text)
+	{
+		if (string.IsNullOrWhiteSpace(text))
+			return null;
+
+		var phrases = new List<string>();
+		foreach (var term in text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+		{
+			if (!term.Any(char.IsLetterOrDigit))
+				continue;
+
+			// Inside a phrase everything is literal except the quote, which doubles to escape.
+			phrases.Add($"\"{term.Replace("\"", "\"\"", StringComparison.Ordinal)}\"*");
+		}
+
+		return phrases.Count == 0 ? null : string.Join(" AND ", phrases);
+	}
 }

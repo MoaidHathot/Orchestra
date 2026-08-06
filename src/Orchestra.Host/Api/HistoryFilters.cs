@@ -172,6 +172,7 @@ public static class HistoryFilterParser
 			RunIdDenyList = deny,
 			NameOrIdContains = string.IsNullOrEmpty(searchText) ? null : searchText,
 			AlsoMatchRunIds = alsoMatch,
+			ContentMatch = RunIndexQuery.ToFtsQuery(searchText),
 		};
 	}
 

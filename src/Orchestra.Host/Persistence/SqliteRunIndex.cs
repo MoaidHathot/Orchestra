@@ -41,7 +41,7 @@ internal sealed partial class SqliteRunIndex : IDisposable
 	/// migrating — the data is derived, so a rebuild is always correct and always cheaper to
 	/// reason about than a migration path.
 	/// </summary>
-	private const int SchemaVersion = 2;
+	private const int SchemaVersion = 3;
 
 	/// <summary>
 	/// Appended to every ORDER BY so paging is a true partition of the result set.
@@ -140,6 +140,7 @@ internal sealed partial class SqliteRunIndex : IDisposable
 		{
 			LogSchemaReset(existing.Value, SchemaVersion);
 			Execute("DROP TABLE IF EXISTS runs;");
+			Execute("DROP TABLE IF EXISTS runs_fts;");
 			Execute("DROP TABLE IF EXISTS schema_info;");
 			existing = null;
 		}
@@ -169,7 +170,23 @@ internal sealed partial class SqliteRunIndex : IDisposable
 				parent_step_name      TEXT NULL,
 				root_execution_id     TEXT NULL,
 				nesting_depth         INTEGER NOT NULL,
-				origin                TEXT NOT NULL
+				origin                TEXT NOT NULL,
+				fts_rowid             INTEGER NULL,
+				fts_indexed           INTEGER NOT NULL DEFAULT 0
+			);
+			""");
+
+		// Full-text index over the run's own output. Content is stored rather than referenced,
+		// which costs disk but is what lets snippet() show *why* a run matched — the excerpt is
+		// the difference between a list of run ids and a usable search result.
+		//
+		// unicode61 rather than porter: run output is full of identifiers, paths and log lines,
+		// where stemming produces matches a user did not ask for and cannot predict.
+		Execute("""
+			CREATE VIRTUAL TABLE IF NOT EXISTS runs_fts USING fts5(
+				content,
+				run_id UNINDEXED,
+				tokenize = 'unicode61'
 			);
 			""");
 
@@ -182,6 +199,11 @@ internal sealed partial class SqliteRunIndex : IDisposable
 		Execute("CREATE INDEX IF NOT EXISTS ix_runs_parent ON runs(parent_execution_id);");
 		Execute("CREATE INDEX IF NOT EXISTS ix_runs_root ON runs(root_execution_id);");
 		Execute("CREATE INDEX IF NOT EXISTS ix_runs_origin ON runs(origin, started_at_ticks DESC);");
+
+		// Partial index over the content-indexing backlog. It costs nothing once the backlog is
+		// empty, which is the steady state, and turns "what still needs reading" into a lookup
+		// rather than a scan of the whole history.
+		Execute("CREATE INDEX IF NOT EXISTS ix_runs_fts_pending ON runs(folder_path) WHERE fts_indexed = 0;");
 
 		if (existing is null)
 		{
@@ -212,12 +234,58 @@ internal sealed partial class SqliteRunIndex : IDisposable
 
 	// ── Writes ──
 
-	/// <summary>Inserts or replaces a batch of index rows in a single transaction.</summary>
-	public void UpsertMany(IEnumerable<RunIndex> entries)
+	/// <summary>
+	/// Inserts or replaces index rows without examining run content, leaving them queued for the
+	/// content backfill.
+	/// </summary>
+	/// <remarks>
+	/// Used when an existing store is discovered on disk. Reading every <c>run.json</c> for its
+	/// text takes minutes on a large store — measured at 142 s for 5,421 runs — and doing that
+	/// before the host will answer a request trades a working history panel for a search feature
+	/// nobody has asked for yet. Metadata lands immediately; the text follows in the background.
+	/// </remarks>
+	public void UpsertMany(IEnumerable<RunIndex> entries) =>
+		UpsertMany(entries.Select(e => new RunProjection(e, null)), contentExamined: false);
+
+	/// <summary>
+	/// Inserts or replaces a batch of index rows, together with their full-text content.
+	/// </summary>
+	/// <remarks>
+	/// FTS5 has no upsert, and its rowid is the only cheap way back to a document — the other
+	/// columns are <c>UNINDEXED</c>, so matching on them means scanning the whole index. Each
+	/// <c>runs</c> row therefore stores the rowid of its FTS document, letting a re-index of one
+	/// run drop exactly one document instead of searching for it.
+	/// </remarks>
+	public void UpsertMany(IEnumerable<RunProjection> projections) =>
+		UpsertMany(projections, contentExamined: true);
+
+	/// <param name="contentExamined">
+	/// Whether the run's content has been looked at. A run with no text at all is still
+	/// "examined", so it is not re-read on every start forever.
+	/// </param>
+	private void UpsertMany(IEnumerable<RunProjection> projections, bool contentExamined)
 	{
 		lock (_gate)
 		{
 			using var transaction = _connection.BeginTransaction();
+
+			using var findFts = _connection.CreateCommand();
+			findFts.Transaction = transaction;
+			findFts.CommandText = "SELECT fts_rowid FROM runs WHERE folder_path = $folder;";
+			var findFolder = findFts.Parameters.Add("$folder", SqliteType.Text);
+
+			using var deleteFts = _connection.CreateCommand();
+			deleteFts.Transaction = transaction;
+			deleteFts.CommandText = "DELETE FROM runs_fts WHERE rowid = $rid;";
+			var deleteRowId = deleteFts.Parameters.Add("$rid", SqliteType.Integer);
+
+			using var insertFts = _connection.CreateCommand();
+			insertFts.Transaction = transaction;
+			insertFts.CommandText =
+				"INSERT INTO runs_fts (content, run_id) VALUES ($content, $runId); SELECT last_insert_rowid();";
+			var insertContent = insertFts.Parameters.Add("$content", SqliteType.Text);
+			var insertRunId = insertFts.Parameters.Add("$runId", SqliteType.Text);
+
 			using var cmd = _connection.CreateCommand();
 			cmd.Transaction = transaction;
 			cmd.CommandText = """
@@ -227,14 +295,16 @@ internal sealed partial class SqliteRunIndex : IDisposable
 					failed_step_name, error_message, completion_reason, completed_by_step,
 					is_incomplete, cancellation_json, hook_execution_count,
 					retried_from_run_id, retry_mode,
-					parent_execution_id, parent_step_name, root_execution_id, nesting_depth, origin)
+					parent_execution_id, parent_step_name, root_execution_id, nesting_depth, origin,
+					fts_rowid, fts_indexed)
 				VALUES (
 					$folder, $runId, $orch, $version, $triggeredBy,
 					$startedAt, $startedTicks, $completedAt, $status, $triggerId,
 					$failedStep, $error, $completionReason, $completedByStep,
 					$isIncomplete, $cancellation, $hookCount,
 					$retriedFrom, $retryMode,
-					$parentExec, $parentStep, $rootExec, $depth, $origin);
+					$parentExec, $parentStep, $rootExec, $depth, $origin,
+					$ftsRowId, $ftsIndexed);
 				""";
 
 			var p = cmd.Parameters;
@@ -262,8 +332,11 @@ internal sealed partial class SqliteRunIndex : IDisposable
 			p.Add("$rootExec", SqliteType.Text);
 			p.Add("$depth", SqliteType.Integer);
 			p.Add("$origin", SqliteType.Text);
+			p.Add("$ftsRowId", SqliteType.Integer);
+			p.Add("$ftsIndexed", SqliteType.Integer);
+			p["$ftsIndexed"].Value = contentExamined ? 1 : 0;
 
-			foreach (var entry in entries)
+			foreach (var (entry, searchText) in projections)
 			{
 				p["$folder"].Value = entry.FolderPath;
 				p["$runId"].Value = entry.RunId;
@@ -293,6 +366,28 @@ internal sealed partial class SqliteRunIndex : IDisposable
 				// Materialized rather than recomputed in SQL so the C# classifier stays the single
 				// definition of what an origin is. A change there bumps the schema and rebuilds.
 				p["$origin"].Value = RunOriginClassifier.ToWireValue(RunOriginClassifier.Classify(entry.TriggeredBy));
+
+				// Drop the document this folder used to own, if any, then index the new text.
+				// Re-indexing an existing folder only happens on the duplicate-save path, since
+				// run folders are otherwise write-once.
+				findFolder.Value = entry.FolderPath;
+				if (findFts.ExecuteScalar() is long staleRowId)
+				{
+					deleteRowId.Value = staleRowId;
+					deleteFts.ExecuteNonQuery();
+				}
+
+				if (string.IsNullOrEmpty(searchText))
+				{
+					p["$ftsRowId"].Value = DBNull.Value;
+				}
+				else
+				{
+					insertContent.Value = searchText;
+					insertRunId.Value = entry.RunId;
+					p["$ftsRowId"].Value = Convert.ToInt64(insertFts.ExecuteScalar());
+				}
+
 				cmd.ExecuteNonQuery();
 			}
 
@@ -302,12 +397,19 @@ internal sealed partial class SqliteRunIndex : IDisposable
 
 	public void Upsert(RunIndex entry) => UpsertMany([entry]);
 
-	/// <summary>Removes rows for the supplied folder paths.</summary>
+	/// <summary>Removes rows for the supplied folder paths, and their full-text documents.</summary>
 	public void DeleteByFolderPaths(IEnumerable<string> folderPaths)
 	{
 		lock (_gate)
 		{
 			using var transaction = _connection.BeginTransaction();
+
+			using var deleteFts = _connection.CreateCommand();
+			deleteFts.Transaction = transaction;
+			deleteFts.CommandText =
+				"DELETE FROM runs_fts WHERE rowid IN (SELECT fts_rowid FROM runs WHERE folder_path = $folder AND fts_rowid IS NOT NULL);";
+			var ftsFolder = deleteFts.Parameters.Add("$folder", SqliteType.Text);
+
 			using var cmd = _connection.CreateCommand();
 			cmd.Transaction = transaction;
 			cmd.CommandText = "DELETE FROM runs WHERE folder_path = $folder;";
@@ -315,6 +417,8 @@ internal sealed partial class SqliteRunIndex : IDisposable
 
 			foreach (var path in folderPaths)
 			{
+				ftsFolder.Value = path;
+				deleteFts.ExecuteNonQuery();
 				param.Value = path;
 				cmd.ExecuteNonQuery();
 			}
@@ -328,15 +432,126 @@ internal sealed partial class SqliteRunIndex : IDisposable
 	{
 		lock (_gate)
 		{
+			using var transaction = _connection.BeginTransaction();
+
+			using var deleteFts = _connection.CreateCommand();
+			deleteFts.Transaction = transaction;
+			deleteFts.CommandText = """
+				DELETE FROM runs_fts WHERE rowid IN (
+					SELECT fts_rowid FROM runs
+					WHERE orchestration_name = $orch AND run_id = $runId AND fts_rowid IS NOT NULL);
+				""";
+			deleteFts.Parameters.AddWithValue("$orch", orchestrationName);
+			deleteFts.Parameters.AddWithValue("$runId", runId);
+			deleteFts.ExecuteNonQuery();
+
 			using var cmd = _connection.CreateCommand();
+			cmd.Transaction = transaction;
 			cmd.CommandText = "DELETE FROM runs WHERE orchestration_name = $orch AND run_id = $runId;";
 			cmd.Parameters.AddWithValue("$orch", orchestrationName);
 			cmd.Parameters.AddWithValue("$runId", runId);
-			return cmd.ExecuteNonQuery() > 0;
+			var affected = cmd.ExecuteNonQuery();
+
+			transaction.Commit();
+			return affected > 0;
 		}
 	}
 
 	// ── Reads ──
+
+	/// <summary>Folder paths whose run content has not been read into the full-text index yet.</summary>
+	public IReadOnlyList<string> GetFoldersPendingContentIndex(int limit)
+	{
+		lock (_gate)
+		{
+			var paths = new List<string>();
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText = $"SELECT folder_path FROM runs WHERE fts_indexed = 0 LIMIT {limit};";
+			using var reader = cmd.ExecuteReader();
+			while (reader.Read())
+				paths.Add(reader.GetString(0));
+			return paths;
+		}
+	}
+
+	/// <summary>Number of runs still waiting to have their content indexed.</summary>
+	public int PendingContentIndexCount
+	{
+		get
+		{
+			lock (_gate)
+			{
+				using var cmd = _connection.CreateCommand();
+				cmd.CommandText = "SELECT COUNT(*) FROM runs WHERE fts_indexed = 0;";
+				return Convert.ToInt32(cmd.ExecuteScalar());
+			}
+		}
+	}
+
+	/// <summary>
+	/// Attaches full-text content to rows that already exist, marking them examined.
+	/// </summary>
+	/// <remarks>
+	/// A <see langword="null"/> text still marks the row examined: a run with no output, or one
+	/// whose file has since gone or become unreadable, must not be retried on every start.
+	/// </remarks>
+	public void SetSearchContent(IEnumerable<(string FolderPath, string RunId, string? SearchText)> entries)
+	{
+		lock (_gate)
+		{
+			using var transaction = _connection.BeginTransaction();
+
+			using var findFts = _connection.CreateCommand();
+			findFts.Transaction = transaction;
+			findFts.CommandText = "SELECT fts_rowid FROM runs WHERE folder_path = $folder;";
+			var findFolder = findFts.Parameters.Add("$folder", SqliteType.Text);
+
+			using var deleteFts = _connection.CreateCommand();
+			deleteFts.Transaction = transaction;
+			deleteFts.CommandText = "DELETE FROM runs_fts WHERE rowid = $rid;";
+			var deleteRowId = deleteFts.Parameters.Add("$rid", SqliteType.Integer);
+
+			using var insertFts = _connection.CreateCommand();
+			insertFts.Transaction = transaction;
+			insertFts.CommandText =
+				"INSERT INTO runs_fts (content, run_id) VALUES ($content, $runId); SELECT last_insert_rowid();";
+			var insertContent = insertFts.Parameters.Add("$content", SqliteType.Text);
+			var insertRunId = insertFts.Parameters.Add("$runId", SqliteType.Text);
+
+			using var update = _connection.CreateCommand();
+			update.Transaction = transaction;
+			update.CommandText =
+				"UPDATE runs SET fts_rowid = $rid, fts_indexed = 1 WHERE folder_path = $folder;";
+			var updateRowId = update.Parameters.Add("$rid", SqliteType.Integer);
+			var updateFolder = update.Parameters.Add("$folder", SqliteType.Text);
+
+			foreach (var (folderPath, runId, searchText) in entries)
+			{
+				findFolder.Value = folderPath;
+				if (findFts.ExecuteScalar() is long staleRowId)
+				{
+					deleteRowId.Value = staleRowId;
+					deleteFts.ExecuteNonQuery();
+				}
+
+				if (string.IsNullOrEmpty(searchText))
+				{
+					updateRowId.Value = DBNull.Value;
+				}
+				else
+				{
+					insertContent.Value = searchText;
+					insertRunId.Value = runId;
+					updateRowId.Value = Convert.ToInt64(insertFts.ExecuteScalar());
+				}
+
+				updateFolder.Value = folderPath;
+				update.ExecuteNonQuery();
+			}
+
+			transaction.Commit();
+		}
+	}
 
 	/// <summary>Every folder path currently indexed. Used to reconcile against the filesystem.</summary>
 	public HashSet<string> GetIndexedFolderPaths()
@@ -446,8 +661,12 @@ internal sealed partial class SqliteRunIndex : IDisposable
 	/// the history — thousands of objects — per request, and made an honest <c>total</c>
 	/// awkward enough that the search endpoint simply reported the size of the page instead.
 	/// </remarks>
-	/// <returns>The requested page, and the total number of matching runs ignoring paging.</returns>
-	public (IReadOnlyList<RunIndex> Rows, int Total) QueryPage(RunIndexQuery query, int offset, int limit)
+	/// <returns>
+	/// The requested page, the total number of matching runs ignoring paging, and — when the query
+	/// searched run content — the matching excerpt per folder path.
+	/// </returns>
+	public (IReadOnlyList<RunIndex> Rows, int Total, IReadOnlyDictionary<string, string>? Snippets) QueryPage(
+		RunIndexQuery query, int offset, int limit)
 	{
 		lock (_gate)
 		{
@@ -466,19 +685,34 @@ internal sealed partial class SqliteRunIndex : IDisposable
 			// Skip the page query entirely when the caller only wanted the count, or when the
 			// offset is already past the end.
 			if (limit <= 0 || offset >= total)
-				return ([], total);
+				return ([], total, null);
+
+			var wantsSnippets = !string.IsNullOrEmpty(query.ContentMatch);
 
 			using var pageCmd = _connection.CreateCommand();
 			pageCmd.CommandText =
-				$"SELECT * FROM runs{predicate.Where}{StableOrder} LIMIT {limit} OFFSET {Math.Max(0, offset)};";
+				$"SELECT runs.*{(wantsSnippets ? SnippetSelect : "")} FROM runs{predicate.Where}{StableOrder} "
+				+ $"LIMIT {limit} OFFSET {Math.Max(0, offset)};";
 			predicate.Bind(pageCmd);
 
 			var rows = new List<RunIndex>();
+			Dictionary<string, string>? snippets = wantsSnippets ? new(StringComparer.OrdinalIgnoreCase) : null;
+
 			using var reader = pageCmd.ExecuteReader();
 			while (reader.Read())
-				rows.Add(Read(reader));
+			{
+				var row = Read(reader);
+				rows.Add(row);
 
-			return (rows, total);
+				if (snippets is null)
+					continue;
+
+				var ordinal = reader.GetOrdinal("match_snippet");
+				if (!reader.IsDBNull(ordinal))
+					snippets[row.FolderPath] = reader.GetString(ordinal);
+			}
+
+			return (rows, total, snippets);
 		}
 	}
 
@@ -609,25 +843,29 @@ internal sealed partial class SqliteRunIndex : IDisposable
 		if (query.RunIdDenyList is { Count: > 0 })
 			clauses.Add($"run_id NOT IN ({BucketQuery(Bucket.Deny)})");
 
-		// OR-scoped text match: name or id contains the query, or the run was matched by its
-		// annotation (title / note / tag), which lives on disk and is resolved by the caller.
+		// The text-match group: a run qualifies if its name or id contains the query, if its
+		// annotation matched (resolved by the caller, since annotations live on disk), or if its
+		// indexed output matches. These are alternatives, not additional constraints.
+		var alternatives = new List<string>();
+
 		if (!string.IsNullOrEmpty(query.NameOrIdContains))
 		{
-			var alternatives = new List<string>
-			{
-				@"orchestration_name LIKE $text ESCAPE '\'",
-				@"run_id LIKE $text ESCAPE '\'",
-			};
-			if (query.AlsoMatchRunIds is { Count: > 0 })
-				alternatives.Add($"run_id IN ({BucketQuery(Bucket.Also)})");
-
-			clauses.Add($"({string.Join(" OR ", alternatives)})");
+			alternatives.Add(@"orchestration_name LIKE $text ESCAPE '\'");
+			alternatives.Add(@"run_id LIKE $text ESCAPE '\'");
 			parameters.Add(("$text", $"%{EscapeLike(query.NameOrIdContains)}%"));
 		}
-		else if (query.AlsoMatchRunIds is not null)
+
+		if (query.AlsoMatchRunIds is { Count: > 0 })
+			alternatives.Add($"run_id IN ({BucketQuery(Bucket.Also)})");
+
+		if (!string.IsNullOrEmpty(query.ContentMatch))
 		{
-			clauses.Add($"run_id IN ({BucketQuery(Bucket.Also)})");
+			alternatives.Add($"fts_rowid IN (SELECT rowid FROM runs_fts WHERE runs_fts MATCH {FtsParam})");
+			parameters.Add((FtsParam, query.ContentMatch));
 		}
+
+		if (alternatives.Count > 0)
+			clauses.Add($"({string.Join(" OR ", alternatives)})");
 
 		var where = clauses.Count == 0 ? "" : " WHERE " + string.Join(" AND ", clauses);
 		return new Predicate(where, cmd =>
@@ -636,6 +874,22 @@ internal sealed partial class SqliteRunIndex : IDisposable
 				cmd.Parameters.AddWithValue(name, value);
 		});
 	}
+
+	private const string FtsParam = "$fts";
+
+	/// <summary>
+	/// Correlated subquery that produces the matching excerpt for a row, or <c>NULL</c> when the
+	/// row was matched by something other than its content.
+	/// </summary>
+	/// <remarks>
+	/// Evaluated per returned row, and each evaluation is a rowid lookup into FTS5 rather than a
+	/// scan, so the cost is bounded by the page size rather than by the number of matches.
+	/// </remarks>
+	private const string SnippetSelect = $"""
+		, (SELECT snippet(runs_fts, 0, '<mark>', '</mark>', '…', 24)
+		   FROM runs_fts
+		   WHERE runs_fts.rowid = runs.fts_rowid AND runs_fts MATCH {FtsParam}) AS match_snippet
+		""";
 
 	/// <summary>Neutralizes LIKE wildcards so a query for "50%" does not match everything.</summary>
 	private static string EscapeLike(string value) => value

@@ -277,6 +277,55 @@ public class RunsApiHistoryPagingTests : IDisposable
 			.Should().BeEquivalentTo(["run-010", "run-011"]);
 	}
 
+	[Fact]
+	public async Task Search_MatchesRunOutputAndReturnsAHighlightedSnippet()
+	{
+		await SaveRunsAsync(3);
+		await _store.SaveRunAsync(new OrchestrationRunRecord
+		{
+			RunId = "wordy",
+			OrchestrationName = "alpha-orch",
+			OrchestrationVersion = "1.0.0",
+			TriggeredBy = "manual",
+			StartedAt = s_epoch.AddHours(2),
+			CompletedAt = s_epoch.AddHours(2).AddSeconds(5),
+			Status = ExecutionStatus.Succeeded,
+			IsIncomplete = false,
+			FinalContent = "Padding so the excerpt has to be trimmed on both sides. "
+				+ "The audit found seventeen orphaned invoices. "
+				+ "More padding so the excerpt has to be trimmed on both sides.",
+			SavedFiles = [],
+			HookExecutions = [],
+			StepRecords = new Dictionary<string, StepRunRecord>(),
+			AllStepRecords = new Dictionary<string, StepRunRecord>(),
+		}, cancellationToken: default);
+
+		using var host = CreateHost();
+		var response = await host.GetTestClient().GetAsync("/api/history/search?query=orphaned");
+		response.EnsureSuccessStatusCode();
+		using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+		var run = doc.RootElement.GetProperty("runs").EnumerateArray().Single();
+		run.GetProperty("runId").GetString().Should().Be("wordy");
+		run.GetProperty("snippet").GetString().Should().Contain("<mark>orphaned</mark>");
+	}
+
+	[Fact]
+	public async Task Search_OmitsSnippetWhenTheMatchWasNotInTheContent()
+	{
+		// Matching on the orchestration name has no excerpt to show, and inventing one would
+		// suggest the run's output contained the query when it did not.
+		await SaveRunsAsync(2);
+
+		using var host = CreateHost();
+		var response = await host.GetTestClient().GetAsync("/api/history/search?query=alpha-orch");
+		response.EnsureSuccessStatusCode();
+		using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+
+		foreach (var run in doc.RootElement.GetProperty("runs").EnumerateArray())
+			run.TryGetProperty("snippet", out _).Should().BeFalse();
+	}
+
 	private IHost CreateHost()
 	{
 		var jsonOptions = new JsonSerializerOptions
