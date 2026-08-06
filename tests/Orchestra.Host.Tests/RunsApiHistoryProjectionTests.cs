@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using NSubstitute;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
+using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
@@ -445,6 +446,7 @@ public class RunsApiHistoryProjectionTests : IDisposable
 				{
 					services.AddRouting();
 					services.AddSingleton(_store);
+					services.AddSingleton(new RunAnnotationStore(Path.Combine(Path.GetTempPath(), $"orchestra-api-annotations-{Guid.NewGuid():N}"), NullLogger<RunAnnotationStore>.Instance));
 					services.AddSingleton(activeExecutionInfos);
 					services.AddSingleton(triggerManager);
 					services.AddSingleton(new OrchestrationRegistry());

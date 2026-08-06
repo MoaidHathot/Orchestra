@@ -361,6 +361,14 @@ X-Webhook-Signature: sha256=<signature>
 GET /api/history?limit=10
 ```
 
+**Query Parameters:**
+- `limit`: Number of records to return (default: 15)
+- `origins`: Comma-separated origin kinds (`manual`, `scheduler`, `loop`, `webhook`, `mcp`, `orchestration`, `retry`, `resume`)
+- `roots`: `true` = roots only, `false` = children only, omitted = no scope filter
+- `statuses`: Comma-separated `ExecutionStatus` names
+- `favorites`: `true` = favorited runs only, `false` = unfavorited only
+- `tags`: Comma-separated annotation tags. **OR semantics** — a run matches if it carries *any* of them
+
 **Response:**
 ```json
 {
@@ -376,11 +384,18 @@ GET /api/history?limit=10
       "completedAt": "2024-01-15T10:30:45Z",
       "durationSeconds": 45.12,
       "status": "Succeeded",
-      "isActive": false
+      "isActive": false,
+      "favorite": true,
+      "title": "Q1 evidence pack",
+      "tags": ["connect", "keep"],
+      "note": "Counts are unreliable — see caveats."
     }
   ]
 }
 ```
+
+Every history row carries the run's annotation. Unannotated runs report
+`favorite: false`, `title: null`, `tags: []`, `note: null`.
 
 ### Get All Runs
 
@@ -391,6 +406,17 @@ GET /api/history/all?offset=0&limit=100
 **Query Parameters:**
 - `offset`: Number of records to skip (default: 0)
 - `limit`: Number of records to return (default: 100)
+- Plus every filter listed under [Get Recent Runs](#get-recent-runs)
+
+### Search Runs
+
+```http
+GET /api/history/search?query=connect
+```
+
+Substring, case-insensitive. Matches the orchestration name, the run id, **and the
+run's annotation title, tags and note** — which is what makes machine-named runs
+(ephemeral and self-healing) findable by the words a human would actually search for.
 
 ### Get Run Details
 
@@ -476,6 +502,146 @@ GET /api/history/{orchestrationName}/{runId}
 ```http
 DELETE /api/history/{orchestrationName}/{runId}
 ```
+
+**Query Parameters:**
+- `force`: Required (`true`) to delete a run marked as a favorite. Without it the
+  request is rejected with `400`.
+
+---
+
+## Run Annotations
+
+User-curated metadata attached to a run: **favorite**, **title**, **tags**, **note**.
+
+Run records are immutable — `OrchestrationRunRecord` is entirely `init`-only and re-saving
+one would duplicate its history index entry — so annotations live in their own store, keyed
+by run id, and are merged into history projections at read time.
+
+Two things annotations buy you:
+
+- **Findability.** Machine-named runs (`ephemeral-efca835904b6-attempt-3`) carry no meaning.
+  A title makes them searchable by the words you would actually type.
+- **Durability.** Favorited runs are exempt from retention deletion, and are also excluded
+  from the max-count ranking so they never consume another run's keep-slot.
+
+Annotations are **sparse**: a record exists only for runs you have acted on. Emptying an
+annotation deletes it.
+
+Stored one file per annotated run at `{dataPath}/annotations/{orchestrationName}/{runId}.json`.
+
+### List Annotations
+
+```http
+GET /api/history/annotations
+GET /api/history/annotations?orphans=true
+```
+
+**Response:**
+```json
+{
+  "count": 2,
+  "orphanCount": 0,
+  "annotations": [
+    {
+      "runId": "a1b2c3d4e5f6",
+      "orchestrationName": "research-assistant",
+      "favorite": true,
+      "title": "Q1 evidence pack",
+      "tags": ["connect", "keep"],
+      "note": "Counts are unreliable.",
+      "annotatedAt": "2024-01-15T10:31:00Z",
+      "orphaned": false
+    }
+  ],
+  "tags": [{ "tag": "connect", "count": 2 }]
+}
+```
+
+An annotation is **orphaned** when its run no longer exists. Orphans are reported, never
+silently deleted — a partially-loaded index must not be able to destroy curation.
+
+### Prune Orphaned Annotations
+
+```http
+POST /api/history/annotations/prune
+```
+
+### Get / Set / Update / Remove an Annotation
+
+```http
+GET    /api/history/{orchestrationName}/{runId}/annotation
+PUT    /api/history/{orchestrationName}/{runId}/annotation
+PATCH  /api/history/{orchestrationName}/{runId}/annotation
+DELETE /api/history/{orchestrationName}/{runId}/annotation
+```
+
+**Body** (`PUT` and `PATCH`):
+```json
+{
+  "favorite": true,
+  "title": "Q1 evidence pack",
+  "tags": ["connect", "keep"],
+  "note": "Counts are unreliable."
+}
+```
+
+`PUT` replaces: omitted fields are cleared. `PATCH` merges: omitted fields are left
+untouched, so setting a title cannot silently wipe tags. Passing an empty string clears
+a field explicitly.
+
+### Favorite Shortcuts
+
+```http
+POST   /api/history/{orchestrationName}/{runId}/favorite
+DELETE /api/history/{orchestrationName}/{runId}/favorite
+```
+
+---
+
+## Run Export
+
+```http
+GET /api/history/{orchestrationName}/{runId}/export?format=bundle
+```
+
+**Query Parameters:**
+- `format`: `bundle` (default), `report`, or `data`
+
+A run's artifacts live in **two** roots, which is the reason this endpoint exists:
+
+| Root | Contains |
+|---|---|
+| `{dataPath}/executions/{orch}/{folder}/` | run record, per-step projections, `result.md` |
+| `{dataPath}/temp/{orch}/{runId}/` | files written via `orchestra_save_file` |
+
+The second is usually where the real deliverable is: a step that produces a large document
+saves it and returns only a short summary inline, so copying the execution folder alone
+gives you the summary and loses the document. Every export format pulls both in.
+
+| `format` | Returns | Content type |
+|---|---|---|
+| `report` | The run's richest markdown — the largest saved `.md` artifact, else `finalContent` | `text/markdown` |
+| `bundle` | Everything (below), zipped | `application/zip` |
+| `data` | `steps/` only — fence-stripped, JSON-validated | `application/zip` |
+
+`bundle` layout:
+
+```
+{orchestration}_{runId}_{timestamp}/
+├── README.md            provenance, status warning, step table, parameters, token usage,
+│                        the run's annotation, and any export warnings
+├── run.json             full run record
+├── orchestration.json   definition snapshot as it was at execution time
+├── steps/{step}.json    per-step payloads (.txt when the step did not emit JSON)
+├── files/{step}.{ext}   saved artifacts, GUID names resolved to the producing step
+└── result.md            final content
+```
+
+The endpoint always streams, since HTTP cannot write into the caller's filesystem. The CLI
+(`orchestra runs export`) expands the archive into a directory unless `--zip` is given.
+
+Missing artifacts and unparseable step payloads are reported in the README's *Export
+warnings* section rather than being silently dropped.
 
 ---
 

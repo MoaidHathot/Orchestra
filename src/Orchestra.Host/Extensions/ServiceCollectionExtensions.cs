@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Api;
+using Orchestra.Host.Export;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Mcp;
 using Orchestra.Host.McpServer;
@@ -139,13 +140,35 @@ public static class ServiceCollectionExtensions
 		// Tests can override this with NullOrchestrationReporterFactory via DI.
 		services.TryAddSingleton<IOrchestrationReporterFactory, SseReporterFactory>();
 
+		// User-curated run annotations (favorite / title / tags / note).
+		// Registered before the run store, which consults it to protect favorites from retention.
+		services.AddSingleton<RunAnnotationStore>(sp =>
+		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			return new RunAnnotationStore(opts.DataPath, sp.GetRequiredService<ILogger<RunAnnotationStore>>());
+		});
+
 		// File-based run store
 		services.AddSingleton<FileSystemRunStore>(sp =>
 		{
 			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
-			return new FileSystemRunStore(opts.DataPath, sp.GetRequiredService<ILogger<FileSystemRunStore>>());
+			return new FileSystemRunStore(
+				opts.DataPath,
+				sp.GetRequiredService<ILogger<FileSystemRunStore>>(),
+				sp.GetRequiredService<RunAnnotationStore>());
 		});
 		services.AddSingleton<IRunStore>(sp => sp.GetRequiredService<FileSystemRunStore>());
+
+		// Run export (bundle / report / data)
+		services.AddSingleton<RunExporter>(sp =>
+		{
+			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
+			return new RunExporter(
+				opts.DataPath,
+				sp.GetRequiredService<FileSystemRunStore>(),
+				sp.GetRequiredService<RunAnnotationStore>(),
+				sp.GetRequiredService<ILogger<RunExporter>>());
+		});
 
 		// File-based checkpoint store
 		services.AddSingleton<FileSystemCheckpointStore>(sp =>

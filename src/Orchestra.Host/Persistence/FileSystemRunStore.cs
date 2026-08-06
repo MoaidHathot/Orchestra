@@ -35,10 +35,17 @@ public partial class FileSystemRunStore : IRunStore
 	private volatile bool _indexLoaded;
 	private readonly SemaphoreSlim _indexLoadLock = new(1, 1);
 
-	public FileSystemRunStore(string rootPath, ILogger<FileSystemRunStore>? logger = null)
+	/// <summary>
+	/// User-curated run annotations. Optional: when absent (tests, embedded hosts) favorites
+	/// simply do not exist and retention behaves exactly as before.
+	/// </summary>
+	private readonly RunAnnotationStore? _annotations;
+
+	public FileSystemRunStore(string rootPath, ILogger<FileSystemRunStore>? logger = null, RunAnnotationStore? annotations = null)
 	{
 		_rootPath = Path.Combine(rootPath, "executions");
 		_logger = logger ?? NullLogger<FileSystemRunStore>.Instance;
+		_annotations = annotations;
 		_jsonOptions = new JsonSerializerOptions
 		{
 			WriteIndented = true,
@@ -324,8 +331,17 @@ public partial class FileSystemRunStore : IRunStore
 			}
 		}
 
+		// An annotation must not outlive the run it describes.
+		_annotations?.Remove(runId, orchestrationName);
+
 		return true;
 	}
+
+	/// <summary>
+	/// Returns <see langword="true"/> when the run has been marked as a favorite and is therefore
+	/// exempt from retention deletion.
+	/// </summary>
+	public bool IsFavorite(string runId) => _annotations?.IsFavorite(runId) == true;
 
 	/// <summary>
 	/// Eagerly loads the run index into memory so that subsequent queries are fast.
@@ -684,8 +700,14 @@ public partial class FileSystemRunStore : IRunStore
 		{
 			foreach (var (orchestrationName, indices) in _indexByOrchestration)
 			{
-				// Sort newest first for max-count enforcement
-				var sorted = indices.OrderByDescending(i => i.StartedAt).ToList();
+				// Favorited runs are exempt from retention entirely, and are excluded from the
+				// ranking below rather than merely skipped. The max-count rule deletes by
+				// position (i >= N), so leaving favorites in the ranking would let N favorites
+				// permanently occupy every keep-slot and block all pruning for the orchestration.
+				var sorted = indices
+					.Where(i => !IsFavorite(i.RunId))
+					.OrderByDescending(i => i.StartedAt)
+					.ToList();
 
 				for (var i = 0; i < sorted.Count; i++)
 				{
@@ -716,6 +738,7 @@ public partial class FileSystemRunStore : IRunStore
 
 		// Delete outside the lock to avoid holding it during I/O
 		var deleted = 0;
+		var deletedRunIds = new List<string>();
 		foreach (var (orchestrationName, run) in toDelete)
 		{
 			cancellationToken.ThrowIfCancellationRequested();
@@ -743,12 +766,18 @@ public partial class FileSystemRunStore : IRunStore
 				}
 
 				deleted++;
+				deletedRunIds.Add(run.RunId);
 			}
 			catch (Exception ex)
 			{
 				LogRetentionDeleteFailed(run.FolderPath, ex);
 			}
 		}
+
+		// Annotations must not outlive their run. Only reached for runs that were not favorited,
+		// since favorites are never queued for deletion above.
+		if (deletedRunIds.Count > 0)
+			_annotations?.RemoveMany(deletedRunIds);
 
 		return deleted;
 	}

@@ -84,6 +84,78 @@ public class ProgramWiringTests
 		result.Output.Should().Contain("list");
 		result.Output.Should().Contain("get");
 		result.Output.Should().Contain("delete");
+		result.Output.Should().Contain("favorite");
+		result.Output.Should().Contain("unfavorite");
+		result.Output.Should().Contain("annotate");
+		result.Output.Should().Contain("annotations");
+	}
+
+	[Theory]
+	[InlineData("favorite")]
+	[InlineData("unfavorite")]
+	[InlineData("annotate")]
+	[InlineData("annotations")]
+	[InlineData("prune-annotations")]
+	[InlineData("export")]
+	public void RunsAnnotationSubcommands_AreRegistered(string subcommand)
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("runs", subcommand, "--help");
+
+		result.ExitCode.Should().Be(0);
+	}
+
+	[Fact]
+	public void RunsListHelp_ShowsAnnotationFilters()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("runs", "list", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--favorites");
+		result.Output.Should().Contain("--tag");
+	}
+
+	[Fact]
+	public void RunsAnnotateHelp_ShowsCurationOptions()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("runs", "annotate", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--title");
+		result.Output.Should().Contain("--tag");
+		result.Output.Should().Contain("--note");
+		result.Output.Should().Contain("--clear");
+	}
+
+	[Fact]
+	public void RunsDeleteHelp_ShowsForceFlag()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("runs", "delete", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--force");
+	}
+
+	[Fact]
+	public void RunsExportHelp_ShowsFormatAndSelectors()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("runs", "export", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--out");
+		result.Output.Should().Contain("--as");
+		result.Output.Should().Contain("--zip");
+		result.Output.Should().Contain("--favorites");
+		result.Output.Should().Contain("--tag");
 	}
 
 	[Theory]

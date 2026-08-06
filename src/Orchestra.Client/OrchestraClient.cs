@@ -146,18 +146,99 @@ public class OrchestraClient : IDisposable
 
 	// ── Run History ──
 
-	public async Task<JsonElement> ListRunsAsync(int? limit = null)
+	public async Task<JsonElement> ListRunsAsync(int? limit = null, bool? favorites = null, string? tags = null)
 	{
+		var query = new List<string>();
+		if (limit.HasValue) query.Add($"limit={limit}");
+		if (favorites == true) query.Add("favorites=true");
+		if (!string.IsNullOrWhiteSpace(tags)) query.Add($"tags={Uri.EscapeDataString(tags)}");
+
 		var url = "api/history";
-		if (limit.HasValue) url += $"?limit={limit}";
+		if (query.Count > 0) url += "?" + string.Join("&", query);
 		return await GetAsync(url);
 	}
 
 	public async Task<JsonElement> GetRunAsync(string orchestrationName, string runId)
 		=> await GetAsync($"api/history/{Uri.EscapeDataString(orchestrationName)}/{Uri.EscapeDataString(runId)}");
 
-	public async Task<JsonElement> DeleteRunAsync(string orchestrationName, string runId)
-		=> await DeleteAsync($"api/history/{Uri.EscapeDataString(orchestrationName)}/{Uri.EscapeDataString(runId)}");
+	public async Task<JsonElement> DeleteRunAsync(string orchestrationName, string runId, bool force = false)
+	{
+		var url = $"api/history/{Uri.EscapeDataString(orchestrationName)}/{Uri.EscapeDataString(runId)}";
+		if (force) url += "?force=true";
+		return await DeleteAsync(url);
+	}
+
+	public async Task<JsonElement> SearchRunsAsync(string query, int? limit = null)
+	{
+		var url = $"api/history/search?query={Uri.EscapeDataString(query)}";
+		if (limit.HasValue) url += $"&limit={limit}";
+		return await GetAsync(url);
+	}
+
+	// ── Run Annotations (favorite / title / tags / note) ──
+
+	private static string AnnotationUrl(string orchestrationName, string runId)
+		=> $"api/history/{Uri.EscapeDataString(orchestrationName)}/{Uri.EscapeDataString(runId)}/annotation";
+
+	public async Task<JsonElement> ListRunAnnotationsAsync(bool orphansOnly = false)
+		=> await GetAsync(orphansOnly ? "api/history/annotations?orphans=true" : "api/history/annotations");
+
+	public async Task<JsonElement> PruneRunAnnotationsAsync()
+		=> await PostAsync("api/history/annotations/prune", new { });
+
+	public async Task<JsonElement> GetRunAnnotationAsync(string orchestrationName, string runId)
+		=> await GetAsync(AnnotationUrl(orchestrationName, runId));
+
+	/// <summary>Replaces the annotation; omitted fields are cleared.</summary>
+	public async Task<JsonElement> SetRunAnnotationAsync(
+		string orchestrationName, string runId, bool? favorite, string? title, string[]? tags, string? note)
+		=> await PutAsync(AnnotationUrl(orchestrationName, runId), new { favorite, title, tags, note });
+
+	/// <summary>Updates only the supplied fields; omitted fields are left untouched.</summary>
+	public async Task<JsonElement> PatchRunAnnotationAsync(
+		string orchestrationName, string runId, bool? favorite, string? title, string[]? tags, string? note)
+		=> await PatchAsync(AnnotationUrl(orchestrationName, runId), new { favorite, title, tags, note });
+
+	public async Task<JsonElement> RemoveRunAnnotationAsync(string orchestrationName, string runId)
+		=> await DeleteAsync(AnnotationUrl(orchestrationName, runId));
+
+	public async Task<JsonElement> FavoriteRunAsync(string orchestrationName, string runId)
+		=> await PostAsync($"api/history/{Uri.EscapeDataString(orchestrationName)}/{Uri.EscapeDataString(runId)}/favorite", new { });
+
+	public async Task<JsonElement> UnfavoriteRunAsync(string orchestrationName, string runId)
+		=> await DeleteAsync($"api/history/{Uri.EscapeDataString(orchestrationName)}/{Uri.EscapeDataString(runId)}/favorite");
+
+	// ── Run Export ──
+
+	/// <summary>
+	/// Downloads an exported run. <c>report</c> returns markdown; <c>bundle</c> and <c>data</c>
+	/// return a zip archive. The server streams because HTTP cannot write to the caller's disk.
+	/// </summary>
+	public async Task<(byte[] Content, string FileName, bool IsArchive)> ExportRunAsync(
+		string orchestrationName, string runId, string format)
+	{
+		var url = $"api/history/{Uri.EscapeDataString(orchestrationName)}/{Uri.EscapeDataString(runId)}/export"
+			+ $"?format={Uri.EscapeDataString(format)}";
+
+		var response = await _http.GetAsync(url);
+		if (!response.IsSuccessStatusCode)
+		{
+			var error = await response.Content.ReadAsStringAsync();
+			throw new HttpRequestException(
+				$"Server returned {(int)response.StatusCode}: {(string.IsNullOrWhiteSpace(error) ? response.ReasonPhrase : error)}");
+		}
+
+		var bytes = await response.Content.ReadAsByteArrayAsync();
+		var fileName = response.Content.Headers.ContentDisposition?.FileNameStar
+			?? response.Content.Headers.ContentDisposition?.FileName
+			?? $"{orchestrationName}_{runId}";
+		fileName = fileName.Trim('"');
+
+		var isArchive = string.Equals(
+			response.Content.Headers.ContentType?.MediaType, "application/zip", StringComparison.OrdinalIgnoreCase);
+
+		return (bytes, fileName, isArchive);
+	}
 
 	// ── Triggers ──
 
@@ -239,6 +320,18 @@ public class OrchestraClient : IDisposable
 	private async Task<JsonElement> PostAsync(string url, object body)
 	{
 		var response = await _http.PostAsJsonAsync(url, body, s_jsonOptions);
+		return await ReadResponseAsync(response);
+	}
+
+	private async Task<JsonElement> PutAsync(string url, object body)
+	{
+		var response = await _http.PutAsJsonAsync(url, body, s_jsonOptions);
+		return await ReadResponseAsync(response);
+	}
+
+	private async Task<JsonElement> PatchAsync(string url, object body)
+	{
+		var response = await _http.PatchAsJsonAsync(url, body, s_jsonOptions);
 		return await ReadResponseAsync(response);
 	}
 

@@ -128,15 +128,35 @@ public class Program
 		// ── Run history (branch) ─────────────────────────────────────────────────
 		config.AddBranch("runs", branch =>
 		{
-			branch.SetDescription("Inspect past run history.");
+			branch.SetDescription("Inspect, annotate, and manage past run history.");
 			branch.AddCommand<RunsListCommand>("list")
 				.WithDescription("List recent runs across all orchestrations.")
-				.WithExample("runs", "list", "--limit", "50");
+				.WithExample("runs", "list", "--limit", "50")
+				.WithExample("runs", "list", "--favorites")
+				.WithExample("runs", "list", "--tag", "connect");
 			branch.AddCommand<RunsGetCommand>("get")
 				.WithDescription("Get a specific run's full record.");
 			branch.AddCommand<RunsDeleteCommand>("delete")
 				.WithAlias("rm")
-				.WithDescription("Delete a run record.");
+				.WithDescription("Delete a run record. Favorited runs require --force.");
+			branch.AddCommand<RunsFavoriteCommand>("favorite")
+				.WithAlias("star")
+				.WithDescription("Mark a run as a favorite (exempt from retention deletion).");
+			branch.AddCommand<RunsUnfavoriteCommand>("unfavorite")
+				.WithAlias("unstar")
+				.WithDescription("Remove a run's favorite mark.");
+			branch.AddCommand<RunsAnnotateCommand>("annotate")
+				.WithDescription("Set a run's title, tags, and note so it can be found later.")
+				.WithExample("runs", "annotate", "my-orchestration", "a1b2c3d4e5f6",
+					"--title", "Connect evidence pack", "--tag", "connect", "--favorite");
+			branch.AddCommand<RunsAnnotationsCommand>("annotations")
+				.WithDescription("List every annotated run and its tags.");
+			branch.AddCommand<RunsAnnotationsPruneCommand>("prune-annotations")
+				.WithDescription("Drop annotations whose run no longer exists.");
+			branch.AddCommand<RunsExportCommand>("export")
+				.WithDescription("Export a run (or every run matching --tag/--favorites) with its saved artifacts.")
+				.WithExample("runs", "export", "my-orchestration", "a1b2c3d4e5f6", "--out", "./exports")
+				.WithExample("runs", "export", "--tag", "connect", "--out", "./exports", "--zip");
 		});
 
 		// ── Triggers (branch) ────────────────────────────────────────────────────

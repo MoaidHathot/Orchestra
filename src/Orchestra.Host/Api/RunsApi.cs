@@ -2,10 +2,12 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.Export;
 using Orchestra.Host.Persistence;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Triggers;
@@ -33,13 +35,16 @@ public static partial class RunsApi
 		historyGroup.MapGet("", async (
 			FileSystemRunStore runStore,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+			[FromServices] RunAnnotationStore annotations,
 			int? limit,
 			string? origins,
 			bool? roots,
-			string? statuses) =>
+			string? statuses,
+			bool? favorites,
+			string? tags) =>
 		{
 			var requestedLimit = limit ?? 15;
-			var filters = HistoryFilterParser.Parse(origins, roots, statuses);
+			var filters = HistoryFilterParser.Parse(origins, roots, statuses, favorites, tags);
 
 			// Build a runId -> orchestrationName lookup so child rows can surface the parent's
 			// orchestration name even when the parent is outside the response window. The lookup
@@ -53,21 +58,21 @@ public static partial class RunsApi
 			// during the cleanup grace period — they should show up as completed history entries instead.
 			var runningRuns = activeExecutionInfos.Values
 				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
-				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters))
+				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters, annotations.Get(e.ExecutionId)))
 				.OrderByDescending(e => e.StartedAt)
-				.Select(e => ProjectActiveRow(e, runIdToOrchName))
+				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
 				.ToList();
 
 			// Get completed runs from store, applying filters server-side. We pull all summaries
 			// (already in memory from the lookup-build step) and filter+take the requested count.
 			var remainingLimit = Math.Max(0, requestedLimit - runningRuns.Count);
 			IEnumerable<RunIndex> filteredCompleted = filters.HasAnyFilter
-				? allSummariesForLookup.Where(s => HistoryFilterParser.Matches(s, filters))
+				? allSummariesForLookup.Where(s => HistoryFilterParser.Matches(s, filters, annotations.Get(s.RunId)))
 				: allSummariesForLookup;
 
 			var completedRuns = filteredCompleted
 				.Take(remainingLimit)
-				.Select(s => ProjectCompletedRow(s, runIdToOrchName));
+				.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId)));
 
 			// Combine: running first, then completed
 			var allRuns = runningRuns
@@ -87,15 +92,18 @@ public static partial class RunsApi
 		historyGroup.MapGet("/all", async (
 			FileSystemRunStore runStore,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+			[FromServices] RunAnnotationStore annotations,
 			int? limit,
 			int? offset,
 			string? origins,
 			bool? roots,
-			string? statuses) =>
+			string? statuses,
+			bool? favorites,
+			string? tags) =>
 		{
 			var requestedOffset = offset ?? 0;
 			var requestedLimit = limit ?? 300;
-			var filters = HistoryFilterParser.Parse(origins, roots, statuses);
+			var filters = HistoryFilterParser.Parse(origins, roots, statuses, favorites, tags);
 
 			var allSummariesForLookup = await runStore.GetRunSummariesAsync();
 			var runIdToOrchName = BuildRunIdLookup(allSummariesForLookup, activeExecutionInfos);
@@ -103,15 +111,15 @@ public static partial class RunsApi
 			// Get running orchestrations (filter out completed/cancelled/failed during cleanup grace period)
 			var runningRuns = activeExecutionInfos.Values
 				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
-				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters))
+				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters, annotations.Get(e.ExecutionId)))
 				.OrderByDescending(e => e.StartedAt)
-				.Select(e => ProjectActiveRow(e, runIdToOrchName))
+				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
 				.ToList();
 
 			var runningCount = runningRuns.Count;
 
 			var completedFiltered = filters.HasAnyFilter
-				? allSummariesForLookup.Where(s => HistoryFilterParser.Matches(s, filters)).ToList()
+				? allSummariesForLookup.Where(s => HistoryFilterParser.Matches(s, filters, annotations.Get(s.RunId))).ToList()
 				: [.. allSummariesForLookup];
 			var completedTotal = completedFiltered.Count;
 			var totalAll = runningCount + completedTotal;
@@ -129,7 +137,7 @@ public static partial class RunsApi
 				{
 					var completedItems = completedFiltered
 						.Take(remaining)
-						.Select(s => ProjectCompletedRow(s, runIdToOrchName));
+						.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId)));
 					allItems.AddRange(completedItems);
 				}
 			}
@@ -139,7 +147,7 @@ public static partial class RunsApi
 				var completedItems = completedFiltered
 					.Skip(completedOffset)
 					.Take(requestedLimit)
-					.Select(s => ProjectCompletedRow(s, runIdToOrchName));
+					.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId)));
 				allItems.AddRange(completedItems);
 			}
 
@@ -158,15 +166,18 @@ public static partial class RunsApi
 		historyGroup.MapGet("/search", async (
 			FileSystemRunStore runStore,
 			ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+			[FromServices] RunAnnotationStore annotations,
 			string? query,
 			int? limit,
 			string? origins,
 			bool? roots,
-			string? statuses) =>
+			string? statuses,
+			bool? favorites,
+			string? tags) =>
 		{
 			var searchQuery = query?.Trim() ?? "";
 			var requestedLimit = limit ?? 300;
-			var filters = HistoryFilterParser.Parse(origins, roots, statuses);
+			var filters = HistoryFilterParser.Parse(origins, roots, statuses, favorites, tags);
 
 			if (string.IsNullOrEmpty(searchQuery))
 				return Results.Json(new { total = 0, count = 0, runs = Array.Empty<object>() }, jsonOptions);
@@ -177,21 +188,23 @@ public static partial class RunsApi
 			// Search across active executions (filter out completed/cancelled/failed during cleanup grace period)
 			var matchingActive = activeExecutionInfos.Values
 				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
-				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters))
+				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters, annotations.Get(e.ExecutionId)))
 				.Where(e => e.OrchestrationName.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
-					|| e.ExecutionId.Contains(searchQuery, StringComparison.OrdinalIgnoreCase))
+					|| e.ExecutionId.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
+					|| MatchesAnnotation(annotations.Get(e.ExecutionId), searchQuery))
 				.OrderByDescending(e => e.StartedAt)
-				.Select(e => ProjectActiveRow(e, runIdToOrchName))
+				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
 				.Cast<object>()
 				.ToList();
 
 			// Search across ALL completed runs in the index
 			var matchingCompleted = allSummaries
-				.Where(s => !filters.HasAnyFilter || HistoryFilterParser.Matches(s, filters))
+				.Where(s => !filters.HasAnyFilter || HistoryFilterParser.Matches(s, filters, annotations.Get(s.RunId)))
 				.Where(s => s.OrchestrationName.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
-					|| s.RunId.Contains(searchQuery, StringComparison.OrdinalIgnoreCase))
+					|| s.RunId.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
+					|| MatchesAnnotation(annotations.Get(s.RunId), searchQuery))
 				.Take(requestedLimit)
-				.Select(s => ProjectCompletedRow(s, runIdToOrchName))
+				.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId)))
 				.Cast<object>()
 				.ToList();
 
@@ -206,7 +219,7 @@ public static partial class RunsApi
 		});
 
 		// GET /api/history/{orchestrationName}/{runId} - Get full execution details
-		historyGroup.MapGet("/{orchestrationName}/{runId}", async (string orchestrationName, string runId, FileSystemRunStore runStore) =>
+		historyGroup.MapGet("/{orchestrationName}/{runId}", async (string orchestrationName, string runId, FileSystemRunStore runStore, [FromServices] RunAnnotationStore annotations) =>
 		{
 			var record = await runStore.GetRunAsync(orchestrationName, runId);
 			if (record is null)
@@ -215,10 +228,12 @@ public static partial class RunsApi
 			// Look up the folder path from the run index
 			var summaries = await runStore.GetRunSummariesAsync(orchestrationName);
 			var matchingIndex = summaries.FirstOrDefault(s => s.RunId == runId);
+			var annotation = annotations.Get(runId);
 
 			return Results.Json(new
 			{
 				runId = record.RunId,
+				annotation = ProjectAnnotation(runId, annotation, orphaned: false),
 				orchestrationName = record.OrchestrationName,
 				version = record.OrchestrationVersion,
 				triggeredBy = record.TriggeredBy,
@@ -396,13 +411,202 @@ public static partial class RunsApi
 		});
 
 		// DELETE /api/history/{orchestrationName}/{runId} - Delete a specific execution
-		historyGroup.MapDelete("/{orchestrationName}/{runId}", async (string orchestrationName, string runId, FileSystemRunStore runStore) =>
+		// Favorited runs require ?force=true: a favorite is an explicit "keep this" signal, so
+		// deleting one is made deliberate rather than incidental.
+		historyGroup.MapDelete("/{orchestrationName}/{runId}", async (
+			string orchestrationName,
+			string runId,
+			FileSystemRunStore runStore,
+			[FromServices] RunAnnotationStore annotations,
+			bool? force) =>
 		{
+			if (annotations.Get(runId)?.Favorite == true && force != true)
+			{
+				return ProblemDetailsHelpers.BadRequest(
+					$"Run '{runId}' is marked as a favorite. Use --force (CLI) or ?force=true (API) to delete it.");
+			}
+
 			var deleted = await runStore.DeleteRunAsync(orchestrationName, runId);
 			if (!deleted)
 				return ProblemDetailsHelpers.NotFound($"Run '{runId}' not found.");
 
 			return Results.Ok(new { deleted = true, runId, orchestrationName });
+		});
+
+		// GET /api/history/{orchestrationName}/{runId}/export?format=bundle|report|data
+		//
+		// Always streams: HTTP cannot write into the caller's filesystem. `report` returns the
+		// markdown directly; the other formats return a zip. The CLI writes directories instead.
+		historyGroup.MapGet("/{orchestrationName}/{runId}/export", async (
+			string orchestrationName,
+			string runId,
+			string? format,
+			[FromServices] RunExporter exporter,
+			CancellationToken cancellationToken) =>
+		{
+			if (!TryParseExportFormat(format, out var parsed))
+				return ProblemDetailsHelpers.BadRequest($"Unknown export format '{format}'. Use report, bundle, or data.");
+
+			try
+			{
+				var (content, fileName, contentType) =
+					await exporter.ExportToArchiveAsync(orchestrationName, runId, parsed, cancellationToken);
+				return Results.File(content, contentType, fileName);
+			}
+			catch (FileNotFoundException)
+			{
+				return ProblemDetailsHelpers.NotFound($"Run '{runId}' not found.");
+			}
+		});
+
+		// ── Run annotations (favorite / title / tags / note) ──
+		//
+		// Annotations live in their own store rather than on the run record: run records are
+		// immutable and re-saving one would duplicate its index entry. They are keyed by run id
+		// and merged into history projections at read time.
+
+		// GET /api/history/annotations - Every annotation plus tag usage counts
+		historyGroup.MapGet("/annotations", async (
+			FileSystemRunStore runStore,
+			[FromServices] RunAnnotationStore annotations,
+			bool? orphans) =>
+		{
+			var all = annotations.GetAll();
+
+			// An annotation is orphaned when its run is no longer in the store. They are reported
+			// rather than silently deleted, so a partially-loaded index can never destroy curation.
+			var summaries = await runStore.GetRunSummariesAsync();
+			var liveRunIds = new HashSet<string>(summaries.Select(s => s.RunId), StringComparer.OrdinalIgnoreCase);
+			var orphanIds = annotations.FindOrphans(liveRunIds);
+			var orphanSet = new HashSet<string>(orphanIds, StringComparer.OrdinalIgnoreCase);
+
+			var items = all
+				.Where(kvp => orphans != true || orphanSet.Contains(kvp.Key))
+				.OrderByDescending(kvp => kvp.Value.AnnotatedAt)
+				.Select(kvp => ProjectAnnotation(kvp.Key, kvp.Value, orphanSet.Contains(kvp.Key)))
+				.ToList();
+
+			var tagCounts = annotations.GetAllTagsWithCounts()
+				.OrderByDescending(kvp => kvp.Value)
+				.ThenBy(kvp => kvp.Key, StringComparer.Ordinal)
+				.Select(kvp => new { tag = kvp.Key, count = kvp.Value })
+				.ToList();
+
+			return Results.Json(new
+			{
+				count = items.Count,
+				orphanCount = orphanIds.Count,
+				annotations = items,
+				tags = tagCounts,
+			}, jsonOptions);
+		});
+
+		// POST /api/history/annotations/prune - Drop annotations whose run no longer exists
+		historyGroup.MapPost("/annotations/prune", async (
+			FileSystemRunStore runStore,
+			[FromServices] RunAnnotationStore annotations) =>
+		{
+			var summaries = await runStore.GetRunSummariesAsync();
+			var liveRunIds = new HashSet<string>(summaries.Select(s => s.RunId), StringComparer.OrdinalIgnoreCase);
+			var orphans = annotations.FindOrphans(liveRunIds);
+			var pruned = annotations.RemoveMany(orphans);
+
+			return Results.Ok(new { pruned, runIds = orphans });
+		});
+
+		// GET /api/history/{orchestrationName}/{runId}/annotation
+		historyGroup.MapGet("/{orchestrationName}/{runId}/annotation", (
+			string orchestrationName,
+			string runId,
+			[FromServices] RunAnnotationStore annotations) =>
+		{
+			var annotation = annotations.Get(runId);
+			return annotation is null
+				? ProblemDetailsHelpers.NotFound($"Run '{runId}' has no annotation.")
+				: Results.Json(ProjectAnnotation(runId, annotation, orphaned: false), jsonOptions);
+		});
+
+		// PUT /api/history/{orchestrationName}/{runId}/annotation - Replace
+		historyGroup.MapPut("/{orchestrationName}/{runId}/annotation", async (
+			string orchestrationName,
+			string runId,
+			AnnotationRequest? body,
+			FileSystemRunStore runStore,
+			[FromServices] RunAnnotationStore annotations) =>
+		{
+			if (await runStore.GetRunAsync(orchestrationName, runId) is null)
+				return ProblemDetailsHelpers.NotFound($"Run '{runId}' not found.");
+
+			var saved = annotations.Set(runId, new RunAnnotation
+			{
+				Favorite = body?.Favorite ?? false,
+				Title = body?.Title,
+				Tags = body?.Tags ?? [],
+				Note = body?.Note,
+				OrchestrationName = orchestrationName,
+				AnnotatedAt = DateTimeOffset.UtcNow,
+			});
+
+			return Results.Json(ProjectAnnotation(runId, saved, orphaned: false), jsonOptions);
+		});
+
+		// PATCH /api/history/{orchestrationName}/{runId}/annotation - Partial update
+		// Omitted fields are left untouched, so setting a title cannot clear tags.
+		historyGroup.MapPatch("/{orchestrationName}/{runId}/annotation", async (
+			string orchestrationName,
+			string runId,
+			AnnotationRequest? body,
+			FileSystemRunStore runStore,
+			[FromServices] RunAnnotationStore annotations) =>
+		{
+			if (await runStore.GetRunAsync(orchestrationName, runId) is null)
+				return ProblemDetailsHelpers.NotFound($"Run '{runId}' not found.");
+
+			var saved = annotations.Patch(
+				runId,
+				favorite: body?.Favorite,
+				title: body?.Title,
+				tags: body?.Tags,
+				note: body?.Note,
+				orchestrationName: orchestrationName);
+
+			return Results.Json(ProjectAnnotation(runId, saved, orphaned: false), jsonOptions);
+		});
+
+		// DELETE /api/history/{orchestrationName}/{runId}/annotation
+		historyGroup.MapDelete("/{orchestrationName}/{runId}/annotation", (
+			string orchestrationName,
+			string runId,
+			[FromServices] RunAnnotationStore annotations) =>
+		{
+			var removed = annotations.Remove(runId, orchestrationName);
+			return removed
+				? Results.Ok(new { removed = true, runId })
+				: ProblemDetailsHelpers.NotFound($"Run '{runId}' has no annotation.");
+		});
+
+		// POST /api/history/{orchestrationName}/{runId}/favorite
+		historyGroup.MapPost("/{orchestrationName}/{runId}/favorite", async (
+			string orchestrationName,
+			string runId,
+			FileSystemRunStore runStore,
+			[FromServices] RunAnnotationStore annotations) =>
+		{
+			if (await runStore.GetRunAsync(orchestrationName, runId) is null)
+				return ProblemDetailsHelpers.NotFound($"Run '{runId}' not found.");
+
+			var saved = annotations.Patch(runId, favorite: true, orchestrationName: orchestrationName);
+			return Results.Json(ProjectAnnotation(runId, saved, orphaned: false), jsonOptions);
+		});
+
+		// DELETE /api/history/{orchestrationName}/{runId}/favorite
+		historyGroup.MapDelete("/{orchestrationName}/{runId}/favorite", (
+			string orchestrationName,
+			string runId,
+			[FromServices] RunAnnotationStore annotations) =>
+		{
+			var saved = annotations.Patch(runId, favorite: false, orchestrationName: orchestrationName);
+			return Results.Json(ProjectAnnotation(runId, saved, orphaned: false), jsonOptions);
 		});
 
 		// Active executions endpoints
@@ -723,13 +927,86 @@ public static partial class RunsApi
 	}
 
 	/// <summary>
+	/// Parses the <c>?format=</c> export query parameter. Defaults to
+	/// <see cref="RunExportFormat.Bundle"/> when absent.
+	/// </summary>
+	private static bool TryParseExportFormat(string? value, out RunExportFormat format)
+	{
+		if (string.IsNullOrWhiteSpace(value))
+		{
+			format = RunExportFormat.Bundle;
+			return true;
+		}
+
+		return Enum.TryParse(value, ignoreCase: true, out format) && Enum.IsDefined(format);
+	}
+
+	/// <summary>
+	/// Substring match of a search query against a run's user curation (title, tags, note).
+	/// </summary>
+	/// <remarks>
+	/// This is what makes machine-named runs discoverable. An ephemeral run called
+	/// <c>ephemeral-efca835904b6-attempt-3</c> is unfindable by name; titled "Connect evidence
+	/// pack" it is findable by the words a human would actually search for.
+	/// </remarks>
+	private static bool MatchesAnnotation(RunAnnotation? annotation, string query)
+	{
+		if (annotation is null)
+			return false;
+
+		if (annotation.Title?.Contains(query, StringComparison.OrdinalIgnoreCase) == true)
+			return true;
+
+		if (annotation.Note?.Contains(query, StringComparison.OrdinalIgnoreCase) == true)
+			return true;
+
+		foreach (var tag in annotation.Tags)
+		{
+			if (tag.Contains(query, StringComparison.OrdinalIgnoreCase))
+				return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>
+	/// Request body for annotation writes. Every field is optional: on <c>PUT</c> an omitted
+	/// field is cleared, on <c>PATCH</c> an omitted field is left untouched.
+	/// </summary>
+	public sealed class AnnotationRequest
+	{
+		public bool? Favorite { get; set; }
+		public string? Title { get; set; }
+		public string[]? Tags { get; set; }
+		public string? Note { get; set; }
+	}
+
+	/// <summary>
+	/// Projects an annotation onto the wire. A <see langword="null"/> annotation — the run was
+	/// annotated down to nothing — is reported as a cleared annotation rather than as absent,
+	/// so clients get a consistent shape back from every write.
+	/// </summary>
+	private static object ProjectAnnotation(string runId, RunAnnotation? annotation, bool orphaned) => new
+	{
+		runId,
+		orchestrationName = annotation?.OrchestrationName,
+		favorite = annotation?.Favorite ?? false,
+		title = annotation?.Title,
+		tags = annotation?.Tags ?? [],
+		note = annotation?.Note,
+		annotatedAt = annotation?.AnnotatedAt.ToString("o"),
+		orphaned,
+	};
+
+	/// <summary>
 	/// Projects an <see cref="ActiveExecutionInfo"/> (a still-running execution) into the
 	/// JSON shape expected by the history list endpoints. Includes the lineage and origin
 	/// fields that the portal needs to render badges/icons for child and retry runs.
 	/// </summary>
 	private static object ProjectActiveRow(
 		ActiveExecutionInfo e,
-		IReadOnlyDictionary<string, string> runIdToOrchName)
+		IReadOnlyDictionary<string, string> runIdToOrchName,
+		RunAnnotation? annotation = null)
 	{
 		var nesting = e.NestingMetadata;
 		var parentExecutionId = nesting?.ParentExecutionId;
@@ -761,6 +1038,11 @@ public static partial class RunsApi
 			parentOrchestrationName = parentOrchName,
 			rootExecutionId = nesting?.RootExecutionId,
 			nestingDepth = nesting?.Depth ?? 0,
+			// User curation; absent annotation reads as an unfavorited, untitled, untagged run.
+			favorite = annotation?.Favorite ?? false,
+			title = annotation?.Title,
+			tags = annotation?.Tags ?? [],
+			note = annotation?.Note,
 		};
 	}
 
@@ -770,7 +1052,8 @@ public static partial class RunsApi
 	/// </summary>
 	private static object ProjectCompletedRow(
 		RunIndex s,
-		IReadOnlyDictionary<string, string> runIdToOrchName)
+		IReadOnlyDictionary<string, string> runIdToOrchName,
+		RunAnnotation? annotation = null)
 	{
 		string? parentOrchName = null;
 		if (s.ParentExecutionId is not null && runIdToOrchName.TryGetValue(s.ParentExecutionId, out var name))
@@ -803,6 +1086,11 @@ public static partial class RunsApi
 			parentOrchestrationName = parentOrchName,
 			rootExecutionId = s.RootExecutionId,
 			nestingDepth = s.NestingDepth,
+			// User curation; absent annotation reads as an unfavorited, untitled, untagged run.
+			favorite = annotation?.Favorite ?? false,
+			title = annotation?.Title,
+			tags = annotation?.Tags ?? [],
+			note = annotation?.Note,
 		};
 	}
 }

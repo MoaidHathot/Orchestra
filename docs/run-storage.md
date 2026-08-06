@@ -31,6 +31,34 @@ Folder names are sanitized: any filesystem-invalid characters are replaced with 
 canonical id of a run is its `runId` (also referred to as `executionId`) — the suffix at
 the end of the folder name.
 
+## Run annotations
+
+Everything under `executions/` is an immutable record of what happened. User-curated
+metadata — **favorite**, **title**, **tags**, **note** — is mutable, so it lives in a
+parallel root alongside the other per-run state directories (`checkpoints/`, `pending/`,
+`temp/`):
+
+```
+<dataPath>/annotations/
+└── <orchestration-name>/
+    └── <runId>.json
+```
+
+Why out-of-band rather than a field on `run.json`: `OrchestrationRunRecord` is entirely
+`init`-only, `IRunStore` has no update operation, and re-saving a record to mutate it would
+append a **duplicate** entry to the in-memory history index.
+
+Why one file per run rather than a single `run-annotations.json` (the shape used by
+`orchestration-tags.json`): orchestrations number in the dozens, runs in the thousands per
+year. Annotations are **sparse** — a file exists only for a run you acted on — so file count
+tracks annotations, not executions. Per-run files also keep each mutation a ~300-byte atomic
+write instead of rewriting one growing blob, and contain corruption to a single record.
+Annotations are the only irreplaceable data in the run store, so blast radius matters.
+
+Annotations are merged into history projections at read time, are searchable
+(`GET /api/history/search` matches title, tags and note), and are filterable
+(`?favorites=true`, `?tags=a,b` with OR semantics).
+
 ## What each file contains
 
 | File | Purpose | Typical size |
@@ -231,6 +259,35 @@ retry's lineage is broken.
   `GetRunSummariesAsync`, `FindRunByIdAsync`, `FindChildRunsAsync`) read from the
   in-memory index that's populated by scanning all `run.json` files at startup.
 
+## Retention and favorites
+
+`RunRetentionService` applies `RetentionPolicy` hourly. Two independent rules, OR-ed: a run
+is deleted when it exceeds `maxRunAgeDays`, **or** when it falls outside the newest
+`maxRunsPerOrchestration` for its orchestration. Default is keep-forever.
+
+**Favorited runs are exempt.** They are also removed from the ranking the max-count rule
+uses, not merely skipped at deletion time — the rule deletes by *position*
+(`i >= maxRunsPerOrchestration`), so favorites left in the ranking would occupy keep-slots
+and block pruning of ordinary runs entirely.
+
+Deleting a run — by retention or explicitly — also removes its annotation, so curation never
+outlives its subject. Explicit `DELETE` of a favorited run requires `?force=true`.
+
+## Export
+
+Because a run's artifacts are split between `executions/` and `temp/`, copying the execution
+folder is **not** a complete export — it captures the inline summary a step returned and
+loses the document that step actually saved.
+
+`RunExporter` gathers both, resolving saved-file paths first from the run record and then by
+sweeping `{dataPath}/temp/{orch}/{runId}/`, so artifacts are found even when the data
+directory has moved since the run. GUID filenames are renamed to the producing step, step
+payloads have markdown code fences stripped and are JSON-validated, and anything missing or
+unparseable is reported in the bundle's README rather than dropped silently.
+
+See [`orchestra runs export`](cli.md#run-export) and
+[`GET /api/history/{name}/{runId}/export`](api-reference.md#run-export).
+
 ## Related references
 
 - [Engine reference: storage layer](engine.md)
@@ -238,5 +295,7 @@ retry's lineage is broken.
 - [REST API: GET /api/history/{name}/{runId}](api-reference.md)
 - [Orchestration step deep-dive](orchestration-step-deep-dive.md)
 - Source: `src/Orchestra.Host/Persistence/FileSystemRunStore.cs`
+- Source: `src/Orchestra.Host/Persistence/RunAnnotationStore.cs`
+- Source: `src/Orchestra.Host/Export/RunExporter.cs`
 - Source: `src/Orchestra.Engine/Storage/OrchestrationRunRecord.cs`
 - Source: `src/Orchestra.Engine/Storage/StepRunRecord.cs`

@@ -463,8 +463,12 @@ builder.Services.AddTriggerExecutionCallback<MyExecutionCallback>();
 ```
 {DataPath}/
 ├── registered-orchestrations.json    # Persisted orchestration paths
+├── orchestration-tags.json            # Host-managed orchestration tags
 ├── triggers/                          # Persisted trigger states
 │   └── {hash}.trigger.json
+├── annotations/                       # User curation for runs (sparse)
+│   └── {orchestration-name}/
+│       └── {runId}.json               # favorite / title / tags / note
 └── executions/                        # Run history
     └── {orchestration-name}/
         └── {name}_{version}_{trigger}_{timestamp}_{id}/
@@ -475,6 +479,10 @@ builder.Services.AddTriggerExecutionCallback<MyExecutionCallback>();
             ├── {step-name}-result.json
             └── result.md              # Human-readable final output
 ```
+
+`executions/` is an immutable record. Mutable per-run state lives in parallel roots —
+`annotations/` alongside `checkpoints/`, `pending/` and `temp/`. Favorited runs are exempt
+from retention deletion; see the [run storage reference](run-storage.md).
 
 For a deep-dive on `run.json`'s structure, what each field contains, sizes you can expect,
 and the design decisions behind how parent → child orchestration links are persisted (and

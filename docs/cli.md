@@ -165,9 +165,74 @@ orchestra attach my-long-orch run-abc123
 
 | Command | Purpose |
 |---|---|
-| `orchestra runs list [--limit N]` | List recent runs (default 20). |
+| `orchestra runs list [--limit N] [--favorites] [--tag NAME]` | List recent runs (default 20). `--tag` is repeatable and matches **any** of the given tags. |
 | `orchestra runs get <name> <run-id>` | Get a specific run's full record (every step's input/output). |
-| `orchestra runs delete <name> <run-id>` | Delete a stored run record. |
+| `orchestra runs delete <name> <run-id> [--force]` | Delete a stored run record. `--force` is required for favorited runs. |
+
+### Run annotations
+
+Runs are named by the machine, not by you — an ephemeral run called
+`ephemeral-efca835904b6-attempt-3` is impossible to find later. Annotations attach a
+**title**, **tags**, a **note** and a **favorite** flag to a run so it stays findable, and
+favorited runs are exempt from retention deletion.
+
+| Command | Purpose |
+|---|---|
+| `orchestra runs favorite <name> <run-id>` | Mark a run as a favorite (alias `star`). Exempt from retention. |
+| `orchestra runs unfavorite <name> <run-id>` | Remove the favorite mark (alias `unstar`). |
+| `orchestra runs annotate <name> <run-id> [--title T] [--tag N]... [--note T] [--favorite] [--clear]` | Set curation fields. Omitted fields are left untouched; `--clear` removes the annotation. |
+| `orchestra runs annotations [--orphans]` | List every annotated run and its tag counts. |
+| `orchestra runs prune-annotations` | Drop annotations whose run no longer exists. |
+
+```bash
+# Make a machine-named run findable again
+orchestra runs annotate ephemeral-efca835904b6-attempt-3 efca835904b6 \
+  --title "Connect evidence pack" \
+  --tag connect --favorite \
+  --note "22/24 steps green despite the Cancelled status."
+
+# Find it later by any of those words
+orchestra runs list --tag connect
+orchestra runs list --favorites
+```
+
+Search (`GET /api/history/search`) also matches the title, tags and note, so the words you
+wrote are the words you can search for.
+
+### Run export
+
+A run's artifacts are split across two directories: the execution folder, and the temp store
+where steps write files via `orchestra_save_file`. The second is usually where the real
+deliverable is — a step producing a large document saves it and returns only a summary
+inline. Export gathers both.
+
+| Command | Purpose |
+|---|---|
+| `orchestra runs export <name> <run-id> --out <DIR>` | Export one run. |
+| `orchestra runs export --tag NAME --out <DIR>` | Export every run carrying any of these tags. |
+| `orchestra runs export --favorites --out <DIR>` | Export every favorited run. |
+
+| Option | Purpose |
+|---|---|
+| `--out <DIR>` | Destination directory (default: current directory). |
+| `--as <SHAPE>` | `bundle` (default), `report`, or `data`. Named `--as` because `--format` already selects the CLI's own output shape. |
+| `--zip` | Write a `.zip` instead of a directory. |
+| `--limit <N>` | Cap on how many runs a bulk selector exports (default 100). |
+
+```bash
+# One run, as a browsable directory
+orchestra runs export connect-evidence efca835904b6 --out ./exports
+
+# Just the document, nothing else
+orchestra runs export connect-evidence efca835904b6 --out ./exports --as report
+
+# Everything tagged 'connect', zipped
+orchestra runs export --tag connect --out ./exports --zip
+```
+
+A `bundle` contains `README.md` (status, step table, parameters, the run's annotation, and
+any export warnings), `run.json`, `orchestration.json`, `steps/` and `files/` — the last
+holding the saved artifacts, renamed from their GUIDs to the step that produced them.
 
 ### Triggers
 
