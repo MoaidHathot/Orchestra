@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Host.Api;
 
 namespace Orchestra.Host.Persistence;
 
@@ -40,7 +41,18 @@ internal sealed partial class SqliteRunIndex : IDisposable
 	/// migrating — the data is derived, so a rebuild is always correct and always cheaper to
 	/// reason about than a migration path.
 	/// </summary>
-	private const int SchemaVersion = 1;
+	private const int SchemaVersion = 2;
+
+	/// <summary>
+	/// Appended to every ORDER BY so paging is a true partition of the result set.
+	/// </summary>
+	/// <remarks>
+	/// Start timestamps are not unique — runs launched in one batch share an instant — and SQLite
+	/// is free to return tied rows in any order it likes, independently per query. LIMIT/OFFSET
+	/// over an unstable order silently repeats some rows and drops others. The folder path is the
+	/// primary key, so adding it makes the order total.
+	/// </remarks>
+	private const string StableOrder = " ORDER BY started_at_ticks DESC, folder_path DESC";
 
 	private SqliteConnection _connection;
 	private readonly Lock _gate = new();
@@ -156,7 +168,8 @@ internal sealed partial class SqliteRunIndex : IDisposable
 				parent_execution_id   TEXT NULL,
 				parent_step_name      TEXT NULL,
 				root_execution_id     TEXT NULL,
-				nesting_depth         INTEGER NOT NULL
+				nesting_depth         INTEGER NOT NULL,
+				origin                TEXT NOT NULL
 			);
 			""");
 
@@ -168,6 +181,7 @@ internal sealed partial class SqliteRunIndex : IDisposable
 		Execute("CREATE INDEX IF NOT EXISTS ix_runs_trigger ON runs(trigger_id);");
 		Execute("CREATE INDEX IF NOT EXISTS ix_runs_parent ON runs(parent_execution_id);");
 		Execute("CREATE INDEX IF NOT EXISTS ix_runs_root ON runs(root_execution_id);");
+		Execute("CREATE INDEX IF NOT EXISTS ix_runs_origin ON runs(origin, started_at_ticks DESC);");
 
 		if (existing is null)
 		{
@@ -213,14 +227,14 @@ internal sealed partial class SqliteRunIndex : IDisposable
 					failed_step_name, error_message, completion_reason, completed_by_step,
 					is_incomplete, cancellation_json, hook_execution_count,
 					retried_from_run_id, retry_mode,
-					parent_execution_id, parent_step_name, root_execution_id, nesting_depth)
+					parent_execution_id, parent_step_name, root_execution_id, nesting_depth, origin)
 				VALUES (
 					$folder, $runId, $orch, $version, $triggeredBy,
 					$startedAt, $startedTicks, $completedAt, $status, $triggerId,
 					$failedStep, $error, $completionReason, $completedByStep,
 					$isIncomplete, $cancellation, $hookCount,
 					$retriedFrom, $retryMode,
-					$parentExec, $parentStep, $rootExec, $depth);
+					$parentExec, $parentStep, $rootExec, $depth, $origin);
 				""";
 
 			var p = cmd.Parameters;
@@ -247,6 +261,7 @@ internal sealed partial class SqliteRunIndex : IDisposable
 			p.Add("$parentStep", SqliteType.Text);
 			p.Add("$rootExec", SqliteType.Text);
 			p.Add("$depth", SqliteType.Integer);
+			p.Add("$origin", SqliteType.Text);
 
 			foreach (var entry in entries)
 			{
@@ -275,6 +290,9 @@ internal sealed partial class SqliteRunIndex : IDisposable
 				p["$parentStep"].Value = (object?)entry.ParentStepName ?? DBNull.Value;
 				p["$rootExec"].Value = (object?)entry.RootExecutionId ?? DBNull.Value;
 				p["$depth"].Value = entry.NestingDepth;
+				// Materialized rather than recomputed in SQL so the C# classifier stays the single
+				// definition of what an origin is. A change there bumps the schema and rebuilds.
+				p["$origin"].Value = RunOriginClassifier.ToWireValue(RunOriginClassifier.Classify(entry.TriggeredBy));
 				cmd.ExecuteNonQuery();
 			}
 
@@ -350,24 +368,24 @@ internal sealed partial class SqliteRunIndex : IDisposable
 
 	/// <summary>All runs, newest first.</summary>
 	public IReadOnlyList<RunIndex> ListAll(int? limit = null) =>
-		Query("SELECT * FROM runs ORDER BY started_at_ticks DESC" + LimitClause(limit), _ => { });
+		Query("SELECT * FROM runs" + StableOrder + LimitClause(limit), _ => { });
 
 	/// <summary>Runs for one orchestration, newest first.</summary>
 	public IReadOnlyList<RunIndex> ListByOrchestration(string orchestrationName, int? limit = null) =>
 		Query(
-			"SELECT * FROM runs WHERE orchestration_name = $orch ORDER BY started_at_ticks DESC" + LimitClause(limit),
+			"SELECT * FROM runs WHERE orchestration_name = $orch" + StableOrder + LimitClause(limit),
 			cmd => cmd.Parameters.AddWithValue("$orch", orchestrationName));
 
 	/// <summary>Runs fired by one trigger, newest first.</summary>
 	public IReadOnlyList<RunIndex> ListByTrigger(string triggerId, int? limit = null) =>
 		Query(
-			"SELECT * FROM runs WHERE trigger_id = $trigger ORDER BY started_at_ticks DESC" + LimitClause(limit),
+			"SELECT * FROM runs WHERE trigger_id = $trigger" + StableOrder + LimitClause(limit),
 			cmd => cmd.Parameters.AddWithValue("$trigger", triggerId));
 
 	/// <summary>Finds a run by id across every orchestration. Case-insensitive, as callers expect.</summary>
 	public RunIndex? FindByRunId(string runId) =>
 		Query(
-			"SELECT * FROM runs WHERE run_id = $runId COLLATE NOCASE ORDER BY started_at_ticks DESC LIMIT 1;",
+			"SELECT * FROM runs WHERE run_id = $runId COLLATE NOCASE" + StableOrder + " LIMIT 1;",
 			cmd => cmd.Parameters.AddWithValue("$runId", runId))
 		.FirstOrDefault();
 
@@ -402,7 +420,7 @@ internal sealed partial class SqliteRunIndex : IDisposable
 		var sql = $"SELECT * FROM runs WHERE {column} = $scope COLLATE NOCASE";
 		if (statusFilter is not null)
 			sql += " AND status = $status";
-		sql += " ORDER BY started_at_ticks DESC";
+		sql += StableOrder;
 
 		// SQLite requires a LIMIT before OFFSET; -1 means "no limit".
 		if (limit is not null || offset is not null)
@@ -417,6 +435,213 @@ internal sealed partial class SqliteRunIndex : IDisposable
 				cmd.Parameters.AddWithValue("$status", statusFilter.Value.ToString());
 		});
 	}
+
+	/// <summary>
+	/// Runs matching <paramref name="query"/>, newest first, together with the size of the whole
+	/// match set.
+	/// </summary>
+	/// <remarks>
+	/// Filtering, ordering, counting and paging all happen in SQL. The endpoints used to pull
+	/// every index row into memory and filter with LINQ, which cost one full materialization of
+	/// the history — thousands of objects — per request, and made an honest <c>total</c>
+	/// awkward enough that the search endpoint simply reported the size of the page instead.
+	/// </remarks>
+	/// <returns>The requested page, and the total number of matching runs ignoring paging.</returns>
+	public (IReadOnlyList<RunIndex> Rows, int Total) QueryPage(RunIndexQuery query, int offset, int limit)
+	{
+		lock (_gate)
+		{
+			PopulateIdFilters(
+				(Bucket.Allow, query.RunIdAllowList),
+				(Bucket.Also, query.AlsoMatchRunIds),
+				(Bucket.Deny, query.RunIdDenyList));
+
+			var predicate = BuildPredicate(query);
+
+			using var countCmd = _connection.CreateCommand();
+			countCmd.CommandText = $"SELECT COUNT(*) FROM runs{predicate.Where};";
+			predicate.Bind(countCmd);
+			var total = Convert.ToInt32(countCmd.ExecuteScalar());
+
+			// Skip the page query entirely when the caller only wanted the count, or when the
+			// offset is already past the end.
+			if (limit <= 0 || offset >= total)
+				return ([], total);
+
+			using var pageCmd = _connection.CreateCommand();
+			pageCmd.CommandText =
+				$"SELECT * FROM runs{predicate.Where}{StableOrder} LIMIT {limit} OFFSET {Math.Max(0, offset)};";
+			predicate.Bind(pageCmd);
+
+			var rows = new List<RunIndex>();
+			using var reader = pageCmd.ExecuteReader();
+			while (reader.Read())
+				rows.Add(Read(reader));
+
+			return (rows, total);
+		}
+	}
+
+	/// <summary>
+	/// Maps run ids to their orchestration names. Used to label a child row with its parent's
+	/// orchestration, for just the parents referenced by one page rather than the whole history.
+	/// </summary>
+	public Dictionary<string, string> GetOrchestrationNamesByRunIds(IReadOnlyCollection<string> runIds)
+	{
+		var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		if (runIds.Count == 0)
+			return lookup;
+
+		lock (_gate)
+		{
+			PopulateIdFilters((Bucket.Names, runIds));
+
+			using var cmd = _connection.CreateCommand();
+			cmd.CommandText =
+				$"SELECT run_id, orchestration_name FROM runs WHERE run_id IN ({BucketQuery(Bucket.Names)});";
+			using var reader = cmd.ExecuteReader();
+			while (reader.Read())
+				lookup[reader.GetString(0)] = reader.GetString(1);
+			return lookup;
+		}
+	}
+
+	// ── Filter plumbing ──
+
+	/// <summary>
+	/// Bucket ids within <see cref="FilterTable"/>. One table with a discriminator rather than
+	/// four tables, so setup and teardown is a single statement each.
+	/// </summary>
+	private static class Bucket
+	{
+		public const int Allow = 0;
+		public const int Also = 1;
+		public const int Deny = 2;
+		public const int Names = 3;
+	}
+
+	private const string FilterTable = "temp.run_id_filter";
+
+	private static string BucketQuery(int bucket) =>
+		$"SELECT run_id FROM {FilterTable} WHERE bucket = {bucket}";
+
+	/// <summary>
+	/// Loads sets of run ids into a temporary table so they can be joined against.
+	/// </summary>
+	/// <remarks>
+	/// A temp table rather than a bound parameter per id: annotation-derived filters (favorites,
+	/// tags) have no bound on how many runs they select, and SQLite caps the number of parameters
+	/// in a single statement. The table is per-connection and lives in memory, and this path is
+	/// only taken when the caller actually asked for such a filter.
+	/// </remarks>
+	private void PopulateIdFilters(params (int Bucket, IReadOnlyCollection<string>? Ids)[] sets)
+	{
+		Execute($"CREATE TEMP TABLE IF NOT EXISTS run_id_filter (bucket INTEGER NOT NULL, run_id TEXT NOT NULL, PRIMARY KEY (bucket, run_id));");
+
+		using var transaction = _connection.BeginTransaction();
+
+		using (var clear = _connection.CreateCommand())
+		{
+			clear.Transaction = transaction;
+			clear.CommandText = $"DELETE FROM {FilterTable};";
+			clear.ExecuteNonQuery();
+		}
+
+		using (var insert = _connection.CreateCommand())
+		{
+			insert.Transaction = transaction;
+			insert.CommandText = $"INSERT OR IGNORE INTO {FilterTable} (bucket, run_id) VALUES ($bucket, $id);";
+			var bucketParam = insert.Parameters.Add("$bucket", SqliteType.Integer);
+			var idParam = insert.Parameters.Add("$id", SqliteType.Text);
+
+			foreach (var (bucket, ids) in sets)
+			{
+				if (ids is null)
+					continue;
+
+				bucketParam.Value = bucket;
+				foreach (var id in ids)
+				{
+					idParam.Value = id;
+					insert.ExecuteNonQuery();
+				}
+			}
+		}
+
+		transaction.Commit();
+	}
+
+	private readonly record struct Predicate(string Where, Action<SqliteCommand> Bind);
+
+	private static Predicate BuildPredicate(RunIndexQuery query)
+	{
+		var clauses = new List<string>();
+		var parameters = new List<(string Name, object Value)>();
+
+		if (query.Origins is { Count: > 0 } origins)
+		{
+			var names = origins.Select((_, i) => $"$origin{i}").ToList();
+			clauses.Add($"origin IN ({string.Join(", ", names)})");
+			parameters.AddRange(origins.Select((o, i) => ($"$origin{i}", (object)o)));
+		}
+
+		if (query.RootsOnly is { } rootsOnly)
+		{
+			// A run written before lineage tracking has NULL rather than an empty string, so both
+			// have to count as "no parent".
+			clauses.Add(rootsOnly
+				? "(parent_execution_id IS NULL OR parent_execution_id = '')"
+				: "(parent_execution_id IS NOT NULL AND parent_execution_id <> '')");
+		}
+
+		if (query.Statuses is { Count: > 0 } statuses)
+		{
+			var names = statuses.Select((_, i) => $"$status{i}").ToList();
+			clauses.Add($"status COLLATE NOCASE IN ({string.Join(", ", names)})");
+			parameters.AddRange(statuses.Select((s, i) => ($"$status{i}", (object)s)));
+		}
+
+		// AND-scoped allow list: the run must be one of these (e.g. tagged, favorited).
+		if (query.RunIdAllowList is not null)
+			clauses.Add($"run_id IN ({BucketQuery(Bucket.Allow)})");
+
+		// AND-scoped deny list: the complement case, e.g. "not favorited".
+		if (query.RunIdDenyList is { Count: > 0 })
+			clauses.Add($"run_id NOT IN ({BucketQuery(Bucket.Deny)})");
+
+		// OR-scoped text match: name or id contains the query, or the run was matched by its
+		// annotation (title / note / tag), which lives on disk and is resolved by the caller.
+		if (!string.IsNullOrEmpty(query.NameOrIdContains))
+		{
+			var alternatives = new List<string>
+			{
+				@"orchestration_name LIKE $text ESCAPE '\'",
+				@"run_id LIKE $text ESCAPE '\'",
+			};
+			if (query.AlsoMatchRunIds is { Count: > 0 })
+				alternatives.Add($"run_id IN ({BucketQuery(Bucket.Also)})");
+
+			clauses.Add($"({string.Join(" OR ", alternatives)})");
+			parameters.Add(("$text", $"%{EscapeLike(query.NameOrIdContains)}%"));
+		}
+		else if (query.AlsoMatchRunIds is not null)
+		{
+			clauses.Add($"run_id IN ({BucketQuery(Bucket.Also)})");
+		}
+
+		var where = clauses.Count == 0 ? "" : " WHERE " + string.Join(" AND ", clauses);
+		return new Predicate(where, cmd =>
+		{
+			foreach (var (name, value) in parameters)
+				cmd.Parameters.AddWithValue(name, value);
+		});
+	}
+
+	/// <summary>Neutralizes LIKE wildcards so a query for "50%" does not match everything.</summary>
+	private static string EscapeLike(string value) => value
+		.Replace("\\", "\\\\", StringComparison.Ordinal)
+		.Replace("%", "\\%", StringComparison.Ordinal)
+		.Replace("_", "\\_", StringComparison.Ordinal);
 
 	/// <summary>Per-orchestration run count and most recent start, computed in SQL.</summary>
 	public IReadOnlyDictionary<string, OrchestrationRunStats> GetOrchestrationStats()

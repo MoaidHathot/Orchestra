@@ -300,6 +300,38 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 	}
 
 	/// <summary>
+	/// Gets one page of run summaries matching <paramref name="query"/>, newest first, along with
+	/// the total number of matches.
+	/// </summary>
+	/// <remarks>
+	/// Prefer this over <see cref="GetRunSummariesAsync(int?, CancellationToken)"/> for anything
+	/// user-facing: it filters, counts and pages in SQL, so cost tracks the size of the page
+	/// rather than the size of the history.
+	/// </remarks>
+	public async Task<(IReadOnlyList<RunIndex> Rows, int Total)> QueryRunsAsync(
+		RunIndexQuery query, int offset, int limit, CancellationToken cancellationToken = default)
+	{
+		await EnsureIndexLoadedAsync(cancellationToken);
+
+		return _index.QueryPage(query, offset, limit);
+	}
+
+	/// <summary>
+	/// Maps run ids to the orchestration each belongs to, for the ids supplied.
+	/// </summary>
+	/// <remarks>
+	/// Lets a history page label child rows with their parent's orchestration name by asking for
+	/// just the parents that page references, instead of building a lookup over every run.
+	/// </remarks>
+	public async Task<Dictionary<string, string>> GetOrchestrationNamesByRunIdsAsync(
+		IReadOnlyCollection<string> runIds, CancellationToken cancellationToken = default)
+	{
+		await EnsureIndexLoadedAsync(cancellationToken);
+
+		return _index.GetOrchestrationNamesByRunIds(runIds);
+	}
+
+	/// <summary>
 	/// Finds a run index by run ID across all orchestrations.
 	/// Returns null if no matching run is found.
 	/// </summary>

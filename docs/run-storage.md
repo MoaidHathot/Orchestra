@@ -302,7 +302,36 @@ materializing the whole object graph (recall p99 is 9 MB, with a 52 MB outlier).
 
 `.index.db` carries a schema version. A mismatch drops the table and rebuilds rather than
 migrating — correct by construction for derived data, and cheaper to reason about than a migration
-path.
+path. The rebuild on the 5,421-run store above takes ~9 s, once.
+
+### Filtering and paging happen in SQL
+
+`QueryRunsAsync(query, offset, limit)` returns one page plus the total number of matches, with
+every predicate, the ordering, the count and the page evaluated by SQLite. The history endpoints
+used to pull the whole index into memory and filter with LINQ, so a request for 15 rows still
+materialized every run in the store and built a run-id dictionary the same size.
+
+Two details the SQL has to get right:
+
+- **The order must be total.** Runs launched in one batch share a start timestamp, and SQLite may
+  return tied rows in a different order per query. `LIMIT`/`OFFSET` over an unstable order
+  silently repeats some rows and drops others, so the primary key is appended to every
+  `ORDER BY`.
+- **`origin` is a stored column,** written by `RunOriginClassifier` at index time rather than
+  recomputed from `triggeredBy` in SQL, so the C# classifier stays the single definition of what
+  an origin is.
+
+### Annotations are not indexed
+
+Favorites, tags, titles and notes stay in `annotations/` and are deliberately **not** mirrored
+into `.index.db`. The index is derived and deletable; user data is neither, and a copy would need
+keeping honest.
+
+Annotation-backed filters are instead resolved against the in-memory annotation map — small,
+because only runs a human acted on appear in it — and passed into the query as a set of run ids
+that SQL joins against. `?favorites=true` and `?tags=` become an allow-list;
+`?favorites=false` asks for the *complement* of a set, which includes every unannotated run, so
+it becomes a deny-list instead.
 
 ## Reading and writing
 
@@ -311,7 +340,7 @@ path.
   to avoid Windows file locking conflicts under concurrent saves).
 - **Reader:** `FileSystemRunStore.GetRunAsync(orchestrationName, runId)` deserializes
   `run.json` and returns the full `OrchestrationRunRecord`. Other methods (
-  `GetRunSummariesAsync`, `FindRunByIdAsync`, `FindChildRunsAsync`,
+  `GetRunSummariesAsync`, `FindRunByIdAsync`, `FindChildRunsAsync`, `QueryRunsAsync`,
   `GetOrchestrationRunStatsAsync`) are answered by the SQLite index described above and never
   open a `run.json`.
 - **Lifetime:** `FileSystemRunStore` owns the index handle and implements `IDisposable`. The DI

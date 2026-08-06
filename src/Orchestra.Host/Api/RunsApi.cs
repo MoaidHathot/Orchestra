@@ -43,41 +43,25 @@ public static partial class RunsApi
 			bool? favorites,
 			string? tags) =>
 		{
-			var requestedLimit = limit ?? 15;
+			var requestedLimit = Math.Max(0, limit ?? 15);
 			var filters = HistoryFilterParser.Parse(origins, roots, statuses, favorites, tags);
 
-			// Build a runId -> orchestrationName lookup so child rows can surface the parent's
-			// orchestration name even when the parent is outside the response window. The lookup
-			// covers BOTH active and stored runs because a child can be launched while the parent
-			// is still running.
-			var allSummariesForLookup = await runStore.GetRunSummariesAsync();
-			var runIdToOrchName = BuildRunIdLookup(allSummariesForLookup, activeExecutionInfos);
-
-			// Get running orchestrations (these should appear at the top).
-			// Filter out completed/cancelled/failed executions that are still in the dictionary
-			// during the cleanup grace period — they should show up as completed history entries instead.
-			var runningRuns = activeExecutionInfos.Values
-				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
-				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters, annotations.Get(e.ExecutionId)))
-				.OrderByDescending(e => e.StartedAt)
-				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
+			// Running executions sort above completed ones and are held in memory, so they are
+			// filtered here and the store is asked only for the shortfall.
+			var runningRuns = SelectActiveRuns(activeExecutionInfos, filters, annotations)
+				.Take(requestedLimit)
 				.ToList();
 
-			// Get completed runs from store, applying filters server-side. We pull all summaries
-			// (already in memory from the lookup-build step) and filter+take the requested count.
 			var remainingLimit = Math.Max(0, requestedLimit - runningRuns.Count);
-			IEnumerable<RunIndex> filteredCompleted = filters.HasAnyFilter
-				? allSummariesForLookup.Where(s => HistoryFilterParser.Matches(s, filters, annotations.Get(s.RunId)))
-				: allSummariesForLookup;
+			var (completedRuns, _) = await runStore.QueryRunsAsync(
+				filters.ToIndexQuery(annotations), offset: 0, limit: remainingLimit);
 
-			var completedRuns = filteredCompleted
-				.Take(remainingLimit)
-				.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId)));
+			var runIdToOrchName = await BuildParentLookupAsync(
+				runStore, activeExecutionInfos, runningRuns, completedRuns);
 
-			// Combine: running first, then completed
 			var allRuns = runningRuns
-				.Concat(completedRuns)
-				.Take(requestedLimit)
+				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
+				.Concat(completedRuns.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId))))
 				.ToList();
 
 			return Results.Json(new
@@ -101,59 +85,34 @@ public static partial class RunsApi
 			bool? favorites,
 			string? tags) =>
 		{
-			var requestedOffset = offset ?? 0;
-			var requestedLimit = limit ?? 300;
+			var requestedOffset = Math.Max(0, offset ?? 0);
+			var requestedLimit = Math.Max(0, limit ?? 300);
 			var filters = HistoryFilterParser.Parse(origins, roots, statuses, favorites, tags);
 
-			var allSummariesForLookup = await runStore.GetRunSummariesAsync();
-			var runIdToOrchName = BuildRunIdLookup(allSummariesForLookup, activeExecutionInfos);
-
-			// Get running orchestrations (filter out completed/cancelled/failed during cleanup grace period)
-			var runningRuns = activeExecutionInfos.Values
-				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
-				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters, annotations.Get(e.ExecutionId)))
-				.OrderByDescending(e => e.StartedAt)
-				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
-				.ToList();
-
+			// The response is one virtual list: every running run, then every completed run. The
+			// running segment is served from memory; the completed segment is paged in SQL with
+			// its offset shifted by however much of the running segment the caller already has.
+			var runningRuns = SelectActiveRuns(activeExecutionInfos, filters, annotations).ToList();
 			var runningCount = runningRuns.Count;
 
-			var completedFiltered = filters.HasAnyFilter
-				? allSummariesForLookup.Where(s => HistoryFilterParser.Matches(s, filters, annotations.Get(s.RunId))).ToList()
-				: [.. allSummariesForLookup];
-			var completedTotal = completedFiltered.Count;
-			var totalAll = runningCount + completedTotal;
+			var runningPage = runningRuns.Skip(requestedOffset).Take(requestedLimit).ToList();
 
-			// Calculate which items to return based on offset
-			var allItems = new List<object>();
+			var (completedPage, completedTotal) = await runStore.QueryRunsAsync(
+				filters.ToIndexQuery(annotations),
+				offset: Math.Max(0, requestedOffset - runningCount),
+				limit: requestedLimit - runningPage.Count);
 
-			if (requestedOffset < runningCount)
-			{
-				var runningToTake = runningRuns.Skip(requestedOffset).Take(requestedLimit);
-				allItems.AddRange(runningToTake);
+			var runIdToOrchName = await BuildParentLookupAsync(
+				runStore, activeExecutionInfos, runningPage, completedPage);
 
-				var remaining = requestedLimit - allItems.Count;
-				if (remaining > 0)
-				{
-					var completedItems = completedFiltered
-						.Take(remaining)
-						.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId)));
-					allItems.AddRange(completedItems);
-				}
-			}
-			else
-			{
-				var completedOffset = requestedOffset - runningCount;
-				var completedItems = completedFiltered
-					.Skip(completedOffset)
-					.Take(requestedLimit)
-					.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId)));
-				allItems.AddRange(completedItems);
-			}
+			var allItems = runningPage
+				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
+				.Concat(completedPage.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId))))
+				.ToList();
 
 			return Results.Json(new
 			{
-				total = totalAll,
+				total = runningCount + completedTotal,
 				offset = requestedOffset,
 				limit = requestedLimit,
 				count = allItems.Count,
@@ -169,6 +128,7 @@ public static partial class RunsApi
 			[FromServices] RunAnnotationStore annotations,
 			string? query,
 			int? limit,
+			int? offset,
 			string? origins,
 			bool? roots,
 			string? statuses,
@@ -176,43 +136,41 @@ public static partial class RunsApi
 			string? tags) =>
 		{
 			var searchQuery = query?.Trim() ?? "";
-			var requestedLimit = limit ?? 300;
+			var requestedOffset = Math.Max(0, offset ?? 0);
+			var requestedLimit = Math.Max(0, limit ?? 300);
 			var filters = HistoryFilterParser.Parse(origins, roots, statuses, favorites, tags);
 
 			if (string.IsNullOrEmpty(searchQuery))
-				return Results.Json(new { total = 0, count = 0, runs = Array.Empty<object>() }, jsonOptions);
+				return Results.Json(new { total = 0, offset = requestedOffset, limit = requestedLimit, count = 0, runs = Array.Empty<object>() }, jsonOptions);
 
-			var allSummaries = await runStore.GetRunSummariesAsync();
-			var runIdToOrchName = BuildRunIdLookup(allSummaries, activeExecutionInfos);
-
-			// Search across active executions (filter out completed/cancelled/failed during cleanup grace period)
-			var matchingActive = activeExecutionInfos.Values
-				.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
-				.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters, annotations.Get(e.ExecutionId)))
+			var matchingActive = SelectActiveRuns(activeExecutionInfos, filters, annotations)
 				.Where(e => e.OrchestrationName.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
 					|| e.ExecutionId.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
-					|| MatchesAnnotation(annotations.Get(e.ExecutionId), searchQuery))
-				.OrderByDescending(e => e.StartedAt)
+					|| HistoryFilterParser.MatchesAnnotationText(annotations.Get(e.ExecutionId), searchQuery))
+				.ToList();
+
+			var activePage = matchingActive.Skip(requestedOffset).Take(requestedLimit).ToList();
+
+			var (completedPage, completedTotal) = await runStore.QueryRunsAsync(
+				filters.ToIndexQuery(annotations, searchQuery),
+				offset: Math.Max(0, requestedOffset - matchingActive.Count),
+				limit: requestedLimit - activePage.Count);
+
+			var runIdToOrchName = await BuildParentLookupAsync(
+				runStore, activeExecutionInfos, activePage, completedPage);
+
+			var allResults = activePage
 				.Select(e => ProjectActiveRow(e, runIdToOrchName, annotations.Get(e.ExecutionId)))
-				.Cast<object>()
+				.Concat(completedPage.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId))))
 				.ToList();
-
-			// Search across ALL completed runs in the index
-			var matchingCompleted = allSummaries
-				.Where(s => !filters.HasAnyFilter || HistoryFilterParser.Matches(s, filters, annotations.Get(s.RunId)))
-				.Where(s => s.OrchestrationName.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
-					|| s.RunId.Contains(searchQuery, StringComparison.OrdinalIgnoreCase)
-					|| MatchesAnnotation(annotations.Get(s.RunId), searchQuery))
-				.Take(requestedLimit)
-				.Select(s => ProjectCompletedRow(s, runIdToOrchName, annotations.Get(s.RunId)))
-				.Cast<object>()
-				.ToList();
-
-			var allResults = matchingActive.Concat(matchingCompleted).Take(requestedLimit).ToList();
 
 			return Results.Json(new
 			{
-				total = allResults.Count,
+				// The size of the whole match set, not of the page: a client paging through
+				// results has no other way to know that more exist.
+				total = matchingActive.Count + completedTotal,
+				offset = requestedOffset,
+				limit = requestedLimit,
 				count = allResults.Count,
 				runs = allResults
 			}, jsonOptions);
@@ -914,15 +872,67 @@ public static partial class RunsApi
 	/// the active set wins because the active record is authoritative for what is currently
 	/// running. Lookups are case-insensitive to mirror <c>FindRunByIdAsync</c>.
 	/// </remarks>
-	private static Dictionary<string, string> BuildRunIdLookup(
-		IEnumerable<RunIndex> summaries,
-		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos)
+	/// <summary>
+	/// The running executions that pass <paramref name="filters"/>, newest first.
+	/// </summary>
+	/// <remarks>
+	/// Executions that have finished but are still in the dictionary during the cleanup grace
+	/// period are dropped here — they belong in the completed segment, and counting them in both
+	/// would double up rows and inflate totals.
+	/// </remarks>
+	private static IEnumerable<ActiveExecutionInfo> SelectActiveRuns(
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		HistoryFilters filters,
+		RunAnnotationStore annotations) =>
+		activeExecutionInfos.Values
+			.Where(e => e.Status is not (HostExecutionStatus.Completed or HostExecutionStatus.Cancelled or HostExecutionStatus.Failed))
+			.Where(e => !filters.HasAnyFilter || HistoryFilterParser.Matches(e, filters, annotations.Get(e.ExecutionId)))
+			.OrderByDescending(e => e.StartedAt)
+			.ThenBy(e => e.ExecutionId, StringComparer.Ordinal);
+
+	/// <summary>
+	/// Builds the runId → orchestrationName lookup needed to label the child rows on one page
+	/// with their parent's orchestration.
+	/// </summary>
+	/// <remarks>
+	/// Scoped to the parents this page actually references. The previous implementation built the
+	/// lookup from every run in the index on every request, which grew without bound while the
+	/// number of entries a page can use stays capped by the page size.
+	/// <para>
+	/// On a collision (a run id appears both in the active set and in the persisted index) the
+	/// active set wins, because the active record is authoritative for what is currently running.
+	/// </para>
+	/// </remarks>
+	private static async Task<Dictionary<string, string>> BuildParentLookupAsync(
+		FileSystemRunStore runStore,
+		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
+		IEnumerable<ActiveExecutionInfo> activeRows,
+		IEnumerable<RunIndex> completedRows)
 	{
-		var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-		foreach (var s in summaries)
-			lookup[s.RunId] = s.OrchestrationName;
-		foreach (var (id, info) in activeExecutionInfos)
-			lookup[id] = info.OrchestrationName;
+		var needed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		foreach (var e in activeRows)
+		{
+			if (e.NestingMetadata?.ParentExecutionId is { Length: > 0 } parentId)
+				needed.Add(parentId);
+		}
+
+		foreach (var s in completedRows)
+		{
+			if (s.ParentExecutionId is { Length: > 0 } parentId)
+				needed.Add(parentId);
+		}
+
+		var lookup = needed.Count == 0
+			? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+			: await runStore.GetOrchestrationNamesByRunIdsAsync(needed);
+
+		foreach (var id in needed)
+		{
+			if (activeExecutionInfos.TryGetValue(id, out var info))
+				lookup[id] = info.OrchestrationName;
+		}
+
 		return lookup;
 	}
 
@@ -939,34 +949,6 @@ public static partial class RunsApi
 		}
 
 		return Enum.TryParse(value, ignoreCase: true, out format) && Enum.IsDefined(format);
-	}
-
-	/// <summary>
-	/// Substring match of a search query against a run's user curation (title, tags, note).
-	/// </summary>
-	/// <remarks>
-	/// This is what makes machine-named runs discoverable. An ephemeral run called
-	/// <c>ephemeral-efca835904b6-attempt-3</c> is unfindable by name; titled "Connect evidence
-	/// pack" it is findable by the words a human would actually search for.
-	/// </remarks>
-	private static bool MatchesAnnotation(RunAnnotation? annotation, string query)
-	{
-		if (annotation is null)
-			return false;
-
-		if (annotation.Title?.Contains(query, StringComparison.OrdinalIgnoreCase) == true)
-			return true;
-
-		if (annotation.Note?.Contains(query, StringComparison.OrdinalIgnoreCase) == true)
-			return true;
-
-		foreach (var tag in annotation.Tags)
-		{
-			if (tag.Contains(query, StringComparison.OrdinalIgnoreCase))
-				return true;
-		}
-
-		return false;
 	}
 
 	/// <summary>

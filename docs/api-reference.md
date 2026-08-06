@@ -405,18 +405,33 @@ GET /api/history/all?offset=0&limit=100
 
 **Query Parameters:**
 - `offset`: Number of records to skip (default: 0)
-- `limit`: Number of records to return (default: 100)
+- `limit`: Number of records to return (default: 300)
 - Plus every filter listed under [Get Recent Runs](#get-recent-runs)
+
+**Response fields:** `total` is the size of the whole filtered match set, not of the
+returned page — page through by advancing `offset` until you have `total` rows.
+Running executions sort ahead of completed ones, and paging is a strict partition:
+each run appears on exactly one page.
 
 ### Search Runs
 
 ```http
-GET /api/history/search?query=connect
+GET /api/history/search?query=connect&offset=0&limit=100
 ```
 
 Substring, case-insensitive. Matches the orchestration name, the run id, **and the
 run's annotation title, tags and note** — which is what makes machine-named runs
 (ephemeral and self-healing) findable by the words a human would actually search for.
+SQL wildcards in `query` (`%`, `_`) are matched literally.
+
+**Query Parameters:**
+- `query`: Text to search for. An empty query returns no rows.
+- `offset`: Number of records to skip (default: 0)
+- `limit`: Number of records to return (default: 300)
+- Plus every filter listed under [Get Recent Runs](#get-recent-runs)
+
+**Response fields:** as for `/api/history/all` — `total` counts every match, so a
+client can tell that more results exist beyond the page it received.
 
 ### Get Run Details
 

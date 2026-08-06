@@ -106,6 +106,104 @@ public static class HistoryFilterParser
 	}
 
 	/// <summary>
+	/// Translates HTTP-level filters into a <see cref="RunIndexQuery"/> the run index can execute.
+	/// </summary>
+	/// <remarks>
+	/// <para>
+	/// Structural filters (origin, scope, status) map straight onto indexed columns. The
+	/// annotation-backed ones cannot: annotations are user data and live on disk outside the
+	/// derived index, so they are resolved here against the in-memory annotation map and handed
+	/// down as run-id sets. That map only contains runs a human has acted on, so it is small
+	/// regardless of how much history exists.
+	/// </para>
+	/// <para>
+	/// Note the asymmetry between the two favorite cases. <c>favorites=true</c> names a set and
+	/// becomes an allow-list; <c>favorites=false</c> asks for its complement — which includes
+	/// every run that has no annotation at all — and so becomes a deny-list instead.
+	/// </para>
+	/// </remarks>
+	/// <param name="searchText">Free-text query, or <see langword="null"/> for a plain listing.</param>
+	public static RunIndexQuery ToIndexQuery(
+		this HistoryFilters filters,
+		RunAnnotationStore annotations,
+		string? searchText = null)
+	{
+		List<string>? allow = null;
+		IReadOnlyCollection<string>? deny = null;
+
+		if (filters.Tags is not null || filters.Favorites is true)
+		{
+			// Both dimensions require an annotation to exist, so a single pass over the
+			// annotated runs produces the whole candidate set.
+			allow = [];
+			foreach (var (runId, annotation) in annotations.GetAll())
+			{
+				if (filters.Favorites is { } wantFavorite && annotation.Favorite != wantFavorite)
+					continue;
+				if (filters.Tags is { } wantTags && !annotation.Tags.Any(wantTags.Contains))
+					continue;
+				allow.Add(runId);
+			}
+		}
+		else if (filters.Favorites is false)
+		{
+			// Everything except the favorites — including unannotated runs, which is why this
+			// cannot be enumerated as an allow-list.
+			deny = annotations.GetFavoriteRunIds();
+		}
+
+		List<string>? alsoMatch = null;
+		if (!string.IsNullOrEmpty(searchText))
+		{
+			alsoMatch = [];
+			foreach (var (runId, annotation) in annotations.GetAll())
+			{
+				if (MatchesAnnotationText(annotation, searchText))
+					alsoMatch.Add(runId);
+			}
+		}
+
+		return new RunIndexQuery
+		{
+			Origins = filters.Origins?.Select(RunOriginClassifier.ToWireValue).ToList(),
+			RootsOnly = filters.Roots,
+			Statuses = filters.Statuses?.ToList(),
+			RunIdAllowList = allow,
+			RunIdDenyList = deny,
+			NameOrIdContains = string.IsNullOrEmpty(searchText) ? null : searchText,
+			AlsoMatchRunIds = alsoMatch,
+		};
+	}
+
+	/// <summary>
+	/// Substring match of a search query against a run's user curation (title, tags, note).
+	/// </summary>
+	/// <remarks>
+	/// This is what makes machine-named runs discoverable. An ephemeral run called
+	/// <c>ephemeral-efca835904b6-attempt-3</c> is unfindable by name; titled "Connect evidence
+	/// pack" it is findable by the words a human would actually search for.
+	/// </remarks>
+	public static bool MatchesAnnotationText(RunAnnotation? annotation, string query)
+	{
+		if (annotation is null)
+			return false;
+
+		if (annotation.Title?.Contains(query, StringComparison.OrdinalIgnoreCase) == true)
+			return true;
+
+		if (annotation.Note?.Contains(query, StringComparison.OrdinalIgnoreCase) == true)
+			return true;
+
+		foreach (var tag in annotation.Tags)
+		{
+			if (tag.Contains(query, StringComparison.OrdinalIgnoreCase))
+				return true;
+		}
+
+		return false;
+	}
+
+	/// <summary>
 	/// Returns <see langword="true"/> when the annotation-backed filters (favorites, tags) match.
 	/// </summary>
 	/// <param name="annotation">The run's annotation, or <see langword="null"/> when unannotated.</param>

@@ -297,6 +297,45 @@ public class RunsApiAnnotationTests : IDisposable
 			.Should().BeEquivalentTo(["a", "b"]);
 	}
 
+	[Fact]
+	public async Task FavoritesFilter_False_ReturnsUnfavoritedRunsIncludingUnannotatedOnes()
+	{
+		// The complement of a set, not a set: "not favorited" has to include every run that was
+		// never annotated at all, which is most of them. Expressing this as an allow-list of
+		// annotated-and-not-favorited runs would return almost nothing.
+		await SaveRunAsync("fav");
+		await SaveRunAsync("titled-only");
+		await SaveRunAsync("untouched");
+		using var host = CreateHost();
+		var client = host.GetTestClient();
+		await client.PostAsync($"/api/history/{Orchestration}/fav/favorite", null);
+		await client.PutAsJsonAsync(Url("titled-only"), new { title = "Not a favorite" });
+
+		var json = await client.GetFromJsonAsync<JsonElement>("/api/history?favorites=false");
+
+		json.GetProperty("runs").EnumerateArray()
+			.Select(r => r.GetProperty("runId").GetString())
+			.Should().BeEquivalentTo(["titled-only", "untouched"]);
+	}
+
+	[Fact]
+	public async Task FavoritesFilter_FalseCombinedWithTags_AppliesBoth()
+	{
+		await SaveRunAsync("fav-tagged");
+		await SaveRunAsync("plain-tagged");
+		await SaveRunAsync("untagged");
+		using var host = CreateHost();
+		var client = host.GetTestClient();
+		await client.PutAsJsonAsync(Url("fav-tagged"), new { favorite = true, tags = new[] { "connect" } });
+		await client.PutAsJsonAsync(Url("plain-tagged"), new { tags = new[] { "connect" } });
+
+		var json = await client.GetFromJsonAsync<JsonElement>("/api/history?favorites=false&tags=connect");
+
+		json.GetProperty("runs").EnumerateArray()
+			.Select(r => r.GetProperty("runId").GetString())
+			.Should().BeEquivalentTo(["plain-tagged"]);
+	}
+
 	// ── Search ──
 
 	[Fact]
