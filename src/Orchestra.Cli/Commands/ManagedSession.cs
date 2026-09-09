@@ -23,9 +23,11 @@ internal static class ManagedSession
 		// The management host never loads the user's orchestra.json into the spawned instance:
 		// scanning the workspace and starting orchestra.services.json / orchestra.mcp.json processes
 		// can take tens of seconds and is pure overhead for a read-only registry operation. We
-		// resolve only the data path from config (so it reads the same files the server uses) and
-		// inject it into an otherwise reproducible, side-effect-free host (NoConfig = true).
+		// resolve only the data path and scan directory from config (so it reads the same files the
+		// server uses, and a project-local workspace's orchestrations are actually registered) and
+		// inject them into an otherwise reproducible, side-effect-free host (NoConfig = true).
 		var dataPath = settings.DataPath ?? (settings.NoConfig ? null : SafeConfiguredDataPath());
+		var scanDirectory = settings.NoConfig ? null : SafeConfiguredScanDirectory();
 
 		var request = new HostSessionRequest
 		{
@@ -36,6 +38,7 @@ internal static class ManagedSession
 			// START the services/proxies — that's the slow, side-effecting part the management host skips.
 			SkipExternalServices = false,
 			DataPath = dataPath,
+			OrchestrationsPath = scanDirectory,
 			ConfigureIsolation = ConfigureManagementHost,
 			SpawnOnlyOptionLabels = SpawnOnlyOptionsInEffect(settings),
 		};
@@ -90,6 +93,14 @@ internal static class ManagedSession
 	private static string? SafeConfiguredDataPath()
 	{
 		try { return OrchestraConfigLoader.ResolveConfiguredDataPath(); }
+		catch { return null; }
+	}
+
+	/// <summary>Best-effort read of the configured scan directory; same contract as
+	/// <see cref="SafeConfiguredDataPath"/> — never let config discovery fail a management verb.</summary>
+	private static string? SafeConfiguredScanDirectory()
+	{
+		try { return OrchestraConfigLoader.ResolveConfiguredScanDirectory(); }
 		catch { return null; }
 	}
 }

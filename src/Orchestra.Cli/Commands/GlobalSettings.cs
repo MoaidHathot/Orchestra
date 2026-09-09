@@ -9,6 +9,7 @@ namespace Orchestra.Cli.Commands;
 /// <list type="number">
 ///   <item>The explicit <c>--server / -s</c> flag, when provided.</item>
 ///   <item>The <c>ORCHESTRA_URL</c> environment variable.</item>
+///   <item><c>hostBaseUrl</c> (or the first <c>urls</c> entry) in the discovered <c>orchestra.json</c>.</item>
 ///   <item>The fallback <c>http://localhost:5000</c>.</item>
 /// </list>
 /// Promoted onto the base so every subcommand inherits the flag and shows it uniformly

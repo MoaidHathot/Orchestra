@@ -19,6 +19,15 @@ public class Program
 {
 	public static int Main(string[] args)
 	{
+		// A bare `orchestra` on an unconfigured machine gets a short "start here" banner instead
+		// of the full verb list. Handled here rather than in Configure so the command map that
+		// CommandAppTester exercises is untouched.
+		if (FirstRunBanner.ShouldShow(args, Console.IsOutputRedirected))
+		{
+			FirstRunBanner.Write(ThisAssembly.InformationalVersion());
+			return 0;
+		}
+
 		var app = new CommandApp();
 		app.Configure(Configure);
 
@@ -60,6 +69,19 @@ public class Program
 		// CaseSensitivity.None matches the legacy hand-rolled parser's lenience.
 		config.PropagateExceptions();
 		config.CaseSensitivity(CaseSensitivity.None);
+
+		// ── Getting started ──────────────────────────────────────────────────────
+		config.AddCommand<InitCommand>("init")
+			.WithDescription("Scaffold a workspace: a starter orchestration, JSON schemas, and orchestra.json.")
+			.WithExample("init")
+			.WithExample("init", "./my-workflows", "--template", "research")
+			.WithExample("init", "--template", "hello", "--provider", "copilot", "--yes");
+
+		config.AddCommand<DoctorCommand>("doctor")
+			.WithDescription("Check prerequisites: config, data path, agent CLI, credentials, server.")
+			.WithExample("doctor")
+			.WithExample("doctor", "--fix")
+			.WithExample("doctor", "--provider", "opencode", "--format", "json");
 
 		// ── Orchestration commands (top-level) ───────────────────────────────────
 		config.AddCommand<ListCommand>("list")
@@ -124,6 +146,11 @@ public class Program
 		config.AddCommand<SchemasCliCommand>("schemas")
 			.WithDescription("Copy the bundled JSON schemas into a local directory for editor $schema validation.")
 			.WithExample("schemas", "--output", "./.orchestra/schemas");
+
+		config.AddCommand<ValidateCommand>("validate")
+			.WithDescription("Parse an orchestration file and check its template expressions without running it.")
+			.WithExample("validate", "./orchestrations/hello.yaml")
+			.WithExample("validate", "./draft.yaml", "--format", "json");
 
 		// ── Run history (branch) ─────────────────────────────────────────────────
 		config.AddBranch("runs", branch =>

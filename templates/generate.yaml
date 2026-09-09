@@ -1,0 +1,139 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: generate
+description: >
+  Writes new Orchestra orchestrations from a natural-language description. An agent
+  drafts the YAML against the bundled authoring skill, a reviewer loop refines it,
+  and a deterministic Script gate then machine-checks the result with
+  `orchestra validate` before anything is written.
+version: "1.0.0"
+defaultModel: claude-opus-4.8
+tags: [meta, generator, tooling]
+
+inputs:
+  description:
+    type: string
+    description: What the new orchestration should do.
+    required: false
+    multiline: true
+    default: Fetch the top Hacker News stories and summarize the themes.
+  outputPath:
+    type: string
+    description: Where to write the generated file. Empty writes to the run temp directory only.
+    required: false
+    # Optional inputs need an explicit default. Without one the template expression
+    # stays literal ("{{param.outputPath}}") and the script cannot tell it was omitted.
+    default: ""
+
+steps:
+  - name: draft
+    type: Prompt
+    parameters: [description]
+    # Resolved against THIS FILE's directory. `orchestra init --template generate`
+    # copies the skill to .orchestra/skills/, one level up from orchestrations/.
+    # A missing directory is skipped silently, so this path must be exact.
+    skillDirectories:
+      - ../.orchestra/skills/orchestration-authoring
+    systemPrompt: |
+      You author Orchestra orchestration files. The orchestration-authoring skill is
+      available to you: consult it for the schema, step types, and template expressions.
+
+      Rules:
+      - Output ONLY raw YAML. No prose, no markdown fences.
+      - Use only properties defined by the schema. Do not invent fields.
+      - Use typed `inputs`, not the legacy step-level `parameters` list, for user input.
+      - Give every optional input a `default` so the orchestration runs with no arguments.
+      - kebab-case orchestration and step names; camelCase variables.
+      - Prefer deterministic steps (Command, Script, Transform) over Prompt steps
+        wherever the work is not genuinely fuzzy. They cost nothing and cannot hallucinate.
+      - Set `defaultModel: claude-opus-4.8` unless the description says otherwise.
+    userPrompt: |
+      Generate an Orchestra orchestration for this description:
+
+      {{param.description}}
+
+  # Semantic review. The loop mechanism only re-runs the target and this checker, so
+  # nothing deterministic can live between them -- that is what the `check` step below is for.
+  #
+  # exitPattern must not be a substring of the rejection marker: "VALID" would match
+  # "INVALID" and approve every rejection. APPROVED / NEEDS_WORK are disjoint.
+  # Note there is deliberately no outputHandlerPrompt here -- it would strip the marker
+  # the loop matches on.
+  - name: review
+    type: Prompt
+    dependsOn: [draft]
+    skillDirectories:
+      - ../.orchestra/skills/orchestration-authoring
+    systemPrompt: |
+      You review Orchestra orchestrations against the authoring skill.
+
+      Check: required fields present; step names unique; every `dependsOn` names a real
+      step; every \{{expression}} resolves to a declared input, variable, or upstream step;
+      no invented properties; optional inputs have defaults; Prompt steps are justified.
+
+      Reply with EXACTLY one of:
+        APPROVED
+        NEEDS_WORK
+      on the first line. If NEEDS_WORK, list the specific problems beneath it, then
+      output the corrected YAML.
+    userPrompt: |
+      Review this orchestration:
+
+      {{draft.output}}
+    loop:
+      target: draft
+      maxIterations: 3
+      exitPattern: "APPROVED"
+
+  # Deterministic gate. Writes the candidate, then runs the real parser and template
+  # expression validator through `orchestra validate`. This is the check that cannot
+  # hallucinate -- the review loop above is judgment, this is ground truth.
+  - name: check
+    type: Script
+    dependsOn: [review]
+    shell: pwsh
+    parameters: [outputPath]
+    script: |
+      $ErrorActionPreference = 'Stop'
+
+      # The reviewer may wrap the YAML in fences or prefix its verdict; strip both.
+      $content = @'
+      {{review.output}}
+      '@
+      $content = $content -replace '(?m)^\s*(APPROVED|NEEDS_WORK)\s*$', ''
+      if ($content -match '(?s)```(?:yaml)?\s*(.+?)\s*```') { $content = $Matches[1] }
+      $content = $content.Trim()
+
+      $draftPath = Join-Path '{{orchestration.tempDir}}' 'generated.yaml'
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $draftPath) | Out-Null
+      Set-Content -LiteralPath $draftPath -Value $content -Encoding utf8NoBOM
+
+      $result = & orchestra validate $draftPath 2>&1 | Out-String
+      if ($LASTEXITCODE -ne 0) {
+        # Halt the whole run rather than emitting a file that will not parse.
+        Orchestra-Complete -Status failed -Reason "Generated orchestration failed validation:`n$result"
+      }
+
+      $outputPath = '{{param.outputPath}}'
+      if (-not [string]::IsNullOrWhiteSpace($outputPath)) {
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $outputPath) | Out-Null
+        Copy-Item -LiteralPath $draftPath -Destination $outputPath -Force
+        Write-Output $outputPath
+      } else {
+        Write-Output $draftPath
+      }
+
+  - name: report
+    type: Transform
+    dependsOn: [check]
+    template: |
+      # Generated orchestration
+
+      **Validated and written to:** {{check.output}}
+
+      Register and run it with:
+
+          orchestra register {{check.output}}
+          orchestra validate {{check.output}}
+
+      ---
+      Run {{orchestration.runId}}

@@ -1,0 +1,49 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: code-review
+description: >
+  Reviews uncommitted changes in a git repository. Shows how a deterministic
+  Command step feeds real data into an agent step, so the model reviews your
+  actual diff rather than something it guessed at.
+version: "1.0.0"
+defaultModel: claude-opus-4.8
+
+inputs:
+  repo:
+    type: string
+    description: Path to the git repository to review.
+    required: false
+    default: "."
+  baseRef:
+    type: string
+    description: What to diff against. Use HEAD for uncommitted work.
+    required: false
+    default: HEAD
+
+steps:
+  # Command steps run a process and capture stdout. Deterministic, no model,
+  # no cost — the right tool for gathering facts.
+  - name: diff
+    type: Command
+    command: git
+    arguments:
+      - "-C"
+      - "{{param.repo}}"
+      - diff
+      - "{{param.baseRef}}"
+    includeStdErr: true
+
+  - name: review
+    type: Prompt
+    dependsOn: [diff]
+    systemPrompt: |
+      You are a senior engineer doing code review. Focus on correctness,
+      error handling, and edge cases over style. Say so plainly when the diff
+      looks fine — do not manufacture problems to seem useful.
+    userPrompt: |
+      Review the following diff. For each issue, give the file, the concern,
+      and a concrete suggested fix. Order by severity. If the diff is empty,
+      say that there is nothing to review and stop.
+
+      ```diff
+      {{diff.output}}
+      ```

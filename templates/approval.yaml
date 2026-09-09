@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: approval
+description: >
+  Human-in-the-loop gate. An agent drafts something, a person approves or rejects
+  it, and the run branches on that decision. The pause is durable: the run survives
+  a host restart and can be answered later from the CLI, the portal, or the REST API.
+version: "1.0.0"
+defaultModel: claude-opus-4.8
+
+inputs:
+  subject:
+    type: string
+    description: What to draft an announcement about.
+    required: false
+    default: the 2.0 release of our API
+
+steps:
+  - name: draft
+    type: Prompt
+    systemPrompt: You write short, plain announcements. No marketing voice.
+    userPrompt: |
+      Draft a 60-word internal announcement about "{{param.subject}}".
+      Return only the announcement text.
+
+  # Approval pauses the run and persists a pending record to disk. Nothing is
+  # held in memory, so the run resumes correctly even if the host restarts.
+  #
+  # Answer it with:
+  #   orchestra pending
+  #   orchestra respond approval <run-id> review --choice approve --by you
+  - name: review
+    type: Approval
+    dependsOn: [draft]
+    prompt: |
+      Approve this announcement?
+
+      {{draft.output}}
+    choices: [approve, reject]
+    # Without a timeout the run waits indefinitely. With one, decide what silence
+    # means: 'fail', 'cancel', or fall back to 'defaultResponse' as below.
+    timeoutSeconds: 3600
+    onTimeout: defaultResponse
+    defaultResponse: reject
+
+  # The approver's answer becomes this step's output, so downstream steps read it
+  # like any other step result.
+  - name: publish
+    type: Transform
+    dependsOn: [review]
+    template: |
+      # Announcement: {{param.subject}}
+
+      **Decision:** {{review.output}}
+
+      ---
+
+      {{draft.output}}
+
+      ---
+      Run {{orchestration.runId}}

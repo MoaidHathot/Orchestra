@@ -13,11 +13,14 @@ namespace Orchestra.Host.Hosting;
 /// Loads Orchestra configuration from a JSON file on disk.
 /// Resolution order:
 ///   1. Explicit path via ORCHESTRA_CONFIG_PATH environment variable
-///   2. XDG_CONFIG_HOME/Orchestra/orchestra.json (all platforms, including Windows)
-///   3. Platform-specific fallback:
+///   2. Project-local config found by walking up from the working directory
+///      (<c>./orchestra.json</c>, then <c>./.orchestra/orchestra.json</c> at each level,
+///      stopping at a repository root). This is what <c>orchestra init</c> scaffolds.
+///   3. XDG_CONFIG_HOME/Orchestra/orchestra.json (all platforms, including Windows)
+///   4. Platform-specific fallback:
 ///      - Windows: %APPDATA%/Orchestra/orchestra.json
 ///      - Linux/macOS: ~/.config/Orchestra/orchestra.json
-///   4. If no file is found, returns defaults.
+///   5. If no file is found, returns defaults.
 /// </summary>
 public static class OrchestraConfigLoader
 {
@@ -30,6 +33,12 @@ public static class OrchestraConfigLoader
 	/// The directory name under the config root.
 	/// </summary>
 	public const string ConfigDirectoryName = "Orchestra";
+
+	/// <summary>
+	/// The per-project directory name (holding schemas and, optionally, a project-local
+	/// <c>orchestra.json</c>) that <c>orchestra init</c> scaffolds into a workspace.
+	/// </summary>
+	public const string ProjectDirectoryName = ".orchestra";
 
 	private static readonly JsonSerializerOptions JsonOptions = new()
 	{
@@ -51,14 +60,26 @@ public static class OrchestraConfigLoader
 	/// Resolves the configuration file path according to the resolution order.
 	/// Returns null if no configuration file exists at any location.
 	/// </summary>
-	public static string? ResolveConfigPath()
+	/// <param name="startDirectory">
+	/// Directory the project-local walk-up starts from. Defaults to the process working
+	/// directory; tests pass an explicit directory to stay hermetic.
+	/// </param>
+	public static string? ResolveConfigPath(string? startDirectory = null)
 	{
 		// 1. Explicit path via environment variable
 		var envPath = Environment.GetEnvironmentVariable("ORCHESTRA_CONFIG_PATH");
 		if (!string.IsNullOrWhiteSpace(envPath) && File.Exists(envPath))
 			return envPath;
 
-		// 2. XDG_CONFIG_HOME (works on all platforms, including Windows)
+		// 2. Project-local config, discovered by walking up from the working directory.
+		//    Deliberately ranked above the user-global locations so that `cd`-ing into a
+		//    scaffolded workspace makes that workspace's settings win — the same contract
+		//    as .editorconfig / global.json / Directory.Build.props.
+		var projectPath = ResolveProjectConfigPath(startDirectory);
+		if (projectPath is not null)
+			return projectPath;
+
+		// 3. XDG_CONFIG_HOME (works on all platforms, including Windows)
 		var xdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
 		if (!string.IsNullOrWhiteSpace(xdgConfigHome))
 		{
@@ -67,12 +88,128 @@ public static class OrchestraConfigLoader
 				return xdgPath;
 		}
 
-		// 3. Platform-specific fallback
+		// 4. Platform-specific fallback
 		var fallbackPath = GetPlatformConfigPath();
 		if (fallbackPath is not null && File.Exists(fallbackPath))
 			return fallbackPath;
 
 		return null;
+	}
+
+	/// <summary>
+	/// Walks up from <paramref name="startDirectory"/> looking for a project-local
+	/// <c>orchestra.json</c> — first directly in the directory, then under
+	/// <c>.orchestra/</c>. The walk stops after inspecting a repository root (a directory
+	/// containing <c>.git</c>), so a config belonging to an unrelated parent checkout is
+	/// never picked up.
+	/// </summary>
+	/// <remarks>
+	/// Returns null when no project-local config exists, which lets
+	/// <see cref="ResolveConfigPath"/> fall through to the user-global locations.
+	/// I/O errors while probing a directory are treated as "not here" rather than
+	/// propagated: config discovery runs on nearly every CLI verb and must never throw.
+	/// </remarks>
+	public static string? ResolveProjectConfigPath(string? startDirectory = null)
+	{
+		DirectoryInfo? directory;
+		try
+		{
+			directory = new DirectoryInfo(startDirectory ?? Directory.GetCurrentDirectory());
+		}
+		catch
+		{
+			return null;
+		}
+
+		for (; directory is not null && directory.Exists; directory = directory.Parent)
+		{
+			try
+			{
+				var direct = Path.Combine(directory.FullName, ConfigFileName);
+				if (File.Exists(direct))
+					return direct;
+
+				var nested = Path.Combine(directory.FullName, ProjectDirectoryName, ConfigFileName);
+				if (File.Exists(nested))
+					return nested;
+
+				// `.git` is a directory in a normal clone but a file in worktrees and
+				// submodules — both mark a repository root, so both end the walk.
+				var gitMarker = Path.Combine(directory.FullName, ".git");
+				if (Directory.Exists(gitMarker) || File.Exists(gitMarker))
+					return null;
+			}
+			catch (UnauthorizedAccessException)
+			{
+				// Unreadable directory: keep walking toward the root.
+			}
+			catch (IOException)
+			{
+			}
+		}
+
+		return null;
+	}
+
+	/// <summary>
+	/// Reports which configuration file (if any) wins for the current working directory and
+	/// whether it actually parses, <em>without</em> applying it or mutating any options.
+	/// </summary>
+	/// <remarks>
+	/// The normal load paths (<see cref="Load"/> / <see cref="LoadAndApply"/>) deliberately
+	/// degrade to defaults when a config file is malformed, so a typo can silently change
+	/// how the host behaves. This method exists so <c>orchestra doctor</c> can surface that
+	/// state explicitly. It never throws — every failure is reported through
+	/// <see cref="OrchestraConfigDiagnostic.Error"/>.
+	/// </remarks>
+	public static OrchestraConfigDiagnostic Describe(string? startDirectory = null)
+	{
+		var (path, source) = ResolveConfigPathWithSource(startDirectory);
+		if (path is null)
+			return new OrchestraConfigDiagnostic(null, OrchestraConfigSource.None, Parsed: true, Error: null);
+
+		try
+		{
+			var json = File.ReadAllText(path);
+			json = EnvironmentVariableExpander.Expand(json, path);
+			var config = JsonSerializer.Deserialize<OrchestraConfigFile>(json, JsonOptions);
+			return config is null
+				? new OrchestraConfigDiagnostic(path, source, Parsed: false, Error: "File is empty or contains only 'null'.")
+				: new OrchestraConfigDiagnostic(path, source, Parsed: true, Error: null);
+		}
+		catch (Exception ex)
+		{
+			return new OrchestraConfigDiagnostic(path, source, Parsed: false, Error: ex.Message);
+		}
+	}
+
+	/// <summary>
+	/// Same resolution order as <see cref="ResolveConfigPath"/>, but also reports which
+	/// step produced the winning path so callers can explain the outcome to a human.
+	/// </summary>
+	private static (string? Path, OrchestraConfigSource Source) ResolveConfigPathWithSource(string? startDirectory)
+	{
+		var envPath = Environment.GetEnvironmentVariable("ORCHESTRA_CONFIG_PATH");
+		if (!string.IsNullOrWhiteSpace(envPath) && File.Exists(envPath))
+			return (envPath, OrchestraConfigSource.EnvironmentVariable);
+
+		var projectPath = ResolveProjectConfigPath(startDirectory);
+		if (projectPath is not null)
+			return (projectPath, OrchestraConfigSource.Project);
+
+		var xdgConfigHome = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+		if (!string.IsNullOrWhiteSpace(xdgConfigHome))
+		{
+			var xdgPath = Path.Combine(xdgConfigHome, ConfigDirectoryName, ConfigFileName);
+			if (File.Exists(xdgPath))
+				return (xdgPath, OrchestraConfigSource.XdgConfigHome);
+		}
+
+		var fallbackPath = GetPlatformConfigPath();
+		if (fallbackPath is not null && File.Exists(fallbackPath))
+			return (fallbackPath, OrchestraConfigSource.PlatformDefault);
+
+		return (null, OrchestraConfigSource.None);
 	}
 
 	/// <summary>
@@ -259,6 +396,35 @@ public static class OrchestraConfigLoader
 	}
 
 	/// <summary>
+	/// Resolves the effective <c>scan.directory</c> configured in the discovered
+	/// <c>orchestra.json</c>, applying the same relative-to-config-directory resolution as
+	/// <see cref="ApplyConfig"/>. Returns null when no config file is found, no <c>scan</c>
+	/// block is set, or the directory does not exist.
+	/// </summary>
+	/// <remarks>
+	/// Counterpart to <see cref="ResolveConfiguredDataPath"/>, and used for the same reason: the
+	/// CLI's management verbs spawn a deliberately inert host with <c>NoConfig</c> so they never
+	/// pay for starting <c>orchestra.services.json</c> processes or MCP proxies. They still need
+	/// the workspace's orchestrations to be registered, though, otherwise <c>orchestra list</c>
+	/// and <c>orchestra run &lt;name&gt;</c> come up empty inside a scaffolded project. Injecting
+	/// just this one value keeps the fast path fast while honouring the project's scan config.
+	/// </remarks>
+	public static string? ResolveConfiguredScanDirectory(ILogger? logger = null)
+	{
+		var configPath = ResolveConfigPath();
+		if (configPath is null)
+			return null;
+
+		var config = Load(logger);
+		if (config?.Scan?.Directory is not { } directory)
+			return null;
+
+		var configDirectory = Path.GetDirectoryName(Path.GetFullPath(configPath));
+		var resolved = ResolvePath(directory, configDirectory);
+		return Directory.Exists(resolved) ? resolved : null;
+	}
+
+	/// <summary>
 	/// Loads configuration from the resolved config file path and applies it to the options.
 	/// Values in the config file are applied first, then the programmatic configure action
 	/// runs on top (allowing overrides).
@@ -294,7 +460,7 @@ public static class OrchestraConfigLoader
 			}
 
 			var configDirectory = Path.GetDirectoryName(Path.GetFullPath(configPath));
-			ApplyConfig(options, config, configDirectory);
+			ApplyConfig(options, config, configDirectory, logger);
 			logger.LogInformation("Orchestra configuration loaded successfully from {ConfigPath}", configPath);
 		}
 		catch (EnvironmentVariableExpansionException ex)
@@ -314,7 +480,7 @@ public static class OrchestraConfigLoader
 	/// Relative paths for <c>dataPath</c> and <c>orchestrationsScan.directory</c>
 	/// are resolved against the config file's directory.
 	/// </summary>
-	internal static void ApplyConfig(OrchestrationHostOptions options, OrchestraConfigFile config, string? configDirectory = null)
+	internal static void ApplyConfig(OrchestrationHostOptions options, OrchestraConfigFile config, string? configDirectory = null, ILogger? logger = null)
 	{
 		if (config.DataPath is not null)
 			options.DataPath = ResolvePath(config.DataPath, configDirectory);
@@ -322,18 +488,33 @@ public static class OrchestraConfigLoader
 		if (config.HostBaseUrl is not null)
 			options.HostBaseUrl = config.HostBaseUrl;
 
-		if (config.Scan is not null && config.Scan.Directory is not null)
+		if (config.Scan is not null)
 		{
-			var resolvedDirectory = ResolvePath(config.Scan.Directory, configDirectory);
-			options.Scan ??= new ScanConfig { Directory = resolvedDirectory };
+			// `directory` is what makes a scan block meaningful: ScanConfig requires it, and
+			// without one there is nothing for watch/recursive to apply to. Previously a block
+			// with only watch/recursive was dropped in complete silence, so an operator who
+			// omitted `directory` saw no scanning and no explanation. Honour the flags when a
+			// directory already exists (e.g. injected by the CLI), and otherwise say so.
+			if (config.Scan.Directory is not null)
+			{
+				var resolvedDirectory = ResolvePath(config.Scan.Directory, configDirectory);
+				options.Scan ??= new ScanConfig { Directory = resolvedDirectory };
+				options.Scan.Directory = resolvedDirectory;
+			}
 
-			options.Scan.Directory = resolvedDirectory;
+			if (options.Scan is not null)
+			{
+				if (config.Scan.Watch.HasValue)
+					options.Scan.Watch = config.Scan.Watch.Value;
 
-			if (config.Scan.Watch.HasValue)
-				options.Scan.Watch = config.Scan.Watch.Value;
-
-			if (config.Scan.Recursive.HasValue)
-				options.Scan.Recursive = config.Scan.Recursive.Value;
+				if (config.Scan.Recursive.HasValue)
+					options.Scan.Recursive = config.Scan.Recursive.Value;
+			}
+			else if (config.Scan.Watch.HasValue || config.Scan.Recursive.HasValue)
+			{
+				logger?.LogWarning(
+					"orchestra.json defines a 'scan' block with watch/recursive but no 'directory', so no workspace will be scanned. Set scan.directory to the workspace root (the folder containing 'orchestrations/').");
+			}
 		}
 
 		if (config.ShutdownTimeoutSeconds.HasValue)
@@ -498,6 +679,44 @@ public static class OrchestraConfigLoader
 		return null;
 	}
 }
+
+/// <summary>
+/// Which step of the configuration resolution order produced the winning file.
+/// </summary>
+public enum OrchestraConfigSource
+{
+	/// <summary>No configuration file was found; built-in defaults apply.</summary>
+	None,
+
+	/// <summary>An explicit path supplied via <c>ORCHESTRA_CONFIG_PATH</c>.</summary>
+	EnvironmentVariable,
+
+	/// <summary>A project-local file found by walking up from the working directory.</summary>
+	Project,
+
+	/// <summary><c>$XDG_CONFIG_HOME/Orchestra/orchestra.json</c>.</summary>
+	XdgConfigHome,
+
+	/// <summary>The per-user platform default (<c>%APPDATA%</c> or <c>~/.config</c>).</summary>
+	PlatformDefault,
+}
+
+/// <summary>
+/// The outcome of configuration discovery: which file won, how it was found, and whether
+/// it parses. Produced by <see cref="OrchestraConfigLoader.Describe"/> for diagnostics.
+/// </summary>
+/// <param name="Path">Absolute path of the winning file, or null when none was found.</param>
+/// <param name="Source">Which resolution step produced <paramref name="Path"/>.</param>
+/// <param name="Parsed">
+/// False when a file was found but could not be read, expanded, or deserialized — the case
+/// where the host silently falls back to defaults.
+/// </param>
+/// <param name="Error">Human-readable failure reason when <paramref name="Parsed"/> is false.</param>
+public sealed record OrchestraConfigDiagnostic(
+	string? Path,
+	OrchestraConfigSource Source,
+	bool Parsed,
+	string? Error);
 
 /// <summary>
 /// Represents the on-disk orchestra.json configuration file structure.

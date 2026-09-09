@@ -85,7 +85,8 @@ public static class ClientFactory
 	/// <summary>
 	/// Best-effort read of the server URL configured in the discovered <c>orchestra.json</c>
 	/// (<c>hostBaseUrl</c>, else the first <c>urls</c> entry). Honors the same discovery order as
-	/// the host — <c>ORCHESTRA_CONFIG_PATH</c> → <c>XDG_CONFIG_HOME</c> → <c>%APPDATA%</c>/<c>~/.config</c>.
+	/// the host — <c>ORCHESTRA_CONFIG_PATH</c> → a project-local <c>orchestra.json</c> found by
+	/// walking up from the working directory → <c>XDG_CONFIG_HOME</c> → <c>%APPDATA%</c>/<c>~/.config</c>.
 	/// Returns null when no config file is found, nothing relevant is set, or the file can't be
 	/// parsed: config discovery must never throw out of a simple client command. Shared with
 	/// <c>orchestra run</c>/<c>exec</c> so both resolve the target instance identically.

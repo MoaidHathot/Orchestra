@@ -1,0 +1,351 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestra.schema.json",
+  "title": "Orchestra Host Configuration",
+  "description": "Configuration for an Orchestra host (orchestra.json). Discovered in this order, first match wins: $ORCHESTRA_CONFIG_PATH, then a project-local file found by walking up from the working directory (./orchestra.json then ./.orchestra/orchestra.json at each level, stopping at a repository root), then $XDG_CONFIG_HOME/Orchestra/orchestra.json, then %APPDATA%\\Orchestra\\orchestra.json (Windows) or ~/.config/Orchestra/orchestra.json. Every property is optional; Orchestra runs with no configuration file at all. The loader tolerates // comments and trailing commas, and expands ${VAR} / \"env:VAR\" references against the process environment (a missing variable is a hard error).",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON schema reference."
+    },
+    "urls": {
+      "type": "string",
+      "description": "Kestrel URL binding for the host, semicolon-separated for multiple. Applied only when no --urls argument, ASPNETCORE_URLS, or DOTNET_URLS is present. Example: \"http://localhost:5000\"."
+    },
+    "hostBaseUrl": {
+      "type": "string",
+      "description": "Base URL that CLI client commands target when neither --server nor $ORCHESTRA_URL is set. Also used by run/exec to decide whether a running instance exists before spawning a throwaway host."
+    },
+    "dataPath": {
+      "type": "string",
+      "description": "Root directory for run history, the orchestration registry, checkpoints, and pending human-input records. Relative paths resolve against the directory holding this file. Default: %LOCALAPPDATA%/OrchestraHost (or the platform equivalent)."
+    },
+    "scan": {
+      "$ref": "#/definitions/scan",
+      "description": "Workspace directory scanned for orchestrations and profiles."
+    },
+    "retention": {
+      "$ref": "#/definitions/retention",
+      "description": "Run-history retention. Omit for unlimited. Favorited runs are always exempt."
+    },
+    "shutdownTimeoutSeconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Grace period for in-flight work when the host stops. Default: 30."
+    },
+    "autoResumeCheckpointsOnStartup": {
+      "type": "boolean",
+      "description": "Resume checkpointed runs when the host starts. Default: true."
+    },
+    "enableScheduler": {
+      "type": "boolean",
+      "description": "Run the trigger scheduler. Set false for an API-only host that never fires triggers on its own. Default: true."
+    },
+    "logLevel": {
+      "type": "string",
+      "description": "Default minimum log level. Overrides Logging:LogLevel:Default from appsettings.json. An unrecognized value is ignored rather than applied. Default: Information.",
+      "enum": ["Trace", "Debug", "Information", "Warning", "Error", "Critical", "None"]
+    },
+    "defaultModel": {
+      "type": "string",
+      "description": "Model used by Prompt steps that set no model and belong to an orchestration with no defaultModel."
+    },
+    "provider": {
+      "type": "string",
+      "description": "Default agent provider for Prompt steps. Resolution per step: step provider -> orchestration defaultProvider -> this value. Default: copilot.",
+      "enum": ["copilot", "opencode"]
+    },
+    "defaultProvider": {
+      "type": "string",
+      "description": "Alias for 'provider'. When both are set, 'provider' wins.",
+      "enum": ["copilot", "opencode"]
+    },
+    "agentPool": {
+      "$ref": "#/definitions/agentPool",
+      "description": "Provider worker-pool capacity, applied to whichever provider is in use."
+    },
+    "copilot": {
+      "$ref": "#/definitions/copilot",
+      "description": "GitHub Copilot provider settings."
+    },
+    "openCode": {
+      "$ref": "#/definitions/openCode",
+      "description": "OpenCode provider settings."
+    },
+    "mcpServer": {
+      "$ref": "#/definitions/mcpServer",
+      "description": "The MCP server Orchestra exposes, letting other agents discover and invoke your orchestrations."
+    },
+    "polling": {
+      "$ref": "#/definitions/polling",
+      "description": "Portal poll intervals, surfaced to the UI."
+    },
+    "sse": {
+      "$ref": "#/definitions/sse",
+      "description": "Server-sent events limits for live run streaming."
+    },
+    "hooks": {
+      "type": "array",
+      "description": "Global lifecycle hooks applied to every orchestration, in addition to any the orchestration declares. Relative scriptFile / workingDirectory paths resolve against this file's directory.",
+      "items": { "type": "object" }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "scan": {
+      "type": "object",
+      "description": "Workspace scanning. NOTE: 'directory' is the workspace ROOT, not the orchestrations folder -- the host looks for 'orchestrations/' and 'profiles/' subdirectories inside it.",
+      "properties": {
+        "directory": {
+          "type": "string",
+          "description": "Workspace root containing 'orchestrations/' and/or 'profiles/'. Relative paths resolve against this file's directory; \".\" means the directory holding this file. Without it nothing is scanned and watch/recursive have no effect."
+        },
+        "watch": {
+          "type": "boolean",
+          "description": "Re-register orchestrations and profiles as files change on disk. Default: false."
+        },
+        "recursive": {
+          "type": "boolean",
+          "description": "Scan subdirectories of 'orchestrations/' and 'profiles/'. Default: false."
+        }
+      },
+      "additionalProperties": false
+    },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "maxRunsPerOrchestration": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Keep at most this many runs per orchestration. 0 or omitted means unlimited."
+        },
+        "maxRunAgeDays": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Delete runs older than this many days. 0 or omitted means never."
+        }
+      },
+      "additionalProperties": false
+    },
+    "agentPool": {
+      "type": "object",
+      "properties": {
+        "minInstances": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Workers kept ready. 0 disables prewarming, so the provider starts on the first Prompt step instead of at run start. Default: 1."
+        },
+        "maxInstances": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum workers per run. Default: 8."
+        },
+        "maxSessionsPerInstance": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent prompt sessions per worker. Default: 1."
+        },
+        "idleTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Seconds an idle worker above minInstances stays alive. 0 disables idle shrink. Default: 120."
+        }
+      },
+      "additionalProperties": false
+    },
+    "copilot": {
+      "type": "object",
+      "properties": {
+        "gitHubToken": {
+          "type": "string",
+          "description": "Token used for Copilot authentication. Prefer \"${GITHUB_TOKEN}\" over a literal. When unset, the Copilot CLI's stored credentials are used."
+        },
+        "useLoggedInUser": {
+          "type": "boolean",
+          "description": "Use the Copilot CLI's signed-in user rather than a token."
+        },
+        "mcpStartupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long to wait for a step's MCP servers to start. Default: 120."
+        },
+        "swap": {
+          "type": "object",
+          "description": "Worker swap-and-resume behaviour after a transient CLI transport failure.",
+          "properties": {
+            "budgetPerStep": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Worker swaps allowed per step before the step fails. Default: 3."
+            },
+            "resumeOnSwap": {
+              "type": "boolean",
+              "description": "Resume the existing session on the new worker instead of starting over. Default: true."
+            },
+            "resumeAlreadyInUseWaitSeconds": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Grace period for a dying worker to release its session lock. Default: 5."
+            },
+            "resumeAlreadyInUsePollIntervalMs": {
+              "type": "number",
+              "minimum": 1,
+              "description": "Poll interval while waiting for that lock. Default: 500."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "openCode": {
+      "type": "object",
+      "properties": {
+        "cliPath": {
+          "type": "string",
+          "description": "Path to the 'opencode' binary. Overrides $ORCHESTRA_OPENCODE_PATH. When unset, 'opencode' is resolved from PATH. Orchestra never downloads OpenCode."
+        },
+        "hostname": {
+          "type": "string",
+          "description": "Interface the spawned 'opencode serve' binds to. Default: 127.0.0.1."
+        },
+        "serverUsername": {
+          "type": "string",
+          "description": "Basic-auth username for the spawned server. Default: opencode."
+        },
+        "serverPassword": {
+          "type": "string",
+          "description": "Basic-auth password for the spawned server. Prefer \"${VAR}\" over a literal."
+        },
+        "fallbackProvider": {
+          "type": "string",
+          "description": "Provider prefix applied to unqualified model ids. Without it a bare model id such as 'claude-opus-4.8' fails; use a qualified id like 'github-copilot/claude-opus-4.8' instead. Default: github-copilot."
+        },
+        "startupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How long to wait for the spawned server to report healthy. Default: 60."
+        },
+        "engineToolBridgeEnabled": {
+          "type": "boolean",
+          "description": "Expose Orchestra's engine tools to OpenCode over a loopback MCP endpoint. Default: true."
+        },
+        "swapBudgetPerStep": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Worker swaps allowed per step. Default: 1."
+        },
+        "resumeOnSwapEnabled": {
+          "type": "boolean",
+          "description": "Resume the session after a swap. Default: true."
+        }
+      },
+      "additionalProperties": false
+    },
+    "mcpServer": {
+      "type": "object",
+      "properties": {
+        "dataPlaneEnabled": {
+          "type": "boolean",
+          "description": "Expose the data plane, which lets other agents list and invoke orchestrations. Default: true."
+        },
+        "dataPlaneRoute": {
+          "type": "string",
+          "description": "Data-plane route. Default: /mcp/data."
+        },
+        "controlPlaneEnabled": {
+          "type": "boolean",
+          "description": "Expose the control plane, which can register and modify orchestrations. Opt-in because it is a write surface. Default: false -- an orchestration referencing this endpoint gets a 404 until it is turned on."
+        },
+        "controlPlaneRoute": {
+          "type": "string",
+          "description": "Control-plane route. Default: /mcp/control."
+        },
+        "maxNestingDepth": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum depth of orchestrations invoking orchestrations, guarding against runaway recursion. Default: 5."
+        },
+        "defaultOrchestraInvokeTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Client transport timeout for orchestra_* tool calls. 0 disables it. Default: 0."
+        },
+        "defaultMcpToolCallTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Default per-tool-call timeout. When unset the MCP SDK's own default (~180s) applies."
+        },
+        "defaultInvokeOrchestrationSyncTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "How long a synchronous invoke_orchestration call waits for the child run. Default: 300."
+        },
+        "toolDiscoveryProbeTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Timeout for the pre-flight probe that checks an MCP server returns tools. Default: 5."
+        },
+        "endpointReachabilityProbeTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Timeout for the remote-MCP reachability probe. Default: 2."
+        }
+      },
+      "additionalProperties": false
+    },
+    "polling": {
+      "type": "object",
+      "properties": {
+        "activeExecutionsMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Active-executions poll interval. Default: 1000."
+        },
+        "orchestrationsMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Orchestration-registry poll interval. Default: 5000."
+        },
+        "historyMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Run-history poll interval. Default: 5000."
+        },
+        "serverStatusMs": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Server-status poll interval. Default: 5000."
+        }
+      },
+      "additionalProperties": false
+    },
+    "sse": {
+      "type": "object",
+      "properties": {
+        "maxAccumulatedEvents": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Events retained per run for late subscribers. Default: 50000."
+        },
+        "maxChannelCapacity": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-subscriber buffered event capacity. Default: 5000."
+        },
+        "maxSubscribers": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Concurrent SSE subscribers. Default: 50."
+        },
+        "heartbeatIntervalSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Keepalive interval, which stops idle proxies dropping the stream. Default: 20."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

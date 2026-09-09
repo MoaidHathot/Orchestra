@@ -1,0 +1,58 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: research
+description: >
+  Parallel research pipeline. Two independent analyses of the same topic run at
+  the same time — Orchestra resolves the DAG and schedules anything whose
+  dependencies are satisfied concurrently — then a third step synthesizes both
+  into a single briefing.
+version: "1.0.0"
+defaultModel: claude-opus-4.8
+
+inputs:
+  topic:
+    type: string
+    description: The subject to research.
+    required: false
+    default: retrieval-augmented generation
+  audience:
+    type: string
+    description: Who the final briefing is written for.
+    required: false
+    default: engineering leadership
+
+steps:
+  # `technical` and `risks` both have no dependencies, so they run in PARALLEL.
+  # Nothing else is required to get concurrency — it falls out of the DAG.
+  - name: technical
+    type: Prompt
+    systemPrompt: You are a systems engineer. Prioritize mechanism over marketing.
+    userPrompt: |
+      Explain how "{{param.topic}}" actually works. Cover the core mechanism,
+      the main design tradeoffs, and where it tends to break down in production.
+      Be concrete. Under 300 words.
+
+  - name: risks
+    type: Prompt
+    systemPrompt: You are a skeptical technical reviewer looking for real failure modes.
+    userPrompt: |
+      Identify the three most consequential risks, limitations, or common
+      misconceptions about "{{param.topic}}". For each, state the risk and why
+      it bites teams in practice. Under 300 words.
+
+  # Fan-in: this waits for BOTH parallel steps and reads both outputs.
+  - name: synthesize
+    type: Prompt
+    dependsOn: [technical, risks]
+    systemPrompt: You are a technical writer briefing busy decision-makers.
+    userPrompt: |
+      Write a briefing on "{{param.topic}}" for {{param.audience}}.
+
+      Structure it as: what it is, why it matters, what to watch out for, and a
+      one-line recommendation. Around 400 words. Ground every claim in the
+      material below and do not invent specifics.
+
+      ## Technical analysis
+      {{technical.output}}
+
+      ## Risk analysis
+      {{risks.output}}

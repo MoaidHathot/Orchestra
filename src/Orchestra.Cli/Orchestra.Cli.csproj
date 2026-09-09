@@ -58,6 +58,29 @@
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
              Pack="false" />
+    <!--
+      Starter orchestrations scaffolded by `orchestra init`. Same publish-dir mechanism as
+      schemas above: Pack=false keeps them out of the package root, while
+      CopyToPublishDirectory puts them in the publish output that PackAsTool ships as
+      tools/net10.0/any/templates/. Kept as real files (not embedded resources) so they
+      stay editable, schema-validated in the editor, and coverable by BundledTemplatesTests.
+    -->
+    <Content Include="..\..\templates\*.yaml"
+             Link="templates\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Pack="false" />
+    <!--
+      The orchestration-authoring Agent Skill. Shipping it means a Prompt step can point
+      `skillDirectories` at the copy `orchestra init` drops into a workspace, instead of the
+      skill being reachable only by cloning the GitHub repo. ~135 KB of Markdown, so the size
+      cost is negligible next to the portal assets.
+    -->
+    <Content Include="..\..\skills\**\*.md"
+             Link="skills\%(RecursiveDir)%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Pack="false" />
   </ItemGroup>
 
   <ItemGroup>

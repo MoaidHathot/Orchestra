@@ -13,6 +13,7 @@ public static class SchemasCommand
 	private static readonly string[] s_schemaFileNames =
 	[
 		"orchestration.schema.json",
+		"orchestra.schema.json",
 		"orchestra.mcp.schema.json",
 		"orchestra.services.schema.json",
 	];
