@@ -6,31 +6,143 @@ nav_order: 6
 
 # Orchestra CLI
 
-The Orchestra CLI (`orchestra`) is a thin HTTP/SSE client for the Orchestra REST API.
-Built on **Spectre.Console.Cli**, it provides typed arguments, per-command `--help`,
+The Orchestra CLI (`orchestra`) is the single entry point to Orchestra: it scaffolds and
+diagnoses a workspace, runs orchestrations, and acts as an HTTP/SSE client for the Orchestra
+REST API. Built on **Spectre.Console.Cli**, it provides typed arguments, per-command `--help`,
 typo correction, and live event streaming for runs that include human-in-the-loop pauses.
 
-> The CLI **requires a running Orchestra server** (Portal/Host). It does not embed the
-> engine, hold its own state, or talk to a database; everything goes over HTTP.
+> Most commands do **not** require a running server. `run`/`exec` and the management verbs
+> (`list`, `get`, `register`, `runs`, `triggers`, `profiles`, `tags`) attach to a running
+> instance when one is configured and healthy, and otherwise spawn a throwaway in-process host
+> for the duration of the command — see [`--mode`](#host-selection---mode). Only the
+> live-runtime verbs (`active`, `cancel`, `server-status`, `pending`, `respond`,
+> `triggers fire`) need a server that is already up.
+
+---
+
+## Quick start
+
+```bash
+orchestra init      # scaffold a workspace: starter orchestration, schemas, orchestra.json
+orchestra doctor    # verify prerequisites before the first run
+orchestra run hello # run the scaffolded orchestration by name
+```
+
+### `init` — scaffold a workspace
+
+Creates a ready-to-run project in the target directory (default: the current one):
+
+```text
+orchestrations/hello.yaml     the starter orchestration
+.orchestra/schemas/*.json     JSON schemas for editor $schema validation
+.orchestra/.gitignore         excludes the local run history
+orchestra.json                project config; its `scan` block registers orchestrations by name
+```
+
+Interactive by default. Every prompted value has a flag, so supplying them all makes the
+command non-interactive; `--yes` accepts defaults for whatever is left.
+
+| Option | Purpose |
+|--------|---------|
+| `[DIRECTORY]` | Target directory (default: current). |
+| `-t, --template <ID>` | `hello` (default), `research`, `code-review`, `approval`, `generate`. |
+| `--with-skill` | Also copy the `orchestration-authoring` Agent Skill into `.orchestra/skills/`. Implied by `--template generate`. |
+| `-p, --provider <PROVIDER>` | `copilot` (default) or `opencode`. |
+| `-m, --model <ID>` | Default model (default: `claude-opus-4.8`). |
+| `--no-config` | Skip `orchestra.json`. |
+| `--no-schemas` | Skip local schemas; reference the public GitHub schema URL instead. |
+| `-f, --force` | Overwrite existing files (otherwise they are skipped). |
+| `-y, --yes` | Never prompt. |
+
+```bash
+orchestra init
+orchestra init ./my-workflows --template research
+orchestra init --template hello --provider copilot --yes
+```
+
+`init` is idempotent — re-running it leaves existing files untouched unless you pass `--force`.
+
+### `doctor` — verify prerequisites
+
+Checks everything that otherwise only fails *during* a run:
+
+| Check | What it answers |
+|-------|-----------------|
+| `installation` | Are the tool's bundled schemas and templates present? |
+| `configuration` | Which `orchestra.json` is in effect, and does it parse? |
+| `data path` | Is the run-history directory writable? |
+| `copilot cli` | Is the Copilot CLI cached, or will the first run download ~100 MB? |
+| `copilot auth` | Are credentials valid and is a Copilot subscription active? |
+| `opencode cli` | Is OpenCode resolvable on PATH? |
+| `server` | Is a configured server reachable? |
+
+| Option | Purpose |
+|--------|---------|
+| `--format <FORMAT>` | `text` (default) or `json`. |
+| `-p, --provider <PROVIDER>` | Check only `copilot` or `opencode`. |
+| `--fix` | Download the Copilot CLI now instead of during the first run. |
+| `--offline` | Skip checks that touch the network. |
+
+Exit code is `1` when any check fails, so CI can gate on it.
+
+```bash
+orchestra doctor
+orchestra doctor --fix
+orchestra doctor --provider opencode --format json
+```
+
+A malformed `orchestra.json` is reported as a **failure** here even though the host tolerates
+it — the host logs a warning and silently runs on built-in defaults, so none of your settings
+apply. `doctor` is the only place that surfaces this.
+
+### `validate` — check an orchestration without running it
+
+Runs the same two gates the executor applies before a real run: the orchestration parser and
+the template-expression validator. No server, no agent, no cost.
+
+```bash
+orchestra validate ./orchestrations/hello.yaml
+orchestra validate ./draft.yaml --format json
+```
+
+| Exit code | Meaning |
+|---|---|
+| `0` | Valid. |
+| `1` | Parses but is invalid, or does not parse at all. |
+| `2` | File missing or unreadable. |
+
+The distinct exit codes let a `Script` step branch on the result, which is how the `generate`
+template machine-checks its own output before writing a file.
+
+The most common failure it catches is a **bare `{{name}}` expression**. Only the
+namespace-prefixed forms resolve (`{{param.name}}`, `{{vars.name}}`, `{{env.NAME}}`,
+`{{stepName.output}}`); a bare `{{name}}` is passed through to the model as literal text. To
+show template syntax to a model deliberately, escape it as `\{{...}}`.
 
 ---
 
 ## Installation & invocation
 
-The CLI ships as a .NET project in the Orchestra repo
-(`src/Orchestra.Cli/Orchestra.Cli.csproj`, target `net10.0`).
+Orchestra is published to NuGet as the **`Orchestra`** package with the command name
+`orchestra`.
 
 ```bash
-# Run from a checkout
-dotnet run --project src/Orchestra.Cli -- list
+# Run without installing (requires the `dnx` launcher):
+dnx Orchestra --yes -- <command> [options]
 
-# Or build once and use the binary
-dotnet build src/Orchestra.Cli -c Release
-./src/Orchestra.Cli/bin/Release/net10.0/Orchestra.Cli list   # or .exe on Windows
+# …or install it as a global tool:
+dotnet tool install --global Orchestra
+orchestra <command> [options]
 ```
 
-You can wrap the binary as a `dotnet tool` or shell alias named `orchestra` for the
-ergonomics in the examples below.
+From a checkout:
+
+```bash
+dotnet run --project src/Orchestra.Cli -- list
+```
+
+Running `orchestra` with no arguments prints the help — or, on a machine with no
+configuration and no run history, a short first-run banner pointing at `init` and `doctor`.
 
 ---
 
@@ -40,7 +152,8 @@ Every command resolves the server URL in this order:
 
 1. `--server <URL>` / `-s <URL>` flag on the command line.
 2. `ORCHESTRA_URL` environment variable.
-3. Fallback: `http://localhost:5000`.
+3. `hostBaseUrl` (or the first `urls` entry) in the discovered `orchestra.json`.
+4. Fallback: `http://localhost:5000`.
 
 ```bash
 orchestra -s https://orchestra.internal:8443 list
@@ -52,6 +165,38 @@ gating access (e.g., reverse proxy, ASP.NET Core middleware).
 
 ---
 
+## Configuration discovery
+
+`orchestra.json` is resolved in this order, and the first match wins:
+
+1. `ORCHESTRA_CONFIG_PATH` — an explicit file path.
+2. **Project-local** — walking up from the working directory, checking `./orchestra.json`
+   then `./.orchestra/orchestra.json` at each level. The walk stops after inspecting a
+   repository root (a directory containing `.git`), so a config belonging to an unrelated
+   parent checkout is never picked up. This is what `orchestra init` scaffolds.
+3. `$XDG_CONFIG_HOME/Orchestra/orchestra.json`.
+4. `%APPDATA%\Orchestra\orchestra.json` (Windows) or `~/.config/Orchestra/orchestra.json`.
+
+Project-local beats the user-global locations, matching how `.editorconfig`, `global.json`,
+and `Directory.Build.props` behave. `orchestra.mcp.json` and `orchestra.services.json` are
+looked up next to whichever `orchestra.json` won, falling back to the user-global directory.
+
+Run `orchestra doctor` to see which file is actually in effect.
+
+### Environment variables
+
+| Variable | Purpose |
+|----------|---------|
+| `ORCHESTRA_CONFIG_PATH` | Explicit `orchestra.json` path; highest precedence. |
+| `ORCHESTRA_URL` | Server URL for client commands. |
+| `ORCHESTRA_DATA_PATH` | Data path for run history / registry. |
+| `ORCHESTRA_ORCHESTRATIONS_PATH` | Workspace directory scanned for orchestrations. |
+| `ORCHESTRA_COPILOT_CLI_PATH` | Use a pre-installed Copilot CLI instead of the managed download. |
+| `ORCHESTRA_COPILOT_NPM_REGISTRY` | npm registry mirror for the Copilot CLI download. |
+| `ORCHESTRA_OPENCODE_PATH` | Path to the `opencode` binary when it is not on PATH. |
+
+---
+
 ## Output format
 
 JSON-producing commands accept `--format`:
@@ -60,6 +205,9 @@ JSON-producing commands accept `--format`:
 |-------------------|----------------------------------------------------------------|
 | `json` (default)  | Pretty-printed JSON to stdout. Machine-friendly; pipe to `jq`. |
 | `table`           | Spectre.Console rendered table for humans.                     |
+
+`doctor` is the exception: it defaults to `text` and accepts `text` or `json`, because it is
+read by a human deciding whether to proceed.
 
 Streaming commands (`run`, `attach`) emit live event lines, not buffered JSON, and
 therefore do not accept `--format`.
@@ -104,6 +252,17 @@ If multiple orchestrations share a name, reference them explicitly by ID.
 
 Every command supports `--help`. The summaries here are the same text Spectre prints.
 
+### Getting started
+
+| Command | Purpose |
+|---|---|
+| `orchestra init [DIRECTORY] [-t ID] [-p PROVIDER] [-m MODEL] [--no-config] [--no-schemas] [-f] [-y]` | Scaffold a workspace: starter orchestration, JSON schemas, and `orchestra.json`. |
+| `orchestra doctor [--format text\|json] [-p PROVIDER] [--fix] [--offline]` | Check prerequisites: config, data path, agent CLI, credentials, server. |
+| `orchestra schemas [-o DIR] [-f]` | Copy the bundled JSON schemas into a local directory (default `./.orchestra/schemas`). |
+| `orchestra validate <PATH> [--format text\|json]` | Parse an orchestration and check its template expressions without running it. |
+
+See [Quick start](#quick-start) for the full option tables.
+
 ### Orchestration management
 
 | Command | Purpose |
@@ -137,18 +296,45 @@ orchestra list --filter research --tag prod --enabled
 
 | Command | Purpose |
 |---|---|
-| `orchestra run <id> [--param k=v ...] [--no-interactive] [-q\|--quiet] [-V\|--verbose] [--by NAME]` | Start a new run, stream live SSE, prompt inline on HITL pauses. |
-| `orchestra attach <orchestration> <run-id> [...same flags]` | Re-attach to a still-running run and stream the remaining events. |
+| `orchestra run [NAME] [--run-file PATH] [--mode MODE] [--param k=v ...] [--report FORMAT] [--detailed] [--no-interactive] [-q\|--quiet] [-V\|--verbose] [--by NAME]` | Run one orchestration to completion, streaming live SSE and prompting inline on HITL pauses. |
+| `orchestra exec [...same flags]` | Shorthand for `run --mode isolated`: always self-contained. |
+| `orchestra attach <orchestration> <run-id> [--no-interactive] [-q] [-V] [--by NAME]` | Re-attach to a still-running run and stream the remaining events. |
+| `orchestra portal [--urls URLS] [--data-path DIR] [--orchestrations-path DIR]` | Launch the long-running host + Portal web UI (blocks). |
 | `orchestra active` | List currently active executions. |
 | `orchestra cancel <execution-id> [--reason TEXT] [--source LABEL]` | Cancel a running execution. `--source` defaults to `cli`. |
+
+Pass either a registered `NAME` or `--run-file <path>`, not both.
+
+#### Host selection (`--mode`)
+
+| Mode | Behaviour |
+|------|-----------|
+| `auto` (default for `run`) | Attach to a configured instance when one is reachable and healthy; otherwise spawn a throwaway in-process host for this run. |
+| `existing` | Require a healthy configured instance; error with exit code 3 if there is none. |
+| `isolated` (default for `exec`) | Always run self-contained, ignoring any running server. |
+
+The management verbs (`list`, `get`, `register`, `remove`, `scan`, `enable`, `disable`, and
+the `runs` / `triggers` / `profiles` / `tags` branches) accept the same `--mode`, plus
+`--data-path` and `--no-config`. They spawn a deliberately inert host — no scheduler, no
+auto-resume, no external services — and inject the `dataPath` and `scan.directory` resolved
+from your `orchestra.json` so a project workspace's orchestrations are visible.
+
+#### Reporting
+
+`--report text|markdown|json` prints a post-run report; `--report-output <FILE>` writes it to
+a file instead of stdout. `--detailed` adds live per-step detail (model, MCP/tool calls,
+sub-agents, retries) while the run streams.
 
 `run` and `attach` auto-degrade to non-interactive mode when stdin is redirected (CI,
 shell pipes) so `orchestra run my-orch | jq '.'` does not hang on a HITL prompt — it
 exits 2 with an instructional message instead.
 
 ```bash
-# One-shot run
+# One-shot run of a registered orchestration
 orchestra run research-assistant --param topic="quantum computing"
+
+# Run a file directly, self-contained, with a Markdown report
+orchestra exec --run-file ./pipeline.yaml --report markdown
 
 # Quiet output, suitable for CI; exits 2 if anything needs a human
 orchestra run nightly-deploy --no-interactive --quiet

@@ -7,13 +7,14 @@ It ships as one self-contained command-line tool with a built-in web portal, a o
 MCP integration, triggers, checkpointing, and human-in-the-loop pauses.
 
 ```text
-inputs ─▶ ┌─ research ─┐                      orchestra run research-assistant
-          │            ├─▶ brief ─▶ output     --param topic="vector databases"
-          └─ (Copilot) ─┘  (OpenCode)
+inputs ─▶ ┌─ research ─┐                       orchestra init
+          │            ├─▶ brief ─▶ document   orchestra doctor
+          └─ (Copilot) ─┘         (no model)   orchestra run hello
 ```
 
 ## Highlights
 
+- **Zero to running in two commands.** `orchestra init` scaffolds a working workspace; `orchestra doctor` verifies your machine before the first run instead of failing mid-run.
 - **One file, one DAG.** Steps (`Prompt`, `Command`, `Script`, `Http`, `Transform`, `Approval`, nested `Orchestration`) wired by `dependsOn`, with template expressions (`{{param.x}}`, `{{step.output}}`).
 - **Pluggable agents.** Run any Prompt step on `copilot` or `opencode`, selectable per step or per orchestration.
 - **MCP-native.** Attach Model Context Protocol servers to steps, and expose your orchestrations *as* an MCP server.
@@ -36,21 +37,50 @@ orchestra <command> [options]
 
 Running `orchestra` with no command prints the help. `orchestra <command> --help` documents any subcommand.
 
+## Quick start
+
+```bash
+orchestra init      # scaffold a workspace with a runnable example
+orchestra doctor    # verify prerequisites before the first run
+orchestra run hello # run it
+```
+
+`init` writes a starter orchestration under `orchestrations/`, the JSON schemas under
+`.orchestra/schemas/` for editor autocomplete, and an `orchestra.json` whose `scan` block is
+what lets you run orchestrations **by name**. It prompts for the template, provider, and model —
+pass any of those as flags to skip the prompt, or `--yes` to accept every default:
+
+```bash
+orchestra init ./my-workflows --template research --provider copilot --yes
+```
+
+`doctor` checks the things that otherwise only fail *during* a run: which `orchestra.json` is in
+effect and whether it parses, whether the data path is writable, whether the agent CLI is present
+and authenticated, and whether a configured server is reachable. The first Copilot run downloads
+the Copilot CLI (~100 MB, once per machine) — `orchestra doctor --fix` does it up front instead of
+mid-run.
+
+Orchestra discovers `orchestra.json` by walking up from your working directory, so a scaffolded
+folder is self-contained; a user-global config at `%APPDATA%\Orchestra\` (or `~/.config/Orchestra/`)
+applies everywhere else.
+
 ## Your first orchestration
 
-Save this as `research-assistant.yaml`. It's a two-step DAG: `research` produces findings, then
-`brief` summarizes them. (`orchestra schemas` drops the JSON Schema locally for editor autocomplete.)
+`orchestra init` writes this for you as `orchestrations/hello.yaml`; here it is in full. It's a
+DAG: `research` produces findings, `brief` summarizes them, and `document` shapes the result
+without calling a model at all.
 
 ```yaml
-# yaml-language-server: $schema=./.orchestra/schemas/orchestration.schema.json
-name: research-assistant
-description: Research a topic, then write a short executive brief about it.
+# yaml-language-server: $schema=../.orchestra/schemas/orchestration.schema.json
+name: hello
+description: Research a topic, brief it, then assemble a document.
 defaultModel: claude-opus-4.8
 
 inputs:
   topic:
     type: string
-    required: true
+    required: false
+    default: deterministic AI agent orchestration
 
 steps:
   - name: research
@@ -63,17 +93,28 @@ steps:
     dependsOn: [research]
     systemPrompt: You are a technical writer.
     userPrompt: |
-      Using the research below, write a 150-word executive brief on {{param.topic}}.
+      Using the research below, write a 120-word executive brief on {{param.topic}}.
 
       {{research.output}}
+
+  - name: document
+    type: Transform
+    dependsOn: [brief]
+    template: |
+      # {{param.topic}}
+
+      {{brief.output}}
 ```
+
+Because `topic` has a default, `orchestra run hello` works with no arguments — and
+`--param topic="vector databases"` points it somewhere else.
 
 ## Run it
 
 `orchestra run` runs one orchestration to completion. With `dnx` (no install):
 
 ```bash
-dnx Orchestra --yes -- run --run-file ./research-assistant.yaml --param topic="vector databases" --report markdown
+dnx Orchestra --yes -- run --run-file ./orchestrations/hello.yaml --param topic="vector databases" --report markdown
 ```
 
 `--mode` decides *where* it runs:
@@ -83,9 +124,9 @@ dnx Orchestra --yes -- run --run-file ./research-assistant.yaml --param topic="v
 - **`isolated`** — always run self-contained. `orchestra exec` is shorthand for `run --mode isolated`.
 
 ```bash
-orchestra run research-assistant --param topic="vector databases"   # registered, on your server (auto)
-orchestra exec --run-file ./research-assistant.yaml                  # self-contained one-shot
-orchestra portal                                                     # long-running host + web UI
+orchestra run hello --param topic="vector databases"   # registered, on your server (auto)
+orchestra exec --run-file ./orchestrations/hello.yaml  # self-contained one-shot
+orchestra portal                                       # long-running host + web UI
 ```
 
 The portal (`orchestra portal`) serves the dashboard, REST API, and MCP endpoints; the client
@@ -145,8 +186,19 @@ steps:
 ```
 
 A `SKILL.md` is Markdown with a small YAML frontmatter (`name`, `description`) plus the
-instructions and any reference files. Orchestra also ships an **`orchestration-authoring`** skill
-(under [`skills/`](skills/)) you can hand to an agent so it writes valid Orchestra files for you.
+instructions and any reference files. Orchestra ships an **`orchestration-authoring`** skill
+(under [`skills/`](skills/)) that teaches an agent to write valid Orchestra files. It ships
+inside the tool too, so `orchestra init --with-skill` drops a copy into `.orchestra/skills/`
+without cloning this repo — that's what the `generate` template uses to write orchestrations
+from a plain-English description:
+
+```bash
+orchestra init --template generate
+orchestra run generate --param description="review my open PRs every morning and post a digest"
+```
+
+The generated file is machine-checked with `orchestra validate` before it's written, so a draft
+that wouldn't parse fails the run instead of landing on disk.
 
 ## MCP integration
 
