@@ -15,6 +15,7 @@ namespace Orchestra.Portal.Tests;
 /// These tests assert the Portal host now resolves the multi-provider registry with both
 /// <c>copilot</c> and <c>opencode</c> registered as distinct builders.
 /// </summary>
+[Collection(PortalHostEnvironmentCollection.Name)]
 public class ProviderRegistrationTests : IClassFixture<PortalWebApplicationFactory>
 {
 	private readonly PortalWebApplicationFactory _factory;

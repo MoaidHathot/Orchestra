@@ -24,6 +24,7 @@ namespace Orchestra.Portal.Tests;
 /// Expected responses: 200/OK with JSON, 400 BadRequest (validation), 404 NotFound
 /// (resource doesn't exist yet but the route is valid).
 /// </summary>
+[Collection(PortalHostEnvironmentCollection.Name)]
 public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDisposable
 {
 	private readonly PortalWebApplicationFactory _factory;

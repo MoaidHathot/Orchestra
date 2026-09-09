@@ -264,4 +264,85 @@ public class ProgramWiringTests
 		result.ExitCode.Should().Be(0);
 		result.Output.Should().NotContain("--mode");
 	}
+
+	// ── Onboarding verbs ──
+
+	[Fact]
+	public void RootHelp_LeadsWithTheOnboardingVerbs()
+	{
+		// `init` and `doctor` are the answer to "I just installed this, now what?", so they must
+		// be discoverable from the bare help without scrolling past twenty operational verbs.
+		var tester = NewTester();
+
+		var result = tester.Run("--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("init").And.Contain("doctor");
+	}
+
+	[Fact]
+	public void InitHelp_DocumentsEveryPromptedValueAsAFlag()
+	{
+		// init is interactive by default; each prompt must have a flag so the command can be
+		// scripted, and --yes must exist to skip whatever was not supplied.
+		var tester = NewTester();
+
+		var result = tester.Run("init", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--template");
+		result.Output.Should().Contain("--provider");
+		result.Output.Should().Contain("--model");
+		result.Output.Should().Contain("--yes");
+		result.Output.Should().Contain("--force");
+		result.Output.Should().Contain("--no-config");
+		result.Output.Should().Contain("--no-schemas");
+	}
+
+	[Fact]
+	public void InitWithInvalidProvider_FailsValidation()
+	{
+		var tester = NewTester();
+
+		Action act = () => tester.Run("init", "--provider", "bogus");
+
+		act.Should().Throw<CommandRuntimeException>()
+			.Where(ex => ex.Message.Contains("copilot") && ex.Message.Contains("opencode"));
+	}
+
+	[Fact]
+	public void DoctorHelp_DocumentsFixAndOfflineFlags()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("doctor", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--fix");
+		result.Output.Should().Contain("--offline");
+		result.Output.Should().Contain("--provider");
+	}
+
+	[Fact]
+	public void DoctorWithInvalidFormat_FailsValidation()
+	{
+		var tester = NewTester();
+
+		Action act = () => tester.Run("doctor", "--format", "yaml");
+
+		act.Should().Throw<CommandRuntimeException>()
+			.Where(ex => ex.Message.Contains("text") && ex.Message.Contains("json"));
+	}
+
+	[Fact]
+	public void DoctorHelp_DefaultsToTextNotJson()
+	{
+		// Unlike the data verbs, doctor is read by a human deciding whether to proceed.
+		var tester = NewTester();
+
+		var result = tester.Run("doctor", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("'text' (default)");
+	}
 }

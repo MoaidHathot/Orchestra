@@ -19,6 +19,7 @@ namespace Orchestra.Engine.Tests.McpResolution;
 /// provider binaries — so they are safe to run in CI on Windows, Linux, and macOS.
 /// </para>
 /// </summary>
+[Collection(ProcessPathEnvironmentCollection.Name)]
 public class InlineMcpCommandResolutionIntegrationTests
 {
     private static readonly bool IsWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);

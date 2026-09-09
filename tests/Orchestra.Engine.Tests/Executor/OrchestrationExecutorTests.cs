@@ -9,7 +9,11 @@ namespace Orchestra.Engine.Tests.Executor;
 public class OrchestrationExecutorTests
 {
 	private readonly IScheduler _scheduler = new OrchestrationScheduler();
-	private readonly IOrchestrationReporter _reporter = Substitute.For<IOrchestrationReporter>();
+	// Assertions target the substitute; the executor gets a serialized proxy because
+	// NSubstitute's call recording is not thread-safe and parallel DAG steps report
+	// from several threads at once.
+	private readonly IOrchestrationReporter _reporter = SerializingReporterProxy.CreateRecording();
+	private IOrchestrationReporter _reporterSubstitute => SerializingReporterProxy.Recorded(_reporter);
 	private readonly ILoggerFactory _loggerFactory = NullLoggerFactory.Instance;
 
 	#region Basic Execution
@@ -218,7 +222,7 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert
-		_reporter.Received().ReportStepStarted("step1");
+		_reporterSubstitute.Received().ReportStepStarted("step1");
 	}
 
 	[Fact]
@@ -233,8 +237,8 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert
-		_reporter.Received().ReportStepSkipped("B", Arg.Any<string>());
-		_reporter.Received().ReportStepSkipped("C", Arg.Any<string>());
+		_reporterSubstitute.Received().ReportStepSkipped("B", Arg.Any<string>());
+		_reporterSubstitute.Received().ReportStepSkipped("C", Arg.Any<string>());
 	}
 
 	[Fact]
@@ -252,7 +256,7 @@ public class OrchestrationExecutorTests
 		// can update the step status immediately (not only at orchestration-done).
 		// PromptExecutor uses the structured ReportStepError overload; details are null
 		// for a plain Exception because it does not implement IAgentSessionFailedException.
-		_reporter.Received().ReportStepError("step1", "Something broke", Arg.Is<AgentSessionErrorDetails?>(d => d == null));
+		_reporterSubstitute.Received().ReportStepError("step1", "Something broke", Arg.Is<AgentSessionErrorDetails?>(d => d == null));
 	}
 
 	[Fact]
@@ -268,9 +272,9 @@ public class OrchestrationExecutorTests
 
 		// Assert — step-error for the failed step (via PromptExecutor's structured
 		// overload), step-skipped for downstream.
-		_reporter.Received().ReportStepError("A", "Boom", Arg.Is<AgentSessionErrorDetails?>(d => d == null));
-		_reporter.Received().ReportStepSkipped("B", Arg.Any<string>());
-		_reporter.Received().ReportStepSkipped("C", Arg.Any<string>());
+		_reporterSubstitute.Received().ReportStepError("A", "Boom", Arg.Is<AgentSessionErrorDetails?>(d => d == null));
+		_reporterSubstitute.Received().ReportStepSkipped("B", Arg.Any<string>());
+		_reporterSubstitute.Received().ReportStepSkipped("C", Arg.Any<string>());
 	}
 
 	#endregion
@@ -663,9 +667,9 @@ public class OrchestrationExecutorTests
 		result.StepResults["A"].Status.Should().Be(ExecutionStatus.Cancelled);
 		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Cancelled);
 		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Cancelled);
-		_reporter.Received().ReportStepCancelled("A");
-		_reporter.Received().ReportStepCancelled("B");
-		_reporter.Received().ReportStepCancelled("C");
+		_reporterSubstitute.Received().ReportStepCancelled("A");
+		_reporterSubstitute.Received().ReportStepCancelled("B");
+		_reporterSubstitute.Received().ReportStepCancelled("C");
 	}
 
 	[Fact]
@@ -1102,7 +1106,7 @@ public class OrchestrationExecutorTests
 			capturedRecord.HookExecutions[0].EventType.Should().Be(HookEventType.StepFailure);
 			capturedRecord.HookExecutions[0].Source.Should().Be(HookSource.Orchestration);
 			capturedRecord.HookExecutions[0].StepName.Should().Be("step1");
-			_reporter.Received().ReportHookExecuted(Arg.Is<HookExecutionRecord>(h =>
+			_reporterSubstitute.Received().ReportHookExecuted(Arg.Is<HookExecutionRecord>(h =>
 				h.HookName == "persisted-hook" &&
 				h.EventType == HookEventType.StepFailure &&
 				h.StepName == "step1"));
@@ -1285,8 +1289,8 @@ public class OrchestrationExecutorTests
 		// hit the pre-cancellation check rather than the dependency-skip check)
 		result.StepResults["B"].Status.Should().Be(ExecutionStatus.Cancelled);
 		result.StepResults["C"].Status.Should().Be(ExecutionStatus.Cancelled);
-		_reporter.Received().ReportStepCancelled("B");
-		_reporter.Received().ReportStepCancelled("C");
+		_reporterSubstitute.Received().ReportStepCancelled("B");
+		_reporterSubstitute.Received().ReportStepCancelled("C");
 	}
 
 	#endregion
@@ -1508,7 +1512,7 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert
-		_reporter.Received().ReportStepSkipped("step1", "Step is disabled (enabled: false)");
+		_reporterSubstitute.Received().ReportStepSkipped("step1", "Step is disabled (enabled: false)");
 	}
 
 	[Fact]
@@ -1669,7 +1673,7 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — ReportStepCompleted should be called centrally after execution
-		_reporter.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == "Step output"), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == "Step output"), Arg.Any<OrchestrationStepType>());
 	}
 
 	[Fact]
@@ -1685,7 +1689,7 @@ public class OrchestrationExecutorTests
 
 		// Assert — Full step output should be emitted when the step completes, not only
 		// after orchestration-done, so Command output is visible while downstream work runs.
-		_reporter.Received().ReportStepOutput("step1", "full command output");
+		_reporterSubstitute.Received().ReportStepOutput("step1", "full command output");
 	}
 
 	[Fact]
@@ -1725,7 +1729,7 @@ public class OrchestrationExecutorTests
 		trace.AccessibleStepData["fetch"].Status.Should().Be(nameof(ExecutionStatus.Succeeded));
 		trace.AccessibleStepData["fetch"].Output.Should().Be("processed output");
 
-		_reporter.Received().ReportStepTrace("judge", Arg.Is<StepExecutionTrace>(t =>
+		_reporterSubstitute.Received().ReportStepTrace("judge", Arg.Is<StepExecutionTrace>(t =>
 			t.Parameters.ContainsKey("ticket") &&
 			t.DependencyOutputs.ContainsKey("fetch") &&
 			t.AccessibleStepData.ContainsKey("fetch")));
@@ -1786,9 +1790,9 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — All three steps should get step-completed events
-		_reporter.Received().ReportStepCompleted("A", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
-		_reporter.Received().ReportStepCompleted("B", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
-		_reporter.Received().ReportStepCompleted("C", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.Received().ReportStepCompleted("A", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.Received().ReportStepCompleted("B", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.Received().ReportStepCompleted("C", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
 	}
 
 	[Fact]
@@ -1803,9 +1807,9 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — All three parallel steps should get step-completed events
-		_reporter.Received().ReportStepCompleted("A", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
-		_reporter.Received().ReportStepCompleted("B", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
-		_reporter.Received().ReportStepCompleted("C", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.Received().ReportStepCompleted("A", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.Received().ReportStepCompleted("B", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.Received().ReportStepCompleted("C", Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
 	}
 
 	[Fact]
@@ -1820,7 +1824,7 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — Failed steps should NOT get step-completed events
-		_reporter.DidNotReceive().ReportStepCompleted(Arg.Any<string>(), Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.DidNotReceive().ReportStepCompleted(Arg.Any<string>(), Arg.Any<AgentResult>(), Arg.Any<OrchestrationStepType>());
 	}
 
 	[Fact]
@@ -1836,7 +1840,7 @@ public class OrchestrationExecutorTests
 		await executor.ExecuteAsync(orchestration);
 
 		// Assert — Disabled steps return Succeeded status, so they DO get step-completed
-		_reporter.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == string.Empty), Arg.Any<OrchestrationStepType>());
+		_reporterSubstitute.Received().ReportStepCompleted("step1", Arg.Is<AgentResult>(r => r.Content == string.Empty), Arg.Any<OrchestrationStepType>());
 	}
 
 	#endregion

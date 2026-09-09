@@ -527,6 +527,21 @@ public class OrchestraConfigLoaderTests : IDisposable
 	}
 
 	// ── ResolveConfigPath tests ──
+	//
+	// These pass an explicit start directory so the project-local walk-up cannot reach a real
+	// orchestra.json from the repository the tests happen to be running in.
+
+	/// <summary>An empty directory with no orchestra.json anywhere between it and the drive root.</summary>
+	private string IsolatedStart()
+	{
+		var dir = Path.Combine(_tempDir, "isolated", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(dir);
+
+		// A .git marker stops the walk here, so a stray config in a parent of the temp folder
+		// can never leak into these assertions.
+		Directory.CreateDirectory(Path.Combine(dir, ".git"));
+		return dir;
+	}
 
 	[Fact]
 	public void ResolveConfigPath_EnvVar_ReturnsEnvVarPath()
@@ -537,7 +552,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
 
 		// Act
-		var result = OrchestraConfigLoader.ResolveConfigPath();
+		var result = OrchestraConfigLoader.ResolveConfigPath(IsolatedStart());
 
 		// Assert
 		result.Should().Be(configPath);
@@ -551,7 +566,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", null);
 
 		// Act
-		var result = OrchestraConfigLoader.ResolveConfigPath();
+		var result = OrchestraConfigLoader.ResolveConfigPath(IsolatedStart());
 
 		// Assert — should not return the non-existent path; may return null or platform fallback
 		result.Should().NotBe("/non/existent/path.json");
@@ -567,7 +582,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		var expectedPath = WriteConfigFile(xdgDir, "{}");
 
 		// Act
-		var result = OrchestraConfigLoader.ResolveConfigPath();
+		var result = OrchestraConfigLoader.ResolveConfigPath(IsolatedStart());
 
 		// Assert
 		result.Should().Be(expectedPath);
@@ -581,11 +596,240 @@ public class OrchestraConfigLoaderTests : IDisposable
 		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(_tempDir, "empty-xdg"));
 
 		// Act
-		var result = OrchestraConfigLoader.ResolveConfigPath();
+		var result = OrchestraConfigLoader.ResolveConfigPath(IsolatedStart());
 
 		// Assert — may return null if platform fallback doesn't exist either
 		// At minimum, should not throw
 		// (Platform fallback might exist on the test machine, so we just verify no exception)
+	}
+
+	// ── Project-local (walk-up) discovery ──
+
+	[Fact]
+	public void ResolveProjectConfigPath_FindsConfigInStartDirectory()
+	{
+		var project = IsolatedStart();
+		var expected = Path.Combine(project, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(expected, "{}");
+
+		OrchestraConfigLoader.ResolveProjectConfigPath(project).Should().Be(expected);
+	}
+
+	[Fact]
+	public void ResolveProjectConfigPath_FindsConfigUnderDotOrchestraDirectory()
+	{
+		var project = IsolatedStart();
+		var nestedDir = Path.Combine(project, OrchestraConfigLoader.ProjectDirectoryName);
+		Directory.CreateDirectory(nestedDir);
+		var expected = Path.Combine(nestedDir, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(expected, "{}");
+
+		OrchestraConfigLoader.ResolveProjectConfigPath(project).Should().Be(expected);
+	}
+
+	[Fact]
+	public void ResolveProjectConfigPath_PrefersDirectFileOverDotOrchestra()
+	{
+		var project = IsolatedStart();
+		var direct = Path.Combine(project, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(direct, "{}");
+
+		var nestedDir = Path.Combine(project, OrchestraConfigLoader.ProjectDirectoryName);
+		Directory.CreateDirectory(nestedDir);
+		File.WriteAllText(Path.Combine(nestedDir, OrchestraConfigLoader.ConfigFileName), "{}");
+
+		OrchestraConfigLoader.ResolveProjectConfigPath(project).Should().Be(direct);
+	}
+
+	[Fact]
+	public void ResolveProjectConfigPath_WalksUpFromNestedDirectory()
+	{
+		var project = IsolatedStart();
+		var expected = Path.Combine(project, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(expected, "{}");
+
+		var deep = Path.Combine(project, "a", "b", "c");
+		Directory.CreateDirectory(deep);
+
+		OrchestraConfigLoader.ResolveProjectConfigPath(deep).Should().Be(expected);
+	}
+
+	[Fact]
+	public void ResolveProjectConfigPath_StopsAtRepositoryRoot()
+	{
+		// A config above the repo root must not leak into a checkout that has none.
+		var outer = Path.Combine(_tempDir, "outer", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(outer);
+		File.WriteAllText(Path.Combine(outer, OrchestraConfigLoader.ConfigFileName), "{}");
+
+		var repo = Path.Combine(outer, "repo");
+		Directory.CreateDirectory(Path.Combine(repo, ".git"));
+		var inside = Path.Combine(repo, "src");
+		Directory.CreateDirectory(inside);
+
+		OrchestraConfigLoader.ResolveProjectConfigPath(inside).Should().BeNull();
+	}
+
+	[Fact]
+	public void ResolveProjectConfigPath_TreatsGitFileAsRepositoryRoot()
+	{
+		// Worktrees and submodules use a .git *file* rather than a directory.
+		var outer = Path.Combine(_tempDir, "outer-file", Guid.NewGuid().ToString("N"));
+		Directory.CreateDirectory(outer);
+		File.WriteAllText(Path.Combine(outer, OrchestraConfigLoader.ConfigFileName), "{}");
+
+		var worktree = Path.Combine(outer, "worktree");
+		Directory.CreateDirectory(worktree);
+		File.WriteAllText(Path.Combine(worktree, ".git"), "gitdir: ../.git/worktrees/wt");
+
+		OrchestraConfigLoader.ResolveProjectConfigPath(worktree).Should().BeNull();
+	}
+
+	[Fact]
+	public void ResolveProjectConfigPath_NoConfigAnywhere_ReturnsNull()
+	{
+		OrchestraConfigLoader.ResolveProjectConfigPath(IsolatedStart()).Should().BeNull();
+	}
+
+	[Fact]
+	public void ResolveConfigPath_ProjectConfig_BeatsXdgConfigHome()
+	{
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
+		var xdgDir = Path.Combine(_tempDir, "xdg-loses");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", xdgDir);
+		WriteConfigFile(xdgDir, "{}");
+
+		var project = IsolatedStart();
+		var expected = Path.Combine(project, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(expected, "{}");
+
+		OrchestraConfigLoader.ResolveConfigPath(project).Should().Be(expected);
+	}
+
+	[Fact]
+	public void ResolveConfigPath_ExplicitEnvVar_BeatsProjectConfig()
+	{
+		var explicitPath = Path.Combine(_tempDir, "wins.json");
+		File.WriteAllText(explicitPath, "{}");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", explicitPath);
+
+		var project = IsolatedStart();
+		File.WriteAllText(Path.Combine(project, OrchestraConfigLoader.ConfigFileName), "{}");
+
+		OrchestraConfigLoader.ResolveConfigPath(project).Should().Be(explicitPath);
+	}
+
+	// ── Describe (doctor's config-health probe) ──
+
+	[Fact]
+	public void Describe_NoConfig_ReportsNoneAndParsed()
+	{
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(_tempDir, "empty-xdg-describe"));
+
+		var result = OrchestraConfigLoader.Describe(IsolatedStart());
+
+		// A platform-default config may exist on the dev machine; only assert the no-file shape.
+		if (result.Path is null)
+		{
+			result.Source.Should().Be(OrchestraConfigSource.None);
+			result.Parsed.Should().BeTrue();
+			result.Error.Should().BeNull();
+		}
+	}
+
+	[Fact]
+	public void Describe_ProjectConfig_ReportsProjectSource()
+	{
+		var project = IsolatedStart();
+		var path = Path.Combine(project, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(path, """{ "shutdownTimeoutSeconds": 42 }""");
+
+		var result = OrchestraConfigLoader.Describe(project);
+
+		result.Path.Should().Be(path);
+		result.Source.Should().Be(OrchestraConfigSource.Project);
+		result.Parsed.Should().BeTrue();
+		result.Error.Should().BeNull();
+	}
+
+	[Fact]
+	public void Describe_MalformedConfig_ReportsParseFailure()
+	{
+		// LoadAndApply deliberately swallows this and runs on defaults; Describe is what makes
+		// the silent fallback visible to `orchestra doctor`.
+		var project = IsolatedStart();
+		var path = Path.Combine(project, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(path, "{ this is not json");
+
+		var result = OrchestraConfigLoader.Describe(project);
+
+		result.Path.Should().Be(path);
+		result.Parsed.Should().BeFalse();
+		result.Error.Should().NotBeNullOrWhiteSpace();
+	}
+
+	[Fact]
+	public void Describe_UnsetEnvironmentVariableReference_ReportsParseFailure()
+	{
+		var project = IsolatedStart();
+		var path = Path.Combine(project, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(path, """{ "dataPath": "${ORCHESTRA_TEST_DEFINITELY_UNSET_VAR}" }""");
+
+		var result = OrchestraConfigLoader.Describe(project);
+
+		result.Parsed.Should().BeFalse();
+		result.Error.Should().Contain("ORCHESTRA_TEST_DEFINITELY_UNSET_VAR");
+	}
+
+	// ── ResolveConfiguredScanDirectory ──
+
+	[Fact]
+	public void ResolveConfiguredScanDirectory_ResolvesRelativeToConfigDirectory()
+	{
+		var project = IsolatedStart();
+		Environment.SetEnvironmentVariable(
+			"ORCHESTRA_CONFIG_PATH",
+			Path.Combine(project, OrchestraConfigLoader.ConfigFileName));
+
+		File.WriteAllText(
+			Path.Combine(project, OrchestraConfigLoader.ConfigFileName),
+			"""{ "scan": { "directory": "." } }""");
+
+		OrchestraConfigLoader.ResolveConfiguredScanDirectory()
+			.Should().Be(Path.GetFullPath(project));
+	}
+
+	[Fact]
+	public void ResolveConfiguredScanDirectory_MissingDirectory_ReturnsNull()
+	{
+		// A scan directory that does not exist must not be injected into a spawned host — the
+		// host logs a warning and registers nothing, which is worse than falling back to default.
+		var project = IsolatedStart();
+		Environment.SetEnvironmentVariable(
+			"ORCHESTRA_CONFIG_PATH",
+			Path.Combine(project, OrchestraConfigLoader.ConfigFileName));
+
+		File.WriteAllText(
+			Path.Combine(project, OrchestraConfigLoader.ConfigFileName),
+			"""{ "scan": { "directory": "./does-not-exist" } }""");
+
+		OrchestraConfigLoader.ResolveConfiguredScanDirectory().Should().BeNull();
+	}
+
+	[Fact]
+	public void ResolveConfiguredScanDirectory_NoScanBlock_ReturnsNull()
+	{
+		var project = IsolatedStart();
+		Environment.SetEnvironmentVariable(
+			"ORCHESTRA_CONFIG_PATH",
+			Path.Combine(project, OrchestraConfigLoader.ConfigFileName));
+
+		File.WriteAllText(
+			Path.Combine(project, OrchestraConfigLoader.ConfigFileName),
+			"""{ "dataPath": "./data" }""");
+
+		OrchestraConfigLoader.ResolveConfiguredScanDirectory().Should().BeNull();
 	}
 
 	// ── RetentionPolicy tests ──

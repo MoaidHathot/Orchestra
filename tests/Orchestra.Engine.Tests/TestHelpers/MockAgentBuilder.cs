@@ -298,23 +298,42 @@ public class MockAgentBuilder : AgentBuilder
 		return BuildAgentInternal(config);
 	}
 
+	/// <summary>
+	/// Hand-written <see cref="IAgent"/> fake used instead of an NSubstitute proxy.
+	/// </summary>
+	/// <remarks>
+	/// NSubstitute is not thread-safe while a substitute is being created and configured — it
+	/// associates a <c>.Returns(...)</c> with the preceding call through ambient per-thread
+	/// state, and argument matchers go on a shared queue. Any orchestration with independent
+	/// steps (<c>ComplexDag</c>, <c>ParallelSteps</c>) builds and invokes agents concurrently, so
+	/// threads interleave inside that machinery and a substitute can end up with its
+	/// <c>SendAsync</c> unconfigured. The step then fails and the run reports Failed instead of
+	/// Succeeded, intermittently and only under enough load for the overlap to happen — which
+	/// reads as CI flakiness rather than a harness bug.
+	/// <para>
+	/// <see cref="IAgent"/> has exactly one member, so a real class costs nothing and removes the
+	/// concurrency question entirely.
+	/// </para>
+	/// </remarks>
+	private sealed class FakeAgent(Func<string, CancellationToken, AgentTask> handler) : IAgent
+	{
+		public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
+			=> handler(prompt, cancellationToken);
+	}
+
 	private Task<IAgent> BuildAgentInternal(AgentBuildConfig? config)
 	{
-		var agent = Substitute.For<IAgent>();
-		agent.SendAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-			.Returns(callInfo =>
-			{
-				var prompt = callInfo.ArgAt<string>(0);
-				var ct = callInfo.ArgAt<CancellationToken>(1);
-				// Prefer the config-aware handler when set: it closes over the per-agent
-				// config so concurrent BuildAgentAsync calls cannot poison each other.
-				if (_sendAsyncHandlerWithConfig is not null)
-				{
-					return _sendAsyncHandlerWithConfig(prompt, config, ct);
-				}
-				return _sendAsyncHandler?.Invoke(prompt, ct)
-					?? CreateDefaultTask("Default response");
-			});
+		// `config` is captured per-agent here, so concurrent BuildAgentAsync calls cannot
+		// poison each other even though _capturedConfig is shared.
+		IAgent agent = new FakeAgent((prompt, ct) =>
+		{
+			// Prefer the config-aware handler when set.
+			if (_sendAsyncHandlerWithConfig is not null)
+				return _sendAsyncHandlerWithConfig(prompt, config, ct);
+
+			return _sendAsyncHandler?.Invoke(prompt, ct)
+				?? CreateDefaultTask("Default response");
+		});
 
 		return Task.FromResult(agent);
 	}

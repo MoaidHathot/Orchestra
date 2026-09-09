@@ -25,6 +25,7 @@ namespace Orchestra.Portal.Tests;
 /// - POST /api/orchestrations/{id}/disable - Disable an orchestration trigger (Host canonical)
 /// Note: GET /api/folder/browse is not tested here because it opens a native Windows dialog.
 /// </summary>
+[Collection(PortalHostEnvironmentCollection.Name)]
 public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory>, IDisposable
 {
 	private readonly PortalWebApplicationFactory _factory;

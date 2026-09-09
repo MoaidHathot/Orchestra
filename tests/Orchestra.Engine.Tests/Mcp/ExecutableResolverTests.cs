@@ -4,6 +4,7 @@ using Orchestra.Engine;
 
 namespace Orchestra.Engine.Tests.McpResolution;
 
+[Collection(ProcessPathEnvironmentCollection.Name)]
 public class ExecutableResolverTests
 {
     [Fact]

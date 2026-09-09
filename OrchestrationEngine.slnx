@@ -27,5 +27,6 @@
     <Project Path="tests/Orchestra.Cli.Tests/Orchestra.Cli.Tests.csproj" />
     <Project Path="tests/Orchestra.Client.Tests/Orchestra.Client.Tests.csproj" />
     <Project Path="tests/Orchestra.Exec.Tests/Orchestra.Exec.Tests.csproj" />
+    <Project Path="tests/Orchestra.Portal.E2E/Orchestra.Portal.E2E.csproj" />
   </Folder>
 </Solution>

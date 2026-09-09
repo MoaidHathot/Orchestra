@@ -13,6 +13,7 @@ namespace Orchestra.Portal.Tests;
 /// <summary>
 /// Tests for SPA routing - ensures the Portal serves index.html for all routes.
 /// </summary>
+[Collection(PortalHostEnvironmentCollection.Name)]
 public class SpaRoutingTests : IClassFixture<PortalWebApplicationFactory>, IDisposable
 {
 	private readonly PortalWebApplicationFactory _factory;

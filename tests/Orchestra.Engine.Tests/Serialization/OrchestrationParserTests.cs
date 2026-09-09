@@ -2807,7 +2807,7 @@ public class OrchestrationParserTests
 		// Generate step with subagents
 		var generateStep = orchestration.Steps[0].Should().BeOfType<PromptOrchestrationStep>().Subject;
 		generateStep.Name.Should().Be("generate");
-		generateStep.Model.Should().Be("claude-opus-4.6");
+		generateStep.Model.Should().Be("claude-opus-4.8");
 		generateStep.SkillDirectories.Should().ContainMatch("*skills*orchestration-authoring*");
 		generateStep.Mcps.Should().HaveCount(1);
 		generateStep.OutputHandlerPrompt.Should().NotBeNullOrWhiteSpace();
@@ -2821,15 +2821,23 @@ public class OrchestrationParserTests
 		validateStep.DependsOn.Should().Contain("generate");
 		validateStep.Loop.Should().NotBeNull();
 		validateStep.Loop!.Target.Should().Be("generate");
-		validateStep.Loop.MaxIterations.Should().Be(2);
-		validateStep.Loop.ExitPattern.Should().Be("VALID");
+		validateStep.Loop.MaxIterations.Should().Be(3);
+		// "VALID" is a substring of "INVALID", and the exit check is a substring match, so the
+		// old pattern read every rejection as an approval.
+		validateStep.Loop.ExitPattern.Should().Be("APPROVED");
+		// The loop matches the checker's post-handler content, so the checker must not carry an
+		// output handler that strips its own verdict marker.
+		validateStep.OutputHandlerPrompt.Should().BeNull();
 		validateStep.SkillDirectories.Should().ContainMatch("*skills*orchestration-authoring*");
 
-		// Save step
-		var saveStep = orchestration.Steps[2].Should().BeOfType<PromptOrchestrationStep>().Subject;
+		// Save step. Deterministic on purpose: writing a file and checking that it parses are
+		// not judgement calls, so this is a Script step rather than another model turn.
+		var saveStep = orchestration.Steps[2].Should().BeOfType<ScriptOrchestrationStep>().Subject;
 		saveStep.Name.Should().Be("save-orchestration");
 		saveStep.DependsOn.Should().Contain("validate");
-		saveStep.Mcps.Should().HaveCount(1);
+		saveStep.Script.Should().Contain(
+			"orchestra validate",
+			"the generated orchestration must be machine-verified before it is written anywhere");
 
 		// Register step
 		var registerStep = orchestration.Steps[3].Should().BeOfType<PromptOrchestrationStep>().Subject;
@@ -2841,6 +2849,18 @@ public class OrchestrationParserTests
 		orchestration.Steps[4].Name.Should().Be("format-output");
 		orchestration.Steps[4].DependsOn.Should().Contain("save-orchestration");
 		orchestration.Steps[4].DependsOn.Should().Contain("register-orchestration");
+
+		// Every skillDirectories path must resolve. They are relative to the orchestration FILE,
+		// and a missing directory is skipped SILENTLY at runtime, so a wrong relative depth
+		// degrades the run with no error anywhere. A wildcard name match would not catch that.
+		foreach (var promptStep in orchestration.Steps.OfType<PromptOrchestrationStep>())
+		{
+			foreach (var skillDir in promptStep.SkillDirectories ?? [])
+			{
+				Directory.Exists(skillDir).Should().BeTrue(
+					$"step '{promptStep.Name}' references skill directory '{skillDir}'");
+			}
+		}
 
 		// MCP definitions — orchestra-control and filesystem
 		orchestration.Mcps.Should().HaveCount(2);

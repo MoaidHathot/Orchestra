@@ -9,6 +9,7 @@ namespace Orchestra.Portal.Tests;
 /// Integration tests asserting the Portal host honors <c>orchestra.json</c>'s <c>logLevel</c>,
 /// overriding the <c>appsettings.json</c> <c>Logging:LogLevel:Default</c> baseline.
 /// </summary>
+[Collection(PortalHostEnvironmentCollection.Name)]
 public class PortalLogLevelTests
 {
 	private const string ProbeCategory = "PortalLogLevelTests.Probe";

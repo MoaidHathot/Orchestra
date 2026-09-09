@@ -17,7 +17,15 @@ public class OrchestrationStepExecutorTests
 {
 	private static readonly OrchestrationInfo s_parentInfo = new("parent-orch", "1.0.0", "parent-run-123", DateTimeOffset.UtcNow);
 
-	private readonly IOrchestrationReporter _reporter = Substitute.For<IOrchestrationReporter>();
+	// Assertions target the substitute; the executor gets a serialized proxy because
+
+	// NSubstitute's call recording is not thread-safe and parallel DAG steps report
+
+	// from several threads at once.
+
+	private readonly IOrchestrationReporter _reporter = SerializingReporterProxy.CreateRecording();
+
+	private IOrchestrationReporter _reporterSubstitute => SerializingReporterProxy.Recorded(_reporter);
 	private readonly ILogger<OrchestrationStepExecutor> _logger = NullLoggerFactory.Instance.CreateLogger<OrchestrationStepExecutor>();
 
 	private OrchestrationStepExecutor CreateExecutor(IChildOrchestrationLauncher launcher, AgentBuilder? agentBuilder = null)

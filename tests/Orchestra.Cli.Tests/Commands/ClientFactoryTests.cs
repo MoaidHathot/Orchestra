@@ -16,6 +16,7 @@ namespace Orchestra.Cli.Tests.Commands;
 /// restore them on dispose, and point <c>ORCHESTRA_CONFIG_PATH</c> at a throwaway temp file so
 /// the real loader is exercised without depending on (or disturbing) a developer's own config.
 /// </summary>
+[Collection(OrchestraEnvironmentCollection.Name)]
 public class ClientFactoryTests : IDisposable
 {
 	private readonly string _tempDir;

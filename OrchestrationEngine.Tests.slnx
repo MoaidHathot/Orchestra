@@ -9,5 +9,8 @@
     <Project Path="tests/Orchestra.Portal.Tests/Orchestra.Portal.Tests.csproj" />
     <Project Path="tests/Orchestra.Tool.Tests/Orchestra.Tool.Tests.csproj" />
     <Project Path="tests/Orchestra.Cli.Tests/Orchestra.Cli.Tests.csproj" />
+    <Project Path="tests/Orchestra.Exec.Tests/Orchestra.Exec.Tests.csproj" />
+    <Project Path="tests/Orchestra.Client.Tests/Orchestra.Client.Tests.csproj" />
+    <Project Path="tests/Orchestra.ProcessHost.Tests/Orchestra.ProcessHost.Tests.csproj" />
   </Folder>
 </Solution>

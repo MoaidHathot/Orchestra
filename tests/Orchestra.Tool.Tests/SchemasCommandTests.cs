@@ -13,6 +13,7 @@ public class SchemasCommandTests : IDisposable
 	private static readonly string[] s_expectedSchemas =
 	[
 		"orchestration.schema.json",
+		"orchestra.schema.json",
 		"orchestra.mcp.schema.json",
 		"orchestra.services.schema.json",
 	];
@@ -56,7 +57,7 @@ public class SchemasCommandTests : IDisposable
 		foreach (var name in s_expectedSchemas)
 			File.Exists(Path.Combine(defaultDir, name)).Should().BeTrue($"because {name} should be copied");
 
-		stdout.ToString().Should().Contain("Done. 3 written, 0 skipped.");
+		stdout.ToString().Should().Contain($"Done. {s_expectedSchemas.Length} written, 0 skipped.");
 	}
 
 	[Fact]
@@ -101,7 +102,7 @@ public class SchemasCommandTests : IDisposable
 		exitCode.Should().Be(0, stderr.ToString());
 		File.ReadAllText(existingPath).Should().Be("EXISTING_CONTENT");
 		stdout.ToString().Should().Contain("Skipped (already exists)");
-		stdout.ToString().Should().Contain("Done. 2 written, 1 skipped.");
+		stdout.ToString().Should().Contain($"Done. {s_expectedSchemas.Length - 1} written, 1 skipped.");
 	}
 
 	[Fact]
@@ -125,7 +126,7 @@ public class SchemasCommandTests : IDisposable
 		exitCode.Should().Be(0, stderr.ToString());
 		File.ReadAllText(existingPath).Should().NotBe("EXISTING_CONTENT");
 		File.ReadAllText(existingPath).Should().Contain("orchestration.schema.json");
-		stdout.ToString().Should().Contain("Done. 3 written, 0 skipped.");
+		stdout.ToString().Should().Contain($"Done. {s_expectedSchemas.Length} written, 0 skipped.");
 	}
 
 	[Fact]

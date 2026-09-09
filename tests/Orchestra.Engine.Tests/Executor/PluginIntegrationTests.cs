@@ -10,7 +10,11 @@ namespace Orchestra.Engine.Tests.Executor;
 public class PluginIntegrationTests
 {
 	private readonly IScheduler _scheduler = new OrchestrationScheduler();
-	private readonly IOrchestrationReporter _reporter = Substitute.For<IOrchestrationReporter>();
+	// Assertions target the substitute; the executor gets a serialized proxy because
+	// NSubstitute's call recording is not thread-safe and parallel DAG steps report
+	// from several threads at once.
+	private readonly IOrchestrationReporter _reporter = SerializingReporterProxy.CreateRecording();
+	private IOrchestrationReporter _reporterSubstitute => SerializingReporterProxy.Recorded(_reporter);
 	private readonly ILoggerFactory _loggerFactory = NullLoggerFactory.Instance;
 
 	/// <summary>

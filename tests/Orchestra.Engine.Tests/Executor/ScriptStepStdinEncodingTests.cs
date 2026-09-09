@@ -1,3 +1,4 @@
+using Orchestra.Engine.Tests.TestHelpers;
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -23,7 +24,15 @@ public class ScriptStepStdinEncodingTests
 	private static readonly OrchestrationInfo s_defaultInfo =
 		new("test-orchestration", "1.0.0", "run123", DateTimeOffset.UtcNow);
 
-	private readonly IOrchestrationReporter _reporter = Substitute.For<IOrchestrationReporter>();
+	// Assertions target the substitute; the executor gets a serialized proxy because
+
+	// NSubstitute's call recording is not thread-safe and parallel DAG steps report
+
+	// from several threads at once.
+
+	private readonly IOrchestrationReporter _reporter = SerializingReporterProxy.CreateRecording();
+
+	private IOrchestrationReporter _reporterSubstitute => SerializingReporterProxy.Recorded(_reporter);
 	private readonly ILogger<ScriptStepExecutor> _logger =
 		NullLoggerFactory.Instance.CreateLogger<ScriptStepExecutor>();
 

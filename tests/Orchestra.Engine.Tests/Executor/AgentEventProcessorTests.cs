@@ -1,10 +1,15 @@
+using Orchestra.Engine.Tests.TestHelpers;
 using NSubstitute;
 
 namespace Orchestra.Engine.Tests.Executor;
 
 public class AgentEventProcessorTests
 {
-	private readonly IOrchestrationReporter _reporter = Substitute.For<IOrchestrationReporter>();
+	// Assertions target the substitute; the executor gets a serialized proxy because
+	// NSubstitute's call recording is not thread-safe and parallel DAG steps report
+	// from several threads at once.
+	private readonly IOrchestrationReporter _reporter = SerializingReporterProxy.CreateRecording();
+	private IOrchestrationReporter _reporterSubstitute => SerializingReporterProxy.Recorded(_reporter);
 
 	[Fact]
 	public async Task ProcessEventsAsync_MessageDelta_ReportsContentDelta()
@@ -20,8 +25,8 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportContentDelta("test-step", "Hello", Arg.Any<ActorContext>());
-		_reporter.Received(1).ReportContentDelta("test-step", " World", Arg.Any<ActorContext>());
+		_reporterSubstitute.Received(1).ReportContentDelta("test-step", "Hello", Arg.Any<ActorContext>());
+		_reporterSubstitute.Received(1).ReportContentDelta("test-step", " World", Arg.Any<ActorContext>());
 	}
 
 	[Fact]
@@ -77,8 +82,8 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportReasoningDelta("test-step", "Let me think", Arg.Any<ActorContext>());
-		_reporter.Received(1).ReportReasoningDelta("test-step", " about this...", Arg.Any<ActorContext>());
+		_reporterSubstitute.Received(1).ReportReasoningDelta("test-step", "Let me think", Arg.Any<ActorContext>());
+		_reporterSubstitute.Received(1).ReportReasoningDelta("test-step", " about this...", Arg.Any<ActorContext>());
 		Assert.Equal("Let me think about this...", processor.Reasoning);
 	}
 
@@ -110,8 +115,8 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportToolExecutionStarted("test-step", "read_file", "{\"path\": \"test.txt\"}", "filesystem", Arg.Any<ActorContext>());
-		_reporter.Received(1).ReportToolExecutionCompleted("test-step", "read_file", true, "file contents", null, Arg.Any<ActorContext>());
+		_reporterSubstitute.Received(1).ReportToolExecutionStarted("test-step", "read_file", "{\"path\": \"test.txt\"}", "filesystem", Arg.Any<ActorContext>());
+		_reporterSubstitute.Received(1).ReportToolExecutionCompleted("test-step", "read_file", true, "file contents", null, Arg.Any<ActorContext>());
 
 		Assert.Single(processor.ToolCalls);
 		var toolCall = processor.ToolCalls[0];
@@ -185,7 +190,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportStepError("test-step", "Something went wrong");
+		_reporterSubstitute.Received(1).ReportStepError("test-step", "Something went wrong");
 	}
 
 	[Fact]
@@ -320,7 +325,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportContentDelta("test-step", string.Empty, Arg.Any<ActorContext>());
+		_reporterSubstitute.Received(1).ReportContentDelta("test-step", string.Empty, Arg.Any<ActorContext>());
 	}
 
 	#region Subagent Events
@@ -344,7 +349,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentSelected(
+		_reporterSubstitute.Received(1).ReportSubagentSelected(
 			"test-step",
 			"researcher",
 			"Research Agent",
@@ -370,7 +375,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentSelected("test-step", "unknown", null, null);
+		_reporterSubstitute.Received(1).ReportSubagentSelected("test-step", "unknown", null, null);
 	}
 
 	[Fact]
@@ -393,7 +398,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentStarted(
+		_reporterSubstitute.Received(1).ReportSubagentStarted(
 			"test-step",
 			"call-123",
 			"writer",
@@ -421,7 +426,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentStarted("test-step", null, "minimal-agent", null, null);
+		_reporterSubstitute.Received(1).ReportSubagentStarted("test-step", null, "minimal-agent", null, null);
 	}
 
 	[Fact]
@@ -443,7 +448,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentCompleted("test-step", "call-456", "researcher", "Research Agent");
+		_reporterSubstitute.Received(1).ReportSubagentCompleted("test-step", "call-456", "researcher", "Research Agent");
 	}
 
 	[Fact]
@@ -466,7 +471,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentFailed(
+		_reporterSubstitute.Received(1).ReportSubagentFailed(
 			"test-step",
 			"call-789",
 			"writer",
@@ -494,7 +499,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentFailed("test-step", "call-error", "failing-agent", null, null);
+		_reporterSubstitute.Received(1).ReportSubagentFailed("test-step", "call-error", "failing-agent", null, null);
 	}
 
 	[Fact]
@@ -510,7 +515,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentDeselected("test-step");
+		_reporterSubstitute.Received(1).ReportSubagentDeselected("test-step");
 	}
 
 	[Fact]
@@ -631,9 +636,9 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentSelected("multi-agent-step", "agent1", Arg.Any<string?>(), Arg.Any<string[]?>());
-		_reporter.Received(1).ReportSubagentSelected("multi-agent-step", "agent2", Arg.Any<string?>(), Arg.Any<string[]?>());
-		_reporter.Received(2).ReportSubagentDeselected("multi-agent-step");
+		_reporterSubstitute.Received(1).ReportSubagentSelected("multi-agent-step", "agent1", Arg.Any<string?>(), Arg.Any<string[]?>());
+		_reporterSubstitute.Received(1).ReportSubagentSelected("multi-agent-step", "agent2", Arg.Any<string?>(), Arg.Any<string[]?>());
+		_reporterSubstitute.Received(2).ReportSubagentDeselected("multi-agent-step");
 	}
 
 	[Fact]
@@ -659,8 +664,8 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSubagentFailed("test-step", "call-fail", "failing-agent", Arg.Any<string?>(), "Agent crashed");
-		_reporter.Received(1).ReportContentDelta("test-step", "Handling failure gracefully", Arg.Any<ActorContext>());
+		_reporterSubstitute.Received(1).ReportSubagentFailed("test-step", "call-fail", "failing-agent", Arg.Any<string?>(), "Agent crashed");
+		_reporterSubstitute.Received(1).ReportContentDelta("test-step", "Handling failure gracefully", Arg.Any<ActorContext>());
 	}
 
 	#endregion
@@ -685,7 +690,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSessionWarning("mcp_server_error", "Failed to start MCP server 'icm'");
+		_reporterSubstitute.Received(1).ReportSessionWarning("mcp_server_error", "Failed to start MCP server 'icm'");
 		var trace = processor.BuildTrace("sys", "user");
 		Assert.Single(trace.Warnings);
 		Assert.Equal("[mcp_server_error] Failed to start MCP server 'icm'", trace.Warnings[0]);
@@ -709,7 +714,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSessionWarning("unknown", "Unknown warning");
+		_reporterSubstitute.Received(1).ReportSessionWarning("unknown", "Unknown warning");
 		var trace = processor.BuildTrace("sys", "user");
 		Assert.Single(trace.Warnings);
 		Assert.Equal("[unknown] Unknown warning", trace.Warnings[0]);
@@ -763,7 +768,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSessionInfo("mcp_connected", "MCP server 'icm' connected");
+		_reporterSubstitute.Received(1).ReportSessionInfo("mcp_connected", "MCP server 'icm' connected");
 	}
 
 	[Fact]
@@ -784,7 +789,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSessionInfo("unknown", "");
+		_reporterSubstitute.Received(1).ReportSessionInfo("unknown", "");
 	}
 
 	#endregion
@@ -813,7 +818,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportMcpServersLoaded(
+		_reporterSubstitute.Received(1).ReportMcpServersLoaded(
 			Arg.Is<IReadOnlyList<McpServerStatusInfo>>(list =>
 				list.Count == 2 && list[0].Name == "icm" && list[1].Name == "graph"));
 	}
@@ -951,7 +956,7 @@ public class AgentEventProcessorTests
 
 		// Assert
 		Assert.Empty(processor.McpServerStatuses);
-		_reporter.Received(1).ReportMcpServersLoaded(
+		_reporterSubstitute.Received(1).ReportMcpServersLoaded(
 			Arg.Is<IReadOnlyList<McpServerStatusInfo>>(list => list.Count == 0));
 	}
 
@@ -1008,7 +1013,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportMcpServerStatusChanged("icm", "Connected");
+		_reporterSubstitute.Received(1).ReportMcpServerStatusChanged("icm", "Connected");
 	}
 
 	[Fact]
@@ -1029,7 +1034,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportMcpServerStatusChanged("unknown", "unknown");
+		_reporterSubstitute.Received(1).ReportMcpServerStatusChanged("unknown", "unknown");
 	}
 
 	[Fact]
@@ -1656,7 +1661,7 @@ public class AgentEventProcessorTests
 		await processor.ProcessEventsAsync(events);
 
 		// Assert
-		_reporter.Received(1).ReportSessionWarning("compaction", "Context compaction started");
+		_reporterSubstitute.Received(1).ReportSessionWarning("compaction", "Context compaction started");
 		var trace = processor.BuildTrace("sys", "user");
 		Assert.Single(trace.Warnings);
 		Assert.Contains("compaction", trace.Warnings[0]);
@@ -1815,7 +1820,7 @@ public class AgentEventProcessorTests
 		Assert.Single(trace.Warnings);
 		Assert.Contains("hook_failed", trace.Warnings[0]);
 		Assert.Contains("postToolUse", trace.Warnings[0]);
-		_reporter.Received(1).ReportSessionWarning("hook_failed", Arg.Is<string>(s => s.Contains("postToolUse")));
+		_reporterSubstitute.Received(1).ReportSessionWarning("hook_failed", Arg.Is<string>(s => s.Contains("postToolUse")));
 	}
 
 	[Fact]
@@ -2007,8 +2012,8 @@ public class AgentEventProcessorTests
 
 		await processor.ProcessEventsAsync(events);
 
-		_reporter.Received(1).ReportAutoModeSwitchRequested("step-x", "req-99", "rate_limited");
-		_reporter.Received(1).ReportSessionInfo("auto_mode_switch_requested", Arg.Any<string>());
+		_reporterSubstitute.Received(1).ReportAutoModeSwitchRequested("step-x", "req-99", "rate_limited");
+		_reporterSubstitute.Received(1).ReportSessionInfo("auto_mode_switch_requested", Arg.Any<string>());
 		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.AutoModeSwitchRequested
 			&& e.AutoModeRequestId == "req-99" && e.AutoModeErrorCode == "rate_limited");
 	}
@@ -2026,7 +2031,7 @@ public class AgentEventProcessorTests
 
 		await processor.ProcessEventsAsync(events);
 
-		_reporter.Received(1).ReportAutoModeSwitchCompleted("step-x", "req-99", "claude-sonnet-4.5");
+		_reporterSubstitute.Received(1).ReportAutoModeSwitchCompleted("step-x", "req-99", "claude-sonnet-4.5");
 		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.AutoModeSwitchCompleted
 			&& e.AutoModeRequestId == "req-99" && e.AutoModeResponse == "claude-sonnet-4.5");
 	}
@@ -2044,7 +2049,7 @@ public class AgentEventProcessorTests
 
 		await processor.ProcessEventsAsync(events);
 
-		_reporter.Received(1).ReportSystemNotification("step-x", "shell_completed", "shell finished");
+		_reporterSubstitute.Received(1).ReportSystemNotification("step-x", "shell_completed", "shell finished");
 		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.SystemNotification
 			&& e.NotificationKind == "shell_completed" && e.NotificationMessage == "shell finished");
 	}
@@ -2073,7 +2078,7 @@ public class AgentEventProcessorTests
 
 		await processor.ProcessEventsAsync(events);
 
-		_reporter.Received(1).ReportQuotaSnapshot("step-x", snapshots);
+		_reporterSubstitute.Received(1).ReportQuotaSnapshot("step-x", snapshots);
 		Assert.Contains(processor.AuditLog, e => e.EventType == AuditEventType.QuotaSnapshot);
 	}
 
@@ -2089,7 +2094,7 @@ public class AgentEventProcessorTests
 
 		await processor.ProcessEventsAsync(events);
 
-		_reporter.DidNotReceive().ReportQuotaSnapshot(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, AgentQuotaSnapshot>>());
+		_reporterSubstitute.DidNotReceive().ReportQuotaSnapshot(Arg.Any<string>(), Arg.Any<IReadOnlyDictionary<string, AgentQuotaSnapshot>>());
 		Assert.DoesNotContain(processor.AuditLog, e => e.EventType == AuditEventType.QuotaSnapshot);
 	}
 
@@ -2211,9 +2216,9 @@ public class AgentEventProcessorTests
 
 		await processor.ProcessEventsAsync(events);
 
-		_reporter.DidNotReceive().ReportContentDelta(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ActorContext>());
-		_reporter.DidNotReceive().ReportSessionWarning(Arg.Any<string>(), Arg.Any<string>());
-		_reporter.DidNotReceive().ReportSessionInfo(Arg.Any<string>(), Arg.Any<string>());
+		_reporterSubstitute.DidNotReceive().ReportContentDelta(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<ActorContext>());
+		_reporterSubstitute.DidNotReceive().ReportSessionWarning(Arg.Any<string>(), Arg.Any<string>());
+		_reporterSubstitute.DidNotReceive().ReportSessionInfo(Arg.Any<string>(), Arg.Any<string>());
 	}
 
 	#endregion
