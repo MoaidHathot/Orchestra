@@ -335,6 +335,65 @@ public class ProgramWiringTests
 	}
 
 	[Fact]
+	public void NewHelp_DocumentsTemplateListAndForce()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("new", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--template");
+		result.Output.Should().Contain("--list");
+		result.Output.Should().Contain("--force");
+	}
+
+	[Fact]
+	public void NewWithoutNameOrList_FailsValidation()
+	{
+		var tester = NewTester();
+
+		Action act = () => tester.Run("new");
+
+		act.Should().Throw<CommandRuntimeException>()
+			.Where(ex => ex.Message.Contains("<NAME>") && ex.Message.Contains("--list"));
+	}
+
+	[Fact]
+	public void NewWithNonKebabName_FailsValidation()
+	{
+		// The name becomes the file name and the `orchestra run <name>` argument, so it is
+		// rejected up front rather than producing a file that cannot be run by name.
+		var tester = NewTester();
+
+		Action act = () => tester.Run("new", "My Thing");
+
+		act.Should().Throw<CommandRuntimeException>()
+			.Where(ex => ex.Message.Contains("kebab-case"));
+	}
+
+	[Fact]
+	public void LoginHelp_DocumentsProviderAndDeviceCode()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("login", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--provider");
+		result.Output.Should().Contain("--device-code");
+	}
+
+	[Fact]
+	public void LoginWithInvalidProvider_FailsValidation()
+	{
+		var tester = NewTester();
+
+		Action act = () => tester.Run("login", "--provider", "bogus");
+
+		act.Should().Throw<CommandRuntimeException>()
+			.Where(ex => ex.Message.Contains("copilot") && ex.Message.Contains("opencode"));
+	}
+	[Fact]
 	public void DoctorHelp_DefaultsToTextNotJson()
 	{
 		// Unlike the data verbs, doctor is read by a human deciding whether to proceed.

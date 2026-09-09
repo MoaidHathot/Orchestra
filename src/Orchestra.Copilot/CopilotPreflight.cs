@@ -55,6 +55,11 @@ public sealed record CopilotAuthProbe(bool Ok, int ModelCount, string? Error);
 /// </remarks>
 public static class CopilotPreflight
 {
+	/// <summary>Environment variable that points at a pre-installed Copilot CLI, bypassing the download.</summary>
+	public const string ExplicitCliPathEnvVar = CopilotCliBootstrap.ExplicitCliPathEnvVar;
+
+	/// <summary>Environment variable that redirects the Copilot CLI download to an npm mirror.</summary>
+	public const string NpmRegistryEnvVar = CopilotCliBootstrap.NpmRegistryEnvVar;
 	/// <summary>
 	/// Reports whether a Copilot CLI binary is already present, without ever downloading.
 	/// </summary>

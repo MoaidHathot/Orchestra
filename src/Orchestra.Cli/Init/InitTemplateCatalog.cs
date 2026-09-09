@@ -37,6 +37,8 @@ public static class InitTemplateCatalog
 	[
 		("hello", "hello — starter (recommended)",
 			"Three-step DAG: research, brief, then a no-cost Transform. Runs with no arguments.", false),
+		("smoke-test", "smoke-test — no agent, no credentials",
+			"Two deterministic steps that prove the install works before any agent is set up.", false),
 		("research", "research — parallel fan-out",
 			"Two analyses run concurrently, then a third step synthesizes both.", false),
 		("code-review", "code-review — Command feeding an agent",

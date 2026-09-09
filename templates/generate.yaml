@@ -107,7 +107,15 @@ steps:
       New-Item -ItemType Directory -Force -Path (Split-Path -Parent $draftPath) | Out-Null
       Set-Content -LiteralPath $draftPath -Value $content -Encoding utf8NoBOM
 
-      $result = & orchestra validate $draftPath 2>&1 | Out-String
+      # `orchestra` is on PATH for a global-tool install but not when launched through
+      # `dnx`, so fall back to the dnx form rather than failing on a missing command.
+      if (Get-Command orchestra -ErrorAction SilentlyContinue) {
+        $result = & orchestra validate $draftPath 2>&1 | Out-String
+      } elseif (Get-Command dnx -ErrorAction SilentlyContinue) {
+        $result = & dnx Orchestra --yes -- validate $draftPath 2>&1 | Out-String
+      } else {
+        Orchestra-Complete -Status failed -Reason 'Neither `orchestra` nor `dnx` is on PATH, so the generated file could not be validated.'
+      }
       if ($LASTEXITCODE -ne 0) {
         # Halt the whole run rather than emitting a file that will not parse.
         Orchestra-Complete -Status failed -Reason "Generated orchestration failed validation:`n$result"

@@ -77,11 +77,23 @@ public class Program
 			.WithExample("init", "./my-workflows", "--template", "research")
 			.WithExample("init", "--template", "hello", "--provider", "copilot", "--yes");
 
+		config.AddCommand<NewCommand>("new")
+			.WithDescription("Add another orchestration to this workspace from a template, renamed so it runs on its own.")
+			.WithExample("new", "nightly-digest")
+			.WithExample("new", "pr-review", "--template", "code-review")
+			.WithExample("new", "--list");
+
 		config.AddCommand<DoctorCommand>("doctor")
 			.WithDescription("Check prerequisites: config, data path, agent CLI, credentials, server.")
 			.WithExample("doctor")
 			.WithExample("doctor", "--fix")
 			.WithExample("doctor", "--provider", "opencode", "--format", "json");
+
+		config.AddCommand<LoginCommand>("login")
+			.WithDescription("Sign in to the agent provider (runs `copilot login` or `opencode auth login`).")
+			.WithExample("login")
+			.WithExample("login", "--device-code")
+			.WithExample("login", "--provider", "opencode");
 
 		// ── Orchestration commands (top-level) ───────────────────────────────────
 		config.AddCommand<ListCommand>("list")

@@ -24,9 +24,11 @@ typo correction, and live event streaming for runs that include human-in-the-loo
 ## Quick start
 
 ```bash
-orchestra init      # scaffold a workspace: starter orchestration, schemas, orchestra.json
-orchestra doctor    # verify prerequisites before the first run
-orchestra run hello # run the scaffolded orchestration by name
+orchestra init              # scaffold a workspace: starter orchestration, schemas, orchestra.json
+orchestra doctor            # verify prerequisites before the first run
+orchestra login             # sign in to the agent provider, if doctor says you need to
+orchestra run hello         # run the scaffolded orchestration by name
+orchestra new my-workflow   # add your own, from a template
 ```
 
 ### `init` — scaffold a workspace
@@ -46,7 +48,7 @@ command non-interactive; `--yes` accepts defaults for whatever is left.
 | Option | Purpose |
 |--------|---------|
 | `[DIRECTORY]` | Target directory (default: current). |
-| `-t, --template <ID>` | `hello` (default), `research`, `code-review`, `approval`, `generate`. |
+| `-t, --template <ID>` | `hello` (default), `smoke-test`, `research`, `code-review`, `approval`, `generate`. |
 | `--with-skill` | Also copy the `orchestration-authoring` Agent Skill into `.orchestra/skills/`. Implied by `--template generate`. |
 | `-p, --provider <PROVIDER>` | `copilot` (default) or `opencode`. |
 | `-m, --model <ID>` | Default model (default: `claude-opus-4.8`). |
@@ -95,6 +97,41 @@ orchestra doctor --provider opencode --format json
 A malformed `orchestra.json` is reported as a **failure** here even though the host tolerates
 it — the host logs a warning and silently runs on built-in defaults, so none of your settings
 apply. `doctor` is the only place that surfaces this.
+
+### `new` — add an orchestration from a template
+
+```bash
+orchestra new nightly-digest                      # from `hello`
+orchestra new pr-review --template code-review
+orchestra new --list
+```
+
+Writes `orchestrations/<NAME>.yaml` into the nearest workspace (the directory whose
+`orchestra.json` is found by walking up), with the orchestration renamed to `<NAME>` and its
+description replaced so it registers as its own entry. The template's explanatory comments are
+kept. Outside a workspace it writes under `./orchestrations/` and the next-step hint switches
+to `--run-file`.
+
+| Option | Purpose |
+|--------|---------|
+| `<NAME>` | Kebab-case: lowercase letters, digits, single hyphens. Also the file name and the `run` argument. |
+| `-t, --template <ID>` | Template to start from (default: `hello`). |
+| `-l, --list` | Print the available templates. |
+| `-f, --force` | Overwrite an existing file (otherwise: exit `1`, file untouched). |
+
+### `login` — sign in to the agent provider
+
+```bash
+orchestra login                       # copilot login (browser OAuth)
+orchestra login --device-code         # force the device-code flow for headless machines
+orchestra login --provider opencode   # opencode auth login
+```
+
+Orchestra has no credentials of its own. The Copilot CLI is downloaded to a cache directory
+that is not on `PATH`, so this verb resolves it (downloading first if needed) and runs its
+`login` with your terminal attached. Defaults to the provider `orchestra.json` names.
+
+For unattended use set `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` instead.
 
 ### `validate` — check an orchestration without running it
 
@@ -258,6 +295,8 @@ Every command supports `--help`. The summaries here are the same text Spectre pr
 | Command | Purpose |
 |---|---|
 | `orchestra init [DIRECTORY] [-t ID] [-p PROVIDER] [-m MODEL] [--no-config] [--no-schemas] [-f] [-y]` | Scaffold a workspace: starter orchestration, JSON schemas, and `orchestra.json`. |
+| `orchestra new <NAME> [-t ID] [-f]` / `orchestra new --list` | Add another orchestration to the workspace from a template, renamed to `<NAME>`. |
+| `orchestra login [-p PROVIDER] [--device-code]` | Sign in to the agent provider by running `copilot login` or `opencode auth login`. |
 | `orchestra doctor [--format text\|json] [-p PROVIDER] [--fix] [--offline]` | Check prerequisites: config, data path, agent CLI, credentials, server. |
 | `orchestra schemas [-o DIR] [-f]` | Copy the bundled JSON schemas into a local directory (default `./.orchestra/schemas`). |
 | `orchestra validate <PATH> [--format text\|json]` | Parse an orchestration and check its template expressions without running it. |

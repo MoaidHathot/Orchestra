@@ -45,6 +45,16 @@ orchestra doctor    # check this machine is ready
 orchestra run hello # run it
 ```
 
+Not ready to set up an agent yet? Start with the template that needs none:
+
+```bash
+orchestra init --template smoke-test --yes
+orchestra run smoke-test          # two deterministic steps, green in about a second
+```
+
+That proves the install end to end - registry, scan, DAG execution, template expressions -
+before credentials or the Copilot CLI download enter the picture.
+
 ### `orchestra init`
 
 Creates a workspace in the target directory (default: the current one).
@@ -78,13 +88,14 @@ Re-running is safe: existing files are reported as skipped, never overwritten, u
 | Template | Demonstrates |
 |---|---|
 | `hello` *(default)* | A three-step DAG: two Prompt steps, then a `Transform` that costs nothing. |
-| `research` | Parallel fan-out — two analyses run concurrently, a third synthesizes them. |
+| `smoke-test` | Two deterministic steps. No agent, no credentials, no download - proves the install works. |
+| `research` | Parallel fan-out - two analyses run concurrently, a third synthesizes them. |
 | `code-review` | A deterministic `Command` step (`git diff`) feeding an agent. |
 | `approval` | A human-in-the-loop gate that survives a host restart. |
 | `generate` | Writes new orchestrations from a description, then machine-checks them. |
 
-All of them run with **no arguments** — every input has a default — so you can try any of them
-immediately and edit afterwards.
+All of them run with **no arguments** - every input has a default - so you can try any of them
+immediately and edit afterwards. `orchestra new --list` prints the same table.
 
 ### `orchestra doctor`
 
@@ -136,6 +147,87 @@ that cost whether your credentials actually work.
 
 To use a Copilot CLI you already have, set `ORCHESTRA_COPILOT_CLI_PATH`. For an internal npm
 mirror, set `ORCHESTRA_COPILOT_NPM_REGISTRY`.
+
+## Signing in
+
+Orchestra holds no credentials of its own; each provider's CLI owns authentication. Because the
+Copilot CLI lives in a cache directory that is not on your `PATH`, there is a verb that finds it
+and runs its login flow for you:
+
+```bash
+orchestra login                       # copilot login (browser OAuth; device code when headless)
+orchestra login --device-code         # force the device-code flow: SSH, containers, CI images
+orchestra login --provider opencode   # opencode auth login
+```
+
+`login` defaults to whichever provider `orchestra.json` names. It downloads the Copilot CLI
+first if it is not cached yet, then hands your terminal to the provider's own command.
+
+For unattended machines, skip the interactive flow and set a token instead. Copilot honours
+`COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, and `GITHUB_TOKEN` (in that order of precedence), or you can
+put `"copilot": { "gitHubToken": "${GITHUB_TOKEN}" }` in `orchestra.json`. `orchestra doctor`
+confirms whichever route you chose actually works.
+
+## Adding your own orchestration
+
+Start from a template rather than a blank file - the templates carry comments that explain each
+construct where it is used.
+
+```bash
+orchestra new nightly-digest                          # from `hello`
+orchestra new pr-review --template code-review        # from a specific template
+orchestra new --list                                  # see what is available
+```
+
+`new` writes `orchestrations/<name>.yaml` with the orchestration renamed and its description
+replaced, so it registers as its own entry and runs independently of the template it came from.
+It finds the workspace by walking up to the nearest `orchestra.json`; outside a workspace it
+writes under `./orchestrations/` and tells you to use `--run-file`.
+
+Then the loop is:
+
+```bash
+# 1. edit orchestrations/nightly-digest.yaml - start with the description and the prompts
+orchestra validate ./orchestrations/nightly-digest.yaml   # 2. catches structural mistakes for free
+orchestra run nightly-digest                              # 3. run it
+orchestra run nightly-digest --report markdown            #    ...with a post-run report
+```
+
+With `scan.watch: true` (the scaffolded default) the host picks up edits as you save, so a
+long-running `orchestra portal` sees the new orchestration without a restart.
+
+Names must be **kebab-case** - lowercase letters, digits, single hyphens - because the name
+becomes the file name, the registry key, and the argument to `orchestra run`.
+
+### Choosing step types
+
+The single most useful habit: reach for a deterministic step first, and only use `Prompt`
+where the work is genuinely fuzzy.
+
+| You need to... | Use | Cost |
+|---|---|---|
+| Run a program and capture its output | `Command` | none |
+| Run a multi-line script, branch, set the step's own status | `Script` | none |
+| Call an HTTP API | `Http` | none |
+| Reshape or combine earlier outputs into text | `Transform` | none |
+| Pause for a person to decide | `Approval` | none |
+| Reuse another orchestration as a step | `Orchestration` | whatever it costs |
+| Reason, write, summarize, review | `Prompt` | a model call |
+
+Deterministic steps cannot hallucinate and run in milliseconds. `code-review` is the pattern in
+miniature: a `Command` gathers the facts (`git diff`), a `Prompt` reasons about them.
+
+### Feeding an agent your own context
+
+Two mechanisms, both on a `Prompt` step:
+
+- **`mcps`** attach Model Context Protocol servers, giving the agent tools - file access, web
+  fetch, your internal APIs. Define them at the top level and reference by name.
+- **`skillDirectories`** load Agent Skills: `SKILL.md` folders with domain knowledge and
+  workflows. Paths resolve against the **orchestration file's** directory and a missing one is
+  skipped silently, so count the `../` hops carefully.
+
+The [engine reference](engine) covers both in depth.
 
 ## What `init` wrote, and why
 
@@ -282,6 +374,39 @@ It drafts an orchestration, runs a reviewer loop over it, then hands the result 
 deterministic `Script` step that writes the file and verifies it with `orchestra validate`. A
 draft that would not parse fails the run instead of landing on disk.
 
+## Where Orchestra keeps things, and how to start over
+
+Everything Orchestra writes lives in one of these places. Nothing is hidden in the registry
+or in the tool's install directory.
+
+| What | Where | Delete it to... |
+|---|---|---|
+| Run history, registry, checkpoints, pending inputs | `dataPath` from `orchestra.json`; default `%LOCALAPPDATA%\OrchestraHost` (Windows) or `~/.local/share/OrchestraHost` | Forget every past run and registered orchestration. |
+| A scaffolded workspace's data | `<workspace>/.orchestra/data/` | Same, for that project only. Already gitignored. |
+| User-global configuration | `%APPDATA%\Orchestra\orchestra.json`, `~/.config/Orchestra/orchestra.json` (+ `orchestra.mcp.json`, `orchestra.services.json` beside it) | Go back to built-in defaults everywhere. |
+| Downloaded Copilot CLI | `%LOCALAPPDATA%\Orchestra\copilot-cli\<version>\<rid>\` or `~/.local/share/Orchestra/copilot-cli/...` | Force a fresh download on the next run (~100 MB). |
+| Copilot credentials | The OS credential store, or `~/.copilot/` | Sign out. Run `orchestra login` to sign back in. |
+| Tracked external-service PIDs | `.orchestra.pids.json` next to the `orchestra.json` in effect | Nothing useful; recreated automatically. |
+
+`orchestra doctor` prints the first four paths as they resolve on your machine, so you never
+have to guess which config or data directory is actually in use.
+
+A **full reset** is: uninstall the tool, delete the data path and the config directory, and
+reinstall. Nothing else needs cleaning.
+
+```bash
+dotnet tool uninstall --global Orchestra
+# remove the data path and config directory listed above
+dotnet tool install --global Orchestra
+orchestra init
+```
+
+> A user-global `orchestra.mcp.json` applies to **every** workspace on the machine, including a
+> freshly `init`-ed one: MCP servers it lists are started when a run begins, whether or not the
+> orchestration uses them. If a two-step deterministic orchestration takes a minute instead of a
+> second, that is why. Move project-specific MCP servers into the workspace's own
+> `orchestra.mcp.json` next to its `orchestra.json`.
+
 ## Rolling Orchestra out to a team
 
 ### What to commit
@@ -299,11 +424,23 @@ A teammate then needs only:
 ```bash
 dotnet tool install --global Orchestra
 orchestra doctor     # tells them exactly what their machine is missing
+orchestra login      # if doctor says credentials are missing
 orchestra list       # sees every orchestration in the repo
 ```
 
 Because `orchestra.json` is discovered by walking up from the working directory, this works
 anywhere inside the repository with no per-machine setup.
+
+Pin the tool version in the repo so everyone runs the same one - a `dotnet-tools.json`
+manifest does this, and `dotnet tool restore` installs it:
+
+```bash
+dotnet new tool-manifest              # once, at the repo root
+dotnet tool install Orchestra         # writes .config/dotnet-tools.json
+git add .config/dotnet-tools.json
+```
+
+Teammates then run `dotnet tool restore` and invoke it as `dotnet orchestra ...`.
 
 ### Keep secrets out of the config
 

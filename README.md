@@ -40,10 +40,15 @@ Running `orchestra` with no command prints the help. `orchestra <command> --help
 ## Quick start
 
 ```bash
-orchestra init      # scaffold a workspace with a runnable example
-orchestra doctor    # verify prerequisites before the first run
-orchestra run hello # run it
+orchestra init             # scaffold a workspace with a runnable example
+orchestra doctor           # verify prerequisites before the first run
+orchestra run hello        # run it
+orchestra new my-workflow  # then add your own, from a template
 ```
+
+No agent set up yet? `orchestra init --template smoke-test --yes && orchestra run smoke-test`
+gives you a green run in about a second with nothing configured - it proves the install before
+credentials enter the picture.
 
 `init` writes a starter orchestration under `orchestrations/`, the JSON schemas under
 `.orchestra/schemas/` for editor autocomplete, and an `orchestra.json` whose `scan` block is
@@ -59,6 +64,7 @@ Five templates ship with the tool, and every one runs with **no arguments**:
 | Template | Demonstrates |
 |---|---|
 | `hello` *(default)* | Three-step DAG: two Prompt steps, then a `Transform` that costs nothing. |
+| `smoke-test` | Two deterministic steps. No agent, no credentials, no download. |
 | `research` | Parallel fan-out — two analyses run concurrently, a third synthesizes them. |
 | `code-review` | A deterministic `Command` step (`git diff`) feeding an agent. |
 | `approval` | A human-in-the-loop gate that survives a host restart. |
@@ -68,7 +74,7 @@ Five templates ship with the tool, and every one runs with **no arguments**:
 effect and whether it parses, whether the data path is writable, whether the agent CLI is present
 and authenticated, and whether a configured server is reachable. The first Copilot run downloads
 the Copilot CLI (~100 MB, once per machine) — `orchestra doctor --fix` does it up front instead of
-mid-run.
+mid-run. If credentials are missing, `orchestra login` runs the provider's own sign-in flow.
 
 Orchestra discovers `orchestra.json` by walking up from your working directory, so a scaffolded
 folder is self-contained; a user-global config at `%APPDATA%\Orchestra\` (or `~/.config/Orchestra/`)

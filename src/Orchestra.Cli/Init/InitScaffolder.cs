@@ -166,6 +166,89 @@ public static class InitScaffolder
 	}
 
 	/// <summary>
+	/// Names an orchestration can be given: kebab-case, so it round-trips through
+	/// <c>orchestra run &lt;name&gt;</c>, file names, and the registry without quoting.
+	/// </summary>
+	public static readonly Regex OrchestrationNamePattern = new(
+		@"^[a-z0-9]+(-[a-z0-9]+)*$",
+		RegexOptions.CultureInvariant);
+
+	// The template's top-level `name:` line and its `description:` block. The description is
+	// matched together with every directly-following indented line so a folded `>` block is
+	// replaced whole rather than leaving its continuation lines dangling.
+	private static readonly Regex s_nameLine = new(
+		@"^name:[^\r\n]*$",
+		RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
+	private static readonly Regex s_descriptionBlock = new(
+		@"^description:[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*",
+		RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
+	/// <summary>
+	/// Creates one additional orchestration from a template, renamed so it does not collide
+	/// with anything already in the workspace.
+	/// </summary>
+	/// <remarks>
+	/// This is how a user gets a <em>second</em> orchestration. Re-running <c>init</c> with a
+	/// template only ever yields one file per template (existing files are skipped), and copying
+	/// a file by hand leaves two orchestrations with the same <c>name:</c>, which the registry
+	/// treats as one. Renaming at creation time is what makes the copy independently runnable.
+	/// </remarks>
+	/// <param name="workspaceRoot">The scan root - the directory containing <c>orchestrations/</c>.</param>
+	/// <param name="name">Kebab-case orchestration name; also the file's base name.</param>
+	/// <param name="template">The template to copy.</param>
+	/// <param name="force">Overwrite an existing file.</param>
+	/// <param name="skillsSourceDirectory">Bundled skills directory, for templates that need one.</param>
+	public static InitResult NewOrchestration(
+		string workspaceRoot,
+		string name,
+		InitTemplate template,
+		bool force,
+		string? skillsSourceDirectory = null)
+	{
+		ArgumentNullException.ThrowIfNull(workspaceRoot);
+		ArgumentNullException.ThrowIfNull(name);
+		ArgumentNullException.ThrowIfNull(template);
+
+		if (!OrchestrationNamePattern.IsMatch(name))
+		{
+			throw new ArgumentException(
+				$"'{name}' is not a valid orchestration name. Use kebab-case: lowercase letters, digits, and single hyphens (e.g. 'nightly-digest').",
+				nameof(name));
+		}
+
+		var files = new List<InitFileResult>();
+		var projectDir = Path.Combine(workspaceRoot, Host.Hosting.OrchestraConfigLoader.ProjectDirectoryName);
+		var orchestrationsDir = Path.Combine(workspaceRoot, OrchestrationsDirectoryName);
+		Directory.CreateDirectory(orchestrationsDir);
+
+		// The template may reference the authoring skill; make sure it is present, otherwise
+		// the runtime skips the missing directory silently and the orchestration degrades.
+		if (template.RequiresSkill && skillsSourceDirectory is not null)
+		{
+			var skillSource = Path.Combine(skillsSourceDirectory, AuthoringSkillName);
+			var skillTarget = Path.Combine(projectDir, SkillsDirectoryName, AuthoringSkillName);
+			if (!Directory.Exists(skillTarget))
+				CopyTree(skillSource, skillTarget, force: false, files);
+		}
+
+		var schemasCopied = File.Exists(Path.Combine(projectDir, "schemas", "orchestration.schema.json"));
+
+		var body = File.ReadAllText(template.SourcePath);
+		body = RewriteSchemaDirective(body, schemasCopied);
+		body = s_nameLine.Replace(body, $"name: {name}", count: 1);
+		body = s_descriptionBlock.Replace(
+			body,
+			$"description: >{Environment.NewLine}  Describe what {name} does. Created from the '{template.Id}' template.",
+			count: 1);
+
+		var path = Path.Combine(orchestrationsDir, $"{name}.yaml");
+		files.Add(WriteFile(path, body, force));
+
+		return new InitResult(files, name, path);
+	}
+
+	/// <summary>
 	/// Recursively copies <paramref name="sourceDirectory"/> into <paramref name="targetDirectory"/>,
 	/// recording each file's outcome. Returns false when the source does not exist.
 	/// </summary>

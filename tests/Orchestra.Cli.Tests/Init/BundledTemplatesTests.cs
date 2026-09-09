@@ -41,7 +41,7 @@ public sealed class BundledTemplatesTests
 	{
 		var ids = InitTemplateCatalog.Discover(TemplatesDirectory).Select(t => t.Id).ToArray();
 
-		ids.Should().Contain(["hello", "research", "code-review", "approval", "generate"]);
+		ids.Should().Contain(["hello", "smoke-test", "research", "code-review", "approval", "generate"]);
 		ids[0].Should().Be(InitTemplateCatalog.DefaultTemplateId, "the default template must be offered first");
 	}
 
@@ -125,7 +125,30 @@ public sealed class BundledTemplatesTests
 	{
 		var orchestration = Parse(id);
 
+		// A template with no Prompt steps has no model to declare; requiring one there would
+		// force an agent dependency onto the one template whose purpose is to run without any.
+		if (!orchestration.Steps.OfType<PromptOrchestrationStep>().Any())
+		{
+			orchestration.DefaultModel.Should().BeNull($"'{id}' has no Prompt steps and should not imply an agent is needed");
+			return;
+		}
+
 		orchestration.DefaultModel.Should().Be("claude-opus-4.8");
+	}
+
+	[Fact]
+	public void SmokeTestTemplate_NeedsNoAgentAtAll()
+	{
+		// The whole value of smoke-test is a green run on a machine with nothing configured. Any
+		// Prompt step, MCP, or skill reference would silently reintroduce the dependencies it
+		// exists to avoid.
+		var orchestration = Parse("smoke-test");
+
+		orchestration.Steps.OfType<PromptOrchestrationStep>().Should().BeEmpty();
+		orchestration.Mcps.Should().BeEmpty();
+		orchestration.Steps.Should().OnlyContain(
+			s => s.Type == OrchestrationStepType.Command || s.Type == OrchestrationStepType.Transform,
+			"only deterministic step types are guaranteed to work with no provider set up");
 	}
 
 	private static Orchestration Parse(string id)

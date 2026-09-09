@@ -253,6 +253,7 @@ public sealed class InitCommand : AsyncCommand<InitSettings>
 		{
 			(InvocationStyle.Format("doctor"), "check prerequisites before the first run"),
 			(InvocationStyle.Format(runCommand), "run it"),
+			(InvocationStyle.Format("new my-workflow"), "add your own orchestration from a template"),
 			(InvocationStyle.Format("portal"), "web UI, REST API, and MCP endpoints"),
 		};
 

@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: smoke-test
+description: >
+  Proves the installation works before you set up an agent. Every step here is
+  deterministic - no model, no credentials, no download - so it succeeds on a
+  machine with nothing configured, in about a second. Run it first; if it passes,
+  the only thing left between you and `hello` is agent authentication.
+version: "1.0.0"
+
+steps:
+  # Command steps run a process and capture stdout. `dotnet` is guaranteed to exist
+  # because Orchestra itself is a .NET tool.
+  - name: runtime
+    type: Command
+    command: dotnet
+    arguments: ["--version"]
+
+  # Transform renders a template with the same expressions agent steps use. This is
+  # how deterministic steps and agent steps pass data to each other.
+  - name: report
+    type: Transform
+    dependsOn: [runtime]
+    template: |
+      Orchestra is working.
+
+      .NET runtime : {{runtime.output}}
+      Orchestration: {{orchestration.name}}
+      Run          : {{orchestration.runId}}
+      Started      : {{orchestration.startedAt}}
+
+      Next: `orchestra doctor` to check agent credentials, then `orchestra run hello`.

@@ -447,6 +447,8 @@ A Script step normally only reports success (exit 0) / failure (non-zero). To le
 
 Read only on exit 0; malformed contents fail the step. `stdout` stays the step output, so a script can emit data **and** signal in the same run. Three ways to write it — pwsh helpers (auto-injected: `Orchestra-Complete -Status success -Reason '...'`, `Orchestra-SetStatus -Status no_action -Reason '...'`), the `orchestra step complete|set-status` CLI (any shell), or writing the JSON to `$ORCHESTRA_CONTROL_FILE` directly. Prefer this over an LLM gate step for deterministic checks (see Pattern 4).
 
+**Prefer the injected pwsh helpers over the `orchestra step ...` CLI form.** The CLI is only on `PATH` for a global-tool install; a user who launches Orchestra through `dnx` has no `orchestra` command, so a script that shells out to it fails with "command not found". The helpers and the `$ORCHESTRA_CONTROL_FILE` JSON work everywhere. If you must shell out to the CLI (e.g. `orchestra validate`), guard it: `if (Get-Command orchestra -EA SilentlyContinue) { & orchestra ... } elseif (Get-Command dnx -EA SilentlyContinue) { & dnx Orchestra --yes -- ... }`.
+
 ### Orchestration Step (type: "Orchestration")
 
 Invokes another registered orchestration. Use this when a flow should delegate to a reusable child orchestration instead of duplicating its steps.

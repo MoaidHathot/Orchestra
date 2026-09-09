@@ -248,7 +248,7 @@ public static class DoctorDiagnostics
 				"copilot auth",
 				missingStatus,
 				auth.Error ?? "Unknown authentication failure.",
-				"Sign in with the Copilot CLI, or set `copilot.gitHubToken` in orchestra.json. A GitHub Copilot subscription is required.");
+				$"Run `{InvocationStyle.Format("login")}` to sign in (needs a GitHub Copilot subscription). For unattended use set GH_TOKEN or GITHUB_TOKEN, or `copilot.gitHubToken` in orchestra.json.");
 
 		return [cliCheck, authCheck];
 	}
