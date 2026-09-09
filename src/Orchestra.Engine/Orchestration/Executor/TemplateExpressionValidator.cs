@@ -81,6 +81,15 @@ public static partial class TemplateExpressionValidator
 	private static readonly HashSet<string> s_knownNamespaces =
 		new(["param", "orchestration", "step", "vars", "env", "server"], StringComparer.OrdinalIgnoreCase);
 
+	/// <summary>
+	/// Appended to "unresolvable expression" errors. Prompt and documentation fields
+	/// routinely embed foreign <c>{{...}}</c> syntaxes (ActionView content references,
+	/// examples shown to an LLM) that this validator cannot distinguish from an Orchestra
+	/// expression, so every such error points at the backslash escape as the way out.
+	/// </summary>
+	private const string EscapeHint =
+		"If this is a literal (e.g. documentation, or template syntax shown to an LLM), escape it as \\{{...}} to skip template processing.";
+
 	private static readonly HashSet<string> s_validServerProperties =
 		new(["url"], StringComparer.OrdinalIgnoreCase);
 
@@ -486,7 +495,7 @@ public static partial class TemplateExpressionValidator
 				result.Errors.Add(new TemplateValidationError(
 					$"Unknown expression namespace '{ns}'. " +
 					$"Known namespaces: {string.Join(", ", s_knownNamespaces)}. " +
-					$"Or use a valid step name.",
+					$"Or use a valid step name. {EscapeHint}",
 					stepName, fieldName, fullExpr));
 			}
 		}
@@ -494,7 +503,7 @@ public static partial class TemplateExpressionValidator
 		{
 			// No dot at all — completely unknown expression format
 			result.Errors.Add(new TemplateValidationError(
-				$"Invalid expression format '{expr}'. Expressions must use a namespace prefix (e.g., param.name, vars.name, env.NAME).",
+				$"Invalid expression format '{expr}'. Expressions must use a namespace prefix (e.g., param.name, vars.name, env.NAME). {EscapeHint}",
 				stepName, fieldName, fullExpr));
 		}
 	}
@@ -717,6 +726,7 @@ public static partial class TemplateExpressionValidator
 		{
 			PromptOrchestrationStep ps => GetPromptStepFields(ps),
 			CommandOrchestrationStep cs => GetCommandStepFields(cs),
+			ScriptOrchestrationStep ss => GetScriptStepFields(ss),
 			HttpOrchestrationStep hs => GetHttpStepFields(hs),
 			TransformOrchestrationStep ts => GetTransformStepFields(ts),
 			_ => [],
@@ -739,6 +749,27 @@ public static partial class TemplateExpressionValidator
 	private static IEnumerable<(string, string)> GetCommandStepFields(CommandOrchestrationStep step)
 	{
 		yield return ("Command", step.Command);
+		foreach (var (i, arg) in step.Arguments.Select((a, i) => (i, a)))
+			yield return ($"Arguments[{i}]", arg);
+		if (step.WorkingDirectory is not null)
+			yield return ("WorkingDirectory", step.WorkingDirectory);
+		if (step.Stdin is not null)
+			yield return ("Stdin", step.Stdin);
+		foreach (var (key, value) in step.Environment)
+			yield return ($"Environment[{key}]", value);
+	}
+
+	/// <summary>
+	/// Mirrors the fields <c>ScriptStepExecutor</c> passes through <see cref="TemplateResolver"/>:
+	/// Script, ScriptFile, Arguments, WorkingDirectory, Stdin and Environment values.
+	/// <c>Shell</c> is excluded because the executor uses it verbatim.
+	/// </summary>
+	private static IEnumerable<(string, string)> GetScriptStepFields(ScriptOrchestrationStep step)
+	{
+		if (step.Script is not null)
+			yield return ("Script", step.Script);
+		if (step.ScriptFile is not null)
+			yield return ("ScriptFile", step.ScriptFile);
 		foreach (var (i, arg) in step.Arguments.Select((a, i) => (i, a)))
 			yield return ($"Arguments[{i}]", arg);
 		if (step.WorkingDirectory is not null)

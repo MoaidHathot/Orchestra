@@ -91,6 +91,34 @@ public class TemplateExpressionValidatorTests
 		};
 	}
 
+	private static ScriptOrchestrationStep CreateScriptStep(
+		string name,
+		string? script = null,
+		string? scriptFile = null,
+		string[]? arguments = null,
+		string? workingDirectory = null,
+		string? stdin = null,
+		Dictionary<string, string>? environment = null,
+		string[]? dependsOn = null,
+		string[]? parameters = null,
+		string shell = "pwsh")
+	{
+		return new ScriptOrchestrationStep
+		{
+			Name = name,
+			Type = OrchestrationStepType.Script,
+			DependsOn = dependsOn ?? [],
+			Parameters = parameters ?? [],
+			Shell = shell,
+			Script = script,
+			ScriptFile = scriptFile,
+			Arguments = arguments ?? [],
+			WorkingDirectory = workingDirectory,
+			Stdin = stdin,
+			Environment = environment ?? [],
+		};
+	}
+
 	private static HttpOrchestrationStep CreateHttpStep(
 		string name,
 		string url,
@@ -728,6 +756,20 @@ public class TemplateExpressionValidatorTests
 	}
 
 	[Fact]
+	public void ValidateOrchestration_UnknownNamespace_ErrorSuggestsBackslashEscape()
+	{
+		// The validator cannot tell an Orchestra expression apart from foreign
+		// {{...}} syntax embedded in prose, so the error must point at the escape.
+		var orchestration = CreateOrchestration(
+			steps: [CreateTransformStep("step1", "{{foo.bar}}")]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.Errors.Should().ContainSingle()
+			.Which.Message.Should().Contain(@"escape it as \{{...}}");
+	}
+
+	[Fact]
 	public void ValidateOrchestration_NoDotExpression_ReturnsError()
 	{
 		var orchestration = CreateOrchestration(
@@ -740,6 +782,211 @@ public class TemplateExpressionValidatorTests
 			e.Message.Contains("Invalid expression format") &&
 			e.Expression == "{{invalid}}");
 	}
+
+	[Fact]
+	public void ValidateOrchestration_NoDotExpression_ErrorSuggestsBackslashEscape()
+	{
+		var orchestration = CreateOrchestration(
+			steps: [CreateTransformStep("step1", "{{invalid}}")]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.Errors.Should().ContainSingle()
+			.Which.Message.Should().Contain(@"escape it as \{{...}}");
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ForeignTemplateSyntaxInUserPrompt_ReturnsError()
+	{
+		// Regression: a prompt that documents ActionView's {{content.<id>}} placeholder
+		// for the model. Unescaped, the validator reads it as an Orchestra expression
+		// with an unknown 'content' namespace and fails the whole orchestration before
+		// any step runs.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreatePromptStep(
+					"create-action-view-entry",
+					"Save Edit runs `powerreview comment edit --body {{content.<uuid>}}`."),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.StepName == "create-action-view-entry" &&
+			e.FieldName == "UserPrompt" &&
+			e.Message.Contains("Unknown expression namespace 'content'") &&
+			e.Expression == "{{content.<uuid>}}");
+	}
+
+	[Fact]
+	public void ValidateOrchestration_EscapedForeignTemplateSyntaxInUserPrompt_NoError()
+	{
+		// The fix: escaping makes it a literal. TemplateResolver strips the backslash
+		// at runtime, so the model still receives the exact `{{content.<uuid>}}` text.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreatePromptStep(
+					"create-action-view-entry",
+					@"Save Edit runs `powerreview comment edit --body \{{content.<uuid>}}`."),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	#endregion
+
+	#region ValidateOrchestration — Script step fields
+
+	// ScriptStepExecutor resolves Script, ScriptFile, Arguments, WorkingDirectory,
+	// Stdin and Environment through TemplateResolver. Each must therefore be
+	// validated, or a bad expression silently survives as literal `{{...}}` text
+	// inside the generated script instead of failing loudly at parse time.
+
+	[Fact]
+	public void ValidateOrchestration_ScriptBodyUnknownNamespace_ReturnsError()
+	{
+		var orchestration = CreateOrchestration(
+			steps: [CreateScriptStep("run", script: "Write-Output '{{input.maxAgeDays}}'")]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.StepName == "run" &&
+			e.FieldName == "Script" &&
+			e.Message.Contains("Unknown expression namespace 'input'") &&
+			e.Expression == "{{input.maxAgeDays}}");
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ScriptArgumentsUnknownNamespace_ReturnsError()
+	{
+		// The exact shape found in pr-worktree-pruner: `{{input.*}}` used where
+		// `{{param.*}}` was meant. Previously invisible because Script steps were
+		// not enumerated at all.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateScriptStep(
+					"prune",
+					script: "param($a, $b)",
+					arguments: ["{{param.dryRun}}", "{{input.force}}"],
+					parameters: ["dryRun", "force"]),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.StepName == "prune" &&
+			e.FieldName == "Arguments[1]" &&
+			e.Expression == "{{input.force}}");
+	}
+
+	[Theory]
+	[InlineData("ScriptFile")]
+	[InlineData("WorkingDirectory")]
+	[InlineData("Stdin")]
+	public void ValidateOrchestration_ScriptPathAndStdinFields_AreValidated(string field)
+	{
+		var step = field switch
+		{
+			"ScriptFile" => CreateScriptStep("run", scriptFile: "{{bogus.dir}}/run.ps1"),
+			"WorkingDirectory" => CreateScriptStep("run", script: "echo hi", workingDirectory: "{{bogus.dir}}"),
+			_ => CreateScriptStep("run", script: "echo hi", stdin: "{{bogus.dir}}"),
+		};
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(CreateOrchestration(steps: [step]));
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.FieldName == field &&
+			e.Message.Contains("Unknown expression namespace 'bogus'"));
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ScriptEnvironmentValue_IsValidated()
+	{
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateScriptStep(
+					"run",
+					script: "echo hi",
+					environment: new Dictionary<string, string> { ["DB_PATH"] = "{{bogus.path}}" }),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e => e.FieldName == "Environment[DB_PATH]");
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ScriptStepValidExpressions_NoError()
+	{
+		// Valid namespaces and a reachable step reference must still pass.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateScriptStep("first", script: "echo one"),
+				CreateScriptStep(
+					"second",
+					script: "Write-Output '{{param.listName}}' '{{first.output}}' '{{vars.root}}'",
+					arguments: ["{{env.HOME}}", "{{orchestration.runId}}"],
+					dependsOn: ["first"],
+					parameters: ["listName"]),
+			],
+			variables: new Dictionary<string, string> { ["root"] = "/tmp" });
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_EscapedLiteralInScriptComment_NoError()
+	{
+		// Regression: PowerShell comments in todo-upsert / meeting-action-items-followup
+		// document that the engine does not expand `{{...}}` inside input defaults.
+		// Unescaped, that documentation is itself parsed as an expression.
+		var orchestration = CreateOrchestration(
+			steps:
+			[
+				CreateScriptStep(
+					"resolve",
+					script: @"# a literal '\{{...}}' path can arrive here" + "\n" +
+					        @"# default is '\{{env.XDG_CONFIG_HOME}}/orchestra/zakira.db'" + "\n" +
+					        "echo hi"),
+			]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(result.FormatErrors());
+	}
+
+	[Fact]
+	public void ValidateOrchestration_UnescapedBareBracesInScript_ReturnsError()
+	{
+		var orchestration = CreateOrchestration(
+			steps: [CreateScriptStep("resolve", script: "# a literal '{{...}}' path can arrive here")]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e =>
+			e.FieldName == "Script" &&
+			e.Message.Contains("Invalid expression format"));
+	}
+
+	#endregion
+
+	#region ValidateOrchestration — Step Output References
 
 	[Fact]
 	public void ValidateOrchestration_InvalidStepOutputProperty_ReturnsError()
