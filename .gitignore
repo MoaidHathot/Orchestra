@@ -153,6 +153,15 @@ ipch/
 # Visual Studio Trace Files
 *.e2e
 
+# ...but not the Playwright E2E test project. On a case-insensitive filesystem the trace-file
+# rule above also matches the directory `Orchestra.Portal.E2E`, which silently kept the whole
+# project out of the repository. Build output is re-excluded below because gitignore is
+# last-match-wins: without these two lines the negation would also resurrect bin/ and obj/.
+!tests/Orchestra.Portal.E2E/
+!tests/Orchestra.Portal.E2E/**
+tests/Orchestra.Portal.E2E/bin/
+tests/Orchestra.Portal.E2E/obj/
+
 # TFS 2012 Local Workspace
 $tf/
 
