@@ -1,3 +1,10 @@
+---
+layout: default
+title: Run Storage
+nav_order: 9
+---
+
+{% raw %}
 # Run storage layout
 
 Every orchestration run is persisted to disk so it can be inspected, retried, replayed, or
@@ -439,3 +446,4 @@ See [`orchestra runs export`](cli.md#run-export) and
 - Source: `src/Orchestra.Host/Persistence/RunIndexProjector.cs`
 - Source: `src/Orchestra.Engine/Storage/OrchestrationRunRecord.cs`
 - Source: `src/Orchestra.Engine/Storage/StepRunRecord.cs`
+{% endraw %}

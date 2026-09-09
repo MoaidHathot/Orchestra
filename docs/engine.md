@@ -3,6 +3,7 @@ layout: default
 title: Orchestra.Engine
 nav_order: 3
 ---
+{% raw %}
 
 # Orchestra.Engine
 
@@ -14,9 +15,8 @@ The engine is provider-agnostic - it defines abstract interfaces (`IAgent`, `Age
 
 ## Installation
 
-```bash
-dotnet add package Orchestra.Engine
-```
+The engine ships inside the `Orchestra` tool - there is no `Orchestra.Engine` package on
+NuGet. To use it as a library, reference the project from a clone of the repository.
 
 ## Core Concepts
 
@@ -595,8 +595,8 @@ Use loops for iterative refinement with checker steps:
   "steps": [
     {
       "name": "writer",
-      "type": "prompt",
-      "userPrompt": "Write a poem about {{topic}}"
+      "type": "Prompt",
+      "userPrompt": "Write a poem about {{param.topic}}"
     },
     {
       "name": "reviewer",
@@ -953,3 +953,4 @@ IRunStore (persist)
 - **Package**: `Microsoft.Extensions.Logging.Abstractions` (v10.0.2)
 
 The engine has minimal dependencies, making it portable and allowing consumers to choose their own logging and DI frameworks.
+{% endraw %}

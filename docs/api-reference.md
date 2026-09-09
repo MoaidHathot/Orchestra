@@ -3,6 +3,7 @@ layout: default
 title: API Reference
 nav_order: 7
 ---
+{% raw %}
 
 # API Reference
 
@@ -61,7 +62,7 @@ GET /api/orchestrations
       "enabled": true,
       "isActive": false,
       "runCount": 15,
-      "models": ["claude-opus-4.5"]
+      "models": ["claude-opus-4.8"]
     }
   ]
 }
@@ -88,9 +89,9 @@ GET /api/orchestrations/{id}
       "type": "Prompt",
       "dependsOn": [],
       "parameters": ["topic"],
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "systemPrompt": "You are a researcher...",
-      "userPrompt": "Research: {{topic}}"
+      "userPrompt": "Research: {{param.topic}}"
     }
   ],
   "layers": [
@@ -214,7 +215,7 @@ event: execution-started
 data: {"executionId":"a1b2c3d4e5f6"}
 
 event: session-started
-data: {"requestedModel":"claude-opus-4.5","selectedModel":"claude-opus-4.5"}
+data: {"requestedModel":"claude-opus-4.8","selectedModel":"claude-opus-4.8"}
 
 event: step-started
 data: {"stepName":"research"}
@@ -232,7 +233,7 @@ event: tool-completed
 data: {"stepName":"research","toolName":"web_search","success":true,"result":"[search results]","error":null}
 
 event: step-completed
-data: {"stepName":"research","actualModel":"claude-opus-4.5","selectedModel":"claude-opus-4.5","contentPreview":"Full research content..."}
+data: {"stepName":"research","actualModel":"claude-opus-4.8","selectedModel":"claude-opus-4.8","contentPreview":"Full research content..."}
 
 event: step-output
 data: {"stepName":"research","content":"Full research content..."}
@@ -491,7 +492,7 @@ GET /api/history/{orchestrationName}/{runId}
       "content": "Research results...",
       "rawContent": "Raw research results...",
       "promptSent": "Research: AI",
-      "actualModel": "claude-opus-4.5",
+      "actualModel": "claude-opus-4.8",
       "usage": {
         "inputTokens": 1500,
         "outputTokens": 2000,
@@ -918,3 +919,4 @@ All endpoints may return error responses:
 - `400 Bad Request` - Invalid request
 - `404 Not Found` - Resource not found
 - `500 Internal Server Error` - Server error
+{% endraw %}

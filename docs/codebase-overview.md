@@ -1,3 +1,9 @@
+---
+layout: default
+title: Codebase Overview
+nav_order: 10
+---
+
 # Codebase Overview
 
 > **Orchestra** — a .NET 10 AI orchestration engine with Copilot, MCP, and multi-surface hosting.
@@ -28,16 +34,19 @@ Orchestra is an open-source AI orchestration framework written in C# targeting .
 
 ```
 Orchestra/
-├── src/                          # Core library source (3 projects)
-│   ├── Orchestra.Engine/         # Core orchestration engine (class library)
-│   ├── Orchestra.Host/           # Hosting/API layer (class library)
-│   └── Orchestra.Copilot/        # Copilot integration (class library)
-├── tests/                        # Test projects (5 total)
-│   ├── Orchestra.Engine.Tests/   # Unit — core engine
-│   ├── Orchestra.Host.Tests/     # Unit — hosting/API
-│   ├── Orchestra.Copilot.Tests/  # Unit — Copilot integration
-│   ├── Orchestra.Terminal.Tests/ # Unit — terminal UI
-│   └── Orchestra.Portal.Tests/   # Unit — portal
+├── src/                          # Source (8 projects)
+│   ├── Orchestra.Engine/         # Core orchestration runtime (class library)
+│   ├── Orchestra.Host/           # Hosting/API layer, persistence, MCP server
+│   ├── Orchestra.Copilot/        # GitHub Copilot provider
+│   ├── Orchestra.OpenCode/       # OpenCode provider
+│   ├── Orchestra.ProcessHost/    # External process supervision (orchestra.services.json)
+│   ├── Orchestra.Client/         # HTTP/SSE client SDK + interactive run stack
+│   ├── Orchestra.Cli/            # The packaged `orchestra` dotnet tool
+│   └── Orchestra.Server/         # Standalone API-only ASP.NET host
+├── tests/                        # Test projects (13 total)
+├── templates/                    # Starter orchestrations scaffolded by `orchestra init`
+├── schemas/                      # JSON schemas (orchestration, orchestra, mcp, services)
+├── skills/                       # Agent Skills, incl. orchestration-authoring
 ├── playground/
 │   └── Hosting/
 │       ├── Orchestra.Playground.Copilot/         # Console worker
@@ -69,10 +78,13 @@ Orchestra/
 └──────────────────────┴──────────────────────┘
 ```
 
-- **Orchestra.Engine** — the central orchestration runtime: pipeline definitions, step execution, scheduling (Cronos), and state management.
-- **Orchestra.Host** — the ASP.NET Core hosting layer; exposes HTTP APIs and wires DI/lifetime management.
-- **Orchestra.Copilot** — thin adapter between the GitHub Copilot SDK and the orchestration engine.
-- **Playground** — three runnable surfaces (Console, Terminal, Portal) for experimentation; not intended for production deployment.
+- **Orchestra.Engine** - the orchestration runtime: model, parsers, DAG executor, per-type step executors, template resolution, engine tools, agent abstractions, triggers, hooks.
+- **Orchestra.Host** - the ASP.NET Core hosting layer: minimal-API endpoint groups, SSE reporters, the MCP server, persistence, retention, and `orchestra.json` loading.
+- **Orchestra.Copilot / Orchestra.OpenCode** - the two agent providers, registered keyed so a step's `provider` field is honored.
+- **Orchestra.ProcessHost** - supervises the external processes declared in `orchestra.services.json`.
+- **Orchestra.Client** - HTTP/SSE client SDK plus the shared interactive run stack (observers, HITL prompters, exit codes).
+- **Orchestra.Cli** - the packaged `orchestra` tool: Spectre.Console command app, one-shot exec engine, and the embedded portal.
+- **Playground** - three runnable surfaces (Console, Terminal, Portal). The Portal project physically owns the React SPA that `orchestra portal` serves.
 
 For deep-dives on specific subsystems:
 
@@ -176,16 +188,26 @@ For deep-dives on specific subsystems:
 ### Build & Run
 
 ```bash
-# Restore and build all projects
-dotnet restore
+# Restore and build everything (src, tests, playground)
+dotnet restore OrchestrationEngine.slnx
 dotnet build OrchestrationEngine.slnx
 
-# Run the unit test suite
-dotnet test OrchestrationEngine.slnx
+# Run the test suite the way CI does (excludes Playwright E2E)
+dotnet test OrchestrationEngine.Tests.slnx --filter "Category!=E2E"
 
-# Run a specific playground surface
-dotnet run --project playground/Hosting/Orchestra.Playground.Copilot.Portal
+# Run the CLI from source
+dotnet run --project src/Orchestra.Cli -- doctor
+
+# Pack the tool (and optionally publish)
+./pack.ps1
+./pack.ps1 -Push -LocalFeed C:\path\to\local-feed
 ```
+
+Set `SKIP_PORTAL_BUILD=true` to skip the Portal's `npm install` + Vite build, which otherwise
+runs whenever `Orchestra.Cli` builds. Useful for fast iteration; unset it before packing.
+
+Two solutions exist deliberately: `OrchestrationEngine.slnx` builds everything, while
+`OrchestrationEngine.Tests.slnx` is the test-only solution CI runs.
 
 ### Frontend (Portal)
 
@@ -198,11 +220,16 @@ npm run build    # Production bundle
 
 ### Declarative Orchestration
 
-JSON orchestration definitions live in `examples/`. Use them as templates for defining pipelines without writing C#:
+Orchestrations are JSON/YAML - no C# required. The fastest way in is the tool itself:
 
 ```bash
-ls examples/
+dotnet run --project src/Orchestra.Cli -- init ./scratch
+dotnet run --project src/Orchestra.Cli -- validate ./examples/hello-world.yaml
 ```
+
+`examples/` holds ~46 runnable reference orchestrations, `templates/` holds the five starters
+`orchestra init` scaffolds. Both are covered by tests that run the real parser and
+template-expression validator, so a broken example fails the build.
 
 ---
 

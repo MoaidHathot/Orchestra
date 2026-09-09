@@ -1,3 +1,10 @@
+---
+layout: default
+title: Orchestration Steps
+nav_order: 8
+---
+
+{% raw %}
 # Orchestration step deep-dive
 
 The `Orchestration` step type invokes another registered orchestration from inside a parent
@@ -25,7 +32,7 @@ This document covers:
     previousOutput: "{{previous-step.output}}"
   inputHandlerPrompt: |               # optional LLM-based parameter shaping
     Transform the inputs into a JSON object mapping parameter names to string values.
-  inputHandlerModel: claude-opus-4.6  # optional model override
+  inputHandlerModel: claude-opus-4.8  # optional model override
 ```
 
 ## Execution modes
@@ -193,7 +200,7 @@ mcps:
 steps:
   - name: controller
     type: Prompt
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     mcps: [orchestra]
     infiniteSessions:
       enabled: true
@@ -268,3 +275,4 @@ Are you an external MCP client / Portal / CLI?
 - [Host reference: data-plane MCP tools](host.md#data-plane-tools)
 - [REST API: GET /api/history/{name}/{runId}](api-reference.md)
 - [Run storage layout](run-storage.md)
+{% endraw %}

@@ -3,6 +3,7 @@ layout: default
 title: CLI
 nav_order: 6
 ---
+{% raw %}
 
 # Orchestra CLI
 
@@ -559,3 +560,4 @@ orchestra -s https://orchestra.internal attach lengthy-pipeline run-abc123
 | `orchestra ls` | `orchestra list` |
 | `orchestra remove` short flags | none — use the full word |
 | `orchestra rm` (under branches) | `delete` / `remove` where applicable (e.g. `orchestra runs rm`, `orchestra tags rm`) |
+{% endraw %}

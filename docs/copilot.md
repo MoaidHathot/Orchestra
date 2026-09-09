@@ -3,6 +3,7 @@ layout: default
 title: Orchestra.Copilot
 nav_order: 5
 ---
+{% raw %}
 
 # Orchestra.Copilot
 
@@ -14,9 +15,8 @@ This package bridges Orchestra with GitHub Copilot, enabling orchestrations to l
 
 ## Installation
 
-```bash
-dotnet add package Orchestra.Copilot
-```
+The Copilot provider ships inside the `Orchestra` tool - there is no `Orchestra.Copilot`
+package on NuGet. To use it as a library, reference the project from a clone of the repository.
 
 ## Prerequisites
 
@@ -34,7 +34,7 @@ await using var builder = new CopilotAgentBuilder(loggerFactory);
 
 // Build an agent
 var agent = await builder
-    .WithModel("claude-opus-4.5")
+    .WithModel("claude-opus-4.8")
     .WithSystemPrompt("You are a helpful assistant.")
     .BuildAgentAsync(cancellationToken);
 
@@ -69,7 +69,7 @@ builder.Services.AddOrchestraHost(options =>
 });
 
 var app = builder.Build();
-app.Services.InitializeOrchestraHost();
+await app.Services.InitializeOrchestraHostAsync();
 app.MapOrchestraHostEndpoints();
 app.Run();
 ```
@@ -94,7 +94,7 @@ All configuration is done through the base `AgentBuilder` fluent API:
 
 ```csharp
 var agent = await builder
-    .WithModel("claude-opus-4.5")           // Set the AI model
+    .WithModel("claude-opus-4.8")           // Set the AI model
     .WithSystemPrompt("You are an expert.") // Set system prompt
     .WithSystemPromptMode(SystemPromptMode.Replace)  // Replace or Append
     .WithReasoningLevel(ReasoningLevel.High)         // Low, Medium, High
@@ -323,7 +323,7 @@ and [`examples/tuned-prompt-step.json`](../examples/tuned-prompt-step.json).
   "type": "Prompt",
   "systemPrompt": "...",
   "userPrompt": "...",
-  "model": "claude-opus-4.6",
+  "model": "claude-opus-4.8",
 
   "reasoningSummary": "concise",
   "contextTier": "longContext",
@@ -484,7 +484,7 @@ var filesystem = new LocalMcp
 
 // Build the agent
 var agent = await agentBuilder
-    .WithModel("claude-opus-4.5")
+    .WithModel("claude-opus-4.8")
     .WithSystemPrompt("You are a helpful coding assistant.")
     .WithSystemPromptMode(SystemPromptMode.Replace)
     .WithReasoningLevel(ReasoningLevel.Medium)
@@ -520,3 +520,4 @@ Console.WriteLine($"Tokens: {result.Usage?.InputTokens} in, {result.Usage?.Outpu
 - **Target Framework**: .NET 10.0
 - **Project Reference**: `Orchestra.Engine`
 - **Package Reference**: `GitHub.Copilot.SDK` (v0.1.29)
+{% endraw %}

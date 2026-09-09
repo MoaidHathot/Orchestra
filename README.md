@@ -54,6 +54,16 @@ pass any of those as flags to skip the prompt, or `--yes` to accept every defaul
 orchestra init ./my-workflows --template research --provider copilot --yes
 ```
 
+Five templates ship with the tool, and every one runs with **no arguments**:
+
+| Template | Demonstrates |
+|---|---|
+| `hello` *(default)* | Three-step DAG: two Prompt steps, then a `Transform` that costs nothing. |
+| `research` | Parallel fan-out — two analyses run concurrently, a third synthesizes them. |
+| `code-review` | A deterministic `Command` step (`git diff`) feeding an agent. |
+| `approval` | A human-in-the-loop gate that survives a host restart. |
+| `generate` | Writes new orchestrations from a description, then machine-checks them. |
+
 `doctor` checks the things that otherwise only fail *during* a run: which `orchestra.json` is in
 effect and whether it parses, whether the data path is writable, whether the agent CLI is present
 and authenticated, and whether a configured server is reachable. The first Copilot run downloads
@@ -63,6 +73,13 @@ mid-run.
 Orchestra discovers `orchestra.json` by walking up from your working directory, so a scaffolded
 folder is self-contained; a user-global config at `%APPDATA%\Orchestra\` (or `~/.config/Orchestra/`)
 applies everywhere else.
+
+`validate` parses an orchestration and checks its expressions without a server, an agent, or any
+cost — it exits `0`/`1`/`2` so CI and Script steps can branch on it:
+
+```bash
+orchestra validate ./orchestrations/hello.yaml
+```
 
 ## Your first orchestration
 
@@ -225,13 +242,15 @@ can discover and invoke them. See [`docs/host.md`](docs/host.md).
 
 | Doc | Contents |
 |-----|----------|
-| [`docs/getting-started.md`](docs/getting-started.md) | Install, first orchestration, embedding Orchestra in your own host |
+| [`docs/getting-started.md`](docs/getting-started.md) | Install, first run, workspace layout, rolling out to a team |
 | [`docs/cli.md`](docs/cli.md) | Full `orchestra` command reference + exit codes |
 | [`docs/engine.md`](docs/engine.md) | Step types, triggers, hooks, checkpointing, template expressions |
-| [`docs/host.md`](docs/host.md) | REST API, MCP server, profiles, tags, retention |
+| [`docs/host.md`](docs/host.md) | Configuration reference, REST API, MCP server, retention |
 | [`docs/copilot.md`](docs/copilot.md) | Agent providers, per-step controls, capability matrix |
 | [`skills/orchestration-authoring/`](skills/orchestration-authoring/) | The authoring skill (full schema reference + examples) |
+| [`templates/`](templates/) | Starter orchestrations scaffolded by `orchestra init` |
 | [`examples/`](examples/) | Runnable example orchestrations |
+| [`schemas/`](schemas/) | JSON schemas for orchestrations and `orchestra.json` |
 
 ## License
 

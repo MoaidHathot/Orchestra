@@ -20,37 +20,48 @@ Orchestra.Host bridges the Orchestra.Engine with web-based clients, providing:
 
 ## Installation
 
+The host ships inside the **`Orchestra`** tool — `orchestra portal` runs it. There is no
+`Orchestra.Host` package on NuGet; to embed the library, reference the project from a clone of
+the repository.
+
 ```bash
-dotnet add package Orchestra.Host
+orchestra portal                                   # dashboard, REST API, MCP endpoints
+orchestra portal --urls http://localhost:5100
 ```
 
 ## Quick Start
 
+Embedding the host in your own ASP.NET Core app:
+
 ```csharp
-using Orchestra.Copilot;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
+using Orchestra.Host.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Register your AgentBuilder implementation
-builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
+// Bind Kestrel to orchestra.json's `urls` unless something more explicit was supplied.
+var orchestraConfig = OrchestraConfigLoader.Load();
+builder.Configuration.ApplyOrchestraUrls(orchestraConfig);
 
-// Add Orchestra Host services
 builder.Services.AddOrchestraHost(options =>
 {
     options.DataPath = "./data";
-    options.Scan = new ScanConfig
-    {
-        Directory = "./orchestrations",
-        Watch = true,
-    };
+
+    // The workspace ROOT, not the orchestrations folder: the host looks for
+    // `orchestrations/` and `profiles/` subdirectories inside it.
+    options.Scan = new ScanConfig { Directory = ".", Watch = true };
 });
+
+// Register an AgentBuilder. Orchestra.Server and the CLI use a shared keyed registration for
+// copilot + opencode so a step's `provider` field is honored; a single non-keyed builder
+// routes every step to that one provider regardless of what the step asked for.
+builder.Services.AddSingleton<AgentBuilder, MyAgentBuilder>();
 
 var app = builder.Build();
 
-// Initialize and map endpoints
-app.Services.InitializeOrchestraHost();
+await app.Services.InitializeOrchestraHostAsync();
+app.UseOrchestraHostProblemDetails();
 app.MapOrchestraHostEndpoints();
 
 app.Run();
@@ -58,17 +69,93 @@ app.Run();
 
 ## Configuration
 
+Almost everything the host does is configured through **`orchestra.json`**. Every property is
+optional — Orchestra runs with no configuration file at all — and the file supports `//`
+comments, trailing commas, and `${VAR}` / `"env:VAR"` environment expansion. A referenced
+variable that is not set is a **hard error**, not an empty string, so a missing secret fails
+loudly instead of silently producing a broken command line.
+
+### Where `orchestra.json` is found
+
+First match wins:
+
+1. `ORCHESTRA_CONFIG_PATH` — an explicit file path.
+2. **Project-local** — walking up from the working directory, checking `./orchestra.json` then
+   `./.orchestra/orchestra.json` at each level, stopping once it has inspected a repository
+   root (a directory containing `.git`). This is what `orchestra init` scaffolds.
+3. `$XDG_CONFIG_HOME/Orchestra/orchestra.json`.
+4. `%APPDATA%\Orchestra\orchestra.json` (Windows) or `~/.config/Orchestra/orchestra.json`.
+
+Project-local beats the user-global locations, matching how `.editorconfig`, `global.json`, and
+`Directory.Build.props` behave, so a workspace is self-contained while a personal config still
+applies elsewhere. `orchestra.mcp.json` and `orchestra.services.json` are resolved next to
+whichever `orchestra.json` won, falling back to the user-global directory.
+
+Run **`orchestra doctor`** to see which file is actually in effect and whether it parses.
+
+> A malformed `orchestra.json` is **not** fatal: the host logs a warning and continues on
+> built-in defaults, so none of your settings apply and nothing obvious tells you. `doctor`
+> reports it as a failure for exactly that reason.
+
+### Editor support
+
+`orchestra.schema.json` ships with the tool and describes every key with its default. Bind it
+for completion and hover documentation:
+
+```bash
+orchestra schemas          # copies the schemas to ./.orchestra/schemas
+```
+
+```jsonc
+{
+  "$schema": "./.orchestra/schemas/orchestra.schema.json",
+  "scan": { "directory": ".", "recursive": true }
+}
+```
+
+`orchestra init` writes this reference for you. The schema sets `additionalProperties: false`,
+so a typo'd key is flagged in the editor rather than silently ignored at runtime.
+
+### Commonly used settings
+
+| Key | Default | Purpose |
+|---|---|---|
+| `urls` | none | Kestrel binding. Applied unless `--urls`, `ASPNETCORE_URLS`, or `DOTNET_URLS` is set. |
+| `hostBaseUrl` | none | Instance the CLI targets when neither `--server` nor `$ORCHESTRA_URL` is set. |
+| `dataPath` | `%LOCALAPPDATA%/OrchestraHost` | Run history, registry, checkpoints. Relative to this file's directory. |
+| `scan.directory` | none | Workspace **root** containing `orchestrations/` and `profiles/`. |
+| `provider` / `defaultProvider` | `copilot` | Default agent provider for Prompt steps. |
+| `defaultModel` | none | Default model for Prompt steps. |
+| `enableScheduler` | `true` | Set `false` for an API-only host that never fires triggers itself. |
+| `logLevel` | `Information` | Overrides `Logging:LogLevel:Default` from `appsettings.json`. |
+| `retention` | unlimited | Run-history limits. Favorited runs are always exempt. |
+| `hooks` | `[]` | Global lifecycle hooks applied to every orchestration. |
+
+See `schemas/orchestra.schema.json` for the complete set, including `copilot`, `openCode`,
+`agentPool`, `mcpServer`, `polling`, and `sse`.
+
 ### OrchestrationHostOptions
+
+The runtime options object that `orchestra.json` is applied onto. These are also settable
+programmatically when embedding the host.
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `DataPath` | `string` | `%LOCALAPPDATA%/OrchestraHost` | Root path for all Orchestra data |
-| `Scan` | `ScanConfig?` | `null` | Configuration for auto-scanning and watching a directory for orchestration and profile files |
+| `Scan` | `ScanConfig?` | `null` | Workspace root to scan and optionally watch for orchestration and profile files |
 | `HostBaseUrl` | `string?` | `null` | Base URL for generating run detail links |
 | `LoadPersistedOrchestrations` | `bool` | `true` | Load saved orchestrations on startup |
 | `LoadPersistedTriggers` | `bool` | `true` | Load saved trigger states on startup |
 | `RegisterJsonTriggers` | `bool` | `true` | Register triggers defined in orchestration JSON |
+| `StartExternalServices` | `bool` | `true` | Start processes declared in `orchestra.services.json` |
+| `AutoResumeCheckpointsOnStartup` | `bool` | `true` | Resume checkpointed runs on startup |
+| `EnableScheduler` | `bool` | `true` | Run the trigger scheduler |
+| `ShutdownTimeoutSeconds` | `int` | `30` | Grace period for in-flight work on shutdown |
 | `Hooks` | `HookDefinition[]` | `[]` | Global hooks applied to every orchestration executed by the host |
+
+`LoadPersistedOrchestrations`, `LoadPersistedTriggers`, `RegisterJsonTriggers`, and
+`StartExternalServices` are programmatic-only — they have no `orchestra.json` equivalent,
+because each composition root (portal, server, CLI managed session) sets them deliberately.
 
 ### Global Hooks
 
@@ -140,8 +227,19 @@ worker). Omit the key to use the built-in default (120s — generous enough to a
 
 | Variable | Description |
 |----------|-------------|
-| `ORCHESTRA_PORTAL_DATA_PATH` | Override the data path |
-| `ORCHESTRA_ORCHESTRATIONS_PATH` | Override the orchestrations scan path |
+| `ORCHESTRA_CONFIG_PATH` | Explicit `orchestra.json` path. Highest precedence in discovery. |
+| `ORCHESTRA_DATA_PATH` | Override the data path (`Orchestra.Server`). |
+| `ORCHESTRA_PORTAL_DATA_PATH` | Override the data path (portal). |
+| `ORCHESTRA_ORCHESTRATIONS_PATH` | Override the workspace scan root. |
+| `ORCHESTRA_ENABLE_SCHEDULER` | `false` runs an API-only host that never fires triggers. |
+| `ORCHESTRA_URL` | Server URL used by CLI client commands. |
+| `ORCHESTRA_COPILOT_CLI_PATH` | Use a pre-installed Copilot CLI instead of the managed download. |
+| `ORCHESTRA_COPILOT_NPM_REGISTRY` | npm registry mirror for the Copilot CLI download. |
+| `ORCHESTRA_OPENCODE_PATH` | Path to the `opencode` binary when it is not on `PATH`. |
+| `ASPNETCORE_URLS` / `DOTNET_URLS` | Standard ASP.NET bindings; both take precedence over `orchestra.json`'s `urls`. |
+
+The engine also *sets* variables for `Script` steps: `ORCHESTRA_CONTROL_FILE`,
+`ORCHESTRA_RUN_ID`, and `ORCHESTRA_STEP_NAME`.
 
 ## API Endpoints
 
@@ -247,8 +345,7 @@ The engine stamps `X-Orchestra-Parent-Execution-Id`, `X-Orchestra-Parent-Orchest
 curl -X POST http://localhost:5000/api/orchestrations \
   -H "Content-Type: application/json" \
   -d '{
-    "paths": ["./orchestrations/my-workflow.json"],
-    "mcpPath": "./mcp.json"
+    "paths": ["./orchestrations/my-workflow.json"]
   }'
 ```
 
@@ -258,8 +355,7 @@ curl -X POST http://localhost:5000/api/orchestrations \
 curl -X POST http://localhost:5000/api/orchestrations/json \
   -H "Content-Type: application/json" \
   -d '{
-    "json": "{\"name\":\"test\",\"version\":\"1.0\",\"steps\":[...]}",
-    "mcpJson": "{\"mcps\":[...]}"
+    "json": "{\"name\":\"test\",\"version\":\"1.0\",\"steps\":[...]}"
   }'
 ```
 

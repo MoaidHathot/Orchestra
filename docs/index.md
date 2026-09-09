@@ -3,126 +3,121 @@ layout: default
 title: Home
 nav_order: 1
 ---
+{% raw %}
 
 # Orchestra
 
-A declarative orchestration framework for LLM workflows in .NET.
+**Deterministic AI agent orchestrations.** Describe a workflow as a declarative DAG of steps in
+a single JSON/YAML file, and Orchestra runs it — resolving dependencies, streaming progress, and
+driving each `Prompt` step on a real coding agent (GitHub Copilot or OpenCode).
 
-Orchestra enables you to define multi-step AI pipelines declaratively in JSON, where steps can depend on each other forming a Directed Acyclic Graph (DAG). Independent steps execute in parallel automatically, and the framework handles retries, quality control loops, and external tool integration via the Model Context Protocol (MCP).
+It ships as **one self-contained command-line tool** with a built-in web portal, a one-shot
+runner, MCP integration, triggers, checkpointing, and human-in-the-loop pauses.
+
+## Quick start
+
+```bash
+dotnet tool install --global Orchestra
+
+orchestra init      # scaffold a workspace with a runnable example
+orchestra doctor    # check this machine is ready
+orchestra run hello # run it
+```
+
+Or without installing anything, using the `dnx` launcher:
+
+```bash
+dnx Orchestra --yes -- init
+```
+
+See [Getting Started](getting-started) for the full walkthrough.
+
+## What an orchestration looks like
+
+```yaml
+name: hello
+description: Research a topic, brief it, then assemble a document.
+defaultModel: claude-opus-4.8
+
+inputs:
+  topic:
+    type: string
+    required: false
+    default: deterministic AI agent orchestration
+
+steps:
+  - name: research
+    type: Prompt
+    systemPrompt: You are a meticulous research assistant.
+    userPrompt: Research "{{param.topic}}" and list the key findings as bullet points.
+
+  - name: brief
+    type: Prompt
+    dependsOn: [research]
+    systemPrompt: You are a technical writer who values clarity over length.
+    userPrompt: |
+      Using the research below, write a 120-word executive brief on {{param.topic}}.
+
+      {{research.output}}
+
+  - name: document          # deterministic: no agent call, no cost
+    type: Transform
+    dependsOn: [brief]
+    template: "# {{param.topic}}\n\n{{brief.output}}"
+```
+
+`dependsOn` builds the DAG; steps with no unmet dependencies run in parallel automatically.
 
 ## Features
 
-- **Declarative Orchestrations**: Define AI workflows in JSON with clear step dependencies
-- **Parallel Execution**: Independent steps run concurrently for optimal performance
-- **Quality Control Loops**: Built-in retry mechanisms with checker steps for output validation
-- **MCP Integration**: Connect to external tools via Model Context Protocol (local or remote servers)
-- **Multiple Trigger Types**: Schedule orchestrations via cron, webhooks, email polling, or loops
-- **Real-time Streaming**: Server-Sent Events (SSE) for live execution progress
-- **Run History**: Persistent storage of execution traces with detailed step-by-step records
-- **Provider Agnostic**: Abstract agent interfaces allow any LLM provider implementation
+- **One file, one DAG.** `Prompt`, `Command`, `Script`, `Http`, `Transform`, `Approval`, and
+  nested `Orchestration` steps wired by `dependsOn`, with template expressions.
+- **Pluggable agents.** Run any Prompt step on `copilot` or `opencode`, chosen per step or per
+  orchestration. The engine fails a step fast if it uses a feature the provider lacks, rather
+  than silently dropping it.
+- **Deterministic where it matters.** Command, Script, Transform, and Http steps cost nothing
+  and cannot hallucinate. A Script step can set its own status or halt the whole run.
+- **Human-in-the-loop.** `Approval` steps and the `request_user_input` engine tool persist a
+  pending record to disk, so a paused run survives a host restart.
+- **MCP-native.** Attach Model Context Protocol servers to steps, and expose your
+  orchestrations *as* an MCP server for other agents to discover and invoke.
+- **Agent Skills.** Ship `SKILL.md` directories to a step — including the bundled
+  `orchestration-authoring` skill that teaches an agent to write Orchestra files.
+- **Operate it.** A web portal, triggers (cron / webhook / file / manual), durable
+  checkpoint-and-resume, profiles and tags, run history and export.
 
-## Architecture
+## Tooling
 
-Orchestra is composed of three main packages:
-
-| Package | Description |
-|---------|-------------|
-| [Orchestra.Engine](engine) | Core orchestration engine with execution, scheduling, and storage abstractions |
-| [Orchestra.Host](host) | ASP.NET Core hosting layer with REST API, triggers, and SSE streaming |
-| [Orchestra.Copilot](copilot) | GitHub Copilot SDK implementation of the agent interfaces |
-
-## Quick Start
-
-### 1. Install the packages
-
-```bash
-dotnet add package Orchestra.Engine
-dotnet add package Orchestra.Host
-dotnet add package Orchestra.Copilot
-```
-
-### 2. Define an orchestration
-
-Create a JSON file defining your workflow:
-
-```json
-{
-  "name": "research-assistant",
-  "description": "Research a topic and generate a summary",
-  "version": "1.0",
-  "steps": [
-    {
-      "name": "research",
-      "type": "prompt",
-      "model": "claude-opus-4.5",
-      "systemPrompt": "You are a research assistant.",
-      "userPrompt": "Research the following topic: {{topic}}"
-    },
-    {
-      "name": "summarize",
-      "type": "prompt",
-      "model": "claude-opus-4.5",
-      "dependsOn": ["research"],
-      "systemPrompt": "You are a technical writer.",
-      "userPrompt": "Summarize the research findings into a concise report."
-    }
-  ]
-}
-```
-
-### 3. Set up the host
-
-```csharp
-var builder = WebApplication.CreateBuilder(args);
-
-// Register the Copilot agent builder
-builder.Services.AddSingleton<AgentBuilder, CopilotAgentBuilder>();
-
-// Add Orchestra Host services
-builder.Services.AddOrchestraHost(options =>
-{
-    options.DataPath = "./data";
-    options.Scan = new ScanConfig
-    {
-        Directory = "./orchestrations",
-    };
-});
-
-var app = builder.Build();
-
-// Initialize and map endpoints
-app.Services.InitializeOrchestraHost();
-app.MapOrchestraHostEndpoints();
-
-app.Run();
-```
-
-### 4. Run an orchestration
-
-```bash
-# Register the orchestration
-curl -X POST http://localhost:5000/api/orchestrations \
-  -H "Content-Type: application/json" \
-  -d '{"paths": ["./orchestrations/research-assistant.json"]}'
-
-# Execute with parameters (SSE stream)
-curl -N "http://localhost:5000/api/orchestrations/{id}/run?params={\"topic\":\"quantum computing\"}"
-```
+| Command | Purpose |
+|---|---|
+| `orchestra init` | Scaffold a workspace: starter orchestration, schemas, `orchestra.json`. |
+| `orchestra doctor` | Verify config, data path, agent CLI, credentials, and server before a run. |
+| `orchestra validate` | Parse an orchestration and check its expressions — no server, no agent. |
+| `orchestra run` / `exec` | Run one orchestration to completion, streaming progress. |
+| `orchestra portal` | Long-running host: dashboard, REST API, and MCP endpoints. |
 
 ## Documentation
 
-- [Getting Started](getting-started) - Installation and basic setup
-- [Orchestra.Engine](engine) - Core engine documentation
-- [Orchestra.Host](host) - Hosting layer and API reference
-- [Orchestra.Copilot](copilot) - GitHub Copilot integration
-- [CLI](cli) - Orchestra command-line interface
-- [API Reference](api-reference) - Complete REST API documentation
+| Doc | Contents |
+|---|---|
+| [Getting Started](getting-started) | Install, first run, workspace layout, team rollout |
+| [CLI](cli) | Every command, flag, and exit code |
+| [Engine](engine) | Step types, triggers, hooks, checkpointing, template expressions |
+| [Host](host) | Configuration reference, REST API, MCP server, retention |
+| [Agent providers](copilot) | Copilot vs OpenCode, per-step controls, capability matrix |
+| [API reference](api-reference) | Complete REST API |
+| [Run storage](run-storage) | On-disk run records and parent/child links |
 
 ## Requirements
 
-- .NET 10.0 or later
-- GitHub Copilot subscription (for Orchestra.Copilot)
+- .NET 10 runtime
+- An agent provider: a **GitHub Copilot** subscription, or **OpenCode** on `PATH`
+
+> Orchestra is distributed as the single **`Orchestra`** package on NuGet. There are no
+> `Orchestra.Engine` / `Orchestra.Host` / `Orchestra.Copilot` packages — to use the libraries
+> directly, reference the projects from a clone of the repository.
 
 ## License
 
-This project is licensed under the MIT License.
+MIT. Repository: <https://github.com/MoaidHathot/Orchestra>.
+{% endraw %}
