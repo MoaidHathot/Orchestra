@@ -11,6 +11,12 @@ namespace Orchestra.ProcessHost;
 /// </summary>
 public sealed partial class ManagedProcess : IAsyncDisposable
 {
+	/// <summary>
+	/// How long to wait for a killed process to be reaped before giving up. Short by design:
+	/// the kill signal is already delivered, so this only covers the OS finishing the job.
+	/// </summary>
+	private static readonly TimeSpan KillReapTimeout = TimeSpan.FromSeconds(5);
+
 	private readonly ProcessService _config;
 	private readonly ILogger _logger;
 	private Process? _process;
@@ -236,8 +242,9 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 			{
 				if (_config.ForceKill)
 				{
-					// Immediate kill — no graceful shutdown attempt
+					// Immediate kill - no graceful shutdown attempt
 					KillProcessTree(_process);
+					await WaitForKilledProcessAsync(_process);
 					LogProcessForceKilled(_config.Name);
 				}
 				else
@@ -254,8 +261,9 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 					}
 					catch (OperationCanceledException)
 					{
-						// Timeout expired — force kill the entire process tree
+						// Timeout expired - force kill the entire process tree
 						KillProcessTree(_process);
+						await WaitForKilledProcessAsync(_process);
 						LogProcessForceKilled(_config.Name);
 					}
 				}
@@ -467,6 +475,34 @@ public sealed partial class ManagedProcess : IAsyncDisposable
 		catch (InvalidOperationException)
 		{
 			// Already exited
+		}
+	}
+
+	/// <summary>
+	/// Waits for a just-killed process to actually be reaped.
+	/// </summary>
+	/// <remarks>
+	/// <see cref="Process.Kill(bool)"/> only signals the process; it does not wait. On Windows
+	/// the exit is usually observable straight away, but on Unix the child stays a zombie until
+	/// it is waited on, so <see cref="Process.HasExited"/> keeps returning false and
+	/// <c>ExitCode</c> is left null - <c>StopAsync</c> would report Stopped for a process that
+	/// is still alive. The bounded wait keeps a wedged process from hanging shutdown: the signal
+	/// has already been sent either way, so timing out here costs nothing.
+	/// </remarks>
+	private static async Task WaitForKilledProcessAsync(Process process)
+	{
+		try
+		{
+			using var cts = new CancellationTokenSource(KillReapTimeout);
+			await process.WaitForExitAsync(cts.Token);
+		}
+		catch (OperationCanceledException)
+		{
+			// Kill signal delivered; the OS has not reaped it yet. ExitCode stays null.
+		}
+		catch (InvalidOperationException)
+		{
+			// Process was never started, or has already been disposed.
 		}
 	}
 
