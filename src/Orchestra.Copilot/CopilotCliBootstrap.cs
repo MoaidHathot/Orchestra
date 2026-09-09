@@ -39,6 +39,12 @@ internal static partial class CopilotCliBootstrap
 
 	private const string DefaultNpmRegistry = "https://registry.npmjs.org";
 
+	/// <summary>How long to wait for a peer process that already holds the download lock.</summary>
+	private static readonly TimeSpan LockAcquisitionTimeout = TimeSpan.FromMinutes(10);
+
+	/// <summary>Poll interval while waiting for the peer's download to finish.</summary>
+	private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(500);
+
 	/// <summary>
 	/// Optional override for the npm registry URL. Honored when set; falls back to
 	/// <see cref="DefaultNpmRegistry"/>. Useful for org-internal mirrors.
@@ -52,11 +58,18 @@ internal static partial class CopilotCliBootstrap
 	/// </summary>
 	public const string ExplicitCliPathEnvVar = "ORCHESTRA_COPILOT_CLI_PATH";
 
-	// One shared download per process. Reset only by full process restart, which is fine --
-	// the on-disk cache is the source of truth across restarts. The `!` on s_bootstrapLogger
-	// silences a spurious CS8604: the field is initialised below to NullLogger.Instance
-	// (non-null), but C#'s static-init ordering analysis can't prove that here.
-	private static readonly Lazy<Task<string>> s_path = new(
+	// One shared download per process. The `!` on s_bootstrapLogger silences a spurious
+	// CS8604: the field is initialised below to NullLogger.Instance (non-null), but C#'s
+	// static-init ordering analysis can't prove that here.
+	//
+	// Held behind a lock rather than a plain static Lazy because a Lazy caches its FAULT:
+	// one transient network blip during the download would poison every later run in this
+	// process, and the only recovery would be a process restart. ResetIfFaulted below drops
+	// a failed attempt so the next caller retries.
+	private static readonly Lock s_pathLock = new();
+	private static Lazy<Task<string>> s_path = CreatePathLazy();
+
+	private static Lazy<Task<string>> CreatePathLazy() => new(
 		() => EnsureCoreAsync(s_bootstrapLogger!, CancellationToken.None),
 		LazyThreadSafetyMode.ExecutionAndPublication);
 
@@ -99,7 +112,46 @@ internal static partial class CopilotCliBootstrap
 
 		// Wrap to honor the per-call cancellation token even though the Lazy task itself
 		// is unforked (so a second caller cancelling can't cancel the first's download).
-		return s_path.Value.WaitAsync(cancellationToken);
+		return AwaitWithRetryAsync(cancellationToken);
+	}
+
+	private static async Task<string> AwaitWithRetryAsync(CancellationToken cancellationToken)
+	{
+		var lazy = GetOrCreatePathLazy();
+
+		try
+		{
+			return await lazy.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			// Drop the faulted attempt so the *next* caller starts a fresh download instead
+			// of replaying this exception forever. The current caller still sees the failure.
+			ResetIfFaulted(lazy);
+			throw;
+		}
+	}
+
+	private static Lazy<Task<string>> GetOrCreatePathLazy()
+	{
+		lock (s_pathLock)
+		{
+			return s_path;
+		}
+	}
+
+	private static void ResetIfFaulted(Lazy<Task<string>> observed)
+	{
+		lock (s_pathLock)
+		{
+			// Only reset the instance we actually observed failing; another thread may have
+			// already swapped in a fresh one that is mid-flight or has since succeeded.
+			if (!ReferenceEquals(s_path, observed))
+				return;
+
+			if (observed.IsValueCreated && observed.Value.IsFaulted)
+				s_path = CreatePathLazy();
+		}
 	}
 
 	/// <summary>
@@ -165,6 +217,60 @@ internal static partial class CopilotCliBootstrap
 		return Path.Combine(root, "Orchestra", "copilot-cli", cliVersion, rid);
 	}
 
+	/// <summary>
+	/// Acquires the cross-process download lock, waiting for a peer that already holds it.
+	/// </summary>
+	/// <returns>
+	/// The held lock stream, or <c>null</c> when the peer finished the download while we were
+	/// waiting (so the caller can just use the cached binary).
+	/// </returns>
+	/// <remarks>
+	/// Opening with <see cref="FileShare.None"/> throws immediately when another process holds
+	/// the lock. Without a retry, two <c>orchestra run</c> invocations starting together on a
+	/// cold cache meant the second died with a raw "file is being used by another process"
+	/// <see cref="IOException"/> — a confusing first-run failure for something the user did
+	/// nothing wrong to cause. Poll instead, and give up only if the peer is still going after
+	/// the download could plausibly have finished.
+	/// </remarks>
+	private static async Task<FileStream?> AcquireDownloadLockAsync(
+		string lockPath,
+		string binaryPath,
+		ILogger logger,
+		CancellationToken cancellationToken)
+	{
+		var deadline = DateTimeOffset.UtcNow + LockAcquisitionTimeout;
+		var logged = false;
+
+		while (true)
+		{
+			try
+			{
+				return new FileStream(
+					lockPath,
+					FileMode.OpenOrCreate,
+					FileAccess.ReadWrite,
+					FileShare.None,
+					bufferSize: 1,
+					options: FileOptions.DeleteOnClose);
+			}
+			catch (IOException) when (DateTimeOffset.UtcNow < deadline)
+			{
+				// Peer holds the lock. If it has finished, take the cached binary and go.
+				if (File.Exists(binaryPath))
+					return null;
+
+				if (!logged)
+				{
+					LogWaitingForPeerDownload(logger, lockPath);
+					WriteProgressToStderr($"Copilot CLI: another process is downloading {CopilotCliVersion}; waiting...");
+					logged = true;
+				}
+
+				await Task.Delay(LockPollInterval, cancellationToken).ConfigureAwait(false);
+			}
+		}
+	}
+
 	private static async Task<string> EnsureCoreAsync(ILogger logger, CancellationToken cancellationToken)
 	{
 		var (rid, npmPlatform, binaryName) = ResolveHostPlatform();
@@ -198,14 +304,15 @@ internal static partial class CopilotCliBootstrap
 		// The file lock is released the moment the using block exits, including on
 		// exception, so a crashed download never leaves the lock pinned.
 		var lockPath = Path.Combine(cacheDir, ".download.lock");
-		using (var lockStream = new FileStream(
-			lockPath,
-			FileMode.OpenOrCreate,
-			FileAccess.ReadWrite,
-			FileShare.None,
-			bufferSize: 1,
-			options: FileOptions.DeleteOnClose))
+		using (var lockStream = await AcquireDownloadLockAsync(lockPath, binaryPath, logger, cancellationToken).ConfigureAwait(false))
 		{
+			// A null stream means another process finished the download while we waited.
+			if (lockStream is null)
+			{
+				LogCacheHit(logger, binaryPath);
+				return binaryPath;
+			}
+
 			// Re-check inside the lock -- another process may have just finished.
 			if (File.Exists(binaryPath))
 			{
@@ -349,4 +456,7 @@ internal static partial class CopilotCliBootstrap
 
 	[LoggerMessage(EventId = 4, Level = LogLevel.Information, Message = "Copilot CLI bootstrap: ready at {Path} ({SizeBytes} bytes)")]
 	private static partial void LogDownloadCompleted(ILogger logger, string path, long sizeBytes);
+
+	[LoggerMessage(EventId = 6, Level = LogLevel.Information, Message = "Copilot CLI bootstrap: waiting for another process holding {LockPath}")]
+	private static partial void LogWaitingForPeerDownload(ILogger logger, string lockPath);
 }

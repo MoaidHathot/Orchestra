@@ -251,7 +251,14 @@ public static class ServiceCollectionExtensions
 		// ServiceManager: manages external processes and hooks from orchestra.services.json
 		services.AddSingleton<ProcessTracker>(sp =>
 		{
-			var configDir = Path.GetDirectoryName(OrchestraConfigLoader.GetDefaultConfigPath())!;
+			// Track PIDs next to the orchestra.json that is actually in effect, not the
+			// user-global default. The services being tracked come from the discovered
+			// orchestra.services.json (which sits beside the resolved config), so pinning the
+			// PID file to the default location would make one project's tracker adopt — and on
+			// shutdown, kill — processes started for a different project.
+			var configPath = OrchestraConfigLoader.ResolveConfigPath()
+				?? OrchestraConfigLoader.GetDefaultConfigPath();
+			var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath))!;
 			var pidFilePath = Path.Combine(configDir, ".orchestra.pids.json");
 			return new ProcessTracker(pidFilePath, sp.GetRequiredService<ILogger<ProcessTracker>>());
 		});

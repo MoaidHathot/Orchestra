@@ -6,12 +6,17 @@ using Microsoft.Extensions.Logging;
 namespace Orchestra.OpenCode;
 
 /// <summary>
-/// Resolves how to obtain an OpenCode server: connect to a pre-running instance
-/// (<c>ORCHESTRA_OPENCODE_URL</c> / <c>opencode.serverUrl</c>) or spawn <c>opencode serve</c>
-/// from an explicit path (<c>ORCHESTRA_OPENCODE_PATH</c> / <c>opencode.cliPath</c>) or the
-/// <c>opencode</c> binary on PATH. Parallels <c>CopilotCliBootstrap</c> but never downloads —
-/// the spawn-or-connect choice keeps the footprint small per the adapter's design.
+/// Resolves how to obtain an OpenCode server: spawn <c>opencode serve</c> from an explicit path
+/// (<c>ORCHESTRA_OPENCODE_PATH</c> / <c>opencode.cliPath</c>) or from the <c>opencode</c> binary
+/// on PATH. Parallels <c>CopilotCliBootstrap</c> but never downloads - the spawn-or-connect
+/// choice keeps the footprint small per the adapter's design.
 /// </summary>
+/// <remarks>
+/// There is deliberately no environment variable for connecting to a pre-running server. The
+/// only connect path is <see cref="OpenCodeAgentPoolOptions.ServerUrl"/>, an internal test seam
+/// that host configuration does not expose. (This doc comment previously advertised an
+/// <c>ORCHESTRA_OPENCODE_URL</c> variable that <see cref="Resolve"/> never read.)
+/// </remarks>
 internal static class OpenCodeServerBootstrap
 {
 	public const string ExplicitCliPathEnvVar = "ORCHESTRA_OPENCODE_PATH";

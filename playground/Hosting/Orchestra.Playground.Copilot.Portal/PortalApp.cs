@@ -29,7 +29,7 @@ internal static class PortalApp
 			})
 			: WebApplication.CreateBuilder(args);
 
-		ApplyUrlBindingFallback(builder.Configuration, orchestraConfig);
+		builder.Configuration.ApplyOrchestraUrls(orchestraConfig);
 
 		// Make orchestra.json's logLevel the authoritative default minimum level (overrides
 		// appsettings.json's Logging:LogLevel:Default). No-op when logLevel is unset.
@@ -98,21 +98,6 @@ internal static class PortalApp
 		var targetMin = Math.Max(workerMin, 64);
 		var targetIoMin = Math.Max(ioMin, 64);
 		ThreadPool.SetMinThreads(targetMin, targetIoMin);
-	}
-
-	private static void ApplyUrlBindingFallback(IConfigurationManager configuration, OrchestraConfigFile? orchestraConfig)
-	{
-		if (string.IsNullOrWhiteSpace(orchestraConfig?.Urls))
-			return;
-
-		var hasExplicitUrls = !string.IsNullOrWhiteSpace(configuration["Urls"])
-			|| !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ASPNETCORE_URLS"))
-			|| !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DOTNET_URLS"));
-
-		if (hasExplicitUrls)
-			return;
-
-		configuration["Urls"] = orchestraConfig.Urls;
 	}
 
 	private static void MapPortalEndpoints(WebApplication app)

@@ -24,6 +24,15 @@ using Orchestra.Host.McpServer;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Load orchestra.json once and reuse it: the config file is the source for both the URL
+// binding and the log level below, and re-loading would parse (and re-expand ${VAR}) twice.
+var orchestraConfig = OrchestraConfigLoader.Load();
+
+// Bind Kestrel to orchestra.json's `urls` when nothing more explicit was supplied. Without
+// this the server ignored `urls` entirely while the CLI still derived its target URL from it,
+// so client commands silently pointed at an address nothing was listening on.
+builder.Configuration.ApplyOrchestraUrls(orchestraConfig);
+
 builder.Logging.AddSimpleConsole(options =>
 {
 	options.SingleLine = true;
@@ -34,7 +43,7 @@ builder.Logging.AddSimpleConsole(options =>
 
 // Make orchestra.json's logLevel the authoritative default minimum level (overrides
 // appsettings.json's Logging:LogLevel:Default). No-op when logLevel is unset.
-builder.Configuration.ApplyOrchestraLogLevel(OrchestraConfigLoader.Load());
+builder.Configuration.ApplyOrchestraLogLevel(orchestraConfig);
 
 // Add Orchestra Host services.  The IConfiguration-aware overload ensures that
 // data-path and orchestrations-path are read from the host's IConfiguration
