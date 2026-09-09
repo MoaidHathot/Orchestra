@@ -9,7 +9,7 @@
       "type": "Prompt",
       "dependsOn": [],
       "systemPrompt": "You are an event parser. Your job is to extract and structure key information from incoming event data. Be concise and factual.",
-      "userPrompt": "Parse the following event and extract the key details:\n\nEvent Type: {{eventType}}\nEvent Data: {{eventData}}\n\nProvide a structured summary with:\n1. Event category (e.g., alert, notification, update)\n2. Priority level (low, medium, high, critical)\n3. Key entities involved\n4. Timestamp or time reference if available\n5. Brief description of what happened",
+      "userPrompt": "Parse the following event and extract the key details:\n\nEvent Type: {{param.eventType}}\nEvent Data: {{param.eventData}}\n\nProvide a structured summary with:\n1. Event category (e.g., alert, notification, update)\n2. Priority level (low, medium, high, critical)\n3. Key entities involved\n4. Timestamp or time reference if available\n5. Brief description of what happened",
       "model": "claude-code-4.5",
       "parameters": ["eventType", "eventData"]
     },

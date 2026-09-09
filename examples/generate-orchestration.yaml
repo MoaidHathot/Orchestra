@@ -31,6 +31,10 @@ inputs:
       If not provided, the file is saved only to the orchestration's temp
       directory.
     required: false
+    # An optional input with no default is never materialized, so the template
+    # expression would reach the agent as the literal "{{param.outputPath}}"
+    # rather than as an empty string it can test for.
+    default: ""
 
 mcps:
   - name: orchestra-control
@@ -43,19 +47,21 @@ mcps:
     arguments:
       - "-y"
       - "@modelcontextprotocol/server-filesystem"
-      - "{{workingDirectory}}"
+      # {{workingDirectory}} is documented in some places but was never implemented
+      # in TemplateResolver; it would be passed through as a literal string.
+      - "{{orchestration.sourceDirectory}}"
 
 steps:
   # ── Step 1: Generate the orchestration ─────────────────────────────────
   - name: generate
     type: Prompt
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     parameters:
       - description
     mcps:
       - orchestra-control
     skillDirectories:
-      - ./skills/orchestration-authoring
+      - ../skills/orchestration-authoring
     systemPrompt: |
       You are an expert Orchestra orchestration author. Your job is to generate
       valid, production-quality Orchestra orchestration YAML files based on user
@@ -66,7 +72,7 @@ steps:
          or commentary in your final output.
       2. Use the knowledge from your loaded skills to ensure correctness. Only
          use documented properties — never invent fields.
-      3. Use 'claude-opus-4.6' as the default model unless the user specifies
+      3. Use 'claude-opus-4.8' as the default model unless the user specifies
          otherwise.
       4. Use kebab-case for orchestration and step names, camelCase for
          variables and inputs.
@@ -187,9 +193,9 @@ steps:
     type: Prompt
     dependsOn:
       - generate
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     skillDirectories:
-      - ./skills/orchestration-authoring
+      - ../skills/orchestration-authoring
     systemPrompt: |
       You are an Orchestra orchestration validator. Review the generated
       orchestration YAML for structural and semantic correctness. Check:
@@ -200,7 +206,9 @@ steps:
       2. Step names are unique and in kebab-case.
       3. dependsOn references exist as step names.
       4. No circular dependencies.
-      5. Template expressions use correct syntax: {{expression}}.
+      5. Template expressions use correct syntax: \{{param.name}}, \{{vars.name}},
+         \{{env.NAME}}, or \{{stepName.output}}. A bare \{{name}} is NOT valid --
+         the resolver only understands the namespace-prefixed forms.
       6. mcps on steps are string arrays referencing defined MCP names.
       7. Loop targets are dependencies of the checker step.
       8. Mutual exclusion rules respected (systemPrompt vs systemPromptFile,
@@ -208,64 +216,83 @@ steps:
       9. Input types are valid (string, boolean, number).
       10. No invented/undocumented properties.
 
-      If valid, respond with: VALID
-      Followed by the orchestration YAML unchanged.
+      If correct, respond with APPROVED on the first line, followed by the
+      orchestration YAML unchanged.
 
-      If invalid, respond with: INVALID
-      Followed by the specific issues found and a corrected version of the YAML.
+      If not, respond with NEEDS_WORK on the first line, followed by the
+      specific issues and a corrected version of the YAML.
     userPrompt: |
       Validate this orchestration:
 
       {{generate.output}}
-    outputHandlerPrompt: >
-      Extract ONLY the raw YAML orchestration content from the input.
-      If the input contains VALID or INVALID markers, skip them and return
-      only the YAML content. Remove any markdown formatting, code fences,
-      explanations, or surrounding text. Return the pure YAML content and
-      nothing else.
+    # Deliberately NO outputHandlerPrompt on this step. The loop's exit check runs
+    # against the checker's FINAL content, so a handler that strips the verdict
+    # marker makes the exit condition permanently unobservable. The save step below
+    # does the YAML extraction instead.
     loop:
       target: generate
-      maxIterations: 2
-      exitPattern: "VALID"
+      maxIterations: 3
+      # Must not be a substring of the rejection marker: "VALID" matches "INVALID",
+      # which would have made every rejection read as an approval.
+      exitPattern: "APPROVED"
 
-  # ── Step 3: Save the orchestration file ────────────────────────────────
+  # ── Step 3: Save + machine-verify the orchestration ────────────────────
+  # Deterministic on purpose. Writing a file and checking that it parses are not
+  # judgement calls, so they must not be an LLM turn: the review loop above is
+  # opinion, this step is ground truth. `orchestra validate` runs the same parser
+  # and template-expression validator the executor runs before a real run, so an
+  # orchestration that would fail at execution fails here instead of being written.
+  #
+  # The candidate arrives on stdin rather than interpolated into the script body,
+  # so YAML containing quotes or here-string terminators cannot break the script.
   - name: save-orchestration
-    type: Prompt
+    type: Script
     dependsOn:
       - validate
-    model: claude-opus-4.6
+    shell: pwsh
     parameters:
       - outputPath
-    mcps:
-      - filesystem
-    systemPrompt: |
-      You are a file management assistant. Your job is to save the
-      orchestration content you receive.
+    stdin: "{{validate.output}}"
+    script: |
+      $ErrorActionPreference = 'Stop'
 
-      INSTRUCTIONS:
-      1. ALWAYS save the orchestration content using `orchestra_save_file`
-         with extension "yaml". This stores it in the orchestration's temp
-         directory and returns the file path.
-      2. If an output path is provided (not empty), ALSO save a copy to
-         that exact path using the filesystem MCP tools. Create any
-         parent directories if needed.
-      3. If no output path is provided, only perform step 1.
+      $content = [Console]::In.ReadToEnd()
 
-      Output the file path(s) where the orchestration was saved.
-    userPrompt: |
-      Save the following orchestration content.
+      # The checker keeps its APPROVED / NEEDS_WORK marker (the loop matches on it),
+      # so strip the verdict line and any markdown fence before writing.
+      $content = $content -replace '(?m)^\s*(APPROVED|NEEDS_WORK).*$', ''
+      if ($content -match '(?s)```(?:yaml|yml)?\s*(.+?)\s*```') { $content = $Matches[1] }
+      $content = $content.Trim()
 
-      Output path: {{param.outputPath}}
+      if ([string]::IsNullOrWhiteSpace($content)) {
+        Orchestra-Complete -Status failed -Reason 'The generator produced no YAML content.'
+      }
 
-      Content:
-      {{validate.output}}
+      $tempPath = Join-Path '{{orchestration.tempDir}}' 'generated-orchestration.yaml'
+      New-Item -ItemType Directory -Force -Path (Split-Path -Parent $tempPath) | Out-Null
+      Set-Content -LiteralPath $tempPath -Value $content -Encoding utf8NoBOM
+
+      $report = & orchestra validate $tempPath 2>&1 | Out-String
+      if ($LASTEXITCODE -ne 0) {
+        Orchestra-Complete -Status failed -Reason "Generated orchestration failed validation:`n$report"
+      }
+
+      $outputPath = '{{param.outputPath}}'
+      if (-not [string]::IsNullOrWhiteSpace($outputPath)) {
+        $parent = Split-Path -Parent $outputPath
+        if ($parent) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+        Copy-Item -LiteralPath $tempPath -Destination $outputPath -Force
+        Write-Output $outputPath
+      } else {
+        Write-Output $tempPath
+      }
 
   # ── Step 4: Conditionally register the orchestration ───────────────────
   - name: register-orchestration
     type: Prompt
     dependsOn:
       - save-orchestration
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     parameters:
       - register
     mcps:

@@ -18,6 +18,11 @@
           { "$ref": "#/definitions/commandHook" }
         ]
       }
+    },
+    "defaultReadinessTimeoutSeconds": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Default readiness timeout applied to any process service whose readiness check does not set its own 'timeoutSeconds'. Lets you raise the timeout once for a slow machine instead of editing every service."
     }
   },
   "required": ["services"],

@@ -7,7 +7,7 @@
       "name": "filesystem",
       "type": "local",
       "command": "npx",
-      "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "{{workingDirectory}}"]
+      "arguments": ["-y", "@modelcontextprotocol/server-filesystem", "{{orchestration.sourceDirectory}}"]
     }
   ],
   "steps": [

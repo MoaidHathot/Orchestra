@@ -9,7 +9,7 @@
       "type": "Prompt",
       "dependsOn": [],
       "systemPrompt": "You are a professional translator. Translate the given text to French. Output only the translation, nothing else.",
-      "userPrompt": "Translate the following text:\n\n{{text}}",
+      "userPrompt": "Translate the following text:\n\n{{param.text}}",
       "parameters": ["text"],
       "mcps": [],
       "model": "claude-opus-4.5"
@@ -20,7 +20,7 @@
       "dependsOn": [],
       "systemPrompt": "Focus specifically on security vulnerabilities, SQL injection risks, and authentication issues.",
       "systemPromptMode": "append",
-      "userPrompt": "Review the following code for security issues:\n\n{{code}}",
+      "userPrompt": "Review the following code for security issues:\n\n{{param.code}}",
       "parameters": ["code"],
       "mcps": [],
       "model": "claude-opus-4.5"

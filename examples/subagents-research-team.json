@@ -16,7 +16,7 @@
       "type": "prompt",
       "dependsOn": [],
       "systemPrompt": "You are a research team coordinator. You manage a team of specialized agents:\n\n1. **Researcher** - Finds and gathers information from the web\n2. **Analyst** - Analyzes data and identifies patterns, trends, and insights\n3. **Writer** - Creates polished, well-structured content and reports\n\nDelegate tasks to the appropriate specialist based on what the user needs. You can use multiple specialists for complex requests. Coordinate their work and synthesize final results.",
-      "userPrompt": "{{topic}}",
+      "userPrompt": "{{param.topic}}",
       "parameters": ["topic"],
       "model": "claude-opus-4.5",
       "subagents": [

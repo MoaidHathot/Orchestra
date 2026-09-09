@@ -8,7 +8,7 @@
       "type": "prompt",
       "dependsOn": [],
       "systemPrompt": "You are an expert code reviewer. Use your loaded skills to guide your review process with best practices and specialized workflows.",
-      "userPrompt": "Review the following code changes and provide feedback:\n\n{{changes}}",
+      "userPrompt": "Review the following code changes and provide feedback:\n\n{{param.changes}}",
       "parameters": ["changes"],
       "model": "claude-opus-4.5",
       "skillDirectories": [

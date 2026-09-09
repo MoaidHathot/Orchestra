@@ -8,7 +8,7 @@
       "type": "Prompt",
       "dependsOn": [],
       "systemPrompt": "You are a request triage analyst. You categorize incoming requests by urgency and type, then produce a structured assessment.",
-      "userPrompt": "Analyze the following request and produce a triage report:\n\nTitle: {{title}}\nBody: {{body}}\n\nProvide: 1) Category (bug, feature-request, question, incident, other). 2) Urgency (critical, high, medium, low). 3) Key entities mentioned (people, systems, services). 4) One-sentence summary. 5) Suggested next actions (2-3 bullet points).",
+      "userPrompt": "Analyze the following request and produce a triage report:\n\nTitle: {{param.title}}\nBody: {{param.body}}\n\nProvide: 1) Category (bug, feature-request, question, incident, other). 2) Urgency (critical, high, medium, low). 3) Key entities mentioned (people, systems, services). 4) One-sentence summary. 5) Suggested next actions (2-3 bullet points).",
       "outputHandlerPrompt": "Format as a concise markdown report with clear section headers. Keep under 300 words.",
       "parameters": ["title", "body"],
       "mcps": [],

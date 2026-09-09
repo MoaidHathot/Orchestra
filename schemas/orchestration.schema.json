@@ -1020,14 +1020,15 @@
         },
         "on": {
           "type": "string",
-          "description": "Hook event to subscribe to.",
+          "description": "Hook event to subscribe to. 'step.awaitingInput' fires when a step suspends for human input (both Approval steps and the orchestra_request_user_input engine tool), which makes it the single place to wire pause notifications.",
           "enum": [
             "orchestration.success",
             "orchestration.failure",
             "orchestration.after",
             "step.success",
             "step.failure",
-            "step.after"
+            "step.after",
+            "step.awaitingInput"
           ]
         },
         "when": {
@@ -1332,7 +1333,7 @@
         },
         "exitPattern": {
           "type": "string",
-          "description": "String to search for in the checker step's output (case-insensitive). If found, the loop exits successfully.",
+          "description": "String to search for in the checker step's output (case-insensitive SUBSTRING match). If found, the loop exits successfully. CAUTION: because this is a substring match, never pick a pattern that is contained in your rejection marker -- 'VALID' matches 'INVALID', so a rejection would be read as approval. Use disjoint markers such as 'APPROVED' / 'NEEDS_WORK'. Also note the match runs against the checker's FINAL content, so an 'outputHandlerPrompt' on the checker step must not strip the marker.",
           "minLength": 1
         }
       },

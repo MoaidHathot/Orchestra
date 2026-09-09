@@ -30,7 +30,7 @@ mcps:
     arguments:
       - "-y"
       - "@modelcontextprotocol/server-filesystem"
-      - "{{workingDirectory}}"
+      - "{{orchestration.sourceDirectory}}"
 
   - name: orchestra
     type: remote
