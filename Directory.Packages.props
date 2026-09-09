@@ -12,7 +12,13 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.9" />
     <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.9" />
-    <PackageVersion Include="System.Security.Cryptography.Xml" Version="9.0.15" />
+    <!-- Transitive-pin System.Security.Cryptography.Xml to a patched release.
+         Microsoft.NET.Test.Sdk 17.12.0 drags in the 9.0.x line, which is affected by five
+         high-severity advisories (GHSA-23rf-6693-g89p, GHSA-8q5v-6pqq-x66h,
+         GHSA-cvvh-rhrc-wg4q, GHSA-g8r8-53c2-pm3f, GHSA-mmjf-rqrv-855v). The 10.x line is
+         patched, and 10.x also matches the net10.0 target the rest of this file is pinned to.
+         CentralPackageTransitivePinningEnabled applies this to every project. -->
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.11" />
     <PackageVersion Include="OpenTelemetry" Version="1.15.3" />
     <PackageVersion Include="OpenTelemetry.Api" Version="1.15.3" />
     <PackageVersion Include="OpenTelemetry.Api.ProviderBuilderExtensions" Version="1.15.3" />
@@ -29,8 +35,11 @@
     <PackageVersion Include="YamlDotNet" Version="17.0.1" />
     <!-- Run-history index. A derived, always-rebuildable sidecar over the plain-on-disk run
          artifacts; never a source of truth. Microsoft.Data.Sqlite (not .Core) so the native
-         e_sqlite3 bundle ships with the tool and no system SQLite is required. -->
-    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.10" />
+         e_sqlite3 bundle ships with the tool and no system SQLite is required.
+         10.0.10 pulled SQLitePCLRaw.bundle_e_sqlite3 2.1.11, whose native
+         SQLitePCLRaw.lib.e_sqlite3 2.1.11 carries a high-severity advisory
+         (GHSA-2m69-gcr7-jv3q); 10.0.11 moves the whole SQLitePCLRaw graph to 2.1.12+. -->
+    <PackageVersion Include="Microsoft.Data.Sqlite" Version="10.0.11" />
     <!-- Scheduling -->
     <PackageVersion Include="Cronos" Version="0.8.4" />
     <!-- UI -->
