@@ -70,6 +70,14 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	private static readonly Encoding s_utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
 
 	/// <summary>
+	/// UTF-8 with a byte-order mark. Used only for the generated <c>scriptFile:</c> wrapper (see
+	/// <see cref="BuildPowerShellScriptFileWrapper"/>): Windows PowerShell 5.1 decodes BOM-less
+	/// script files with the ANSI code page, which would corrupt a non-ASCII script path embedded
+	/// in the wrapper, while pwsh 7 accepts either form.
+	/// </summary>
+	private static readonly Encoding s_utf8WithBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
+
+	/// <summary>
 	/// Marker prefix used to indicate that an argument has been spilled to a file
 	/// due to size constraints (Windows CreateProcess ~32K limit). The value after
 	/// the prefix is the absolute path to a file containing the original argument
@@ -265,8 +273,11 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			var fileExtension = config?.FileExtension ?? ".tmp";
 			var runFileArgs = config?.RunFileArgs ?? [];
 
-			// Resolve template expressions in script content or script file path
+			// Resolve template expressions in script content or script file path.
+			// scriptFilePath is what the shell executes; displayScriptPath is what traces and
+			// logs show ("(inline)" or the author's scriptFile path — never a generated wrapper).
 			string scriptFilePath;
+			string displayScriptPath;
 
 			if (scriptStep.Script is not null)
 			{
@@ -283,11 +294,13 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				tempScriptPath = Path.Combine(Path.GetTempPath(), $"orchestra-{Guid.NewGuid():N}{fileExtension}");
 				await File.WriteAllTextAsync(tempScriptPath, resolvedScript, cancellationToken);
 				scriptFilePath = tempScriptPath;
+				displayScriptPath = "(inline)";
 			}
 			else if (scriptStep.ScriptFile is not null)
 			{
 				// External script file: resolve templates in the path
 				scriptFilePath = TemplateResolver.Resolve(scriptStep.ScriptFile, context.Parameters, context, step.DependsOn, step);
+				displayScriptPath = scriptFilePath;
 
 				if (!File.Exists(scriptFilePath))
 				{
@@ -295,6 +308,20 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 					LogScriptFileNotFound(step.Name, scriptFilePath);
 					_reporter.ReportStepError(step.Name, errorMessage);
 					return ExecutionResult.Failed(errorMessage, rawDependencyOutputs);
+				}
+
+				// pwsh/powershell: the user's file is never modified, so it cannot carry the
+				// UTF-8 / control-helper / arg-spill prologue the inline path injects. Run it
+				// through a tiny generated wrapper that applies those (behaviour-neutral)
+				// pieces and dot-sources the real file — see BuildPowerShellScriptFileWrapper.
+				if (BuildPowerShellScriptFileWrapper(shell, scriptFilePath) is { } wrapper)
+				{
+					tempScriptPath = Path.Combine(Path.GetTempPath(), $"orchestra-{Guid.NewGuid():N}{fileExtension}");
+					// BOM on purpose: Windows PowerShell 5.1 reads BOM-less files as ANSI, which
+					// would garble a non-ASCII script path inside the wrapper; pwsh 7 accepts both.
+					await File.WriteAllTextAsync(tempScriptPath, wrapper, s_utf8WithBom, cancellationToken);
+					LogScriptFileWrapperInjected(step.Name, shell, scriptFilePath);
+					scriptFilePath = tempScriptPath;
 				}
 			}
 			else
@@ -439,7 +466,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				? " " + string.Join(' ', arguments.Select(a => a.Contains(' ') ? $"\"{a}\"" : a))
 				: string.Empty;
 
-			LogScriptStart(step.Name, shell, scriptStep.Script is not null ? "(inline)" : scriptFilePath, displayArgs);
+			LogScriptStart(step.Name, shell, displayScriptPath, displayArgs);
 
 			// Start the process
 			using var process = new Process { StartInfo = startInfo };
@@ -521,7 +548,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				LogScriptSuccess(step.Name, process.ExitCode);
 
 				// Build trace data for viewer visibility
-				var trace = BuildTrace(shell, scriptStep.Script is not null ? "(inline)" : scriptFilePath, processArguments, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
+				var trace = BuildTrace(shell, displayScriptPath, processArguments, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
 				_reporter.ReportStepTrace(step.Name, trace);
 
 				// Control channel: if the script wrote ORCHESTRA_CONTROL_FILE, map the requested
@@ -549,7 +576,7 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				_reporter.ReportStepError(step.Name, errorMessage);
 
 				// Build trace data even on failure
-				var trace = BuildTrace(shell, scriptStep.Script is not null ? "(inline)" : scriptFilePath, processArguments, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
+				var trace = BuildTrace(shell, displayScriptPath, processArguments, arguments, workingDirectory, resolvedEnvironment, resolvedStdin, stdout, stderr);
 				_reporter.ReportStepTrace(step.Name, trace);
 
 				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: trace);
@@ -645,6 +672,57 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		// (including strictMode:false, where GetPowerShellPrologue returns null) and before any
 		// user output or stdin read.
 		return PowerShellOutputEncodingPrologue + " " + PowerShellInputEncodingPrologue + " " + body;
+	}
+
+	/// <summary>
+	/// Builds the generated wrapper that runs a <c>scriptFile:</c> step's PowerShell file. Returns
+	/// <c>null</c> for non-PowerShell shells (their files run directly, as before).
+	/// </summary>
+	/// <remarks>
+	/// <para>The author's file is executed verbatim — it is never copied or edited — so the only
+	/// way to give it the same always-on guarantees as an inline script is to run a tiny wrapper
+	/// first. The wrapper (single prologue line, then the dot-source, then the exit-code shim):</para>
+	/// <list type="number">
+	///   <item>Pins <c>[Console]::OutputEncoding</c> / <c>$OutputEncoding</c> / <c>[Console]::InputEncoding</c>
+	///   to UTF-8 <b>before any output is written</b>. This matters: PowerShell creates its stdout
+	///   writer on the first write with whatever encoding is current, so a script that sets the
+	///   encoding itself after printing something still loses non-ASCII text. Without this, a
+	///   redirected pwsh on Windows encodes with the OEM code page (e.g. CP437) and every character
+	///   it cannot represent — most of Hebrew, CJK, Cyrillic, … — arrives as <c>?</c>.</item>
+	///   <item>Defines the <see cref="PowerShellControlHelpers"/> (<c>Orchestra-Complete</c> /
+	///   <c>Orchestra-SetStatus</c>) and resolves <see cref="OrchestraFileMarker"/> spill tokens
+	///   in <c>$args</c>, so <c>scriptFile:</c> steps get the documented behaviour instead of a raw
+	///   <c>@orchestra-file:</c> marker.</item>
+	///   <item><b>Dot-sources</b> the author's file with <c>@args</c>. Dot-sourcing (rather than
+	///   <c>&amp;</c>) keeps <c>$PSScriptRoot</c>, <c>$PSCommandPath</c>,
+	///   <c>$MyInvocation.MyCommand.Path</c>, <c>param()</c> binding (positional and named), error
+	///   locations and line numbers all pointing at the author's file.</item>
+	///   <item>Re-creates <c>pwsh -File</c> exit semantics. <c>exit N</c> inside a dot-sourced file
+	///   does not end the wrapper; it sets <c>$LASTEXITCODE</c> and, for <c>N != 0</c>, clears
+	///   <c>$?</c>. A file that merely ran a failing native command and then ended normally leaves
+	///   <c>$?</c> true — and <c>-File</c> would have returned 0 for it — so the shim exits with
+	///   <c>$LASTEXITCODE</c> only when <c>$?</c> is false. Terminating errors propagate unchanged
+	///   (exit 1, original error text). Verified identical to the direct <c>-File</c> baseline on
+	///   pwsh 7 and Windows PowerShell 5.1 for: normal end, <c>exit 0</c>, <c>exit N</c>, trailing
+	///   failing native command, trailing non-terminating cmdlet error, and <c>throw</c>.</item>
+	/// </list>
+	/// <para>The strict-mode / <c>$ErrorActionPreference='Stop'</c> prologue is deliberately NOT
+	/// applied: <c>scriptFile:</c> scripts have always run with their own error-handling
+	/// semantics, and preference variables set in the wrapper would leak into the dot-sourced
+	/// file and change them.</para>
+	/// </remarks>
+	internal static string? BuildPowerShellScriptFileWrapper(string shell, string scriptFilePath)
+	{
+		if (!s_strictByDefaultShells.Contains(shell))
+			return null;
+
+		// Single-quoted PowerShell literal: only the quote itself needs escaping (doubled).
+		var literalPath = scriptFilePath.Replace("'", "''");
+
+		return PowerShellOutputEncodingPrologue + " " + PowerShellInputEncodingPrologue + " "
+			+ PowerShellControlHelpers + " " + PowerShellArgSpillResolver + Environment.NewLine
+			+ ". '" + literalPath + "' @args" + Environment.NewLine
+			+ "if (-not $?) { exit $LASTEXITCODE }" + Environment.NewLine;
 	}
 
 	/// <summary>
@@ -1321,6 +1399,12 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' control file was ignored or rejected: {Error}")]
 	private partial void LogControlFileInvalid(string stepName, string error);
+
+	[LoggerMessage(
+		EventId = 14,
+		Level = LogLevel.Debug,
+		Message = "Step '{StepName}' scriptFile '{ScriptFile}' runs through a generated {Shell} wrapper (UTF-8 pinning, control helpers, arg-spill resolution)")]
+	private partial void LogScriptFileWrapperInjected(string stepName, string shell, string scriptFile);
 
 	#endregion
 }

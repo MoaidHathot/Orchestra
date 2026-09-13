@@ -173,20 +173,30 @@ public class PromptOrchestrationStep : OrchestrationStep
 }
 ```
 
-### Script step stdin encoding
+### Script and Command step encoding
 
-Script and Command steps can pipe content to the child via `stdin:`. Orchestra pins **UTF-8 on
-both ends** of that pipe, so non-ASCII content round-trips byte-for-byte:
+Script and Command steps capture the child's stdout/stderr and can pipe content to it via
+`stdin:`. Orchestra pins **UTF-8 on both ends** of every one of those pipes, so non-ASCII content
+round-trips byte-for-byte in both directions:
 
-- host side — `StandardInputEncoding` is set alongside the existing stdout/stderr encodings;
-- child side — `pwsh`/`powershell` get an injected `[Console]::InputEncoding` prologue (applied for
-  every `strictMode` setting), and `python`/`python3` get `PYTHONIOENCODING=utf-8`.
+- host side — `StandardOutputEncoding`, `StandardErrorEncoding` and (when `stdin:` is set)
+  `StandardInputEncoding` are UTF-8 for both step types;
+- child side, Script steps — `pwsh`/`powershell` get an injected `[Console]::OutputEncoding` /
+  `[Console]::InputEncoding` prologue (applied for every `strictMode` setting; for `scriptFile:`
+  steps it runs from a generated wrapper that dot-sources the author's file, so the file itself
+  is never modified and `$PSScriptRoot`, `param()` binding, error locations and exit codes are
+  unchanged), and `python`/`python3` get `PYTHONIOENCODING=utf-8`;
+- child side, Command steps — on Windows the `cmd.exe /c` wrapper first switches the hidden
+  console to code page 65001, so every tool it launches (`dnx`/`dotnet`, `pwsh`, `node`,
+  `python`, …) reads a UTF-8 console code page; `PYTHONIOENCODING=utf-8` is set as well. The
+  only thing this cannot reach is a cmd.exe *builtin* in that same instance (e.g. `echo` of a
+  non-ASCII literal), which keeps the code page cmd cached at startup.
 
-Without both halves the Windows OEM code page best-fit-transliterates the payload on the way in:
+Without both halves the Windows OEM code page best-fit-transliterates the payload:
 `U+2014` flattens to `-`, the curly quotes `U+201C`/`U+201D` collapse to an unescaped ASCII `"`
-(which silently breaks any JSON carrying them), and anything outside the code page becomes `?`.
-Setting only one half is worse than neither — the child then decodes UTF-8 bytes as OEM and
-produces mojibake.
+(which silently breaks any JSON carrying them), and anything outside the code page — Hebrew,
+Cyrillic, CJK, most emoji — becomes `?`. Setting only one half is worse than neither — the child
+then decodes UTF-8 bytes as OEM and produces mojibake.
 
 Read stdin with `[Console]::In.ReadToEnd()` in PowerShell. **`$input` is not encoding-safe** and
 consumes the same stream, so the two idioms are mutually exclusive. `bash`/`sh` and `node` need

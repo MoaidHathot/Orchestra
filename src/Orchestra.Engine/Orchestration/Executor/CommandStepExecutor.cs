@@ -25,6 +25,26 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 
 	public OrchestrationStepType StepType => OrchestrationStepType.Command;
 
+	/// <summary>
+	/// UTF-8 without a byte-order mark, used for every redirected stream of the child process.
+	/// </summary>
+	private static readonly Encoding s_utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+	/// <summary>
+	/// Prefix inserted after <c>cmd.exe /c</c> on Windows so the child's (hidden) console runs
+	/// with the UTF-8 code page before the user's command starts. <c>chcp</c>'s own
+	/// "Active code page" line is discarded; a plain <c>&amp;</c> (not <c>&amp;&amp;</c>) keeps
+	/// the user's command running — with its own exit code — even if <c>chcp</c> were to fail.
+	/// </summary>
+	/// <remarks>
+	/// Every process started afterwards (pwsh, dnx/dotnet tools, node, python, a nested cmd)
+	/// reads the new code page. The one exception is cmd.exe's own builtins in the same
+	/// instance (<c>echo</c>, <c>set</c>, …), which keep the code page cmd cached at startup —
+	/// a non-ASCII literal echoed directly by the wrapping cmd still degrades. Real tools are
+	/// unaffected, and that edge case never round-tripped before either.
+	/// </remarks>
+	internal const string WindowsUtf8CodePagePrefix = "chcp 65001>nul & ";
+
 	public async Task<ExecutionResult> ExecuteAsync(
 		OrchestrationStep step,
 		OrchestrationExecutionContext context,
@@ -89,6 +109,13 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				? $"{command} {string.Join(' ', escapedArgs)}"
 				: command;
 
+			// Pin UTF-8 on BOTH ends of the pipe. The host side decodes stdout/stderr as UTF-8
+			// (and encodes stdin as UTF-8). On Windows the child side is handled by switching
+			// the hidden console's code page to 65001 before the command runs: cmd.exe, .NET
+			// tools (dnx/dotnet), PowerShell and most console programs pick their output
+			// encoding from the console code page, so without this they emit the OEM code
+			// page (e.g. CP437), which cannot represent most non-Latin text and silently turns
+			// it into '?' before the bytes ever reach us. Unix shells already run UTF-8.
 			var startInfo = new ProcessStartInfo
 			{
 				FileName = isWindows ? "cmd.exe" : "/bin/sh",
@@ -97,13 +124,18 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				RedirectStandardInput = resolvedStdin is not null,
 				UseShellExecute = false,
 				CreateNoWindow = true,
+				StandardOutputEncoding = s_utf8NoBom,
+				StandardErrorEncoding = s_utf8NoBom,
+				StandardInputEncoding = resolvedStdin is not null ? s_utf8NoBom : null,
 			};
 
 			if (isWindows)
 			{
 				// Use the Arguments string property so that cmd.exe /c receives
-				// the command line verbatim without extra quoting.
-				startInfo.Arguments = $"/c {fullCommandLine}";
+				// the command line verbatim without extra quoting. The chcp prefix also
+				// guarantees the first character after /c is not a quote, which sidesteps
+				// cmd.exe's quote-stripping heuristics for quoted program paths.
+				startInfo.Arguments = $"/c {WindowsUtf8CodePagePrefix}{fullCommandLine}";
 			}
 			else
 			{
@@ -118,6 +150,11 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			{
 				startInfo.WorkingDirectory = workingDirectory;
 			}
+
+			// Python decides its redirected-stdout encoding from the locale unless told
+			// otherwise; mirror ScriptStepExecutor so Python-based tools also emit UTF-8.
+			// A user-supplied value below wins.
+			startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
 
 			// Set environment variables (resolve templates in values)
 			var resolvedEnvironment = new Dictionary<string, string>(StringComparer.Ordinal);
