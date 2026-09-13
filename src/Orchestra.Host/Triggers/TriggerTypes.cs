@@ -172,7 +172,20 @@ public class ActiveExecutionInfo
 	/// <summary>
 	/// Name of the currently executing step.
 	/// </summary>
+	/// <remarks>
+	/// Set to <see cref="InputHandlerPhaseName"/> while a pre-execution parameter transform
+	/// (input handler) runs before the first step; consumers that map this back to a declared
+	/// step should treat that marker as "no step yet".
+	/// </remarks>
 	public volatile string? CurrentStep;
+
+	/// <summary>
+	/// Marker written to <see cref="CurrentStep"/> while the run's pre-execution parameter
+	/// transform (e.g. an <c>inputHandlerPrompt</c>) is executing. It is not a declared step
+	/// name; it exists so live views show activity during a phase that otherwise emits no
+	/// step events.
+	/// </summary>
+	public const string InputHandlerPhaseName = "input-handler";
 
 	/// <summary>
 	/// Callback invoked when a step starts.

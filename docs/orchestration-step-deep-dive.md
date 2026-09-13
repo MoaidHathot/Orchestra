@@ -54,9 +54,30 @@ and cancellation cause. This is what enables the template bindings below.
 
 **Cancellation propagation:** if the parent is cancelled, the child is cancelled too. The
 child's `CancellationDetails.Detail` will include `"propagated from parent <id> (step: <name>)"`.
+This also covers the case where the parent step's own execution token fires (e.g. the parent
+orchestration's `timeoutSeconds` elapsed): the child records `Kind = External` with that lineage
+detail — never `McpRequestAborted`, which is reserved for children launched through the
+data-plane MCP `invoke_orchestration` tool whose HTTP request was closed by the client.
 
-**Timeout:** when sync-mode `timeoutSeconds` fires, the parent observes `TimedOut: true` on
-the result. The child is cancelled with `CancellationDetails.Kind = SyncInvokeTimeout`.
+**Timeout:** the step's effective timeout (`timeoutSeconds`, or the parent orchestration's
+`defaultStepTimeoutSeconds` when the step has none) is enforced by the child launcher's
+sync-invoke timer, not by the engine's generic per-step timer. When it fires, the child is
+cancelled with `CancellationDetails.Kind = SyncInvokeTimeout` and the parent step fails with
+`ErrorCategory = Timeout` and a message of the form
+`Step timed out after N seconds: child orchestration '<name>' (executionId=<id>) did not complete within the sync timeoutSeconds.`
+— so `retryOnTimeout` policies apply exactly as for any other step. The child's own
+`timeoutSeconds` still applies independently inside the child run; whichever fires first wins.
+(`forEach` fan-outs differ: `timeoutSeconds` is passed to each child, and the engine's generic
+step timeout additionally bounds the whole fan-out.)
+
+**Input handler phase:** when `inputHandlerPrompt` is set, the LLM transform runs *inside the
+child run*, before its first step, and counts against the child's `timeoutSeconds` and the
+step's sync timeout. While it runs the child reports `currentStep = "input-handler"` on
+`/api/active` (Portal card, `orchestra active`, `get_orchestration_status`) and emits
+`session-info` SSE events with `infoType` `input-handler-started` / `input-handler-completed`
+(the latter carries the elapsed time). Keep in mind that the handler must re-emit every
+parameter value as JSON: for large payloads (tens of KB) that alone can take minutes. Prefer
+deterministic `parameters:` templates whenever the mapping does not actually need a model.
 
 ### Async
 

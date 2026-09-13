@@ -54,6 +54,17 @@ public sealed class ChildLaunchRequest
 	public string TriggeredBy { get; init; } = "manual";
 
 	/// <summary>
+	/// Which code path issued this request. Drives how the launcher attributes a cancellation
+	/// that arrives through the caller-supplied <see cref="CancellationToken"/>: an
+	/// <see cref="ChildLaunchOrigin.OrchestrationStep"/> launch records it as propagated from
+	/// the parent step, an <see cref="ChildLaunchOrigin.McpTool"/> launch records it as an MCP
+	/// transport abort. <see cref="ChildLaunchOrigin.Unspecified"/> falls back to a generic
+	/// external cause. Deliberately separate from <see cref="TriggeredBy"/>, which is a display
+	/// label shared by several launch paths.
+	/// </summary>
+	public ChildLaunchOrigin Origin { get; init; } = ChildLaunchOrigin.Unspecified;
+
+	/// <summary>
 	/// Optional trigger ID for runs initiated by a registered trigger.
 	/// </summary>
 	public string? TriggerId { get; init; }

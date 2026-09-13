@@ -343,6 +343,171 @@ public class OrchestrationStepExecutorTests
 		captured!.TimeoutSeconds.Should().BeNull("async mode runs detached, hard timeout makes no sense");
 	}
 
+	[Fact]
+	public async Task TimeoutSeconds_SyncMode_FallsBackToOrchestrationDefaultStepTimeout()
+	{
+		// The launcher owns the sync timeout for single-child steps (the engine no longer arms
+		// its generic per-step CTS for them), so the request must carry the EFFECTIVE step
+		// timeout — the orchestration's defaultStepTimeoutSeconds when the step has none.
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		ChildLaunchRequest? captured = null;
+		launcher.LaunchAsync(Arg.Do<ChildLaunchRequest>(r => captured = r), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle());
+
+		var executor = CreateExecutor(launcher);
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = s_parentInfo,
+			Parameters = [],
+			DefaultStepTimeoutSeconds = 240,
+		};
+
+		await executor.ExecuteAsync(MakeStep(mode: OrchestrationInvocationMode.Sync), context);
+		captured!.TimeoutSeconds.Should().Be(240, "defaultStepTimeoutSeconds applies when the step has no timeoutSeconds");
+
+		captured = null;
+		await executor.ExecuteAsync(MakeStep(mode: OrchestrationInvocationMode.Sync, timeoutSeconds: 30), context);
+		captured!.TimeoutSeconds.Should().Be(30, "an explicit step timeoutSeconds overrides the default");
+
+		captured = null;
+		await executor.ExecuteAsync(MakeStep(mode: OrchestrationInvocationMode.Async), context);
+		captured!.TimeoutSeconds.Should().BeNull("async mode never carries a sync timeout");
+	}
+
+	[Fact]
+	public async Task LaunchRequest_DeclaresOrchestrationStepOrigin()
+	{
+		// The launcher attributes caller-token cancellations by Origin (the TriggeredBy prefix
+		// is shared with MCP-tool launches), so the step must declare itself explicitly.
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		ChildLaunchRequest? captured = null;
+		launcher.LaunchAsync(Arg.Do<ChildLaunchRequest>(r => captured = r), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle());
+
+		var executor = CreateExecutor(launcher);
+		await executor.ExecuteAsync(MakeStep(), MakeContext());
+
+		captured!.Origin.Should().Be(ChildLaunchOrigin.OrchestrationStep);
+		captured.TriggeredBy.Should().Be("orchestration:parent-run-123");
+	}
+
+	[Fact]
+	public void DelegatesStepTimeoutToLauncher_TrueOnlyForSingleChildSyncSteps()
+	{
+		OrchestrationStepExecutor.DelegatesStepTimeoutToLauncher(MakeStep(mode: OrchestrationInvocationMode.Sync))
+			.Should().BeTrue("single-child sync steps hand their timeout to the launcher's sync-invoke CTS");
+
+		OrchestrationStepExecutor.DelegatesStepTimeoutToLauncher(MakeStep(mode: OrchestrationInvocationMode.Async))
+			.Should().BeFalse("async steps return immediately; the generic step timeout still bounds the dispatch");
+
+		var forEachStep = new OrchestrationInvocationStep
+		{
+			Name = "fan-out",
+			Type = OrchestrationStepType.Orchestration,
+			OrchestrationName = "child-orch",
+			Mode = OrchestrationInvocationMode.Sync,
+			ForEach = "[1,2,3]",
+			ItemParameter = "item",
+		};
+		OrchestrationStepExecutor.DelegatesStepTimeoutToLauncher(forEachStep)
+			.Should().BeFalse("forEach applies timeoutSeconds per child; the generic step timeout bounds the whole fan-out");
+
+		OrchestrationStepExecutor.DelegatesStepTimeoutToLauncher(new PromptOrchestrationStep
+		{
+			Name = "prompt",
+			Type = OrchestrationStepType.Prompt,
+			SystemPrompt = "sys",
+			UserPrompt = "hi",
+			Model = "test-model",
+		}).Should().BeFalse("only Orchestration steps delegate");
+	}
+
+	[Fact]
+	public async Task SyncChildTimedOut_ReturnsTimeoutClassifiedFailure_NamingTheChild()
+	{
+		// When the launcher's sync-invoke timeout fires it returns Cancelled + TimedOut=true.
+		// The parent step must surface that as a TIMEOUT (message contains "timed out",
+		// ErrorCategory.Timeout) so retryOnTimeout policies and dashboards classify it
+		// correctly, instead of a generic "Child orchestration ended with status 'Cancelled'".
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle(executionId: "child-exec-7", orchestrationName: "actionview-submit", terminal: new ChildOrchestrationResult
+			{
+				ExecutionId = "child-exec-7",
+				OrchestrationId = "actionview-submit",
+				OrchestrationName = "actionview-submit",
+				Status = ExecutionStatus.Cancelled,
+				TimedOut = true,
+				ErrorMessage = "Child orchestration ended with status 'Cancelled': sync invocation timed out after 600s.",
+				StartedAt = DateTimeOffset.UtcNow,
+				CompletedAt = DateTimeOffset.UtcNow,
+			}));
+
+		var executor = CreateExecutor(launcher);
+		var result = await executor.ExecuteAsync(MakeStep(timeoutSeconds: 600), MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.Timeout);
+		result.ErrorMessage.Should().Contain("timed out", "the retry policy detects timeouts by this phrase")
+			.And.Contain("600")
+			.And.Contain("actionview-submit")
+			.And.Contain("child-exec-7");
+		result.ChildOrchestrationInfo.Should().NotBeNull();
+		result.ChildOrchestrationInfo!.Status.Should().Be(ExecutionStatus.Cancelled);
+		_reporterSubstitute.Received(1).ReportStepError("invoke-child", Arg.Is<string>(m => m.Contains("timed out")));
+	}
+
+	[Fact]
+	public async Task SyncChildCancelled_NotTimedOut_KeepsChildMessage_AndReportsStepError()
+	{
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle(terminal: new ChildOrchestrationResult
+			{
+				ExecutionId = "exec-1",
+				OrchestrationId = "child",
+				OrchestrationName = "child",
+				Status = ExecutionStatus.Cancelled,
+				TimedOut = false,
+				ErrorMessage = "Child orchestration ended with status 'Cancelled': cancelled by caller: propagated from parent p1 (step: s1).",
+				StartedAt = DateTimeOffset.UtcNow,
+				CompletedAt = DateTimeOffset.UtcNow,
+			}));
+
+		var executor = CreateExecutor(launcher);
+		var result = await executor.ExecuteAsync(MakeStep(), MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.Unknown);
+		result.ErrorMessage.Should().Contain("propagated from parent");
+		_reporterSubstitute.Received(1).ReportStepError("invoke-child", Arg.Is<string>(m => m.Contains("propagated from parent")));
+	}
+
+	[Fact]
+	public async Task SyncChildFailed_ReportsStepError()
+	{
+		// Failures of the parent step used to reach SSE consumers only via the step record;
+		// the executor now emits step-error like every other step executor does.
+		var launcher = Substitute.For<IChildOrchestrationLauncher>();
+		launcher.LaunchAsync(Arg.Any<ChildLaunchRequest>(), Arg.Any<CancellationToken>())
+			.Returns(MakeHandle(terminal: new ChildOrchestrationResult
+			{
+				ExecutionId = "exec-1",
+				OrchestrationId = "child",
+				OrchestrationName = "child",
+				Status = ExecutionStatus.Failed,
+				ErrorMessage = "child blew up",
+				StartedAt = DateTimeOffset.UtcNow,
+				CompletedAt = DateTimeOffset.UtcNow,
+			}));
+
+		var executor = CreateExecutor(launcher);
+		var result = await executor.ExecuteAsync(MakeStep(), MakeContext());
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		_reporterSubstitute.Received(1).ReportStepError("invoke-child", "child blew up");
+	}
+
 	// ── Input handler ─────────────────────────────────────────────────────────
 
 	[Fact]

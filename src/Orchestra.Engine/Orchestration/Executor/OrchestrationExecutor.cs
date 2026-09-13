@@ -5,6 +5,19 @@ namespace Orchestra.Engine;
 
 public partial class OrchestrationExecutor
 {
+	/// <summary>
+	/// <c>infoType</c> of the <see cref="IOrchestrationReporter.ReportSessionInfo"/> event emitted
+	/// when a pre-execution parameter transform (input handler) starts, before the first step.
+	/// </summary>
+	public const string InputHandlerStartedInfoType = "input-handler-started";
+
+	/// <summary>
+	/// <c>infoType</c> of the <see cref="IOrchestrationReporter.ReportSessionInfo"/> event emitted
+	/// when the pre-execution parameter transform finishes (or is cancelled). The message
+	/// carries the elapsed time so observers can account for the pre-step gap.
+	/// </summary>
+	public const string InputHandlerCompletedInfoType = "input-handler-completed";
+
 	private readonly IScheduler _scheduler;
 	private readonly IAgentProviderRegistry _providerRegistry;
 	private readonly IOrchestrationReporter _reporter;
@@ -303,9 +316,36 @@ public partial class OrchestrationExecutor
 		// run scope so it shares the orchestration's CLI process — it gets its own session,
 		// not its own CLI subprocess. The runtime validation of template expressions runs
 		// AFTER the transform so transformed parameters are validated against the orchestration.
+		//
+		// This phase happens before any step starts and can take minutes for an LLM-backed
+		// handler working on a large payload, so it is reported explicitly: without these
+		// events an observer sees a "Running, 0/N steps" run with no output at all.
 		if (preExecutionParameterTransform is not null)
 		{
-			var transformed = await preExecutionParameterTransform(cancellationToken).ConfigureAwait(false);
+			LogInputHandlerStarted(runId, orchestration.Name);
+			_reporter.ReportSessionInfo(InputHandlerStartedInfoType,
+				"Transforming input parameters via the input handler before the first step starts.");
+			var inputHandlerStopwatch = System.Diagnostics.Stopwatch.StartNew();
+			Dictionary<string, string>? transformed;
+			try
+			{
+				transformed = await preExecutionParameterTransform(cancellationToken).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException)
+			{
+				inputHandlerStopwatch.Stop();
+				LogInputHandlerCancelled(runId, orchestration.Name, inputHandlerStopwatch.Elapsed.TotalSeconds);
+				_reporter.ReportSessionInfo(InputHandlerCompletedInfoType,
+					$"Input handler cancelled after {inputHandlerStopwatch.Elapsed.TotalSeconds:F1}s.");
+				throw;
+			}
+			inputHandlerStopwatch.Stop();
+			var replaced = transformed is not null;
+			LogInputHandlerCompleted(runId, orchestration.Name, inputHandlerStopwatch.Elapsed.TotalSeconds, replaced);
+			_reporter.ReportSessionInfo(InputHandlerCompletedInfoType,
+				replaced
+					? $"Input handler produced {transformed!.Count} parameter(s) in {inputHandlerStopwatch.Elapsed.TotalSeconds:F1}s."
+					: $"Input handler finished in {inputHandlerStopwatch.Elapsed.TotalSeconds:F1}s; keeping the untransformed parameters.");
 			if (transformed is not null)
 			{
 				parameters = transformed;
@@ -1438,12 +1478,20 @@ public partial class OrchestrationExecutor
 		LogRunningStep(step.Name);
 		_reporter.ReportStepStarted(step.Name);
 
-		// Apply per-step timeout if configured (step-level overrides orchestration default)
+		// Apply per-step timeout if configured (step-level overrides orchestration default).
+		// Single-child sync Orchestration steps are the exception: the child launcher enforces
+		// the same effective timeout through its sync-invoke CTS so the child records a precise
+		// SyncInvokeTimeout cause. Arming a second CTS here would start earlier, always win the
+		// race, and cancel the child through the caller token with an inaccurate cause.
 		CancellationTokenSource? timeoutCts = null;
 		var effectiveToken = cancellationToken;
 		var effectiveStepTimeout = step.TimeoutSeconds ?? context.DefaultStepTimeoutSeconds;
 
-		if (effectiveStepTimeout is > 0)
+		if (effectiveStepTimeout is > 0 && OrchestrationStepExecutor.DelegatesStepTimeoutToLauncher(step))
+		{
+			LogStepTimeoutDelegatedToLauncher(step.Name, effectiveStepTimeout.Value);
+		}
+		else if (effectiveStepTimeout is > 0)
 		{
 			timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 			timeoutCts.CancelAfter(TimeSpan.FromSeconds(effectiveStepTimeout.Value));
@@ -2397,6 +2445,9 @@ public partial class OrchestrationExecutor
 	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' has a timeout of {TimeoutSeconds} seconds.")]
 	private partial void LogStepTimeout(string stepName, int timeoutSeconds);
 
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' has a timeout of {TimeoutSeconds} seconds, enforced by the child launcher's sync-invoke timeout.")]
+	private partial void LogStepTimeoutDelegatedToLauncher(string stepName, int timeoutSeconds);
+
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' timed out after {TimeoutSeconds} seconds.")]
 	private partial void LogStepTimedOut(string stepName, int timeoutSeconds);
 
@@ -2465,6 +2516,15 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Debug, Message = "Run '{RunId}': run scope ready on thread {ThreadId}")]
 	private partial void LogRunScopeReady(string runId, int threadId);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Run '{RunId}' ({OrchestrationName}): input handler started; no step runs until it completes.")]
+	private partial void LogInputHandlerStarted(string runId, string orchestrationName);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Run '{RunId}' ({OrchestrationName}): input handler completed in {ElapsedSeconds:F1}s (parametersReplaced={ParametersReplaced}).")]
+	private partial void LogInputHandlerCompleted(string runId, string orchestrationName, double elapsedSeconds, bool parametersReplaced);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Run '{RunId}' ({OrchestrationName}): input handler cancelled after {ElapsedSeconds:F1}s.")]
+	private partial void LogInputHandlerCancelled(string runId, string orchestrationName, double elapsedSeconds);
 
 	[LoggerMessage(Level = LogLevel.Debug, Message = "AsyncLocal diagnostic [{Where}]: runScopedClient={ClientHash} on thread {ThreadId}")]
 	private partial void LogAsyncLocalDiagnostic(string where, string clientHash, int threadId);

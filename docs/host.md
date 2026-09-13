@@ -277,12 +277,17 @@ app.MapOrchestraMcpEndpoints(); // Maps /mcp/data
 >   The `detail` field carries the source string (`"REST /api/active/{id}/cancel"`,
 >   `"mcp:cancel_orchestration: <reason>"`, `"propagated from parent <id> (step: <step>)"`).
 > - `OrchestrationTimeout` — the orchestration's own `timeoutSeconds` fired.
-> - `SyncInvokeTimeout` — the `request.timeoutSeconds` passed to a sync
->   `invoke_orchestration` call fired (server-side wrapper).
+> - `SyncInvokeTimeout` — the sync hard cap fired: either the `timeoutSeconds` passed to a
+>   sync `invoke_orchestration` call, or the effective `timeoutSeconds` /
+>   `defaultStepTimeoutSeconds` of the parent's `Orchestration` step (the launcher enforces
+>   it on the step's behalf).
 > - `McpRequestAborted` — the upstream MCP transport aborted its request to
 >   `/mcp/data` before the engine completed (typically a stale `mcps[].timeoutSeconds`
 >   smaller than the requested sync `timeoutSeconds`). Counted as a timeout
->   (`isTimeout: true`).
+>   (`isTimeout: true`). Only recorded for children launched through the MCP
+>   `invoke_orchestration` tool (`ChildLaunchRequest.Origin = McpTool`); a child launched by
+>   an in-process `Orchestration` step whose parent token fires is recorded as `External`
+>   with `"propagated from parent <id> (step: <step>)"` instead.
 > - `OrchestrationComplete` — a step invoked the `orchestra_complete` engine tool.
 > - `HostShutdown` — the host process was stopping.
 > - `AwaitingInputTimeout` / `HostShutdownDuringWait` — outstanding human-in-the-loop wait.

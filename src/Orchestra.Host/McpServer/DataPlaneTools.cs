@@ -239,6 +239,9 @@ public sealed partial class DataPlaneTools
 			Mode = isSync ? ChildLaunchMode.Sync : ChildLaunchMode.Async,
 			TimeoutSeconds = isSync ? effectiveSyncTimeoutSeconds : null,
 			TriggeredBy = triggeredBy,
+			// The caller token below is the MCP request's cancellation token; declaring the
+			// origin lets the launcher record McpRequestAborted when it fires.
+			Origin = ChildLaunchOrigin.McpTool,
 			ParentContext = parentContext,
 			UserMetadata = parsedMetadata,
 		};

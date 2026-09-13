@@ -232,30 +232,42 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		//
 		//     Parent CTS firing ⇒ propagated-from-parent (record External with lineage).
 		//     External token firing ⇒ the upstream caller's CancellationToken was triggered.
-		//       For sync MCP-tool calls that token IS the MCP request's cancellation token,
-		//       and its firing here means the MCP transport aborted the request — record
-		//       McpRequestAborted. For other launch paths (e.g. retries with a caller token)
-		//       the same token may not represent an MCP transport; we still record it as
-		//       External with the best-available detail so the run record is never anonymous.
+		//       What that means depends on who launched us (request.Origin):
+		//       - McpTool: the token IS the MCP request's cancellation token, so its firing
+		//         means the MCP transport aborted the request — record McpRequestAborted.
+		//       - OrchestrationStep: the token is the parent step's execution token, so its
+		//         firing means the parent step / parent run was cancelled or timed out. That
+		//         is a propagated cancel, never a transport event — record External with the
+		//         same lineage detail the parent-CTS path uses. (The step's own sync
+		//         timeoutSeconds is enforced by our syncTimeoutCts below, so a sync timeout
+		//         is recorded as SyncInvokeTimeout, not through this callback.)
+		//       - Unspecified (retries with a caller token, API callers, ...): record External
+		//         with the best-available detail so the run record is never anonymous.
+		//     TriggeredBy is deliberately NOT used to infer the origin: the "orchestration:"
+		//     prefix is shared by MCP-tool launches and in-process Orchestration-step launches.
 		var parentExecutionIdForCb = request.ParentContext?.ParentExecutionId;
 		var parentStepNameForCb = request.ParentContext?.ParentStepName;
-		var isMcpTriggered = request.TriggeredBy is { Length: > 0 } tb
-			&& (tb.StartsWith("orchestration:", StringComparison.OrdinalIgnoreCase)
-				|| tb.Equals("mcp", StringComparison.OrdinalIgnoreCase));
 		var capturedExecutionInfo = executionInfo;
+		var capturedOrigin = request.Origin;
 
 		var externalTokenRegistration = cancellationToken.Register(() =>
 		{
 			if (capturedExecutionInfo.CancellationCauseOverride is not null)
 				return;
-			capturedExecutionInfo.CancellationCauseOverride = isMcpTriggered
-				? CancellationDetails.McpRequestAborted(
+			capturedExecutionInfo.CancellationCauseOverride = capturedOrigin switch
+			{
+				ChildLaunchOrigin.McpTool => CancellationDetails.McpRequestAborted(
 					transportTimeoutSeconds: null,
 					source: "mcp-transport",
 					detail: parentExecutionIdForCb is null
 						? "upstream MCP client closed the request"
-						: $"upstream MCP client closed the request (parent: {parentExecutionIdForCb}{(parentStepNameForCb is null ? "" : $", step: {parentStepNameForCb}")})")
-				: CancellationDetails.External(detail: "external token");
+						: $"upstream MCP client closed the request (parent: {parentExecutionIdForCb}{(parentStepNameForCb is null ? "" : $", step: {parentStepNameForCb}")})"),
+				ChildLaunchOrigin.OrchestrationStep => CancellationDetails.External(
+					detail: parentExecutionIdForCb is null
+						? "propagated from parent orchestration step"
+						: $"propagated from parent {parentExecutionIdForCb}{(parentStepNameForCb is null ? "" : $" (step: {parentStepNameForCb})")}"),
+				_ => CancellationDetails.External(detail: "external token"),
+			};
 		});
 
 		var parentTokenRegistration = default(CancellationTokenRegistration);
@@ -292,19 +304,36 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			humanInputWaiter: _humanInputWaiter);
 
 		// 9. Wrap pre-execution param transform so executionInfo.Parameters reflects the
-		// post-transform values (otherwise the UI keeps showing the pre-transform input).
+		// post-transform values (otherwise the UI keeps showing the pre-transform input), and
+		// so the phase is visible while it runs: the transform executes before the first step
+		// starts and can take minutes for an LLM-backed input handler, during which no step
+		// event fires. Marking CurrentStep lets /api/active, the Portal card, `orchestra active`
+		// and get_orchestration_status show activity instead of a silent "0/N steps".
 		Func<CancellationToken, Task<Dictionary<string, string>?>>? wrappedTransform = null;
 		if (request.PreExecutionParameterTransform is not null)
 		{
 			var captured = request.PreExecutionParameterTransform;
 			wrappedTransform = async ct =>
 			{
-				var transformed = await captured(ct).ConfigureAwait(false);
-				if (transformed is not null)
+				executionInfo.CurrentStep = ActiveExecutionInfo.InputHandlerPhaseName;
+				try
 				{
-					executionInfo.Parameters = transformed;
+					var transformed = await captured(ct).ConfigureAwait(false);
+					if (transformed is not null)
+					{
+						executionInfo.Parameters = transformed;
+					}
+					return transformed;
 				}
-				return transformed;
+				finally
+				{
+					// No step can start while the transform runs, so the marker is still ours;
+					// guard anyway so a real step name is never clobbered.
+					if (string.Equals(executionInfo.CurrentStep, ActiveExecutionInfo.InputHandlerPhaseName, StringComparison.Ordinal))
+					{
+						executionInfo.CurrentStep = null;
+					}
+				}
 			};
 		}
 

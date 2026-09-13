@@ -47,6 +47,29 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 
 	public OrchestrationStepType StepType => OrchestrationStepType.Orchestration;
 
+	/// <summary>
+	/// True when <paramref name="step"/> is a single (non-forEach) sync <c>Orchestration</c> step.
+	/// For these steps the child launcher enforces the step's effective timeout
+	/// (<c>timeoutSeconds</c> or the orchestration's <c>defaultStepTimeoutSeconds</c>) via its
+	/// sync-invoke timeout, so the engine must NOT also arm its generic per-step timeout: the
+	/// generic one starts earlier and always wins the race, cancelling the child through the
+	/// caller token and leaving the child's run record with an inaccurate cause instead of
+	/// <see cref="CancellationCauseKind.SyncInvokeTimeout"/>.
+	/// </summary>
+	public static bool DelegatesStepTimeoutToLauncher(OrchestrationStep step) =>
+		step is OrchestrationInvocationStep { Mode: OrchestrationInvocationMode.Sync } invocation
+		&& string.IsNullOrWhiteSpace(invocation.ForEach);
+
+	/// <summary>
+	/// The timeout the launcher should enforce for a sync <c>Orchestration</c> step: the step's
+	/// own <c>timeoutSeconds</c>, else the parent orchestration's <c>defaultStepTimeoutSeconds</c>.
+	/// Null when neither is configured (no hard cap beyond the child's own <c>timeoutSeconds</c>).
+	/// </summary>
+	public static int? ResolveSyncTimeoutSeconds(OrchestrationInvocationStep step, OrchestrationExecutionContext context) =>
+		step.Mode == OrchestrationInvocationMode.Sync
+			? step.TimeoutSeconds ?? context.DefaultStepTimeoutSeconds
+			: null;
+
 	public async Task<ExecutionResult> ExecuteAsync(
 		OrchestrationStep step,
 		OrchestrationExecutionContext context,
@@ -138,6 +161,8 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			ParentStepName = step.Name,
 		};
 
+		var syncTimeoutSeconds = ResolveSyncTimeoutSeconds(invocationStep, context);
+
 		var request = new ChildLaunchRequest
 		{
 			OrchestrationId = resolvedOrchestrationId,
@@ -145,10 +170,12 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			Mode = invocationStep.Mode == OrchestrationInvocationMode.Async
 				? ChildLaunchMode.Async
 				: ChildLaunchMode.Sync,
-			TimeoutSeconds = invocationStep.Mode == OrchestrationInvocationMode.Sync
-				? invocationStep.TimeoutSeconds
-				: null,
+			// The launcher owns the sync timeout for single-child steps (see
+			// DelegatesStepTimeoutToLauncher), so it gets the effective step timeout — not just
+			// the explicit one — and the child records a precise SyncInvokeTimeout when it fires.
+			TimeoutSeconds = syncTimeoutSeconds,
 			TriggeredBy = $"orchestration:{context.OrchestrationInfo.RunId}",
+			Origin = ChildLaunchOrigin.OrchestrationStep,
 			ParentContext = parentContext,
 			PreExecutionParameterTransform = inputHandlerTransform,
 		};
@@ -163,8 +190,10 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			LogLaunchFailed(step.Name, ex.ErrorCode, ex.Message);
 			var trace = BuildTrace(invocationStep, resolvedOrchestrationId, resolvedParameters, executionId: null, errorMessage: ex.Message);
 			_reporter.ReportStepTrace(step.Name, trace);
+			var launchFailureMessage = $"Failed to launch child orchestration '{resolvedOrchestrationId}': {ex.Message}";
+			_reporter.ReportStepError(step.Name, launchFailureMessage);
 			return ExecutionResult.Failed(
-				$"Failed to launch child orchestration '{resolvedOrchestrationId}': {ex.Message}",
+				launchFailureMessage,
 				rawDependencyOutputs,
 				errorCategory: StepErrorCategory.Unknown,
 				trace: trace,
@@ -219,8 +248,10 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			LogChildCompletionThrew(step.Name, handle.ExecutionId, ex);
 			var trace = BuildTrace(invocationStep, resolvedOrchestrationId, resolvedParameters, handle.ExecutionId, ex.Message);
 			_reporter.ReportStepTrace(step.Name, trace);
+			var completionFailureMessage = $"Child orchestration '{handle.OrchestrationName}' (executionId={handle.ExecutionId}) completion threw: {ex.Message}";
+			_reporter.ReportStepError(step.Name, completionFailureMessage);
 			return ExecutionResult.Failed(
-				$"Child orchestration '{handle.OrchestrationName}' (executionId={handle.ExecutionId}) completion threw: {ex.Message}",
+				completionFailureMessage,
 				rawDependencyOutputs,
 				errorCategory: StepErrorCategory.Unknown,
 				trace: trace,
@@ -256,21 +287,48 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 					trace: fullTrace,
 					childOrchestrationInfo: childInfo);
 
-			case ExecutionStatus.Cancelled:
+			case ExecutionStatus.Cancelled when terminal.TimedOut:
+			{
+				// The launcher's sync-invoke timeout (this step's effective timeoutSeconds) fired.
+				// Surface it with the same shape the engine uses for its own per-step timeouts so
+				// retry policies (retryOnTimeout) and dashboards classify it as a timeout, and
+				// name the child so the message is actionable.
+				var timeoutMessage = syncTimeoutSeconds is { } configured
+					? $"Step timed out after {configured} seconds: child orchestration '{handle.OrchestrationName}' (executionId={handle.ExecutionId}) did not complete within the sync timeoutSeconds."
+					: $"Step timed out: child orchestration '{handle.OrchestrationName}' (executionId={handle.ExecutionId}) did not complete within the sync timeout.";
+				LogChildSyncTimeout(step.Name, handle.ExecutionId, handle.OrchestrationName, syncTimeoutSeconds);
+				_reporter.ReportStepError(step.Name, timeoutMessage);
 				return ExecutionResult.Failed(
-					terminal.ErrorMessage ?? "Child orchestration was cancelled.",
+					timeoutMessage,
+					rawDependencyOutputs,
+					errorCategory: StepErrorCategory.Timeout,
+					trace: fullTrace,
+					childOrchestrationInfo: childInfo);
+			}
+
+			case ExecutionStatus.Cancelled:
+			{
+				var cancelledMessage = terminal.ErrorMessage ?? "Child orchestration was cancelled.";
+				_reporter.ReportStepError(step.Name, cancelledMessage);
+				return ExecutionResult.Failed(
+					cancelledMessage,
 					rawDependencyOutputs,
 					errorCategory: StepErrorCategory.Unknown,
 					trace: fullTrace,
 					childOrchestrationInfo: childInfo);
+			}
 
 			default:
+			{
+				var failedMessage = terminal.ErrorMessage ?? $"Child orchestration ended with status '{terminal.Status}'.";
+				_reporter.ReportStepError(step.Name, failedMessage);
 				return ExecutionResult.Failed(
-					terminal.ErrorMessage ?? $"Child orchestration ended with status '{terminal.Status}'.",
+					failedMessage,
 					rawDependencyOutputs,
 					errorCategory: StepErrorCategory.Unknown,
 					trace: fullTrace,
 					childOrchestrationInfo: childInfo);
+			}
 		}
 	}
 
@@ -446,6 +504,7 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 				Mode = step.Mode == OrchestrationInvocationMode.Async ? ChildLaunchMode.Async : ChildLaunchMode.Sync,
 				TimeoutSeconds = step.Mode == OrchestrationInvocationMode.Sync ? step.TimeoutSeconds : null,
 				TriggeredBy = $"orchestration:{context.OrchestrationInfo.RunId}",
+				Origin = ChildLaunchOrigin.OrchestrationStep,
 				ParentContext = parentContext,
 			};
 
@@ -734,6 +793,10 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 	[LoggerMessage(Level = LogLevel.Error,
 		Message = "Step '{StepName}' child completion task threw (executionId={ExecutionId}). Defensive: this should not normally happen.")]
 	private partial void LogChildCompletionThrew(string stepName, string executionId, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Warning,
+		Message = "Step '{StepName}' child '{OrchestrationName}' (executionId={ExecutionId}) hit the sync timeout ({TimeoutSeconds}s); step fails as a timeout.")]
+	private partial void LogChildSyncTimeout(string stepName, string executionId, string orchestrationName, int? timeoutSeconds);
 
 	[LoggerMessage(Level = LogLevel.Information,
 		Message = "Step '{StepName}' input handler transformed {InputCount} → {OutputCount} parameter(s).")]

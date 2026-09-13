@@ -690,10 +690,11 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 	public async Task LaunchAsync_ExternalTokenCancelMidRun_RecordsMcpRequestAbortedWhenInvokedFromMcp()
 	{
 		// Simulates the production scenario: the agent calls invoke_orchestration via MCP
-		// (TriggeredBy = "orchestration:..."), the launcher links the child to the MCP request's
-		// CancellationToken, that token fires (e.g., transport timeout), and the child must be
-		// recorded with kind=McpRequestAborted (not the generic "External") so authors can
-		// distinguish a structural transport failure from a user-driven cancel.
+		// (Origin = McpTool, TriggeredBy = "orchestration:..."), the launcher links the child
+		// to the MCP request's CancellationToken, that token fires (e.g., transport timeout),
+		// and the child must be recorded with kind=McpRequestAborted (not the generic
+		// "External") so authors can distinguish a structural transport failure from a
+		// user-driven cancel.
 		var entry = RegisterPromptOrchestration("mcp-abort-flow");
 		var launcher = CreateLauncher(new HangingAgentBuilder());
 
@@ -704,7 +705,8 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 			OrchestrationId = entry.Id,
 			Mode = ChildLaunchMode.Sync,
 			TimeoutSeconds = 30, // server-side sync timeout (won't fire — we cancel first)
-			TriggeredBy = "orchestration:parent-orch:parent-exec-id", // marks this as MCP-driven
+			TriggeredBy = "orchestration:parent-orch:parent-exec-id",
+			Origin = ChildLaunchOrigin.McpTool, // the caller token is the MCP request token
 		}, externalCts.Token);
 
 		// Give the engine a moment to start the hanging step then cancel the external token.
@@ -722,6 +724,164 @@ public sealed class ChildOrchestrationLauncherTests : IDisposable
 		result.OrchestrationResult.Cancellation.IsTimeout.Should().BeTrue(
 			"McpRequestAborted is conceptually a transport timeout");
 		result.OrchestrationResult.Cancellation.Detail.Should().Contain("upstream");
+	}
+
+	[Fact]
+	public async Task LaunchAsync_ExternalTokenCancelMidRun_OrchestrationStepOrigin_RecordsPropagatedFromParentStep_NotMcpAbort()
+	{
+		// Regression: an Orchestration step launches its child with the SAME "orchestration:"
+		// TriggeredBy prefix the MCP tool uses, and passes the parent step's execution token as
+		// the caller token. When that token fires (parent step cancelled / parent run timed out)
+		// the child used to be recorded as "MCP transport request aborted: upstream MCP client
+		// closed the request" although no MCP request was involved. With an explicit
+		// Origin = OrchestrationStep the cause must be External with parent-step lineage.
+		var entry = RegisterPromptOrchestration("step-origin-cancel-flow");
+		var launcher = CreateLauncher(new HangingAgentBuilder());
+
+		using var parentStepToken = new CancellationTokenSource();
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+			TimeoutSeconds = 30, // won't fire — the parent step token fires first
+			TriggeredBy = "orchestration:parent-exec-id",
+			Origin = ChildLaunchOrigin.OrchestrationStep,
+			ParentContext = new ParentExecutionContext
+			{
+				ParentExecutionId = "parent-exec-id",
+				ParentStepName = "submit-entry",
+			},
+		}, parentStepToken.Token);
+
+		await Task.Delay(150);
+		parentStepToken.Cancel();
+
+		var result = await handle.Completion;
+
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.TimedOut.Should().BeFalse("the parent step token fired, not the sync-invoke timeout");
+		result.OrchestrationResult.Should().NotBeNull();
+		var cancellation = result.OrchestrationResult!.Cancellation;
+		cancellation.Should().NotBeNull();
+		cancellation!.Kind.Should().Be(
+			CancellationCauseKind.External,
+			"a child launched by an Orchestration step is cancelled through its parent step's token, which is a propagated cancel and never an MCP transport event");
+		cancellation.IsTimeout.Should().BeFalse();
+		cancellation.Detail.Should().Contain("propagated from parent")
+			.And.Contain("parent-exec-id")
+			.And.Contain("submit-entry");
+		cancellation.Reason.Should().NotContain("MCP");
+	}
+
+	[Fact]
+	public async Task LaunchAsync_ExternalTokenCancelMidRun_UnspecifiedOrigin_RecordsGenericExternalEvenWithOrchestrationPrefix()
+	{
+		// The TriggeredBy prefix alone must no longer promote a cancel to McpRequestAborted:
+		// only an explicit McpTool origin does. Unspecified origin falls back to External.
+		var entry = RegisterPromptOrchestration("unspecified-origin-cancel-flow");
+		var launcher = CreateLauncher(new HangingAgentBuilder());
+
+		using var externalCts = new CancellationTokenSource();
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+			TimeoutSeconds = 30,
+			TriggeredBy = "orchestration:parent-orch:parent-exec-id",
+		}, externalCts.Token);
+
+		await Task.Delay(150);
+		externalCts.Cancel();
+
+		var result = await handle.Completion;
+
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.OrchestrationResult!.Cancellation.Should().NotBeNull();
+		result.OrchestrationResult.Cancellation!.Kind.Should().Be(CancellationCauseKind.External);
+		result.OrchestrationResult.Cancellation.Detail.Should().Be("external token");
+	}
+
+	[Fact]
+	public async Task LaunchAsync_SyncTimeoutWithOrchestrationStepOrigin_RecordsSyncInvokeTimeout_AndResultIsTimedOut()
+	{
+		// The Orchestration step delegates its effective timeoutSeconds to the launcher (the
+		// engine no longer arms a racing per-step CTS for single-child sync steps). The launcher
+		// must therefore record the precise SyncInvokeTimeout cause and flag TimedOut so the
+		// parent step can classify the failure as a timeout.
+		var entry = RegisterPromptOrchestration("step-origin-sync-timeout");
+		var launcher = CreateLauncher(new HangingAgentBuilder());
+
+		using var parentStepToken = new CancellationTokenSource(); // never cancelled
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Mode = ChildLaunchMode.Sync,
+			TimeoutSeconds = 1,
+			TriggeredBy = "orchestration:parent-exec-id",
+			Origin = ChildLaunchOrigin.OrchestrationStep,
+			ParentContext = new ParentExecutionContext
+			{
+				ParentExecutionId = "parent-exec-id",
+				ParentStepName = "submit-entry",
+			},
+		}, parentStepToken.Token);
+
+		var result = await handle.Completion;
+
+		result.TimedOut.Should().BeTrue();
+		result.Status.Should().Be(ExecutionStatus.Cancelled);
+		result.OrchestrationResult!.Cancellation.Should().NotBeNull();
+		result.OrchestrationResult.Cancellation!.Kind.Should().Be(CancellationCauseKind.SyncInvokeTimeout);
+		result.OrchestrationResult.Cancellation.TimeoutSeconds.Should().Be(1);
+		result.OrchestrationResult.Cancellation.Reason.Should().NotContain("MCP");
+	}
+
+	[Fact]
+	public async Task LaunchAsync_PreExecutionParameterTransform_SurfacesInputHandlerPhaseAsCurrentStep()
+	{
+		// While the pre-execution transform (input handler) runs, no step has started, so the
+		// active-execution record used to show "Running, 0/N steps" with no current step for
+		// as long as the handler took. The launcher must mark the phase on CurrentStep and
+		// clear it again before the first step runs.
+		var entry = RegisterTransformOrchestration(
+			"transform-phase-visibility",
+			template: "result-{{param.who}}",
+			inputs: ["who"]);
+		var launcher = CreateLauncher();
+
+		var transformEntered = new TaskCompletionSource();
+		var releaseTransform = new TaskCompletionSource();
+		string? currentStepDuringTransform = null;
+		Func<CancellationToken, Task<Dictionary<string, string>?>> transform = async _ =>
+		{
+			transformEntered.TrySetResult();
+			await releaseTransform.Task;
+			return new Dictionary<string, string> { ["who"] = "world" };
+		};
+
+		var handle = await launcher.LaunchAsync(new ChildLaunchRequest
+		{
+			OrchestrationId = entry.Id,
+			Parameters = new Dictionary<string, string> { ["who"] = "raw" },
+			PreExecutionParameterTransform = transform,
+			Mode = ChildLaunchMode.Sync,
+		});
+
+		await transformEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		_activeExecutionInfos.TryGetValue(handle.ExecutionId, out var info).Should().BeTrue();
+		currentStepDuringTransform = info!.CurrentStep;
+		releaseTransform.TrySetResult();
+
+		var result = await handle.Completion;
+
+		currentStepDuringTransform.Should().Be(ActiveExecutionInfo.InputHandlerPhaseName,
+			"observers polling /api/active during the transform must see the input-handler phase, not a silent run");
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.FinalContent.Should().Contain("result-world");
+		info.CurrentStep.Should().BeNull("the marker is cleared once the transform finishes and the run completes");
 	}
 
 	[Fact]
