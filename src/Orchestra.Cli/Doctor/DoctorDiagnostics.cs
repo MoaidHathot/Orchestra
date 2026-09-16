@@ -230,10 +230,17 @@ public static class DoctorDiagnostics
 			];
 		}
 
+		// What the binary actually is, not just what Orchestra pins: an explicit path can be any
+		// version and the CLI self-updates in place. Costs a ~1 s process launch, so honour
+		// --offline (which promises not to spawn agent CLIs).
+		var installedVersion = options.Offline
+			? null
+			: await CopilotPreflight.TryGetInstalledVersionAsync(probe.Path!, cancellationToken: cancellationToken).ConfigureAwait(false);
+
 		var cliCheck = new DoctorCheck(
 			"copilot cli",
 			DoctorStatus.Ok,
-			$"{probe.Path} ({DescribeSource(probe.Source)}, CLI {probe.Version})");
+			$"{probe.Path} ({DescribeSource(probe.Source)}, {DescribeCliVersion(installedVersion, probe.Version)})");
 
 		if (options.Offline)
 			return [cliCheck, new DoctorCheck("copilot auth", DoctorStatus.Skipped, "Skipped - --offline.")];
@@ -260,6 +267,21 @@ public static class DoctorDiagnostics
 		CopilotCliSource.Cache => "cached",
 		_ => "not installed",
 	};
+
+	/// <summary>
+	/// Renders the CLI version clause: the installed version when it could be read, flagged
+	/// with the pin when the two differ, and only the pin (labelled as such) when the binary
+	/// was not asked.
+	/// </summary>
+	internal static string DescribeCliVersion(string? installedVersion, string pinnedVersion)
+	{
+		if (string.IsNullOrWhiteSpace(installedVersion))
+			return $"pinned CLI {pinnedVersion}";
+
+		return string.Equals(installedVersion, pinnedVersion, StringComparison.OrdinalIgnoreCase)
+			? $"CLI {installedVersion}"
+			: $"CLI {installedVersion}, Orchestra pins {pinnedVersion}";
+	}
 
 	private static DoctorCheck CheckOpenCode(OrchestraConfigFile? configFile, string configuredProvider)
 	{

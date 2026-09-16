@@ -117,7 +117,9 @@ public sealed class LoginCommand : AsyncCommand<LoginSettings>
 			catch (Exception ex)
 			{
 				_console.MarkupLine($"[red]Error:[/] could not download the Copilot CLI: {Markup.Escape(ex.Message)}");
-				_console.MarkupLine($"[dim]Set {Markup.Escape(CopilotPreflight.ExplicitCliPathEnvVar)} to a pre-installed binary, or {Markup.Escape(CopilotPreflight.NpmRegistryEnvVar)} to an internal npm mirror.[/]");
+				// The bootstrap's own exception already spells out both overrides per failed URL.
+				if (ex is not CopilotCliBootstrapException)
+					_console.MarkupLine($"[dim]Set {Markup.Escape(CopilotPreflight.ExplicitCliPathEnvVar)} to a pre-installed binary, or {Markup.Escape(CopilotPreflight.NpmRegistryEnvVar)} to an internal npm mirror.[/]");
 				return 1;
 			}
 		}

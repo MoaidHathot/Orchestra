@@ -8,4 +8,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!--
+    GitHub.Copilot.SDK downloads the Copilot CLI at build time from $(CopilotNpmRegistryUrl)
+    (default registry.npmjs.org). Honour the same mirror override the runtime bootstrap uses
+    (ORCHESTRA_COPILOT_NPM_REGISTRY) so a network that blocks the public registry can still
+    build and pack without editing project files. An explicit MSBuild property still wins.
+  -->
+  <PropertyGroup Condition="'$(CopilotNpmRegistryUrl)' == '' And '$(ORCHESTRA_COPILOT_NPM_REGISTRY)' != ''">
+    <CopilotNpmRegistryUrl>$(ORCHESTRA_COPILOT_NPM_REGISTRY)</CopilotNpmRegistryUrl>
+  </PropertyGroup>
+
 </Project>

@@ -234,7 +234,7 @@ worker). Omit the key to use the built-in default (120s — generous enough to a
 | `ORCHESTRA_ENABLE_SCHEDULER` | `false` runs an API-only host that never fires triggers. |
 | `ORCHESTRA_URL` | Server URL used by CLI client commands. |
 | `ORCHESTRA_COPILOT_CLI_PATH` | Use a pre-installed Copilot CLI instead of the managed download. |
-| `ORCHESTRA_COPILOT_NPM_REGISTRY` | npm registry mirror for the Copilot CLI download. |
+| `ORCHESTRA_COPILOT_NPM_REGISTRY` | npm registry mirror for the Copilot CLI download (the only one tried when set; also honoured by the build). When unset, the registry from `~/.npmrc` / `npm_config_registry` is tried before `registry.npmjs.org`. |
 | `ORCHESTRA_OPENCODE_PATH` | Path to the `opencode` binary when it is not on `PATH`. |
 | `ASPNETCORE_URLS` / `DOTNET_URLS` | Standard ASP.NET bindings; both take precedence over `orchestra.json`'s `urls`. |
 

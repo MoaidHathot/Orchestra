@@ -230,7 +230,7 @@ Run `orchestra doctor` to see which file is actually in effect.
 | `ORCHESTRA_DATA_PATH` | Data path for run history / registry. |
 | `ORCHESTRA_ORCHESTRATIONS_PATH` | Workspace directory scanned for orchestrations. |
 | `ORCHESTRA_COPILOT_CLI_PATH` | Use a pre-installed Copilot CLI instead of the managed download. |
-| `ORCHESTRA_COPILOT_NPM_REGISTRY` | npm registry mirror for the Copilot CLI download. |
+| `ORCHESTRA_COPILOT_NPM_REGISTRY` | npm registry mirror for the Copilot CLI download (the only one tried when set; also honoured by the build). When unset, the registry from `~/.npmrc` / `npm_config_registry` is tried before `registry.npmjs.org`. |
 | `ORCHESTRA_OPENCODE_PATH` | Path to the `opencode` binary when it is not on PATH. |
 
 ---
