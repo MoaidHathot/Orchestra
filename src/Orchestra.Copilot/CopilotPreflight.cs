@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace Orchestra.Copilot;
@@ -26,7 +27,12 @@ public enum CopilotCliSource
 /// <param name="Available">True when a binary is already usable on this machine.</param>
 /// <param name="Path">Resolved binary path, or the cache path it *would* occupy.</param>
 /// <param name="Source">How <paramref name="Path"/> was resolved.</param>
-/// <param name="Version">Pinned CLI version this build of Orchestra expects.</param>
+/// <param name="Version">
+/// CLI version this build of Orchestra <em>pins</em> (what the bootstrap would download). Not
+/// necessarily what is on disk: an explicit path can be any version, and the CLI self-updates
+/// in place, so a cached binary drifts too. Use <see cref="CopilotPreflight.TryGetInstalledVersionAsync"/>
+/// for the version the binary actually reports.
+/// </param>
 /// <param name="Rid">Runtime identifier the binary is selected for.</param>
 /// <param name="Error">Set when the host platform has no published Copilot CLI build.</param>
 public sealed record CopilotCliProbe(
@@ -53,7 +59,7 @@ public sealed record CopilotAuthProbe(bool Ok, int ModelCount, string? Error);
 /// only discovers a missing CLI or bad credentials <em>mid-run</em> — after the ~100 MB download
 /// and after a run scope has been opened. These checks answer both questions up front.
 /// </remarks>
-public static class CopilotPreflight
+public static partial class CopilotPreflight
 {
 	/// <summary>Environment variable that points at a pre-installed Copilot CLI, bypassing the download.</summary>
 	public const string ExplicitCliPathEnvVar = CopilotCliBootstrap.ExplicitCliPathEnvVar;
@@ -119,6 +125,10 @@ public static class CopilotPreflight
 	/// <see cref="Microsoft.Extensions.Logging.Abstractions.NullLogger"/> and only writes two
 	/// bare lines to stderr.
 	/// </param>
+	/// <exception cref="CopilotCliBootstrapException">
+	/// Every configured npm registry failed; the message names each URL tried and the
+	/// environment overrides that fix it.
+	/// </exception>
 	public static Task<string> EnsureAsync(ILogger? logger = null, CancellationToken cancellationToken = default)
 	{
 		if (logger is not null)
@@ -126,6 +136,90 @@ public static class CopilotPreflight
 
 		return CopilotCliBootstrap.EnsureAsync(cancellationToken);
 	}
+
+	/// <summary>
+	/// Asks the binary at <paramref name="cliPath"/> which version it is (<c>copilot --version</c>)
+	/// and returns the bare version string, e.g. <c>1.0.85</c>; null when the binary cannot be
+	/// started, times out, or prints nothing recognisable.
+	/// </summary>
+	/// <remarks>
+	/// The pinned <see cref="CopilotCliProbe.Version"/> is what Orchestra <em>expects</em>; this
+	/// is what is <em>installed</em>. They legitimately differ when <c>ORCHESTRA_COPILOT_CLI_PATH</c>
+	/// points at a user-managed install or after the CLI self-updated in place, and doctor
+	/// should say so rather than label a 1.0.85 binary "1.0.67". Costs one short process
+	/// launch (~1 s warm), so callers on a hot path should not use it.
+	/// </remarks>
+	public static async Task<string?> TryGetInstalledVersionAsync(
+		string cliPath,
+		TimeSpan? timeout = null,
+		CancellationToken cancellationToken = default)
+	{
+		if (string.IsNullOrWhiteSpace(cliPath) || !File.Exists(cliPath))
+			return null;
+
+		using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		cts.CancelAfter(timeout ?? TimeSpan.FromSeconds(15));
+
+		using var process = new System.Diagnostics.Process
+		{
+			StartInfo = new System.Diagnostics.ProcessStartInfo(cliPath, "--version")
+			{
+				RedirectStandardOutput = true,
+				RedirectStandardError = true,
+				UseShellExecute = false,
+				CreateNoWindow = true,
+			},
+		};
+
+		try
+		{
+			process.Start();
+
+			var stdout = process.StandardOutput.ReadToEndAsync(cts.Token);
+			var stderr = process.StandardError.ReadToEndAsync(cts.Token);
+			await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
+
+			return ParseCliVersion(await stdout.ConfigureAwait(false))
+				?? ParseCliVersion(await stderr.ConfigureAwait(false));
+		}
+		catch (Exception ex) when (ex is OperationCanceledException or System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+		{
+			// Diagnostic only: an unlaunchable or hung binary is reported as "unknown", and the
+			// auth probe that follows will surface the real failure with the SDK's own error.
+			// Kill a hung process so the probe never leaves a stray copilot behind.
+			try
+			{
+				if (!process.HasExited)
+					process.Kill(entireProcessTree: true);
+			}
+			catch
+			{
+				// Never started, or already gone.
+			}
+
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// Extracts the semantic version from the CLI's <c>--version</c> banner
+	/// ("GitHub Copilot CLI 1.0.85." / "1.0.84-5"). Null when no version-shaped token exists.
+	/// </summary>
+	internal static string? ParseCliVersion(string? output)
+	{
+		if (string.IsNullOrWhiteSpace(output))
+			return null;
+
+		var match = CliVersionRegex().Match(output);
+		return match.Success ? match.Groups[1].Value.TrimEnd('.') : null;
+	}
+
+	// Word-ish boundary on the left (an optional "v" prefix is allowed, as in "v1.0.85") so
+	// "CLI 1.0.85" works but ".85" in the middle of a longer dotted token never does; \b on the
+	// right stops before the banner's trailing period. Prerelease tags may contain dots and
+	// hyphens ("1.0.84-5", "1.0.0-beta-2").
+	[GeneratedRegex(@"(?<![\w.])v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b")]
+	private static partial Regex CliVersionRegex();
 
 	/// <summary>
 	/// Starts the Copilot CLI and asks it to list models — the cheapest call that actually

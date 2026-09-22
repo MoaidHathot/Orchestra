@@ -181,4 +181,29 @@ public sealed class DoctorDiagnosticsTests : IDisposable
 		foreach (var check in report.Checks.Where(c => c.Status is DoctorStatus.Failed or DoctorStatus.Warning))
 			check.Remedy.Should().NotBeNullOrWhiteSpace($"check '{check.Name}' failed without telling the user what to do");
 	}
+
+	[Theory]
+	[InlineData("1.0.67", "1.0.67", "CLI 1.0.67")]
+	[InlineData("1.0.85", "1.0.67", "CLI 1.0.85, Orchestra pins 1.0.67")]
+	[InlineData(null, "1.0.67", "pinned CLI 1.0.67")]
+	[InlineData("", "1.0.67", "pinned CLI 1.0.67")]
+	public void DescribeCliVersion_NeverPresentsThePinAsTheInstalledVersion(string? installed, string pinned, string expected)
+	{
+		// The binary on disk is not necessarily the pinned one: ORCHESTRA_COPILOT_CLI_PATH can
+		// point anywhere, and the CLI self-updates in place. Doctor must say which is which.
+		DoctorDiagnostics.DescribeCliVersion(installed, pinned).Should().Be(expected);
+	}
+
+	[Fact]
+	public async Task RunAsync_Offline_DoesNotClaimAnInstalledCliVersion()
+	{
+		// --offline promises not to spawn agent CLIs, so the version can only be the pin --
+		// and it has to be labelled as such.
+		var report = await DoctorDiagnostics.RunAsync(
+			new DoctorOptions(Offline: true, StartDirectory: NewProject(null)));
+
+		var cli = Find(report, "copilot cli");
+		if (cli.Status == DoctorStatus.Ok)
+			cli.Detail.Should().Contain("pinned CLI ");
+	}
 }

@@ -145,8 +145,13 @@ your local application data. During that download the run looks like it has stal
 Run `orchestra doctor --fix` first to get it out of the way, and to find out *before* paying
 that cost whether your credentials actually work.
 
-To use a Copilot CLI you already have, set `ORCHESTRA_COPILOT_CLI_PATH`. For an internal npm
-mirror, set `ORCHESTRA_COPILOT_NPM_REGISTRY`.
+To use a Copilot CLI you already have, set `ORCHESTRA_COPILOT_CLI_PATH`. The download itself
+follows npm's configuration on the machine: a registry set in `~/.npmrc` (`@github:registry` or
+`registry`) or in `npm_config_registry` is tried before `registry.npmjs.org`, so a corporate
+mirror that already works for `npm install` works here too. To force a specific mirror, set
+`ORCHESTRA_COPILOT_NPM_REGISTRY`; it is then the only registry tried, and building from source
+honours it as well. When every registry fails, the error lists each URL with its reason and
+both overrides.
 
 ## Signing in
 

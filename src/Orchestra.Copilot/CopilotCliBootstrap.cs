@@ -2,6 +2,8 @@ using System.Formats.Tar;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace Orchestra.Copilot;
@@ -39,17 +41,39 @@ internal static partial class CopilotCliBootstrap
 
 	private const string DefaultNpmRegistry = "https://registry.npmjs.org";
 
+	/// <summary>npm scope the CLI packages are published under; drives the <c>@scope:registry</c> lookup.</summary>
+	private const string NpmScope = "@github";
+
 	/// <summary>How long to wait for a peer process that already holds the download lock.</summary>
 	private static readonly TimeSpan LockAcquisitionTimeout = TimeSpan.FromMinutes(10);
 
 	/// <summary>Poll interval while waiting for the peer's download to finish.</summary>
 	private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(500);
 
+	/// <summary>Overall budget for one download attempt (headers + ~100 MB body).</summary>
+	private static readonly TimeSpan DownloadTimeout = TimeSpan.FromMinutes(10);
+
 	/// <summary>
-	/// Optional override for the npm registry URL. Honored when set; falls back to
-	/// <see cref="DefaultNpmRegistry"/>. Useful for org-internal mirrors.
+	/// TCP/TLS connect budget per attempt. A registry that is firewalled by dropping packets
+	/// (rather than by a TLS alert) must fail fast so the next candidate gets its turn well
+	/// inside <see cref="DownloadTimeout"/>.
+	/// </summary>
+	private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(15);
+
+	/// <summary>
+	/// Optional override for the npm registry URL. When set it is the <em>only</em> registry
+	/// tried. When unset, the registry npm itself is configured with on this machine
+	/// (<c>@github:registry</c> / <c>registry</c> from <c>~/.npmrc</c>, or
+	/// <c>npm_config_registry</c>) is tried before <see cref="DefaultNpmRegistry"/>, so a
+	/// corporate mirror that already works for <c>npm install</c> works here too.
 	/// </summary>
 	public const string NpmRegistryEnvVar = "ORCHESTRA_COPILOT_NPM_REGISTRY";
+
+	/// <summary>npm's own environment override for the registry (read case-insensitively, as npm does).</summary>
+	internal const string NpmConfigRegistryEnvVar = "npm_config_registry";
+
+	/// <summary>npm's environment override for the user config file path (defaults to <c>~/.npmrc</c>).</summary>
+	internal const string NpmConfigUserConfigEnvVar = "npm_config_userconfig";
 
 	/// <summary>
 	/// Optional override that, when set, bypasses the bootstrap entirely and returns the
@@ -320,27 +344,11 @@ internal static partial class CopilotCliBootstrap
 				return binaryPath;
 			}
 
-			var registry = (Environment.GetEnvironmentVariable(NpmRegistryEnvVar) ?? DefaultNpmRegistry).TrimEnd('/');
-			var url = $"{registry}/@github/copilot-{npmPlatform}/-/copilot-{npmPlatform}-{CopilotCliVersion}.tgz";
+			var registries = ResolveRegistryCandidates();
+			LogRegistryCandidates(logger, string.Join(", ", registries.Select(r => $"{r.Url} ({r.Source})")));
+
 			var archivePath = Path.Combine(cacheDir, "copilot.tgz");
-
-			LogDownloadStarting(logger, CopilotCliVersion, npmPlatform, url);
-			// Stderr write so the user-visible progress shows up even when the host hasn't
-			// wired CopilotCliBootstrap.SetLogger (which is the default for the Portal /
-			// Server hosts today). The download blocks the calling thread for ~30-90 s on
-			// a fresh install; without this line the tool appears to hang silently and
-			// users open issues thinking it's stuck. Stderr (not stdout) so machine-
-			// readable consumers piping `orchestra` JSON output aren't polluted.
-			WriteProgressToStderr($"Copilot CLI: downloading {CopilotCliVersion} for {npmPlatform} from {url} (one-time setup, ~100 MB)...");
-
-			using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(10) })
-			{
-				using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-				response.EnsureSuccessStatusCode();
-				await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-				await using var file = File.Create(archivePath);
-				await stream.CopyToAsync(file, cancellationToken).ConfigureAwait(false);
-			}
+			var url = await DownloadArchiveAsync(registries, npmPlatform, archivePath, logger, cancellationToken).ConfigureAwait(false);
 
 			LogExtractStarting(logger, archivePath, cacheDir);
 			await ExtractTarGzAsync(archivePath, cacheDir, cancellationToken).ConfigureAwait(false);
@@ -386,6 +394,318 @@ internal static partial class CopilotCliBootstrap
 		catch
 		{
 			// Ignore. The structured log via ILogger is the authoritative record.
+		}
+	}
+
+	/// <summary>An npm registry to try, plus where it was configured (for logs and the failure message).</summary>
+	internal sealed record NpmRegistryCandidate(string Url, string Source);
+
+	/// <summary>
+	/// Resolves the ordered list of npm registries to try for the CLI tarball, from the live
+	/// environment and the user's <c>~/.npmrc</c>.
+	/// </summary>
+	internal static IReadOnlyList<NpmRegistryCandidate> ResolveRegistryCandidates()
+		=> ResolveRegistryCandidates(GetEnvironmentVariableAnyCase, TryReadUserNpmrc(GetEnvironmentVariableAnyCase));
+
+	/// <summary>
+	/// Pure core of <see cref="ResolveRegistryCandidates()"/>.
+	/// </summary>
+	/// <remarks>
+	/// Order mirrors what <c>npm install @github/copilot</c> would do on this machine, then
+	/// falls back to the public registry:
+	/// <list type="number">
+	/// <item><see cref="NpmRegistryEnvVar"/> when set -- exclusively, no fallback. An explicit
+	/// override that is not an absolute http(s) URL is an error rather than silently ignored.</item>
+	/// <item><c>@github:registry</c> from <c>~/.npmrc</c> (npm resolves a scoped package's
+	/// registry before the unscoped one).</item>
+	/// <item><c>npm_config_registry</c> from the environment (npm's env beats its user config).</item>
+	/// <item><c>registry</c> from <c>~/.npmrc</c>.</item>
+	/// <item><see cref="DefaultNpmRegistry"/>.</item>
+	/// </list>
+	/// Duplicates and values that are not absolute http(s) URLs are dropped.
+	/// </remarks>
+	internal static IReadOnlyList<NpmRegistryCandidate> ResolveRegistryCandidates(Func<string, string?> getEnv, string? npmrcContent)
+	{
+		var explicitOverride = getEnv(NpmRegistryEnvVar);
+		if (!string.IsNullOrWhiteSpace(explicitOverride))
+		{
+			if (!TryNormalizeRegistryUrl(explicitOverride, out var overrideUrl))
+			{
+				throw new CopilotCliBootstrapException(
+					$"{NpmRegistryEnvVar} is set to '{explicitOverride.Trim()}', which is not an absolute http(s) URL. " +
+					"Point it at an npm registry root such as https://registry.npmjs.org or your organisation's mirror.");
+			}
+
+			return [new NpmRegistryCandidate(overrideUrl, NpmRegistryEnvVar)];
+		}
+
+		var npmrc = npmrcContent is null
+			? new Dictionary<string, string>(StringComparer.Ordinal)
+			: ParseNpmrc(npmrcContent, getEnv);
+
+		var candidates = new List<NpmRegistryCandidate>(4);
+
+		if (npmrc.TryGetValue($"{NpmScope}:registry", out var scoped))
+			Add(scoped, $"~/.npmrc {NpmScope}:registry");
+
+		Add(getEnv(NpmConfigRegistryEnvVar), NpmConfigRegistryEnvVar);
+
+		if (npmrc.TryGetValue("registry", out var unscoped))
+			Add(unscoped, "~/.npmrc registry");
+
+		Add(DefaultNpmRegistry, "default");
+
+		return candidates;
+
+		void Add(string? value, string source)
+		{
+			if (!TryNormalizeRegistryUrl(value, out var url))
+				return;
+
+			if (candidates.Any(c => string.Equals(c.Url, url, StringComparison.OrdinalIgnoreCase)))
+				return;
+
+			candidates.Add(new NpmRegistryCandidate(url, source));
+		}
+	}
+
+	/// <summary>
+	/// Accepts absolute http(s) URLs only and strips the trailing slash so URL composition
+	/// never yields <c>//@github</c>.
+	/// </summary>
+	private static bool TryNormalizeRegistryUrl(string? value, out string url)
+	{
+		url = string.Empty;
+		if (string.IsNullOrWhiteSpace(value))
+			return false;
+
+		var trimmed = value.Trim();
+		if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+			return false;
+
+		if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
+			return false;
+
+		url = trimmed.TrimEnd('/');
+		return url.Length > 0;
+	}
+
+	/// <summary>
+	/// Minimal parser for npm's ini-style <c>.npmrc</c>: <c>key=value</c> lines, <c>#</c>/<c>;</c>
+	/// comments, optional surrounding quotes, <c>${VAR}</c> environment expansion. Later keys win.
+	/// A value whose <c>${VAR}</c> cannot be resolved is dropped (npm would refuse to load the
+	/// file; we just don't want to try a half-expanded URL).
+	/// </summary>
+	internal static IReadOnlyDictionary<string, string> ParseNpmrc(string content, Func<string, string?> getEnv)
+	{
+		var result = new Dictionary<string, string>(StringComparer.Ordinal);
+
+		foreach (var rawLine in content.Split('\n'))
+		{
+			var line = rawLine.Trim();
+			if (line.Length == 0 || line[0] is '#' or ';' or '[')
+				continue;
+
+			var separator = line.IndexOf('=');
+			if (separator <= 0)
+				continue;
+
+			var key = line[..separator].Trim();
+			var value = line[(separator + 1)..].Trim();
+			if (value.Length >= 2 && ((value[0] == '"' && value[^1] == '"') || (value[0] == '\'' && value[^1] == '\'')))
+				value = value[1..^1];
+
+			var expanded = TryExpandEnvPlaceholders(value, getEnv);
+			if (expanded is null)
+				continue;
+
+			result[key] = expanded;
+		}
+
+		return result;
+	}
+
+	private static string? TryExpandEnvPlaceholders(string value, Func<string, string?> getEnv)
+	{
+		if (!value.Contains("${", StringComparison.Ordinal))
+			return value;
+
+		var unresolved = false;
+		var expanded = EnvPlaceholderRegex().Replace(value, match =>
+		{
+			var resolved = getEnv(match.Groups[1].Value);
+			if (resolved is null)
+				unresolved = true;
+			return resolved ?? string.Empty;
+		});
+
+		return unresolved ? null : expanded;
+	}
+
+	[GeneratedRegex(@"\$\{([^}]+)\}")]
+	private static partial Regex EnvPlaceholderRegex();
+
+	/// <summary>
+	/// Reads the user-level <c>.npmrc</c> (honouring <c>npm_config_userconfig</c>), or null when
+	/// there is none or it cannot be read. Never throws: npm config is a hint, not a dependency.
+	/// </summary>
+	internal static string? TryReadUserNpmrc(Func<string, string?> getEnv)
+	{
+		try
+		{
+			var path = getEnv(NpmConfigUserConfigEnvVar);
+			if (string.IsNullOrWhiteSpace(path))
+			{
+				var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+				if (string.IsNullOrEmpty(home))
+					return null;
+
+				path = Path.Combine(home, ".npmrc");
+			}
+
+			return File.Exists(path) ? File.ReadAllText(path) : null;
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
+		{
+			return null;
+		}
+	}
+
+	/// <summary>
+	/// npm reads <c>npm_config_*</c> variables case-insensitively on every OS; Windows already
+	/// does, Unix needs the upper-case spelling tried explicitly.
+	/// </summary>
+	private static string? GetEnvironmentVariableAnyCase(string name)
+		=> Environment.GetEnvironmentVariable(name)
+		   ?? Environment.GetEnvironmentVariable(name.ToUpperInvariant())
+		   ?? Environment.GetEnvironmentVariable(name.ToLowerInvariant());
+
+	/// <summary>Composes the npm tarball URL the SDK's own MSBuild target uses (<c>_CopilotDownloadUrl</c>).</summary>
+	internal static string BuildDownloadUrl(string registry, string npmPlatform, string version)
+		=> $"{registry.TrimEnd('/')}/{NpmScope}/copilot-{npmPlatform}/-/copilot-{npmPlatform}-{version}.tgz";
+
+	/// <summary>
+	/// Downloads the CLI tarball to <paramref name="archivePath"/>, trying each registry in
+	/// order until one succeeds. Returns the URL that worked.
+	/// </summary>
+	/// <exception cref="CopilotCliBootstrapException">
+	/// Every registry failed. The message lists each URL with its reason and the environment
+	/// overrides that fix the common causes.
+	/// </exception>
+	/// <exception cref="OperationCanceledException"><paramref name="cancellationToken"/> was signalled.</exception>
+	internal static async Task<string> DownloadArchiveAsync(
+		IReadOnlyList<NpmRegistryCandidate> registries,
+		string npmPlatform,
+		string archivePath,
+		ILogger logger,
+		CancellationToken cancellationToken)
+	{
+		if (registries.Count == 0)
+			throw new ArgumentException("At least one npm registry is required.", nameof(registries));
+
+		var failures = new List<(string Url, string Source, Exception Error)>();
+
+		using var handler = new SocketsHttpHandler { ConnectTimeout = ConnectTimeout };
+		using var http = new HttpClient(handler) { Timeout = DownloadTimeout };
+
+		for (var i = 0; i < registries.Count; i++)
+		{
+			var candidate = registries[i];
+			var url = BuildDownloadUrl(candidate.Url, npmPlatform, CopilotCliVersion);
+
+			LogDownloadStarting(logger, CopilotCliVersion, npmPlatform, url);
+			// Stderr write so the user-visible progress shows up even when the host hasn't
+			// wired CopilotCliBootstrap.SetLogger (which is the default for the Portal /
+			// Server hosts today). The download blocks the calling thread for ~30-90 s on
+			// a fresh install; without this line the tool appears to hang silently and
+			// users open issues thinking it's stuck. Stderr (not stdout) so machine-
+			// readable consumers piping `orchestra` JSON output aren't polluted.
+			WriteProgressToStderr($"Copilot CLI: downloading {CopilotCliVersion} for {npmPlatform} from {url} (one-time setup, ~100 MB)...");
+
+			try
+			{
+				using var response = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+				response.EnsureSuccessStatusCode();
+				await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+				await using (var file = File.Create(archivePath))
+				{
+					await stream.CopyToAsync(file, cancellationToken).ConfigureAwait(false);
+				}
+
+				return url;
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				TryDeleteFile(archivePath);
+				throw;
+			}
+			catch (Exception ex) when (ex is HttpRequestException or IOException or OperationCanceledException)
+			{
+				// HttpRequestException: DNS, TCP, TLS, or a non-2xx status (EnsureSuccessStatusCode).
+				// IOException: the connection dropped mid-body. OperationCanceledException here is
+				// HttpClient's own timeout -- the caller's token was handled by the filter above.
+				TryDeleteFile(archivePath);
+
+				var reason = DescribeFailure(ex);
+				failures.Add((url, candidate.Source, ex));
+				LogDownloadAttemptFailed(logger, ex, url, candidate.Source, reason);
+
+				var next = i + 1 < registries.Count ? $"; trying {registries[i + 1].Url} next" : string.Empty;
+				WriteProgressToStderr($"Copilot CLI: download from {url} failed: {reason}{next}");
+			}
+		}
+
+		var message = BuildDownloadFailureMessage(npmPlatform, failures.Select(f => (f.Url, f.Source, DescribeFailure(f.Error))));
+		Exception inner = failures.Count == 1 ? failures[0].Error : new AggregateException(failures.Select(f => f.Error));
+		throw new CopilotCliBootstrapException(message, inner);
+	}
+
+	/// <summary>
+	/// Flattens an exception chain into one line: the outer message plus up to two inner
+	/// messages, so a TLS failure reads as the alert that caused it rather than "see inner
+	/// exception".
+	/// </summary>
+	internal static string DescribeFailure(Exception exception)
+	{
+		var parts = new List<string>(3);
+		for (var current = exception; current is not null && parts.Count < 3; current = current.InnerException)
+		{
+			var text = current.Message.Replace(", see inner exception", string.Empty, StringComparison.Ordinal).Trim();
+			if (text.Length > 0 && !parts.Contains(text, StringComparer.Ordinal))
+				parts.Add(text);
+		}
+
+		return parts.Count == 0 ? exception.GetType().Name : string.Join(" -> ", parts);
+	}
+
+	/// <summary>Composes the message for <see cref="CopilotCliBootstrapException"/> after every registry failed.</summary>
+	internal static string BuildDownloadFailureMessage(string npmPlatform, IEnumerable<(string Url, string Source, string Reason)> attempts)
+	{
+		var builder = new StringBuilder();
+		builder.Append("Copilot CLI ").Append(CopilotCliVersion).Append(" for ").Append(npmPlatform)
+			.AppendLine(" could not be downloaded from any npm registry:");
+
+		foreach (var (url, source, reason) in attempts)
+			builder.Append("  - ").Append(url).Append(" [").Append(source).Append("]: ").AppendLine(reason);
+
+		builder.Append("If this machine reaches npm through a mirror or proxy, set ").Append(NpmRegistryEnvVar)
+			.Append(" to its URL (Orchestra also honours '@github:registry' and 'registry' from ~/.npmrc). ")
+			.Append("To skip the download entirely, set ").Append(ExplicitCliPathEnvVar)
+			.Append(" to a pre-installed Copilot CLI binary, e.g. from 'npm i -g @github/copilot'.");
+
+		return builder.ToString();
+	}
+
+	private static void TryDeleteFile(string path)
+	{
+		try
+		{
+			if (File.Exists(path))
+				File.Delete(path);
+		}
+		catch
+		{
+			// Best-effort: a stale partial archive in our own cache dir is overwritten next time.
 		}
 	}
 
@@ -459,4 +779,10 @@ internal static partial class CopilotCliBootstrap
 
 	[LoggerMessage(EventId = 6, Level = LogLevel.Information, Message = "Copilot CLI bootstrap: waiting for another process holding {LockPath}")]
 	private static partial void LogWaitingForPeerDownload(ILogger logger, string lockPath);
+
+	[LoggerMessage(EventId = 7, Level = LogLevel.Warning, Message = "Copilot CLI bootstrap: download from {Url} ({Source}) failed: {Reason}")]
+	private static partial void LogDownloadAttemptFailed(ILogger logger, Exception exception, string url, string source, string reason);
+
+	[LoggerMessage(EventId = 8, Level = LogLevel.Debug, Message = "Copilot CLI bootstrap: npm registry candidates in order: {Registries}")]
+	private static partial void LogRegistryCandidates(ILogger logger, string registries);
 }
