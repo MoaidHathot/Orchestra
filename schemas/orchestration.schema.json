@@ -56,8 +56,12 @@
     },
     "defaultModel": {
       "type": "string",
-      "description": "Default model applied to all Prompt steps that don't define their own model. When absent, each Prompt step must specify its own model.",
+      "description": "Default model applied to all Prompt steps that don't define their own model. When absent, the host's configured defaultModel is used; if the host defines none either, each Prompt step must specify its own model. Resolution per step: step model -> defaultModel -> host defaultModel.",
       "minLength": 1
+    },
+    "defaultReasoningLevel": {
+      "$ref": "#/$defs/reasoningLevel",
+      "description": "Default reasoning effort applied to all Prompt steps that don't define their own reasoningLevel. When absent, the host's configured defaultReasoningLevel is used; if the host defines none either, the provider/model default applies. Resolution per step: step reasoningLevel -> defaultReasoningLevel -> host defaultReasoningLevel -> provider default."
     },
     "defaultProvider": {
       "type": "string",
@@ -1446,8 +1450,8 @@
 
     "reasoningLevel": {
       "type": "string",
-      "description": "Reasoning/thinking level for the LLM model. Controls depth of chain-of-thought reasoning.",
-      "enum": ["low", "medium", "high", "Low", "Medium", "High"]
+      "description": "Reasoning effort for the LLM model (forwarded as the provider's reasoning_effort). low / medium / high are accepted by every reasoning model; xhigh and max only by models that advertise them (e.g. GPT-5.x/6 and Claude Opus 4.7+).",
+      "enum": ["low", "medium", "high", "xhigh", "max", "Low", "Medium", "High", "XHigh", "xHigh", "Max"]
     },
 
     "reasoningSummary": {

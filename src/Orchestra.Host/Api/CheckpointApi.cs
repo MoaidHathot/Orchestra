@@ -213,7 +213,7 @@ public static class CheckpointApi
 				entry.Orchestration.Name,
 				"resume");
 
-			var executor = new OrchestrationExecutor(scheduler, providerRegistry, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, childLauncher: childLauncher, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl, pendingInputStore: pendingInputStore, humanInputWaiter: humanInputWaiter);
+			var executor = new OrchestrationExecutor(scheduler, providerRegistry, reporter, loggerFactory, runStore: runStore, checkpointStore: checkpointStore, engineToolRegistry: engineToolRegistry, mcpResolver: mcpManager, childLauncher: childLauncher, globalHooks: hostOptions.Hooks, dataPath: hostOptions.DataPath, serverUrl: hostOptions.HostBaseUrl, pendingInputStore: pendingInputStore, humanInputWaiter: humanInputWaiter, hostDefaults: hostOptions.ToHostAgentDefaults());
 			var cancellationToken = cts.Token;
 
 			// Execute resume in background

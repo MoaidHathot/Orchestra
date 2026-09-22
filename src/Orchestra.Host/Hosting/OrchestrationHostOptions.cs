@@ -104,11 +104,31 @@ public class OrchestrationHostOptions
 	public PollingOptions Polling { get; set; } = new();
 
 	/// <summary>
-	/// Default AI model to use for internal LLM calls (e.g., trigger input handlers)
-	/// when no model is explicitly specified.
-	/// If null, defaults to "claude-opus-4.6".
+	/// Default AI model for Prompt steps that set no <c>model</c> and belong to an
+	/// orchestration with no <c>defaultModel</c>, and for internal LLM calls (e.g., trigger
+	/// input handlers) when no model is explicitly specified.
+	/// For internal calls, null falls back to "claude-opus-4.6"; for Prompt steps, null means
+	/// the step must resolve a model from the step or the orchestration.
 	/// </summary>
 	public string? DefaultModel { get; set; }
+
+	/// <summary>
+	/// Default reasoning effort for Prompt steps that set no <c>reasoningLevel</c> and belong
+	/// to an orchestration with no <c>defaultReasoningLevel</c>. Resolution per step:
+	/// step <c>reasoningLevel</c> → orchestration <c>defaultReasoningLevel</c> → this value
+	/// → provider/model default. Null means no host-level default.
+	/// </summary>
+	public ReasoningLevel? DefaultReasoningLevel { get; set; }
+
+	/// <summary>
+	/// Host-wide Prompt-step fallbacks derived from <see cref="DefaultModel"/> and
+	/// <see cref="DefaultReasoningLevel"/>, in the shape the engine consumes.
+	/// </summary>
+	public HostAgentDefaults ToHostAgentDefaults() => new()
+	{
+		Model = DefaultModel,
+		ReasoningLevel = DefaultReasoningLevel,
+	};
 
 	/// <summary>
 	/// Default provider-neutral agent worker pool settings applied when an

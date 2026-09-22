@@ -42,6 +42,22 @@ public class OpenCodeConfigBuilderTests
 		agent.GetProperty("reasoningEffort").GetString().Should().Be("high");
 	}
 
+	// opencode's variant keys are the lower-case effort names ("xhigh", "max", ...), so the
+	// generated agent must carry the same wire form the Copilot provider sends.
+	[Theory]
+	[InlineData(ReasoningLevel.Low, "low")]
+	[InlineData(ReasoningLevel.Medium, "medium")]
+	[InlineData(ReasoningLevel.High, "high")]
+	[InlineData(ReasoningLevel.XHigh, "xhigh")]
+	[InlineData(ReasoningLevel.Max, "max")]
+	public void Build_ReasoningLevel_MapsToLowerCaseReasoningEffort(ReasoningLevel level, string expected)
+	{
+		var plan = Build(system: "sys", reasoning: level);
+
+		var agent = ConfigJson(plan).GetProperty("agent").GetProperty("orchestra-primary");
+		agent.GetProperty("reasoningEffort").GetString().Should().Be(expected);
+	}
+
 	[Fact]
 	public void Build_ExcludedTools_DisablesNamedToolsOnPrimaryAgent()
 	{

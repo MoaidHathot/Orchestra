@@ -33,6 +33,7 @@ public partial class OrchestrationExecutor
 	private readonly string? _dataPath;
 	private readonly string? _serverUrl;
 	private readonly HookDefinition[] _globalHooks;
+	private readonly HostAgentDefaults _hostDefaults;
 
 	/// <summary>
 	/// Single-provider convenience constructor. Wraps <paramref name="agentBuilder"/> in a
@@ -56,7 +57,8 @@ public partial class OrchestrationExecutor
 		string? dataPath = null,
 		string? serverUrl = null,
 		IPendingInputStore? pendingInputStore = null,
-		IHumanInputWaiter? humanInputWaiter = null)
+		IHumanInputWaiter? humanInputWaiter = null,
+		HostAgentDefaults? hostDefaults = null)
 		: this(
 			scheduler,
 			new SingleAgentProviderRegistry(agentBuilder),
@@ -73,10 +75,15 @@ public partial class OrchestrationExecutor
 			dataPath,
 			serverUrl,
 			pendingInputStore,
-			humanInputWaiter)
+			humanInputWaiter,
+			hostDefaults)
 	{
 	}
 
+	/// <param name="hostDefaults">
+	/// Host-wide fallbacks (model, reasoning level) applied to Prompt steps when neither the
+	/// step nor the orchestration specifies a value. Null means no host fallbacks.
+	/// </param>
 	public OrchestrationExecutor(
 		IScheduler scheduler,
 		IAgentProviderRegistry providerRegistry,
@@ -93,7 +100,8 @@ public partial class OrchestrationExecutor
 		string? dataPath = null,
 		string? serverUrl = null,
 		IPendingInputStore? pendingInputStore = null,
-		IHumanInputWaiter? humanInputWaiter = null)
+		IHumanInputWaiter? humanInputWaiter = null,
+		HostAgentDefaults? hostDefaults = null)
 	{
 		_scheduler = scheduler;
 		_providerRegistry = providerRegistry;
@@ -108,6 +116,7 @@ public partial class OrchestrationExecutor
 			_globalHooks = MarkHookSources(globalHooks ?? [], HookSource.Global);
 			_dataPath = dataPath;
 			_serverUrl = serverUrl;
+			_hostDefaults = hostDefaults ?? HostAgentDefaults.None;
 			_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 
 		// If no registry is provided, create a default one with all built-in step types
@@ -400,7 +409,8 @@ public partial class OrchestrationExecutor
 			Variables = orchestration.Variables,
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
-			DefaultModel = orchestration.DefaultModel,
+			DefaultModel = orchestration.DefaultModel ?? _hostDefaults.Model,
+			DefaultReasoningLevel = orchestration.DefaultReasoningLevel ?? _hostDefaults.ReasoningLevel,
 			DefaultProvider = orchestration.DefaultProvider,
 			DefaultStepTimeoutSeconds = orchestration.DefaultStepTimeoutSeconds,
 			DefaultEnableTools = orchestration.DefaultEnableTools,

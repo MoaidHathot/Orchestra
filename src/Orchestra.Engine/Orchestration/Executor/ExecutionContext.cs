@@ -44,11 +44,21 @@ public class OrchestrationExecutionContext
 	public RetryPolicy? DefaultRetryPolicy { get; init; }
 
 	/// <summary>
-	/// Default model from the orchestration.
+	/// Effective default model for this run: the orchestration's <c>defaultModel</c>, or the
+	/// host's configured default model when the orchestration sets none.
 	/// Applied to Prompt steps that don't define their own Model.
 	/// When null, each Prompt step must specify its own model.
 	/// </summary>
 	public string? DefaultModel { get; init; }
+
+	/// <summary>
+	/// Effective default reasoning effort for this run: the orchestration's
+	/// <c>defaultReasoningLevel</c>, or the host's configured default when the orchestration
+	/// sets none. Applied to Prompt steps that don't define their own
+	/// <see cref="PromptOrchestrationStep.ReasoningLevel"/>. When null, the provider/model
+	/// default applies.
+	/// </summary>
+	public ReasoningLevel? DefaultReasoningLevel { get; init; }
 
 	/// <summary>
 	/// Default agent provider from the orchestration. Applied to Prompt steps that don't

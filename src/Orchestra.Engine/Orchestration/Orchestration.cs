@@ -51,9 +51,22 @@ public class Orchestration
 	/// <summary>
 	/// Default model applied to all Prompt steps that don't define their own
 	/// <see cref="PromptOrchestrationStep.Model"/>.
-	/// When null, each Prompt step must specify its own model.
+	/// When null, the host's configured default model is used; if the host defines none
+	/// either, each Prompt step must specify its own model.
+	/// Resolution precedence per step: step <c>model</c> → this <c>defaultModel</c>
+	/// → host default model.
 	/// </summary>
 	public string? DefaultModel { get; init; }
+
+	/// <summary>
+	/// Default reasoning effort applied to all Prompt steps that don't define their own
+	/// <see cref="PromptOrchestrationStep.ReasoningLevel"/>. When null, the host's configured
+	/// default reasoning level is used; if the host defines none either, the provider/model
+	/// default applies.
+	/// Resolution precedence per step: step <c>reasoningLevel</c> → this
+	/// <c>defaultReasoningLevel</c> → host default reasoning level → provider default.
+	/// </summary>
+	public ReasoningLevel? DefaultReasoningLevel { get; init; }
 
 	/// <summary>
 	/// Default agent provider applied to all Prompt steps that don't define their own

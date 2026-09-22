@@ -125,7 +125,8 @@ so a typo'd key is flagged in the editor rather than silently ignored at runtime
 | `dataPath` | `%LOCALAPPDATA%/OrchestraHost` | Run history, registry, checkpoints. Relative to this file's directory. |
 | `scan.directory` | none | Workspace **root** containing `orchestrations/` and `profiles/`. |
 | `provider` / `defaultProvider` | `copilot` | Default agent provider for Prompt steps. |
-| `defaultModel` | none | Default model for Prompt steps. |
+| `defaultModel` | none | Default model for Prompt steps that set no `model` and belong to an orchestration with no `defaultModel`. Also used for trigger input-handler calls. |
+| `defaultReasoningLevel` | none (provider default) | Default reasoning effort (`low` / `medium` / `high` / `xhigh` / `max`) for Prompt steps that set no `reasoningLevel` and belong to an orchestration with no `defaultReasoningLevel`. `xhigh`/`max` are only honoured by models that advertise them. |
 | `enableScheduler` | `true` | Set `false` for an API-only host that never fires triggers itself. |
 | `logLevel` | `Information` | Overrides `Logging:LogLevel:Default` from `appsettings.json`. |
 | `retention` | unlimited | Run-history limits. Favorited runs are always exempt. |

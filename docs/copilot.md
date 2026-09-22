@@ -97,7 +97,7 @@ var agent = await builder
     .WithModel("claude-opus-4.8")           // Set the AI model
     .WithSystemPrompt("You are an expert.") // Set system prompt
     .WithSystemPromptMode(SystemPromptMode.Replace)  // Replace or Append
-    .WithReasoningLevel(ReasoningLevel.High)         // Low, Medium, High
+    .WithReasoningLevel(ReasoningLevel.High)         // Low, Medium, High, XHigh, Max
     .WithMcp(localMcp, remoteMcp)           // Add MCP servers
     .WithSubagents(subagent1, subagent2)    // Add subagents
     .WithReporter(reporter)                 // Set event reporter
@@ -284,7 +284,9 @@ var agent = await builder
 
 ## Reasoning Levels
 
-Control the depth of reasoning:
+Control the reasoning effort. The level is forwarded verbatim (lower-cased) as the Copilot CLI's
+`reasoning_effort`; every reasoning model accepts `low` / `medium` / `high`, while `xhigh` and
+`max` are only honoured by models that advertise them (GPT-5.x/6, Claude Opus 4.7+).
 
 ```csharp
 // Quick responses
@@ -295,7 +297,15 @@ builder.WithReasoningLevel(ReasoningLevel.Medium);
 
 // Deep analysis
 builder.WithReasoningLevel(ReasoningLevel.High);
+
+// Extra-deep / the model's maximum effort (model must support it)
+builder.WithReasoningLevel(ReasoningLevel.XHigh);
+builder.WithReasoningLevel(ReasoningLevel.Max);
 ```
+
+When a step sets no level, the executor falls back to the orchestration's
+`defaultReasoningLevel`, then the host's `defaultReasoningLevel` (`orchestra.json`), then the
+provider/model default.
 
 ## System Prompt Modes
 
@@ -344,7 +354,7 @@ and [`examples/tuned-prompt-step.json`](../examples/tuned-prompt-step.json).
 
 | Field | Values | Effect |
 |-------|--------|--------|
-| `reasoningLevel` | `low` / `medium` / `high` | Reasoning effort (depth of chain-of-thought). |
+| `reasoningLevel` | `low` / `medium` / `high` / `xhigh` / `max` | Reasoning effort (depth of chain-of-thought). Falls back to the orchestration's `defaultReasoningLevel`, then the host's. `xhigh`/`max` require a model that advertises them. |
 | `reasoningSummary` | `none` / `concise` / `detailed` | Verbosity of the model's reasoning summary. |
 | `contextTier` | `default` / `longContext` | Opts into the model's extended context window where supported. |
 

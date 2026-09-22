@@ -301,7 +301,8 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			dataPath: _hostOptions.DataPath,
 			serverUrl: _hostOptions.HostBaseUrl,
 			pendingInputStore: _pendingInputStore,
-			humanInputWaiter: _humanInputWaiter);
+			humanInputWaiter: _humanInputWaiter,
+			hostDefaults: _hostOptions.ToHostAgentDefaults());
 
 		// 9. Wrap pre-execution param transform so executionInfo.Parameters reflects the
 		// post-transform values (otherwise the UI keeps showing the pre-transform input), and

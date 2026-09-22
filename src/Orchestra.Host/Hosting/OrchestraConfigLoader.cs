@@ -556,6 +556,9 @@ public static class OrchestraConfigLoader
 		if (config.DefaultModel is not null)
 			options.DefaultModel = config.DefaultModel;
 
+		if (config.DefaultReasoningLevel is not null)
+			options.DefaultReasoningLevel = config.DefaultReasoningLevel;
+
 		if (config.AgentPool is not null)
 		{
 			if (config.AgentPool.MinInstances.HasValue)
@@ -777,9 +780,17 @@ public class OrchestraConfigFile
 	public PollingConfig? Polling { get; set; }
 
 	/// <summary>
-	/// Default AI model to use for internal LLM calls (e.g., trigger input handlers).
+	/// Default AI model for Prompt steps that resolve no model from the step or the
+	/// orchestration, and for internal LLM calls (e.g., trigger input handlers).
 	/// </summary>
 	public string? DefaultModel { get; set; }
+
+	/// <summary>
+	/// Default reasoning effort (<c>low</c> / <c>medium</c> / <c>high</c> / <c>xhigh</c> /
+	/// <c>max</c>) for Prompt steps that set no <c>reasoningLevel</c> and belong to an
+	/// orchestration with no <c>defaultReasoningLevel</c>.
+	/// </summary>
+	public ReasoningLevel? DefaultReasoningLevel { get; set; }
 
 	/// <summary>
 	/// Default agent worker pool settings for orchestration runs.

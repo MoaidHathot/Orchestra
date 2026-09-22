@@ -72,6 +72,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.LogLevel.Should().Be("Information");
 		options.Retention.IsForever.Should().BeTrue();
 		options.DefaultModel.Should().BeNull();
+		options.DefaultReasoningLevel.Should().BeNull();
 	}
 
 	[Fact]
@@ -92,6 +93,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 			AutoResumeCheckpointsOnStartup = false,
 			LogLevel = "Debug",
 			DefaultModel = "claude-sonnet-4",
+			DefaultReasoningLevel = ReasoningLevel.Max,
 			Retention = new RetentionPolicyConfig
 			{
 				MaxRunsPerOrchestration = 50,
@@ -113,6 +115,9 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.AutoResumeCheckpointsOnStartup.Should().BeFalse();
 		options.LogLevel.Should().Be("Debug");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
+		options.DefaultReasoningLevel.Should().Be(ReasoningLevel.Max);
+		options.ToHostAgentDefaults().Should().BeEquivalentTo(
+			new HostAgentDefaults { Model = "claude-sonnet-4", ReasoningLevel = ReasoningLevel.Max });
 		options.Retention.MaxRunsPerOrchestration.Should().Be(50);
 		options.Retention.MaxRunAgeDays.Should().Be(7);
 		options.Retention.IsForever.Should().BeFalse();
@@ -969,6 +974,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 			"shutdownTimeoutSeconds": 180,
 			"logLevel": "Trace",
 			"defaultModel": "claude-sonnet-4",
+			"defaultReasoningLevel": "max",
 			"retention": {
 				"maxRunsPerOrchestration": 25,
 				"maxRunAgeDays": 14
@@ -992,9 +998,40 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.ShutdownTimeoutSeconds.Should().Be(180);
 		options.LogLevel.Should().Be("Trace");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
+		options.DefaultReasoningLevel.Should().Be(ReasoningLevel.Max);
 		options.Retention.MaxRunsPerOrchestration.Should().Be(25);
 		options.Retention.MaxRunAgeDays.Should().Be(14);
 		options.Retention.IsForever.Should().BeFalse();
+	}
+
+	[Theory]
+	[InlineData("low", ReasoningLevel.Low)]
+	[InlineData("medium", ReasoningLevel.Medium)]
+	[InlineData("high", ReasoningLevel.High)]
+	[InlineData("xhigh", ReasoningLevel.XHigh)]
+	[InlineData("XHigh", ReasoningLevel.XHigh)]
+	[InlineData("xHigh", ReasoningLevel.XHigh)]
+	[InlineData("max", ReasoningLevel.Max)]
+	[InlineData("Max", ReasoningLevel.Max)]
+	public void LoadAndApply_DefaultReasoningLevel_AcceptsEveryTierCaseInsensitively(string literal, ReasoningLevel expected)
+	{
+		// Arrange — orchestra.json is hand-edited, so every spelling the schema advertises must load.
+		var configPath = Path.Combine(_tempDir, $"reasoning-{literal}.json");
+		File.WriteAllText(configPath, $$"""
+		{
+			"defaultReasoningLevel": "{{literal}}"
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		// Assert
+		options.DefaultReasoningLevel.Should().Be(expected);
+		options.ToHostAgentDefaults().ReasoningLevel.Should().Be(expected);
 	}
 
 	// ── Load (returns OrchestraConfigFile) tests ──

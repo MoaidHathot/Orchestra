@@ -35,6 +35,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly string? _dataPath;
 	private readonly string? _serverUrl;
 	private readonly string? _defaultModel;
+	private readonly HostAgentDefaults _hostDefaults;
 	private readonly HookDefinition[] _globalHooks;
 	private readonly JsonSerializerOptions _jsonOptions;
 	private readonly IChildOrchestrationLauncher _launcher;
@@ -84,12 +85,13 @@ public partial class TriggerManager : BackgroundService
 		string? defaultModel = null,
 		HookDefinition[]? globalHooks = null,
 		IPendingInputStore? pendingInputStore = null,
-		IHumanInputWaiter? humanInputWaiter = null)
+		IHumanInputWaiter? humanInputWaiter = null,
+		ReasoningLevel? defaultReasoningLevel = null)
 		: this(
 			activeExecutions, activeExecutionInfos, new SingleAgentProviderRegistry(agentBuilder), scheduler,
 			loggerFactory, logger, runsDir, runStore, checkpointStore, launcher, executionCallback,
 			engineToolRegistry, mcpResolver, dataPath, serverUrl, defaultModel, globalHooks,
-			pendingInputStore, humanInputWaiter)
+			pendingInputStore, humanInputWaiter, defaultReasoningLevel)
 	{
 	}
 
@@ -112,7 +114,8 @@ public partial class TriggerManager : BackgroundService
 		string? defaultModel = null,
 		HookDefinition[]? globalHooks = null,
 		IPendingInputStore? pendingInputStore = null,
-		IHumanInputWaiter? humanInputWaiter = null)
+		IHumanInputWaiter? humanInputWaiter = null,
+		ReasoningLevel? defaultReasoningLevel = null)
 	{
 		_activeExecutions = activeExecutions;
 		_activeExecutionInfos = activeExecutionInfos;
@@ -133,6 +136,7 @@ public partial class TriggerManager : BackgroundService
 		_dataPath = dataPath;
 		_serverUrl = serverUrl;
 		_defaultModel = defaultModel;
+		_hostDefaults = new HostAgentDefaults { Model = defaultModel, ReasoningLevel = defaultReasoningLevel };
 		_globalHooks = globalHooks ?? [];
 		Directory.CreateDirectory(_triggersDir);
 
@@ -459,7 +463,7 @@ public partial class TriggerManager : BackgroundService
 		}
 
 		var reporter = _executionCallback?.CreateReporter() ?? NullOrchestrationReporter.Instance;
-		var executor = new OrchestrationExecutor(_scheduler, _providerRegistry, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, childLauncher: _launcher, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl, pendingInputStore: _pendingInputStore, humanInputWaiter: _humanInputWaiter);
+		var executor = new OrchestrationExecutor(_scheduler, _providerRegistry, reporter, _loggerFactory, runStore: _runStore, checkpointStore: _checkpointStore, engineToolRegistry: _engineToolRegistry, mcpResolver: _mcpResolver, childLauncher: _launcher, globalHooks: _globalHooks, dataPath: _dataPath, serverUrl: _serverUrl, pendingInputStore: _pendingInputStore, humanInputWaiter: _humanInputWaiter, hostDefaults: _hostDefaults);
 
 		var executionInfo = new ActiveExecutionInfo
 		{

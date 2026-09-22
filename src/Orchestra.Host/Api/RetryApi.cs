@@ -257,7 +257,8 @@ public static partial class RetryApi
 				// NullHumanInputWaiter (blocks forever and never responds to POST /respond),
 				// leaving any retried run with a human-input step permanently stuck.
 				pendingInputStore: pendingInputStore,
-				humanInputWaiter: humanInputWaiter);
+				humanInputWaiter: humanInputWaiter,
+				hostDefaults: hostOptions.ToHostAgentDefaults());
 			var cancellationToken = cts.Token;
 			var startTime = DateTimeOffset.UtcNow;
 			var logger = loggerFactory.CreateLogger(typeof(RetryApi));

@@ -239,8 +239,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// for model; full resolution including step outputs for prompts).
 		var resolvedModel = TemplateResolver.ResolveStatic(
 			step.Model ?? context.DefaultModel ?? throw new InvalidOperationException(
-				$"Step '{step.Name}' has no 'model' and the orchestration has no 'defaultModel'. " +
-				$"Either specify 'model' on the step or set 'defaultModel' at the orchestration level."),
+				$"Step '{step.Name}' has no 'model', the orchestration has no 'defaultModel', and the host defines no default model. " +
+				$"Either specify 'model' on the step, set 'defaultModel' at the orchestration level, or configure 'defaultModel' in the host configuration."),
 			context.Parameters, context);
 		var resolvedSystemPrompt = TemplateResolver.Resolve(step.SystemPrompt, context.Parameters, context, step.DependsOn, step);
 		var resolvedOutputHandlerPrompt = step.OutputHandlerPrompt is not null
@@ -389,7 +389,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				SystemPrompt = resolvedSystemPrompt,
 				Mcps = resolvedMcps,
 				Subagents = resolvedSubagents,
-				ReasoningLevel = step.ReasoningLevel,
+				ReasoningLevel = step.ReasoningLevel ?? context.DefaultReasoningLevel,
 				ReasoningSummary = step.ReasoningSummary,
 				ContextTier = step.ContextTier,
 				WorkingDirectory = resolvedWorkingDirectory,

@@ -49,7 +49,12 @@
     },
     "defaultModel": {
       "type": "string",
-      "description": "Model used by Prompt steps that set no model and belong to an orchestration with no defaultModel."
+      "description": "Model used by Prompt steps that set no model and belong to an orchestration with no defaultModel. Resolution per step: step model -> orchestration defaultModel -> this value."
+    },
+    "defaultReasoningLevel": {
+      "type": "string",
+      "description": "Reasoning effort used by Prompt steps that set no reasoningLevel and belong to an orchestration with no defaultReasoningLevel. Resolution per step: step reasoningLevel -> orchestration defaultReasoningLevel -> this value -> provider/model default. xhigh and max are only honoured by models that advertise them.",
+      "enum": ["low", "medium", "high", "xhigh", "max", "Low", "Medium", "High", "XHigh", "xHigh", "Max"]
     },
     "provider": {
       "type": "string",

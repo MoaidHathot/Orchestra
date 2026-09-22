@@ -18,7 +18,8 @@ public class CopilotAgentSessionTuningTests
 		Orchestra.Engine.ReasoningSummaryLevel? reasoningSummary = null,
 		Orchestra.Engine.ContextTier? contextTier = null,
 		string? workingDirectory = null,
-		string? gitHubToken = null)
+		string? gitHubToken = null,
+		ReasoningLevel? reasoningLevel = null)
 	{
 		return new CopilotAgent(
 			clientPool: new FixedCopilotClientPool(new CopilotSdkClientAdapter(new CopilotClient(), ownsClient: false)),
@@ -26,7 +27,7 @@ public class CopilotAgentSessionTuningTests
 			systemPrompt: null,
 			mcps: [],
 			subagents: [],
-			reasoningLevel: null,
+			reasoningLevel: reasoningLevel,
 			systemPromptMode: null,
 			systemPromptSections: null,
 			reporter: NullOrchestrationReporter.Instance,
@@ -43,6 +44,49 @@ public class CopilotAgentSessionTuningTests
 			contextTier: contextTier,
 			workingDirectory: workingDirectory,
 			gitHubToken: gitHubToken);
+	}
+
+	// Every ReasoningLevel member must map to the exact lower-case string the Copilot CLI
+	// accepts for reasoning_effort ("low" | "medium" | "high" | "xhigh" | "max"). XHigh is the
+	// one member whose ToString() differs from the wire form in more than case, so this
+	// theory guards the ToLowerInvariant() mapping against a future rename.
+	[Theory]
+	[InlineData(ReasoningLevel.Low, "low")]
+	[InlineData(ReasoningLevel.Medium, "medium")]
+	[InlineData(ReasoningLevel.High, "high")]
+	[InlineData(ReasoningLevel.XHigh, "xhigh")]
+	[InlineData(ReasoningLevel.Max, "max")]
+	public void BuildSessionConfig_MapsReasoningLevelToCliEffortString(ReasoningLevel level, string expected)
+	{
+		var config = CreateAgent(reasoningLevel: level).BuildSessionConfig();
+
+		config.ReasoningEffort.Should().Be(expected);
+	}
+
+	[Fact]
+	public void BuildSessionConfig_NoReasoningLevel_LeavesEffortUnsetForProviderDefault()
+	{
+		var config = CreateAgent().BuildSessionConfig();
+
+		config.ReasoningEffort.Should().BeNull();
+	}
+
+	[Fact]
+	public void ReasoningLevel_EnumExposesAllCliEffortTiers()
+	{
+		// The CLI advertises five effort tiers; Orchestra must be able to request each one.
+		Enum.GetNames<ReasoningLevel>().Should().BeEquivalentTo("Low", "Medium", "High", "XHigh", "Max");
+	}
+
+	[Fact]
+	public void BuildResumeSessionConfig_PreservesReasoningLevel()
+	{
+		var agent = CreateAgent(reasoningLevel: ReasoningLevel.Max);
+		var baseConfig = agent.BuildSessionConfig();
+
+		var resume = agent.BuildResumeSessionConfig(baseConfig);
+
+		resume.ReasoningEffort.Should().Be("max");
 	}
 
 	[Theory]
