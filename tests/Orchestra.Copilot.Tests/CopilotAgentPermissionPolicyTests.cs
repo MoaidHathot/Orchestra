@@ -4,6 +4,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 using Xunit;
+// SDK 1.0.14 introduced GitHub.Copilot.PermissionMode (session permission mode); these tests
+// exercise Orchestra's own step-level PermissionPolicy.Mode, so pin the Engine enum.
+using PermissionMode = Orchestra.Engine.PermissionMode;
 
 namespace Orchestra.Copilot.Tests;
 

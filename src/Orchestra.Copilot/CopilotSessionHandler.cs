@@ -221,9 +221,11 @@ internal sealed partial class CopilotSessionHandler
 			HandleInfo(info);
 			break;
 
+#pragma warning disable GHCP001 // SessionPermissionsChangedEvent is evaluation-only as of SDK 1.0.14.
 		case SessionPermissionsChangedEvent permissions:
 			HandleSessionPermissionsChanged(permissions);
 			break;
+#pragma warning restore GHCP001
 
 		case PermissionRequestedEvent permissionRequested:
 			HandlePermissionRequested(permissionRequested);
@@ -893,19 +895,22 @@ internal sealed partial class CopilotSessionHandler
 		});
 	}
 
-	// SDK 1.0.0 SessionPermissionsChangedEvent fires when the user (via the CLI's
-	// approval UI) flips the "always allow" master toggle. Orchestra runs unattended
-	// in a controlled host and sets its permission posture at session-creation time,
-	// so any mid-session change is unexpected. The most security-relevant transition
-	// is false -> true (someone or something just lifted the per-call approval gate
-	// for everything in this session); we surface that as a warning so it shows up
-	// in StepExecutionTrace.Warnings and the reporter stream. The reverse transition
-	// (true -> false) goes through the Info channel as an audit breadcrumb, and the
-	// no-op case (value unchanged) is dropped to keep noise out of the trace.
+	// SessionPermissionsChangedEvent fires when the session's permission mode changes
+	// mid-flight (SDK 1.0.14 models this as a PermissionMode transition — Manual /
+	// Assisted / AllowAll — instead of the pre-1.0.14 AllowAllPermissions boolean pair).
+	// Orchestra runs unattended in a controlled host and sets its permission posture at
+	// session-creation time, so any mid-session change is unexpected. The most
+	// security-relevant transition is anything -> AllowAll (someone or something just
+	// lifted the per-call approval gate for everything in this session); we surface that
+	// as a warning so it shows up in StepExecutionTrace.Warnings and the reporter stream.
+	// Every other transition (AllowAll -> gated, or Manual <-> Assisted) goes through the
+	// Info channel as an audit breadcrumb, and the no-op case (mode unchanged) is dropped
+	// to keep noise out of the trace.
+#pragma warning disable GHCP001 // SessionPermissionsChangedEvent / PermissionMode are evaluation-only as of SDK 1.0.14.
 	private void HandleSessionPermissionsChanged(SessionPermissionsChangedEvent permissions)
 	{
-		var current = permissions.Data.AllowAllPermissions;
-		var previous = permissions.Data.PreviousAllowAllPermissions;
+		var current = permissions.Data.Mode;
+		var previous = permissions.Data.PreviousMode;
 
 		// Defensive: SDK is expected to only emit on actual transitions, but real-world
 		// SDK events have occasionally fired with unchanged values. Drop the no-op case
@@ -915,15 +920,17 @@ internal sealed partial class CopilotSessionHandler
 			return;
 		}
 
-		LogSessionPermissionsChanged(previous, current);
+		var previousLabel = DescribePermissionMode(previous);
+		var currentLabel = DescribePermissionMode(current);
+		LogSessionPermissionsChanged(previousLabel, currentLabel);
 
-		if (current)
+		if (current == GitHub.Copilot.PermissionMode.AllowAll)
 		{
-			// false -> true: "always allow" was just enabled mid-session. This is the
+			// -> AllowAll: "always allow" was just enabled mid-session. This is the
 			// security-relevant transition — every subsequent tool call (including
 			// destructive ones) will skip the per-call approval gate until the session
 			// ends. Route through the warning channel.
-			var message = "Session permissions widened: AllowAllPermissions flipped from false to true mid-session. " +
+			var message = $"Session permissions widened: permission mode changed from {previousLabel} to {currentLabel} mid-session. " +
 				"All subsequent tool calls will bypass the per-call approval gate.";
 			_reporter.ReportSessionWarning("session_permissions_widened", message);
 			EmitEvent(new AgentEvent
@@ -935,10 +942,10 @@ internal sealed partial class CopilotSessionHandler
 		}
 		else
 		{
-			// true -> false: "always allow" was just disabled. Less alarming, but still
-			// worth an audit breadcrumb so the operator sees that subsequent tool calls
-			// are gated again.
-			var message = "Session permissions narrowed: AllowAllPermissions flipped from true to false mid-session. " +
+			// AllowAll -> gated (or a change between the gated modes). Less alarming, but
+			// still worth an audit breadcrumb so the operator sees that subsequent tool
+			// calls are gated (or gated differently) again.
+			var message = $"Session permissions narrowed: permission mode changed from {previousLabel} to {currentLabel} mid-session. " +
 				"Subsequent tool calls will require per-call approval again.";
 			_reporter.ReportSessionInfo("session_permissions_narrowed", message);
 			EmitEvent(new AgentEvent
@@ -949,6 +956,10 @@ internal sealed partial class CopilotSessionHandler
 			});
 		}
 	}
+
+	private static string DescribePermissionMode(GitHub.Copilot.PermissionMode? mode)
+		=> mode is { } value ? value.Value : "(unset)";
+#pragma warning restore GHCP001
 
 	// SDK 1.0.0 per-call permission gate: every side-effectful action (read, write,
 	// shell, url, mcp, memory, custom tool, hook, extension management) fires
@@ -1857,12 +1868,12 @@ internal sealed partial class CopilotSessionHandler
 	// EventId 12: SDK 1.0.0 SessionPermissionsChangedEvent — the "always allow" master
 	// toggle was flipped mid-session. We log at Warning regardless of direction so
 	// post-mortem analysis can correlate the host log with the in-trace warning emitted
-	// for false->true transitions (see HandleSessionPermissionsChanged).
+	// for transitions into AllowAll (see HandleSessionPermissionsChanged).
 	[LoggerMessage(
 		EventId = 12,
 		Level = LogLevel.Warning,
-		Message = "Session permissions changed mid-session: AllowAllPermissions {Previous} -> {Current}")]
-	private partial void LogSessionPermissionsChanged(bool previous, bool current);
+		Message = "Session permissions changed mid-session: permission mode {Previous} -> {Current}")]
+	private partial void LogSessionPermissionsChanged(string previous, string current);
 
 	// EventId 13: an AssistantIdleEvent attributed to an active sub-agent frame. Ignored for
 	// completion (the root agent owns the session outcome); Debug so it stays out of default

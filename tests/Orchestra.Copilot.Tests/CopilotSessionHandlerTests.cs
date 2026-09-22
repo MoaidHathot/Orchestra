@@ -2311,19 +2311,21 @@ public class CopilotSessionHandlerTests
 	[Fact]
 	public void HandleEvent_SessionPermissionsChanged_FlipOnToAllowAll_EmitsWarning()
 	{
-		// Arrange — false -> true transition: "always allow" was just enabled mid-session.
+		// Arrange — Manual -> AllowAll transition: "always allow" was just enabled mid-session.
 		// This is the security-relevant case: every subsequent tool call (including
 		// destructive ones) will skip the per-call approval gate until the session ends.
 		// We expect a Warning AgentEvent with DiagnosticType "session_permissions_widened"
 		// so the message lands in StepExecutionTrace.Warnings and the reporter stream.
+#pragma warning disable GHCP001 // SessionPermissionsChangedEvent / PermissionMode are evaluation-only SDK APIs.
 		var evt = new SessionPermissionsChangedEvent
 		{
 			Data = new SessionPermissionsChangedData
 			{
-				AllowAllPermissions = true,
-				PreviousAllowAllPermissions = false,
+				Mode = GitHub.Copilot.PermissionMode.AllowAll,
+				PreviousMode = GitHub.Copilot.PermissionMode.Manual,
 			}
 		};
+#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -2332,27 +2334,29 @@ public class CopilotSessionHandlerTests
 		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
 		emitted!.Type.Should().Be(AgentEventType.Warning);
 		emitted.DiagnosticType.Should().Be("session_permissions_widened");
-		emitted.ErrorMessage.Should().Contain("false to true");
+		emitted.ErrorMessage.Should().Contain("manual to allow-all");
 		_reporter.Received(1).ReportSessionWarning(
 			"session_permissions_widened",
-			Arg.Is<string>(s => s.Contains("false to true")));
+			Arg.Is<string>(s => s.Contains("manual to allow-all")));
 	}
 
 	[Fact]
 	public void HandleEvent_SessionPermissionsChanged_FlipOffFromAllowAll_EmitsInfo()
 	{
-		// Arrange — true -> false transition: "always allow" was just disabled. Less
+		// Arrange — AllowAll -> Manual transition: "always allow" was just disabled. Less
 		// alarming than the widening case (subsequent calls go back to the gated path)
 		// but we still emit an audit breadcrumb through the Info channel so the
 		// permission posture change is visible in operator dashboards.
+#pragma warning disable GHCP001 // SessionPermissionsChangedEvent / PermissionMode are evaluation-only SDK APIs.
 		var evt = new SessionPermissionsChangedEvent
 		{
 			Data = new SessionPermissionsChangedData
 			{
-				AllowAllPermissions = false,
-				PreviousAllowAllPermissions = true,
+				Mode = GitHub.Copilot.PermissionMode.Manual,
+				PreviousMode = GitHub.Copilot.PermissionMode.AllowAll,
 			}
 		};
+#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -2361,10 +2365,10 @@ public class CopilotSessionHandlerTests
 		_channel.Reader.TryRead(out var emitted).Should().BeTrue();
 		emitted!.Type.Should().Be(AgentEventType.Info);
 		emitted.DiagnosticType.Should().Be("session_permissions_narrowed");
-		emitted.Content.Should().Contain("true to false");
+		emitted.Content.Should().Contain("allow-all to manual");
 		_reporter.Received(1).ReportSessionInfo(
 			"session_permissions_narrowed",
-			Arg.Is<string>(s => s.Contains("true to false")));
+			Arg.Is<string>(s => s.Contains("allow-all to manual")));
 	}
 
 	[Fact]
@@ -2373,14 +2377,16 @@ public class CopilotSessionHandlerTests
 		// Arrange — the SDK is expected to emit only on actual transitions, but field
 		// reports show occasional pings where current == previous. We silently drop
 		// these to keep the warnings list focused on real posture changes.
+#pragma warning disable GHCP001 // SessionPermissionsChangedEvent / PermissionMode are evaluation-only SDK APIs.
 		var evt = new SessionPermissionsChangedEvent
 		{
 			Data = new SessionPermissionsChangedData
 			{
-				AllowAllPermissions = false,
-				PreviousAllowAllPermissions = false,
+				Mode = GitHub.Copilot.PermissionMode.Manual,
+				PreviousMode = GitHub.Copilot.PermissionMode.Manual,
 			}
 		};
+#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);
