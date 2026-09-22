@@ -12,7 +12,7 @@
       "type": "local",
       "command": "dotnet",
       "arguments": ["run", "--project", "src/Orchestra.Mcp.Graph/Orchestra.Mcp.Graph.csproj"],
-      "workingDirectory": "P:/Github/Orchestra"
+      "workingDirectory": "W:/Github/Orchestra"
     }
   ]
 }

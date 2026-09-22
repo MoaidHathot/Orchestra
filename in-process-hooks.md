@@ -132,7 +132,7 @@ The user's mental model "hook → invokes orchestration" most directly maps to *
 
 ### Contract / base type
 
-`P:\Github\Orchestra\src\Orchestra.ProcessHost\Models\ServiceEntry.cs:7-33` — abstract base:
+`W:\Github\Orchestra\src\Orchestra.ProcessHost\Models\ServiceEntry.cs:7-33` — abstract base:
 
 ```csharp
 public abstract class ServiceEntry
@@ -147,15 +147,15 @@ public abstract class ServiceEntry
 
 Two concrete subtypes:
 
-- **`ProcessService`** — long-running process, with `RestartPolicy` (`Never`/`OnFailure`/`Always`), `ReadinessCheck`, `ShutdownTimeoutSeconds`, `ForceKill`, `Required`. (`P:\Github\Orchestra\src\Orchestra.ProcessHost\Models\ProcessService.cs:7-38`)
-- **`CommandHook`** — one-shot command, with `RunAt` (`BeforeStart` / `AfterStop`), `TimeoutSeconds`, `Required`. (`P:\Github\Orchestra\src\Orchestra.ProcessHost\Models\CommandHook.cs`)
+- **`ProcessService`** — long-running process, with `RestartPolicy` (`Never`/`OnFailure`/`Always`), `ReadinessCheck`, `ShutdownTimeoutSeconds`, `ForceKill`, `Required`. (`W:\Github\Orchestra\src\Orchestra.ProcessHost\Models\ProcessService.cs:7-38`)
+- **`CommandHook`** — one-shot command, with `RunAt` (`BeforeStart` / `AfterStop`), `TimeoutSeconds`, `Required`. (`W:\Github\Orchestra\src\Orchestra.ProcessHost\Models\CommandHook.cs`)
 
 These are discriminated by the JSON `"type"` field: `"process"` or `"command"`.
 
 ### Lifecycle / loader
 
-- Discovery & loading: `P:\Github\Orchestra\src\Orchestra.Host\Extensions\ServiceCollectionExtensions.cs:387-417` (`InitializeOrchestraHostAsync`) calls `OrchestraConfigLoader.ResolveServiceConfigPath()` + `OrchestraConfigLoader.LoadServiceConfig(...)`, then hands the array to `OrchestraInfrastructureLifecycle.InitializeAsync(serviceManager, mcpManager, serviceEntries, globalMcps, shutdownToken)`.
-- Manager: `P:\Github\Orchestra\src\Orchestra.ProcessHost\ServiceManager.cs:12-110` — `InitializeAsync(ServiceEntry[])`:
+- Discovery & loading: `W:\Github\Orchestra\src\Orchestra.Host\Extensions\ServiceCollectionExtensions.cs:387-417` (`InitializeOrchestraHostAsync`) calls `OrchestraConfigLoader.ResolveServiceConfigPath()` + `OrchestraConfigLoader.LoadServiceConfig(...)`, then hands the array to `OrchestraInfrastructureLifecycle.InitializeAsync(serviceManager, mcpManager, serviceEntries, globalMcps, shutdownToken)`.
+- Manager: `W:\Github\Orchestra\src\Orchestra.ProcessHost\ServiceManager.cs:12-110` — `InitializeAsync(ServiceEntry[])`:
   1. Validates uniqueness.
   2. Runs all `beforeStart` `CommandHook`s **concurrently** (ServiceManager.cs:116-144); a failure of a `Required` hook throws `ServiceInitializationException` and aborts host startup.
   3. Starts all `ProcessService`s in **parallel** with readiness checks (ServiceManager.cs:174-215).
@@ -166,7 +166,7 @@ These are discriminated by the JSON `"type"` field: `"process"` or `"command"`.
 ### Skipped in tests
 `InitializeOrchestraHostAsync` skips the services file when env is `"Testing"` or config `"skip-services"=true` (`ServiceCollectionExtensions.cs:377-415`).
 
-### Example config — `P:\Github\Orchestra\examples\orchestra.services.json:1-55`
+### Example config — `W:\Github\Orchestra\examples\orchestra.services.json:1-55`
 
 ```json
 {
@@ -191,7 +191,7 @@ These are discriminated by the JSON `"type"` field: `"process"` or `"command"`.
 }
 ```
 
-JSON schema: `P:\Github\Orchestra\schemas\orchestra.services.schema.json`.
+JSON schema: `W:\Github\Orchestra\schemas\orchestra.services.schema.json`.
 
 ### Capabilities — and limits
 
@@ -208,7 +208,7 @@ This is the mechanism you described. Webhook triggers live **on an orchestration
 
 ### Contract
 
-`P:\Github\Orchestra\src\Orchestra.Engine\Triggers\TriggerConfig.cs:7-29` (base) + `P:\Github\Orchestra\src\Orchestra.Engine\Triggers\WebhookTriggerConfig.cs:7-52`:
+`W:\Github\Orchestra\src\Orchestra.Engine\Triggers\TriggerConfig.cs:7-29` (base) + `W:\Github\Orchestra\src\Orchestra.Engine\Triggers\WebhookTriggerConfig.cs:7-52`:
 
 ```csharp
 public class WebhookTriggerConfig : TriggerConfig
@@ -229,7 +229,7 @@ public class WebhookResponseConfig
 
 ### How it's bound to an orchestration
 
-The webhook lives **inside** the orchestration file under `trigger:`. Example: `P:\Github\Orchestra\examples\webhook-triggered-notification.json:34-39`:
+The webhook lives **inside** the orchestration file under `trigger:`. Example: `W:\Github\Orchestra\examples\webhook-triggered-notification.json:34-39`:
 
 ```json
 "trigger": {
@@ -244,9 +244,9 @@ When the host registers the orchestration's trigger, the webhook is **assigned t
 
 ### Hook URL stability across restarts
 
-URL format: `POST /api/webhooks/{triggerId}` (`P:\Github\Orchestra\src\Orchestra.Host\Api\WebhooksApi.cs:22-25`).
+URL format: `POST /api/webhooks/{triggerId}` (`W:\Github\Orchestra\src\Orchestra.Host\Api\WebhooksApi.cs:22-25`).
 
-The `triggerId` **is the registry ID**, generated deterministically (`P:\Github\Orchestra\src\Orchestra.Host\Registry\OrchestrationRegistry.cs:427-441`):
+The `triggerId` **is the registry ID**, generated deterministically (`W:\Github\Orchestra\src\Orchestra.Host\Registry\OrchestrationRegistry.cs:427-441`):
 
 ```csharp
 public static string GenerateId(string name, string path)
@@ -264,7 +264,7 @@ public static string GenerateId(string name, string path)
 
 ### Receiver handler
 
-`P:\Github\Orchestra\src\Orchestra.Host\Api\WebhooksApi.cs:25-87`:
+`W:\Github\Orchestra\src\Orchestra.Host\Api\WebhooksApi.cs:25-87`:
 1. Look up trigger by id.
 2. Buffer body for HMAC validation against `webhookConfig.Secret` via `X-Webhook-Signature` header (`WebhookSignatureValidator`).
 3. Parse JSON body into `Dictionary<string,string>`.
@@ -285,7 +285,7 @@ There is no separate "hook store." This is critical for your architectural plan.
 
 Different concept: these run scripts in response to orchestration/step events. They cannot directly invoke an orchestration (no "fire orchestration X" action type), but the script they run is free to do so.
 
-### Contract — `P:\Github\Orchestra\src\Orchestra.Engine\Orchestration\Hooks\HookDefinition.cs:69-146`
+### Contract — `W:\Github\Orchestra\src\Orchestra.Engine\Orchestration\Hooks\HookDefinition.cs:69-146`
 
 ```csharp
 public class HookDefinition
@@ -313,9 +313,9 @@ public class HookAction
 
 ### Runtime
 
-`P:\Github\Orchestra\src\Orchestra.Engine\Orchestration\Hooks\HookRuntime.cs:28-100`: the engine fires hooks at event boundaries, builds a JSON payload (`BuildPayload`, line 127), and **runs the action via the same `ScriptStepExecutor`** the engine uses for `type: Script` steps — passing the payload on stdin (line 88). Failures are logged per `FailurePolicy`.
+`W:\Github\Orchestra\src\Orchestra.Engine\Orchestration\Hooks\HookRuntime.cs:28-100`: the engine fires hooks at event boundaries, builds a JSON payload (`BuildPayload`, line 127), and **runs the action via the same `ScriptStepExecutor`** the engine uses for `type: Script` steps — passing the payload on stdin (line 88). Failures are logged per `FailurePolicy`.
 
-### Example — `P:\Github\Orchestra\examples\hooks-step-failure.yaml`
+### Example — `W:\Github\Orchestra\examples\hooks-step-failure.yaml`
 
 ```yaml
 hooks:
@@ -351,7 +351,7 @@ The script can `curl -X POST http://localhost:.../api/webhooks/<id>` or use the 
 
 Idiomatic pattern: **scheduler trigger** → **fetch** step → **gate** step that uses the `orchestra_complete` engine tool to short-circuit when nothing's new.
 
-### Scheduler trigger contract — `P:\Github\Orchestra\src\Orchestra.Engine\Triggers\SchedulerTriggerConfig.cs:7-25`
+### Scheduler trigger contract — `W:\Github\Orchestra\src\Orchestra.Engine\Triggers\SchedulerTriggerConfig.cs:7-25`
 
 ```csharp
 public class SchedulerTriggerConfig : TriggerConfig
@@ -362,7 +362,7 @@ public class SchedulerTriggerConfig : TriggerConfig
 }
 ```
 
-### Canonical example — `P:\Github\Orchestra\examples\icm-auto-acknowledge.yaml`
+### Canonical example — `W:\Github\Orchestra\examples\icm-auto-acknowledge.yaml`
 
 This is exactly the user's PR-comment-tracker pattern (polls IcM every 15 seconds, exits early if no unacknowledged incidents). Key shape:
 
@@ -424,7 +424,7 @@ There **is** a first-class in-process invocation API: **`IChildOrchestrationLaun
 
 ### The contract
 
-`P:\Github\Orchestra\src\Orchestra.Host\Services\ChildOrchestrationLauncher.cs:35-91` (class) and `ServiceCollectionExtensions.cs:188`:
+`W:\Github\Orchestra\src\Orchestra.Host\Services\ChildOrchestrationLauncher.cs:35-91` (class) and `ServiceCollectionExtensions.cs:188`:
 
 ```csharp
 services.AddSingleton<IChildOrchestrationLauncher, ChildOrchestrationLauncher>();
@@ -469,7 +469,7 @@ No CLI / no HTTP loopback needed.
 
 ### The `type: Orchestration` step (declarative in-process invocation)
 
-`P:\Github\Orchestra\src\Orchestra.Engine\Orchestration\Steps\OrchestrationInvocationStep.cs:22-56`:
+`W:\Github\Orchestra\src\Orchestra.Engine\Orchestration\Steps\OrchestrationInvocationStep.cs:22-56`:
 
 ```yaml
 - name: review-pr
@@ -482,11 +482,11 @@ No CLI / no HTTP loopback needed.
   timeoutSeconds: 14400
 ```
 
-Executor: `P:\Github\Orchestra\src\Orchestra.Engine\Orchestration\Executor\OrchestrationStepExecutor.cs:13-117`. It just calls `_launcher.LaunchAsync(...)`.
+Executor: `W:\Github\Orchestra\src\Orchestra.Engine\Orchestration\Executor\OrchestrationStepExecutor.cs:13-117`. It just calls `_launcher.LaunchAsync(...)`.
 
 ### The MCP tool `invoke_orchestration`
 
-`P:\Github\Orchestra\src\Orchestra.Host\McpServer\DataPlaneTools.cs:87-244` — exposed to LLM prompt steps and external MCP clients. Also delegates to the same `IChildOrchestrationLauncher`.
+`W:\Github\Orchestra\src\Orchestra.Host\McpServer\DataPlaneTools.cs:87-244` — exposed to LLM prompt steps and external MCP clients. Also delegates to the same `IChildOrchestrationLauncher`.
 
 ---
 
