@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
+using Orchestra.Engine.Diagnostics;
 
 namespace Orchestra.Engine;
 
@@ -267,14 +268,24 @@ public partial class OrchestrationExecutor
 			LogOrchestrationTimeout(orchestration.Name, orchestration.TimeoutSeconds.Value);
 		}
 
+		using var runScope = OrchestraDiagnostics.BeginRun(orchestration.Name, triggerId, isResume: false);
 		try
 		{
-			return await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform, retryMetadata: retryMetadata, parentContext: parentContext, executionIdOverride: executionIdOverride, orchestrationTimeoutCts: orchestrationTimeoutCts, resolveExternalCancellationCause: resolveExternalCancellationCause, triggeredBy: triggeredBy);
+			var result = await ExecuteCoreAsync(orchestration, parameters, triggerId, effectiveCancellationToken, cancellationToken, preExecutionParameterTransform: preExecutionParameterTransform, retryMetadata: retryMetadata, parentContext: parentContext, executionIdOverride: executionIdOverride, orchestrationTimeoutCts: orchestrationTimeoutCts, resolveExternalCancellationCause: resolveExternalCancellationCause, triggeredBy: triggeredBy);
+			runScope.Complete(result);
+			return result;
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
 			LogOrchestrationTimedOut(orchestration.Name, orchestration.TimeoutSeconds!.Value);
-			throw new TimeoutException($"Orchestration '{orchestration.Name}' timed out after {orchestration.TimeoutSeconds} seconds.");
+			var timeout = new TimeoutException($"Orchestration '{orchestration.Name}' timed out after {orchestration.TimeoutSeconds} seconds.");
+			runScope.Fault(timeout);
+			throw timeout;
+		}
+		catch (Exception ex)
+		{
+			runScope.Fault(ex);
+			throw;
 		}
 		finally
 		{
@@ -299,6 +310,7 @@ public partial class OrchestrationExecutor
 	{
 		var runId = retryMetadata?.OverrideRunId ?? checkpoint?.RunId ?? executionIdOverride ?? Guid.NewGuid().ToString("N")[..12];
 		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
+		OrchestraDiagnostics.TagCurrentRun(runId);
 
 		// Create run-scoped agent pools for isolation: each orchestration run gets its own
 		// per-provider worker pool(s). All steps within this run share the pool for their
@@ -641,9 +653,25 @@ public partial class OrchestrationExecutor
 				var stepExecutor = _stepExecutorRegistry.Resolve(step.Type);
 				var stepStartedAt = DateTimeOffset.UtcNow;
 
+				// True when a fail-fast (onStepFailure=stop), orchestra_complete or external-cancel
+				// block already recorded this step as Cancelled - with its cause - while it was in
+				// flight. The step's own late Cancelled result carries no cause and would race the
+				// post-run cause enrichment (which may already have run once every TCS resolved),
+				// so it must not replace the pre-recorded one.
+				bool CancellationAlreadyRecorded()
+					=> stepResults.TryGetValue(step.Name, out var pre) && pre.Status == ExecutionStatus.Cancelled;
+
 				try
 				{
+					var stepActivity = OrchestraDiagnostics.BeginStep(orchestration.Name, step);
 					var result = await ExecuteWithRetryAsync(step, stepExecutor, context, stepResults, effectiveStepToken);
+					OrchestraDiagnostics.EndStep(stepActivity, orchestration.Name, step, result, stepStartedAt);
+
+					if (result.Status == ExecutionStatus.Cancelled && CancellationAlreadyRecorded())
+					{
+						completionSources[step.Name].TrySetResult(stepResults[step.Name]);
+						return;
+					}
 
 					context.AddResult(step.Name, result);
 					stepResults[step.Name] = result;
@@ -762,16 +790,23 @@ public partial class OrchestrationExecutor
 				}
 				catch (OperationCanceledException)
 				{
-					var cancelled = ExecutionResult.Cancelled();
-					context.AddResult(step.Name, cancelled);
-					stepResults[step.Name] = cancelled;
-					var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
-					stepRecords[step.Name] = record;
-					allStepRecords[step.Name] = record;
-					_reporter.PublishStepRecord(step.Name, record);
-					await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-					_reporter.ReportStepCancelled(step.Name);
-					completionSources[step.Name].TrySetResult(cancelled);
+					if (CancellationAlreadyRecorded())
+					{
+						completionSources[step.Name].TrySetResult(stepResults[step.Name]);
+					}
+					else
+					{
+						var cancelled = ExecutionResult.Cancelled();
+						context.AddResult(step.Name, cancelled);
+						stepResults[step.Name] = cancelled;
+						var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
+						stepRecords[step.Name] = record;
+						allStepRecords[step.Name] = record;
+						_reporter.PublishStepRecord(step.Name, record);
+						await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+						_reporter.ReportStepCancelled(step.Name);
+						completionSources[step.Name].TrySetResult(cancelled);
+					}
 				}
 				catch (Exception ex)
 				{
@@ -1105,9 +1140,10 @@ public partial class OrchestrationExecutor
 			LogOrchestrationTimeout(orchestration.Name, orchestration.TimeoutSeconds.Value);
 		}
 
+		using var runScope = OrchestraDiagnostics.BeginRun(orchestration.Name, checkpoint.TriggerId, isResume: true);
 		try
 		{
-			return await ExecuteCoreAsync(
+			var result = await ExecuteCoreAsync(
 				orchestration,
 				checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null,
 				checkpoint.TriggerId,
@@ -1118,11 +1154,20 @@ public partial class OrchestrationExecutor
 				orchestrationTimeoutCts: orchestrationTimeoutCts,
 				resolveExternalCancellationCause: resolveExternalCancellationCause,
 				triggeredBy: retryMetadata?.TriggeredBy ?? "resume");
+			runScope.Complete(result);
+			return result;
 		}
 		catch (OperationCanceledException) when (orchestrationTimeoutCts is not null && orchestrationTimeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
 		{
 			LogOrchestrationTimedOut(orchestration.Name, orchestration.TimeoutSeconds!.Value);
-			throw new TimeoutException($"Orchestration '{orchestration.Name}' timed out after {orchestration.TimeoutSeconds} seconds.");
+			var timeout = new TimeoutException($"Orchestration '{orchestration.Name}' timed out after {orchestration.TimeoutSeconds} seconds.");
+			runScope.Fault(timeout);
+			throw timeout;
+		}
+		catch (Exception ex)
+		{
+			runScope.Fault(ex);
+			throw;
 		}
 		finally
 		{
@@ -1388,6 +1433,7 @@ public partial class OrchestrationExecutor
 				DelaySeconds = delay.TotalSeconds,
 				ErrorCategory = result.ErrorCategory,
 			});
+			OrchestraDiagnostics.RecordRetry(context.OrchestrationInfo.Name, step, result.ErrorCategory);
 
 			await Task.Delay(delay, cancellationToken);
 

@@ -313,8 +313,6 @@ public static class ServiceCollectionExtensions
 		services.AddSingleton<TriggerManager>(sp =>
 		{
 			var opts = sp.GetRequiredService<OrchestrationHostOptions>();
-			var runsPath = Path.Combine(opts.DataPath, "runs");
-			Directory.CreateDirectory(runsPath);
 
 			var triggerManager = new TriggerManager(
 				sp.GetRequiredService<ConcurrentDictionary<string, CancellationTokenSource>>(),
@@ -323,14 +321,13 @@ public static class ServiceCollectionExtensions
 				sp.GetRequiredService<IScheduler>(),
 				sp.GetRequiredService<ILoggerFactory>(),
 				sp.GetRequiredService<ILogger<TriggerManager>>(),
-				runsPath,
+				opts.DataPath,
 				sp.GetRequiredService<IRunStore>(),
 				sp.GetRequiredService<ICheckpointStore>(),
 				sp.GetRequiredService<IChildOrchestrationLauncher>(),
 				sp.GetRequiredService<ITriggerExecutionCallback>(),
 				sp.GetRequiredService<EngineToolRegistry>(),
 				mcpResolver: sp.GetRequiredService<McpManager>(),
-				dataPath: opts.DataPath,
 				serverUrl: opts.HostBaseUrl,
 				defaultModel: opts.DefaultModel,
 				globalHooks: opts.Hooks,
@@ -448,8 +445,10 @@ public static class ServiceProviderExtensions
 		var profileManager = services.GetRequiredService<ProfileManager>();
 		var mcpManager = services.GetRequiredService<McpManager>();
 		var serviceManager = services.GetRequiredService<ServiceManager>();
-		var initLogger = services.GetRequiredService<ILoggerFactory>()
-			.CreateLogger("Orchestra.Host.Initialization");
+		var loggerFactory = services.GetRequiredService<ILoggerFactory>();
+		var initLogger = loggerFactory.CreateLogger("Orchestra.Host.Initialization");
+
+		AttachFileLogging(loggerFactory, options, initLogger);
 
 		// Determine whether to skip external service/MCP config loading.
 		// Tests should not load the developer's local orchestra.services.json (which
@@ -760,5 +759,31 @@ public static class ServiceProviderExtensions
 				preloadLogger.LogError(ex, "Failed to preload run-history index");
 			}
 		});
+	}
+
+	/// <summary>
+	/// Adds the host's rolling file log to the live logger factory. Done here, after the
+	/// options singleton exists, rather than as a DI-registered <see cref="ILoggerProvider"/>:
+	/// the options factory itself resolves <see cref="ILoggerFactory"/> (the config loader logs),
+	/// so a provider that depended on the options would be a circular dependency.
+	/// <see cref="ILoggerFactory.AddProvider"/> retrofits the new sink onto loggers that already
+	/// exist, and the factory disposes the provider - draining its buffer - on shutdown.
+	/// </summary>
+	private static void AttachFileLogging(ILoggerFactory loggerFactory, OrchestrationHostOptions options, ILogger initLogger)
+	{
+		if (!options.FileLogging.Enabled)
+			return;
+
+		try
+		{
+			var provider = new Logging.FileLoggerProvider(options.FileLogging, options.DataPath);
+			loggerFactory.AddProvider(provider);
+			HostInitializationLog.FileLoggingEnabled(initLogger, provider.PathFor(DateTime.Now), options.FileLogging.MinimumLevel, options.FileLogging.RetainedFiles);
+		}
+		catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+		{
+			// An unwritable log directory must not take the host down; the console still works.
+			HostInitializationLog.FileLoggingUnavailable(initLogger, options.FileLogging.ResolveDirectory(options.DataPath), ex);
+		}
 	}
 }

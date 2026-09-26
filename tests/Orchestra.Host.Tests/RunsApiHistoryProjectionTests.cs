@@ -433,7 +433,7 @@ public class RunsApiHistoryProjectionTests : IDisposable
 			scheduler: new OrchestrationScheduler(),
 			loggerFactory: Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance,
 			logger: Microsoft.Extensions.Logging.Abstractions.NullLogger<TriggerManager>.Instance,
-			runsDir: Path.GetTempPath(),
+			dataPath: Path.GetTempPath(),
 			runStore: _store,
 			checkpointStore: Substitute.For<ICheckpointStore>(),
 			launcher: Substitute.For<IChildOrchestrationLauncher>());

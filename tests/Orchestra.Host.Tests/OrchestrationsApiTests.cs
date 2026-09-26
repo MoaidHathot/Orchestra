@@ -62,7 +62,7 @@ public class OrchestrationsApiTests : IDisposable
 			scheduler: scheduler,
 			loggerFactory: loggerFactory,
 			logger: new NullLogger<TriggerManager>(),
-			runsDir: _runsDir,
+			dataPath: _tempDir,
 			runStore: null!,
 			checkpointStore: null!,
 			launcher: null!

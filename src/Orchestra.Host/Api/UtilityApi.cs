@@ -81,14 +81,17 @@ public static class UtilityApi
 			}, jsonOptions);
 		});
 
-		// GET /api/health - Health check endpoint
-		endpoints.MapGet("/api/health", () =>
+		// GET /api/health - Liveness + readiness. 200 while the host can do its job (possibly
+		// "degraded", e.g. no agent provider), 503 when it cannot (data path unwritable).
+		endpoints.MapGet("/api/health", (
+			OrchestrationHostOptions options,
+			IAgentProviderRegistry providerRegistry,
+			OrchestrationRegistry registry,
+			ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
+			IServiceProvider services) =>
 		{
-			return Results.Ok(new
-			{
-				status = "healthy",
-				timestamp = DateTimeOffset.UtcNow
-			});
+			var report = HealthReport.Build(options, providerRegistry, registry, activeExecutions.Count, services.GetService(typeof(Extensions.TelemetryOptions)) as Extensions.TelemetryOptions);
+			return Results.Json(report, jsonOptions, statusCode: report.Status == HealthReport.Unhealthy ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status200OK);
 		});
 
 		// GET /api/mcps - List all globally managed MCPs

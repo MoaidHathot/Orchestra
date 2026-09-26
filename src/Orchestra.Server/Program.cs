@@ -87,6 +87,11 @@ builder.Services.AddOrchestraAgentProviders();
 // Add Orchestra MCP server (data-plane enabled by default, control-plane disabled by default)
 builder.Services.AddOrchestraMcpServer();
 
+// OpenTelemetry export of orchestra.run / orchestra.step spans and the orchestra.* meter.
+// Registers nothing unless orchestra.json's `telemetry` or OTEL_EXPORTER_OTLP_ENDPOINT names a
+// collector, so a plain host pays no exporter cost.
+builder.Services.AddOrchestraTelemetry(orchestraConfig);
+
 // CORS: loopback-only policy shared with every other Orchestra host (portal, tests).
 builder.Services.AddOrchestraHostCors();
 

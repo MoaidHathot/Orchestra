@@ -560,6 +560,36 @@ public static class OrchestraConfigLoader
 		if (config.LogLevel is not null)
 			options.LogLevel = config.LogLevel;
 
+		// The file sink follows the host's logLevel unless logging.file.level says otherwise, so
+		// a single `logLevel: Debug` turns up in the file as well as the console.
+		if (Enum.TryParse<LogLevel>(config.LogLevel, ignoreCase: true, out var hostLevel))
+			options.FileLogging.MinimumLevel = hostLevel;
+
+		if (config.Logging?.File is { } fileLogging)
+		{
+			if (fileLogging.Enabled.HasValue)
+				options.FileLogging.Enabled = fileLogging.Enabled.Value;
+
+			if (!string.IsNullOrWhiteSpace(fileLogging.Directory))
+				options.FileLogging.Directory = ResolvePath(fileLogging.Directory, configDirectory);
+
+			if (fileLogging.Level is not null)
+			{
+				if (Enum.TryParse<LogLevel>(fileLogging.Level, ignoreCase: true, out var fileLevel))
+					options.FileLogging.MinimumLevel = fileLevel;
+				else
+					HostInitializationLog.InvalidFileLogLevel(logger ?? NullLogger.Instance, fileLogging.Level);
+			}
+
+			if (fileLogging.RetainedFiles is { } retained)
+			{
+				if (retained < 1)
+					HostInitializationLog.InvalidFileLogRetention(logger ?? NullLogger.Instance, retained);
+				else
+					options.FileLogging.RetainedFiles = retained;
+			}
+		}
+
 		if (config.Retention is not null)
 		{
 			if (config.Retention.MaxRunsPerOrchestration.HasValue)
@@ -812,9 +842,22 @@ public class OrchestraConfigFile
 	public bool? EnableScheduler { get; set; }
 
 	/// <summary>
-	/// Minimum log level for the file logger. Values: Trace, Debug, Information, Warning, Error, Critical.
+	/// Default minimum log level for the host (console and file). Values: Trace, Debug,
+	/// Information, Warning, Error, Critical.
 	/// </summary>
 	public string? LogLevel { get; set; }
+
+	/// <summary>
+	/// Host log output settings. Only the file sink is configurable today; see
+	/// <see cref="LoggingConfigFile"/>.
+	/// </summary>
+	public LoggingConfigFile? Logging { get; set; }
+
+	/// <summary>
+	/// OpenTelemetry export. Omit to export nothing (the engine's instrumentation is then a
+	/// no-op); the standard <c>OTEL_EXPORTER_OTLP_ENDPOINT</c> variable also turns it on.
+	/// </summary>
+	public TelemetryConfigFile? Telemetry { get; set; }
 
 	/// <summary>
 	/// Polling intervals for the web UI, in milliseconds.
@@ -926,6 +969,59 @@ public class RetentionPolicyConfig
 	/// 0 or null means no age limit (keep forever).
 	/// </summary>
 	public int? MaxRunAgeDays { get; set; }
+}
+
+/// <summary>
+/// <c>logging</c> section of the config file.
+/// </summary>
+public class LoggingConfigFile
+{
+	/// <summary>The host's rolling log file. Omit for the defaults (on, <c>{dataPath}/logs</c>).</summary>
+	public FileLoggingConfigFile? File { get; set; }
+}
+
+/// <summary>
+/// <c>logging.file</c> section of the config file. All fields are nullable — only non-null
+/// values override <see cref="Logging.FileLoggingOptions"/> defaults.
+/// </summary>
+public class FileLoggingConfigFile
+{
+	/// <summary>Set <c>false</c> to write no log file at all.</summary>
+	public bool? Enabled { get; set; }
+
+	/// <summary>Directory for the daily files; relative paths resolve against the config file. Default <c>{dataPath}/logs</c>.</summary>
+	public string? Directory { get; set; }
+
+	/// <summary>Minimum level written to the file. Default: the host's <c>logLevel</c>, else Information.</summary>
+	public string? Level { get; set; }
+
+	/// <summary>How many daily files to keep. Default 14.</summary>
+	public int? RetainedFiles { get; set; }
+}
+
+/// <summary>
+/// <c>telemetry</c> section of the config file. All fields are nullable; the OTEL_* environment
+/// variables fill in whatever is omitted (see <see cref="Extensions.TelemetryOptions.Resolve"/>).
+/// </summary>
+public class TelemetryConfigFile
+{
+	/// <summary>Force export on/off. Default: on when an endpoint is known, else off.</summary>
+	public bool? Enabled { get; set; }
+
+	/// <summary>OTLP collector endpoint, e.g. <c>http://localhost:4317</c>.</summary>
+	public string? OtlpEndpoint { get; set; }
+
+	/// <summary><c>grpc</c> (default) or <c>http/protobuf</c>.</summary>
+	public string? OtlpProtocol { get; set; }
+
+	/// <summary><c>service.name</c> resource attribute. Default <c>orchestra</c>.</summary>
+	public string? ServiceName { get; set; }
+
+	/// <summary>Export spans. Default true.</summary>
+	public bool? Traces { get; set; }
+
+	/// <summary>Export metrics. Default true.</summary>
+	public bool? Metrics { get; set; }
 }
 
 /// <summary>

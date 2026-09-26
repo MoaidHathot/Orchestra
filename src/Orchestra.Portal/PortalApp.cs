@@ -74,6 +74,8 @@ internal static class PortalApp
 		});
 
 		builder.Services.AddOrchestraMcpServer();
+		// OpenTelemetry export; a no-op unless a collector endpoint is configured.
+		builder.Services.AddOrchestraTelemetry(orchestraConfig);
 		builder.Services.AddOrchestraHostCors();
 		builder.Services.AddSingleton<PortalStatusService>();
 

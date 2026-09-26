@@ -1209,6 +1209,82 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.ToHostAgentDefaults().ReasoningLevel.Should().Be(expected);
 	}
 
+	// ── logging.file ──
+
+	[Fact]
+	public void LoadAndApply_NoLoggingSection_FileLoggingDefaultsOn_AndFollowsLogLevel()
+	{
+		var configPath = Path.Combine(_tempDir, "log-defaults.json");
+		File.WriteAllText(configPath, """{ "logLevel": "Debug" }""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+		var options = new OrchestrationHostOptions();
+
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		options.FileLogging.Enabled.Should().BeTrue();
+		options.FileLogging.Directory.Should().BeNull("null means {dataPath}/logs, resolved when the provider is built");
+		options.FileLogging.MinimumLevel.Should().Be(LogLevel.Debug, "the file follows the host logLevel unless logging.file.level overrides it");
+		options.FileLogging.RetainedFiles.Should().Be(14);
+	}
+
+	[Fact]
+	public void LoadAndApply_LoggingFile_MapsEveryField_AndResolvesRelativeDirectory()
+	{
+		var configPath = Path.Combine(_tempDir, "log-full.json");
+		File.WriteAllText(configPath, """
+		{
+			"logLevel": "Debug",
+			"logging": {
+				"file": {
+					"enabled": true,
+					"directory": "./var/log",
+					"level": "warning",
+					"retainedFiles": 3
+				}
+			}
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+		var options = new OrchestrationHostOptions();
+
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		options.FileLogging.Enabled.Should().BeTrue();
+		options.FileLogging.Directory.Should().Be(Path.GetFullPath(Path.Combine(_tempDir, "var", "log")));
+		options.FileLogging.MinimumLevel.Should().Be(LogLevel.Warning, "logging.file.level wins over logLevel for the file");
+		options.FileLogging.RetainedFiles.Should().Be(3);
+	}
+
+	[Fact]
+	public void LoadAndApply_LoggingFile_Disabled()
+	{
+		var configPath = Path.Combine(_tempDir, "log-off.json");
+		File.WriteAllText(configPath, """{ "logging": { "file": { "enabled": false } } }""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+		var options = new OrchestrationHostOptions();
+
+		OrchestraConfigLoader.LoadAndApply(options);
+
+		options.FileLogging.Enabled.Should().BeFalse();
+	}
+
+	[Fact]
+	public void LoadAndApply_LoggingFile_InvalidLevelAndRetention_AreWarnedAndIgnored()
+	{
+		var configPath = Path.Combine(_tempDir, "log-bad.json");
+		File.WriteAllText(configPath, """{ "logging": { "file": { "level": "loud", "retainedFiles": 0 } } }""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+		var options = new OrchestrationHostOptions();
+		var logger = new ListLogger();
+
+		OrchestraConfigLoader.LoadAndApply(options, logger);
+
+		options.FileLogging.MinimumLevel.Should().Be(LogLevel.Information);
+		options.FileLogging.RetainedFiles.Should().Be(14);
+		logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("logging.file.level"));
+		logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("logging.file.retainedFiles"));
+	}
+
 	// ── Load (returns OrchestraConfigFile) tests ──
 
 	[Fact]

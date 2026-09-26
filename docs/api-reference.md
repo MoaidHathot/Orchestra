@@ -550,6 +550,41 @@ DELETE /api/history/{orchestrationName}/{runId}
 - `force`: Required (`true`) to delete a run marked as a favorite. Without it the
   request is rejected with `400`.
 
+### Prune Runs (apply retention now)
+
+```http
+POST /api/history/prune
+POST /api/history/prune?dryRun=true
+POST /api/history/prune?maxRuns=50&maxAgeDays=30
+```
+
+Applies run retention immediately instead of waiting for the host's hourly sweep. With no
+query parameters the host's configured `retention` policy from `orchestra.json` is used;
+`maxRuns` / `maxAgeDays` replace it for this call only (`0` disables that rule). Favorited
+runs are never candidates.
+
+**Query Parameters:**
+- `maxRuns`: keep only the newest N runs per orchestration.
+- `maxAgeDays`: delete runs that started more than N days ago.
+- `dryRun`: `true` lists the candidates without deleting anything.
+
+**Response (200):**
+
+```json
+{
+  "dryRun": false,
+  "policy": { "maxRunsPerOrchestration": 50, "maxRunAgeDays": 30, "source": "request" },
+  "deleted": 3,
+  "failed": 0,
+  "runs": [ { "runId": "…", "orchestrationName": "nightly", "status": "Succeeded", "startedAt": "…", "folderPath": "…" } ],
+  "failedRuns": []
+}
+```
+
+A dry run returns `wouldDelete` and `runs` instead of `deleted`/`failed`. Responds `400`
+(problem+json) when no policy applies - neither configured nor given - or when a limit is
+negative, so a misconfigured call can never delete everything.
+
 ---
 
 ## Run Annotations
@@ -796,6 +831,69 @@ GET /api/status
   "dataPath": "/data"
 }
 ```
+
+### Health
+
+```http
+GET /api/health
+```
+
+A readiness probe, not just liveness. Runs each check and folds them into `status`:
+`healthy`, `degraded` (the host serves requests but cannot do all of its job - no agent
+provider, scheduler disabled) or `unhealthy` (the data path is not writable, so runs cannot be
+persisted). Healthy and degraded answer `200`; unhealthy answers `503`, which the CLI's
+connect-or-spawn probe treats as "no usable host here".
+
+**Response:**
+```json
+{
+  "status": "healthy",
+  "version": "0.9.1",
+  "timestamp": "2026-09-27T10:15:42Z",
+  "uptime": "00:12:03.4567890",
+  "activeRuns": 1,
+  "checks": [
+    { "name": "dataPath", "status": "healthy", "detail": "/data" },
+    { "name": "agentProviders", "status": "healthy", "detail": "copilot, opencode (default: copilot)" },
+    { "name": "orchestrations", "status": "healthy", "detail": "5 registered" },
+    { "name": "scheduler", "status": "healthy", "detail": "running" },
+    { "name": "fileLogging", "status": "healthy", "detail": "on: /data/logs" },
+    { "name": "telemetry", "status": "healthy", "detail": "off (set telemetry.otlpEndpoint or OTEL_EXPORTER_OTLP_ENDPOINT)" }
+  ]
+}
+```
+
+### Host Log Tail
+
+```http
+GET /api/logs?lines=200
+GET /api/logs?offset=48213&file=orchestra-2026-09-27.log
+```
+
+Reads the host's rolling log file (`{dataPath}/logs/orchestra-yyyy-MM-dd.log`, see
+`logging.file` in [host.md](host.md)). Without `offset` it returns the last `lines` lines
+(default 200, max 5000) of the newest file. With `offset` (the value a previous response
+reported) and that response's `file`, it returns only what was appended since - the follow
+mode used by `orchestra logs --follow`. When the day has rolled to a newer file, the read
+restarts from the top of that file and `file` changes.
+
+**Response:**
+```json
+{
+  "directory": "/data/logs",
+  "file": "orchestra-2026-09-27.log",
+  "path": "/data/logs/orchestra-2026-09-27.log",
+  "sizeBytes": 48213,
+  "offset": 48213,
+  "truncated": true,
+  "enabled": true,
+  "lines": ["2026-09-27 10:15:42 [Information] Orchestra.Host.Initialization: Host log file: ..."]
+}
+```
+
+Returns `404` (problem+json) while no log file exists yet. `enabled` reports whether this
+host writes the file; when it does not (e.g. `logging.file.enabled: false`) the endpoint still
+serves files left by earlier hosts.
 
 ---
 

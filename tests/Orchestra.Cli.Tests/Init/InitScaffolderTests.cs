@@ -211,11 +211,24 @@ public sealed class InitScaffolderTests : IDisposable
 			config.DataPath.Should().Be("./.orchestra/data");
 			config.DefaultProvider.Should().Be("copilot");
 			config.DefaultModel.Should().Be("claude-opus-4.8");
+			config.Retention.Should().NotBeNull("a fresh workspace must not keep every run forever");
+			config.Retention!.MaxRunsPerOrchestration.Should().Be(InitScaffolder.DefaultRetentionMaxRunsPerOrchestration);
+			config.Retention.MaxRunAgeDays.Should().Be(InitScaffolder.DefaultRetentionMaxRunAgeDays);
 		}
 		finally
 		{
 			Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
 		}
+	}
+
+	[Fact]
+	public void BuildConfig_RetentionBlock_ExplainsHowToPreviewAndDisable()
+	{
+		var config = InitScaffolder.BuildConfig(PlanFor(Path.Combine(_root, "retention")));
+
+		config.Should().Contain("\"retention\": {");
+		config.Should().Contain("runs prune --dry-run", "the comment must point at the preview command");
+		config.Should().Contain("Favorited runs are never deleted");
 	}
 
 	[Fact]

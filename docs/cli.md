@@ -394,6 +394,7 @@ orchestra attach my-long-orch run-abc123
 | `orchestra runs list [--limit N] [--favorites] [--tag NAME]` | List recent runs (default 20). `--tag` is repeatable and matches **any** of the given tags. |
 | `orchestra runs get <name> <run-id>` | Get a specific run's full record (every step's input/output). |
 | `orchestra runs delete <name> <run-id> [--force]` | Delete a stored run record. `--force` is required for favorited runs. |
+| `orchestra runs prune [--max-runs N] [--max-age-days N] [--dry-run]` | Apply run retention now. Uses `retention` from `orchestra.json` unless `--max-runs`/`--max-age-days` override it for this call; `--dry-run` lists what would go. Favorites are never deleted. The host also sweeps hourly on its own. |
 
 ### Run annotations
 
@@ -525,6 +526,7 @@ pwsh scripts can use the injected `Orchestra-Complete` / `Orchestra-SetStatus` h
 | Command | Purpose |
 |---|---|
 | `orchestra server-status` | Return the server's reported status payload. |
+| `orchestra logs [-n N] [-f] [--level LEVEL] [--interval-ms MS]` | Show the last N lines (default 100) of the host's log file (`{dataPath}/logs/orchestra-yyyy-MM-dd.log`). `-f/--follow` streams new lines until Ctrl+C and announces when the day rolls to a new file; `--level Warning` keeps only entries at that level or above (stack traces stay with their entry). `--format json` returns the raw tail payload. Works against a running server or, with none up, straight off the workspace's data path. |
 
 ---
 

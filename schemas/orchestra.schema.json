@@ -47,6 +47,75 @@
       "description": "Default minimum log level. Overrides Logging:LogLevel:Default from appsettings.json. An unrecognized value is ignored rather than applied. Default: Information.",
       "enum": ["Trace", "Debug", "Information", "Warning", "Error", "Critical", "None"]
     },
+    "telemetry": {
+      "type": "object",
+      "description": "OpenTelemetry export of orchestra.run / orchestra.step spans and the orchestra.* metrics (runs started/completed/active/duration, steps completed/duration, retries) plus ASP.NET Core request telemetry. Omit to export nothing; the standard OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_PROTOCOL / OTEL_SERVICE_NAME variables fill in anything left unset.",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Force export on or off. Default: on when an endpoint is known (here or via OTEL_EXPORTER_OTLP_ENDPOINT), otherwise off."
+        },
+        "otlpEndpoint": {
+          "type": "string",
+          "description": "OTLP collector endpoint, e.g. http://localhost:4317 (gRPC) or http://localhost:4318 (http/protobuf)."
+        },
+        "otlpProtocol": {
+          "type": "string",
+          "description": "OTLP transport. Default grpc.",
+          "enum": ["grpc", "http/protobuf"]
+        },
+        "serviceName": {
+          "type": "string",
+          "description": "service.name resource attribute. Default orchestra.",
+          "default": "orchestra"
+        },
+        "traces": {
+          "type": "boolean",
+          "description": "Export spans. Default true.",
+          "default": true
+        },
+        "metrics": {
+          "type": "boolean",
+          "description": "Export metrics. Default true.",
+          "default": true
+        }
+      }
+    },
+    "logging": {
+      "type": "object",
+      "description": "Host log output. The host writes one log file per day under {dataPath}/logs by default; `orchestra logs` tails it.",
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "object",
+          "description": "The rolling log file. Omit for the defaults: enabled, {dataPath}/logs/orchestra-yyyy-MM-dd.log, the host's logLevel, 14 days kept.",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Set false to write no log file. Default true.",
+              "default": true
+            },
+            "directory": {
+              "type": "string",
+              "description": "Directory for the daily files. Relative paths resolve against this config file. Default: {dataPath}/logs."
+            },
+            "level": {
+              "type": "string",
+              "description": "Minimum level written to the file. Default: the host's logLevel, else Information.",
+              "enum": ["Trace", "Debug", "Information", "Warning", "Error", "Critical"]
+            },
+            "retainedFiles": {
+              "type": "integer",
+              "description": "How many daily files to keep; older files are deleted when a new day starts. Default 14.",
+              "minimum": 1,
+              "default": 14
+            }
+          }
+        }
+      }
+    },
     "defaultModel": {
       "type": "string",
       "description": "Model used by Prompt steps that set no model and belong to an orchestration with no defaultModel. Resolution per step: step model -> orchestration defaultModel -> this value."

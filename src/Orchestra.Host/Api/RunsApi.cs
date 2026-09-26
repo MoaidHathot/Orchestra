@@ -473,6 +473,56 @@ public static partial class RunsApi
 			return Results.Ok(new { pruned, runIds = orphans });
 		});
 
+		// POST /api/history/prune - Apply run retention on demand.
+		// Uses the host's configured retention policy unless maxRuns / maxAgeDays override it.
+		// dryRun=true lists what would be deleted without deleting anything. Favorites are exempt.
+		historyGroup.MapPost("/prune", async (
+			int? maxRuns,
+			int? maxAgeDays,
+			bool? dryRun,
+			FileSystemRunStore runStore,
+			[FromServices] Hosting.RetentionPolicy configured,
+			CancellationToken cancellationToken) =>
+		{
+			if (maxRuns is < 0 || maxAgeDays is < 0)
+				return ProblemDetailsHelpers.BadRequest("maxRuns and maxAgeDays must be 0 or greater (0 disables that rule).");
+
+			var overridden = maxRuns is not null || maxAgeDays is not null;
+			var policy = overridden
+				? new Hosting.RetentionPolicy { MaxRunsPerOrchestration = maxRuns, MaxRunAgeDays = maxAgeDays }
+				: configured;
+
+			if (policy.IsForever)
+				return ProblemDetailsHelpers.BadRequest(overridden
+					? "The requested policy keeps every run; pass maxRuns and/or maxAgeDays greater than 0."
+					: "No retention policy is configured. Set retention.maxRunsPerOrchestration / retention.maxRunAgeDays in orchestra.json, or pass maxRuns / maxAgeDays.");
+
+			var policyView = new { maxRunsPerOrchestration = policy.MaxRunsPerOrchestration, maxRunAgeDays = policy.MaxRunAgeDays, source = overridden ? "request" : "orchestra.json" };
+
+			if (dryRun == true)
+			{
+				var candidates = await runStore.SelectRunsForRetentionAsync(policy, cancellationToken);
+				return Results.Ok(new
+				{
+					dryRun = true,
+					policy = policyView,
+					wouldDelete = candidates.Count,
+					runs = candidates.Select(ToRetentionRunView).ToArray(),
+				});
+			}
+
+			var result = await runStore.ApplyRetentionDetailedAsync(policy, cancellationToken);
+			return Results.Ok(new
+			{
+				dryRun = false,
+				policy = policyView,
+				deleted = result.Deleted.Count,
+				failed = result.Failed.Count,
+				runs = result.Deleted.Select(ToRetentionRunView).ToArray(),
+				failedRuns = result.Failed.Select(ToRetentionRunView).ToArray(),
+			});
+		});
+
 		// GET /api/history/{orchestrationName}/{runId}/annotation
 		historyGroup.MapGet("/{orchestrationName}/{runId}/annotation", (
 			string orchestrationName,
@@ -806,6 +856,15 @@ public static partial class RunsApi
 
 	private static string? NormalizeOrNull(string? value)
 		=> string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+	private static object ToRetentionRunView(RunIndex run) => new
+	{
+		runId = run.RunId,
+		orchestrationName = run.OrchestrationName,
+		status = run.Status.ToString(),
+		startedAt = run.StartedAt,
+		folderPath = run.FolderPath,
+	};
 
 	[LoggerMessage(Level = LogLevel.Information,
 		Message = "Run cancel requested: executionId={ExecutionId}, source={Source}, detail={Detail}, callerReason={CallerReason}, callerIdentity={CallerIdentity}, callerAddress={CallerAddress}")]

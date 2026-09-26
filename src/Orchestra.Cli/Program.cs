@@ -149,6 +149,12 @@ public class Program
 		config.AddCommand<ServerStatusCommand>("server-status")
 			.WithDescription("Show the Orchestra server's status.");
 
+		config.AddCommand<LogsCommand>("logs")
+			.WithDescription("Show the host's log file (newest day). --follow keeps streaming new lines.")
+			.WithExample("logs")
+			.WithExample("logs", "--follow", "--level", "Warning")
+			.WithExample("logs", "--lines", "500", "--format", "json");
+
 		// ── Host / tooling ───────────────────────────────────────────────────────
 		config.AddCommand<PortalCommand>("portal")
 			.WithDescription("Launch the Orchestra host + Portal web UI (long-running).")
@@ -192,6 +198,10 @@ public class Program
 				.WithDescription("List every annotated run and its tags.");
 			branch.AddCommand<RunsAnnotationsPruneCommand>("prune-annotations")
 				.WithDescription("Drop annotations whose run no longer exists.");
+			branch.AddCommand<RunsPruneCommand>("prune")
+				.WithDescription("Apply run retention now: delete runs beyond the configured (or given) limits. Favorites are kept.")
+				.WithExample("runs", "prune", "--dry-run")
+				.WithExample("runs", "prune", "--max-runs", "50", "--max-age-days", "30");
 			branch.AddCommand<RunsExportCommand>("export")
 				.WithDescription("Export a run (or every run matching --tag/--favorites) with its saved artifacts.")
 				.WithExample("runs", "export", "my-orchestration", "a1b2c3d4e5f6", "--out", "./exports")

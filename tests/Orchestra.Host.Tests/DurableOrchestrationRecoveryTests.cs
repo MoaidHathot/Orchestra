@@ -160,7 +160,6 @@ public sealed class DurableOrchestrationRecoveryTests : IDisposable
 			scheduler: new OrchestrationScheduler(),
 			loggerFactory: NullLoggerFactory.Instance,
 			logger: NullLogger<TriggerManager>.Instance,
-			runsDir: runsDir,
 			runStore: _runStore,
 			checkpointStore: _checkpointStore,
 			launcher: null!,

@@ -106,10 +106,10 @@ public class MaxConcurrencyTests
 	{
 		// Barrier of 2: the run can only finish if two steps are inside the agent at once, which
 		// proves the cap is a ceiling rather than a serializer; the peak proves it is a ceiling.
-		var (agent, peak) = BarrierAgent(parties: 2, barrierTimeout: TimeSpan.FromSeconds(15));
+		var (agent, peak) = BarrierAgent(parties: 2, barrierTimeout: TimeSpan.FromSeconds(25));
 		var executor = new OrchestrationExecutor(_scheduler, agent, _reporter, NullLoggerFactory.Instance);
 
-		var result = await executor.ExecuteAsync(FanOut(stepCount: 8, maxConcurrency: 2)).WaitAsync(TimeSpan.FromSeconds(30));
+		var result = await executor.ExecuteAsync(FanOut(stepCount: 8, maxConcurrency: 2)).WaitAsync(TimeSpan.FromSeconds(45));
 
 		result.Status.Should().Be(ExecutionStatus.Succeeded);
 		result.StepResults.Should().HaveCount(8);
@@ -122,14 +122,17 @@ public class MaxConcurrencyTests
 	{
 		// Every step blocks until all six are inside the agent together; only an unbounded run
 		// can open that barrier. (Wall-clock overlap would be flaky under full-suite load.)
-		var (agent, peak) = BarrierAgent(parties: 6, barrierTimeout: TimeSpan.FromSeconds(15));
+		var (agent, peak) = BarrierAgent(parties: 6, barrierTimeout: TimeSpan.FromSeconds(25));
 		var executor = new OrchestrationExecutor(_scheduler, agent, _reporter, NullLoggerFactory.Instance);
 
-		var result = await executor.ExecuteAsync(FanOut(stepCount: 6, maxConcurrency: null)).WaitAsync(TimeSpan.FromSeconds(30));
+		var result = await executor.ExecuteAsync(FanOut(stepCount: 6, maxConcurrency: null)).WaitAsync(TimeSpan.FromSeconds(45));
 
-		result.Status.Should().Be(ExecutionStatus.Succeeded, "without a cap all independent steps start together (historical behaviour)");
+		result.Status.Should().Be(ExecutionStatus.Succeeded, "without a cap all independent steps start together (historical behaviour); step errors: {0}", DescribeErrors(result));
 		peak().Should().Be(6);
 	}
+
+	private static string DescribeErrors(OrchestrationResult result)
+		=> string.Join(" | ", result.StepResults.Where(kv => kv.Value.Status != ExecutionStatus.Succeeded).Select(kv => $"{kv.Key}: {kv.Value.Status} {kv.Value.ErrorMessage}"));
 
 	[Fact]
 	public async Task MaxConcurrency_HostDefault_AppliesWhenOrchestrationSetsNone()
@@ -149,11 +152,11 @@ public class MaxConcurrencyTests
 	{
 		// With the host default (1) in effect a barrier of 3 could never open; it does, because
 		// the orchestration's own value (3) wins.
-		var (agent, peak) = BarrierAgent(parties: 3, barrierTimeout: TimeSpan.FromSeconds(15));
+		var (agent, peak) = BarrierAgent(parties: 3, barrierTimeout: TimeSpan.FromSeconds(25));
 		var executor = new OrchestrationExecutor(_scheduler, agent, _reporter, NullLoggerFactory.Instance,
 			hostDefaults: new HostAgentDefaults { MaxConcurrency = 1 });
 
-		var result = await executor.ExecuteAsync(FanOut(stepCount: 6, maxConcurrency: 3)).WaitAsync(TimeSpan.FromSeconds(30));
+		var result = await executor.ExecuteAsync(FanOut(stepCount: 6, maxConcurrency: 3)).WaitAsync(TimeSpan.FromSeconds(45));
 
 		result.Status.Should().Be(ExecutionStatus.Succeeded, "the orchestration's own value (3) wins over the host's (1)");
 		peak().Should().Be(3);

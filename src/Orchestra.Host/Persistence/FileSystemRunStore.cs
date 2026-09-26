@@ -730,8 +730,20 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 		Hosting.RetentionPolicy policy,
 		CancellationToken cancellationToken = default)
 	{
+		var result = await ApplyRetentionDetailedAsync(policy, cancellationToken);
+		return result.Deleted.Count;
+	}
+
+	/// <summary>
+	/// Lists the runs that <paramref name="policy"/> would delete, without deleting anything.
+	/// Favorited runs are never candidates.
+	/// </summary>
+	public async Task<IReadOnlyList<RunIndex>> SelectRunsForRetentionAsync(
+		Hosting.RetentionPolicy policy,
+		CancellationToken cancellationToken = default)
+	{
 		if (policy.IsForever)
-			return 0;
+			return [];
 
 		await EnsureIndexLoadedAsync(cancellationToken);
 
@@ -773,8 +785,23 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 			}
 		}
 
-		var deleted = 0;
-		var deletedRunIds = new List<string>();
+		return toDelete;
+	}
+
+	/// <summary>
+	/// Applies a retention policy and reports which runs were deleted and which deletions
+	/// failed (their index rows are kept so the index keeps describing what is on disk).
+	/// </summary>
+	public async Task<RetentionResult> ApplyRetentionDetailedAsync(
+		Hosting.RetentionPolicy policy,
+		CancellationToken cancellationToken = default)
+	{
+		var toDelete = await SelectRunsForRetentionAsync(policy, cancellationToken);
+		if (toDelete.Count == 0)
+			return new RetentionResult([], []);
+
+		var deleted = new List<RunIndex>();
+		var failed = new List<RunIndex>();
 		var deletedFolders = new List<string>();
 		foreach (var run in toDelete)
 		{
@@ -787,12 +814,12 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 					Directory.Delete(run.FolderPath, recursive: true);
 				}
 
-				deleted++;
-				deletedRunIds.Add(run.RunId);
+				deleted.Add(run);
 				deletedFolders.Add(run.FolderPath);
 			}
 			catch (Exception ex)
 			{
+				failed.Add(run);
 				LogRetentionDeleteFailed(run.FolderPath, ex);
 			}
 		}
@@ -804,11 +831,14 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 
 		// Annotations must not outlive their run. Only reached for runs that were not favorited,
 		// since favorites are never queued for deletion above.
-		if (deletedRunIds.Count > 0)
-			_annotations?.RemoveMany(deletedRunIds);
+		if (deleted.Count > 0)
+			_annotations?.RemoveMany(deleted.Select(r => r.RunId).ToList());
 
-		return deleted;
+		return new RetentionResult(deleted, failed);
 	}
+
+	/// <summary>Outcome of <see cref="ApplyRetentionDetailedAsync"/>.</summary>
+	public sealed record RetentionResult(IReadOnlyList<RunIndex> Deleted, IReadOnlyList<RunIndex> Failed);
 
 	/// <summary>
 	/// Releases the index database handle. Registered as a singleton, so the DI container disposes

@@ -81,6 +81,16 @@ public static class InitScaffolder
 	public const string RemoteSchemaBaseUrl =
 		"https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas";
 
+	/// <summary>
+	/// Retention written into a scaffolded orchestra.json. Generous enough that nothing an
+	/// author cares about disappears while iterating, bounded enough that a scheduled
+	/// orchestration cannot fill the disk. Favorites are exempt regardless.
+	/// </summary>
+	public const int DefaultRetentionMaxRunsPerOrchestration = 200;
+
+	/// <inheritdoc cref="DefaultRetentionMaxRunsPerOrchestration"/>
+	public const int DefaultRetentionMaxRunAgeDays = 30;
+
 	private static readonly string[] s_schemaFileNames =
 	[
 		"orchestration.schema.json",
@@ -350,6 +360,19 @@ public static class InitScaffolder
 				"// workspace is self-contained; point it elsewhere to share state across projects.",
 			],
 			[$"\"dataPath\": \"./{Host.Hosting.OrchestraConfigLoader.ProjectDirectoryName}/data\""]));
+
+		blocks.Add(new ConfigBlock(
+			[
+				"// Run retention. Without it every run is kept forever and dataPath grows without",
+				"// bound. The host sweeps hourly; `orchestra runs prune --dry-run` previews a sweep.",
+				"// Favorited runs are never deleted. Set a rule to 0 (or remove it) to disable it.",
+			],
+			[
+				"\"retention\": {",
+				$"  \"maxRunsPerOrchestration\": {DefaultRetentionMaxRunsPerOrchestration},",
+				$"  \"maxRunAgeDays\": {DefaultRetentionMaxRunAgeDays}",
+				"}",
+			]));
 
 		var agentDefaults = new List<string>();
 		if (plan.Provider is not null)

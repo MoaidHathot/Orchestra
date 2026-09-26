@@ -48,7 +48,6 @@ public class TriggerFiringTests : IDisposable
 		scheduler: null!,
 		loggerFactory: NullLoggerFactory.Instance,
 		logger: NullLogger<TriggerManager>.Instance,
-		runsDir: Path.Combine(_tempDir, "runs"),
 		runStore: null!,
 		checkpointStore: null!,
 		launcher: _launcher,

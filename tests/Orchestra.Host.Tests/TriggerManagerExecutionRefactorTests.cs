@@ -34,7 +34,6 @@ public class TriggerManagerExecutionRefactorTests : IDisposable
 			scheduler: null!,
 			loggerFactory: loggerFactory,
 			logger: logger,
-			runsDir: runsDir,
 			runStore: null!,
 			checkpointStore: null!,
 			launcher: null!,

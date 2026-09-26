@@ -96,7 +96,7 @@ public class RunsApiExportTests : IDisposable
 			scheduler: new OrchestrationScheduler(),
 			loggerFactory: NullLoggerFactory.Instance,
 			logger: NullLogger<TriggerManager>.Instance,
-			runsDir: Path.GetTempPath(),
+			dataPath: Path.GetTempPath(),
 			runStore: _runStore,
 			checkpointStore: Substitute.For<ICheckpointStore>(),
 			launcher: Substitute.For<IChildOrchestrationLauncher>());

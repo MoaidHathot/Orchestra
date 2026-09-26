@@ -51,7 +51,6 @@ public class TriggerRuntimeStatePreservationTests : IDisposable
 			scheduler: null!,
 			loggerFactory: loggerFactory,
 			logger: logger,
-			runsDir: _runsDir,
 			runStore: null!,
 			checkpointStore: null!,
 			launcher: null!,

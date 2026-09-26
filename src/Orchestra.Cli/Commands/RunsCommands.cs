@@ -186,6 +186,49 @@ public sealed class RunsAnnotationsPruneCommand : AsyncCommand<ManagedCommandSet
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// runs prune
+//
+// Retention normally runs inside the host on an hourly sweep. This applies it now -
+// with the configured policy or a one-off override - so an operator can reclaim
+// disk, or preview what the configured policy would delete before enabling it.
+// Favorited runs are never deleted.
+// ─────────────────────────────────────────────────────────────────────────────
+
+public sealed class RunsPruneSettings : ManagedCommandSettings
+{
+	[CommandOption("--max-runs <N>")]
+	[Description("Keep only the newest N runs per orchestration (overrides orchestra.json for this call; 0 disables the rule)")]
+	public int? MaxRuns { get; set; }
+
+	[CommandOption("--max-age-days <N>")]
+	[Description("Delete runs older than N days (overrides orchestra.json for this call; 0 disables the rule)")]
+	public int? MaxAgeDays { get; set; }
+
+	[CommandOption("--dry-run")]
+	[Description("List the runs that would be deleted without deleting anything")]
+	public bool DryRun { get; set; }
+
+	public override Spectre.Console.ValidationResult Validate()
+	{
+		if (MaxRuns is < 0)
+			return Spectre.Console.ValidationResult.Error("--max-runs must be 0 or greater.");
+		if (MaxAgeDays is < 0)
+			return Spectre.Console.ValidationResult.Error("--max-age-days must be 0 or greater.");
+		return base.Validate();
+	}
+}
+
+public sealed class RunsPruneCommand : AsyncCommand<RunsPruneSettings>
+{
+	public override async Task<int> ExecuteAsync(CommandContext context, RunsPruneSettings settings)
+		=> await ManagedSession.RunAsync(settings, async client =>
+		{
+			var result = await client.PruneRunsAsync(settings.MaxRuns, settings.MaxAgeDays, settings.DryRun);
+			OutputWriter.Write(result, settings.Format);
+		});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // runs export
 //
 // A run's artifacts live in two places: the execution folder, and the temp store

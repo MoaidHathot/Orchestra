@@ -1,80 +1,197 @@
+using System.Collections.Concurrent;
+using System.Net;
+using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using NSubstitute;
+using Orchestra.Engine;
+using Orchestra.Host.Api;
+using Orchestra.Host.Extensions;
+using Orchestra.Host.Hosting;
+using Orchestra.Host.Registry;
+using Orchestra.Host.Triggers;
 using Xunit;
 
 namespace Orchestra.Host.Tests;
 
 /// <summary>
-/// Tests for the GET /api/health endpoint defined in UtilityApi.
-/// Since UtilityApi uses minimal API endpoints, we test the response shape
-/// by directly invoking the handler logic (the endpoint returns a simple anonymous object).
+/// <c>GET /api/health</c> is a real readiness probe: 200 while the host can persist and run
+/// orchestrations (possibly degraded), 503 when the data path is not writable.
 /// </summary>
-public class HealthCheckTests
+public class HealthCheckTests : IDisposable
 {
-	[Fact]
-	public void HealthCheckResponse_HasExpectedShape()
+	private readonly string _tempDir;
+
+	public HealthCheckTests()
 	{
-		// Arrange & Act - simulate what the endpoint returns
-		var response = new
+		_tempDir = Path.Combine(Path.GetTempPath(), $"orchestra-health-tests-{Guid.NewGuid():N}");
+		Directory.CreateDirectory(_tempDir);
+	}
+
+	public void Dispose()
+	{
+		if (Directory.Exists(_tempDir))
 		{
-			status = "healthy",
-			timestamp = DateTimeOffset.UtcNow
-		};
+			try { Directory.Delete(_tempDir, recursive: true); }
+			catch { /* best-effort cleanup */ }
+		}
+		GC.SuppressFinalize(this);
+	}
 
-		// Assert
-		response.status.Should().Be("healthy");
-		response.timestamp.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
+	private static IAgentProviderRegistry Providers(params string[] names)
+	{
+		var registry = Substitute.For<IAgentProviderRegistry>();
+		registry.ProviderNames.Returns(names);
+		registry.DefaultProviderName.Returns(names.FirstOrDefault() ?? string.Empty);
+		registry.Builders.Returns([]);
+		return registry;
+	}
+
+	#region HealthReport
+
+	[Fact]
+	public void Build_EverythingInPlace_IsHealthy_AndListsEveryCheck()
+	{
+		var options = new OrchestrationHostOptions { DataPath = _tempDir };
+
+		var report = HealthReport.Build(options, Providers("copilot", "opencode"), new OrchestrationRegistry(), activeRuns: 2, telemetry: new TelemetryOptions { Enabled = true, OtlpEndpoint = "http://localhost:4317" });
+
+		report.Status.Should().Be(HealthReport.Healthy);
+		report.ActiveRuns.Should().Be(2);
+		report.Version.Should().Be(UtilityApi.ProductVersion);
+		report.Timestamp.Offset.Should().Be(TimeSpan.Zero);
+		report.Checks.Select(c => c.Name).Should().Equal("dataPath", "agentProviders", "orchestrations", "scheduler", "fileLogging", "telemetry");
+		report.Checks.Should().OnlyContain(c => c.Status == HealthReport.Healthy);
+		report.Checks.Single(c => c.Name == "agentProviders").Detail.Should().Contain("copilot, opencode").And.Contain("default: copilot");
+		report.Checks.Single(c => c.Name == "telemetry").Detail.Should().Contain("http://localhost:4317");
 	}
 
 	[Fact]
-	public void HealthCheckResponse_SerializesToExpectedJson()
+	public void Build_NoAgentProvider_IsDegraded()
 	{
-		// Arrange
-		var response = new
-		{
-			status = "healthy",
-			timestamp = DateTimeOffset.UtcNow
-		};
+		var options = new OrchestrationHostOptions { DataPath = _tempDir };
 
-		var jsonOptions = new JsonSerializerOptions
-		{
-			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-		};
+		var report = HealthReport.Build(options, Providers(), new OrchestrationRegistry(), 0, telemetry: null);
 
-		// Act
-		var json = JsonSerializer.Serialize(response, jsonOptions);
-		using var doc = JsonDocument.Parse(json);
-		var root = doc.RootElement;
-
-		// Assert
-		root.GetProperty("status").GetString().Should().Be("healthy");
-		root.TryGetProperty("timestamp", out var timestampProp).Should().BeTrue();
-		timestampProp.GetString().Should().NotBeNullOrEmpty();
+		report.Status.Should().Be(HealthReport.Degraded);
+		report.Checks.Single(c => c.Name == "agentProviders").Status.Should().Be(HealthReport.Degraded);
+		report.Checks.Single(c => c.Name == "telemetry").Detail.Should().StartWith("off");
 	}
 
 	[Fact]
-	public void HealthCheckResponse_TimestampIsUtc()
+	public void Build_SchedulerDisabled_IsDegraded_NotUnhealthy()
 	{
-		// Arrange & Act
-		var timestamp = DateTimeOffset.UtcNow;
+		var options = new OrchestrationHostOptions { DataPath = _tempDir, EnableScheduler = false };
 
-		// Assert
-		timestamp.Offset.Should().Be(TimeSpan.Zero, "Health check timestamp should be UTC");
+		var report = HealthReport.Build(options, Providers("copilot"), new OrchestrationRegistry(), 0, null);
+
+		report.Status.Should().Be(HealthReport.Degraded);
+		report.Checks.Single(c => c.Name == "scheduler").Detail.Should().Contain("disabled");
 	}
 
 	[Fact]
-	public void HealthCheckResponse_StatusIsAlwaysHealthy()
+	public void Build_UnwritableDataPath_IsUnhealthy()
 	{
-		// The health check endpoint is a simple liveness check.
-		// It should always return "healthy" if the server is running.
-		// This test documents the expected behavior.
+		// A regular file where the directory should be: CreateDirectory throws IOException.
+		var blocker = Path.Combine(_tempDir, "not-a-directory");
+		File.WriteAllText(blocker, "x");
+		var options = new OrchestrationHostOptions { DataPath = blocker };
 
-		// Arrange & Act
-		var status = "healthy";
+		var report = HealthReport.Build(options, Providers("copilot"), new OrchestrationRegistry(), 0, null);
 
-		// Assert
-		status.Should().Be("healthy");
-		status.Should().NotBe("unhealthy");
-		status.Should().NotBe("degraded");
+		report.Status.Should().Be(HealthReport.Unhealthy);
+		report.Checks.Single(c => c.Name == "dataPath").Status.Should().Be(HealthReport.Unhealthy);
 	}
+
+	[Fact]
+	public void CheckDataPath_LeavesNoProbeFileBehind()
+	{
+		HealthReport.CheckDataPath(_tempDir).Status.Should().Be(HealthReport.Healthy);
+
+		Directory.GetFiles(_tempDir).Should().BeEmpty();
+	}
+
+	#endregion
+
+	#region Endpoint
+
+	private IHost CreateHost(string dataPath, IAgentProviderRegistry providers)
+	{
+		var options = new OrchestrationHostOptions { DataPath = dataPath };
+		var jsonOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+		var triggerManager = new TriggerManager(
+			new ConcurrentDictionary<string, CancellationTokenSource>(),
+			new ConcurrentDictionary<string, ActiveExecutionInfo>(),
+			providers,
+			new OrchestrationScheduler(),
+			Microsoft.Extensions.Logging.Abstractions.NullLoggerFactory.Instance,
+			Microsoft.Extensions.Logging.Abstractions.NullLogger<TriggerManager>.Instance,
+			_tempDir,
+			Substitute.For<IRunStore>(),
+			Substitute.For<ICheckpointStore>(),
+			Substitute.For<IChildOrchestrationLauncher>());
+
+		var host = new HostBuilder()
+			.ConfigureWebHost(webHost =>
+			{
+				webHost.UseTestServer();
+				webHost.ConfigureServices(services =>
+				{
+					services.AddRouting();
+					services.AddSingleton(options);
+					services.AddSingleton(providers);
+					services.AddSingleton(new OrchestrationRegistry());
+					services.AddSingleton(new ConcurrentDictionary<string, CancellationTokenSource>());
+					services.AddSingleton(triggerManager);
+					services.AddSingleton(new Mcp.McpManager(Microsoft.Extensions.Logging.Abstractions.NullLogger<Mcp.McpManager>.Instance));
+				});
+				webHost.Configure(app =>
+				{
+					app.UseRouting();
+					app.UseEndpoints(endpoints => endpoints.MapUtilityApi(jsonOptions));
+				});
+			})
+			.Build();
+
+		host.Start();
+		return host;
+	}
+
+	[Fact]
+	public async Task Endpoint_Healthy_Is200_WithChecks()
+	{
+		using var host = CreateHost(_tempDir, Providers("copilot"));
+		var client = host.GetTestClient();
+
+		var response = await client.GetAsync("/api/health");
+
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+		body.GetProperty("status").GetString().Should().Be("healthy");
+		body.GetProperty("activeRuns").GetInt32().Should().Be(0);
+		body.GetProperty("checks").EnumerateArray().Should().Contain(c => c.GetProperty("name").GetString() == "dataPath");
+		body.TryGetProperty("timestamp", out _).Should().BeTrue("existing probes still read timestamp");
+	}
+
+	[Fact]
+	public async Task Endpoint_UnwritableDataPath_Is503()
+	{
+		var blocker = Path.Combine(_tempDir, "blocker-file");
+		File.WriteAllText(blocker, "x");
+		using var host = CreateHost(blocker, Providers("copilot"));
+		var client = host.GetTestClient();
+
+		var response = await client.GetAsync("/api/health");
+
+		response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+		var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+		body.GetProperty("status").GetString().Should().Be("unhealthy");
+	}
+
+	#endregion
 }

@@ -78,6 +78,8 @@ internal static class ManagedSession
 		o.StartExternalServices = false;
 		o.LoadPersistedOrchestrations = true;
 		o.RegisterJsonTriggers = true;
+		// A throwaway read-only host must leave no trace in the data directory's log files.
+		o.FileLogging.Enabled = false;
 	}
 
 	private static IReadOnlyList<string> SpawnOnlyOptionsInEffect(ManagedCommandSettings settings)

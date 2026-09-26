@@ -186,6 +186,37 @@ public class OrchestraClient : IDisposable
 	public async Task<JsonElement> PruneRunAnnotationsAsync()
 		=> await PostAsync("api/history/annotations/prune", new { });
 
+	// ── Host logs ──
+
+	/// <summary>
+	/// Reads the host's log file. Without <paramref name="offset"/>: the last <paramref name="lines"/>
+	/// lines of the newest file. With <paramref name="offset"/> (and the <paramref name="file"/> a
+	/// previous call reported): everything appended since, for follow mode.
+	/// </summary>
+	public async Task<JsonElement> GetLogsAsync(int? lines = null, long? offset = null, string? file = null)
+	{
+		var query = new List<string>();
+		if (lines.HasValue) query.Add($"lines={lines.Value}");
+		if (offset.HasValue) query.Add($"offset={offset.Value}");
+		if (file is not null) query.Add($"file={Uri.EscapeDataString(file)}");
+		return await GetAsync("api/logs" + (query.Count > 0 ? "?" + string.Join("&", query) : string.Empty));
+	}
+
+	/// <summary>
+	/// Applies run retention on demand. With no overrides the host's configured policy is used;
+	/// <paramref name="maxRuns"/> / <paramref name="maxAgeDays"/> replace it for this call.
+	/// <paramref name="dryRun"/> lists the runs that would be deleted without deleting them.
+	/// </summary>
+	public async Task<JsonElement> PruneRunsAsync(int? maxRuns = null, int? maxAgeDays = null, bool dryRun = false)
+	{
+		var query = new List<string>();
+		if (maxRuns.HasValue) query.Add($"maxRuns={maxRuns.Value}");
+		if (maxAgeDays.HasValue) query.Add($"maxAgeDays={maxAgeDays.Value}");
+		if (dryRun) query.Add("dryRun=true");
+		var url = "api/history/prune" + (query.Count > 0 ? "?" + string.Join("&", query) : string.Empty);
+		return await PostAsync(url, new { });
+	}
+
 	public async Task<JsonElement> GetRunAnnotationAsync(string orchestrationName, string runId)
 		=> await GetAsync(AnnotationUrl(orchestrationName, runId));
 

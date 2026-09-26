@@ -92,10 +92,17 @@ public class OrchestrationHostOptions
 	public int ShutdownTimeoutSeconds { get; set; } = 30;
 
 	/// <summary>
-	/// Minimum log level for the file logger.
+	/// Default minimum log level for the host (console and file).
 	/// Default: "Information"
 	/// </summary>
 	public string LogLevel { get; set; } = "Information";
+
+	/// <summary>
+	/// The host's rolling log file (<c>{dataPath}/logs/orchestra-yyyy-MM-dd.log</c> by default,
+	/// 14 days kept). Set <see cref="Logging.FileLoggingOptions.Enabled"/> to false for hosts
+	/// that must not write files, e.g. the CLI's inert management host.
+	/// </summary>
+	public Logging.FileLoggingOptions FileLogging { get; set; } = new();
 
 	/// <summary>
 	/// Polling intervals for the web UI, in milliseconds.

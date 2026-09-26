@@ -52,7 +52,6 @@ public class TriggerScheduleHistoryTests : IDisposable
 		scheduler: null!,
 		loggerFactory: NullLoggerFactory.Instance,
 		logger: new NullLogger<TriggerManager>(),
-		runsDir: _runsDir,
 		runStore: _runStore,
 		checkpointStore: null!,
 		launcher: null!,

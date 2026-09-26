@@ -37,7 +37,7 @@ public class TriggerManagerCancelTests
 			scheduler: null!, // Not needed for cancel tests
 			loggerFactory: loggerFactory,
 			logger: logger,
-			runsDir: runsDir,
+			dataPath: tempDir,
 			runStore: null!, // Not needed for cancel tests
 			checkpointStore: null!, // Not needed for cancel tests
 			launcher: null! // Not needed for cancel tests

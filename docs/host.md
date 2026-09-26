@@ -134,8 +134,10 @@ so a typo'd key is flagged in the editor rather than silently ignored at runtime
 | `defaultReasoningLevel` | none (provider default) | Default reasoning effort (`low` / `medium` / `high` / `xhigh` / `max`) for Prompt steps that set no `reasoningLevel` and belong to an orchestration with no `defaultReasoningLevel`. `xhigh`/`max` are only honoured by models that advertise them. |
 | `defaultMaxConcurrency` | none (unbounded) | Cap on how many steps of a single run execute at the same time, for orchestrations that set no `maxConcurrency`. Approval steps and async Orchestration steps never occupy a slot. Values below 1 are ignored with a startup warning. |
 | `enableScheduler` | `true` | Set `false` for an API-only host that never fires triggers itself. |
-| `logLevel` | `Information` | Overrides `Logging:LogLevel:Default` from `appsettings.json`. |
-| `retention` | unlimited | Run-history limits. Favorited runs are always exempt. |
+| `logLevel` | `Information` | Default minimum level for the console and the log file. Overrides `Logging:LogLevel:Default` from `appsettings.json`. |
+| `logging.file` | on, `{dataPath}/logs`, 14 days | The host's rolling log file: one `orchestra-yyyy-MM-dd.log` per day, older files deleted past `retainedFiles`. Keys: `enabled`, `directory` (relative to `orchestra.json`), `level` (defaults to `logLevel`), `retainedFiles`. Read it with `orchestra logs [--follow]` or `GET /api/logs`. |
+| `telemetry` | off | OpenTelemetry export (`otlpEndpoint`, `otlpProtocol`, `serviceName`, `traces`, `metrics`, `enabled`). See [Observability](#observability). |
+| `retention` | unlimited | Run-history limits: `maxRunsPerOrchestration` (keep the newest N) and `maxRunAgeDays`. The host sweeps hourly; `orchestra runs prune [--dry-run]` applies or previews the same policy on demand. Favorited runs are always exempt. `orchestra init` scaffolds 200 runs / 30 days. |
 | `hooks` | `[]` | Global lifecycle hooks applied to every orchestration. |
 
 See `schemas/orchestra.schema.json` for the complete set, including `copilot`, `openCode`,
@@ -244,9 +246,55 @@ worker). Omit the key to use the built-in default (120s — generous enough to a
 | `ORCHESTRA_COPILOT_NPM_REGISTRY` | npm registry mirror for the Copilot CLI download (the only one tried when set; also honoured by the build). When unset, the registry from `~/.npmrc` / `npm_config_registry` is tried before `registry.npmjs.org`. |
 | `ORCHESTRA_OPENCODE_PATH` | Path to the `opencode` binary when it is not on `PATH`. |
 | `ASPNETCORE_URLS` / `DOTNET_URLS` | Standard ASP.NET bindings; both take precedence over `orchestra.json`'s `urls`. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` / `OTEL_EXPORTER_OTLP_PROTOCOL` / `OTEL_SERVICE_NAME` | Standard OpenTelemetry variables; turn on OTLP export when `orchestra.json` has no `telemetry` block (see below). |
 
 The engine also *sets* variables for `Script` steps: `ORCHESTRA_CONTROL_FILE`,
 `ORCHESTRA_RUN_ID`, and `ORCHESTRA_STEP_NAME`.
+
+### Observability
+
+**Log file.** Every host writes one log file per day to `{dataPath}/logs/orchestra-yyyy-MM-dd.log`
+and keeps 14 of them (`logging.file` in `orchestra.json` changes the directory, level or
+retention, or turns it off). `orchestra logs [--follow] [--level Warning]` tails it and
+`GET /api/logs` serves the same data to the portal. The CLI's throwaway management host never
+writes one.
+
+**Health.** `GET /api/health` runs real checks - data path writable, an agent provider
+registered, scheduler on, log file, telemetry - and answers `200` with `status: healthy|degraded`
+or `503` with `status: unhealthy` when runs could not be persisted. Each check is listed with a
+detail line, so a `degraded` answer tells you what is missing.
+
+**Traces and metrics.** The engine instruments every run with an `orchestra.run` span (tags:
+orchestration, run id, trigger id, status) and every step with a nested `orchestra.step` span
+(name, type, status, error category), and publishes an `Orchestra.Engine` meter:
+
+| Instrument | Type | Tags |
+|---|---|---|
+| `orchestra.runs.started` / `orchestra.runs.completed` | counter | `orchestra.orchestration`, `orchestra.status` (completed) |
+| `orchestra.runs.active` | up/down counter | `orchestra.orchestration` |
+| `orchestra.run.duration` | histogram (s) | `orchestra.orchestration`, `orchestra.status` |
+| `orchestra.steps.completed` | counter | `orchestra.orchestration`, `orchestra.step.type`, `orchestra.status` |
+| `orchestra.step.duration` | histogram (s, includes retries and slot queueing) | `orchestra.orchestration`, `orchestra.step.type`, `orchestra.status` |
+| `orchestra.steps.retries` | counter | `orchestra.orchestration`, `orchestra.step.type`, `orchestra.error.category` |
+
+Nothing is exported until a collector is named:
+
+```jsonc
+"telemetry": {
+  "otlpEndpoint": "http://localhost:4317",   // or OTEL_EXPORTER_OTLP_ENDPOINT
+  "otlpProtocol": "grpc",                    // or "http/protobuf"
+  "serviceName": "orchestra",
+  "traces": true,
+  "metrics": true
+}
+```
+
+With an endpoint the host registers the OpenTelemetry SDK for the engine source/meter plus
+ASP.NET Core request traces and metrics, and ships them over OTLP. Any OpenTelemetry-compatible
+backend (Aspire dashboard, Jaeger, Grafana Tempo/Prometheus via the collector) works. Custom hosts
+built on `Orchestra.Host` call `services.AddOrchestraTelemetry(orchestraConfig)`; hosts that
+embed only the engine can subscribe an `ActivityListener`/`MeterListener` to
+`OrchestraDiagnostics.SourceName` directly - the engine takes no OpenTelemetry dependency.
 
 ## API Endpoints
 
@@ -470,6 +518,8 @@ curl -X POST http://localhost:5000/api/webhooks/{id} \
 |--------|----------|-------------|
 | `GET` | `/api/mcps` | List MCPs used across orchestrations |
 | `GET` | `/api/status` | Get server status |
+| `GET` | `/api/health` | Readiness probe with per-check detail; `503` when the data path is not writable |
+| `GET` | `/api/logs` | Tail of the host's log file (`orchestra logs`) |
 
 ## Trigger Types
 

@@ -51,7 +51,6 @@ public class SchedulerToggleTests : IDisposable
 			scheduler: null!,
 			loggerFactory: NullLoggerFactory.Instance,
 			logger: NullLogger<TriggerManager>.Instance,
-			runsDir: _runsDir,
 			runStore: null!,
 			checkpointStore: null!,
 			launcher: null!,

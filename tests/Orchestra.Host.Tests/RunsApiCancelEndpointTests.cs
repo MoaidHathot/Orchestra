@@ -369,7 +369,7 @@ public sealed class RunsApiCancelEndpointTests : IDisposable
 			scheduler: new OrchestrationScheduler(),
 			loggerFactory: NullLoggerFactory.Instance,
 			logger: NullLogger<TriggerManager>.Instance,
-			runsDir: _tempDir,
+			dataPath: _tempDir,
 			runStore: _store,
 			checkpointStore: Substitute.For<ICheckpointStore>(),
 			launcher: Substitute.For<IChildOrchestrationLauncher>());

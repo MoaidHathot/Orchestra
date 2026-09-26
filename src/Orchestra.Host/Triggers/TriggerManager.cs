@@ -23,7 +23,6 @@ public partial class TriggerManager : BackgroundService
 	private readonly IScheduler _scheduler;
 	private readonly ILoggerFactory _loggerFactory;
 	private readonly ILogger<TriggerManager> _logger;
-	private readonly string _runsDir;
 	private readonly string _triggersDir;
 	private readonly IRunStore _runStore;
 	private readonly ICheckpointStore _checkpointStore;
@@ -32,7 +31,7 @@ public partial class TriggerManager : BackgroundService
 	private readonly IMcpResolver? _mcpResolver;
 	private readonly IPendingInputStore? _pendingInputStore;
 	private readonly IHumanInputWaiter? _humanInputWaiter;
-	private readonly string? _dataPath;
+	private readonly string _dataPath;
 	private readonly string? _serverUrl;
 	private readonly string? _defaultModel;
 	private readonly HostAgentDefaults _hostDefaults;
@@ -73,14 +72,13 @@ public partial class TriggerManager : BackgroundService
 		IScheduler scheduler,
 		ILoggerFactory loggerFactory,
 		ILogger<TriggerManager> logger,
-		string runsDir,
+		string dataPath,
 		IRunStore runStore,
 		ICheckpointStore checkpointStore,
 		IChildOrchestrationLauncher launcher,
 		ITriggerExecutionCallback? executionCallback = null,
 		EngineToolRegistry? engineToolRegistry = null,
 		IMcpResolver? mcpResolver = null,
-		string? dataPath = null,
 		string? serverUrl = null,
 		string? defaultModel = null,
 		HookDefinition[]? globalHooks = null,
@@ -90,8 +88,8 @@ public partial class TriggerManager : BackgroundService
 		int? defaultMaxConcurrency = null)
 		: this(
 			activeExecutions, activeExecutionInfos, new SingleAgentProviderRegistry(agentBuilder), scheduler,
-			loggerFactory, logger, runsDir, runStore, checkpointStore, launcher, executionCallback,
-			engineToolRegistry, mcpResolver, dataPath, serverUrl, defaultModel, globalHooks,
+			loggerFactory, logger, dataPath, runStore, checkpointStore, launcher, executionCallback,
+			engineToolRegistry, mcpResolver, serverUrl, defaultModel, globalHooks,
 			pendingInputStore, humanInputWaiter, defaultReasoningLevel, defaultMaxConcurrency)
 	{
 	}
@@ -103,14 +101,13 @@ public partial class TriggerManager : BackgroundService
 		IScheduler scheduler,
 		ILoggerFactory loggerFactory,
 		ILogger<TriggerManager> logger,
-		string runsDir,
+		string dataPath,
 		IRunStore runStore,
 		ICheckpointStore checkpointStore,
 		IChildOrchestrationLauncher launcher,
 		ITriggerExecutionCallback? executionCallback = null,
 		EngineToolRegistry? engineToolRegistry = null,
 		IMcpResolver? mcpResolver = null,
-		string? dataPath = null,
 		string? serverUrl = null,
 		string? defaultModel = null,
 		HookDefinition[]? globalHooks = null,
@@ -125,8 +122,8 @@ public partial class TriggerManager : BackgroundService
 		_scheduler = scheduler;
 		_loggerFactory = loggerFactory;
 		_logger = logger;
-		_runsDir = runsDir;
-		_triggersDir = Path.Combine(Path.GetDirectoryName(runsDir)!, "triggers");
+		_dataPath = dataPath;
+		_triggersDir = Path.Combine(dataPath, "triggers");
 		_runStore = runStore;
 		_checkpointStore = checkpointStore;
 		_launcher = launcher;
@@ -135,7 +132,6 @@ public partial class TriggerManager : BackgroundService
 		_mcpResolver = mcpResolver;
 		_pendingInputStore = pendingInputStore;
 		_humanInputWaiter = humanInputWaiter;
-		_dataPath = dataPath;
 		_serverUrl = serverUrl;
 		_defaultModel = defaultModel;
 		_hostDefaults = new HostAgentDefaults { Model = defaultModel, ReasoningLevel = defaultReasoningLevel, MaxConcurrency = defaultMaxConcurrency };
@@ -528,36 +524,6 @@ public partial class TriggerManager : BackgroundService
 						sseReporter.ReportOrchestrationDone(result);
 					}
 				}
-
-				// Persist history
-				try
-				{
-					var historyEntry = new
-					{
-						id = executionId,
-						orchestrationName = resumedOrchestration.Name,
-						orchestrationDescription = resumedOrchestration.Description,
-						orchestrationVersion = resumedOrchestration.Version,
-						orchestrationPath = entry.Path,
-						triggerId = checkpoint.TriggerId,
-						triggerType = "resume",
-						startedAt = checkpoint.StartedAt.ToString("o"),
-						status = result.Status.ToString(),
-						stepCount = entry.Orchestration.Steps.Length,
-						results = result.StepResults.ToDictionary(
-							kv => kv.Key,
-							kv => new
-							{
-								status = kv.Value.Status.ToString(),
-								content = kv.Value.Content,
-								error = kv.Value.ErrorMessage,
-							}),
-					};
-					var historyJson = JsonSerializer.Serialize(historyEntry, _jsonOptions);
-					var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
-					await File.WriteAllTextAsync(historyPath, historyJson);
-				}
-				catch (Exception ex) { LogHistoryPersistFailed(executionId, ex); }
 			}
 			catch (OperationCanceledException)
 			{
@@ -1217,36 +1183,6 @@ public partial class TriggerManager : BackgroundService
 
 		var orchResult = terminalResult.OrchestrationResult;
 
-		// Persist trigger-side history JSON sidecar (separate from engine's IRunStore).
-		try
-		{
-			var historyEntry = new
-			{
-				id = executionId,
-				orchestrationName = handle.OrchestrationName,
-				orchestrationDescription = (string?)null,
-				orchestrationVersion = (string?)null,
-				orchestrationPath = reg.OrchestrationPath,
-				triggerId = reg.Id,
-				triggerType = reg.Config.Type.ToString(),
-				startedAt = reg.LastFireTime?.ToString("o"),
-				status = (orchResult?.Status ?? terminalResult.Status).ToString(),
-				stepCount = orchResult?.StepResults.Count ?? 0,
-				results = orchResult?.StepResults.ToDictionary(
-					kv => kv.Key,
-					kv => new
-					{
-						status = kv.Value.Status.ToString(),
-						content = kv.Value.Content,
-						error = kv.Value.ErrorMessage,
-					}),
-			};
-			var historyJson = JsonSerializer.Serialize(historyEntry, _jsonOptions);
-			var historyPath = Path.Combine(_runsDir, $"{executionId}.json");
-			await File.WriteAllTextAsync(historyPath, historyJson);
-		}
-		catch (Exception ex) { LogHistoryPersistFailed(executionId, ex); }
-
 		// Notify completion callback after the launcher has updated executionInfo.Status.
 		if (_activeExecutionInfos.TryGetValue(executionId, out var infoForComplete))
 		{
@@ -1714,9 +1650,6 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Debug, Message = "Failed to delete sidecar file '{Path}'")]
 	private partial void LogSidecarDeleteFailed(string path, Exception ex);
-
-	[LoggerMessage(Level = LogLevel.Error, Message = "Failed to persist run history for execution '{ExecutionId}'")]
-	private partial void LogHistoryPersistFailed(string executionId, Exception ex);
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Orchestration resume failed for '{OrchestrationId}' (execution '{ExecutionId}')")]
 	private partial void LogOrchestrationResumeFailed(string orchestrationId, string executionId, Exception ex);

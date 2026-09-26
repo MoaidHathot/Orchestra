@@ -96,6 +96,7 @@ public class ProgramWiringTests
 	[InlineData("annotate")]
 	[InlineData("annotations")]
 	[InlineData("prune-annotations")]
+	[InlineData("prune")]
 	[InlineData("export")]
 	public void RunsAnnotationSubcommands_AreRegistered(string subcommand)
 	{
@@ -141,6 +142,56 @@ public class ProgramWiringTests
 
 		result.ExitCode.Should().Be(0);
 		result.Output.Should().Contain("--force");
+	}
+
+	[Fact]
+	public void RunsPruneHelp_ShowsOverridesAndDryRun()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("runs", "prune", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--max-runs").And.Contain("--max-age-days").And.Contain("--dry-run");
+	}
+
+	[Theory]
+	[InlineData("--max-runs", "-1")]
+	[InlineData("--max-age-days", "-2")]
+	public void RunsPrune_RejectsNegativeLimitsBeforeContactingAHost(string option, string value)
+	{
+		// PropagateExceptions() is set on the configurator, so settings validation surfaces as a
+		// CommandRuntimeException carrying the user-facing message.
+		var tester = NewTester();
+
+		var act = () => tester.Run("runs", "prune", option, value);
+
+		act.Should().Throw<CommandRuntimeException>()
+			.WithMessage("*must be 0 or greater*");
+	}
+
+	[Fact]
+	public void LogsHelp_ShowsTailFollowAndLevelOptions()
+	{
+		var tester = NewTester();
+
+		var result = tester.Run("logs", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--lines").And.Contain("--follow").And.Contain("--level").And.Contain("--mode");
+	}
+
+	[Theory]
+	[InlineData("--level", "loud", "*not a log level*")]
+	[InlineData("--lines", "-1", "*--lines must be 0 or greater*")]
+	[InlineData("--interval-ms", "10", "*--interval-ms must be at least 100*")]
+	public void Logs_ValidatesOptionsBeforeContactingAHost(string option, string value, string expectedMessage)
+	{
+		var tester = NewTester();
+
+		var act = () => tester.Run("logs", option, value);
+
+		act.Should().Throw<CommandRuntimeException>().WithMessage(expectedMessage);
 	}
 
 	[Fact]

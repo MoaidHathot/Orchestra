@@ -50,7 +50,6 @@ public class OrchestrationSyncServiceTests : IDisposable
 			scheduler: null!,
 			loggerFactory: NullLoggerFactory.Instance,
 			logger: NullLogger<TriggerManager>.Instance,
-			runsDir: runsDir,
 			runStore: null!,
 			checkpointStore: null!,
 			launcher: null!,
