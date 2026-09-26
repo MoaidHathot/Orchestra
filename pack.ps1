@@ -41,7 +41,7 @@ if (Test-Path $artifactsRoot) {
 
 New-Item -ItemType Directory -Path $packageOutput | Out-Null
 
-$portalProject = Join-Path $repoRoot 'playground/Hosting/Orchestra.Playground.Copilot.Portal/Orchestra.Playground.Copilot.Portal.csproj'
+$portalProject = Join-Path $repoRoot 'src/Orchestra.Portal/Orchestra.Portal.csproj'
 $toolProject = Join-Path $repoRoot 'src/Orchestra.Cli/Orchestra.Cli.csproj'
 
 # Pack is a build+publish step, not a verification step. Tests live in CI (or a

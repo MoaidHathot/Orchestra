@@ -923,6 +923,103 @@ public class OrchestraConfigLoaderTests : IDisposable
 		result.Should().EndWith(Path.Combine(OrchestraConfigLoader.ConfigDirectoryName, OrchestraConfigLoader.ConfigFileName));
 	}
 
+	// ── Sidecar (orchestra.mcp.json / orchestra.services.json) resolution ──
+	//
+	// Regression: sidecars fell back to the user-global directory even when a project
+	// orchestra.json was in effect, so every scaffolded workspace silently started every
+	// globally configured service and MCP proxy — and a required global service that failed
+	// to start failed `orchestra run smoke-test` in a workspace with no MCPs at all.
+
+	[Fact]
+	public void ResolveSidecar_ProjectConfigInEffect_IgnoresGlobalSidecar_AndReportsItAsShadowed()
+	{
+		// "User-global" directory (redirected via XDG) with orchestra.json + a sidecar.
+		var globalDir = Path.Combine(_tempDir, "global-xdg", OrchestraConfigLoader.ConfigDirectoryName);
+		Directory.CreateDirectory(globalDir);
+		File.WriteAllText(Path.Combine(globalDir, OrchestraConfigLoader.ConfigFileName), "{}");
+		var globalMcp = Path.Combine(globalDir, OrchestraConfigLoader.McpConfigFileName);
+		File.WriteAllText(globalMcp, """{ "mcps": [] }""");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(_tempDir, "global-xdg"));
+
+		// Project workspace with only orchestra.json (what `orchestra init` produces).
+		var projectDir = Path.Combine(_tempDir, "project");
+		Directory.CreateDirectory(projectDir);
+		var projectConfig = Path.Combine(projectDir, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(projectConfig, "{}");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", projectConfig);
+
+		var result = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.McpConfigFileName);
+
+		result.EffectivePath.Should().BeNull("a project workspace is self-contained; the global sidecar must not leak in");
+		result.ShadowedGlobalPath.Should().Be(globalMcp, "the host logs which global file is being ignored and why");
+		OrchestraConfigLoader.ResolveGlobalMcpPath().Should().BeNull();
+	}
+
+	[Fact]
+	public void ResolveSidecar_ProjectConfigWithOwnSidecar_UsesIt_WithoutReportingShadow()
+	{
+		var globalDir = Path.Combine(_tempDir, "global-xdg", OrchestraConfigLoader.ConfigDirectoryName);
+		Directory.CreateDirectory(globalDir);
+		File.WriteAllText(Path.Combine(globalDir, OrchestraConfigLoader.ConfigFileName), "{}");
+		File.WriteAllText(Path.Combine(globalDir, OrchestraConfigLoader.ServiceConfigFileName), """{ "services": [] }""");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(_tempDir, "global-xdg"));
+
+		var projectDir = Path.Combine(_tempDir, "project");
+		Directory.CreateDirectory(projectDir);
+		var projectConfig = Path.Combine(projectDir, OrchestraConfigLoader.ConfigFileName);
+		File.WriteAllText(projectConfig, "{}");
+		var projectServices = Path.Combine(projectDir, OrchestraConfigLoader.ServiceConfigFileName);
+		File.WriteAllText(projectServices, """{ "services": [] }""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", projectConfig);
+
+		var result = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.ServiceConfigFileName);
+
+		result.EffectivePath.Should().Be(projectServices);
+		result.ShadowedGlobalPath.Should().BeNull("the project supplies its own copy, so nothing is being ignored");
+		OrchestraConfigLoader.ResolveServiceConfigPath().Should().Be(projectServices);
+	}
+
+	[Fact]
+	public void ResolveSidecar_GlobalConfigInEffect_UsesGlobalSidecar()
+	{
+		// No project config anywhere on the walk-up path (tests run under the repo, which has no
+		// orchestra.json and stops at .git), so the XDG "global" orchestra.json wins.
+		var globalDir = Path.Combine(_tempDir, "global-xdg", OrchestraConfigLoader.ConfigDirectoryName);
+		Directory.CreateDirectory(globalDir);
+		File.WriteAllText(Path.Combine(globalDir, OrchestraConfigLoader.ConfigFileName), "{}");
+		var globalMcp = Path.Combine(globalDir, OrchestraConfigLoader.McpConfigFileName);
+		File.WriteAllText(globalMcp, """{ "mcps": [] }""");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(_tempDir, "global-xdg"));
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
+
+		OrchestraConfigLoader.ResolveConfigPath().Should().Be(Path.Combine(globalDir, OrchestraConfigLoader.ConfigFileName),
+			"precondition: the global orchestra.json must be the one in effect for this test");
+
+		var result = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.McpConfigFileName);
+
+		result.EffectivePath.Should().Be(globalMcp);
+		result.ShadowedGlobalPath.Should().BeNull();
+	}
+
+	[Fact]
+	public void ResolveSidecar_NoConfigAnywhere_LoneGlobalSidecarStillApplies()
+	{
+		// Only a global orchestra.mcp.json, no orchestra.json at all: preserved behaviour.
+		var globalDir = Path.Combine(_tempDir, "global-xdg", OrchestraConfigLoader.ConfigDirectoryName);
+		Directory.CreateDirectory(globalDir);
+		var globalMcp = Path.Combine(globalDir, OrchestraConfigLoader.McpConfigFileName);
+		File.WriteAllText(globalMcp, """{ "mcps": [] }""");
+		Environment.SetEnvironmentVariable("XDG_CONFIG_HOME", Path.Combine(_tempDir, "global-xdg"));
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", null);
+
+		OrchestraConfigLoader.ResolveConfigPath().Should().BeNull("precondition: no orchestra.json is discoverable");
+
+		var result = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.McpConfigFileName);
+
+		result.EffectivePath.Should().Be(globalMcp);
+		result.ShadowedGlobalPath.Should().BeNull();
+	}
+
 	// ── Full round-trip test ──
 
 	[Fact]

@@ -1,4 +1,4 @@
-namespace Orchestra.Playground.Copilot.Portal;
+namespace Orchestra.Portal;
 
 /// <summary>
 /// Service for tracking and reporting portal status.

@@ -14,6 +14,11 @@ on:
       - '*.md'
       - 'LICENSE'
   workflow_dispatch:
+    inputs:
+      run-e2e:
+        description: Also run the Playwright portal E2E suite
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -22,8 +27,104 @@ concurrency:
   group: "ci-${{ github.ref }}"
   cancel-in-progress: true
 
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  # The Copilot SDK downloads the Copilot CLI at build time by default; the tool fetches it on
+  # first run instead, and CI never needs it.
+  CopilotSkipCliDownload: true
+
 jobs:
-  build:
+  # ── Portal SPA: type-check, unit tests, and a production bundle ────────────────────────────
+  # The .NET build below also runs `npm run build`, but only this job runs tsc and vitest.
+  portal:
+    name: Portal (typecheck, vitest, bundle)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/Orchestra.Portal/portal
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Orchestra.Portal/portal/package-lock.json
+
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production bundle
+        run: npm run build
+
+  # ── .NET: build the whole solution (incl. the portal SPA) and run every non-E2E test ───────
+  # Windows is in the matrix because the engine has Windows-only paths (cmd.exe argument
+  # escaping, chcp code-page prefix, PowerShell folder dialog) that Linux cannot exercise.
+  dotnet:
+    name: .NET (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node (portal bundle is built by Orchestra.Portal.csproj)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Orchestra.Portal/portal/package-lock.json
+
+      - name: Restore
+        run: dotnet restore OrchestrationEngine.slnx
+
+      - name: Build
+        run: dotnet build OrchestrationEngine.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: >
+          dotnet test OrchestrationEngine.Tests.slnx
+          --no-build
+          --configuration Release
+          -m:1
+          --logger "trx;LogFileName=test-results.trx"
+          --filter "Category!=E2E"
+          --verbosity normal
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: '**/TestResults/*.trx'
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # ── Portal E2E (Playwright) ───────────────────────────────────────────────────────────────
+  # Slow and browser-dependent, so it runs on pushes to main and on demand rather than on
+  # every pull request. The fixture starts `dotnet run --project src/Orchestra.Portal --no-build`.
+  e2e:
+    name: Portal E2E (Playwright)
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run-e2e)
+    needs: [dotnet, portal]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -33,20 +134,34 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-          dotnet-quality: 'preview'
 
-      - name: Restore dependencies
-        run: dotnet restore OrchestrationEngine.slnx
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Orchestra.Portal/portal/package-lock.json
 
-      - name: Build
-        run: dotnet build OrchestrationEngine.slnx --no-restore --configuration Release
+      - name: Build portal host and E2E project
+        run: dotnet build tests/Orchestra.Portal.E2E/Orchestra.Portal.E2E.csproj --configuration Debug
 
-      - name: Run unit tests
+      - name: Install Playwright browsers
+        run: pwsh tests/Orchestra.Portal.E2E/bin/Debug/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Run E2E
         run: >
-          dotnet test OrchestrationEngine.Tests.slnx
+          dotnet test tests/Orchestra.Portal.E2E/Orchestra.Portal.E2E.csproj
           --no-build
-          --configuration Release
-          -m:1
-          --logger "trx;LogFileName=test-results.trx"
-          --filter "Category!=E2E"
+          --configuration Debug
+          --filter "Category=E2E"
+          --logger "trx;LogFileName=e2e-results.trx"
           --verbosity normal
+
+      - name: Upload E2E results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: '**/TestResults/*.trx'
+          if-no-files-found: ignore
+          retention-days: 7

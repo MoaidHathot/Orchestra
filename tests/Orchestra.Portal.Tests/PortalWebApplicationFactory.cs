@@ -14,7 +14,7 @@ namespace Orchestra.Portal.Tests;
 /// process-global, so host construction is serialized across instances to keep parallel
 /// Portal test classes from reading each other's config.
 /// </summary>
-public class PortalWebApplicationFactory : WebApplicationFactory<Program>
+public class PortalWebApplicationFactory : WebApplicationFactory<Orchestra.Portal.Program>
 {
 	// OrchestraConfigLoader resolves orchestra.json from the process-global ORCHESTRA_CONFIG_PATH
 	// (and honors XDG_CONFIG_HOME). Hold this lock across the whole host build so concurrent

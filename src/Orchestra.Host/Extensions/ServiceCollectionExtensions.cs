@@ -477,10 +477,12 @@ public static class ServiceProviderExtensions
 		// Testing / skip-services mode skips them.
 		if (!skipExternalServices)
 		{
-			var globalMcpPath = OrchestraConfigLoader.ResolveGlobalMcpPath();
-			if (globalMcpPath is not null)
+			var mcpSidecar = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.McpConfigFileName);
+			if (mcpSidecar.ShadowedGlobalPath is not null)
+				HostInitializationLog.GlobalSidecarShadowed(initLogger, OrchestraConfigLoader.McpConfigFileName, mcpSidecar.ShadowedGlobalPath, OrchestraConfigLoader.ResolveConfigPath()!);
+			if (mcpSidecar.EffectivePath is not null)
 			{
-				globalMcps = OrchestrationParser.ParseMcpFile(globalMcpPath);
+				globalMcps = OrchestrationParser.ParseMcpFile(mcpSidecar.EffectivePath);
 			}
 		}
 		else
@@ -497,11 +499,13 @@ public static class ServiceProviderExtensions
 		{
 			if (!skipExternalServices)
 			{
-				var serviceConfigPath = OrchestraConfigLoader.ResolveServiceConfigPath();
-				if (serviceConfigPath is not null)
+				var servicesSidecar = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.ServiceConfigFileName);
+				if (servicesSidecar.ShadowedGlobalPath is not null)
+					HostInitializationLog.GlobalSidecarShadowed(initLogger, OrchestraConfigLoader.ServiceConfigFileName, servicesSidecar.ShadowedGlobalPath, OrchestraConfigLoader.ResolveConfigPath()!);
+				if (servicesSidecar.EffectivePath is not null)
 				{
-					serviceEntries = OrchestraConfigLoader.LoadServiceConfig(serviceConfigPath, initLogger) ?? [];
-					initLogger.LogInformation("Loaded {Count} service(s) from {Path}", serviceEntries.Length, serviceConfigPath);
+					serviceEntries = OrchestraConfigLoader.LoadServiceConfig(servicesSidecar.EffectivePath, initLogger) ?? [];
+					initLogger.LogInformation("Loaded {Count} service(s) from {Path}", serviceEntries.Length, servicesSidecar.EffectivePath);
 				}
 			}
 			else

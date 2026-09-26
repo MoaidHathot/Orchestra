@@ -1,16 +1,28 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
 
+  <!--
+    The Orchestra web portal: the ASP.NET host that serves the React SPA plus the REST/SSE/MCP
+    endpoints from Orchestra.Host. Consumed two ways:
+      - `orchestra portal` (src/Orchestra.Cli references this project and copies wwwroot/),
+      - `dotnet run` here for local development (Program.cs), which is also what the
+        Orchestra.Portal.Tests WebApplicationFactory and the Playwright E2E fixture start.
+  -->
+
   <PropertyGroup>
-    <RootNamespace>Orchestra.Playground.Copilot.Portal</RootNamespace>
+    <RootNamespace>Orchestra.Portal</RootNamespace>
+    <AssemblyName>Orchestra.Portal</AssemblyName>
+    <IsPackable>false</IsPackable>
     <SpaRoot>portal\</SpaRoot>
     <PortalBuildStamp>$(SpaRoot).build-stamp</PortalBuildStamp>
+    <!-- The tool nupkg fetches the Copilot CLI on first run; never bake it into a build here. -->
+    <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Orchestra.Engine\Orchestra.Engine.csproj" />
-    <ProjectReference Include="..\..\..\src\Orchestra.Copilot\Orchestra.Copilot.csproj" />
-    <ProjectReference Include="..\..\..\src\Orchestra.OpenCode\Orchestra.OpenCode.csproj" />
-    <ProjectReference Include="..\..\..\src\Orchestra.Host\Orchestra.Host.csproj" />
+    <ProjectReference Include="..\Orchestra.Engine\Orchestra.Engine.csproj" />
+    <ProjectReference Include="..\Orchestra.Copilot\Orchestra.Copilot.csproj" />
+    <ProjectReference Include="..\Orchestra.OpenCode\Orchestra.OpenCode.csproj" />
+    <ProjectReference Include="..\Orchestra.Host\Orchestra.Host.csproj" />
   </ItemGroup>
 
   <!-- Shared composition helper that registers every agent provider (copilot + opencode) as a
@@ -19,20 +31,15 @@
        the Portal would fall back to a SingleAgentProviderRegistry that ignores each step's
        `provider` and routes everything to one builder. -->
   <ItemGroup>
-    <Compile Include="..\..\..\src\Shared\AgentProviderRegistration.cs" Link="Composition\AgentProviderRegistration.cs" />
-  </ItemGroup>
-
-  <!-- Exclude unrelated sample/reference checkouts that may be cloned into the project
-       directory by developers. These are not part of the Portal project; the Sdk.Web
-       default Compile glob would otherwise pick them up and break the build. -->
-  <ItemGroup>
-    <Compile Remove="zts-pr*\**" />
-    <Content Remove="zts-pr*\**" />
-    <None Remove="zts-pr*\**" />
+    <Compile Include="..\Shared\AgentProviderRegistration.cs" Link="Composition\AgentProviderRegistration.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Orchestra.Cli" />
+    <!-- Orchestra.Cli.Tests composes a host with AddOrchestraAgentProviders, which is internal here. -->
+    <InternalsVisibleTo Include="Orchestra.Cli.Tests" />
+    <InternalsVisibleTo Include="Orchestra.Portal.Tests" />
+    <InternalsVisibleTo Include="Orchestra.Portal.E2E" />
   </ItemGroup>
 
   <!-- Collect portal source files for incremental build detection -->
@@ -51,7 +58,8 @@
   </Target>
 
   <!-- Build the Vite frontend before .NET build (output goes to wwwroot/).
-       Uses Inputs/Outputs to skip rebuilding when no portal source files changed. -->
+       Uses Inputs/Outputs to skip rebuilding when no portal source files changed.
+       Set SKIP_PORTAL_BUILD=true to skip entirely (CI test jobs, inner-loop .NET work). -->
   <Target Name="BuildPortal" BeforeTargets="Build"
           Condition="'$(SKIP_PORTAL_BUILD)' != 'true'"
           Inputs="@(PortalSourceFiles)"
@@ -63,7 +71,7 @@
   <!-- Exclude portal source from .NET content items -->
   <ItemGroup>
     <Content Remove="portal\**" />
-    <None Include="portal\**" Exclude="portal\node_modules\**" />
+    <None Include="portal\**" Exclude="portal\node_modules\**;portal\.build-stamp;portal\tsconfig.tsbuildinfo" />
   </ItemGroup>
 
 </Project>

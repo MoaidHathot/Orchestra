@@ -406,11 +406,11 @@ dotnet tool install --global Orchestra
 orchestra init
 ```
 
-> A user-global `orchestra.mcp.json` applies to **every** workspace on the machine, including a
-> freshly `init`-ed one: MCP servers it lists are started when a run begins, whether or not the
-> orchestration uses them. If a two-step deterministic orchestration takes a minute instead of a
-> second, that is why. Move project-specific MCP servers into the workspace's own
-> `orchestra.mcp.json` next to its `orchestra.json`.
+> A user-global `orchestra.mcp.json` / `orchestra.services.json` applies only where the user-global
+> `orchestra.json` is the configuration in effect (or where no `orchestra.json` exists at all). A
+> workspace with its own `orchestra.json` — which is what `init` scaffolds — is self-contained:
+> your personal MCP servers and services are not started there, and the host logs the file it
+> skipped. To use one inside a workspace, copy the sidecar next to that workspace's `orchestra.json`.
 
 ## Rolling Orchestra out to a team
 

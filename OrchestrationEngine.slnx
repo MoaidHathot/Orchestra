@@ -6,12 +6,12 @@
     <Project Path="src/Orchestra.Copilot/Orchestra.Copilot.csproj" />
     <Project Path="src/Orchestra.OpenCode/Orchestra.OpenCode.csproj" />
     <Project Path="src/Orchestra.Host/Orchestra.Host.csproj" />
+    <Project Path="src/Orchestra.Portal/Orchestra.Portal.csproj" />
     <Project Path="src/Orchestra.ProcessHost/Orchestra.ProcessHost.csproj" />
     <Project Path="src/Orchestra.Server/Orchestra.Server.csproj" />
   </Folder>
   <Folder Name="/playground/">
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot/Orchestra.Playground.Copilot.csproj" />
-    <Project Path="playground/Hosting/Orchestra.Playground.Copilot.Portal/Orchestra.Playground.Copilot.Portal.csproj" />
     <Project Path="playground/Hosting/Orchestra.Playground.Copilot.Terminal/Orchestra.Playground.Copilot.Terminal.csproj" />
   </Folder>
   <Folder Name="/tests/">

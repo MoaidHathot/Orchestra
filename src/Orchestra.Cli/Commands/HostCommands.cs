@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using Orchestra.Playground.Copilot.Portal;
+using Orchestra.Portal;
 using Spectre.Console.Cli;
 
 namespace Orchestra.Cli.Commands;

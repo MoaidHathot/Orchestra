@@ -229,7 +229,7 @@ public static class OrchestraConfigLoader
 	/// </summary>
 	public static string? ResolveGlobalMcpPath()
 	{
-		return ResolveColocatedConfigPath(McpConfigFileName);
+		return ResolveSidecar(McpConfigFileName).EffectivePath;
 	}
 
 	/// <summary>
@@ -239,30 +239,60 @@ public static class OrchestraConfigLoader
 	/// </summary>
 	public static string? ResolveServiceConfigPath()
 	{
-		return ResolveColocatedConfigPath(ServiceConfigFileName);
+		return ResolveSidecar(ServiceConfigFileName).EffectivePath;
 	}
 
 	/// <summary>
-	/// Resolves the path to a config file co-located with orchestra.json.
-	/// Returns null if the file does not exist.
+	/// Where a sidecar file (<see cref="McpConfigFileName"/>, <see cref="ServiceConfigFileName"/>)
+	/// was found, plus the user-global copy that is deliberately <em>not</em> being used when a
+	/// project configuration is in effect — so hosts can tell the user why their global MCPs or
+	/// services are absent inside a scaffolded workspace.
 	/// </summary>
-	private static string? ResolveColocatedConfigPath(string fileName)
+	/// <param name="EffectivePath">The sidecar in effect, or null when none applies.</param>
+	/// <param name="ShadowedGlobalPath">
+	/// A user-global sidecar that exists but is ignored because a project-level (or
+	/// <c>ORCHESTRA_CONFIG_PATH</c>) <c>orchestra.json</c> won discovery. Null otherwise.
+	/// </param>
+	public sealed record SidecarResolution(string? EffectivePath, string? ShadowedGlobalPath);
+
+	/// <summary>
+	/// Resolves a config file co-located with the <c>orchestra.json</c> that is in effect.
+	/// </summary>
+	/// <remarks>
+	/// Sidecars follow the winning <c>orchestra.json</c> and nothing else: a scaffolded workspace
+	/// is self-contained, and the user-global directory (<c>%APPDATA%\Orchestra</c> /
+	/// <c>~/.config/Orchestra</c>) applies only when no <c>orchestra.json</c> was found at all.
+	/// Falling back to the global directory <em>while</em> a project config is in effect used to
+	/// start every globally configured service and MCP proxy inside every workspace — and a
+	/// single <c>required</c> global service that failed to start would fail a
+	/// <c>smoke-test</c> run that references no MCP whatsoever.
+	/// </remarks>
+	public static SidecarResolution ResolveSidecar(string fileName)
 	{
-		// First try to find the config directory from the resolved config path
 		var configPath = ResolveConfigPath();
-		if (configPath is not null)
+		var defaultDir = Path.GetDirectoryName(GetDefaultConfigPath())!;
+		var globalSidecar = Path.Combine(defaultDir, fileName);
+		var globalExists = File.Exists(globalSidecar);
+
+		if (configPath is null)
 		{
-			var dir = Path.GetDirectoryName(configPath)!;
-			var filePath = Path.Combine(dir, fileName);
-			if (File.Exists(filePath))
-				return filePath;
+			// No orchestra.json anywhere: a lone global sidecar still applies.
+			return new SidecarResolution(globalExists ? globalSidecar : null, ShadowedGlobalPath: null);
 		}
 
-		// Fall back to the default config directory
-		var defaultConfigPath = GetDefaultConfigPath();
-		var defaultDir = Path.GetDirectoryName(defaultConfigPath)!;
-		var defaultFilePath = Path.Combine(defaultDir, fileName);
-		return File.Exists(defaultFilePath) ? defaultFilePath : null;
+		var dir = Path.GetDirectoryName(Path.GetFullPath(configPath))!;
+		var colocated = Path.Combine(dir, fileName);
+		var colocatedExists = File.Exists(colocated);
+
+		var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+		var isGlobalConfig = string.Equals(
+			Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir)),
+			Path.TrimEndingDirectorySeparator(Path.GetFullPath(defaultDir)),
+			comparison);
+
+		return new SidecarResolution(
+			colocatedExists ? colocated : null,
+			ShadowedGlobalPath: !isGlobalConfig && !colocatedExists && globalExists ? globalSidecar : null);
 	}
 
 	/// <summary>

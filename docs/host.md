@@ -88,8 +88,13 @@ First match wins:
 
 Project-local beats the user-global locations, matching how `.editorconfig`, `global.json`, and
 `Directory.Build.props` behave, so a workspace is self-contained while a personal config still
-applies elsewhere. `orchestra.mcp.json` and `orchestra.services.json` are resolved next to
-whichever `orchestra.json` won, falling back to the user-global directory.
+applies elsewhere. `orchestra.mcp.json` and `orchestra.services.json` are resolved **only** next
+to whichever `orchestra.json` won: inside a workspace with its own `orchestra.json`, the
+user-global sidecars are ignored (the host logs which file it skipped and why), so a scaffolded
+project never starts your personal MCP servers or services. A user-global sidecar applies when
+the user-global `orchestra.json` is the one in effect, or when no `orchestra.json` exists at all.
+To use a global MCP or service inside a workspace, copy the sidecar next to that workspace's
+`orchestra.json`.
 
 Run **`orchestra doctor`** to see which file is actually in effect and whether it parses.
 

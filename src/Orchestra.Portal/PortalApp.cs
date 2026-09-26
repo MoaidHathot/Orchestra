@@ -6,7 +6,7 @@ using Orchestra.Host.Hosting;
 using Orchestra.Host.Logging;
 using Orchestra.Host.McpServer;
 
-namespace Orchestra.Playground.Copilot.Portal;
+namespace Orchestra.Portal;
 
 internal static class PortalApp
 {

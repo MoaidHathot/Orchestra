@@ -184,37 +184,24 @@ public class PortalServerFixture : IAsyncLifetime
 	{
 		var currentDir = Directory.GetCurrentDirectory();
 		Console.WriteLine($"Current directory: {currentDir}");
-		
-		var searchPaths = new[]
-		{
-			Path.Combine(currentDir, "..", "..", "..", "..", "..", "playground", "Hosting", "Orchestra.Playground.Copilot.Portal"),
-			Path.Combine(currentDir, "playground", "Hosting", "Orchestra.Playground.Copilot.Portal"),
-		};
 
-		foreach (var path in searchPaths)
-		{
-			var fullPath = Path.GetFullPath(path);
-			Console.WriteLine($"Checking path: {fullPath}");
-			if (Directory.Exists(fullPath))
-			{
-				Console.WriteLine($"Found project at: {fullPath}");
-				return fullPath;
-			}
-		}
-
-		// Try to find from solution root
+		// Walk up to the repository root (the folder holding the solution) and resolve the
+		// portal project from there; robust to where the test host was launched from.
 		var dir = new DirectoryInfo(currentDir);
 		while (dir != null)
 		{
-			var portalPath = Path.Combine(dir.FullName, "playground", "Hosting", "Orchestra.Playground.Copilot.Portal");
-			if (Directory.Exists(portalPath))
+			if (File.Exists(Path.Combine(dir.FullName, "OrchestrationEngine.slnx")))
 			{
-				Console.WriteLine($"Found project at: {portalPath}");
-				return portalPath;
+				var portalPath = Path.Combine(dir.FullName, "src", "Orchestra.Portal");
+				if (Directory.Exists(portalPath))
+				{
+					Console.WriteLine($"Found project at: {portalPath}");
+					return portalPath;
+				}
 			}
 			dir = dir.Parent;
 		}
 
-		throw new Exception($"Could not find Portal project path. Started from: {currentDir}");
+		throw new Exception($"Could not find Portal project path (src/Orchestra.Portal). Started from: {currentDir}");
 	}
 }

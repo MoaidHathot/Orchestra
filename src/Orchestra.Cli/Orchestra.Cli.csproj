@@ -18,6 +18,15 @@
       per-host build-time download from baking the binary into the publish output.
     -->
     <CopilotSkipCliDownload>true</CopilotSkipCliDownload>
+
+    <!--
+      The portal's wwwroot is shipped as plain files copied into this project's output (see the
+      Content items below) so `orchestra portal` can serve them from AppContext.BaseDirectory.
+      With Orchestra.Portal referenced as a project, the Static Web Assets SDK would also try to
+      flow the same files as static web assets and fail on duplicate keys; the plain copy is the
+      mechanism we want, so disable the SWA pipeline here.
+    -->
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
   </PropertyGroup>
 
   <ItemGroup>
@@ -31,24 +40,29 @@
     <ProjectReference Include="..\Orchestra.Copilot\Orchestra.Copilot.csproj" />
     <ProjectReference Include="..\Orchestra.OpenCode\Orchestra.OpenCode.csproj" />
     <ProjectReference Include="..\Orchestra.Host\Orchestra.Host.csproj" />
+    <!-- Portal host + UI (the `orchestra portal` subcommand). -->
+    <ProjectReference Include="..\Orchestra.Portal\Orchestra.Portal.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Keyed copilot + opencode provider registration, shared with Orchestra.Server. -->
-    <Compile Include="..\Shared\AgentProviderRegistration.cs" Link="Composition\AgentProviderRegistration.cs" />
-    <!-- Portal host + UI (the `orchestra portal` subcommand), shared with the playground portal. -->
-    <Compile Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\PortalApp.cs" Link="Portal\PortalApp.cs" />
-    <Compile Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\PortalStatusService.cs" Link="Portal\PortalStatusService.cs" />
-  </ItemGroup>
+  <!--
+    Keyed copilot + opencode provider registration (src/Shared/AgentProviderRegistration.cs) is
+    compiled into Orchestra.Portal, which grants this project InternalsVisibleTo; compiling a second
+    copy here would make AddOrchestraAgentProviders ambiguous.
+  -->
 
   <ItemGroup>
     <None Include="..\..\README.md" Link="README.md" Pack="true" PackagePath="\" />
-    <Content Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\appsettings.json"
+    <Content Include="..\Orchestra.Portal\appsettings.json"
              Link="appsettings.json"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
              Pack="false" />
-    <Content Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\wwwroot\**\*"
+    <!--
+      The built SPA. A ProjectReference does not flow a Web project's wwwroot into the referencing
+      exe's output, so copy it explicitly; Orchestra.Portal's BuildPortal target has produced it by
+      the time this project builds because the reference orders the builds.
+    -->
+    <Content Include="..\Orchestra.Portal\wwwroot\**\*"
              Link="wwwroot\%(RecursiveDir)%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"

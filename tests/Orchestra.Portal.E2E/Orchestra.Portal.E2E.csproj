@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\playground\Hosting\Orchestra.Playground.Copilot.Portal\Orchestra.Playground.Copilot.Portal.csproj" />
+    <ProjectReference Include="..\..\src\Orchestra.Portal\Orchestra.Portal.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,0 +1,142 @@
+name: Release
+
+# Publishes the `Orchestra` dotnet tool to NuGet and creates a GitHub Release.
+#
+# Trigger by pushing a version tag that matches Version.props:
+#   git tag v0.9.1 && git push origin v0.9.1
+#
+# The tag/Version.props check exists because the package version comes from Version.props,
+# not from the tag: a mismatch would publish a package whose version differs from the release
+# it is attached to.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Push the package to NuGet.org (requires NUGET_API_KEY secret)
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  CopilotSkipCliDownload: true
+
+jobs:
+  release:
+    name: Pack, test, publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version from Version.props
+        id: version
+        shell: pwsh
+        run: |
+          [xml]$props = Get-Content Version.props
+          $version = $props.Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($version)) { throw 'Version.props has no <Version>.' }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version.props: $version"
+
+      - name: Verify tag matches Version.props
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'.TrimStart('v')
+          $version = '${{ steps.version.outputs.version }}'
+          if ($tag -ne $version) {
+            throw "Tag v$tag does not match Version.props ($version). Bump Version.props or retag."
+          }
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src/Orchestra.Portal/portal/package-lock.json
+
+      - name: Restore
+        run: dotnet restore OrchestrationEngine.slnx
+
+      - name: Build (Release, includes the portal bundle)
+        run: dotnet build OrchestrationEngine.slnx --no-restore --configuration Release
+
+      - name: Test
+        run: >
+          dotnet test OrchestrationEngine.Tests.slnx
+          --no-build
+          --configuration Release
+          -m:1
+          --filter "Category!=E2E"
+          --verbosity minimal
+
+      - name: Pack
+        run: dotnet pack src/Orchestra.Cli/Orchestra.Cli.csproj --configuration Release --no-build -o artifacts/packages
+
+      - name: Smoke-test the packed tool (README quick start)
+        shell: pwsh
+        run: |
+          $pkg = Get-ChildItem artifacts/packages -Filter 'Orchestra.*.nupkg' | Where-Object Name -NotLike '*.snupkg' | Select-Object -First 1
+          if (-not $pkg) { throw 'No package produced.' }
+          dotnet tool install --global Orchestra --add-source artifacts/packages --version '${{ steps.version.outputs.version }}'
+          if ($LASTEXITCODE -ne 0) { throw 'tool install failed' }
+
+          $reported = (orchestra --version | Out-String).Trim()
+          Write-Host "orchestra --version => $reported"
+          if ($reported -notlike '${{ steps.version.outputs.version }}*') { throw "Installed tool reports '$reported', expected ${{ steps.version.outputs.version }}" }
+
+          # The smoke-test template needs no agent, credentials or download: a green run here
+          # proves the packed tool can scaffold a workspace, discover its config, and execute.
+          $ws = Join-Path $env:RUNNER_TEMP 'orchestra-smoke'
+          orchestra init $ws --template smoke-test --yes
+          if ($LASTEXITCODE -ne 0) { throw 'orchestra init failed' }
+          Push-Location $ws
+          try {
+            orchestra validate ./orchestrations/smoke-test.yaml
+            if ($LASTEXITCODE -ne 0) { throw 'orchestra validate failed' }
+            orchestra run smoke-test --mode isolated
+            if ($LASTEXITCODE -ne 0) { throw 'orchestra run smoke-test failed' }
+          }
+          finally { Pop-Location }
+
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestra-nupkg
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+
+      - name: Publish to NuGet.org
+        if: github.ref_type == 'tag' || inputs.publish
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:NUGET_API_KEY)) { throw 'NUGET_API_KEY secret is not set.' }
+          Get-ChildItem artifacts/packages -Filter '*.nupkg' | Where-Object Name -NotLike '*.snupkg' | ForEach-Object {
+            dotnet nuget push $_.FullName --api-key $env:NUGET_API_KEY --source https://api.nuget.org/v3/index.json --skip-duplicate
+            if ($LASTEXITCODE -ne 0) { throw "Push of $($_.Name) failed." }
+          }
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create '${{ github.ref_name }}'
+          artifacts/packages/*.nupkg
+          --title 'Orchestra ${{ steps.version.outputs.version }}'
+          --generate-notes
+          --verify-tag

@@ -34,7 +34,7 @@ Orchestra is an open-source AI orchestration framework written in C# targeting .
 
 ```
 Orchestra/
-├── src/                          # Source (8 projects)
+├── src/                          # Source (9 projects)
 │   ├── Orchestra.Engine/         # Core orchestration runtime (class library)
 │   ├── Orchestra.Host/           # Hosting/API layer, persistence, MCP server
 │   ├── Orchestra.Copilot/        # GitHub Copilot provider
@@ -42,6 +42,7 @@ Orchestra/
 │   ├── Orchestra.ProcessHost/    # External process supervision (orchestra.services.json)
 │   ├── Orchestra.Client/         # HTTP/SSE client SDK + interactive run stack
 │   ├── Orchestra.Cli/            # The packaged `orchestra` dotnet tool
+│   ├── Orchestra.Portal/         # Web portal host + React SPA (`orchestra portal`)
 │   └── Orchestra.Server/         # Standalone API-only ASP.NET host
 ├── tests/                        # Test projects (13 total)
 ├── templates/                    # Starter orchestrations scaffolded by `orchestra init`
@@ -50,8 +51,7 @@ Orchestra/
 ├── playground/
 │   └── Hosting/
 │       ├── Orchestra.Playground.Copilot/         # Console worker
-│       ├── Orchestra.Playground.Copilot.Terminal/ # Terminal UI host
-│       └── Orchestra.Playground.Copilot.Portal/   # Portal host
+│       └── Orchestra.Playground.Copilot.Terminal/ # Terminal UI host
 ├── examples/                     # Declarative JSON orchestration definitions
 ├── docs/                         # Jekyll documentation site
 ├── scripts/                      # Utility/build scripts
@@ -99,7 +99,7 @@ For deep-dives on specific subsystems:
 |---|---|---|
 | Console worker | `Orchestra.Playground.Copilot` | `IHostedService` / Console |
 | Terminal UI | `Orchestra.Playground.Copilot.Terminal` | `Spectre.Console` TUI |
-| Portal | `Orchestra.Playground.Copilot.Portal` | React SPA + ASP.NET Core |
+| Portal | `Orchestra.Portal` | React SPA + ASP.NET Core |
 
 ---
 
@@ -212,7 +212,7 @@ Two solutions exist deliberately: `OrchestrationEngine.slnx` builds everything, 
 ### Frontend (Portal)
 
 ```bash
-cd playground/Hosting/Orchestra.Playground.Copilot.Portal
+cd src/Orchestra.Portal
 npm install
 npm run dev      # Development server (Vite)
 npm run build    # Production bundle

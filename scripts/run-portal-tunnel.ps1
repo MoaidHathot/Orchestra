@@ -53,8 +53,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$projectDir = Join-Path $scriptDir '..\playground\Hosting\Orchestra.Playground.Copilot.Portal'
-$projectPath = Join-Path $projectDir 'Orchestra.Playground.Copilot.Portal.csproj'
+$projectDir = Join-Path $scriptDir '..\src\Orchestra.Portal'
+$projectPath = Join-Path $projectDir 'Orchestra.Portal.csproj'
 
 # Check if devtunnel is installed
 $devtunnelPath = Get-Command 'devtunnel' -ErrorAction SilentlyContinue

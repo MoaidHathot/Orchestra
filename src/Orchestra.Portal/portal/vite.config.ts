@@ -27,7 +27,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:5100',
+      // `dotnet run` in src/Orchestra.Portal listens on 5100 (Properties/launchSettings.json);
+      // `orchestra portal` defaults to 5000. Override with PORTAL_API=http://localhost:5000.
+      '/api': process.env.PORTAL_API ?? 'http://localhost:5100',
     },
   },
   test: {
