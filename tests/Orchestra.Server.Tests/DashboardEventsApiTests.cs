@@ -114,6 +114,49 @@ public class DashboardEventsApiTests : IClassFixture<ServerWebApplicationFactory
 	}
 
 	[Fact]
+	public async Task Events_Endpoint_RejectsWithReal503_WhenSubscriberCapIsReached()
+	{
+		// Regression: the endpoint used to flush the "retry:" preamble (committing a 200) before
+		// checking the cap, so a rejected client saw a 200 that closed immediately and
+		// EventSource reconnected in a tight loop. The 503 must be the actual response status.
+		await using var factory = new ServerWebApplicationFactory();
+		var broadcaster = factory.Services.GetRequiredService<DashboardEventBroadcaster>();
+
+		// Saturate the cap directly on the singleton (each Subscribe holds one slot).
+		var held = new List<System.Threading.Channels.ChannelReader<SseEvent>>();
+		try
+		{
+			while (broadcaster.SubscriberCount < DashboardEventBroadcaster.MaxSubscribers)
+			{
+				var r = broadcaster.Subscribe();
+				r.Should().NotBeNull("slots below the cap must be granted");
+				held.Add(r!);
+			}
+
+			using var client = factory.CreateClient();
+			using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+			using var request = new HttpRequestMessage(HttpMethod.Get, "/api/events");
+			using var response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+
+			response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+			response.Headers.RetryAfter.Should().NotBeNull("clients should back off instead of hammering");
+			response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+
+			var body = await response.Content.ReadFromJsonAsync<JsonElement>(cts.Token);
+			body.GetProperty("status").GetInt32().Should().Be(503);
+			body.GetProperty("reason").GetString().Should().Be("subscriber-limit-reached");
+
+			// A rejected request must not have consumed a slot.
+			broadcaster.SubscriberCount.Should().Be(DashboardEventBroadcaster.MaxSubscribers);
+		}
+		finally
+		{
+			foreach (var r in held)
+				broadcaster.Unsubscribe(r);
+		}
+	}
+
+	[Fact]
 	public async Task Events_Endpoint_Forwards_ExecutionStarted_And_Completed()
 	{
 		var broadcaster = _factory.Services.GetRequiredService<DashboardEventBroadcaster>();

@@ -74,6 +74,7 @@ internal static class PortalApp
 		});
 
 		builder.Services.AddOrchestraMcpServer();
+		builder.Services.AddOrchestraHostCors();
 		builder.Services.AddSingleton<PortalStatusService>();
 
 		var app = builder.Build();
@@ -84,6 +85,9 @@ internal static class PortalApp
 		var resolvedDataPath = app.Services.GetRequiredService<OrchestrationHostOptions>().DataPath;
 		startupLogger.LogInformation("Orchestra Portal started with data path: {DataPath}", resolvedDataPath);
 
+		// Same problem-details + CORS pipeline as Orchestra.Server, so `orchestra portal` returns
+		// application/problem+json for API faults instead of ASP.NET's default HTML page.
+		app.UseOrchestraHostPipeline();
 		app.UseStaticFiles();
 		app.MapOrchestraHostEndpoints();
 		app.MapOrchestraMcpEndpoints();

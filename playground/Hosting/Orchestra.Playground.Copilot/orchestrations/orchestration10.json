@@ -11,7 +11,7 @@
       "outputHandlerPrompt": "Keep only the specification. Remove any preamble or commentary. Ensure the function signature and edge cases are clearly listed.",
       "parameters": ["feature"],
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "generate-code",
@@ -22,7 +22,7 @@
       "inputHandlerPrompt": "Extract the full specification: function signature, validation rules, expected behavior, edge cases, and constraints. Present it as a clear spec document.",
       "parameters": [],
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "review-code",
@@ -34,7 +34,7 @@
       "outputHandlerPrompt": "Keep the full review. Ensure APPROVED or NEEDS REVISION is the first word of the output.",
       "parameters": [],
       "mcps": [],
-      "model": "gpt-4o",
+      "model": "claude-opus-4.8",
       "loop": {
         "target": "generate-code",
         "maxIterations": 3,
@@ -50,7 +50,7 @@
       "inputHandlerPrompt": "From generate-code, extract the final version of the code. From review-code, extract the review verdict (APPROVED/NEEDS REVISION) and any feedback given. Present both clearly.",
       "parameters": [],
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     }
   ]
 }

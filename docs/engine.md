@@ -202,6 +202,26 @@ Read stdin with `[Console]::In.ReadToEnd()` in PowerShell. **`$input` is not enc
 consumes the same stream, so the two idioms are mutually exclusive. `bash`/`sh` and `node` need
 nothing — they handle the raw bytes themselves.
 
+### Command step arguments are literal
+
+Every entry in a Command step's `arguments` reaches the child program **byte-for-byte**. The
+platform shell that Orchestra wraps the launch in (`cmd.exe /c` on Windows, `/bin/sh -c`
+elsewhere) never interprets an argument: `& | < > ( ) ^ % !` and quotes are escaped on Windows,
+and each argument is single-quoted on Unix. That matters because arguments are usually
+template-resolved — `{{review.output}}` containing `& del /q *` is data, not a second command.
+
+Two consequences:
+
+- `%NAME%` inside an argument is passed literally on Windows instead of being expanded by
+  cmd.exe. Set variables through the step's `environment:` block, or reference them with
+  `{{env.NAME}}` in the template, when you want the value.
+- Shell syntax cannot be smuggled through arguments (`["/c", "echo a && echo b"]`). Run a real
+  interpreter instead — a `Script` step, or `pwsh -Command "..."` / `bash -c "..."` as the
+  Command with the script text as one argument.
+
+Only `command` itself is passed to the shell unescaped, so a program path containing spaces
+should be quoted by the author (`command: "\"C:\\Program Files\\Git\\bin\\git.exe\""`).
+
 ### Script step control channel
 
 A **Script** step (`shell: pwsh|bash|python|node`) is deterministic — it only reports success (exit 0) or failure (non-zero). To let a script decide the orchestration's fate the way a Prompt step can with the `orchestra_complete` / `orchestra_set_status` engine tools, the engine gives every Script step a **control channel**: an engine-owned file whose path is exported as the `ORCHESTRA_CONTROL_FILE` environment variable (alongside `ORCHESTRA_RUN_ID` and `ORCHESTRA_STEP_NAME`).

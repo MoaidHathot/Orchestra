@@ -301,7 +301,7 @@ Sends a prompt to an LLM and captures the response as output. Supports input/out
 | `systemPromptFile` | `string` | **Yes*** | -- | Path to a file containing the system prompt. Mutually exclusive with `systemPrompt`. |
 | `userPrompt` | `string` | **Yes*** | -- | User prompt text provided inline. |
 | `userPromptFile` | `string` | **Yes*** | -- | Path to a file containing the user prompt. Mutually exclusive with `userPrompt`. |
-| `model` | `string` | No | from `defaultModel` | LLM model identifier (e.g., `"claude-opus-4.8"`, `"gpt-4o"`). Required only when neither the orchestration (`defaultModel`) nor the host (`orchestra.json` `defaultModel`) provides a default -- a Prompt step with none of the three fails at execution. |
+| `model` | `string` | No | from `defaultModel` | LLM model identifier (e.g., `"claude-opus-4.8"`, `"gpt-5"`). Required only when neither the orchestration (`defaultModel`) nor the host (`orchestra.json` `defaultModel`) provides a default -- a Prompt step with none of the three fails at execution. |
 | `inputHandlerPrompt` | `string` | No | `null` | An LLM prompt that pre-processes dependency outputs before the main prompt sees them. |
 | `inputHandlerPromptFile` | `string` | No | `null` | Path to file containing the input handler prompt. Mutually exclusive with `inputHandlerPrompt`. |
 | `outputHandlerPrompt` | `string` | No | `null` | An LLM prompt that post-processes the main LLM output. |

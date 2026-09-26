@@ -255,6 +255,50 @@ public class HttpStepExecutorTests
 		await act.Should().ThrowAsync<OperationCanceledException>();
 	}
 
+	[Fact]
+	public async Task ExecuteAsync_HttpClientTimeout_WithoutStepCancellation_IsAFailedTimeoutNotACancellation()
+	{
+		// HttpClient.Timeout surfaces as TaskCanceledException even though the caller's token
+		// is untouched. That must be reported as a Failed/Timeout result (retryable, skips
+		// dependents) rather than bubbling up as a cancellation that tears down the whole run.
+		var httpClient = new HttpClient(new MockHttpHandler(async (_, ct) =>
+		{
+			await Task.Delay(TimeSpan.FromSeconds(30), ct);
+			return new HttpResponseMessage(HttpStatusCode.OK);
+		}))
+		{
+			Timeout = TimeSpan.FromMilliseconds(200),
+		};
+		var executor = new HttpStepExecutor(httpClient, _reporter, _logger);
+
+		var step = CreateHttpStep();
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		var result = await executor.ExecuteAsync(step, context, CancellationToken.None);
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.ErrorCategory.Should().Be(StepErrorCategory.Timeout);
+		result.ErrorMessage.Should().Contain("timed out");
+	}
+
+	[Fact]
+	public void SharedHttpClient_HasNoClientSideTimeout()
+	{
+		// The step / orchestration timeout is the only clock; the client must never race it.
+		HttpStepExecutor.SharedHttpClient.Timeout.Should().Be(Timeout.InfiniteTimeSpan);
+	}
+
+	[Fact]
+	public void DefaultConstructor_UsesTheSharedClient_SoRunsDoNotLeakClients()
+	{
+		var a = new HttpStepExecutor(_reporter, _logger);
+		var b = new HttpStepExecutor(_reporter, _logger);
+
+		var field = typeof(HttpStepExecutor).GetField("_httpClient", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+		field.GetValue(a).Should().BeSameAs(HttpStepExecutor.SharedHttpClient);
+		field.GetValue(b).Should().BeSameAs(HttpStepExecutor.SharedHttpClient);
+	}
+
 	#endregion
 
 	#region MockHttpHandler

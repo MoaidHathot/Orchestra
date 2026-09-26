@@ -53,7 +53,7 @@ public sealed class InitSettings : CommandSettings
 	internal static readonly string[] KnownProviders = ["copilot", "opencode"];
 
 	/// <summary>Model written when the user neither passes <c>--model</c> nor is prompted.</summary>
-	internal const string DefaultModel = "claude-opus-4.8";
+	internal const string DefaultModel = Orchestra.Engine.ModelDefaults.Model;
 
 	public override ValidationResult Validate()
 	{

@@ -1,6 +1,6 @@
 {
   "name": "math-aggregate-fast-mode",
-  "description": "Same as orchestration5 but uses Claude Opus 4.6 fast mode to benchmark speed improvement.",
+  "description": "Same as orchestration5, kept as a second copy for benchmarking model changes.",
   "steps": [
     {
       "name": "step-1",
@@ -10,7 +10,7 @@
       "userPrompt": "{{number}}",
       "parameters": ["number"],
       "mcps": [],
-      "model": "claude-opus-4.6-fast",
+      "model": "claude-opus-4.8",
       "systemPromptMode": "replace"
     },
     {
@@ -21,7 +21,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6-fast",
+      "model": "claude-opus-4.8",
       "systemPromptMode": "replace"
     },
     {
@@ -32,7 +32,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6-fast",
+      "model": "claude-opus-4.8",
       "systemPromptMode": "replace"
     },
     {
@@ -43,7 +43,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6-fast",
+      "model": "claude-opus-4.8",
       "systemPromptMode": "replace"
     }
   ]

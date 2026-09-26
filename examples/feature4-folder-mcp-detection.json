@@ -19,7 +19,7 @@
       "userPrompt": "Using the filesystem tools, explore the current working directory and produce a project structure overview: 1) List the top-level directories and their purposes. 2) Identify the programming language(s) and framework(s) used. 3) Find the main entry point(s). 4) Note any configuration files (package.json, .csproj, Dockerfile, etc.). 5) Identify the test directory if present.",
       "outputHandlerPrompt": "Present as a clean markdown tree structure followed by a brief analysis. Keep under 500 words.",
       "mcps": ["filesystem"],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "analyze-dependencies",
@@ -29,7 +29,7 @@
       "userPrompt": "Using the filesystem tools, find and read the project's dependency files (package.json, .csproj, requirements.txt, go.mod, Cargo.toml, etc.). Then produce a dependency report: 1) Total number of direct dependencies. 2) Key dependencies and their purposes. 3) Any outdated or potentially risky dependencies. 4) Development vs production dependency split.",
       "outputHandlerPrompt": "Format as a markdown table for dependencies plus a brief risk assessment. Keep under 400 words.",
       "mcps": ["filesystem"],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "produce-report",
@@ -40,7 +40,7 @@
       "inputHandlerPrompt": "From discover-structure, extract the directory tree, languages, frameworks, and entry points. From analyze-dependencies, extract the dependency table and risk assessment. Present as two labeled sections.",
       "outputHandlerPrompt": "Format as a polished markdown document suitable for a project README. Keep under 800 words.",
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     }
   ]
 }

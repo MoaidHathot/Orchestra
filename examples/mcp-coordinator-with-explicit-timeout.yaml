@@ -53,7 +53,7 @@ steps:
     mcps:
       - orchestra
       - filesystem
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     # Step timeout > MCP timeout so a single MCP-level timeout doesn't
     # masquerade as a step timeout in trace diagnostics.
     timeoutSeconds: 6000

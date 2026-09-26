@@ -337,7 +337,7 @@
         },
         "model": {
           "type": "string",
-          "description": "LLM model identifier (e.g., 'claude-opus-4.6', 'claude-sonnet-4', 'gpt-4o'). For the 'opencode' provider, use a provider-qualified id such as 'github-copilot/claude-opus-4.8' (bare ids fall back to the OpenCode fallback provider).",
+          "description": "LLM model identifier (e.g., 'claude-opus-4.8', 'claude-sonnet-4.5', 'gpt-5'). For the 'opencode' provider, use a provider-qualified id such as 'github-copilot/claude-opus-4.8' (bare ids fall back to the OpenCode fallback provider).",
           "minLength": 1
         },
         "provider": {

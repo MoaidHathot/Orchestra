@@ -107,6 +107,42 @@ public class ServerIntegrationTests : IClassFixture<ServerWebApplicationFactory>
 	}
 
 	[Fact]
+	public async Task Server_StatusEndpoint_ReportsTheBuiltProductVersion_NotAHardcodedLiteral()
+	{
+		// The version used to be the literal "1.0.0" regardless of Version.props. It must now
+		// match the informational version the assemblies were built with (e.g. "0.9.1").
+		var response = await _client.GetAsync("/api/status");
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+		result.TryGetProperty("version", out var version).Should().BeTrue();
+		var reported = version.GetString();
+		reported.Should().NotBeNullOrWhiteSpace();
+		reported.Should().Be(Orchestra.Host.Api.UtilityApi.ProductVersion);
+
+		var expected = typeof(Orchestra.Host.Api.UtilityApi).Assembly
+			.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+			.OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+			.Single().InformationalVersion;
+		expected = expected.Contains('+') ? expected[..expected.IndexOf('+')] : expected;
+		reported.Should().Be(expected);
+		reported.Should().NotBe("1.0.0", "Version.props is not at 1.0.0; a literal would mean the version is hardcoded again");
+	}
+
+	[Fact]
+	public async Task Server_ConfigEndpoint_ExposesTheDefaultModelForClients()
+	{
+		// The Portal's Visual Builder pre-fills new Prompt steps with this value instead of a
+		// hardcoded model of its own.
+		var response = await _client.GetAsync("/api/config");
+
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		result.TryGetProperty("defaultModel", out var defaultModel).Should().BeTrue();
+		defaultModel.GetString().Should().Be(Orchestra.Engine.ModelDefaults.Model);
+		result.TryGetProperty("polling", out _).Should().BeTrue("existing polling block must remain");
+	}
+
+	[Fact]
 	public async Task Server_TriggersEndpoint_ReturnsJson()
 	{
 		var response = await _client.GetAsync("/api/triggers");

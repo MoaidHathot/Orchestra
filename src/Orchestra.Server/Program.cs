@@ -87,21 +87,8 @@ builder.Services.AddOrchestraAgentProviders();
 // Add Orchestra MCP server (data-plane enabled by default, control-plane disabled by default)
 builder.Services.AddOrchestraMcpServer();
 
-// CORS: allow localhost access for local programs and tools
-builder.Services.AddCors(options =>
-{
-	options.AddDefaultPolicy(policy =>
-	{
-		policy.SetIsOriginAllowed(origin =>
-		{
-			var uri = new Uri(origin);
-			return uri.Host is "localhost" or "127.0.0.1" or "::1";
-		})
-		.AllowAnyMethod()
-		.AllowAnyHeader()
-		.AllowCredentials();
-	});
-});
+// CORS: loopback-only policy shared with every other Orchestra host (portal, tests).
+builder.Services.AddOrchestraHostCors();
 
 // OpenAPI
 builder.Services.AddOpenApi();
@@ -115,9 +102,8 @@ var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
 var resolvedDataPath = app.Services.GetRequiredService<OrchestrationHostOptions>().DataPath;
 startupLogger.LogInformation("Orchestra Server started with data path: {DataPath}", resolvedDataPath);
 
-// Middleware pipeline
-app.UseOrchestraHostProblemDetails();
-app.UseCors();
+// Middleware pipeline (problem-details + CORS), shared with the embedded portal host.
+app.UseOrchestraHostPipeline();
 
 // OpenAPI endpoint at /openapi/v1.json
 app.MapOpenApi();

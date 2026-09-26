@@ -16,7 +16,7 @@ description: >
        body in chunks (offset + length) or in one shot (length: -1).
 version: "1.0.0"
 tags: ["example", "mcp", "detail-modes", "paging"]
-defaultModel: claude-opus-4.6
+defaultModel: claude-opus-4.8
 timeoutSeconds: 600
 
 mcps:
@@ -42,7 +42,7 @@ steps:
   - name: tour
     type: Prompt
     dependsOn: []
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     mcps:
       - orchestra
     parameters: []

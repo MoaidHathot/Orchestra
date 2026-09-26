@@ -867,6 +867,142 @@ public class PluginIntegrationTests
 
 	#endregion
 
+	#region Http client timeout classification
+
+	[Fact]
+	public async Task ExecuteAsync_HttpClientTimeout_FailsTheStepAndSkipsDependents_WithoutCancellingIndependentBranches()
+	{
+		// Regression: HttpClient.Timeout (100 s by default on a bare `new HttpClient()`) raised
+		// TaskCanceledException, which the executor's catch(OperationCanceledException) treated
+		// as an external cancel: the Http step became Cancelled, retry never applied, and every
+		// pending step in the DAG was cancelled. Now the step fails with Timeout and the DAG
+		// proceeds like any other step failure.
+		var slowHandler = new DelayingHttpHandler(TimeSpan.FromSeconds(30));
+		var httpClient = new HttpClient(slowHandler) { Timeout = TimeSpan.FromMilliseconds(250) };
+		var agentBuilder = new MockAgentBuilder().WithResponse("independent ok");
+
+		var registry = new StepExecutorRegistry()
+			.Register(new PromptStepExecutor(new PromptExecutor(agentBuilder, _reporter, DefaultPromptFormatter.Instance, _loggerFactory.CreateLogger<PromptExecutor>())))
+			.Register(new HttpStepExecutor(httpClient, _reporter, _loggerFactory.CreateLogger<HttpStepExecutor>()))
+			.Register(new TransformStepExecutor(_loggerFactory.CreateLogger<TransformStepExecutor>()));
+
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory, stepExecutorRegistry: registry);
+
+		var orchestration = new Orchestration
+		{
+			Name = "http-client-timeout",
+			Description = "Http step whose client times out; a dependent and an independent branch",
+			TimeoutSeconds = null,
+			Steps =
+			[
+				new HttpOrchestrationStep
+				{
+					Name = "fetch",
+					Type = OrchestrationStepType.Http,
+					Method = "GET",
+					Url = "https://api.example.com/slow",
+				},
+				new TransformOrchestrationStep
+				{
+					Name = "use-fetch",
+					Type = OrchestrationStepType.Transform,
+					DependsOn = ["fetch"],
+					Template = "{{fetch.output}}",
+				},
+				new PromptOrchestrationStep
+				{
+					Name = "independent",
+					Type = OrchestrationStepType.Prompt,
+					SystemPrompt = "s",
+					UserPrompt = "u",
+					Model = "claude-opus-4.8",
+				},
+			]
+		};
+
+		var result = await executor.ExecuteAsync(orchestration);
+
+		result.Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["fetch"].Status.Should().Be(ExecutionStatus.Failed);
+		result.StepResults["fetch"].ErrorCategory.Should().Be(StepErrorCategory.Timeout);
+		result.StepResults["use-fetch"].Status.Should().Be(ExecutionStatus.Skipped, "a failed dependency skips, it does not cancel");
+		result.StepResults["independent"].Status.Should().Be(ExecutionStatus.Succeeded, "an unrelated branch must not be cancelled by an Http timeout");
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_HttpClientTimeout_IsRetriedWhenTheStepHasARetryPolicy()
+	{
+		// First attempt hangs past the client timeout; the second attempt answers immediately.
+		var handler = new FlakyThenFastHandler(hangFirst: TimeSpan.FromSeconds(30), body: "recovered");
+		var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromMilliseconds(250) };
+		var agentBuilder = new MockAgentBuilder().WithResponse("unused");
+
+		var registry = new StepExecutorRegistry()
+			.Register(new HttpStepExecutor(httpClient, _reporter, _loggerFactory.CreateLogger<HttpStepExecutor>()));
+		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory, stepExecutorRegistry: registry);
+
+		var orchestration = new Orchestration
+		{
+			Name = "http-client-timeout-retry",
+			Description = "Http step retried after a client timeout",
+			TimeoutSeconds = null,
+			Steps =
+			[
+				new HttpOrchestrationStep
+				{
+					Name = "fetch",
+					Type = OrchestrationStepType.Http,
+					Method = "GET",
+					Url = "https://api.example.com/flaky",
+					Retry = new RetryPolicy { MaxRetries = 1, BackoffSeconds = 0, RetryOnTimeout = true },
+				},
+			]
+		};
+
+		var result = await executor.ExecuteAsync(orchestration);
+
+		result.Status.Should().Be(ExecutionStatus.Succeeded);
+		result.StepResults["fetch"].Content.Should().Be("recovered");
+		handler.Calls.Should().Be(2);
+	}
+
+	private sealed class DelayingHttpHandler : HttpMessageHandler
+	{
+		private readonly TimeSpan _delay;
+		public DelayingHttpHandler(TimeSpan delay) => _delay = delay;
+
+		protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			await Task.Delay(_delay, cancellationToken);
+			return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("late") };
+		}
+	}
+
+	private sealed class FlakyThenFastHandler : HttpMessageHandler
+	{
+		private readonly TimeSpan _hangFirst;
+		private readonly string _body;
+		private int _calls;
+
+		public FlakyThenFastHandler(TimeSpan hangFirst, string body)
+		{
+			_hangFirst = hangFirst;
+			_body = body;
+		}
+
+		public int Calls => Volatile.Read(ref _calls);
+
+		protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+		{
+			if (Interlocked.Increment(ref _calls) == 1)
+				await Task.Delay(_hangFirst, cancellationToken);
+
+			return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(_body) };
+		}
+	}
+
+	#endregion
+
 	/// <summary>
 	/// A mock DelegatingHandler that returns a fixed response for any HTTP request.
 	/// </summary>

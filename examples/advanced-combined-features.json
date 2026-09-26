@@ -26,7 +26,7 @@
       "outputHandlerPrompt": "Keep only factual content. Remove hedging language and caveats. Ensure all claims are specific, not vague. Limit to 500 words.",
       "parameters": ["topic"],
       "mcps": ["fetch"],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "analyze-audience",
@@ -37,7 +37,7 @@
       "outputHandlerPrompt": "Format as a concise profile card. Keep under 300 words.",
       "parameters": ["audience"],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "gather-examples",
@@ -48,7 +48,7 @@
       "outputHandlerPrompt": "Number each example. Keep each to 3-4 sentences max. Total under 400 words.",
       "parameters": ["topic", "audience"],
       "mcps": ["fetch"],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "create-outline",
@@ -60,7 +60,7 @@
       "outputHandlerPrompt": "Format as a clean markdown outline with section numbers and bullet points. Keep under 400 words.",
       "parameters": ["topic", "audience"],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "write-draft",
@@ -71,7 +71,7 @@
       "inputHandlerPrompt": "From create-outline, extract the complete section-by-section outline with headings and bullet points. From gather-examples, extract the numbered examples with their descriptions and takeaways. Present as two labeled sections: OUTLINE and EXAMPLES.",
       "parameters": ["audience"],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "quality-review",
@@ -83,7 +83,7 @@
       "outputHandlerPrompt": "Ensure PUBLISH or REVISE is the first word. Keep the review under 500 words.",
       "parameters": ["audience"],
       "mcps": [],
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.8",
       "loop": {
         "target": "write-draft",
         "maxIterations": 3,
@@ -100,7 +100,7 @@
       "outputHandlerPrompt": "Output the complete formatted article with front matter. This is the final published version.",
       "parameters": ["topic"],
       "mcps": ["filesystem"],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     }
   ],
   "trigger": {

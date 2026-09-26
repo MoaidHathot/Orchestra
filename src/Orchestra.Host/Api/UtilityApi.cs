@@ -18,6 +18,31 @@ namespace Orchestra.Host.Api;
 public static class UtilityApi
 {
 	/// <summary>
+	/// The host's product version, taken from the informational version stamped at build time
+	/// (<c>Version.props</c>), with any <c>+commit</c> build-metadata suffix removed. Shared by
+	/// <c>/api/status</c> and the MCP server's <c>serverInfo</c> so both agree with
+	/// <c>orchestra --version</c> instead of carrying their own hardcoded literal.
+	/// </summary>
+	public static string ProductVersion { get; } = ResolveProductVersion();
+
+	private static string ResolveProductVersion()
+	{
+		var assembly = typeof(UtilityApi).Assembly;
+		var informational = assembly
+			.GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), inherit: false)
+			.OfType<System.Reflection.AssemblyInformationalVersionAttribute>()
+			.FirstOrDefault()?.InformationalVersion;
+
+		if (!string.IsNullOrWhiteSpace(informational))
+		{
+			var plus = informational.IndexOf('+');
+			return plus > 0 ? informational[..plus] : informational;
+		}
+
+		return assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+	}
+
+	/// <summary>
 	/// Maps utility endpoints.
 	/// </summary>
 	public static IEndpointRouteBuilder MapUtilityApi(
@@ -42,7 +67,7 @@ public static class UtilityApi
 			return Results.Json(new
 			{
 				status = "running",
-				version = "1.0.0",
+				version = ProductVersion,
 				orchestrationCount = registry.Count,
 				activeTriggers = triggers.Count(t => t.Config.Enabled),
 				runningExecutions = activeExecutions.Count,
@@ -87,7 +112,7 @@ public static class UtilityApi
 			}, jsonOptions);
 		});
 
-		// GET /api/config - Client-facing configuration (polling intervals, etc.)
+		// GET /api/config - Client-facing configuration (polling intervals, defaults, etc.)
 		endpoints.MapGet("/api/config", (OrchestrationHostOptions options) =>
 		{
 			return Results.Json(new
@@ -98,7 +123,11 @@ public static class UtilityApi
 					orchestrationsMs = options.Polling.OrchestrationsMs,
 					historyMs = options.Polling.HistoryMs,
 					serverStatusMs = options.Polling.ServerStatusMs,
-				}
+				},
+				// The model a client should pre-fill when the author has not chosen one: the
+				// host's configured default, else the engine's single fallback constant.
+				defaultModel = options.DefaultModel ?? ModelDefaults.Model,
+				defaultProvider = options.Provider,
 			}, jsonOptions);
 		});
 

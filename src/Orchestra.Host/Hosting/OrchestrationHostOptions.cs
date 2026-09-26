@@ -107,8 +107,8 @@ public class OrchestrationHostOptions
 	/// Default AI model for Prompt steps that set no <c>model</c> and belong to an
 	/// orchestration with no <c>defaultModel</c>, and for internal LLM calls (e.g., trigger
 	/// input handlers) when no model is explicitly specified.
-	/// For internal calls, null falls back to "claude-opus-4.6"; for Prompt steps, null means
-	/// the step must resolve a model from the step or the orchestration.
+	/// For internal calls, null falls back to <see cref="Engine.ModelDefaults.Model"/>; for Prompt
+	/// steps, null means the step must resolve a model from the step or the orchestration.
 	/// </summary>
 	public string? DefaultModel { get; set; }
 

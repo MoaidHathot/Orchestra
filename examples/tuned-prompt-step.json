@@ -17,7 +17,7 @@
       "systemPrompt": "You are a senior engineer performing a large-context analysis. Work within the provided directory.",
       "userPrompt": "{{param.task}}",
       "parameters": ["task"],
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.8",
       "reasoningSummary": "concise",
       "contextTier": "longContext",
       "workingDirectory": "{{env.PROJECT_DIR}}",

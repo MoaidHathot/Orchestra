@@ -11,7 +11,7 @@
       "userPrompt": "Perform a simulated health check of the following systems and report their status:\n\n1) API Gateway - check latency, error rate, request volume\n2) Database Cluster - check connection pool, query performance, replication lag\n3) Cache Layer - check hit rate, memory usage, eviction rate\n4) Message Queue - check queue depth, consumer lag, dead letter count\n5) Storage Service - check disk usage, I/O throughput, availability\n\nFor each system provide: status (healthy/degraded/critical), key metrics (use realistic simulated values), and any alerts.",
       "outputHandlerPrompt": "Format as a structured status dashboard. Use emoji indicators: healthy, degraded, critical. Include a timestamp header. Keep under 400 words.",
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "generate-summary",
@@ -22,7 +22,7 @@
       "inputHandlerPrompt": "Extract the status of each system (healthy/degraded/critical) and any alerts. Present as a compact list.",
       "outputHandlerPrompt": "Keep under 200 words. Start with a bold overall status line.",
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     }
   ],
   "trigger": {

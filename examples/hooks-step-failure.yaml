@@ -31,4 +31,4 @@ steps:
     dependsOn: [build]
     systemPrompt: You summarize build output.
     userPrompt: Summarize the build output.
-    model: claude-opus-4.6
+    model: claude-opus-4.8

@@ -11,7 +11,7 @@
       "outputHandlerPrompt": "Condense the output to the most important facts only. Remove any filler or caveats. Limit to 600 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "price-history",
@@ -22,7 +22,7 @@
       "outputHandlerPrompt": "Keep only the numerical data, trend descriptions, and key technical levels. Remove explanations of what indicators are. Limit to 600 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "recent-news",
@@ -33,7 +33,7 @@
       "outputHandlerPrompt": "Format as a compact numbered list. Each item: date, headline, impact (bullish/bearish/neutral), one-line reason. Remove any lengthy explanations. Limit to 700 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "quarterly-earnings",
@@ -44,7 +44,7 @@
       "outputHandlerPrompt": "Present as a compact table or structured list with only the numbers. Remove narrative explanations. Keep margins, growth rates, and beat/miss data. Limit to 700 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "industry-analysis",
@@ -55,7 +55,7 @@
       "outputHandlerPrompt": "Keep only the market sizing data, growth rates, key regulatory items, and sector valuation context. Remove generic industry descriptions. Limit to 600 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "competitive-position",
@@ -67,7 +67,7 @@
       "outputHandlerPrompt": "Focus on the moat assessment, market share data, and competitive comparison. Remove generic strategy frameworks. Limit to 600 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "financial-health",
@@ -79,7 +79,7 @@
       "outputHandlerPrompt": "Keep the numerical assessments, ratios, and trajectory conclusions. Remove definitions of financial terms. Limit to 600 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "sentiment-momentum",
@@ -91,7 +91,7 @@
       "outputHandlerPrompt": "Keep the sentiment score, analyst data, momentum assessment, and catalyst calendar. Remove explanations of methodology. Limit to 500 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "risk-assessment",
@@ -103,7 +103,7 @@
       "outputHandlerPrompt": "Format as a structured risk register. Each risk: name, rating (Low/Medium/High), probability, potential impact. End with an overall risk score. Limit to 600 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "valuation-analysis",
@@ -115,7 +115,7 @@
       "outputHandlerPrompt": "Keep the valuation multiples comparison, DCF assumptions and result, and the bear/base/bull price targets. Remove textbook explanations of valuation methods. Limit to 600 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "investment-report",
@@ -127,7 +127,7 @@
       "outputHandlerPrompt": "Ensure the output is well-structured markdown. The recommendation (STRONG BUY/BUY/HOLD/SELL/STRONG SELL) must be the very first thing, bolded and prominent. Use proper markdown headings (##), bullet points, and bold for key figures. Do not wrap in code fences. Limit to 2000 words.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     }
   ]
 }

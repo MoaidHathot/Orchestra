@@ -16,7 +16,7 @@ description: >
        Persisted records carry durationSeconds / failedStepName / errorMessage.
 version: "1.0.0"
 tags: ["example", "fan-out", "list-child-runs", "controller"]
-defaultModel: claude-opus-4.6
+defaultModel: claude-opus-4.8
 timeoutSeconds: 3600
 
 mcps:
@@ -47,7 +47,7 @@ steps:
   - name: dispatch-and-track
     type: Prompt
     dependsOn: []
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     mcps:
       - orchestra
     parameters: []

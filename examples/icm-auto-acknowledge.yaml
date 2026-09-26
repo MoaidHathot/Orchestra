@@ -41,7 +41,7 @@ steps:
     type: Prompt
     dependsOn:
       - fetch-active-incidents
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     timeoutSeconds: 40
     mcps: []
     systemPrompt: >
@@ -63,7 +63,7 @@ steps:
     type: Prompt
     dependsOn:
       - check-incidents
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     enabled: false
     timeoutSeconds: 120
     mcps:
@@ -104,7 +104,7 @@ steps:
       - fetch-active-incidents
       - acknowledge-incidents
       - fetch-action-view-schema
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     timeoutSeconds: 120
     mcps: []
     systemPrompt: >
@@ -136,7 +136,7 @@ steps:
     type: Prompt
     dependsOn:
       - create-action-view-entry
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     timeoutSeconds: 120
     mcps: []
     systemPrompt: >
@@ -173,7 +173,7 @@ steps:
       - acknowledge-incidents
       - create-action-view-entry
       - submit-action-view-entry
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     timeoutSeconds: 120
     mcps: []
     systemPrompt: >

@@ -18,7 +18,7 @@ description: >
        data from terminal records.
 version: "1.0.0"
 tags: ["example", "async-dispatch", "fan-out", "list-child-runs"]
-defaultModel: claude-opus-4.6
+defaultModel: claude-opus-4.8
 timeoutSeconds: 3600
 
 mcps:
@@ -67,7 +67,7 @@ steps:
       - research-A
       - research-B
       - research-C
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     mcps:
       - orchestra
     parameters: []

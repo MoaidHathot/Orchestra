@@ -18,7 +18,7 @@ description: >
        error case is what makes self-healing controllers useful.
 version: "1.0.0"
 tags: ["example", "child-bindings", "self-healing", "orchestration-step"]
-defaultModel: claude-opus-4.6
+defaultModel: claude-opus-4.8
 timeoutSeconds: 1800
 
 inputs:
@@ -54,7 +54,7 @@ steps:
     type: Prompt
     dependsOn:
       - attempt-1
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     parameters: []
     systemPrompt: |
       You are a code repair assistant. The previous attempt at the user's task has finished;

@@ -62,7 +62,7 @@ public static class McpServerExtensions
 			mcpOptions.ServerInfo = new()
 			{
 				Name = "Orchestra",
-				Version = "1.0.0",
+				Version = Api.UtilityApi.ProductVersion,
 			};
 		})
 		.WithHttpTransport(httpOptions =>

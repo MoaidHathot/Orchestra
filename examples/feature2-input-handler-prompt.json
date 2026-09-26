@@ -12,7 +12,7 @@
       "outputHandlerPrompt": "Format as a concise markdown report with clear section headers. Keep under 300 words.",
       "parameters": ["title", "body"],
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "draft-response",
@@ -23,7 +23,7 @@
       "inputHandlerPrompt": "Extract the category, urgency, summary, and suggested actions from the triage report. Present as labeled fields.",
       "outputHandlerPrompt": "Keep the response professional and concise. Under 200 words.",
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     }
   ],
   "trigger": {

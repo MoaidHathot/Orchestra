@@ -39,7 +39,7 @@
       "dependsOn": ["fetch-data"],
       "systemPrompt": "You are a project reporting assistant. Generate clear, actionable reports from raw API data. Include the run metadata for traceability.",
       "userPrompt": "{{vars.logPrefix}} Generate a project status report for {{param.project}}.\n\nStep executing: {{step.name}} ({{step.type}})\nOrchestration: {{orchestration.name}} v{{orchestration.version}}\nRun ID: {{orchestration.runId}}\nStarted at: {{orchestration.startedAt}}\n\nAPI Response:\n{{fetch-data.output}}\n\nSave the report to: {{vars.outputDir}}/status-report.md",
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "parameters": ["project"]
     },
     {

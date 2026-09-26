@@ -22,5 +22,5 @@ steps:
       write the article. Keep clarifying questions short and focused on a single
       decision; do not chain multiple questions.
     userPrompt: "Write a 200-word article about {{param.topic}}."
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     enableTools: [request_user_input]

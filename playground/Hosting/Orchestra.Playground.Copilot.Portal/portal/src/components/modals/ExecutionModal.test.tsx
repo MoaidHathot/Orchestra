@@ -650,7 +650,7 @@ describe('ExecutionModal child-run badge', () => {
         },
       },
     }) as Parameters<typeof ExecutionModal>[0];
-    (props as { onViewChildRun: typeof onViewChildRun }).onViewChildRun = onViewChildRun;
+    props.onViewChildRun = onViewChildRun;
 
     render(<ExecutionModal {...props} />);
 
@@ -671,7 +671,7 @@ describe('ExecutionModal child-run badge', () => {
     const props = makeProps({
       // No stepChildRuns map at all.
     }) as Parameters<typeof ExecutionModal>[0];
-    (props as { onViewChildRun: typeof onViewChildRun }).onViewChildRun = onViewChildRun;
+    props.onViewChildRun = onViewChildRun;
 
     render(<ExecutionModal {...props} />);
 

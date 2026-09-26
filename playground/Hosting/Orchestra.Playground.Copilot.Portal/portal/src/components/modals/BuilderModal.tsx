@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Icons } from '../../icons';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
+import { getDefaultModel } from '../../serverConfig';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -563,7 +564,7 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
         dependsOn: [],
         x: Math.round(cx),
         y: Math.round(cy),
-        ...(type === 'Prompt' ? { model: 'claude-opus-4.5', systemPrompt: '', userPrompt: '' } : {}),
+        ...(type === 'Prompt' ? { model: getDefaultModel(), systemPrompt: '', userPrompt: '' } : {}),
         ...(type === 'Http' ? { method: 'GET', url: '', body: '' } : {}),
         ...(type === 'Transform' ? { template: '' } : {}),
       };
@@ -778,7 +779,7 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
           .filter((n): n is string => !!n),
       };
       if (s.type === 'Prompt') {
-        base.model = s.model || 'claude-opus-4.5';
+        base.model = s.model || getDefaultModel();
         base.systemPrompt = s.systemPrompt || '';
         base.userPrompt = s.userPrompt || '';
       }
@@ -1039,7 +1040,7 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
                   <input
                     className="builder-field-input"
                     type="text"
-                    value={selected.model ?? 'claude-opus-4.5'}
+                    value={selected.model ?? getDefaultModel()}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                       updateStep(selected.id, { model: e.target.value })
                     }

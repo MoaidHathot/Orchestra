@@ -10,7 +10,7 @@
       "userPrompt": "{{number}}",
       "parameters": ["number"],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "step-2",
@@ -20,7 +20,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "step-3",
@@ -30,7 +30,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "step-4",
@@ -40,7 +40,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6"
+      "model": "claude-opus-4.8"
     }
   ]
 }

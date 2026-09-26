@@ -99,14 +99,19 @@ public class BundledSchemasTests
 		var toolBin = Path.Combine(repoRoot!.FullName, "src", "Orchestra.Cli", "bin");
 		Directory.Exists(toolBin).Should().BeTrue($"Orchestra.Cli bin directory missing: {toolBin}");
 
-		// Find the most-recently-built TFM directory under any configuration.
+		// Find the most-recently-built TFM directory under any configuration. Rank by the
+		// write time of the tool assembly itself rather than the directory: an empty
+		// bin/<Config>/<tfm>/ folder left behind by a restore or an aborted build has a
+		// fresh directory timestamp but no build in it, and must not win.
 		var tfmDirs = Directory.GetDirectories(toolBin, "*", SearchOption.AllDirectories)
 			.Where(d => Path.GetFileName(d).StartsWith("net", StringComparison.OrdinalIgnoreCase))
-			.OrderByDescending(d => new DirectoryInfo(d).LastWriteTimeUtc)
+			.Select(d => new { Directory = d, Assembly = Path.Combine(d, "Orchestra.Cli.dll") })
+			.Where(x => File.Exists(x.Assembly))
+			.OrderByDescending(x => File.GetLastWriteTimeUtc(x.Assembly))
 			.ToList();
 
 		tfmDirs.Should().NotBeEmpty("Orchestra.Cli must be built before this test runs");
 
-		return tfmDirs[0];
+		return tfmDirs[0].Directory;
 	}
 }

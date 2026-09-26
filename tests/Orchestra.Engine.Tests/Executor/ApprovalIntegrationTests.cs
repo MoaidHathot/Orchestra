@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using NSubstitute;
 using Orchestra.Engine.Tests.TestHelpers;
 
 namespace Orchestra.Engine.Tests.Executor;
@@ -191,6 +192,119 @@ public class ApprovalIntegrationTests
 		var result = await executor.ExecuteAsync(orchestration);
 
 		result.StepResults["review"].Content.Should().Be("ship it but watch out");
+	}
+
+	/// <summary>
+	/// Regression for the <c>step.awaitingInput</c> hook never firing: the runtime's private
+	/// event-name switch lacked <see cref="HookEventType.StepAwaitingInput"/>, so payload
+	/// construction threw before the script ran. This drives the whole path through the
+	/// executor: an Approval step begins waiting, the hook script writes its payload, and only
+	/// then does the test respond — so the hook must have completed before the run finishes
+	/// and its execution record must be in the run record.
+	/// </summary>
+	[Fact]
+	public async Task ExecuteAsync_ApprovalWithAwaitingInputHook_RunsHookAndRecordsExecution()
+	{
+		var outputPath = Path.Combine(Path.GetTempPath(), $"orchestra-hook-awaiting-{Guid.NewGuid():N}.json");
+		try
+		{
+			var pendingStore = new InMemoryPendingInputStore();
+			var waiter = new InMemoryWaiter();
+			var runStore = Substitute.For<IRunStore>();
+			OrchestrationRunRecord? capturedRecord = null;
+			runStore
+				.SaveRunAsync(Arg.Do<OrchestrationRunRecord>(r => capturedRecord = r), Arg.Any<CancellationToken>())
+				.Returns(Task.CompletedTask);
+
+			var orchestration = new Orchestration
+			{
+				Name = "approval-hook",
+				Description = "Approval gate with an awaiting-input notification hook.",
+				TimeoutSeconds = null,
+				Steps =
+				[
+					new ApprovalOrchestrationStep
+					{
+						Name = "review",
+						Type = OrchestrationStepType.Approval,
+						Prompt = "Approve deploy to prod?",
+						Choices = ["approve", "reject"],
+					}
+				],
+				Hooks =
+				[
+					new HookDefinition
+					{
+						// Deliberately unnamed: the record's HookName falls back to the wire
+						// name, which was the second place the old switch threw.
+						On = HookEventType.StepAwaitingInput,
+						Payload = new HookPayloadOptions
+						{
+							Detail = HookPayloadDetail.Compact,
+							Steps = new HookStepSelection(HookStepSelector.Current),
+						},
+						Action = new HookAction
+						{
+							Type = HookActionType.Script,
+							Shell = "pwsh",
+							Script = $"$input | Set-Content -Path '{outputPath.Replace("'", "''")}'"
+						}
+					}
+				]
+			};
+
+			var executor = new OrchestrationExecutor(
+				scheduler: new OrchestrationScheduler(),
+				agentBuilder: new MockAgentBuilder(),
+				reporter: NullOrchestrationReporter.Instance,
+				loggerFactory: NullLoggerFactory.Instance,
+				runStore: runStore,
+				pendingInputStore: pendingStore,
+				humanInputWaiter: waiter);
+
+			_ = Task.Run(async () =>
+			{
+				await waiter.WaitForRegistration();
+
+				// The hook is fired fire-and-forget when the wait begins. Wait for its script
+				// to land before answering so the assertion below is deterministic.
+				var deadline = DateTime.UtcNow.AddSeconds(30);
+				while (!File.Exists(outputPath) && DateTime.UtcNow < deadline)
+					await Task.Delay(50);
+
+				// Give the runtime a beat to enqueue the execution record after the script exits.
+				await Task.Delay(250);
+
+				waiter.Complete(new UserInputResponse
+				{
+					Choice = "approve",
+					RespondedAt = DateTimeOffset.UtcNow,
+				});
+			});
+
+			var result = await executor.ExecuteAsync(orchestration);
+
+			result.Status.Should().Be(ExecutionStatus.Succeeded);
+			result.StepResults["review"].Content.Should().Be("approve");
+
+			File.Exists(outputPath).Should().BeTrue("the step.awaitingInput hook script must have run");
+			var json = await File.ReadAllTextAsync(outputPath);
+			json.Should().Contain("\"eventType\":\"step.awaitingInput\"");
+			json.Should().Contain("\"name\":\"review\"");
+			json.Should().Contain("\"status\":\"AwaitingInput\"");
+
+			capturedRecord.Should().NotBeNull();
+			capturedRecord!.HookExecutions.Should().ContainSingle();
+			capturedRecord.HookExecutions[0].EventType.Should().Be(HookEventType.StepAwaitingInput);
+			capturedRecord.HookExecutions[0].HookName.Should().Be("step.awaitingInput");
+			capturedRecord.HookExecutions[0].Status.Should().Be(ExecutionStatus.Succeeded, capturedRecord.HookExecutions[0].ErrorMessage);
+			capturedRecord.HookExecutions[0].StepName.Should().Be("review");
+		}
+		finally
+		{
+			if (File.Exists(outputPath))
+				File.Delete(outputPath);
+		}
 	}
 
 	private sealed class InMemoryWaiter : IHumanInputWaiter

@@ -302,19 +302,7 @@ internal sealed partial class HookRuntime
 		};
 	}
 
-	private static string ToEventName(HookEventType eventType)
-	{
-		return eventType switch
-		{
-			HookEventType.OrchestrationSuccess => "orchestration.success",
-			HookEventType.OrchestrationFailure => "orchestration.failure",
-			HookEventType.OrchestrationAfter => "orchestration.after",
-			HookEventType.StepSuccess => "step.success",
-			HookEventType.StepFailure => "step.failure",
-			HookEventType.StepAfter => "step.after",
-			_ => throw new InvalidOperationException($"Unknown hook event '{eventType}'.")
-		};
-	}
+	private static string ToEventName(HookEventType eventType) => HookEventNames.ToWireName(eventType);
 
 	[LoggerMessage(
 		EventId = 1,

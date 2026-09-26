@@ -3,7 +3,7 @@
   "name": "advanced-copilot-sdk-features",
   "description": "Demonstrates advanced Copilot SDK features: infinite sessions with custom thresholds, Customize system prompt mode with section overrides, and image attachments (file + blob). Session hooks automatically capture structured audit logs for every step.",
   "version": "1.0.0",
-  "defaultModel": "claude-opus-4.6",
+  "defaultModel": "claude-opus-4.8",
   "tags": ["advanced", "copilot-sdk", "image-analysis", "audit-log"],
   "steps": [
     {
@@ -16,7 +16,7 @@
     {
       "name": "analyze-ui-mockup",
       "type": "Prompt",
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.8",
       "systemPrompt": "You are a senior UX engineer. Analyze UI screenshots and mockups for accessibility issues, design inconsistencies, and usability concerns.",
       "systemPromptMode": "customize",
       "systemPromptSections": {

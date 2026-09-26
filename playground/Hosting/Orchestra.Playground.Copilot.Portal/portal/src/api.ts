@@ -10,6 +10,105 @@ const MAX_RETRIES = 3;
 /** Base delay for exponential backoff (ms). */
 const BASE_DELAY = 1_000;
 
+/**
+ * A non-2xx response from the Orchestra API, with the RFC 7807 problem-details fields the host
+ * emits (`application/problem+json`) lifted onto the error so UI code can show `detail` or
+ * `title` instead of a raw JSON blob. Plain-text and `{ error }` bodies are normalised too.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+  readonly title: string;
+  readonly detail?: string;
+  readonly type?: string;
+  readonly url: string;
+  /** Extra members of the problem document (e.g. `reason`, `stepName`). */
+  readonly extensions: Record<string, unknown>;
+
+  constructor(init: {
+    status: number;
+    title: string;
+    detail?: string;
+    type?: string;
+    url: string;
+    extensions?: Record<string, unknown>;
+  }) {
+    super(init.detail && init.detail.length > 0 ? init.detail : init.title);
+    this.name = 'ApiError';
+    this.status = init.status;
+    this.title = init.title;
+    this.detail = init.detail;
+    this.type = init.type;
+    this.url = init.url;
+    this.extensions = init.extensions ?? {};
+  }
+
+  /** Short, human-readable text suitable for a toast or inline error. */
+  get userMessage(): string {
+    return this.message;
+  }
+}
+
+const PROBLEM_FIELDS = new Set(['type', 'title', 'status', 'detail', 'instance', 'traceId']);
+
+/**
+ * Builds an {@link ApiError} from a failed response. Understands `application/problem+json`
+ * (title/detail/status), the legacy `{ "error": "..." }` shape used by a few portal endpoints,
+ * and falls back to the raw text (or the HTTP status text when the body is empty).
+ */
+export async function toApiError(res: Response, url: string): Promise<ApiError> {
+  const status = res.status;
+  const fallbackTitle = res.statusText && res.statusText.length > 0 ? res.statusText : `HTTP ${status}`;
+
+  let text = '';
+  try {
+    text = await res.text();
+  } catch {
+    /* body already consumed or unreadable */
+  }
+
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const body = JSON.parse(trimmed) as Record<string, unknown>;
+      const title = typeof body.title === 'string' ? body.title : undefined;
+      const detail = typeof body.detail === 'string' ? body.detail : undefined;
+      const legacyError = typeof body.error === 'string' ? body.error : undefined;
+      const type = typeof body.type === 'string' ? body.type : undefined;
+
+      if (title || detail || legacyError) {
+        const extensions: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(body)) {
+          if (!PROBLEM_FIELDS.has(k) && k !== 'error') extensions[k] = v;
+        }
+        return new ApiError({
+          status,
+          title: title ?? legacyError ?? fallbackTitle,
+          detail: detail ?? (title ? undefined : legacyError),
+          type,
+          url,
+          extensions,
+        });
+      }
+    } catch {
+      /* not JSON after all — fall through to the raw text */
+    }
+  }
+
+  return new ApiError({
+    status,
+    title: fallbackTitle,
+    detail: trimmed.length > 0 ? trimmed : undefined,
+    url,
+  });
+}
+
+/** Text to show a user for any thrown value (ApiError, Error, or unknown). */
+export function describeError(err: unknown): string {
+  if (err instanceof ApiError) return err.userMessage;
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
 /** Pending mutations to replay when coming back online. */
 interface QueuedMutation {
   method: 'POST' | 'DELETE';
@@ -94,7 +193,7 @@ async function processQueue(): Promise<void> {
         }
         const res = await fetchWithRetry(item.url, init);
         if (!res.ok) {
-          item.reject(new Error(await res.text()));
+          item.reject(await toApiError(res, item.url));
         } else {
           item.resolve(await res.json());
         }
@@ -133,7 +232,7 @@ export const api = {
 
     try {
       const res = await fetchWithRetry(url);
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) throw await toApiError(res, url);
       const data: T = await res.json();
       setCache(url, data);
       return data;
@@ -166,7 +265,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw await toApiError(res, url);
     return res.json();
   },
 
@@ -179,7 +278,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw await toApiError(res, url);
     return res.json();
   },
 
@@ -193,7 +292,7 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw await toApiError(res, url);
     return res.json();
   },
 
@@ -213,7 +312,7 @@ export const api = {
     }
 
     const res = await fetchWithRetry(url, { method: 'DELETE' });
-    if (!res.ok) throw new Error(await res.text());
+    if (!res.ok) throw await toApiError(res, url);
     return res.json();
   },
 

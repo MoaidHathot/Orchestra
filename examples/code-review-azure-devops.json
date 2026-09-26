@@ -43,7 +43,7 @@
       "userPrompt": "Using the Azure DevOps tools, list all active (open) pull requests in the repository that have 'Moaid Hathot' as a reviewer. For each PR, return the following fields in a JSON array: id, title, createdBy (the author's display name), creationDate, sourceRefName, targetRefName, and the list of reviewer display names. Return ONLY the JSON array, no markdown fencing or explanation.",
       "outputHandlerPrompt": "Ensure the output is a valid JSON array. If no PRs are found, return an empty array: []. Strip any markdown code fences or surrounding text — return raw JSON only.",
       "mcps": ["azure-devops"],
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "timeoutSeconds": 120,
       "retry": {
         "maxRetries": 3,
@@ -67,7 +67,7 @@
       "userPrompt": "From the filtered PR list below, select the most recently created PR (by creationDate):\n\n{{filter-reviewer-prs.output}}\n\nFor that PR:\n1. Fetch the complete diff / file changes (all modified, added, and deleted files with their content changes).\n2. Fetch any existing review comments or discussion threads on the PR.\n3. Fetch the PR description and any linked work item IDs.\n\nReturn the results as structured JSON with fields: prId, prTitle, author, description, linkedWorkItemIds (array of integers), files (array of {path, changeType, diff}), existingComments (array of {author, content, file, line}).",
       "outputHandlerPrompt": "Ensure the output is well-structured JSON. If the diff is very large, summarize unchanged boilerplate but keep all meaningful code changes intact. The 'diff' field for each file should contain the actual unified diff content.",
       "mcps": ["azure-devops"],
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "timeoutSeconds": 180
     },
     {
@@ -78,7 +78,7 @@
       "userPrompt": "The PR details are:\n\n{{fetch-pr-changes.output}}\n\nExtract the linkedWorkItemIds from the PR data above. For each linked Work Item, use the work-item-fetcher subagent to retrieve its details (title, description, acceptance criteria, state). Then produce a unified context summary that explains: 1) What feature or bug this PR addresses. 2) The acceptance criteria or requirements. 3) Any relevant design decisions mentioned in the Work Item.",
       "outputHandlerPrompt": "Return a concise context summary (under 500 words) that a code reviewer can quickly read to understand the 'why' behind the code changes.",
       "mcps": ["azure-devops"],
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "subagents": [
         {
           "name": "work-item-fetcher",
@@ -98,7 +98,7 @@
       "userPrompt": "The PR changes are:\n\n{{fetch-pr-changes.output}}\n\nFor each modified file in the PR diff:\n1. Read the full current version of the file from the local repo (main branch) to understand the baseline.\n2. If the file imports or references other project files (e.g., interfaces, base classes, shared utilities), read those too.\n3. Check if there are corresponding test files and read them.\n\nProduce a context report with: for each modified file, the relevant surrounding code (interfaces implemented, base classes extended, callers of modified methods, and existing test coverage). Keep each file's context under 200 lines — focus on the most relevant parts.",
       "outputHandlerPrompt": "Structure the output as sections per file. Include file paths as headers. Omit files that are trivial changes (e.g., auto-generated, package-lock, .csproj version bumps). Focus on files with logic changes.",
       "mcps": ["filesystem"],
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "timeoutSeconds": 180
     },
     {
@@ -108,7 +108,7 @@
       "systemPrompt": "You are a senior code reviewer coordinating a thorough pull request review. You have access to the PR diff, the Work Item context (requirements), and the surrounding source code context. You coordinate with specialized subagents for security and code quality analysis, then synthesize all findings into a comprehensive review.\n\nYour review must cover:\n1. Correctness — Does the code do what the Work Item requires?\n2. Security — Are there vulnerabilities, injection risks, or auth issues?\n3. Code quality — Naming, structure, SOLID principles, readability\n4. Performance — Unnecessary allocations, N+1 queries, blocking calls\n5. Testing — Are changes adequately tested?\n6. Architecture — Does the change fit the existing patterns?\n\nBe specific: reference file paths and line numbers. Distinguish between blocking issues (must fix) and suggestions (nice to have).",
       "userPrompt": "Review this pull request:\n\n## PR Changes\n{{fetch-pr-changes.output}}\n\n## Work Item Context\n{{fetch-work-item.output}}\n\n## Source Code Context\n{{read-source-context.output}}\n\nPerform a thorough code review. Delegate security analysis to the security-reviewer subagent and code quality analysis to the quality-reviewer subagent. Combine their findings with your own analysis of correctness, performance, testing, and architecture.\n\nProduce a review with:\n1. An executive summary (2-3 sentences)\n2. A list of review comments, each with: file, line (if applicable), severity (blocking | suggestion | nitpick), category (security | quality | correctness | performance | testing | architecture), and the comment text\n3. A recommended status: 'approved' if no blocking issues, 'approved-with-suggestions' if only suggestions/nitpicks, 'waiting-for-author' if there are blocking issues\n\nReturn the review as JSON with fields: summary, comments (array), status.",
       "outputHandlerPrompt": "Ensure the output is valid JSON with the specified schema. The 'status' field must be exactly one of: 'approved', 'approved-with-suggestions', 'waiting-for-author'. Each comment must have: file, line (number or null), severity, category, and text fields.",
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "reasoningLevel": "High",
       "timeoutSeconds": 300,
       "subagents": [
@@ -135,7 +135,7 @@
       "systemPrompt": "You are a review quality auditor. You evaluate whether a code review is thorough and actionable. Check that the review covers all critical areas and that comments are specific (not vague). If the review meets all quality criteria, respond with APPROVED as the first word. If it needs improvement, respond with REVISE and explain what's missing.",
       "userPrompt": "Evaluate this code review for quality and completeness:\n\n{{review-code.output}}\n\nQuality checklist:\n1. Does the review have an executive summary?\n2. Are there specific file/line references in comments (not just generic advice)?\n3. Are severity levels assigned to each comment?\n4. Is there at least one comment about testing (either praising coverage or noting gaps)?\n5. Is the status field present and one of the valid values?\n6. Are blocking issues (if any) clearly explained with remediation guidance?\n7. Is the review respectful and constructive in tone?\n\nIf ALL criteria pass, respond with: APPROVED\nIf ANY criterion fails, respond with: REVISE and list exactly what needs to be added or improved.",
       "outputHandlerPrompt": "Ensure APPROVED or REVISE is the first word. Keep the evaluation under 300 words.",
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "loop": {
         "target": "review-code",
         "maxIterations": 2,

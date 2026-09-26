@@ -704,7 +704,7 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			var agent = await _providerRegistry.Resolve(null)
 				.BuildAgentAsync(new AgentBuildConfig
 				{
-					Model = step.InputHandlerModel ?? defaultModel ?? "claude-opus-4.6",
+					Model = step.InputHandlerModel ?? defaultModel ?? ModelDefaults.Model,
 					SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
 					Mcps = [],
 				}, cancellationToken);

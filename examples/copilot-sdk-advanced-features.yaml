@@ -6,7 +6,7 @@ description: >
   image attachments (file paths and base64 blobs from prior steps), and
   structured audit logging via session hooks.
 version: "1.0.0"
-defaultModel: claude-opus-4.6
+defaultModel: claude-opus-4.8
 tags:
   - advanced
   - copilot-sdk

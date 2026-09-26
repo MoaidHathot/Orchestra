@@ -1112,7 +1112,7 @@ Orchestrations can be registered in Orchestra via:
 13. **Do NOT use `Command` with `pwsh -Command`, `powershell -Command`, or `bash -c` for script logic.** Use `type: Script`, `shell: pwsh`, and `script: |` instead.
 14. **Do NOT rely on the host process working directory for runtime file paths.** Use `{{orchestration.sourceDirectory}}` to build absolute paths relative to the orchestration file.
 15. **`systemPromptSections` requires `systemPromptMode: "customize"`**. Section overrides are ignored with `append` or `replace`.
-16. **Image attachments require a vision-capable model** (e.g., `claude-opus-4.8`, `gpt-4o`). Non-vision models will not understand the images.
+16. **Image attachments require a vision-capable model** (e.g., `claude-opus-4.8`, `gpt-5`). Non-vision models will not understand the images.
 17. **`infiniteSessions` thresholds are ratios (0.0-1.0)**, not token counts. `0.80` means 80% of context used.
 18. **`hooks` is a top-level array**, not a step-level property.
 19. **Hook actions require exactly one of `script` or `scriptFile`.** Do not specify both.

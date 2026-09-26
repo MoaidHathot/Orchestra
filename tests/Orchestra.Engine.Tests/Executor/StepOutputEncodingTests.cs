@@ -102,11 +102,11 @@ public class StepOutputEncodingTests : IDisposable
 	[Fact]
 	public async Task CommandStep_NonZeroExitCode_StillFails_WithCodePagePrefixInPlace()
 	{
-		// The Windows chcp prefix must not mask the user command's exit code.
+		// The Windows chcp prefix must not mask the user command's exit code. (Arguments are
+		// literal argv, so the exit has to happen inside a real interpreter rather than a
+		// nested `cmd /c` string.)
 		var result = await CreateCommandExecutor().ExecuteAsync(
-			RuntimeInformation.IsOSPlatform(OSPlatform.Windows)
-				? CommandStep("cmd", "/c", "exit 7")
-				: CommandStep("sh", "-c", "exit 7"),
+			CommandStep("pwsh", "-NoProfile", "-Command", "exit 7"),
 			Context());
 
 		result.Status.Should().Be(ExecutionStatus.Failed);

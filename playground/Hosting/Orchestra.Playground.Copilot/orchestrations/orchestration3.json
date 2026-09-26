@@ -10,7 +10,7 @@
       "userPrompt": "Search for the latest news about {{company}}. Find at least 5-10 recent news items. For each, provide the headline, date, source, a brief summary, and your assessment of whether it is bullish, bearish, or neutral for the stock.",
       "parameters": ["company"],
       "mcps": ["web-search"],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "historical-performance",
@@ -20,7 +20,7 @@
       "userPrompt": "Research {{company}} historical stock performance. Cover the following: 1) Price trend over the last 12 months (key highs, lows, current price). 2) 52-week range. 3) Key technical indicators if available (moving averages, RSI, volume trends). 4) How the stock has performed relative to the S&P 500 and NASDAQ over the same period. 5) Any notable price patterns or support/resistance levels.",
       "parameters": ["company"],
       "mcps": ["web-search"],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "financial-fundamentals",
@@ -30,7 +30,7 @@
       "userPrompt": "Research {{company}} financial fundamentals. Analyze: 1) Revenue and earnings growth (last 4 quarters, year-over-year). 2) Profit margins (gross, operating, net). 3) P/E ratio and how it compares to sector average. 4) Free cash flow and balance sheet strength. 5) Dividend yield and history. 6) Key growth drivers. Provide concrete numbers where possible.",
       "parameters": ["company"],
       "mcps": ["web-search"],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "competitor-landscape",
@@ -40,7 +40,7 @@
       "userPrompt": "Analyze {{company}}'s competitive landscape. Cover: 1) Market position in its primary business segments. 2) Key competitors and their relative strengths. 3) Market share trends. 4) Competitive advantages and moats. 5) Any emerging competitive threats or advantages. Summarize {{company}}'s overall competitive moat strength.",
       "parameters": ["company"],
       "mcps": ["web-search"],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "risk-assessment",
@@ -51,7 +51,7 @@
       "inputHandlerPrompt": "Extract key risk-relevant information from the news, financial fundamentals, and competitor analysis outputs.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "sentiment-analysis",
@@ -62,7 +62,7 @@
       "inputHandlerPrompt": "Extract all news items and their bullish/bearish/neutral assessments from the news search output.",
       "parameters": ["company"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "generate-recommendation",
@@ -74,7 +74,7 @@
       "outputHandlerPrompt": "Reformat the entire content as clean, well-structured markdown. The recommendation (Strong Buy/Buy/Hold/Sell/Strong Sell) must appear prominently at the top. Use proper markdown headings, bullet points, and bold text. Do not wrap the output in code fences. Keep all data, analysis, and details from the original — do not remove or shorten any sections.",
       "parameters": ["company", "filename"],
       "mcps": [],
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     }
   ]
 }

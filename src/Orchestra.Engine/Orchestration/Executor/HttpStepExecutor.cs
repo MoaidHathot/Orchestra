@@ -10,9 +10,33 @@ namespace Orchestra.Engine;
 /// </summary>
 public sealed partial class HttpStepExecutor : IStepExecutor
 {
+	/// <summary>
+	/// Process-wide client shared by every executor that does not inject its own. One
+	/// <see cref="HttpClient"/> for the process is the documented usage pattern (a new client
+	/// per run leaks sockets and never gets disposed), and its timeout is disabled so the only
+	/// clock that governs an Http step is the step / orchestration timeout: the client's own
+	/// default 100 s timeout used to surface as a <see cref="TaskCanceledException"/> that the
+	/// engine mistook for an external cancellation, marking the step Cancelled (never retried)
+	/// and cancelling every pending step with it.
+	/// </summary>
+	public static HttpClient SharedHttpClient { get; } = new()
+	{
+		Timeout = Timeout.InfiniteTimeSpan,
+	};
+
 	private readonly HttpClient _httpClient;
 	private readonly IOrchestrationReporter _reporter;
 	private readonly ILogger<HttpStepExecutor> _logger;
+
+	/// <summary>
+	/// Creates an executor that uses <see cref="SharedHttpClient"/>.
+	/// </summary>
+	public HttpStepExecutor(
+		IOrchestrationReporter reporter,
+		ILogger<HttpStepExecutor> logger)
+		: this(SharedHttpClient, reporter, logger)
+	{
+	}
 
 	public HttpStepExecutor(
 		HttpClient httpClient,
@@ -120,9 +144,22 @@ public sealed partial class HttpStepExecutor : IStepExecutor
 				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, trace: trace, errorCategory: StepErrorCategory.HttpError);
 			}
 		}
-		catch (OperationCanceledException)
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
-			throw; // Let cancellation propagate for timeout handling
+			throw; // Step timeout or external cancellation: let the executor classify it.
+		}
+		catch (OperationCanceledException ex)
+		{
+			// The token was NOT cancelled, so this came from HttpClient.Timeout on an injected
+			// client (SharedHttpClient disables it). Report it as a timeout failure so retry
+			// policies apply and dependents are skipped rather than the whole run cancelled.
+			var timeout = _httpClient.Timeout == Timeout.InfiniteTimeSpan
+				? "the HTTP client's timeout"
+				: $"the HTTP client's {_httpClient.Timeout.TotalSeconds:0.#} s timeout";
+			var errorMessage = $"HTTP request timed out after {timeout}: {ex.Message}";
+			LogHttpException(step.Name, ex);
+			_reporter.ReportStepError(step.Name, errorMessage);
+			return ExecutionResult.Failed(errorMessage, rawDependencyOutputs, errorCategory: StepErrorCategory.Timeout);
 		}
 		catch (HttpRequestException ex)
 		{

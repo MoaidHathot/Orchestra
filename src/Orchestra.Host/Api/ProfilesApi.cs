@@ -29,7 +29,18 @@ public static class ProfilesApi
 		// POST /api/profiles - Create a new profile
 		group.MapPost("", async Task<IResult> (HttpContext ctx, ProfileManager profileManager) =>
 		{
-			var body = await JsonSerializer.DeserializeAsync<CreateProfileRequest>(ctx.Request.Body, jsonOptions);
+			CreateProfileRequest? body;
+			try
+			{
+				body = await JsonSerializer.DeserializeAsync<CreateProfileRequest>(ctx.Request.Body, jsonOptions);
+			}
+			catch (JsonException ex)
+			{
+				// A malformed body is the caller's fault: answer 400, not a 500 from the
+				// unhandled-exception middleware.
+				return ProblemDetailsHelpers.BadRequest($"Request body is not valid JSON: {ex.Message}");
+			}
+
 			if (body is null || string.IsNullOrWhiteSpace(body.Name))
 				return ProblemDetailsHelpers.BadRequest("Name is required.");
 

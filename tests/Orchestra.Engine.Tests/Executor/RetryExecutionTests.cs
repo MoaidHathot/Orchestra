@@ -633,4 +633,43 @@ public class RetryExecutionTests
 	}
 
 	#endregion
+
+	#region Timeout classification for retryOnTimeout
+
+	[Fact]
+	public void IsTimeoutFailure_TimeoutCategory_IsTimeout_RegardlessOfMessage()
+	{
+		var result = ExecutionResult.Failed("Step exceeded budget", errorCategory: StepErrorCategory.Timeout);
+		OrchestrationExecutor.IsTimeoutFailure(result).Should().BeTrue("the structured category is authoritative");
+	}
+
+	[Fact]
+	public void IsTimeoutFailure_SpecificNonTimeoutCategory_IsNotTimeout_EvenIfMessageSaysTimedOut()
+	{
+		// An upstream 504 body like "gateway timed out" is an HttpError, not a step timeout.
+		// Previously the executor sniffed the message and would have treated this as a timeout.
+		var result = ExecutionResult.Failed("HTTP GET https://x returned 504 Gateway timed out", errorCategory: StepErrorCategory.HttpError);
+		OrchestrationExecutor.IsTimeoutFailure(result).Should().BeFalse();
+	}
+
+	[Theory]
+	[InlineData("The tool call timed out after 30s")]
+	[InlineData("TIMED OUT")]
+	public void IsTimeoutFailure_UncategorisedResult_FallsBackToMessage(string message)
+	{
+		// Third-party IStepExecutor plugins may not categorise; keep the historical fallback.
+		var unknown = ExecutionResult.Failed(message); // defaults to StepErrorCategory.Unknown
+		OrchestrationExecutor.IsTimeoutFailure(unknown).Should().BeTrue();
+
+		var uncategorised = new ExecutionResult { Content = "", Status = ExecutionStatus.Failed, ErrorMessage = message, ErrorCategory = null };
+		OrchestrationExecutor.IsTimeoutFailure(uncategorised).Should().BeTrue();
+	}
+
+	[Fact]
+	public void IsTimeoutFailure_UncategorisedResultWithoutTimeoutPhrase_IsNotTimeout()
+	{
+		OrchestrationExecutor.IsTimeoutFailure(ExecutionResult.Failed("boom")).Should().BeFalse();
+	}
+
+	#endregion
 }

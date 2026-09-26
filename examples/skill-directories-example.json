@@ -10,7 +10,7 @@
       "systemPrompt": "You are an expert code reviewer. Use your loaded skills to guide your review process with best practices and specialized workflows.",
       "userPrompt": "Review the following code changes and provide feedback:\n\n{{param.changes}}",
       "parameters": ["changes"],
-      "model": "claude-opus-4.5",
+      "model": "claude-opus-4.8",
       "skillDirectories": [
         "./skills/code-review",
         "./skills/security-analysis"
@@ -22,7 +22,7 @@
       "dependsOn": ["code-review"],
       "systemPrompt": "You are a technical writer. Summarize code review findings into a concise executive summary.",
       "userPrompt": "Create a concise summary of this code review:\n\n{{code-review.output}}",
-      "model": "claude-opus-4.5"
+      "model": "claude-opus-4.8"
     }
   ],
   "trigger": {

@@ -34,7 +34,7 @@ steps:
       - taskDescription
     mcps:
       - orchestra
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     systemPrompt: |
       You are an orchestration discovery agent. Use the Orchestra MCP tools
       to find orchestrations that could help with the user's task. Return a
@@ -56,7 +56,7 @@ steps:
       - taskDescription
     mcps:
       - orchestra
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     reasoningLevel: high
     # Per-step timeout: this whole step may take up to 1 hour because the
     # invocations themselves can be long. The MCP-level default (30 min)

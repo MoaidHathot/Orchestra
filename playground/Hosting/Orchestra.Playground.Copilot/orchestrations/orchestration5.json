@@ -10,7 +10,7 @@
       "userPrompt": "{{number}}",
       "parameters": ["number"],
       "mcps": [],
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.8",
       "systemPromptMode": "replace"
     },
     {
@@ -21,7 +21,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.8",
       "systemPromptMode": "replace"
     },
     {
@@ -32,7 +32,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.8",
       "systemPromptMode": "replace"
     },
     {
@@ -43,7 +43,7 @@
       "userPrompt": "Add 1 to the number from the previous step.",
       "parameters": [],
       "mcps": [],
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.8",
       "systemPromptMode": "replace"
     }
   ]

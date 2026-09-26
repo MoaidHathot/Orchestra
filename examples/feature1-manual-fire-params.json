@@ -11,7 +11,7 @@
       "userPrompt": "List the top 10 must-visit attractions and experiences in {{param.destination}}. For each, include: name, why it's worth visiting, best time to go, and approximate cost. Group them by category (cultural, nature, food, entertainment).",
       "parameters": ["destination"],
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "research-logistics",
@@ -21,7 +21,7 @@
       "userPrompt": "Provide a logistics guide for a {{param.duration}} trip to {{param.destination}}: 1) Best neighborhoods to stay in (budget, mid-range, luxury). 2) Getting around (public transport, rideshare, walking). 3) Estimated daily budget breakdown (accommodation, food, transport, activities). 4) Essential local tips (currency, tipping, safety, SIM cards). 5) Best time of year to visit.",
       "parameters": ["destination", "duration"],
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     },
     {
       "name": "build-itinerary",
@@ -33,7 +33,7 @@
       "outputHandlerPrompt": "Format as clean markdown with day headers (## Day 1, ## Day 2, etc.). Include a budget summary table at the end. Keep under 1500 words.",
       "parameters": ["destination", "duration"],
       "mcps": [],
-      "model": "gpt-4o"
+      "model": "claude-opus-4.8"
     }
   ],
   "trigger": {

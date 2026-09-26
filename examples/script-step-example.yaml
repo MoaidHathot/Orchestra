@@ -39,7 +39,7 @@ steps:
   - name: analyze-info
     type: Prompt
     dependsOn: [gather-system-info]
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     systemPrompt: |
       You are a systems analyst. Given system information in JSON format,
       provide a brief health assessment and note any concerns.

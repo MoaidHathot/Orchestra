@@ -2,7 +2,7 @@
 name: multiline-input-summary
 description: Demonstrates a typed string input that asks the UI to render a multiline text area.
 version: "1.0.0"
-defaultModel: claude-opus-4.6
+defaultModel: claude-opus-4.8
 tags: [example, inputs, multiline]
 
 inputs:
@@ -28,7 +28,7 @@ steps:
 
       Notes to summarize:
       {{param.notes}}
-    model: claude-opus-4.6
+    model: claude-opus-4.8
 
   - name: format-summary
     type: Transform

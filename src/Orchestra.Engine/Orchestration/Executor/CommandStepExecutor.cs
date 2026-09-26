@@ -45,6 +45,91 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 	/// </remarks>
 	internal const string WindowsUtf8CodePagePrefix = "chcp 65001>nul & ";
 
+	/// <summary>
+	/// Characters cmd.exe treats specially outside quote mode. Every one of them is
+	/// caret-escaped by <see cref="EscapeArgumentForCmd"/>, including the quote itself, so
+	/// cmd.exe never enters quote mode and passes the argument through verbatim.
+	/// </summary>
+	private static readonly System.Buffers.SearchValues<char> s_cmdMetaCharacters =
+		System.Buffers.SearchValues.Create("()%!^\"<>&|");
+
+	/// <summary>
+	/// Escapes one argument for a command line that runs under <c>cmd.exe /c</c>, so the child
+	/// program receives it byte-for-byte. Two parsers see the text — cmd.exe first, then the
+	/// child's C runtime (<c>CommandLineToArgvW</c> rules) — and both have to be satisfied:
+	/// <list type="number">
+	///   <item>C-runtime quoting: every run of backslashes that precedes a <c>"</c> (or the
+	///   end of the value, where the closing quote will go) is doubled and the embedded quote
+	///   is escaped as <c>\"</c>; the whole value is wrapped in <c>"…"</c>. Backslashes anywhere
+	///   else are literal, so Windows paths survive untouched.</item>
+	///   <item>cmd.exe escaping: every metacharacter in the quoted result — <c>( ) % ! ^ " &lt; &gt; &amp; |</c>,
+	///   <em>including</em> the surrounding quotes — is prefixed with <c>^</c>. Because the quotes
+	///   are escaped too, cmd.exe never toggles quote mode, so its parser sees every character
+	///   plainly and strips exactly the carets, handing the child the C-runtime-quoted value.</item>
+	/// </list>
+	/// This is the algorithm documented at https://qntm.org/cmd and used by Node's cross-spawn.
+	/// A consequence worth knowing: <c>%NAME%</c> inside an argument is now a literal for the
+	/// child instead of being expanded by cmd.exe — use the step's <c>environment</c> block or
+	/// <c>{{env.NAME}}</c> when expansion is wanted.
+	/// </summary>
+	internal static string EscapeArgumentForCmd(string arg)
+	{
+		// Step 1: C-runtime quoting.
+		var quoted = new StringBuilder(arg.Length + 8);
+		quoted.Append('"');
+
+		var backslashes = 0;
+		foreach (var c in arg)
+		{
+			if (c == '\\')
+			{
+				backslashes++;
+				continue;
+			}
+
+			if (c == '"')
+			{
+				// 2n+1 backslashes: the run is preserved and the quote is escaped.
+				quoted.Append('\\', backslashes * 2 + 1);
+				quoted.Append('"');
+			}
+			else
+			{
+				// Backslashes not followed by a quote are literal.
+				quoted.Append('\\', backslashes);
+				quoted.Append(c);
+			}
+
+			backslashes = 0;
+		}
+
+		// A trailing run precedes the closing quote we are about to add: double it.
+		quoted.Append('\\', backslashes * 2);
+		quoted.Append('"');
+
+		// Step 2: caret-escape every cmd.exe metacharacter, quotes included.
+		var span = quoted.ToString().AsSpan();
+		if (span.IndexOfAny(s_cmdMetaCharacters) < 0)
+			return quoted.ToString();
+
+		var escaped = new StringBuilder(span.Length + 8);
+		foreach (var c in span)
+		{
+			if (s_cmdMetaCharacters.Contains(c))
+				escaped.Append('^');
+			escaped.Append(c);
+		}
+
+		return escaped.ToString();
+	}
+
+	/// <summary>
+	/// Escapes one argument for <c>/bin/sh -c</c>: single quotes make every character literal,
+	/// and an embedded single quote is expressed as <c>'\''</c> (close, escaped quote, reopen).
+	/// </summary>
+	internal static string EscapeArgumentForSh(string arg)
+		=> $"'{arg.Replace("'", "'\\''")}'";
+
 	public async Task<ExecutionResult> ExecuteAsync(
 		OrchestrationStep step,
 		OrchestrationExecutionContext context,
@@ -90,20 +175,10 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			// directly, which doesn't resolve .cmd files.
 			var isWindows = RuntimeInformation.IsOSPlatform(OSPlatform.Windows);
 
-			// Build the shell-escaped argument string
-			var escapedArgs = arguments.Select(arg =>
-			{
-				if (isWindows)
-				{
-					// On Windows cmd.exe: wrap args containing spaces in double quotes
-					return arg.Contains(' ') ? $"\"{arg}\"" : arg;
-				}
-				else
-				{
-					// On Unix sh: use single quotes to prevent interpretation, escaping embedded single quotes
-					return $"'{arg.Replace("'", "'\\''")}'";
-				}
-			});
+			// Build the shell-escaped argument string. Arguments are frequently template-resolved
+			// from step outputs or parameters, so every metacharacter must reach the child program
+			// as a literal — otherwise "{{review.output}}" containing "& del /q *" is a command.
+			var escapedArgs = arguments.Select(arg => isWindows ? EscapeArgumentForCmd(arg) : EscapeArgumentForSh(arg));
 
 			var fullCommandLine = arguments.Length > 0
 				? $"{command} {string.Join(' ', escapedArgs)}"

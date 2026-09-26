@@ -1199,6 +1199,74 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 		await AssertIsApiResponse(response, "GET /api/status (raw fetch)");
 	}
 
+	[Fact]
+	public async Task Contract_GetStatus_ReportsBuiltVersion()
+	{
+		var response = await _client.GetAsync("/api/status");
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+		result.GetProperty("version").GetString().Should().Be(Orchestra.Host.Api.UtilityApi.ProductVersion,
+			"the version must come from the build, not a hardcoded literal");
+	}
+
+	[Fact]
+	public async Task Contract_GetConfig_ExposesDefaultModel()
+	{
+		// serverConfig.ts / BuilderModal pre-fill new Prompt steps from this value.
+		var response = await _client.GetAsync("/api/config");
+
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+		result.GetProperty("defaultModel").GetString().Should().NotBeNullOrWhiteSpace();
+		result.TryGetProperty("polling", out _).Should().BeTrue();
+	}
+
+	#endregion
+
+	#region 17b. Shared host pipeline (problem-details + CORS) is installed on the portal host
+
+	[Fact]
+	public async Task PortalHost_AllowsLoopbackCorsOrigins_ViaSharedPipeline()
+	{
+		// `orchestra portal` had no CORS policy at all (only Orchestra.Server did). The shared
+		// UseOrchestraHostPipeline installs the loopback policy so the Vite dev server and local
+		// tools can call the API from a browser.
+		using var request = new HttpRequestMessage(HttpMethod.Options, "/api/status");
+		request.Headers.Add("Origin", "http://localhost:5173");
+		request.Headers.Add("Access-Control-Request-Method", "GET");
+
+		var response = await _client.SendAsync(request);
+
+		response.Headers.TryGetValues("Access-Control-Allow-Origin", out var allowed).Should().BeTrue(
+			"the portal host must run the shared CORS policy");
+		allowed!.Single().Should().Be("http://localhost:5173");
+	}
+
+	[Fact]
+	public async Task PortalHost_RejectsNonLoopbackCorsOrigins()
+	{
+		using var request = new HttpRequestMessage(HttpMethod.Options, "/api/status");
+		request.Headers.Add("Origin", "http://evil.example.com");
+		request.Headers.Add("Access-Control-Request-Method", "GET");
+
+		var response = await _client.SendAsync(request);
+
+		response.Headers.Contains("Access-Control-Allow-Origin").Should().BeFalse();
+	}
+
+	[Fact]
+	public async Task PortalHost_MalformedJsonBody_IsA400ProblemDetails_NotA500()
+	{
+		// POST /api/profiles used to let JsonException escape to the exception middleware (500).
+		var content = new StringContent("{ this is not json", Encoding.UTF8, "application/json");
+		var response = await _client.PostAsync("/api/profiles", content);
+
+		response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+		response.Content.Headers.ContentType?.MediaType.Should().Be("application/problem+json");
+		var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+		body.GetProperty("detail").GetString().Should().Contain("not valid JSON");
+	}
+
 	#endregion
 
 	#region 18. GET /api/mcps — List MCP tools

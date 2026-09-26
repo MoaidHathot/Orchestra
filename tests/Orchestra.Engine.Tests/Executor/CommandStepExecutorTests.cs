@@ -184,6 +184,138 @@ public class CommandStepExecutorTests
 
 	#endregion
 
+	#region Argument escaping (shell injection)
+
+	// Pure function tests for the cmd.exe escaper: run on every OS because the escaper is
+	// platform-independent string manipulation.
+
+	[Theory]
+	[InlineData("plain", "^\"plain^\"")]
+	[InlineData("", "^\"^\"")]
+	[InlineData("has space", "^\"has space^\"")]
+	[InlineData("a&b", "^\"a^&b^\"")]
+	[InlineData("a|b", "^\"a^|b^\"")]
+	[InlineData("<in >out", "^\"^<in ^>out^\"")]
+	[InlineData("(paren)", "^\"^(paren^)^\"")]
+	[InlineData("%PATH%", "^\"^%PATH^%^\"")]
+	[InlineData("bang!", "^\"bang^!^\"")]
+	[InlineData("caret^", "^\"caret^^^\"")]
+	public void EscapeArgumentForCmd_CaretEscapesEveryMetacharacterIncludingTheQuotes(string input, string expected)
+	{
+		CommandStepExecutor.EscapeArgumentForCmd(input).Should().Be(expected);
+	}
+
+	[Theory]
+	// Embedded quote: C-runtime rule escapes it as \" and the cmd rule carets the quote.
+	[InlineData("say \"hi\"", "^\"say \\^\"hi\\^\"^\"")]
+	// Windows path: interior backslashes are literal, no doubling.
+	[InlineData(@"C:\Users\me", "^\"C:\\Users\\me^\"")]
+	// Trailing backslash precedes the closing quote and must be doubled or it would escape it.
+	[InlineData(@"C:\dir\", "^\"C:\\dir\\\\^\"")]
+	// Backslashes before an embedded quote are doubled (2n) plus one to escape the quote.
+	[InlineData("a\\\"b", "^\"a\\\\\\^\"b^\"")]
+	public void EscapeArgumentForCmd_AppliesCRuntimeQuotingRules(string input, string expected)
+	{
+		CommandStepExecutor.EscapeArgumentForCmd(input).Should().Be(expected);
+	}
+
+	[Theory]
+	[InlineData("plain", "'plain'")]
+	[InlineData("it's", "'it'\\''s'")]
+	[InlineData("a && rm -rf /", "'a && rm -rf /'")]
+	[InlineData("$(whoami)", "'$(whoami)'")]
+	public void EscapeArgumentForSh_SingleQuotesEverything(string input, string expected)
+	{
+		CommandStepExecutor.EscapeArgumentForSh(input).Should().Be(expected);
+	}
+
+	/// <summary>
+	/// End-to-end: every argument must reach the child process byte-for-byte. Runs a tiny
+	/// pwsh script file (<c>-File</c>, so the remaining arguments land in <c>$args</c> as
+	/// literal strings) that prints each argument between markers, so the assertion is exact
+	/// rather than a substring match. The escaping under test happens in the shell wrapper
+	/// *before* pwsh sees the argument.
+	/// </summary>
+	[Theory]
+	[InlineData("hello world")]
+	[InlineData("a & echo INJECTED")]
+	[InlineData("a && echo INJECTED")]
+	[InlineData("a | echo INJECTED")]
+	[InlineData("a > injected.txt")]
+	[InlineData("(parens) and [brackets]")]
+	[InlineData("%PATH% stays literal")]
+	[InlineData("caret ^ and bang !")]
+	[InlineData("quote \" inside")]
+	[InlineData("it's got an apostrophe")]
+	[InlineData("$(whoami) `whoami`")]
+	[InlineData("C:\\Windows\\Path\\")]
+	[InlineData("")]
+	public async Task ExecuteAsync_ArgumentsWithShellMetacharacters_ReachTheChildVerbatim(string argument)
+	{
+		var scriptPath = WriteArgEchoScript();
+		try
+		{
+			var executor = CreateExecutor();
+			var step = CreateCommandStep(
+				command: "pwsh",
+				arguments: ["-NoProfile", "-File", scriptPath, argument, "second"]);
+			var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+			var result = await executor.ExecuteAsync(step, context);
+
+			result.Status.Should().Be(ExecutionStatus.Succeeded, result.ErrorMessage);
+			result.Content.Should().Contain($"<<{argument}>>", "the argument must arrive unchanged");
+			result.Content.Should().Contain("<<second>>", "arguments after a metacharacter-laden one must still be delivered");
+
+			// An executed `echo INJECTED` would print a bare "INJECTED" line; the literal text
+			// inside the echoed <<argument>> marker is expected and fine.
+			var bareLines = result.Content.Split('\n').Select(l => l.Trim());
+			bareLines.Should().NotContain("INJECTED", "no shell operator inside an argument may execute");
+			File.Exists("injected.txt").Should().BeFalse("a redirect inside an argument must not create a file");
+		}
+		finally
+		{
+			File.Delete(scriptPath);
+		}
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_TemplatedArgumentFromStepOutput_CannotInjectACommand()
+	{
+		// The realistic attack: an upstream step's output (LLM or external) is spliced into a
+		// Command step argument via a template expression.
+		var scriptPath = WriteArgEchoScript();
+		try
+		{
+			var executor = CreateExecutor();
+			var step = CreateCommandStep(
+				command: "pwsh",
+				arguments: ["-NoProfile", "-File", scriptPath, "{{review.output}}"],
+				dependsOn: ["review"]);
+			var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+			context.AddResult("review", ExecutionResult.Succeeded("LGTM & echo PWNED > pwned.txt"));
+
+			var result = await executor.ExecuteAsync(step, context);
+
+			result.Status.Should().Be(ExecutionStatus.Succeeded, result.ErrorMessage);
+			result.Content.Should().Contain("<<LGTM & echo PWNED > pwned.txt>>");
+			File.Exists("pwned.txt").Should().BeFalse();
+		}
+		finally
+		{
+			File.Delete(scriptPath);
+		}
+	}
+
+	private static string WriteArgEchoScript()
+	{
+		var path = Path.Combine(Path.GetTempPath(), $"orchestra-argecho-{Guid.NewGuid():N}.ps1");
+		File.WriteAllText(path, "foreach ($a in $args) { \"<<$a>>\" }\n");
+		return path;
+	}
+
+	#endregion
+
 	#region Environment Variables
 
 	[Fact]
@@ -583,17 +715,16 @@ public class CommandStepExecutorTests
 		("echo", [text]);
 
 	/// <summary>Returns a command that prints an environment variable.</summary>
+	/// <remarks>
+	/// Arguments are delivered to the child verbatim (no shell interpretation), so shell syntax
+	/// has to run inside a real interpreter. pwsh is present on every platform this suite runs on.
+	/// </remarks>
 	private static (string cmd, string[] args) GetEnvPrintCommand(string envVarName) =>
-		OperatingSystem.IsWindows()
-			? ("cmd", ["/c", $"echo %{envVarName}%"])
-			: ("printenv", [envVarName]);
+		("pwsh", ["-NoProfile", "-Command", $"Write-Output ([Environment]::GetEnvironmentVariable('{envVarName}'))"]);
 
-	/// <summary>Returns a command that writes to both stdout and stderr.
-	/// Uses shell syntax (&&, >&2) so wraps in an explicit shell on both platforms.</summary>
+	/// <summary>Returns a command that writes to both stdout and stderr.</summary>
 	private static (string cmd, string[] args) GetStdoutAndStderrCommand(string stdoutText, string stderrText) =>
-		OperatingSystem.IsWindows()
-			? ("cmd", ["/c", $"echo {stdoutText} && echo {stderrText} 1>&2"])
-			: ("sh", ["-c", $"echo {stdoutText} && echo {stderrText} >&2"]);
+		("pwsh", ["-NoProfile", "-Command", $"Write-Output '{stdoutText}'; [Console]::Error.WriteLine('{stderrText}')"]);
 
 	#endregion
 }

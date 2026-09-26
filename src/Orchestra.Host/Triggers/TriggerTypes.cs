@@ -64,6 +64,60 @@ public class TriggerRegistration
 		set => Volatile.Write(ref _runCount, value);
 	}
 	public int IncrementRunCount() => Interlocked.Increment(ref _runCount);
+
+	private int _activeExecutionCount;
+
+	/// <summary>
+	/// Number of executions this trigger currently has in flight. Unlike
+	/// <see cref="ActiveExecutionId"/> (which can only remember the most recent launch) this
+	/// counts every concurrent run, so a webhook's <c>maxConcurrent</c> can be enforced when
+	/// the limit is greater than one.
+	/// </summary>
+	public int ActiveExecutionCount => Volatile.Read(ref _activeExecutionCount);
+
+	/// <summary>
+	/// Atomically reserves an execution slot if fewer than <paramref name="limit"/> runs are in
+	/// flight. Returns <see langword="false"/> without changing state when the limit is reached.
+	/// Callers that receive <see langword="true"/> must pair it with <see cref="ReleaseExecutionSlot"/>.
+	/// </summary>
+	public bool TryReserveExecutionSlot(int limit)
+	{
+		while (true)
+		{
+			var current = Volatile.Read(ref _activeExecutionCount);
+			if (current >= limit)
+				return false;
+			if (Interlocked.CompareExchange(ref _activeExecutionCount, current + 1, current) == current)
+				return true;
+		}
+	}
+
+	/// <summary>
+	/// Reserves an execution slot unconditionally (no limit). Pair with <see cref="ReleaseExecutionSlot"/>.
+	/// </summary>
+	public void ReserveExecutionSlot() => Interlocked.Increment(ref _activeExecutionCount);
+
+	public void ReleaseExecutionSlot()
+	{
+		// Never go negative even if a caller releases without a matching reserve.
+		while (true)
+		{
+			var current = Volatile.Read(ref _activeExecutionCount);
+			if (current <= 0)
+				return;
+			if (Interlocked.CompareExchange(ref _activeExecutionCount, current - 1, current) == current)
+				return;
+		}
+	}
+
+	/// <summary>
+	/// Parameters to pass to the next iteration of a <see cref="LoopTriggerConfig"/> whose
+	/// <c>delaySeconds</c> armed <see cref="NextFireTime"/>. The immediate re-run path keeps the
+	/// merged parameters on the call stack; the delayed path has to stash them here so the
+	/// scheduler tick can hand them to the next run. Null means "use <see cref="Parameters"/>".
+	/// </summary>
+	public Dictionary<string, string>? PendingLoopParameters { get; set; }
+
 	public volatile string? LastError;
 	public volatile string? ActiveExecutionId;
 	public volatile string? LastExecutionId;

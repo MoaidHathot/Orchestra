@@ -18,6 +18,18 @@ function makeRecord(overrides: Partial<PendingInputRecord> = {}): PendingInputRe
 	};
 }
 
+type FetchArgs = [input: string, init?: RequestInit];
+
+/**
+ * Builds a fetch mock whose recorded calls are typed as `[url, init]`, so tests can
+ * destructure `mock.calls[0]` without an unchecked tuple cast.
+ */
+function mockFetch(response: Partial<Response> & { text?: () => Promise<string> }) {
+	const spy = vi.fn<(...args: FetchArgs) => Promise<Response>>(async () => response as Response);
+	globalThis.fetch = spy as unknown as typeof fetch;
+	return spy;
+}
+
 describe('WaitingInputsModal', () => {
 	beforeEach(() => {
 		localStorage.clear();
@@ -79,14 +91,13 @@ describe('WaitingInputsModal', () => {
 	});
 
 	it('submits the selected choice via POST /respond and notifies parent on success', async () => {
-		const fetchSpy = vi.fn(async () => ({
+		const fetchSpy = mockFetch({
 			ok: true,
 			status: 200,
 			headers: new Headers({ 'Content-Type': 'application/json' }),
 			async json() { return { accepted: true }; },
 			async text() { return '{"accepted":true}'; },
-		} as unknown as Response));
-		globalThis.fetch = fetchSpy as unknown as typeof fetch;
+		});
 
 		const onResponded = vi.fn();
 		render(
@@ -107,22 +118,21 @@ describe('WaitingInputsModal', () => {
 		expect(onResponded).toHaveBeenCalledWith('approval-deploy', 'run-abc123', 'review-deploy');
 
 		// Verify the request URL + body
-		const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+		const [url, init] = fetchSpy.mock.calls[0];
 		expect(url).toBe('/api/orchestrations/approval-deploy/runs/run-abc123/respond?step=review-deploy');
-		expect(init.method).toBe('POST');
-		const body = JSON.parse(init.body as string);
+		expect(init?.method).toBe('POST');
+		const body = JSON.parse(init?.body as string);
 		expect(body.choice).toBe('reject');
 	});
 
 	it('submits a free-form reply when no choices exist', async () => {
-		const fetchSpy = vi.fn(async () => ({
+		const fetchSpy = mockFetch({
 			ok: true,
 			status: 200,
 			headers: new Headers(),
 			async json() { return { accepted: true }; },
 			async text() { return ''; },
-		} as unknown as Response));
-		globalThis.fetch = fetchSpy as unknown as typeof fetch;
+		});
 
 		const onResponded = vi.fn();
 		render(
@@ -141,8 +151,8 @@ describe('WaitingInputsModal', () => {
 		fireEvent.click(screen.getByRole('button', { name: /Submit response/i }));
 
 		await waitFor(() => expect(onResponded).toHaveBeenCalledTimes(1));
-		const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-		const body = JSON.parse(init.body as string);
+		const [, init] = fetchSpy.mock.calls[0];
+		const body = JSON.parse(init?.body as string);
 		expect(body.reply).toBe('Looks good to me.');
 		expect(body.choice).toBeNull();
 	});
@@ -166,14 +176,13 @@ describe('WaitingInputsModal', () => {
 	});
 
 	it('persists respondedBy to localStorage on first submission', async () => {
-		const fetchSpy = vi.fn(async () => ({
+		const fetchSpy = mockFetch({
 			ok: true,
 			status: 200,
 			headers: new Headers(),
 			async json() { return { accepted: true }; },
 			async text() { return ''; },
-		} as unknown as Response));
-		globalThis.fetch = fetchSpy as unknown as typeof fetch;
+		});
 
 		render(
 			<WaitingInputsModal
@@ -191,20 +200,19 @@ describe('WaitingInputsModal', () => {
 		await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
 		expect(localStorage.getItem('orchestra.portal.respondedBy')).toBe('maya');
 
-		const [, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
-		const body = JSON.parse(init.body as string);
+		const [, init] = fetchSpy.mock.calls[0];
+		const body = JSON.parse(init?.body as string);
 		expect(body.respondedBy).toBe('maya');
 	});
 
 	it('drops the record when the server returns 404 (already resolved race)', async () => {
-		const fetchSpy = vi.fn(async () => ({
+		mockFetch({
 			ok: false,
 			status: 404,
 			headers: new Headers(),
 			async json() { return { error: 'No pending input record' }; },
 			async text() { return 'No pending input record for this run.'; },
-		} as unknown as Response));
-		globalThis.fetch = fetchSpy as unknown as typeof fetch;
+		});
 
 		const onResponded = vi.fn();
 		render(

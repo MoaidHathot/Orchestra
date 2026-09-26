@@ -6,7 +6,7 @@ version: "1.0.0"
 steps:
   - name: analyze-code
     type: Prompt
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     dependsOn: []
     parameters:
       - code
@@ -27,7 +27,7 @@ steps:
 
   - name: summarize-review
     type: Prompt
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     dependsOn:
       - analyze-code
     systemPrompt: |

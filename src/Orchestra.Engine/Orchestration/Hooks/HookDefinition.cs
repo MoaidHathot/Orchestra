@@ -169,27 +169,18 @@ public static class HookDefinitionResolver
 	}
 }
 
-public sealed class HookEventTypeJsonConverter : JsonConverter<HookEventType>
+/// <summary>
+/// Canonical wire names for <see cref="HookEventType"/>. Single source of truth shared by the
+/// JSON converter (parsing <c>on:</c>) and <c>HookRuntime</c> (the <c>eventType</c> field of the
+/// payload handed to the hook script), so adding an event to the enum cannot leave one of them
+/// behind: <see cref="ToWireName"/> throws for an unmapped member and
+/// <c>HookEventNamesTests</c> asserts every enum value round-trips.
+/// </summary>
+public static class HookEventNames
 {
-	public override HookEventType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+	public static string ToWireName(HookEventType eventType)
 	{
-		var value = reader.GetString();
-		return value?.Trim().ToLowerInvariant() switch
-		{
-			"orchestration.success" => HookEventType.OrchestrationSuccess,
-			"orchestration.failure" => HookEventType.OrchestrationFailure,
-			"orchestration.after" => HookEventType.OrchestrationAfter,
-			"step.success" => HookEventType.StepSuccess,
-			"step.failure" => HookEventType.StepFailure,
-			"step.after" => HookEventType.StepAfter,
-			"step.awaitinginput" or "step.awaiting-input" or "step.awaiting_input" => HookEventType.StepAwaitingInput,
-			_ => throw new JsonException($"Unknown hook event '{value}'.")
-		};
-	}
-
-	public override void Write(Utf8JsonWriter writer, HookEventType value, JsonSerializerOptions options)
-	{
-		writer.WriteStringValue(value switch
+		return eventType switch
 		{
 			HookEventType.OrchestrationSuccess => "orchestration.success",
 			HookEventType.OrchestrationFailure => "orchestration.failure",
@@ -198,8 +189,53 @@ public sealed class HookEventTypeJsonConverter : JsonConverter<HookEventType>
 			HookEventType.StepFailure => "step.failure",
 			HookEventType.StepAfter => "step.after",
 			HookEventType.StepAwaitingInput => "step.awaitingInput",
-			_ => throw new JsonException($"Unknown hook event '{value}'.")
-		});
+			_ => throw new ArgumentOutOfRangeException(nameof(eventType), eventType, $"Unknown hook event '{eventType}'.")
+		};
+	}
+
+	public static bool TryParse(string? value, out HookEventType eventType)
+	{
+		switch (value?.Trim().ToLowerInvariant())
+		{
+			case "orchestration.success": eventType = HookEventType.OrchestrationSuccess; return true;
+			case "orchestration.failure": eventType = HookEventType.OrchestrationFailure; return true;
+			case "orchestration.after": eventType = HookEventType.OrchestrationAfter; return true;
+			case "step.success": eventType = HookEventType.StepSuccess; return true;
+			case "step.failure": eventType = HookEventType.StepFailure; return true;
+			case "step.after": eventType = HookEventType.StepAfter; return true;
+			case "step.awaitinginput":
+			case "step.awaiting-input":
+			case "step.awaiting_input":
+				eventType = HookEventType.StepAwaitingInput; return true;
+			default:
+				eventType = default; return false;
+		}
+	}
+}
+
+public sealed class HookEventTypeJsonConverter : JsonConverter<HookEventType>
+{
+	public override HookEventType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+	{
+		var value = reader.GetString();
+		if (!HookEventNames.TryParse(value, out var eventType))
+			throw new JsonException($"Unknown hook event '{value}'.");
+		return eventType;
+	}
+
+	public override void Write(Utf8JsonWriter writer, HookEventType value, JsonSerializerOptions options)
+	{
+		string name;
+		try
+		{
+			name = HookEventNames.ToWireName(value);
+		}
+		catch (ArgumentOutOfRangeException)
+		{
+			throw new JsonException($"Unknown hook event '{value}'.");
+		}
+
+		writer.WriteStringValue(name);
 	}
 }
 

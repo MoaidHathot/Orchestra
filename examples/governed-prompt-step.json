@@ -17,7 +17,7 @@
       "systemPrompt": "You are a read-only code reviewer. Inspect files under the working directory and answer the question. Do not run shell commands, fetch URLs, or modify files. If you need a decision from the operator, ask.",
       "userPrompt": "{{param.question}}",
       "parameters": ["question"],
-      "model": "claude-opus-4.6",
+      "model": "claude-opus-4.8",
       "workingDirectory": "/work/repo",
       "humanInput": true,
       "permissionPolicy": {

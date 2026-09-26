@@ -342,33 +342,43 @@ public partial class TriggerManager : BackgroundService
 		if (!reg.Config.Enabled || reg.Status == TriggerStatus.Paused)
 			return (true, null, null);
 
-		// Check concurrent execution limit
-		if (reg.ActiveExecutionId != null)
+		// Enforce the concurrent-execution limit with a counted slot rather than the single
+		// ActiveExecutionId (which only remembers the most recent launch and therefore cannot
+		// express maxConcurrent > 1). The slot is held for the lifetime of the run.
+		var maxConcurrent = Math.Max(1, webhookConfig.MaxConcurrent);
+		if (!reg.TryReserveExecutionSlot(maxConcurrent))
 		{
-			if (webhookConfig.MaxConcurrent <= 1)
-			{
+			if (maxConcurrent == 1)
 				LogWebhookSkippedConcurrent(id);
-				return (true, null, null);
+			else
+				LogWebhookSkippedMaxConcurrent(id, reg.ActiveExecutionCount, maxConcurrent);
+			return (true, null, null);
+		}
+
+		try
+		{
+			// Merge webhook parameters with configured parameters
+			var mergedParams = new Dictionary<string, string>(reg.Parameters ?? []);
+			if (webhookParameters != null)
+			{
+				foreach (var kv in webhookParameters)
+					mergedParams[kv.Key] = kv.Value;
 			}
-		}
 
-		// Merge webhook parameters with configured parameters
-		var mergedParams = new Dictionary<string, string>(reg.Parameters ?? []);
-		if (webhookParameters != null)
+			// If synchronous response is requested, await and capture the result
+			if (webhookConfig.Response is { WaitForResult: true })
+			{
+				var (executionId, result) = await ExecuteOrchestrationWithResultAsync(reg, mergedParams, slotReserved: true);
+				return (true, executionId, result);
+			}
+
+			var execId = await ExecuteOrchestrationAsync(reg, mergedParams, slotReserved: true);
+			return (true, execId, null);
+		}
+		finally
 		{
-			foreach (var kv in webhookParameters)
-				mergedParams[kv.Key] = kv.Value;
+			reg.ReleaseExecutionSlot();
 		}
-
-		// If synchronous response is requested, await and capture the result
-		if (webhookConfig.Response is { WaitForResult: true })
-		{
-			var (executionId, result) = await ExecuteOrchestrationWithResultAsync(reg, mergedParams);
-			return (true, executionId, result);
-		}
-
-		var execId = await ExecuteOrchestrationAsync(reg, mergedParams);
-		return (true, execId, null);
 	}
 
 	/// <summary>
@@ -916,7 +926,11 @@ public partial class TriggerManager : BackgroundService
 		}
 	}
 
-	private async Task CheckSchedulerTriggersAsync(CancellationToken stoppingToken)
+	/// <summary>
+	/// One scheduler tick: fires every due Scheduler and delayed-Loop trigger. Invoked once a
+	/// second by the background loop; <c>internal</c> so tests can drive a tick deterministically.
+	/// </summary>
+	internal async Task CheckSchedulerTriggersAsync(CancellationToken stoppingToken)
 	{
 		var now = DateTime.UtcNow;
 
@@ -947,6 +961,42 @@ public partial class TriggerManager : BackgroundService
 					TrackBackgroundTask(ExecuteAndHandleCompletionAsync(reg, schedulerConfig));
 				}
 			}
+			else if (reg.Config is LoopTriggerConfig)
+			{
+				// A loop with delaySeconds > 0 re-arms itself by setting Waiting + NextFireTime in
+				// HandlePostExecutionTriggerStatus. This is the only consumer of that arm: without
+				// it the loop silently stops after its first iteration.
+				if (reg.NextFireTime.HasValue && now >= reg.NextFireTime.Value)
+				{
+					if (!reg.TryTransitionStatus(TriggerStatus.Waiting, TriggerStatus.Running))
+						continue;
+
+					reg.NextFireTime = null;
+					var loopParameters = reg.PendingLoopParameters ?? reg.Parameters;
+					reg.PendingLoopParameters = null;
+					LogLoopTriggerDelayedRefire(reg.Id, reg.RunCount + 1);
+					TrackBackgroundTask(ExecuteLoopIterationAsync(reg, loopParameters));
+				}
+			}
+		}
+	}
+
+	/// <summary>
+	/// Runs one delayed loop iteration. <see cref="ExecuteOrchestrationAsync"/> already calls
+	/// <see cref="HandlePostExecutionTriggerStatus"/>, which re-arms the loop (or completes /
+	/// pauses it), so nothing further is needed here beyond error containment.
+	/// </summary>
+	private async Task ExecuteLoopIterationAsync(TriggerRegistration reg, Dictionary<string, string>? parameters)
+	{
+		try
+		{
+			await ExecuteOrchestrationAsync(reg, parameters);
+		}
+		catch (Exception ex)
+		{
+			reg.Status = TriggerStatus.Error;
+			reg.LastError = ex.Message;
+			LogTriggerExecutionFailed(ex, reg.Id);
 		}
 	}
 
@@ -985,9 +1035,10 @@ public partial class TriggerManager : BackgroundService
 
 	private async Task<string?> ExecuteOrchestrationAsync(
 		TriggerRegistration reg,
-		Dictionary<string, string>? parameters)
+		Dictionary<string, string>? parameters,
+		bool slotReserved = false)
 	{
-		var (executionId, result) = await ExecuteOrchestrationCoreAsync(reg, parameters);
+		var (executionId, result) = await ExecuteOrchestrationCoreAsync(reg, parameters, slotReserved);
 		if (executionId is null)
 			return null;
 
@@ -1001,9 +1052,10 @@ public partial class TriggerManager : BackgroundService
 	/// </summary>
 	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationWithResultAsync(
 		TriggerRegistration reg,
-		Dictionary<string, string>? parameters)
+		Dictionary<string, string>? parameters,
+		bool slotReserved = false)
 	{
-		var (executionId, result) = await ExecuteOrchestrationCoreAsync(reg, parameters);
+		var (executionId, result) = await ExecuteOrchestrationCoreAsync(reg, parameters, slotReserved);
 		if (executionId is null)
 			return (null, null);
 
@@ -1017,7 +1069,32 @@ public partial class TriggerManager : BackgroundService
 	/// delegates execution to <see cref="IChildOrchestrationLauncher"/>, persists trigger-side
 	/// history, and cleans up trigger bookkeeping.
 	/// </summary>
+	/// <param name="slotReserved">
+	/// <see langword="true"/> when the caller already reserved an execution slot on
+	/// <paramref name="reg"/> (webhook admission) and will release it; otherwise this method
+	/// holds a slot for the duration of the run so <see cref="TriggerRegistration.ActiveExecutionCount"/>
+	/// reflects every in-flight execution regardless of how it was started.
+	/// </param>
 	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationCoreAsync(
+		TriggerRegistration reg,
+		Dictionary<string, string>? parameters,
+		bool slotReserved = false)
+	{
+		if (!slotReserved)
+			reg.ReserveExecutionSlot();
+
+		try
+		{
+			return await ExecuteOrchestrationCoreUnguardedAsync(reg, parameters);
+		}
+		finally
+		{
+			if (!slotReserved)
+				reg.ReleaseExecutionSlot();
+		}
+	}
+
+	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationCoreUnguardedAsync(
 		TriggerRegistration reg,
 		Dictionary<string, string>? parameters)
 	{
@@ -1048,7 +1125,7 @@ public partial class TriggerManager : BackgroundService
 					var agent = await _providerRegistry.Resolve(null)
 						.BuildAgentAsync(new AgentBuildConfig
 						{
-							Model = capturedReg.Config.InputHandlerModel ?? _defaultModel ?? "claude-opus-4.6",
+							Model = capturedReg.Config.InputHandlerModel ?? _defaultModel ?? ModelDefaults.Model,
 							SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
 							Mcps = [],
 						}, ct);
@@ -1198,8 +1275,11 @@ public partial class TriggerManager : BackgroundService
 			{
 				if (loopConfig.DelaySeconds > 0)
 				{
-					reg.Status = TriggerStatus.Waiting;
+					// Arm the next iteration. CheckSchedulerTriggersAsync fires it once
+					// NextFireTime is due, passing PendingLoopParameters to the run.
+					reg.PendingLoopParameters = parameters;
 					reg.NextFireTime = DateTime.UtcNow.AddSeconds(loopConfig.DelaySeconds);
+					reg.Status = TriggerStatus.Waiting;
 				}
 				else
 				{
@@ -1590,6 +1670,12 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Auto-resuming loop trigger '{TriggerId}' for orchestration '{Path}' (prior runs={RunCount}, lastFire={LastFire})")]
 	private partial void LogLoopTriggerAutoResume(string triggerId, string path, int runCount, DateTime? lastFire);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Loop trigger '{TriggerId}' delay elapsed; starting iteration #{NextRun}")]
+	private partial void LogLoopTriggerDelayedRefire(string triggerId, int nextRun);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Webhook trigger '{TriggerId}' has {ActiveCount} active executions (maxConcurrent={MaxConcurrent}). Skipping.")]
+	private partial void LogWebhookSkippedMaxConcurrent(string triggerId, int activeCount, int maxConcurrent);
 
 	[LoggerMessage(Level = LogLevel.Error, Message = "Trigger '{TriggerId}' execution failed")]
 	private partial void LogTriggerExecutionFailed(Exception ex, string triggerId);

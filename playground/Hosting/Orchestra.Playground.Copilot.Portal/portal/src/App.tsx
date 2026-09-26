@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './App.css';
 import { api } from './api';
 import { Icons } from './icons';
+import { DEFAULT_POLLING, setServerConfig, type ServerConfig } from './serverConfig';
 import { activeOrchestrationMatchesSearch, formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch, buildRestoredStepStatusUpdates } from './utils';
 import type { RunOrigin } from './runFilters';
 import {
@@ -273,12 +274,7 @@ function App(): React.JSX.Element {
   const runContextsRef = useRef<Map<string, RunContext>>(new Map());
 
   // Polling config from server (loaded once on init)
-  const [pollingConfig, setPollingConfig] = useState({
-    activeExecutionsMs: 1000,
-    orchestrationsMs: 5000,
-    historyMs: 5000,
-    serverStatusMs: 5000,
-  });
+  const [pollingConfig, setPollingConfig] = useState<ServerConfig['polling']>(DEFAULT_POLLING);
 
   // Modal states
   const [viewerModal, setViewerModal] = useState<ViewerModalState>({ open: false, orchestration: null });
@@ -430,13 +426,14 @@ function App(): React.JSX.Element {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  // Load polling config from server (once on init)
+  // Load server config (polling intervals, default model) once on init
   useEffect(() => {
     (async () => {
       try {
-        const config = await api.get<{ polling: typeof pollingConfig }>('/api/config');
+        const config = await api.get<ServerConfig>('/api/config');
+        setServerConfig(config);
         if (config?.polling) {
-          setPollingConfig(config.polling);
+          setPollingConfig({ ...DEFAULT_POLLING, ...config.polling });
         }
       } catch (err) {
         console.error('Failed to load config, using defaults:', err);

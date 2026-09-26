@@ -132,7 +132,7 @@ public partial class OrchestrationExecutor
 				serverUrl: _serverUrl);
 			_stepExecutorRegistry = new StepExecutorRegistry()
 				.Register(new PromptStepExecutor(promptExecutor))
-				.Register(new HttpStepExecutor(new System.Net.Http.HttpClient(), reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))
+				.Register(new HttpStepExecutor(reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))
 				.Register(new TransformStepExecutor(loggerFactory.CreateLogger<TransformStepExecutor>(), reporter))
 				.Register(new CommandStepExecutor(reporter, loggerFactory.CreateLogger<CommandStepExecutor>()))
 				.Register(new ScriptStepExecutor(reporter, loggerFactory.CreateLogger<ScriptStepExecutor>()))
@@ -1309,8 +1309,7 @@ public partial class OrchestrationExecutor
 		}
 
 		// Check if the failure was a timeout and retryOnTimeout is disabled
-		var isTimeout = result.ErrorMessage?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true;
-		if (isTimeout && !retryPolicy.RetryOnTimeout)
+		if (IsTimeoutFailure(result) && !retryPolicy.RetryOnTimeout)
 			return result;
 
 		// Collect retry history
@@ -1368,8 +1367,7 @@ public partial class OrchestrationExecutor
 			}
 
 			// Check timeout condition for subsequent retries
-			isTimeout = result.ErrorMessage?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true;
-			if (isTimeout && !retryPolicy.RetryOnTimeout)
+			if (IsTimeoutFailure(result) && !retryPolicy.RetryOnTimeout)
 			{
 				LogStepRetryAbortedTimeout(step.Name, attempt);
 				break;
@@ -1401,6 +1399,23 @@ public partial class OrchestrationExecutor
 			RetryHistory = retryHistory,
 			ErrorCategory = result.ErrorCategory,
 		};
+	}
+
+	/// <summary>
+	/// Whether a failed result represents a timeout for the purposes of
+	/// <see cref="RetryPolicy.RetryOnTimeout"/>. A specific <see cref="StepErrorCategory"/> is
+	/// authoritative — e.g. an <see cref="StepErrorCategory.HttpError"/> whose body happens to
+	/// say "gateway timed out" is not a step timeout. The message sniff only applies to
+	/// uncategorised results (null or <see cref="StepErrorCategory.Unknown"/>), as a fallback
+	/// for third-party <see cref="IStepExecutor"/> plugins that report a timeout without
+	/// categorising it.
+	/// </summary>
+	internal static bool IsTimeoutFailure(ExecutionResult result)
+	{
+		if (result.ErrorCategory is { } category && category != StepErrorCategory.Unknown)
+			return category == StepErrorCategory.Timeout;
+
+		return result.ErrorMessage?.Contains("timed out", StringComparison.OrdinalIgnoreCase) == true;
 	}
 
 	private async Task<ExecutionResult> ExecuteOrSkipStepAsync(

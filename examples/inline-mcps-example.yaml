@@ -45,7 +45,7 @@ steps:
     # Bind the web-fetch MCP to this step — the model can use its tools.
     mcps:
       - web-fetch
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     systemPrompt: |
       You are a research assistant with web access via the fetch tool.
       Your job is to find authoritative sources on a given topic.
@@ -70,7 +70,7 @@ steps:
     # Bind the Orchestra remote MCP to discover related orchestrations.
     mcps:
       - orchestra
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     systemPrompt: |
       You are a coordination assistant. Use the Orchestra MCP tools to check
       if there are any existing orchestrations that have already produced
@@ -92,7 +92,7 @@ steps:
     mcps:
       - web-fetch
       - filesystem
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     reasoningLevel: high
     systemPrompt: |
       You are a senior research coordinator managing a team of specialists.

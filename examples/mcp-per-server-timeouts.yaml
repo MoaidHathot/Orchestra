@@ -68,7 +68,7 @@ steps:
     # broken DB connections quickly without dragging out the run.
     mcps:
       - db
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     systemPrompt: |
       You are a query classifier. Use the database MCP to look up which
       analyzer should handle the user's query and return a single keyword.
@@ -89,7 +89,7 @@ steps:
     mcps:
       - code-analyzer
       - filesystem
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     reasoningLevel: high
     systemPrompt: |
       You are a senior code analyst. Run the analyzer tool against the
@@ -117,7 +117,7 @@ steps:
     # enough to complete.
     mcps:
       - orchestra
-    model: claude-opus-4.6
+    model: claude-opus-4.8
     timeoutSeconds: 8400  # 2h 20m — generous step cap
     systemPrompt: |
       Spawn a follow-up orchestration via the Orchestra MCP based on the
