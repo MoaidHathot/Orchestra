@@ -28,4 +28,12 @@ public sealed record HostAgentDefaults
 	/// Reasoning effort applied to Prompt steps when neither the step nor the orchestration sets one.
 	/// </summary>
 	public ReasoningLevel? ReasoningLevel { get; init; }
+
+	/// <summary>
+	/// Upper bound on steps executing at the same time within one run, applied when the
+	/// orchestration does not set its own <c>maxConcurrency</c>. Null means unbounded (every
+	/// ready step starts immediately). Approval steps and async Orchestration steps do not
+	/// occupy a slot. Sourced from <c>defaultMaxConcurrency</c> in <c>orchestra.json</c>.
+	/// </summary>
+	public int? MaxConcurrency { get; init; }
 }

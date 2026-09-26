@@ -15,16 +15,19 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 
 	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
 	{
-		var stepName = root.GetProperty("name").GetString()!;
+		var baseFields = StepBaseFields.Parse(root);
+		var stepName = baseFields.Name;
 
 		return new PromptOrchestrationStep
 		{
 			Name = stepName,
 			Type = OrchestrationStepType.Prompt,
-			DependsOn = root.TryGetProperty("dependsOn", out var deps)
-				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
+			DependsOn = baseFields.DependsOn,
+			Enabled = baseFields.Enabled,
+			When = baseFields.When,
+			TimeoutSeconds = baseFields.TimeoutSeconds,
+			Retry = baseFields.Retry,
+			Parameters = StepBaseFields.ParseParameterNames(root),
 			SystemPrompt = ResolveRequiredPrompt(root, "systemPrompt", stepName, context),
 			UserPrompt = ResolveRequiredPrompt(root, "userPrompt", stepName, context),
 			InputHandlerPrompt = ResolveOptionalPrompt(root, "inputHandlerPrompt", stepName, context),
@@ -56,15 +59,6 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			SystemPromptMode = root.TryGetProperty("systemPromptMode", out var spm)
 				? Enum.Parse<SystemPromptMode>(spm.GetString()!, ignoreCase: true)
 				: null,
-			TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
-				? ts.GetInt32()
-				: null,
-			Retry = root.TryGetProperty("retry", out var retry)
-				? DeserializeRetryPolicy(retry)
-				: null,
-			Parameters = root.TryGetProperty("parameters", out var parameters)
-				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
 			Loop = root.TryGetProperty("loop", out var loop)
 				? DeserializeLoopConfig(loop)
 				: null,
@@ -368,11 +362,25 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 
 	internal static RetryPolicy DeserializeRetryPolicy(JsonElement element)
 	{
+		var maxDelay = element.TryGetProperty("maxDelaySeconds", out var md) && md.ValueKind == JsonValueKind.Number
+			? md.GetDouble()
+			: (double?)null;
+		var jitter = element.TryGetProperty("jitterSeconds", out var js) && js.ValueKind == JsonValueKind.Number
+			? js.GetDouble()
+			: 0.0;
+
+		if (maxDelay is < 0)
+			throw new JsonException($"retry.maxDelaySeconds must be 0 or greater, got {maxDelay}.");
+		if (jitter < 0)
+			throw new JsonException($"retry.jitterSeconds must be 0 or greater, got {jitter}.");
+
 		return new RetryPolicy
 		{
 			MaxRetries = element.TryGetProperty("maxRetries", out var mr) ? mr.GetInt32() : 3,
 			BackoffSeconds = element.TryGetProperty("backoffSeconds", out var bs) ? bs.GetDouble() : 1.0,
 			BackoffMultiplier = element.TryGetProperty("backoffMultiplier", out var bm) ? bm.GetDouble() : 2.0,
+			MaxDelaySeconds = maxDelay,
+			JitterSeconds = jitter,
 			RetryOnTimeout = !element.TryGetProperty("retryOnTimeout", out var rot) || rot.GetBoolean(),
 		};
 	}

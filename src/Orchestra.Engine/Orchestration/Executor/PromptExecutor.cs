@@ -162,21 +162,14 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private static ExecutionResult SynthesizeResultFromCapturedOverride(ExecutionResult failedResult)
 	{
 		var status = failedResult.CapturedStatusOverride!.Value;
-		return new ExecutionResult
+		return failedResult with
 		{
 			Content = string.Empty,
 			Status = status,
+			// The step is no longer Failed: drop the transport error, keep prompt/model/usage/trace.
 			ErrorMessage = null,
-			RawDependencyOutputs = failedResult.RawDependencyOutputs,
-			PromptSent = failedResult.PromptSent,
-			ActualModel = failedResult.ActualModel,
-			SelectedModel = failedResult.SelectedModel,
-			RequestedModelInfo = failedResult.RequestedModelInfo,
-			SelectedModelInfo = failedResult.SelectedModelInfo,
-			ActualModelInfo = failedResult.ActualModelInfo,
-			Trace = failedResult.Trace,
-			SavedFiles = failedResult.SavedFiles,
-			RetryHistory = failedResult.RetryHistory,
+			ErrorCategory = null,
+			ErrorDetails = null,
 			CapturedStatusOverride = status,
 		};
 	}
@@ -796,32 +789,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			if (!engineToolCtx.HasStatusOverride)
 				return failedResult;
 
-			return new ExecutionResult
-			{
-				Content = failedResult.Content,
-				Status = failedResult.Status,
-				ErrorMessage = failedResult.ErrorMessage,
-				RawContent = failedResult.RawContent,
-				RawDependencyOutputs = failedResult.RawDependencyOutputs,
-				PromptSent = failedResult.PromptSent,
-				ActualModel = failedResult.ActualModel,
-				SelectedModel = failedResult.SelectedModel,
-				RequestedModelInfo = failedResult.RequestedModelInfo,
-				SelectedModelInfo = failedResult.SelectedModelInfo,
-				ActualModelInfo = failedResult.ActualModelInfo,
-				Usage = failedResult.Usage,
-				Trace = failedResult.Trace,
-				SavedFiles = failedResult.SavedFiles,
-				RetryHistory = failedResult.RetryHistory,
-				ErrorCategory = failedResult.ErrorCategory,
-				ErrorDetails = failedResult.ErrorDetails,
-				CapturedStatusOverride = engineToolCtx.StatusOverride,
-				ChildOrchestrationInfo = failedResult.ChildOrchestrationInfo,
-				OrchestrationCompleteRequested = failedResult.OrchestrationCompleteRequested,
-				OrchestrationCompleteStatus = failedResult.OrchestrationCompleteStatus,
-				OrchestrationCompleteStepName = failedResult.OrchestrationCompleteStepName,
-				OrchestrationCompleteReason = failedResult.OrchestrationCompleteReason,
-			};
+			return failedResult with { CapturedStatusOverride = engineToolCtx.StatusOverride };
 		}
 	}
 
@@ -1153,24 +1121,9 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		if (!ctx.OrchestrationCompleteRequested)
 			return WithSavedFiles(result, savedFiles, capturedOverride);
 
-		return new ExecutionResult
+		return result with
 		{
-			Content = result.Content,
-			Status = result.Status,
-			ErrorMessage = result.ErrorMessage,
-			RawContent = result.RawContent,
-			RawDependencyOutputs = result.RawDependencyOutputs,
-			PromptSent = result.PromptSent,
-			ActualModel = result.ActualModel,
-			SelectedModel = result.SelectedModel,
-			RequestedModelInfo = result.RequestedModelInfo,
-			SelectedModelInfo = result.SelectedModelInfo,
-			ActualModelInfo = result.ActualModelInfo,
-			Usage = result.Usage,
-			Trace = result.Trace,
 			SavedFiles = savedFiles,
-			RetryHistory = result.RetryHistory,
-			ErrorCategory = result.ErrorCategory,
 			CapturedStatusOverride = capturedOverride,
 			OrchestrationCompleteRequested = true,
 			OrchestrationCompleteStatus = ctx.OrchestrationCompleteStatus,
@@ -1179,30 +1132,10 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		};
 	}
 
-	private static ExecutionResult WithSavedFiles(ExecutionResult result, string[] savedFiles, ExecutionStatus? capturedStatusOverride = null) => new()
+	private static ExecutionResult WithSavedFiles(ExecutionResult result, string[] savedFiles, ExecutionStatus? capturedStatusOverride = null) => result with
 	{
-		Content = result.Content,
-		Status = result.Status,
-		ErrorMessage = result.ErrorMessage,
-		RawContent = result.RawContent,
-		RawDependencyOutputs = result.RawDependencyOutputs,
-		PromptSent = result.PromptSent,
-		ActualModel = result.ActualModel,
-		SelectedModel = result.SelectedModel,
-		RequestedModelInfo = result.RequestedModelInfo,
-		SelectedModelInfo = result.SelectedModelInfo,
-		ActualModelInfo = result.ActualModelInfo,
-		Usage = result.Usage,
-		Trace = result.Trace,
 		SavedFiles = savedFiles,
-		RetryHistory = result.RetryHistory,
-		ErrorCategory = result.ErrorCategory,
-		ErrorDetails = result.ErrorDetails,
 		CapturedStatusOverride = capturedStatusOverride ?? result.CapturedStatusOverride,
-		OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
-		OrchestrationCompleteStatus = result.OrchestrationCompleteStatus,
-		OrchestrationCompleteReason = result.OrchestrationCompleteReason,
-		OrchestrationCompleteStepName = result.OrchestrationCompleteStepName,
 	};
 
 	/// <summary>

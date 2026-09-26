@@ -694,9 +694,9 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 	private async Task<string> RegisterOrchestrationWithDisabledStepAsync()
 	{
 		var name = $"Disabled Step Test {Guid.NewGuid():N}";
-		var json = $$"""
+		var json = $$$"""
 		{
-			"name": "{{name}}",
+			"name": "{{{name}}}",
 			"description": "Test orchestration with a disabled step",
 			"steps": [
 				{
@@ -715,6 +715,13 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 					"userPrompt": "Hello",
 					"model": "claude-opus-4.5",
 					"enabled": false
+				},
+				{
+					"name": "conditional-step",
+					"type": "Transform",
+					"dependsOn": ["enabled-step"],
+					"when": "{{enabled-step.status}} == 'succeeded'",
+					"template": "gated"
 				}
 			]
 		}
@@ -725,6 +732,29 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 		response.StatusCode.Should().Be(HttpStatusCode.OK);
 		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
 		return result.GetProperty("id").GetString()!;
+	}
+
+	[Fact]
+	public async Task Contract_GetOrchestrations_StepWhenIsExposed()
+	{
+		// StepDetailsPanel renders `when` (mirrored as the older `condition` field) so users can
+		// see why a step may be skipped without opening the source file.
+		var id = await RegisterOrchestrationWithDisabledStepAsync();
+
+		var response = await _client.GetAsync($"/api/orchestrations/{id}");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+
+		var conditional = result.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "conditional-step");
+		conditional.GetProperty("when").GetString().Should().Be("{{enabled-step.status}} == 'succeeded'");
+		conditional.GetProperty("condition").GetString().Should().Be("{{enabled-step.status}} == 'succeeded'");
+
+		var plain = result.GetProperty("steps").EnumerateArray()
+			.First(s => s.GetProperty("name").GetString() == "enabled-step");
+		// The host's JSON options drop null members, so a step without a condition has no key.
+		if (plain.TryGetProperty("when", out var when))
+			when.ValueKind.Should().Be(JsonValueKind.Null);
 	}
 
 	[Fact]

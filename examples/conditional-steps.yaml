@@ -1,0 +1,73 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: conditional-steps
+description: >
+  Conditional execution with `when`: an if/else pair of branches gated on a decision,
+  a join step that depends on both branches, and an on-failure handler that runs only
+  when its dependency did not succeed. Deterministic (Transform/Script only) so it runs
+  with no agent or credentials.
+defaultModel: claude-opus-4.8
+
+inputs:
+  environment:
+    type: string
+    required: false
+    default: staging
+    description: Target environment. "prod" takes the production branch, anything else the staging branch.
+  breakTests:
+    type: string
+    required: false
+    default: "no"
+    description: Set to "yes" to make the run-tests step fail and exercise the on-failure handler.
+
+steps:
+  # 1. A decision that downstream conditions read through {{decide.output}}.
+  - name: decide
+    type: Transform
+    template: "{{param.environment}}"
+
+  # 2. if / else: exactly one of these runs. The other is recorded as Skipped with
+  #    skipKind "Condition", which does NOT block the join step below.
+  - name: deploy-prod
+    type: Transform
+    dependsOn: [decide]
+    when: "{{decide.output}} == 'prod'"
+    template: "Deployed to PRODUCTION (change window checked)."
+
+  - name: deploy-staging
+    type: Transform
+    dependsOn: [decide]
+    when: "{{decide.output}} != 'prod'"
+    template: "Deployed to staging."
+
+  # 3. Join: depends on both branches; the skipped branch resolves to an empty string.
+  - name: announce
+    type: Transform
+    dependsOn: [deploy-prod, deploy-staging]
+    template: "{{deploy-prod.output}}{{deploy-staging.output}}"
+
+  # 4. A step that can fail on demand...
+  - name: run-tests
+    type: Script
+    dependsOn: [announce]
+    shell: pwsh
+    script: |
+      if ('{{param.breakTests}}' -eq 'yes') { Write-Error 'integration suite failed: 3 tests red'; exit 1 }
+      Write-Output 'all tests green'
+
+  # 5. ...with an on-failure handler. `failure()` reasons about outcomes, so this step's
+  #    condition is evaluated even though its dependency failed (normally a failed
+  #    dependency skips its dependents before any condition is consulted).
+  - name: on-test-failure
+    type: Transform
+    dependsOn: [run-tests]
+    when: "failure()"
+    template: |
+      Tests failed for {{param.environment}}: {{run-tests.errorMessage}}
+      Status was: {{run-tests.status}}
+
+  # 6. And a success-only follow-up. `success()` is the complement of failure().
+  - name: publish-report
+    type: Transform
+    dependsOn: [run-tests]
+    when: "success()"
+    template: "Report published: {{run-tests.output}}"

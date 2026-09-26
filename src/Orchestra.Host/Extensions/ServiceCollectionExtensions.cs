@@ -336,7 +336,8 @@ public static class ServiceCollectionExtensions
 				globalHooks: opts.Hooks,
 				pendingInputStore: sp.GetRequiredService<IPendingInputStore>(),
 				humanInputWaiter: sp.GetRequiredService<IHumanInputWaiter>(),
-				defaultReasoningLevel: opts.DefaultReasoningLevel);
+				defaultReasoningLevel: opts.DefaultReasoningLevel,
+				defaultMaxConcurrency: opts.DefaultMaxConcurrency);
 
 			// Apply shutdown timeout from configuration
 			triggerManager.ShutdownTimeout = TimeSpan.FromSeconds(opts.ShutdownTimeoutSeconds);

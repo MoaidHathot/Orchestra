@@ -132,6 +132,7 @@ so a typo'd key is flagged in the editor rather than silently ignored at runtime
 | `provider` / `defaultProvider` | `copilot` | Default agent provider for Prompt steps. |
 | `defaultModel` | none | Default model for Prompt steps that set no `model` and belong to an orchestration with no `defaultModel`. Also used for trigger input-handler calls. |
 | `defaultReasoningLevel` | none (provider default) | Default reasoning effort (`low` / `medium` / `high` / `xhigh` / `max`) for Prompt steps that set no `reasoningLevel` and belong to an orchestration with no `defaultReasoningLevel`. `xhigh`/`max` are only honoured by models that advertise them. |
+| `defaultMaxConcurrency` | none (unbounded) | Cap on how many steps of a single run execute at the same time, for orchestrations that set no `maxConcurrency`. Approval steps and async Orchestration steps never occupy a slot. Values below 1 are ignored with a startup warning. |
 | `enableScheduler` | `true` | Set `false` for an API-only host that never fires triggers itself. |
 | `logLevel` | `Information` | Overrides `Logging:LogLevel:Default` from `appsettings.json`. |
 | `retention` | unlimited | Run-history limits. Favorited runs are always exempt. |

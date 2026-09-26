@@ -75,6 +75,15 @@ public class OrchestrationExecutionContext
 	public int? DefaultStepTimeoutSeconds { get; init; }
 
 	/// <summary>
+	/// Bounds how many steps execute at once within this run (the orchestration's
+	/// <c>maxConcurrency</c>, else the host default). Null = unbounded. A slot is taken right
+	/// before a step's executor starts and released when it returns, so skips never consume
+	/// one and retry back-off does not hold one. Approval steps and async Orchestration steps
+	/// bypass the limiter because they are waits, not work.
+	/// </summary>
+	public SemaphoreSlim? StepConcurrencyLimiter { get; init; }
+
+	/// <summary>
 	/// Default set of opt-in engine tool names enabled for every Prompt step that does
 	/// not specify its own <see cref="PromptOrchestrationStep.EnableTools"/>. Wired from
 	/// <see cref="Orchestration.DefaultEnableTools"/>.
@@ -172,41 +181,63 @@ public class OrchestrationExecutionContext
 
 	public IReadOnlyDictionary<string, ExecutionResult> Results => _results;
 
+	/// <summary>
+	/// Whether any dependency ended in a state that blocks this step. A dependency skipped by
+	/// its own <c>when:</c> condition does <em>not</em> block (see
+	/// <see cref="ExecutionResult.BlocksDependents"/>), which is what lets if/else branches join.
+	/// </summary>
 	public bool HasAnyDependencyFailed(string[] dependsOn)
 	{
 		return dependsOn.Any(dep =>
-			_results.TryGetValue(dep, out var result) &&
-			result.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped or ExecutionStatus.Cancelled or ExecutionStatus.NoAction);
+			_results.TryGetValue(dep, out var result) && result.BlocksDependents);
 	}
 
 	/// <summary>
-	/// Gets the processed content from succeeded dependencies as a dictionary.
+	/// Gets the processed content from succeeded dependencies as a dictionary. A dependency that
+	/// was skipped by its own <c>when:</c> condition contributes an empty string — the same
+	/// contract as an <c>enabled: false</c> step — so it still appears in a Prompt step's
+	/// dependency section and <c>{{branch.output}}</c> resolves. Failed, cancelled and
+	/// cascade-skipped dependencies are excluded; a step can only run past those through an
+	/// outcome-aware condition, and <see cref="TemplateResolver"/> resolves their
+	/// <c>{{dep.output}}</c> to the (empty) recorded content while <c>{{dep.status}}</c> and
+	/// <c>{{dep.errorMessage}}</c> carry the diagnosis.
 	/// </summary>
 	public IReadOnlyDictionary<string, string> GetDependencyOutputs(string[] dependsOn)
 	{
 		var outputs = new Dictionary<string, string>();
 		foreach (var dep in dependsOn)
 		{
-			if (_results.TryGetValue(dep, out var result) && result.Status == ExecutionStatus.Succeeded)
-			{
+			if (!_results.TryGetValue(dep, out var result))
+				continue;
+
+			if (result.Status == ExecutionStatus.Succeeded)
 				outputs[dep] = result.Content;
-			}
+			else if (result.SkipKind == SkipKind.Condition)
+				outputs[dep] = string.Empty;
 		}
 		return outputs;
 	}
 
 	/// <summary>
 	/// Gets raw dependency outputs as a dictionary (step name -> raw content before any handlers).
+	/// Same contract as <see cref="GetDependencyOutputs"/>.
 	/// </summary>
 	public Dictionary<string, string> GetRawDependencyOutputs(string[] dependsOn)
 	{
 		var outputs = new Dictionary<string, string>();
 		foreach (var dep in dependsOn)
 		{
-			if (_results.TryGetValue(dep, out var result) && result.Status == ExecutionStatus.Succeeded)
+			if (!_results.TryGetValue(dep, out var result))
+				continue;
+
+			if (result.Status == ExecutionStatus.Succeeded)
 			{
 				// Use RawContent if available (content before output handler), otherwise use Content
 				outputs[dep] = result.RawContent ?? result.Content;
+			}
+			else if (result.SkipKind == SkipKind.Condition)
+			{
+				outputs[dep] = string.Empty;
 			}
 		}
 		return outputs;

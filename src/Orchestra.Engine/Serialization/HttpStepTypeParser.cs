@@ -12,14 +12,18 @@ public sealed class HttpStepTypeParser : IStepTypeParser
 
 	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
 	{
+		var baseFields = StepBaseFields.Parse(root);
+
 		return new HttpOrchestrationStep
 		{
-			Name = root.GetProperty("name").GetString()!,
+			Name = baseFields.Name,
 			Type = OrchestrationStepType.Http,
-			DependsOn = root.TryGetProperty("dependsOn", out var deps)
-				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
+			DependsOn = baseFields.DependsOn,
+			Enabled = baseFields.Enabled,
+			When = baseFields.When,
+			TimeoutSeconds = baseFields.TimeoutSeconds,
+			Retry = baseFields.Retry,
+			Parameters = StepBaseFields.ParseParameterNames(root),
 			Method = root.TryGetProperty("method", out var method)
 				? method.GetString()!
 				: "GET",
@@ -33,15 +37,7 @@ public sealed class HttpStepTypeParser : IStepTypeParser
 			ContentType = root.TryGetProperty("contentType", out var ct)
 				? ct.GetString() ?? "application/json"
 				: "application/json",
-			TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
-				? ts.GetInt32()
-				: null,
-			Retry = root.TryGetProperty("retry", out var retry)
-				? PromptStepTypeParser.DeserializeRetryPolicy(retry)
-				: null,
-			Parameters = root.TryGetProperty("parameters", out var parameters)
-				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
+			MaxOutputBytes = StepBaseFields.ParseMaxOutputBytes(root, baseFields.Name),
 		};
 	}
 }

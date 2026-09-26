@@ -98,14 +98,17 @@ public sealed class OrchestrationStepTypeParser : IStepTypeParser
 			throw new JsonException($"Orchestration step 'maxConcurrency' must be a positive integer (got {maxConcurrency}).");
 		}
 
+		var baseFields = StepBaseFields.Parse(root);
+
 		return new OrchestrationInvocationStep
 		{
-			Name = root.GetProperty("name").GetString()!,
+			Name = baseFields.Name,
 			Type = OrchestrationStepType.Orchestration,
-			DependsOn = root.TryGetProperty("dependsOn", out var deps)
-				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
+			DependsOn = baseFields.DependsOn,
+			Enabled = baseFields.Enabled,
+			When = baseFields.When,
+			TimeoutSeconds = baseFields.TimeoutSeconds,
+			Retry = baseFields.Retry,
 			OrchestrationName = orchProp.GetString()!,
 			ChildParameters = childParameters,
 			Mode = mode,
@@ -115,12 +118,8 @@ public sealed class OrchestrationStepTypeParser : IStepTypeParser
 			InputHandlerModel = root.TryGetProperty("inputHandlerModel", out var ihm)
 				? ihm.GetString()
 				: null,
-			TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
-				? ts.GetInt32()
-				: null,
-			Retry = root.TryGetProperty("retry", out var retry)
-				? PromptStepTypeParser.DeserializeRetryPolicy(retry)
-				: null,
+			// Orchestration steps use `parameters` for the child's parameter MAP; the parent-parameter
+			// references that every other step type calls `parameters` live under `paramRefs`.
 			Parameters = root.TryGetProperty("paramRefs", out var paramRefs)
 				? paramRefs.EnumerateArray().Select(e => e.GetString()!).ToArray()
 				: [],

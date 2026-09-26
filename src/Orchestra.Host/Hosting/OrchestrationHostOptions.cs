@@ -121,13 +121,23 @@ public class OrchestrationHostOptions
 	public ReasoningLevel? DefaultReasoningLevel { get; set; }
 
 	/// <summary>
-	/// Host-wide Prompt-step fallbacks derived from <see cref="DefaultModel"/> and
-	/// <see cref="DefaultReasoningLevel"/>, in the shape the engine consumes.
+	/// Default cap on how many steps of a single run execute at the same time, applied to
+	/// orchestrations that set no <c>maxConcurrency</c> of their own. Null (the default) means
+	/// unbounded — every ready step starts immediately on its own dedicated thread. From
+	/// <c>defaultMaxConcurrency</c> in <c>orchestra.json</c>.
+	/// </summary>
+	public int? DefaultMaxConcurrency { get; set; }
+
+	/// <summary>
+	/// Host-wide fallbacks derived from <see cref="DefaultModel"/>,
+	/// <see cref="DefaultReasoningLevel"/> and <see cref="DefaultMaxConcurrency"/>, in the shape
+	/// the engine consumes.
 	/// </summary>
 	public HostAgentDefaults ToHostAgentDefaults() => new()
 	{
 		Model = DefaultModel,
 		ReasoningLevel = DefaultReasoningLevel,
+		MaxConcurrency = DefaultMaxConcurrency,
 	};
 
 	/// <summary>

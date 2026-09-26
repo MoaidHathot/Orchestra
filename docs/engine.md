@@ -202,6 +202,31 @@ Read stdin with `[Console]::In.ReadToEnd()` in PowerShell. **`$input` is not enc
 consumes the same stream, so the two idioms are mutually exclusive. `bash`/`sh` and `node` need
 nothing — they handle the raw bytes themselves.
 
+### Output size is capped (`maxOutputBytes`)
+
+Command, Script and Http steps buffer their whole output in memory and hand it to dependents
+through templates, so a runaway process or a multi-gigabyte response would otherwise exhaust
+the host. Each of these steps keeps at most **10 MiB** (`OutputLimits.DefaultMaxOutputBytes`)
+unless it sets `maxOutputBytes`:
+
+```yaml
+- name: dump
+  type: Script
+  shell: pwsh
+  script: Get-ChildItem -Recurse | Format-List
+  maxOutputBytes: 52428800   # 50 MiB; 0 disables the cap
+```
+
+- Command/Script: stdout and stderr share one byte budget, so the cap is per step. Lines are
+  dropped whole (never cut mid-character) once the budget is spent; live `ReportContentDelta`
+  streaming stops at the same point.
+- Http: the body is read from the network only up to the cap (`ResponseHeadersRead`), the rest is
+  counted and discarded, and the declared charset is honoured when decoding.
+- When anything was dropped the step still succeeds; its output ends with
+  `[output truncated: exceeded maxOutputBytes (N bytes); M bytes dropped]`, the trace carries the
+  same text, and the run gets an `output-truncated` session warning naming the step.
+- Negative values are rejected at parse time.
+
 ### Command step arguments are literal
 
 Every entry in a Command step's `arguments` reaches the child program **byte-for-byte**. The
@@ -272,6 +297,87 @@ Steps can depend on other steps using the `DependsOn` property. The engine:
 - Validates the dependency graph (DAG) for cycles
 - Executes independent steps in parallel
 - Passes outputs from dependencies to dependent steps automatically
+
+When a dependency fails (or is cancelled, reports no-action, or was itself skipped for one of
+those reasons), its dependents are **skipped** and the skip cascades through the DAG. Independent
+branches keep running.
+
+### Conditional steps (`when`)
+
+Every step type accepts a `when` expression. It is evaluated after all of the step's
+dependencies have settled and just before the step would start:
+
+```yaml
+steps:
+  - name: decide
+    type: Transform
+    template: "{{param.environment}}"
+
+  - name: deploy-prod
+    type: Prompt
+    dependsOn: [decide]
+    when: "{{decide.output}} == 'prod'"
+    userPrompt: Deploy to production.
+
+  - name: deploy-staging
+    type: Prompt
+    dependsOn: [decide]
+    when: "{{decide.output}} != 'prod'"
+    userPrompt: Deploy to staging.
+
+  - name: announce                 # join: runs even though one branch was skipped
+    type: Transform
+    dependsOn: [deploy-prod, deploy-staging]
+    template: "{{deploy-prod.output}}{{deploy-staging.output}}"
+```
+
+A false condition records the step as `Skipped` with `skipKind: Condition` and — unlike a
+dependency failure — does **not** block dependents: they run and see `""` as that step's output
+(the same contract as `enabled: false`). That is what makes if/else and join patterns
+expressible in a DAG.
+
+**Expression language.** `{{...}}` references are tokens of the grammar, resolved to values at
+evaluation time, so they are written bare (never quoted) and a step output containing quotes or
+operators cannot alter the condition:
+
+| Element | Examples |
+|---|---|
+| References | `{{param.x}}`, `{{step.output}}`, `{{step.output.json.path}}`, `{{step.status}}`, `{{step.errorMessage}}` |
+| Literals | `'text'`, `"text"`, `42`, `-1.5`, `true`, `false`, `null` |
+| Comparison | `==` `!=` `<` `<=` `>` `>=` — numeric when both sides are numbers, otherwise case-insensitive text; `null == ''` |
+| Logic | `&&` `\|\|` `!` (aliases `and` `or` `not`), parentheses |
+| Text functions | `contains(t, needle)`, `startsWith(t, p)`, `endsWith(t, s)` (case-insensitive), `matches(t, regex)`, `empty(x)`, `lower(x)`, `trim(x)`, `length(x)` |
+| Outcome functions | `always()`, `success()`, `failure()` |
+
+A bare value is truthy unless it is empty/whitespace or, ignoring case, `false`, `0`, `no`,
+`off`, `null`. Inside string literals only `\'`, `\"` and `\\` are escapes, so regexes are
+written naturally: `matches({{x.output}}, '^\d+$')`.
+
+**Failures and conditions.** By default the dependency-failure cascade above is applied *before*
+a step's condition is consulted. A condition that reasons about outcomes — one that calls
+`failure()`, `success()` or `always()`, or references some step's `status`/`errorMessage` —
+suspends that cascade for its step so the condition alone decides (the same rule GitHub
+Actions uses for `if: failure()`). That is how an on-failure handler is written:
+
+```yaml
+  - name: on-test-failure
+    type: Prompt
+    dependsOn: [run-tests]
+    when: "failure()"                        # or "{{run-tests.status}} == 'failed'"
+    userPrompt: "Tests failed: {{run-tests.errorMessage}} — propose a fix."
+```
+
+`{{step.status}}` resolves to the lowercase terminal status of any finished step
+(`succeeded`, `failed`, `skipped`, `cancelled`, `noaction`); `{{step.errorMessage}}` to its
+error text or `""`.
+
+**Validation and errors.** `orchestra validate` (and the executor, before a run starts) checks
+the grammar and every `{{...}}` reference in a condition like any other templated field, so
+typos fail fast. An error that only surfaces at evaluation time — an invalid regular expression,
+for example — fails the step with error category `ConditionError`. A reference that cannot be
+resolved at run time (a JSON-path field the output lacks) evaluates to `null`, so the step is
+skipped rather than failed. Condition-skipped steps are not checkpointed; on resume their
+condition is evaluated again. In YAML, quote the whole expression when it starts with `{{`.
 
 ### Template Expressions
 
@@ -957,18 +1063,18 @@ OrchestrationParser
 Orchestration
     │
     ▼
-OrchestrationScheduler (validate DAG, create execution plan)
+OrchestrationScheduler (validate DAG: names, dependencies, cycles)
     │
     ▼
-OrchestrationExecutor
+OrchestrationExecutor (event-driven: a step launches the moment its last dependency settles)
     │
     ├──▶ Step 1 ──▶ PromptExecutor ──▶ AgentBuilder ──▶ IAgent ──▶ LLM
     │
     ├──▶ Step 2 ──▶ PromptExecutor ──▶ AgentBuilder ──▶ IAgent ──▶ LLM
-    │       (parallel with Step 1 if no dependencies)
+    │       (parallel with Step 1 if no dependencies — up to maxConcurrency at a time)
     │
     └──▶ Step 3 ──▶ PromptExecutor ──▶ AgentBuilder ──▶ IAgent ──▶ LLM
-            (waits for dependencies)
+            (waits for dependencies; gated by `when`)
     │
     ▼
 OrchestrationResult
@@ -976,6 +1082,25 @@ OrchestrationResult
     ▼
 IRunStore (persist)
 ```
+
+### Concurrency and failure policy
+
+Every ready step starts immediately on its own dedicated thread unless the run is capped:
+
+```yaml
+maxConcurrency: 4        # at most 4 steps execute at once in this run
+onStepFailure: stop      # fail fast (default: continue)
+```
+
+- **`maxConcurrency`** (orchestration; host default `defaultMaxConcurrency` in `orchestra.json`)
+  bounds simultaneous step execution. Ready steps beyond the cap queue for a slot; a queued
+  step is not reported as started and its `timeoutSeconds` does not tick until it runs.
+  Approval steps and async Orchestration steps are waits and never occupy a slot; skipped
+  steps never take one.
+- **`onStepFailure`** — `continue` (default) skips a failed step's dependents while
+  independent branches finish, then reports the run Failed. `stop` cancels every unfinished
+  step the moment a step fails (after its retries); the run is Failed, and each cancelled step
+  records `Cancelled: step 'X' failed and onStepFailure is 'stop'`.
 
 ## Dependencies
 

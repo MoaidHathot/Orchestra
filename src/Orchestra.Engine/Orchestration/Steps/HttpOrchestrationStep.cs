@@ -33,4 +33,12 @@ public class HttpOrchestrationStep : OrchestrationStep
 	/// Content type for the request body. Defaults to "application/json".
 	/// </summary>
 	public string ContentType { get; init; } = "application/json";
+
+	/// <summary>
+	/// Maximum bytes of the response body the step keeps. Null uses
+	/// <see cref="OutputLimits.DefaultMaxOutputBytes"/> (10 MiB); 0 disables the cap. The body
+	/// is read from the network only up to the cap; the rest is discarded, a marker is appended
+	/// and an <c>output-truncated</c> session warning is reported.
+	/// </summary>
+	public int? MaxOutputBytes { get; init; }
 }

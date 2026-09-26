@@ -249,15 +249,26 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			// Start the process
 			using var process = new Process { StartInfo = startInfo };
 
-			var stdoutBuilder = new StringBuilder();
-			var stderrBuilder = new StringBuilder();
+			// stdout and stderr share one byte budget so maxOutputBytes is a per-step cap.
+			var budget = OutputBudget.For(commandStep.MaxOutputBytes);
+			var stdoutBuilder = new BoundedOutputBuffer(budget);
+			var stderrBuilder = new BoundedOutputBuffer(budget);
+			var truncationAnnounced = 0;
+
+			void AnnounceTruncationOnce()
+			{
+				if (Interlocked.Exchange(ref truncationAnnounced, 1) == 0)
+					_reporter.ReportContentDelta(step.Name, OutputLimits.Marker(commandStep.MaxOutputBytes, 0) + Environment.NewLine);
+			}
 
 			process.OutputDataReceived += (_, e) =>
 			{
 				if (e.Data is not null)
 				{
-					stdoutBuilder.AppendLine(e.Data);
-					_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+					if (stdoutBuilder.TryAppendLine(e.Data))
+						_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+					else
+						AnnounceTruncationOnce();
 				}
 			};
 
@@ -265,9 +276,14 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			{
 				if (e.Data is not null)
 				{
-					stderrBuilder.AppendLine(e.Data);
+					var kept = stderrBuilder.TryAppendLine(e.Data);
 					if (commandStep.IncludeStdErr)
-						_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+					{
+						if (kept)
+							_reporter.ReportContentDelta(step.Name, e.Data + Environment.NewLine);
+						else
+							AnnounceTruncationOnce();
+					}
 				}
 			};
 
@@ -311,8 +327,16 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 			}
 			process.WaitForExit();
 
-			var stdout = stdoutBuilder.ToString().TrimEnd();
-			var stderr = stderrBuilder.ToString().TrimEnd();
+			var stdout = stdoutBuilder.ToStringTrimmed();
+			var stderr = stderrBuilder.ToStringTrimmed();
+
+			if (budget.Truncated)
+			{
+				// The marker rides on stdout — that is what dependents read through templates.
+				stdout += OutputLimits.Marker(commandStep.MaxOutputBytes, budget.DroppedBytes);
+				LogCommandOutputTruncated(step.Name, budget.DroppedBytes);
+				_reporter.ReportSessionWarning(OutputLimits.WarningType, OutputLimits.WarningMessage(step.Name, commandStep.MaxOutputBytes, budget.DroppedBytes));
+			}
 
 			if (process.ExitCode == 0)
 			{
@@ -510,6 +534,12 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' command process did not exit within {GraceSeconds}s after kill")]
 	private partial void LogCommandKillDrainTimeout(string stepName, int graceSeconds);
+
+	[LoggerMessage(
+		EventId = 9,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' command output exceeded maxOutputBytes; {DroppedBytes} bytes dropped")]
+	private partial void LogCommandOutputTruncated(string stepName, long droppedBytes);
 
 	#endregion
 }

@@ -1,10 +1,66 @@
 namespace Orchestra.Engine;
 
-public class ExecutionResult
+/// <summary>
+/// Why a step ended as <see cref="ExecutionStatus.Skipped"/>. Determines whether the skip
+/// propagates to dependents.
+/// </summary>
+public enum SkipKind
+{
+	/// <summary>
+	/// A dependency failed, was cancelled, was skipped for the same reason, or reported
+	/// <see cref="ExecutionStatus.NoAction"/>. Cascades: dependents of this step are skipped too.
+	/// </summary>
+	DependencyFailure,
+
+	/// <summary>
+	/// The step's own <c>when:</c> condition evaluated to false. Does <em>not</em> cascade:
+	/// dependents run and see an empty string as this step's output.
+	/// </summary>
+	Condition,
+
+	/// <summary>
+	/// The step's <c>when:</c> condition could not be evaluated (a syntax error or a failing
+	/// function such as an invalid regex). Reported as <see cref="ExecutionStatus.Failed"/> with
+	/// <see cref="StepErrorCategory.ConditionError"/>, so this value only appears in diagnostics.
+	/// </summary>
+	ConditionError,
+}
+
+/// <summary>
+/// The outcome of one step execution.
+/// </summary>
+/// <remarks>
+/// This is a <c>record</c> so derived results are produced with <c>with</c> expressions
+/// (<c>result with { Trace = enriched }</c>), which copy <em>every</em> property. Never
+/// rebuild a result by hand-copying fields from another instance: earlier hand-copies in the
+/// executor silently dropped <see cref="ErrorDetails"/> and <see cref="ChildOrchestrationInfo"/>,
+/// so child-run drill-down templates and persisted SDK error details never survived a run.
+/// </remarks>
+public record ExecutionResult
 {
 	public required string Content { get; init; }
 	public required ExecutionStatus Status { get; init; }
 	public string? ErrorMessage { get; init; }
+
+	/// <summary>
+	/// Set when <see cref="Status"/> is <see cref="ExecutionStatus.Skipped"/>; distinguishes a
+	/// skip that must cascade to dependents from a <c>when:</c> condition skip that must not.
+	/// Null for non-skipped results and for skips recorded before this field existed (treated
+	/// as <see cref="SkipKind.DependencyFailure"/>).
+	/// </summary>
+	public SkipKind? SkipKind { get; init; }
+
+	/// <summary>
+	/// Whether this result prevents dependent steps from running. Every non-success blocks
+	/// except a skip caused by the step's own <c>when:</c> condition.
+	/// </summary>
+	public bool BlocksDependents => Status switch
+	{
+		ExecutionStatus.Succeeded => false,
+		ExecutionStatus.Skipped => SkipKind != Engine.SkipKind.Condition,
+		ExecutionStatus.Failed or ExecutionStatus.Cancelled or ExecutionStatus.NoAction => true,
+		_ => false,
+	};
 
 	/// <summary>
 	/// The raw content before output handler was applied.
@@ -193,11 +249,24 @@ public class ExecutionResult
 		ChildOrchestrationInfo = childOrchestrationInfo,
 	};
 
-	public static ExecutionResult Skipped(string reason) => new()
+	public static ExecutionResult Skipped(string reason, SkipKind skipKind = Engine.SkipKind.DependencyFailure) => new()
 	{
 		Content = string.Empty,
 		Status = ExecutionStatus.Skipped,
 		ErrorMessage = reason,
+		SkipKind = skipKind,
+	};
+
+	/// <summary>
+	/// A step whose <c>when:</c> condition evaluated to false. Dependents are not blocked and
+	/// see an empty string as this step's output.
+	/// </summary>
+	public static ExecutionResult SkippedByCondition(string expression) => new()
+	{
+		Content = string.Empty,
+		Status = ExecutionStatus.Skipped,
+		ErrorMessage = $"Condition evaluated to false: {expression}",
+		SkipKind = Engine.SkipKind.Condition,
 	};
 
 	public static ExecutionResult Cancelled(string? errorMessage = null, string[]? savedFiles = null) => new()

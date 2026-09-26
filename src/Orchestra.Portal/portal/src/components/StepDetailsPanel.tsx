@@ -306,16 +306,19 @@ export default function StepDetailsPanel({ step }: Props): React.JSX.Element | n
         </div>
       )}
 
-      {/* Condition */}
-      {step.condition != null && (
-        <div style={{ marginBottom: '12px' }}>
+      {/* Condition (`when`) */}
+      {(step.when ?? step.condition) != null && (
+        <div style={{ marginBottom: '12px' }} data-testid="step-condition">
           <div
             className="text-muted"
             style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}
           >
-            Condition
+            Runs when
           </div>
-          <div style={{ color: '#ffa657' }}>{step.condition}</div>
+          <code style={{ color: '#ffa657', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{step.when ?? step.condition}</code>
+          <div className="text-muted" style={{ fontSize: '11px', marginTop: '4px' }}>
+            Evaluated after dependencies settle; false skips this step without blocking dependents.
+          </div>
         </div>
       )}
 

@@ -12,18 +12,22 @@ public sealed class CommandStepTypeParser : IStepTypeParser
 
 	public OrchestrationStep Parse(JsonElement root, StepParseContext context)
 	{
+		var baseFields = StepBaseFields.Parse(root);
+
 		var workingDirectory = root.TryGetProperty("workingDirectory", out var wd)
 			? ResolvePath(wd.GetString()!, context)
 			: null;
 
 		return new CommandOrchestrationStep
 		{
-			Name = root.GetProperty("name").GetString()!,
+			Name = baseFields.Name,
 			Type = OrchestrationStepType.Command,
-			DependsOn = root.TryGetProperty("dependsOn", out var deps)
-				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
+			DependsOn = baseFields.DependsOn,
+			Enabled = baseFields.Enabled,
+			When = baseFields.When,
+			TimeoutSeconds = baseFields.TimeoutSeconds,
+			Retry = baseFields.Retry,
+			Parameters = StepBaseFields.ParseParameterNames(root),
 			Command = root.GetProperty("command").GetString()!,
 			Arguments = root.TryGetProperty("arguments", out var args)
 				? args.EnumerateArray().Select(e => e.GetString()!).ToArray()
@@ -37,15 +41,7 @@ public sealed class CommandStepTypeParser : IStepTypeParser
 			Stdin = root.TryGetProperty("stdin", out var stdin)
 				? stdin.GetString()
 				: null,
-			TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
-				? ts.GetInt32()
-				: null,
-			Retry = root.TryGetProperty("retry", out var retry)
-				? PromptStepTypeParser.DeserializeRetryPolicy(retry)
-				: null,
-			Parameters = root.TryGetProperty("parameters", out var parameters)
-				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
+			MaxOutputBytes = StepBaseFields.ParseMaxOutputBytes(root, baseFields.Name),
 		};
 	}
 

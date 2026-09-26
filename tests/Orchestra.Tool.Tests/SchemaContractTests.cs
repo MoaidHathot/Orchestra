@@ -119,6 +119,49 @@ public class SchemaContractTests
 			props.TryGetProperty(name, out _).Should().BeTrue($"'{name}' is part of the fan-out contract");
 	}
 
+	[Theory]
+	[InlineData("commandStepProperties")]
+	[InlineData("scriptStepProperties")]
+	[InlineData("httpStepProperties")]
+	public void OutputCapturingSteps_DeclareMaxOutputBytes(string stepDef)
+	{
+		// The step definition ends with unevaluatedProperties=false, so a property the engine
+		// accepts but the schema omits would fail validation for every author who uses it.
+		using var doc = Load("orchestration.schema.json");
+
+		var prop = doc.RootElement
+			.GetProperty("$defs").GetProperty(stepDef).GetProperty("properties").GetProperty("maxOutputBytes");
+
+		prop.GetProperty("type").GetString().Should().Be("integer");
+		prop.GetProperty("minimum").GetInt32().Should().Be(0, "0 disables the cap; negatives are rejected");
+		prop.GetProperty("description").GetString().Should().Contain("10485760").And.Contain("0 disables");
+	}
+
+	[Fact]
+	public void TopLevel_DeclaresConcurrencyAndFailurePolicy()
+	{
+		using var doc = Load("orchestration.schema.json");
+		var props = doc.RootElement.GetProperty("properties");
+
+		props.GetProperty("maxConcurrency").GetProperty("minimum").GetInt32().Should().Be(1);
+		props.GetProperty("onStepFailure").GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+			.Should().Contain(["continue", "stop"]);
+		props.GetProperty("onStepFailure").GetProperty("default").GetString().Should().Be("continue");
+	}
+
+	[Fact]
+	public void RetryPolicy_DeclaresMaxDelayAndJitter()
+	{
+		// retryPolicy has additionalProperties=false, so a property the engine reads but the
+		// schema omits would be rejected by editors and `orchestra validate --schema`.
+		using var doc = Load("orchestration.schema.json");
+		var props = doc.RootElement.GetProperty("$defs").GetProperty("retryPolicy").GetProperty("properties");
+
+		props.GetProperty("maxDelaySeconds").GetProperty("minimum").GetDouble().Should().Be(0);
+		props.GetProperty("jitterSeconds").GetProperty("default").GetDouble().Should().Be(0);
+		doc.RootElement.GetProperty("$defs").GetProperty("retryPolicy").GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
+	}
+
 	[Fact]
 	public void LoopExitPattern_DocumentsTheSubstringTrap()
 	{

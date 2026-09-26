@@ -56,6 +56,11 @@
       "description": "Reasoning effort used by Prompt steps that set no reasoningLevel and belong to an orchestration with no defaultReasoningLevel. Resolution per step: step reasoningLevel -> orchestration defaultReasoningLevel -> this value -> provider/model default. xhigh and max are only honoured by models that advertise them.",
       "enum": ["low", "medium", "high", "xhigh", "max", "Low", "Medium", "High", "XHigh", "xHigh", "Max"]
     },
+    "defaultMaxConcurrency": {
+      "type": "integer",
+      "description": "Default cap on how many steps of a single run execute at the same time, for orchestrations that set no maxConcurrency of their own. Omit for unbounded (every ready step starts immediately). Approval steps and async Orchestration steps never occupy a slot.",
+      "minimum": 1
+    },
     "provider": {
       "type": "string",
       "description": "Default agent provider for Prompt steps. Resolution per step: step provider -> orchestration defaultProvider -> this value. Default: copilot.",

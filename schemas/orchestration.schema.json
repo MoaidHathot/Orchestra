@@ -77,6 +77,17 @@
       "description": "Default timeout in seconds applied to all steps that don't define their own timeoutSeconds. When absent, steps without an explicit timeout run with no per-step timeout (only the orchestration-level timeout applies).",
       "minimum": 0
     },
+    "maxConcurrency": {
+      "type": "integer",
+      "description": "Maximum number of steps that may execute at the same time within one run. Ready steps beyond the limit wait for a slot; dependency order is unaffected. Omit to fall back to the host's defaultMaxConcurrency, and to unbounded when that is unset too (every ready step starts immediately on its own thread). Approval steps and Orchestration steps in async mode are waits and never occupy a slot; skipped steps never take one.",
+      "minimum": 1
+    },
+    "onStepFailure": {
+      "type": "string",
+      "description": "What happens to the rest of the run when a step ends as Failed (after its retries). 'continue' (default): the failed step's dependents are skipped and independent branches finish; the run is Failed at the end. 'stop': fail fast - every step that has not finished is cancelled and the run ends as Failed immediately.",
+      "enum": ["continue", "stop", "Continue", "Stop"],
+      "default": "continue"
+    },
     "timeoutSeconds": {
       "type": "integer",
       "description": "Maximum time in seconds for the entire orchestration to complete. When elapsed, all running steps are cancelled. Default is 0 (disabled — no orchestration-level timeout). Set to a positive value to enforce a wall-clock cap.",
@@ -187,6 +198,18 @@
           "type": "boolean",
           "description": "When false, the step is skipped during execution.",
           "default": true
+        },
+        "when": {
+          "type": "string",
+          "description": "Run-time condition evaluated after every dependency has settled. False -> the step is recorded as Skipped WITHOUT blocking its dependents (they run and see '' for this step's output), which is what makes if/else + join patterns work. Syntax: {{template}} references ({{param.x}}, {{step.output}}, {{step.status}}, {{step.errorMessage}}) used directly as values (no quoting needed), string/number/true/false/null literals, == != < <= > >= && || ! (and/or/not aliases), parentheses, and the functions contains(text, needle), startsWith, endsWith (case-insensitive), matches(text, regex), empty(x), lower(x), trim(x), length(x), always(), success(), failure(). A condition that reasons about outcomes - failure()/success()/always() or a {{step.status}}/{{step.errorMessage}} reference - suspends the dependency-failure cascade for this step so an on-failure handler can run; any other condition is only consulted when every dependency succeeded. A bare value is truthy unless empty or, ignoring case, false/0/no/off/null. In YAML, quote the whole expression when it starts with {{. Validated by `orchestra validate`.",
+          "minLength": 1,
+          "examples": [
+            "{{param.environment}} == 'prod'",
+            "{{review.output}} != 'reject' && !empty({{review.output}})",
+            "failure()",
+            "{{tests.status}} == 'failed'",
+            "contains({{scan.output}}, 'CRITICAL') || {{param.force}}"
+          ]
         },
         "timeoutSeconds": {
           "type": "integer",
@@ -588,6 +611,11 @@
           "type": "string",
           "description": "Body content type.",
           "default": "application/json"
+        },
+        "maxOutputBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum bytes of output the step keeps (stdout and stderr combined for Command/Script; the response body for Http). Omit for the engine default of 10485760 (10 MiB); 0 disables the cap. Output beyond the cap is dropped, a '[output truncated: ...]' marker is appended and an 'output-truncated' session warning is reported."
         }
       }
     },
@@ -666,6 +694,11 @@
         "stdin": {
           "type": "string",
           "description": "Content to pipe to the command's standard input. Supports template expressions. Both ends of the pipe are UTF-8, so non-ASCII content round-trips intact."
+        },
+        "maxOutputBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum bytes of output the step keeps (stdout and stderr combined for Command/Script; the response body for Http). Omit for the engine default of 10485760 (10 MiB); 0 disables the cap. Output beyond the cap is dropped, a '[output truncated: ...]' marker is appended and an 'output-truncated' session warning is reported."
         }
       }
     },
@@ -727,6 +760,11 @@
         "strictMode": {
           "type": "boolean",
           "description": "Controls how the executor wraps a PowerShell script (shell=pwsh|powershell) with an error-handling prologue. When unset (auto), the executor injects `$ErrorActionPreference='Stop'; trap { Write-Error -ErrorRecord $_; exit 1 };` so terminating errors cause the step to be reported Failed instead of silently succeeding. When set to true, the executor additionally injects `Set-StrictMode -Version Latest` (catches uninitialized variables, missing properties, and out-of-bounds indexing) — use this for scripts written with strict-mode discipline. When set to false, the error-handling prologue is not injected and the script runs verbatim (the Orchestra-Complete / Orchestra-SetStatus control helpers are still injected). Non-PowerShell shells ignore this setting."
+        },
+        "maxOutputBytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Maximum bytes of output the step keeps (stdout and stderr combined for Command/Script; the response body for Http). Omit for the engine default of 10485760 (10 MiB); 0 disables the cap. Output beyond the cap is dropped, a '[output truncated: ...]' marker is appended and an 'output-truncated' session warning is reported."
         }
       },
       "oneOf": [
@@ -1309,6 +1347,17 @@
           "description": "Multiplier applied to the backoff delay after each retry (exponential backoff).",
           "default": 2.0,
           "minimum": 1
+        },
+        "maxDelaySeconds": {
+          "type": "number",
+          "description": "Upper bound on the computed backoff delay in seconds, applied before jitter. Omit for unbounded exponential growth.",
+          "minimum": 0
+        },
+        "jitterSeconds": {
+          "type": "number",
+          "description": "Maximum random jitter in seconds added to every retry delay (uniform in [0, jitterSeconds]). Spreads out retries of steps that failed together. Default 0.",
+          "default": 0,
+          "minimum": 0
         },
         "retryOnTimeout": {
           "type": "boolean",

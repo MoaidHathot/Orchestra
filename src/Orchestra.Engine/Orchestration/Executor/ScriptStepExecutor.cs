@@ -471,8 +471,17 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			// Start the process
 			using var process = new Process { StartInfo = startInfo };
 
-			var stdoutBuilder = new StringBuilder();
-			var stderrBuilder = new StringBuilder();
+			// stdout and stderr share one byte budget so maxOutputBytes is a per-step cap.
+			var budget = OutputBudget.For(scriptStep.MaxOutputBytes);
+			var stdoutBuilder = new BoundedOutputBuffer(budget);
+			var stderrBuilder = new BoundedOutputBuffer(budget);
+			var truncationAnnounced = 0;
+
+			void AnnounceTruncationOnce()
+			{
+				if (Interlocked.Exchange(ref truncationAnnounced, 1) == 0)
+					_reporter.ReportContentDelta(step.Name, OutputLimits.Marker(scriptStep.MaxOutputBytes, 0) + Environment.NewLine);
+			}
 
 			process.OutputDataReceived += (_, e) =>
 			{
@@ -481,8 +490,10 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 					// Defensive: strip ANSI escape sequences for tools that ignore NO_COLOR.
 					// AnsiSanitizer.Strip is a no-op fast-path when no ESC byte is present.
 					var line = AnsiSanitizer.Strip(e.Data) ?? string.Empty;
-					stdoutBuilder.AppendLine(line);
-					_reporter.ReportContentDelta(step.Name, line + Environment.NewLine);
+					if (stdoutBuilder.TryAppendLine(line))
+						_reporter.ReportContentDelta(step.Name, line + Environment.NewLine);
+					else
+						AnnounceTruncationOnce();
 				}
 			};
 
@@ -491,9 +502,14 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				if (e.Data is not null)
 				{
 					var line = AnsiSanitizer.Strip(e.Data) ?? string.Empty;
-					stderrBuilder.AppendLine(line);
+					var kept = stderrBuilder.TryAppendLine(line);
 					if (scriptStep.IncludeStdErr)
-						_reporter.ReportContentDelta(step.Name, line + Environment.NewLine);
+					{
+						if (kept)
+							_reporter.ReportContentDelta(step.Name, line + Environment.NewLine);
+						else
+							AnnounceTruncationOnce();
+					}
 				}
 			};
 
@@ -536,8 +552,16 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 			}
 			process.WaitForExit();
 
-			var stdout = stdoutBuilder.ToString().TrimEnd();
-			var stderr = stderrBuilder.ToString().TrimEnd();
+			var stdout = stdoutBuilder.ToStringTrimmed();
+			var stderr = stderrBuilder.ToStringTrimmed();
+
+			if (budget.Truncated)
+			{
+				// The marker rides on stdout — that is what dependents read through templates.
+				stdout += OutputLimits.Marker(scriptStep.MaxOutputBytes, budget.DroppedBytes);
+				LogScriptOutputTruncated(step.Name, budget.DroppedBytes);
+				_reporter.ReportSessionWarning(OutputLimits.WarningType, OutputLimits.WarningMessage(step.Name, scriptStep.MaxOutputBytes, budget.DroppedBytes));
+			}
 
 			if (process.ExitCode == 0)
 			{
@@ -1405,6 +1429,12 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		Level = LogLevel.Debug,
 		Message = "Step '{StepName}' scriptFile '{ScriptFile}' runs through a generated {Shell} wrapper (UTF-8 pinning, control helpers, arg-spill resolution)")]
 	private partial void LogScriptFileWrapperInjected(string stepName, string shell, string scriptFile);
+
+	[LoggerMessage(
+		EventId = 15,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' script output exceeded maxOutputBytes; {DroppedBytes} bytes dropped")]
+	private partial void LogScriptOutputTruncated(string stepName, long droppedBytes);
 
 	#endregion
 }

@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Hosting;
 using Orchestra.ProcessHost;
@@ -42,6 +43,22 @@ public class OrchestraConfigLoaderTests : IDisposable
 	{
 		_savedEnvVars[name] = Environment.GetEnvironmentVariable(name);
 		Environment.SetEnvironmentVariable(name, null);
+	}
+
+	/// <summary>Minimal in-memory <see cref="ILogger"/> so tests can assert on loader warnings.</summary>
+	private sealed class ListLogger : ILogger
+	{
+		public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+		public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+		public bool IsEnabled(LogLevel logLevel) => true;
+
+		public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+		{
+			lock (Entries)
+				Entries.Add((logLevel, formatter(state, exception)));
+		}
 	}
 
 	private string WriteConfigFile(string directory, string content)
@@ -94,6 +111,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 			LogLevel = "Debug",
 			DefaultModel = "claude-sonnet-4",
 			DefaultReasoningLevel = ReasoningLevel.Max,
+			DefaultMaxConcurrency = 6,
 			Retention = new RetentionPolicyConfig
 			{
 				MaxRunsPerOrchestration = 50,
@@ -116,8 +134,9 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.LogLevel.Should().Be("Debug");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
 		options.DefaultReasoningLevel.Should().Be(ReasoningLevel.Max);
+		options.DefaultMaxConcurrency.Should().Be(6);
 		options.ToHostAgentDefaults().Should().BeEquivalentTo(
-			new HostAgentDefaults { Model = "claude-sonnet-4", ReasoningLevel = ReasoningLevel.Max });
+			new HostAgentDefaults { Model = "claude-sonnet-4", ReasoningLevel = ReasoningLevel.Max, MaxConcurrency = 6 });
 		options.Retention.MaxRunsPerOrchestration.Should().Be(50);
 		options.Retention.MaxRunAgeDays.Should().Be(7);
 		options.Retention.IsForever.Should().BeFalse();
@@ -1072,6 +1091,7 @@ public class OrchestraConfigLoaderTests : IDisposable
 			"logLevel": "Trace",
 			"defaultModel": "claude-sonnet-4",
 			"defaultReasoningLevel": "max",
+			"defaultMaxConcurrency": 3,
 			"retention": {
 				"maxRunsPerOrchestration": 25,
 				"maxRunAgeDays": 14
@@ -1096,9 +1116,67 @@ public class OrchestraConfigLoaderTests : IDisposable
 		options.LogLevel.Should().Be("Trace");
 		options.DefaultModel.Should().Be("claude-sonnet-4");
 		options.DefaultReasoningLevel.Should().Be(ReasoningLevel.Max);
+		options.DefaultMaxConcurrency.Should().Be(3);
+		options.ToHostAgentDefaults().MaxConcurrency.Should().Be(3);
 		options.Retention.MaxRunsPerOrchestration.Should().Be(25);
 		options.Retention.MaxRunAgeDays.Should().Be(14);
 		options.Retention.IsForever.Should().BeFalse();
+	}
+
+	[Fact]
+	public void LoadAndApply_DefaultMaxConcurrency_Omitted_StaysUnbounded()
+	{
+		// Arrange — the absence of the key must not clobber a value set programmatically either.
+		var configPath = Path.Combine(_tempDir, "no-concurrency.json");
+		File.WriteAllText(configPath, """
+		{
+			"defaultModel": "claude-opus-4.8"
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var fresh = new OrchestrationHostOptions();
+		var preset = new OrchestrationHostOptions { DefaultMaxConcurrency = 8 };
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(fresh);
+		OrchestraConfigLoader.LoadAndApply(preset);
+
+		// Assert
+		fresh.DefaultMaxConcurrency.Should().BeNull();
+		fresh.ToHostAgentDefaults().MaxConcurrency.Should().BeNull();
+		preset.DefaultMaxConcurrency.Should().Be(8, "an absent key leaves programmatic configuration alone");
+	}
+
+	[Theory]
+	[InlineData(0)]
+	[InlineData(-1)]
+	[InlineData(-100)]
+	public void LoadAndApply_DefaultMaxConcurrency_IgnoresNonPositiveValues_AndKeepsApplyingTheRest(int value)
+	{
+		// Arrange — a zero cap would deadlock every run. The loader is warn-and-continue, so the
+		// bad value is dropped (cap stays unbounded) and settings that follow it still apply.
+		var configPath = Path.Combine(_tempDir, $"bad-concurrency-{value}.json");
+		File.WriteAllText(configPath, $$"""
+		{
+			"defaultMaxConcurrency": {{value}},
+			"agentPool": { "maxInstances": 7 }
+		}
+		""");
+		Environment.SetEnvironmentVariable("ORCHESTRA_CONFIG_PATH", configPath);
+
+		var options = new OrchestrationHostOptions();
+		var logger = new ListLogger();
+
+		// Act
+		OrchestraConfigLoader.LoadAndApply(options, logger);
+
+		// Assert
+		options.DefaultMaxConcurrency.Should().BeNull();
+		options.ToHostAgentDefaults().MaxConcurrency.Should().BeNull();
+		options.AgentPool.MaxInstances.Should().Be(7, "settings after the invalid value must still be applied");
+		logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Warning && e.Message.Contains("defaultMaxConcurrency"))
+			.Which.Message.Should().Contain(value.ToString());
 	}
 
 	[Theory]

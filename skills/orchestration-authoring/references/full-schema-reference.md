@@ -69,6 +69,8 @@ steps:
 | `defaultRetryPolicy` | `RetryPolicy` | No | `null` | Default retry policy applied to all steps unless overridden at the step level. |
 | `defaultStepTimeoutSeconds` | `int` | No | `null` | Default per-step timeout in seconds. Individual steps can override this. |
 | `timeoutSeconds` | `int` | No | `0` (disabled) | Maximum time in seconds for the entire orchestration run. `0` or `null` means no orchestration-level timeout. |
+| `maxConcurrency` | `int` | No | `null` (unbounded) | Maximum number of steps executing at the same time within one run. Ready steps beyond the cap wait for a slot; a waiting step is not reported as started and its `timeoutSeconds` does not tick while it queues. Falls back to the host's `defaultMaxConcurrency` (`orchestra.json`); unbounded when both are unset (every ready step starts immediately on its own thread). Approval steps and Orchestration steps in `async` mode never occupy a slot; skipped steps never take one; a sync Orchestration step holds its slot for the child's whole duration. Must be >= 1. |
+| `onStepFailure` | `string` | No | `"continue"` | `"continue"`: when a step ends Failed (after retries), its dependents are skipped (cascading) and independent branches finish; the run ends Failed. `"stop"`: fail fast -- every step that has not finished is cancelled immediately; the run ends **Failed** (not Cancelled) and each cancelled step's error message reads `Cancelled: step 'X' failed and onStepFailure is 'stop'`. Case-insensitive. |
 | `variables` | `object` | No | `{}` | Key-value pairs of user-defined variables. Values can contain template expressions. Accessed via `{{vars.name}}`. |
 | `tags` | `string[]` | No | `[]` | Tags for categorizing and filtering orchestrations. |
 | `hooks` | `Hook[]` | No | `[]` | Lifecycle hooks that run after step or orchestration outcomes. Hooks receive structured JSON payloads on stdin and can execute follow-up scripts. |
@@ -283,7 +285,8 @@ These properties are shared by **all** step types.
 | `type` | `string` | **Yes** | -- | Step type. One of: `"Prompt"`, `"Http"`, `"Transform"`, `"Command"`, `"Script"`, `"Orchestration"`, `"Approval"` (case-insensitive). |
 | `dependsOn` | `string[]` | No | `[]` | Names of steps that must complete before this step runs. Defines the DAG edges. |
 | `parameters` | `string[]` or `object` | No | `[]` | For most step types, parameter names this step expects. For Orchestration steps, child parameter values keyed by child input name. |
-| `enabled` | `bool` | No | `true` | When `false`, the step is skipped during execution. |
+| `enabled` | `bool` | No | `true` | When `false`, the step is skipped during execution (recorded as an empty success; dependents see `""`). Static switch. |
+| `when` | `string` | No | `null` | Run-time boolean condition, evaluated after every dependency settles. False => the step is `Skipped` (skipKind `Condition`) **without blocking dependents**, which see `""` for its output. Grammar: `{{...}}` references used directly as values (`{{param.x}}`, `{{step.output}}`, `{{step.output.a.b}}`, `{{step.status}}`, `{{step.errorMessage}}`), `'string'`/number/`true`/`false`/`null` literals, `== != < <= > >= && \|\| !` (`and`/`or`/`not` aliases), parentheses, functions `contains(t, n)`, `startsWith`, `endsWith` (case-insensitive), `matches(t, regex)`, `empty(x)`, `lower(x)`, `trim(x)`, `length(x)`, `always()`, `success()`, `failure()`. Outcome-aware conditions (`failure()`/`success()`/`always()` or a `{{step.status}}`/`{{step.errorMessage}}` reference) suspend the dependency-failure cascade for the step so on-failure handlers can run; other conditions are consulted only after every dependency succeeded. Syntax errors fail `orchestra validate`; run-time evaluation errors fail the step with `ConditionError`. Quote the whole value in YAML when it starts with `{{`. |
 | `timeoutSeconds` | `int` | No | `null` | Per-step timeout in seconds. Falls back to `defaultStepTimeoutSeconds` if not set. Set to `0` to explicitly disable timeout. |
 | `retry` | `RetryPolicy` | No | `null` | Per-step retry policy. Overrides `defaultRetryPolicy`. |
 
@@ -502,6 +505,7 @@ Makes an HTTP request and captures the response body as output. No LLM is involv
 | `headers` | `object` | No | `{}` | Key-value pairs of request headers. Values support template expressions. |
 | `body` | `string` | No | `null` | Request body. Supports template expressions. |
 | `contentType` | `string` | No | `"application/json"` | Content-Type header for the request body. |
+| `maxOutputBytes` | `int` | No | `10485760` (10 MiB) | Maximum bytes of the response body kept. The body is read from the network only up to the cap; the rest is discarded, `[output truncated: ...]` is appended and an `output-truncated` session warning is reported. `0` disables the cap. |
 
 ---
 
@@ -534,6 +538,7 @@ Do not use `Command` for shell snippets or wrappers such as `pwsh -Command`, `po
 | `environment` | `object` | No | `{}` | Environment variables to set. Values support template expressions. |
 | `includeStdErr` | `bool` | No | `false` | Whether to append stderr to the captured output. |
 | `stdin` | `string` | No | `null` | Content to pipe to the process's standard input. |
+| `maxOutputBytes` | `int` | No | `10485760` (10 MiB) | Maximum bytes of output kept, stdout and stderr combined. Output beyond the cap is dropped at a line boundary, `[output truncated: ...]` is appended to the output and an `output-truncated` session warning is reported; the step still succeeds. `0` disables the cap. |
 
 ---
 
@@ -553,6 +558,7 @@ Executes an inline or file-based script via a shell interpreter. The script's st
 | `environment` | `object` | No | `{}` | Environment variables to set. |
 | `includeStdErr` | `bool` | No | `false` | Whether to append stderr to the captured output. |
 | `stdin` | `string` | No | `null` | Content to pipe to the process's standard input. |
+| `maxOutputBytes` | `int` | No | `10485760` (10 MiB) | Maximum bytes of output kept, stdout and stderr combined. Output beyond the cap is dropped at a line boundary, `[output truncated: ...]` is appended to the output and an `output-truncated` session warning is reported; the step still succeeds. `0` disables the cap. |
 
 > **\*Mutual exclusion:** Exactly one of `script` or `scriptFile` is required.
 
@@ -736,6 +742,8 @@ Retry policies control automatic retries on step failure with exponential backof
 | `maxRetries` | `int` | `3` | Maximum retry attempts after the initial failure. |
 | `backoffSeconds` | `double` | `1.0` | Initial delay before the first retry (in seconds). |
 | `backoffMultiplier` | `double` | `2.0` | Multiplier applied to the backoff delay after each retry. |
+| `maxDelaySeconds` | `double` | `null` (uncapped) | Upper bound on the computed backoff delay, applied before jitter. With the defaults the uncapped curve is 1s, 2s, 4s, 8s, 16s... |
+| `jitterSeconds` | `double` | `0` | Maximum random jitter added to every delay: actual wait = capped backoff + uniform random in `[0, jitterSeconds]`. Spreads out retries of steps that failed together. |
 | `retryOnTimeout` | `bool` | `true` | Whether to retry when the failure is a timeout. |
 
 ---

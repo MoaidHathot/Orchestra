@@ -95,10 +95,17 @@ public sealed partial class HttpStepExecutor : IStepExecutor
 
 			LogHttpRequest(step.Name, httpStep.Method, url);
 
-			// Send the request
-			using var response = await _httpClient.SendAsync(request, cancellationToken);
+			// Send the request. Headers-only completion so the body is read through the cap
+			// below instead of being buffered whole by HttpClient.
+			using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
 
-			var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+			var (responseBody, droppedBytes) = await ReadBodyBoundedAsync(response, httpStep.MaxOutputBytes, cancellationToken);
+			if (droppedBytes > 0)
+			{
+				responseBody += OutputLimits.Marker(httpStep.MaxOutputBytes, droppedBytes);
+				LogHttpBodyTruncated(step.Name, droppedBytes);
+				_reporter.ReportSessionWarning(OutputLimits.WarningType, OutputLimits.WarningMessage(step.Name, httpStep.MaxOutputBytes, droppedBytes));
+			}
 
 			// Build trace for the HTTP step
 			var responseHeaders = response.Headers
@@ -177,6 +184,72 @@ public sealed partial class HttpStepExecutor : IStepExecutor
 		}
 	}
 
+	/// <summary>
+	/// Reads the response body up to the step's <c>maxOutputBytes</c>. Returns the decoded text
+	/// and how many bytes were left unread (0 when the whole body fit). The body is decoded with
+	/// the charset the server declared, falling back to UTF-8; a multi-byte character cut by the
+	/// cap decodes to U+FFFD and is trimmed so the marker follows clean text.
+	/// </summary>
+	internal static async Task<(string Body, long DroppedBytes)> ReadBodyBoundedAsync(HttpResponseMessage response, int? maxOutputBytes, CancellationToken cancellationToken)
+	{
+		var encoding = ResolveEncoding(response.Content.Headers.ContentType?.CharSet);
+		await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+
+		if (!OutputLimits.IsBounded(maxOutputBytes))
+		{
+			using var reader = new StreamReader(stream, encoding);
+			return (await reader.ReadToEndAsync(cancellationToken), 0);
+		}
+
+		var cap = OutputLimits.Resolve(maxOutputBytes);
+		var buffer = new MemoryStream();
+		var chunk = new byte[81920];
+		long dropped = 0;
+
+		while (true)
+		{
+			var read = await stream.ReadAsync(chunk, cancellationToken);
+			if (read == 0)
+				break;
+
+			var room = cap - buffer.Length;
+			if (room >= read)
+			{
+				buffer.Write(chunk, 0, read);
+				continue;
+			}
+
+			if (room > 0)
+				buffer.Write(chunk, 0, (int)room);
+			dropped += read - Math.Max(0, room);
+
+			// Count (but do not keep) whatever remains so the warning states the real size.
+			while ((read = await stream.ReadAsync(chunk, cancellationToken)) > 0)
+				dropped += read;
+			break;
+		}
+
+		var text = encoding.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
+		if (dropped > 0)
+			text = text.TrimEnd('\uFFFD');
+		return (text, dropped);
+	}
+
+	private static Encoding ResolveEncoding(string? charSet)
+	{
+		if (string.IsNullOrWhiteSpace(charSet))
+			return Encoding.UTF8;
+
+		try
+		{
+			return Encoding.GetEncoding(charSet.Trim('"'));
+		}
+		catch (ArgumentException)
+		{
+			return Encoding.UTF8;
+		}
+	}
+
 	#region Source-Generated Logging
 
 	[LoggerMessage(
@@ -202,6 +275,12 @@ public sealed partial class HttpStepExecutor : IStepExecutor
 		Level = LogLevel.Error,
 		Message = "Step '{StepName}' HTTP request threw an exception")]
 	private partial void LogHttpException(string stepName, Exception ex);
+
+	[LoggerMessage(
+		EventId = 5,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' HTTP response body exceeded maxOutputBytes; {DroppedBytes} bytes dropped")]
+	private partial void LogHttpBodyTruncated(string stepName, long droppedBytes);
 
 	#endregion
 }

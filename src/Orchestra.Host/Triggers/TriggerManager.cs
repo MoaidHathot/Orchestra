@@ -86,12 +86,13 @@ public partial class TriggerManager : BackgroundService
 		HookDefinition[]? globalHooks = null,
 		IPendingInputStore? pendingInputStore = null,
 		IHumanInputWaiter? humanInputWaiter = null,
-		ReasoningLevel? defaultReasoningLevel = null)
+		ReasoningLevel? defaultReasoningLevel = null,
+		int? defaultMaxConcurrency = null)
 		: this(
 			activeExecutions, activeExecutionInfos, new SingleAgentProviderRegistry(agentBuilder), scheduler,
 			loggerFactory, logger, runsDir, runStore, checkpointStore, launcher, executionCallback,
 			engineToolRegistry, mcpResolver, dataPath, serverUrl, defaultModel, globalHooks,
-			pendingInputStore, humanInputWaiter, defaultReasoningLevel)
+			pendingInputStore, humanInputWaiter, defaultReasoningLevel, defaultMaxConcurrency)
 	{
 	}
 
@@ -115,7 +116,8 @@ public partial class TriggerManager : BackgroundService
 		HookDefinition[]? globalHooks = null,
 		IPendingInputStore? pendingInputStore = null,
 		IHumanInputWaiter? humanInputWaiter = null,
-		ReasoningLevel? defaultReasoningLevel = null)
+		ReasoningLevel? defaultReasoningLevel = null,
+		int? defaultMaxConcurrency = null)
 	{
 		_activeExecutions = activeExecutions;
 		_activeExecutionInfos = activeExecutionInfos;
@@ -136,7 +138,7 @@ public partial class TriggerManager : BackgroundService
 		_dataPath = dataPath;
 		_serverUrl = serverUrl;
 		_defaultModel = defaultModel;
-		_hostDefaults = new HostAgentDefaults { Model = defaultModel, ReasoningLevel = defaultReasoningLevel };
+		_hostDefaults = new HostAgentDefaults { Model = defaultModel, ReasoningLevel = defaultReasoningLevel, MaxConcurrency = defaultMaxConcurrency };
 		_globalHooks = globalHooks ?? [];
 		Directory.CreateDirectory(_triggersDir);
 

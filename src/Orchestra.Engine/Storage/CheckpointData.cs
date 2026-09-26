@@ -130,6 +130,19 @@ public class CheckpointStepResult
 	/// </summary>
 	public StepErrorCategory? ErrorCategory { get; init; }
 
+	/// <summary>
+	/// Structured SDK error details for failures, when the agent session reported them.
+	/// Null on legacy checkpoints.
+	/// </summary>
+	public AgentSessionErrorDetails? ErrorDetails { get; init; }
+
+	/// <summary>
+	/// Why a Skipped step was skipped. Must round-trip so that, after a resume, a step
+	/// skipped by its own <c>when:</c> condition keeps <em>not</em> blocking its dependents.
+	/// Null on legacy checkpoints (treated as a dependency-failure skip).
+	/// </summary>
+	public SkipKind? SkipKind { get; init; }
+
 	// ── Child orchestration pointer (Orchestration steps only) ──
 	//
 	// We persist ONLY the pointer triple — not the child's full StepResults map —
@@ -182,6 +195,8 @@ public class CheckpointStepResult
 		SavedFiles = SavedFiles,
 		RetryHistory = RetryHistory,
 		ErrorCategory = ErrorCategory,
+		ErrorDetails = ErrorDetails,
+		SkipKind = SkipKind,
 		// NOTE: ChildOrchestrationInfo is intentionally NOT reconstructed here.
 		// The full per-step data lives in the child's own run.json; the parent's
 		// retry/resume path rehydrates it via IRunStore.GetRunAsync after this
@@ -211,6 +226,8 @@ public class CheckpointStepResult
 		SavedFiles = result.SavedFiles,
 		RetryHistory = result.RetryHistory,
 		ErrorCategory = result.ErrorCategory,
+		ErrorDetails = result.ErrorDetails,
+		SkipKind = result.SkipKind,
 		// Capture just the pointer triple from ChildOrchestrationInfo (if any).
 		// The child's per-step content lives on its own run.json — we don't
 		// inline it here, mirroring the parent run.json's storage decision.

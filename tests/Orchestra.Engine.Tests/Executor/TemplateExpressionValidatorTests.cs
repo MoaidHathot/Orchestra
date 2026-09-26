@@ -1820,4 +1820,163 @@ public class TemplateExpressionValidatorTests
 	}
 
 	#endregion
+
+	#region `when` conditions
+
+	[Fact]
+	public void ValidateOrchestration_WhenWithValidReferences_ReturnsNoErrors()
+	{
+		var step2 = CreateTransformStep("step2", "x", dependsOn: ["step1"]);
+		var orchestration = CreateOrchestration(steps:
+		[
+			CreateTransformStep("step1", "Hello {{param.topic}}", parameters: ["topic"]),
+			WithWhen(step2, "{{step1.status}} == 'succeeded' && !empty({{param.topic}}) || failure()"),
+		]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(string.Join("; ", result.Errors.Select(e => e.Message)));
+	}
+
+	[Fact]
+	public void ValidateOrchestration_WhenWithSyntaxError_ReportsIt()
+	{
+		var orchestration = CreateOrchestration(steps:
+		[
+			WithWhen(CreateTransformStep("step1", "x", parameters: ["a"]), "{{param.a}} = 'b'"),
+		]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e => e.FieldName == "when" && e.StepName == "step1")
+			.Which.Message.Should().Contain("Invalid `when` condition").And.Contain("Use '=='");
+	}
+
+	[Fact]
+	public void ValidateOrchestration_WhenReferencingUnknownStep_ReportsIt()
+	{
+		var orchestration = CreateOrchestration(steps:
+		[
+			WithWhen(CreateTransformStep("step1", "x"), "{{ghost.status}} == 'failed'"),
+		]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().Contain(e => e.FieldName == "when" && e.Message.Contains("Step 'ghost' does not exist"));
+	}
+
+	[Fact]
+	public void ValidateOrchestration_WhenReferencingUnreachableStep_ReportsIt()
+	{
+		// step2 does not depend on step1, so step1's outcome is not guaranteed to be known.
+		var orchestration = CreateOrchestration(steps:
+		[
+			CreateTransformStep("step1", "x"),
+			WithWhen(CreateTransformStep("step2", "y"), "{{step1.status}} == 'succeeded'"),
+		]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().Contain(e => e.FieldName == "when" && e.Message.Contains("not reachable via DependsOn"));
+	}
+
+	[Fact]
+	public void ValidateOrchestration_StatusAndErrorMessage_AreValidOnEveryStepType()
+	{
+		// Previously `status` was an Orchestration-step-only accessor and was rejected on a
+		// Transform/Prompt/Command target. `when:` needs it everywhere.
+		var orchestration = CreateOrchestration(steps:
+		[
+			CreateTransformStep("step1", "x"),
+			CreateTransformStep("step2", "{{step1.status}} / {{step1.errorMessage}}", dependsOn: ["step1"]),
+		]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeTrue(string.Join("; ", result.Errors.Select(e => e.Message)));
+	}
+
+	[Fact]
+	public void ValidateOrchestration_OrchestrationOnlyAccessor_StillRejectedOnOtherStepTypes()
+	{
+		var orchestration = CreateOrchestration(steps:
+		[
+			CreateTransformStep("step1", "x"),
+			CreateTransformStep("step2", "{{step1.executionId}}", dependsOn: ["step1"]),
+		]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle().Which.Message.Should().Contain("only available on steps of type 'Orchestration'");
+	}
+
+	private static T WithWhen<T>(T step, string when) where T : OrchestrationStep
+	{
+		// OrchestrationStep.When is init-only; rebuild through the type's own copy shape.
+		return step switch
+		{
+			TransformOrchestrationStep t => (T)(OrchestrationStep)new TransformOrchestrationStep
+			{
+				Name = t.Name, Type = t.Type, DependsOn = t.DependsOn, Parameters = t.Parameters,
+				Template = t.Template, ContentType = t.ContentType, When = when,
+			},
+			_ => throw new NotSupportedException($"WithWhen helper does not cover {typeof(T).Name}"),
+		};
+	}
+
+	#endregion
+
+	#region Orchestration and Approval step fields (previously unvalidated)
+
+	[Fact]
+	public void ValidateOrchestration_OrchestrationStepFields_AreValidated()
+	{
+		// `orchestration`, every `parameters` value and `forEach` are template-resolved by the
+		// executor, but the validator used to return no fields for this step type, so a typo
+		// surfaced only as a literal {{...}} at run time.
+		var orchestration = CreateOrchestration(steps:
+		[
+			CreateTransformStep("plan", "x"),
+			new OrchestrationInvocationStep
+			{
+				Name = "invoke",
+				Type = OrchestrationStepType.Orchestration,
+				DependsOn = ["plan"],
+				OrchestrationName = "child-{{param.env}}",
+				ChildParameters = new() { ["items"] = "{{plan.output}}", ["bad"] = "{{plann.output}}" },
+				ForEach = "{{param.notDeclared}}",
+			},
+		]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Select(e => e.FieldName).Should().Contain(["Orchestration", "Parameters[bad]", "ForEach"]);
+		result.Errors.Should().Contain(e => e.FieldName == "Parameters[bad]" && e.Message.Contains("Step 'plann' does not exist"));
+	}
+
+	[Fact]
+	public void ValidateOrchestration_ApprovalPrompt_IsValidated()
+	{
+		var orchestration = CreateOrchestration(steps:
+		[
+			new ApprovalOrchestrationStep
+			{
+				Name = "gate",
+				Type = OrchestrationStepType.Approval,
+				Prompt = "Approve {{param.missing}}?",
+			},
+		]);
+
+		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+
+		result.IsValid.Should().BeFalse();
+		result.Errors.Should().ContainSingle(e => e.FieldName == "Prompt" && e.StepName == "gate");
+	}
+
+	#endregion
 }

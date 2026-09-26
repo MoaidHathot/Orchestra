@@ -70,6 +70,8 @@ public static class OrchestrationsApi
 								dependsOn = s.DependsOn,
 								parameters = s.Parameters,
 								enabled = s.Enabled,
+								when = s.When,
+								condition = s.When,
 								model = ps?.Model,
 								mcps = ps?.Mcps.Select(m => new
 								{
@@ -192,6 +194,8 @@ public static class OrchestrationsApi
 					dependsOn = s.DependsOn,
 					parameters = s.Parameters,
 					enabled = s.Enabled,
+					when = s.When,
+					condition = s.When,
 					model = ps?.Model,
 					reasoningLevel = ps?.ReasoningLevel?.ToString(),
 					systemPromptMode = ps?.SystemPromptMode?.ToString(),
@@ -234,6 +238,10 @@ public static class OrchestrationsApi
 					command = cs?.Command,
 					arguments = cs?.Arguments.Length > 0 ? cs.Arguments : null,
 					workingDirectory = cs?.WorkingDirectory,
+					// Output cap shared by Command / Script / Http (null = engine default 10 MiB, 0 = no cap)
+					maxOutputBytes = (s as CommandOrchestrationStep)?.MaxOutputBytes
+						?? (s as ScriptOrchestrationStep)?.MaxOutputBytes
+						?? (s as HttpOrchestrationStep)?.MaxOutputBytes,
 					// Transform step fields
 					template = ts?.Template
 				};

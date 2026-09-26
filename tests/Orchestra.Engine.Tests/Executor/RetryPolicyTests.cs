@@ -130,5 +130,59 @@ public class RetryPolicyTests
 		policy.BackoffSeconds.Should().Be(1.0);
 		policy.BackoffMultiplier.Should().Be(2.0);
 		policy.RetryOnTimeout.Should().BeTrue();
+		policy.MaxDelaySeconds.Should().BeNull("exponential growth is unbounded unless capped");
+		policy.JitterSeconds.Should().Be(0, "delays are deterministic unless jitter is requested");
+	}
+
+	[Fact]
+	public void GetDelay_MaxDelaySeconds_CapsExponentialGrowth()
+	{
+		var policy = new RetryPolicy { BackoffSeconds = 1.0, BackoffMultiplier = 2.0, MaxDelaySeconds = 5.0 };
+
+		policy.GetDelay(1).Should().Be(TimeSpan.FromSeconds(1));
+		policy.GetDelay(3).Should().Be(TimeSpan.FromSeconds(4), "below the cap the curve is untouched");
+		policy.GetDelay(4).Should().Be(TimeSpan.FromSeconds(5), "8s is capped to 5s");
+		policy.GetDelay(10).Should().Be(TimeSpan.FromSeconds(5));
+	}
+
+	[Fact]
+	public void GetDelay_Jitter_AddsUpToJitterSeconds_OnTopOfTheCappedDelay()
+	{
+		var policy = new RetryPolicy { BackoffSeconds = 1.0, BackoffMultiplier = 2.0, MaxDelaySeconds = 4.0, JitterSeconds = 2.0 };
+
+		// Deterministic randomness: NextDouble() in [0,1) scaled by JitterSeconds.
+		var zero = new FixedRandom(0.0);
+		var half = new FixedRandom(0.5);
+		var almostOne = new FixedRandom(0.999);
+
+		policy.GetDelay(2, zero).Should().Be(TimeSpan.FromSeconds(2.0));
+		policy.GetDelay(2, half).Should().Be(TimeSpan.FromSeconds(3.0));
+		policy.GetDelay(5, almostOne).TotalSeconds.Should().BeApproximately(4.0 + 1.998, 0.001, "capped 4s plus jitter");
+	}
+
+	[Fact]
+	public void GetDelay_Jitter_IsRandomAcrossCalls_ButBounded()
+	{
+		var policy = new RetryPolicy { BackoffSeconds = 1.0, JitterSeconds = 1.0 };
+
+		var samples = Enumerable.Range(0, 50).Select(_ => policy.GetDelay(1).TotalSeconds).ToArray();
+
+		samples.Should().OnlyContain(s => s >= 1.0 && s < 2.0);
+		samples.Distinct().Should().HaveCountGreaterThan(1, "jitter must actually vary");
+	}
+
+	[Fact]
+	public void GetDelay_WithoutJitter_IsDeterministic()
+	{
+		var policy = new RetryPolicy { BackoffSeconds = 1.5 };
+
+		Enumerable.Range(0, 10).Select(_ => policy.GetDelay(2)).Distinct().Should().ContainSingle();
+	}
+
+	/// <summary>A <see cref="Random"/> whose <see cref="Random.NextDouble"/> always returns one value.</summary>
+	private sealed class FixedRandom(double value) : Random
+	{
+		protected override double Sample() => value;
+		public override double NextDouble() => value;
 	}
 }

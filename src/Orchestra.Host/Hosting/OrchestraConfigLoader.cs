@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
 using Orchestra.Engine.Serialization;
+using Orchestra.Host.Extensions;
 using Orchestra.ProcessHost;
 
 namespace Orchestra.Host.Hosting;
@@ -589,6 +590,17 @@ public static class OrchestraConfigLoader
 		if (config.DefaultReasoningLevel is not null)
 			options.DefaultReasoningLevel = config.DefaultReasoningLevel;
 
+		if (config.DefaultMaxConcurrency is { } defaultMaxConcurrency)
+		{
+			// A zero cap would deadlock every run. The loader's contract is warn-and-continue
+			// (only env-var expansion is fatal), so ignore the value rather than throw: a throw
+			// here would be swallowed by LoadAndApply and abandon every setting below this line.
+			if (defaultMaxConcurrency <= 0)
+				HostInitializationLog.InvalidDefaultMaxConcurrency(logger ?? NullLogger.Instance, defaultMaxConcurrency);
+			else
+				options.DefaultMaxConcurrency = defaultMaxConcurrency;
+		}
+
 		if (config.AgentPool is not null)
 		{
 			if (config.AgentPool.MinInstances.HasValue)
@@ -821,6 +833,12 @@ public class OrchestraConfigFile
 	/// orchestration with no <c>defaultReasoningLevel</c>.
 	/// </summary>
 	public ReasoningLevel? DefaultReasoningLevel { get; set; }
+
+	/// <summary>
+	/// Default cap on concurrently executing steps within one run, for orchestrations that set
+	/// no <c>maxConcurrency</c>. Positive integer; omit for unbounded.
+	/// </summary>
+	public int? DefaultMaxConcurrency { get; set; }
 
 	/// <summary>
 	/// Default agent worker pool settings for orchestration runs.

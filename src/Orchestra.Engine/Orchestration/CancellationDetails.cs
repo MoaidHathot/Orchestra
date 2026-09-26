@@ -73,6 +73,13 @@ public enum CancellationCauseKind
 	/// surface a hot-reload separately from a user-driven cancel.
 	/// </summary>
 	ConfigReload = 9,
+
+	/// <summary>
+	/// The orchestration declares <c>onStepFailure: stop</c> and a step failed, so every step
+	/// that had not finished was cancelled (fail fast). The run itself ends as Failed, not
+	/// Cancelled; this cause appears on the cancelled steps' error messages.
+	/// </summary>
+	StepFailureStop = 10,
 }
 
 /// <summary>
@@ -249,6 +256,10 @@ public sealed class CancellationDetails
 					!string.IsNullOrWhiteSpace(Detail)
 						? $"orchestration definition reloaded: {Detail}"
 						: "orchestration definition reloaded",
+				CancellationCauseKind.StepFailureStop =>
+					!string.IsNullOrWhiteSpace(Source)
+						? $"step '{Source}' failed and onStepFailure is 'stop'"
+						: "a step failed and onStepFailure is 'stop'",
 				CancellationCauseKind.Unknown => "cancelled",
 				_ => "cancelled",
 			};
@@ -398,6 +409,18 @@ public sealed class CancellationDetails
 	{
 		Kind = CancellationCauseKind.ConfigReload,
 		Source = source ?? "config-reload",
+		Detail = detail,
+	};
+
+	/// <summary>
+	/// Convenience constructor for the fail-fast cancellation applied to unfinished steps when
+	/// a step fails in an orchestration with <c>onStepFailure: stop</c>.
+	/// <paramref name="failedStepName"/> is recorded as <see cref="Source"/>.
+	/// </summary>
+	public static CancellationDetails StepFailureStop(string failedStepName, string? detail = null) => new()
+	{
+		Kind = CancellationCauseKind.StepFailureStop,
+		Source = failedStepName,
 		Detail = detail,
 	};
 

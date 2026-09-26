@@ -88,6 +88,9 @@ export interface Step {
   userPrompt?: string;
   prompt?: string;
   dependsOn?: string[];
+  /** The step's `when:` condition expression, if any (server also mirrors it as `condition`). */
+  when?: string;
+  /** @deprecated alias of `when`, kept for the existing details panel. */
   condition?: string;
   output?: string;
   tools?: string[];
@@ -107,6 +110,8 @@ export interface Step {
   command?: string;
   arguments?: string[];
   workingDirectory?: string;
+  /** Command/Script/Http: output cap in bytes (absent = 10 MiB default, 0 = no cap). */
+  maxOutputBytes?: number | null;
   // Transform step fields
   transform?: string;
   template?: string;
@@ -198,6 +203,10 @@ export interface StepResultData {
   trace?: TraceData;
   errorCategory?: string;
   retryHistory?: RetryAttemptRecord[];
+  /** Why a Skipped step was skipped: 'DependencyFailure' cascades, 'Condition' (its own `when`) does not. */
+  skipKind?: 'DependencyFailure' | 'Condition' | 'ConditionError' | string;
+  /** The step's `when:` expression as authored, when one was declared. */
+  condition?: string;
 }
 
 export interface ModelInfo {

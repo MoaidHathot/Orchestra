@@ -121,6 +121,19 @@ public class StepRunRecord
 	public StepErrorCategory? ErrorCategory { get; init; }
 
 	/// <summary>
+	/// Why the step was skipped when <see cref="Status"/> is <see cref="ExecutionStatus.Skipped"/>:
+	/// a cascading dependency failure, or the step's own <c>when:</c> condition (which does not
+	/// cascade). Null for non-skipped steps and for records written before this field existed.
+	/// </summary>
+	public SkipKind? SkipKind { get; init; }
+
+	/// <summary>
+	/// The step's <c>when:</c> expression as authored, when one was declared. Persisted so a run
+	/// record explains a condition skip without the reader needing the orchestration source.
+	/// </summary>
+	public string? Condition { get; init; }
+
+	/// <summary>
 	/// Structured details from the underlying agent session error, when the step failed
 	/// because of a Copilot SDK <c>session.error</c> event. Carries the upstream
 	/// <c>ErrorType</c>, HTTP status code, GitHub <c>x-github-request-id</c>, optional
@@ -253,6 +266,13 @@ public enum StepErrorCategory
 	/// are guaranteed to fail and should be skipped.
 	/// </summary>
 	ClientUnhealthy,
+
+	/// <summary>
+	/// The step's <c>when:</c> condition could not be evaluated: a syntax error that escaped
+	/// parse-time validation, an unresolvable reference used in a way that throws, or a failing
+	/// function (e.g. an invalid regular expression passed to <c>matches()</c>).
+	/// </summary>
+	ConditionError,
 }
 
 /// <summary>

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 
 namespace Orchestra.Engine;
@@ -393,6 +394,18 @@ public partial class OrchestrationExecutor
 			? new ClockPauseTracker(orchestrationTimeoutCts, orchestration.TimeoutSeconds.Value, runStartedAt)
 			: null;
 
+		// Per-run step concurrency cap: orchestration value, else host default, else unbounded.
+		// Deliberately not disposed: early termination (orchestra_complete, onStepFailure=stop)
+		// resolves pending step TCSs while steps are still in flight, so this method can return
+		// before a running step's finally-block Release(); a SemaphoreSlim without a wait handle
+		// owns no unmanaged resources, so leaving it to the GC is the correct choice.
+		var effectiveMaxConcurrency = orchestration.MaxConcurrency ?? _hostDefaults.MaxConcurrency;
+		if (effectiveMaxConcurrency is <= 0)
+			throw new InvalidOperationException($"Orchestration '{orchestration.Name}' has an invalid maxConcurrency of {effectiveMaxConcurrency}; it must be a positive integer.");
+		var stepConcurrencyLimiter = effectiveMaxConcurrency is { } cap ? new SemaphoreSlim(cap, cap) : null;
+		if (stepConcurrencyLimiter is not null)
+			LogStepConcurrencyLimit(orchestration.Name, effectiveMaxConcurrency!.Value);
+
 		var context = new OrchestrationExecutionContext
 		{
 			Parameters = effectiveParams,
@@ -413,6 +426,7 @@ public partial class OrchestrationExecutor
 			DefaultReasoningLevel = orchestration.DefaultReasoningLevel ?? _hostDefaults.ReasoningLevel,
 			DefaultProvider = orchestration.DefaultProvider,
 			DefaultStepTimeoutSeconds = orchestration.DefaultStepTimeoutSeconds,
+			StepConcurrencyLimiter = stepConcurrencyLimiter,
 			DefaultEnableTools = orchestration.DefaultEnableTools,
 			DefaultPermissionPolicy = orchestration.DefaultPermissionPolicy,
 			DefaultSandboxPolicy = orchestration.DefaultSandboxPolicy,
@@ -442,6 +456,9 @@ public partial class OrchestrationExecutor
 		ExecutionStatus? orchestrationCompleteStatus = null;
 		string? orchestrationCompleteReason = null;
 		string? orchestrationCompleteStepName = null;
+
+		// Name of the step whose failure triggered onStepFailure=stop (null when it did not fire).
+		string? stopTriggeredByStep = null;
 
 		// Step lookup is already built above so the hook callback can find the step entry.
 
@@ -562,7 +579,7 @@ public partial class OrchestrationExecutor
 					{
 						continue;
 					}
-					var enriched = CloneResultWithChildInfo(restored, rehydrated);
+					var enriched = restored with { ChildOrchestrationInfo = rehydrated };
 					context.AddResult(stepName, enriched);  // overwrites
 					stepResults[stepName] = enriched;
 				}
@@ -626,42 +643,42 @@ public partial class OrchestrationExecutor
 
 				try
 				{
-		var result = await ExecuteWithRetryAsync(step, stepExecutor, context, stepResults, effectiveStepToken);
+					var result = await ExecuteWithRetryAsync(step, stepExecutor, context, stepResults, effectiveStepToken);
 
-				context.AddResult(step.Name, result);
-				stepResults[step.Name] = result;
+					context.AddResult(step.Name, result);
+					stepResults[step.Name] = result;
 
-				var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
-				stepRecords[step.Name] = record;
-				allStepRecords[step.Name] = record;
-				// Publish so data-plane MCP tools (get_orchestration_step) can serve this
-				// step's content mid-run, before the orchestration finalizes its run.json.
-				_reporter.PublishStepRecord(step.Name, record);
-				await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+					var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
+					stepRecords[step.Name] = record;
+					allStepRecords[step.Name] = record;
+					// Publish so data-plane MCP tools (get_orchestration_step) can serve this
+					// step's content mid-run, before the orchestration finalizes its run.json.
+					_reporter.PublishStepRecord(step.Name, record);
+					await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
 
-				// Report full step output as soon as the step completes so non-streaming steps
-				// (especially Command) are viewable while downstream steps are still running.
-				if (result.Status == ExecutionStatus.Succeeded)
-				{
-					_reporter.ReportStepOutput(step.Name, result.Content);
-				}
-
-				// Report step completed/failed/no-action to the reporter so the UI
-				// can update step status immediately (not just at orchestration-done).
-				// This centralised call ensures all step types (Prompt, Command, HTTP, Transform)
-				// emit step-completed events with their step type for correct UI display.
-				if (result.Status == ExecutionStatus.Succeeded || result.Status == ExecutionStatus.NoAction)
-				{
-					_reporter.ReportStepCompleted(step.Name, new AgentResult
+					// Report full step output as soon as the step completes so non-streaming steps
+					// (especially Command) are viewable while downstream steps are still running.
+					if (result.Status == ExecutionStatus.Succeeded)
 					{
-						Content = result.Content,
-						ActualModel = result.ActualModel,
-						SelectedModel = result.SelectedModel,
-						RequestedModelInfo = result.RequestedModelInfo,
-						SelectedModelInfo = result.SelectedModelInfo,
-						ActualModelInfo = result.ActualModelInfo,
-					}, step.Type);
-				}
+						_reporter.ReportStepOutput(step.Name, result.Content);
+					}
+
+					// Report step completed/failed/no-action to the reporter so the UI
+					// can update step status immediately (not just at orchestration-done).
+					// This centralised call ensures all step types (Prompt, Command, HTTP, Transform)
+					// emit step-completed events with their step type for correct UI display.
+					if (result.Status == ExecutionStatus.Succeeded || result.Status == ExecutionStatus.NoAction)
+					{
+						_reporter.ReportStepCompleted(step.Name, new AgentResult
+						{
+							Content = result.Content,
+							ActualModel = result.ActualModel,
+							SelectedModel = result.SelectedModel,
+							RequestedModelInfo = result.RequestedModelInfo,
+							SelectedModelInfo = result.SelectedModelInfo,
+							ActualModelInfo = result.ActualModelInfo,
+						}, step.Type);
+					}
 
 					// Handle loop if configured (loop is a Prompt-only feature)
 					if (step is PromptOrchestrationStep promptStep && promptStep.Loop is not null && result.Status == ExecutionStatus.Succeeded)
@@ -674,6 +691,38 @@ public partial class OrchestrationExecutor
 					if (result.Status == ExecutionStatus.Succeeded)
 					{
 						await SaveCheckpointAfterStepAsync(runId, orchestration, runStartedAt, effectiveParams, triggerId, stepResults, step.Name, totalSteps, externalCancellationToken);
+					}
+
+					// Fail fast: with onStepFailure=stop, the first Failed step cancels everything
+					// still pending. Mirrors the orchestra_complete path below, but the run keeps
+					// its Failed status (OrchestrationResult.From ranks Failed above Cancelled) and
+					// the cancelled steps carry a StepFailureStop cause.
+					if (result.Status == ExecutionStatus.Failed
+						&& orchestration.OnStepFailure == StepFailurePolicy.Stop
+						&& !orchestrationCompleteCts.IsCancellationRequested)
+					{
+						Interlocked.CompareExchange(ref stopTriggeredByStep, step.Name, null);
+						LogStepFailureStop(step.Name, result.ErrorMessage ?? "(no message)");
+						try { orchestrationCompleteCts.Cancel(); } catch (ObjectDisposedException) { }
+
+						var stopReason = $"Cancelled: step '{step.Name}' failed and onStepFailure is 'stop'";
+						foreach (var (name, tcs) in completionSources)
+						{
+							if (!stepResults.ContainsKey(name))
+							{
+								var cancelledResult = ExecutionResult.Cancelled(stopReason);
+								context.AddResult(name, cancelledResult);
+								stepResults[name] = cancelledResult;
+
+								var cancelRecord = BuildStepRecord(allSteps[name], cancelledResult, effectiveParams, DateTimeOffset.UtcNow);
+								stepRecords[name] = cancelRecord;
+								allStepRecords[name] = cancelRecord;
+								_reporter.PublishStepRecord(name, cancelRecord);
+
+								_reporter.ReportStepCancelled(name);
+								tcs.TrySetResult(cancelledResult);
+							}
+						}
 					}
 
 					// Check if this step requested orchestration completion
@@ -827,6 +876,12 @@ public partial class OrchestrationExecutor
 				&& !externalCancellationToken.IsCancellationRequested)
 			{
 				cancellationDetails = CancellationDetails.OrchestrationTimeout(orchestration.TimeoutSeconds!.Value);
+			}
+			else if (stopTriggeredByStep is not null
+				&& !externalCancellationToken.IsCancellationRequested
+				&& (orchestrationTimeoutCts is null || !orchestrationTimeoutCts.IsCancellationRequested))
+			{
+				cancellationDetails = CancellationDetails.StepFailureStop(stopTriggeredByStep);
 			}
 			else if (orchestrationCompleteStatus is not null
 				&& !externalCancellationToken.IsCancellationRequested
@@ -1341,29 +1396,7 @@ public partial class OrchestrationExecutor
 			if (result.Status != ExecutionStatus.Failed)
 			{
 				// Succeeded after retries — attach retry history to the result
-				return new ExecutionResult
-				{
-					Content = result.Content,
-					Status = result.Status,
-					ErrorMessage = result.ErrorMessage,
-					RawContent = result.RawContent,
-					RawDependencyOutputs = result.RawDependencyOutputs,
-					PromptSent = result.PromptSent,
-					ActualModel = result.ActualModel,
-					SelectedModel = result.SelectedModel,
-					RequestedModelInfo = result.RequestedModelInfo,
-					SelectedModelInfo = result.SelectedModelInfo,
-					ActualModelInfo = result.ActualModelInfo,
-					Usage = result.Usage,
-					Trace = result.Trace,
-					SavedFiles = result.SavedFiles,
-					RetryHistory = retryHistory,
-					ErrorCategory = result.ErrorCategory,
-					OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
-					OrchestrationCompleteStatus = result.OrchestrationCompleteStatus,
-					OrchestrationCompleteReason = result.OrchestrationCompleteReason,
-					OrchestrationCompleteStepName = result.OrchestrationCompleteStepName,
-				};
+				return result with { RetryHistory = retryHistory };
 			}
 
 			// Check timeout condition for subsequent retries
@@ -1384,21 +1417,7 @@ public partial class OrchestrationExecutor
 		LogStepRetryExhausted(step.Name, retryPolicy.MaxRetries);
 
 		// Attach retry history to the final failed result
-		return new ExecutionResult
-		{
-			Content = result.Content,
-			Status = result.Status,
-			ErrorMessage = result.ErrorMessage,
-			RawContent = result.RawContent,
-			RawDependencyOutputs = result.RawDependencyOutputs,
-			PromptSent = result.PromptSent,
-			ActualModel = result.ActualModel,
-			Usage = result.Usage,
-			Trace = result.Trace,
-			SavedFiles = result.SavedFiles,
-			RetryHistory = retryHistory,
-			ErrorCategory = result.ErrorCategory,
-		};
+		return result with { RetryHistory = retryHistory };
 	}
 
 	/// <summary>
@@ -1441,14 +1460,21 @@ public partial class OrchestrationExecutor
 			return ExecutionResult.Succeeded(string.Empty);
 		}
 
-		// Check if any dependency failed or was skipped
-		var shouldSkip = context.HasAnyDependencyFailed(step.DependsOn);
+		// Check if any dependency failed or was skipped. A `when:` condition that reasons about
+		// outcomes (failure()/success()/always(), or a {{step.status}} reference) suspends this
+		// cascade for its step — otherwise an on-failure handler could never run.
+		var anyDependencyFailed = context.HasAnyDependencyFailed(step.DependsOn);
+		var outcomeAwareCondition = !string.IsNullOrWhiteSpace(step.When)
+			&& ConditionEvaluator.ReferencesDependencyOutcome(step.When);
+		var shouldSkip = anyDependencyFailed && !outcomeAwareCondition;
 		var failedDeps = shouldSkip
 			? step.DependsOn
-				.Where(dep => stepResults.TryGetValue(dep, out var r) &&
-					r.Status is ExecutionStatus.Failed or ExecutionStatus.Skipped or ExecutionStatus.Cancelled or ExecutionStatus.NoAction)
+				.Where(dep => stepResults.TryGetValue(dep, out var r) && r.BlocksDependents)
 				.ToArray()
 			: [];
+
+		if (anyDependencyFailed && outcomeAwareCondition)
+			LogStepCascadeSuspendedByCondition(step.Name, step.When!);
 
 		if (shouldSkip)
 		{
@@ -1500,6 +1526,95 @@ public partial class OrchestrationExecutor
 			return ExecutionResult.Skipped(reason);
 		}
 
+		// Evaluate the step's own `when:` condition now that every dependency has settled.
+		// A false condition is a non-cascading skip (dependents still run and see ""); an
+		// evaluation error is a real failure so a typo never silently disables a step.
+		if (!string.IsNullOrWhiteSpace(step.When))
+		{
+			bool conditionResult;
+			try
+			{
+				conditionResult = ConditionEvaluator.Evaluate(step.When, token =>
+				{
+					var resolved = TemplateResolver.Resolve(token, context.Parameters, context, step.DependsOn, step);
+					// TemplateResolver leaves unresolvable references as the literal token.
+					return string.Equals(resolved, token, StringComparison.Ordinal) ? null : resolved;
+				}, new ConditionContext(AnyDependencyFailed: anyDependencyFailed));
+			}
+			catch (Exception ex) when (ex is ConditionSyntaxException or InvalidOperationException or RegexMatchTimeoutException)
+			{
+				var message = $"Failed to evaluate condition '{step.When}': {ex.Message}";
+				LogStepConditionError(step.Name, step.When, ex.Message);
+				_reporter.ReportStepError(step.Name, message);
+				return ExecutionResult.Failed(message, errorCategory: StepErrorCategory.ConditionError);
+			}
+
+			if (!conditionResult)
+			{
+				LogStepConditionFalse(step.Name, step.When);
+				var result = ExecutionResult.SkippedByCondition(step.When);
+				_reporter.ReportStepSkipped(step.Name, result.ErrorMessage!);
+				return result;
+			}
+
+			LogStepConditionTrue(step.Name, step.When);
+		}
+
+		// Concurrency cap: wait for a slot BEFORE the step is reported as started and before its
+		// timeout is armed, so queueing time is neither shown as running nor charged against the
+		// step's budget. Waits (Approval, async child dispatch) bypass the limiter.
+		var limiter = OccupiesConcurrencySlot(step) ? context.StepConcurrencyLimiter : null;
+		if (limiter is not null)
+		{
+			if (!limiter.Wait(0))
+			{
+				LogStepWaitingForSlot(step.Name);
+				var waitStarted = DateTimeOffset.UtcNow;
+				try
+				{
+					await limiter.WaitAsync(cancellationToken).ConfigureAwait(false);
+				}
+				catch (OperationCanceledException)
+				{
+					LogStepCancelledBeforeStart(step.Name);
+					_reporter.ReportStepCancelled(step.Name);
+					return ExecutionResult.Cancelled();
+				}
+				LogStepAcquiredSlot(step.Name, (DateTimeOffset.UtcNow - waitStarted).TotalSeconds);
+			}
+		}
+
+		try
+		{
+			return await ExecuteStepWithTimeoutAsync(step, executor, context, cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			try { limiter?.Release(); } catch (ObjectDisposedException) { /* run already torn down */ }
+		}
+	}
+
+	/// <summary>
+	/// Whether a step counts against <see cref="Orchestration.MaxConcurrency"/>. Steps that only
+	/// wait — an Approval gate, or an Orchestration step that dispatches a child asynchronously
+	/// and returns — do not, so a small cap cannot be exhausted by parked gates.
+	/// </summary>
+	internal static bool OccupiesConcurrencySlot(OrchestrationStep step)
+	{
+		return step switch
+		{
+			ApprovalOrchestrationStep => false,
+			OrchestrationInvocationStep { Mode: OrchestrationInvocationMode.Async } => false,
+			_ => true,
+		};
+	}
+
+	private async Task<ExecutionResult> ExecuteStepWithTimeoutAsync(
+		OrchestrationStep step,
+		IStepExecutor executor,
+		OrchestrationExecutionContext context,
+		CancellationToken cancellationToken)
+	{
 		LogRunningStep(step.Name);
 		_reporter.ReportStepStarted(step.Name);
 
@@ -1669,25 +1784,27 @@ public partial class OrchestrationExecutor
 		}
 	}
 
-	private static ExecutionResult BuildTimeoutResult(string message, ExecutionResult? partialResult) => new()
+	/// <summary>
+	/// Converts the partial result of a step that hit its <c>timeoutSeconds</c> into a Failed /
+	/// <see cref="StepErrorCategory.Timeout"/> result, keeping whatever the step produced before
+	/// the deadline (prompt, model, usage, trace, saved files) for diagnostics.
+	/// </summary>
+	private static ExecutionResult BuildTimeoutResult(string message, ExecutionResult? partialResult)
 	{
-		Content = string.Empty,
-		Status = ExecutionStatus.Failed,
-		ErrorMessage = message,
-		RawContent = partialResult?.RawContent,
-		RawDependencyOutputs = partialResult?.RawDependencyOutputs ?? new Dictionary<string, string>(),
-		PromptSent = partialResult?.PromptSent,
-		ActualModel = partialResult?.ActualModel,
-		SelectedModel = partialResult?.SelectedModel,
-		RequestedModelInfo = partialResult?.RequestedModelInfo,
-		SelectedModelInfo = partialResult?.SelectedModelInfo,
-		ActualModelInfo = partialResult?.ActualModelInfo,
-		Usage = partialResult?.Usage,
-		Trace = partialResult?.Trace,
-		SavedFiles = partialResult?.SavedFiles ?? [],
-		RetryHistory = partialResult?.RetryHistory,
-		ErrorCategory = StepErrorCategory.Timeout,
-	};
+		if (partialResult is null)
+			return ExecutionResult.Failed(message, errorCategory: StepErrorCategory.Timeout);
+
+		return partialResult with
+		{
+			Content = string.Empty,
+			Status = ExecutionStatus.Failed,
+			ErrorMessage = message,
+			ErrorCategory = StepErrorCategory.Timeout,
+			// The partial result was a cancellation, never a skip or an SDK failure.
+			SkipKind = null,
+			ErrorDetails = null,
+		};
+	}
 
 	private ExecutionResult EnrichResultTrace(OrchestrationStep step, OrchestrationExecutionContext context, ExecutionResult result)
 	{
@@ -1698,29 +1815,7 @@ public partial class OrchestrationExecutor
 			_reporter.ReportStepTrace(step.Name, trace);
 		}
 
-		return new ExecutionResult
-		{
-			Content = result.Content,
-			Status = result.Status,
-			ErrorMessage = result.ErrorMessage,
-			RawContent = result.RawContent,
-			RawDependencyOutputs = result.RawDependencyOutputs,
-			PromptSent = result.PromptSent,
-			ActualModel = result.ActualModel,
-			SelectedModel = result.SelectedModel,
-			RequestedModelInfo = result.RequestedModelInfo,
-			SelectedModelInfo = result.SelectedModelInfo,
-			ActualModelInfo = result.ActualModelInfo,
-			Usage = result.Usage,
-			Trace = trace,
-			SavedFiles = savedFiles,
-			RetryHistory = result.RetryHistory,
-			ErrorCategory = result.ErrorCategory,
-			OrchestrationCompleteRequested = result.OrchestrationCompleteRequested,
-			OrchestrationCompleteStatus = result.OrchestrationCompleteStatus,
-			OrchestrationCompleteStepName = result.OrchestrationCompleteStepName,
-			OrchestrationCompleteReason = result.OrchestrationCompleteReason,
-		};
+		return result with { Trace = trace, SavedFiles = savedFiles };
 	}
 
 	private static StepRunRecord BuildStepRecord(
@@ -1768,6 +1863,8 @@ public partial class OrchestrationExecutor
 			RetryHistory = result.RetryHistory,
 			ErrorCategory = result.ErrorCategory,
 			ErrorDetails = result.ErrorDetails,
+			SkipKind = result.SkipKind,
+			Condition = step.When,
 			// Persist only the minimal child reference; the child's full per-step content
 			// lives on its own run.json (avoid bloating the parent's record).
 			ChildExecutionId = result.ChildOrchestrationInfo?.ExecutionId,
@@ -1818,42 +1915,6 @@ public partial class OrchestrationExecutor
 			StepResults = stepResults,
 			StartedAt = childRecord.StartedAt,
 			CompletedAt = childRecord.CompletedAt,
-		};
-	}
-
-	/// <summary>
-	/// Returns a copy of <paramref name="source"/> with its <see cref="ExecutionResult.ChildOrchestrationInfo"/>
-	/// replaced by <paramref name="childInfo"/>. Used by the checkpoint-restore path to
-	/// attach a rehydrated <see cref="ChildOrchestrationInfo"/> onto the restored result
-	/// after <see cref="CheckpointStepResult.ToExecutionResult"/> produced one without it.
-	/// </summary>
-	private static ExecutionResult CloneResultWithChildInfo(
-		ExecutionResult source,
-		ChildOrchestrationInfo childInfo)
-	{
-		return new ExecutionResult
-		{
-			Status = source.Status,
-			Content = source.Content,
-			RawContent = source.RawContent,
-			ErrorMessage = source.ErrorMessage,
-			RawDependencyOutputs = source.RawDependencyOutputs,
-			PromptSent = source.PromptSent,
-			ActualModel = source.ActualModel,
-			SelectedModel = source.SelectedModel,
-			RequestedModelInfo = source.RequestedModelInfo,
-			SelectedModelInfo = source.SelectedModelInfo,
-			ActualModelInfo = source.ActualModelInfo,
-			Usage = source.Usage,
-			Trace = source.Trace,
-			SavedFiles = source.SavedFiles,
-			RetryHistory = source.RetryHistory,
-			ErrorCategory = source.ErrorCategory,
-			OrchestrationCompleteRequested = source.OrchestrationCompleteRequested,
-			OrchestrationCompleteStatus = source.OrchestrationCompleteStatus,
-			OrchestrationCompleteStepName = source.OrchestrationCompleteStepName,
-			OrchestrationCompleteReason = source.OrchestrationCompleteReason,
-			ChildOrchestrationInfo = childInfo,
 		};
 	}
 
@@ -2526,6 +2587,30 @@ public partial class OrchestrationExecutor
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' is disabled (enabled: false), skipping with empty result.")]
 	private partial void LogStepDisabled(string stepName);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}' skipped: condition evaluated to false: {Condition}")]
+	private partial void LogStepConditionFalse(string stepName, string condition);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Step '{StepName}' condition evaluated to true: {Condition}")]
+	private partial void LogStepConditionTrue(string stepName, string condition);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Step '{StepName}' failed: could not evaluate condition '{Condition}': {Error}")]
+	private partial void LogStepConditionError(string stepName, string condition, string error);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Step '{StepName}': a dependency did not succeed, but its condition reasons about outcomes ('{Condition}'), so the condition decides instead of the failure cascade.")]
+	private partial void LogStepCascadeSuspendedByCondition(string stepName, string condition);
+
+	[LoggerMessage(Level = LogLevel.Information, Message = "Orchestration '{Name}': step concurrency limited to {MaxConcurrency} at a time.")]
+	private partial void LogStepConcurrencyLimit(string name, int maxConcurrency);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' failed and onStepFailure is 'stop': cancelling every unfinished step. Error: {Error}")]
+	private partial void LogStepFailureStop(string stepName, string error);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Step '{StepName}' is ready but waiting for a concurrency slot.")]
+	private partial void LogStepWaitingForSlot(string stepName);
+
+	[LoggerMessage(Level = LogLevel.Debug, Message = "Step '{StepName}' acquired a concurrency slot after waiting {WaitedSeconds:F1}s.")]
+	private partial void LogStepAcquiredSlot(string stepName, double waitedSeconds);
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Step '{StepName}' has unresolved template expression: {Expression}")]
 	private partial void LogUnresolvedTemplateExpression(string stepName, string expression);

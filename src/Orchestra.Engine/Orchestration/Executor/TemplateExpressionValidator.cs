@@ -94,15 +94,18 @@ public static partial class TemplateExpressionValidator
 		new(["url"], StringComparer.OrdinalIgnoreCase);
 
 	private static readonly HashSet<string> s_validStepOutputSuffixes =
-		new(["output", "rawoutput", "files"], StringComparer.OrdinalIgnoreCase);
+		new(["output", "rawoutput", "files", "status", "errormessage"], StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
 	/// Accessors that are only meaningful on steps of type <see cref="OrchestrationStepType.Orchestration"/>.
-	/// They drill into a child run's data (executionId, status, errorMessage, etc.) via the
+	/// They drill into a child run's data (executionId, completionReason, steps, etc.) via the
 	/// <see cref="ExecutionResult.ChildOrchestrationInfo"/> populated by <c>OrchestrationStepExecutor</c>.
+	/// <c>status</c> and <c>errorMessage</c> are deliberately absent: every step exposes them
+	/// (see <see cref="s_validStepOutputSuffixes"/>), so <c>when:</c> conditions can gate on
+	/// <c>{{anyStep.status}}</c>; on an Orchestration step they report the child run's values.
 	/// </summary>
 	private static readonly HashSet<string> s_validOrchestrationStepAccessors =
-		new(["executionId", "status", "errorMessage", "completionReason", "childResult", "steps"], StringComparer.OrdinalIgnoreCase);
+		new(["executionId", "completionReason", "childResult", "steps"], StringComparer.OrdinalIgnoreCase);
 
 	/// <summary>
 	/// Leaves accepted at the end of <c>{{stepName.steps.&lt;childStepName&gt;.&lt;leaf&gt;}}</c>.
@@ -441,7 +444,7 @@ public static partial class TemplateExpressionValidator
 						result.Errors.Add(new TemplateValidationError(
 							$"Accessor '{property}' is only available on steps of type 'Orchestration'. " +
 							$"Step '{refStepName}' is of type '{refType}'. " +
-							$"Valid accessors for non-orchestration steps: output, rawOutput, files, files[N].",
+							$"Valid accessors for non-orchestration steps: output, rawOutput, files, files[N], status, errorMessage.",
 							stepName, fieldName, fullExpr));
 						return;
 					}
@@ -475,8 +478,8 @@ public static partial class TemplateExpressionValidator
 			{
 				var stepType = stepTypes.TryGetValue(refStepName, out var t) ? t : (OrchestrationStepType?)null;
 				var validList = stepType == OrchestrationStepType.Orchestration
-					? "output, rawOutput, files, files[N], executionId, status, errorMessage, completionReason, childResult, steps, steps.<childStepName>.{output|rawOutput|error|status|files|files[N]}"
-					: "output, rawOutput, files, files[N]";
+					? "output, rawOutput, files, files[N], status, errorMessage, executionId, completionReason, childResult, steps, steps.<childStepName>.{output|rawOutput|error|status|files|files[N]}"
+					: "output, rawOutput, files, files[N], status, errorMessage";
 				result.Errors.Add(new TemplateValidationError(
 					$"Unknown output property '{property}' on step '{refStepName}'. " +
 					$"Valid properties: {validList}.",
@@ -525,6 +528,21 @@ public static partial class TemplateExpressionValidator
 			ValidateExpressionsInField(result, value, step.Name, fieldName,
 				allParamNames, variables, stepNames, stepTypes, reachability,
 				isStaticOnlyContext: false);
+		}
+
+		// `when:` is a boolean expression, not a template string: besides the {{...}} references
+		// inside it (validated above, since GetStepFields includes the field), the expression
+		// itself must parse. A grammar error here fails `orchestra validate` instead of turning
+		// into a Failed step at run time.
+		if (!string.IsNullOrWhiteSpace(step.When))
+		{
+			var syntaxError = ConditionEvaluator.Validate(step.When);
+			if (syntaxError is not null)
+			{
+				result.Errors.Add(new TemplateValidationError(
+					$"Invalid `when` condition: {syntaxError}",
+					step.Name, "when", step.When));
+			}
 		}
 
 		// Validate step-level MCP definitions (static-only context)
@@ -718,19 +736,49 @@ public static partial class TemplateExpressionValidator
 
 	/// <summary>
 	/// Enumerates all resolvable fields from a step (full-resolution context).
-	/// Returns (fieldName, value) pairs.
+	/// Returns (fieldName, value) pairs. Mirrors exactly what each executor passes through
+	/// <see cref="TemplateResolver"/>, so a typo in any templated field fails
+	/// <c>orchestra validate</c> instead of surfacing as a literal <c>{{...}}</c> at run time.
 	/// </summary>
 	private static IEnumerable<(string FieldName, string Value)> GetStepFields(OrchestrationStep step)
 	{
-		return step switch
+		IEnumerable<(string, string)> typeSpecific = step switch
 		{
 			PromptOrchestrationStep ps => GetPromptStepFields(ps),
 			CommandOrchestrationStep cs => GetCommandStepFields(cs),
 			ScriptOrchestrationStep ss => GetScriptStepFields(ss),
 			HttpOrchestrationStep hs => GetHttpStepFields(hs),
 			TransformOrchestrationStep ts => GetTransformStepFields(ts),
+			OrchestrationInvocationStep os => GetOrchestrationStepFields(os),
+			ApprovalOrchestrationStep aps => GetApprovalStepFields(aps),
 			_ => [],
 		};
+
+		// `when` is a base field: the {{...}} references inside the condition are validated
+		// like any other templated field (the expression grammar is checked separately).
+		if (!string.IsNullOrWhiteSpace(step.When))
+			typeSpecific = typeSpecific.Prepend(("when", step.When));
+
+		return typeSpecific;
+	}
+
+	/// <summary>
+	/// Mirrors <c>OrchestrationStepExecutor</c>: the child orchestration id, every static child
+	/// parameter value, and the <c>forEach</c> source are template-resolved.
+	/// </summary>
+	private static IEnumerable<(string, string)> GetOrchestrationStepFields(OrchestrationInvocationStep step)
+	{
+		yield return ("Orchestration", step.OrchestrationName);
+		foreach (var (key, value) in step.ChildParameters)
+			yield return ($"Parameters[{key}]", value);
+		if (step.ForEach is not null)
+			yield return ("ForEach", step.ForEach);
+	}
+
+	/// <summary>Mirrors <c>ApprovalStepExecutor</c>: only the prompt is template-resolved.</summary>
+	private static IEnumerable<(string, string)> GetApprovalStepFields(ApprovalOrchestrationStep step)
+	{
+		yield return ("Prompt", step.Prompt);
 	}
 
 	private static IEnumerable<(string, string)> GetPromptStepFields(PromptOrchestrationStep step)

@@ -102,6 +102,29 @@ public class Orchestration
 	public int? TimeoutSeconds { get; init; } = 0;
 
 	/// <summary>
+	/// Maximum number of steps that may execute at the same time within one run. Ready steps
+	/// beyond the limit wait for a slot (dependency order is unaffected). Null falls back to the
+	/// host's <c>defaultMaxConcurrency</c>; null there too means unbounded — every ready step
+	/// starts immediately, each on its own dedicated thread, which is the historical behaviour.
+	/// </summary>
+	/// <remarks>
+	/// Steps that are pure waits do not occupy a slot: Approval steps and Orchestration steps in
+	/// async mode. A Prompt step blocked on human input (<c>orchestra_request_user_input</c>)
+	/// does still hold its slot while waiting. Skipped steps (dependency failure, false
+	/// <c>when</c>, <c>enabled: false</c>) never take a slot.
+	/// </remarks>
+	public int? MaxConcurrency { get; init; }
+
+	/// <summary>
+	/// What happens to the rest of the run when a step ends as <see cref="ExecutionStatus.Failed"/>
+	/// (after its retries). <see cref="StepFailurePolicy.Continue"/> — the default and the
+	/// historical behaviour — skips the failed step's dependents and lets independent branches
+	/// finish. <see cref="StepFailurePolicy.Stop"/> cancels every step that has not yet
+	/// finished and ends the run as Failed immediately.
+	/// </summary>
+	public StepFailurePolicy OnStepFailure { get; init; } = StepFailurePolicy.Continue;
+
+	/// <summary>
 	/// User-defined variables available to all steps via <c>{{vars.name}}</c> template expressions.
 	/// Variable values may themselves contain template expressions (e.g., <c>{{param.project}}</c>)
 	/// which are resolved lazily when the variable is first referenced.

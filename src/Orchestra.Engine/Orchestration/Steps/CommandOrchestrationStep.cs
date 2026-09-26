@@ -46,4 +46,12 @@ public class CommandOrchestrationStep : OrchestrationStep
 	/// which can exceed OS command-line length limits.
 	/// </summary>
 	public string? Stdin { get; init; }
+
+	/// <summary>
+	/// Maximum bytes of output (stdout and stderr combined) the step keeps. Null uses
+	/// <see cref="OutputLimits.DefaultMaxOutputBytes"/> (10 MiB); 0 disables the cap. Output
+	/// beyond the cap is dropped at a line boundary, a marker is appended and an
+	/// <c>output-truncated</c> session warning is reported.
+	/// </summary>
+	public int? MaxOutputBytes { get; init; }
 }

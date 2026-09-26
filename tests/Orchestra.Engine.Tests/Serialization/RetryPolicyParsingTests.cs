@@ -472,4 +472,85 @@ public class RetryPolicyParsingTests
 	}
 
 	#endregion
+
+	#region maxDelaySeconds / jitterSeconds
+
+	[Fact]
+	public void ParseOrchestration_StepRetry_ParsesMaxDelayAndJitter()
+	{
+		var json = """
+			{
+				"name": "t",
+				"description": "d",
+				"steps": [
+					{
+						"name": "s",
+						"type": "command",
+						"command": "echo",
+						"retry": { "maxRetries": 6, "backoffSeconds": 1, "maxDelaySeconds": 30, "jitterSeconds": 2.5 }
+					}
+				]
+			}
+			""";
+
+		var step = OrchestrationParser.ParseOrchestration(json, []).Steps[0];
+
+		step.Retry!.MaxDelaySeconds.Should().Be(30);
+		step.Retry.JitterSeconds.Should().Be(2.5);
+	}
+
+	[Fact]
+	public void ParseOrchestration_DefaultRetryPolicy_ParsesMaxDelayAndJitter()
+	{
+		var json = """
+			{
+				"name": "t",
+				"description": "d",
+				"defaultRetryPolicy": { "maxRetries": 2, "maxDelaySeconds": 10, "jitterSeconds": 1 },
+				"steps": [ { "name": "s", "type": "command", "command": "echo" } ]
+			}
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		orchestration.DefaultRetryPolicy!.MaxDelaySeconds.Should().Be(10);
+		orchestration.DefaultRetryPolicy.JitterSeconds.Should().Be(1);
+	}
+
+	[Fact]
+	public void ParseOrchestration_StepRetry_OmittedMaxDelayAndJitter_KeepDefaults()
+	{
+		var json = """
+			{
+				"name": "t",
+				"description": "d",
+				"steps": [ { "name": "s", "type": "command", "command": "echo", "retry": { "maxRetries": 1 } } ]
+			}
+			""";
+
+		var step = OrchestrationParser.ParseOrchestration(json, []).Steps[0];
+
+		step.Retry!.MaxDelaySeconds.Should().BeNull();
+		step.Retry.JitterSeconds.Should().Be(0);
+	}
+
+	[Theory]
+	[InlineData("\"maxDelaySeconds\": -1")]
+	[InlineData("\"jitterSeconds\": -0.5")]
+	public void ParseOrchestration_StepRetry_RejectsNegativeDelayFields(string field)
+	{
+		var json = $$"""
+			{
+				"name": "t",
+				"description": "d",
+				"steps": [ { "name": "s", "type": "command", "command": "echo", "retry": { {{field}} } } ]
+			}
+			""";
+
+		var act = () => OrchestrationParser.ParseOrchestration(json, []);
+
+		act.Should().Throw<System.Text.Json.JsonException>().WithMessage("*must be 0 or greater*");
+	}
+
+	#endregion
 }

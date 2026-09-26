@@ -369,6 +369,14 @@ public static partial class TemplateResolver
 						return result.RawContent ?? result.Content;
 					if (property.Equals("output", StringComparison.OrdinalIgnoreCase))
 						return result.Content;
+					// {{stepName.status}} / {{stepName.errorMessage}} on ANY finished step. The
+					// lowercase status name ("succeeded", "failed", "skipped", "cancelled",
+					// "noaction") is what `when:` conditions gate on, e.g.
+					//   when: "{{tests.status}} == 'succeeded'"
+					if (property.Equals("status", StringComparison.OrdinalIgnoreCase))
+						return result.Status.ToString().ToLowerInvariant();
+					if (property.Equals("errorMessage", StringComparison.OrdinalIgnoreCase))
+						return result.ErrorMessage ?? string.Empty;
 				}
 
 				// Track unresolved step output reference for diagnostics

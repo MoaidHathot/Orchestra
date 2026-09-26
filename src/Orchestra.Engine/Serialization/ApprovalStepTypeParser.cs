@@ -38,23 +38,18 @@ public sealed class ApprovalStepTypeParser : IStepTypeParser
 				$"Approval step '{stepName}' has onTimeout=defaultResponse but no 'defaultResponse' value supplied.");
 		}
 
+		var baseFields = StepBaseFields.Parse(root);
+
 		return new ApprovalOrchestrationStep
 		{
-			Name = stepName,
+			Name = baseFields.Name,
 			Type = OrchestrationStepType.Approval,
-			DependsOn = root.TryGetProperty("dependsOn", out var deps)
-				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
-			Parameters = root.TryGetProperty("parameters", out var parameters)
-				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-			TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
-				? ts.GetInt32()
-				: null,
-			Retry = root.TryGetProperty("retry", out var retry)
-				? PromptStepTypeParser.DeserializeRetryPolicy(retry)
-				: null,
+			DependsOn = baseFields.DependsOn,
+			Enabled = baseFields.Enabled,
+			When = baseFields.When,
+			TimeoutSeconds = baseFields.TimeoutSeconds,
+			Retry = baseFields.Retry,
+			Parameters = StepBaseFields.ParseParameterNames(root),
 			Prompt = prompt,
 			Choices = choices,
 			OnTimeout = onTimeout,

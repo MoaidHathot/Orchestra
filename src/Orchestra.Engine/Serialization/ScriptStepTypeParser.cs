@@ -44,14 +44,18 @@ public sealed class ScriptStepTypeParser : IStepTypeParser
 			? ResolvePath(wd.GetString()!, context)
 			: null;
 
+		var baseFields = StepBaseFields.Parse(root);
+
 		return new ScriptOrchestrationStep
 		{
-			Name = root.GetProperty("name").GetString()!,
+			Name = baseFields.Name,
 			Type = OrchestrationStepType.Script,
-			DependsOn = root.TryGetProperty("dependsOn", out var deps)
-				? deps.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
-			Enabled = !root.TryGetProperty("enabled", out var enabled) || enabled.GetBoolean(),
+			DependsOn = baseFields.DependsOn,
+			Enabled = baseFields.Enabled,
+			When = baseFields.When,
+			TimeoutSeconds = baseFields.TimeoutSeconds,
+			Retry = baseFields.Retry,
+			Parameters = StepBaseFields.ParseParameterNames(root),
 			Shell = shellProp.GetString()!,
 			Script = hasScript ? scriptProp.GetString() : null,
 			ScriptFile = scriptFile,
@@ -70,15 +74,7 @@ public sealed class ScriptStepTypeParser : IStepTypeParser
 			StrictMode = root.TryGetProperty("strictMode", out var strictMode) && strictMode.ValueKind is JsonValueKind.True or JsonValueKind.False
 				? strictMode.GetBoolean()
 				: null,
-			TimeoutSeconds = root.TryGetProperty("timeoutSeconds", out var ts)
-				? ts.GetInt32()
-				: null,
-			Retry = root.TryGetProperty("retry", out var retry)
-				? PromptStepTypeParser.DeserializeRetryPolicy(retry)
-				: null,
-			Parameters = root.TryGetProperty("parameters", out var parameters)
-				? parameters.EnumerateArray().Select(e => e.GetString()!).ToArray()
-				: [],
+			MaxOutputBytes = StepBaseFields.ParseMaxOutputBytes(root, baseFields.Name),
 		};
 	}
 

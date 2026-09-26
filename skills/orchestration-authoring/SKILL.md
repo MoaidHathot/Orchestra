@@ -56,6 +56,8 @@ YAML modelines work in VS Code (Red Hat YAML extension), JetBrains IDEs, and any
 | `defaultRetryPolicy` | RetryPolicy | No | null | Default retry for all steps |
 | `defaultStepTimeoutSeconds` | int | No | null | Default per-step timeout |
 | `timeoutSeconds` | int | No | 0 (disabled) | Orchestration-level timeout. 0 or null means no timeout |
+| `maxConcurrency` | int | No | null (unbounded) | Max steps executing at once within a run. Ready steps beyond the cap wait for a slot; dependency order is unchanged. Falls back to host `defaultMaxConcurrency` (`orchestra.json`). Approval steps and async Orchestration steps never take a slot; skipped steps never take one. |
+| `onStepFailure` | string | No | `"continue"` | `"continue"`: a failed step's dependents are skipped, independent branches finish, run ends Failed. `"stop"`: fail fast -- every unfinished step is cancelled the moment one step fails (after its retries); the run ends Failed and cancelled steps carry the reason `step 'X' failed and onStepFailure is 'stop'`. |
 | `variables` | object | No | {} | Key-value pairs accessed via `{{vars.name}}` |
 | `tags` | string[] | No | [] | Categorization tags |
 | `hooks` | Hook[] | No | [] | Lifecycle hooks that run after step or orchestration outcomes |
@@ -209,8 +211,77 @@ Steps form a DAG. Steps with no `dependsOn` run first (in parallel). Downstream 
 | `dependsOn` | string[] | No | [] |
 | `parameters` | string[] or object | No | [] |
 | `enabled` | bool | No | true |
+| `when` | string (condition) | No | null |
 | `timeoutSeconds` | int | No | null |
 | `retry` | RetryPolicy | No | null |
+
+### Conditional Steps (`when`)
+
+`when` is a boolean expression evaluated **after every dependency has settled and just before the
+step would start**. When it is false the step is recorded as `Skipped` (skipKind `Condition`)
+and, unlike a failed or dependency-skipped step, it does **not** block its dependents: they run
+and see `""` for `{{thisStep.output}}`. That is what makes if/else + join expressible.
+
+```yaml
+steps:
+  - name: decide
+    type: Transform
+    template: "{{param.environment}}"
+  - name: deploy-prod
+    type: Transform
+    dependsOn: [decide]
+    when: "{{decide.output}} == 'prod'"
+    template: "deployed to prod"
+  - name: deploy-staging
+    type: Transform
+    dependsOn: [decide]
+    when: "{{decide.output}} != 'prod'"
+    template: "deployed to staging"
+  - name: announce            # join: exactly one branch has output, the other is ""
+    type: Transform
+    dependsOn: [deploy-prod, deploy-staging]
+    template: "{{deploy-prod.output}}{{deploy-staging.output}}"
+```
+
+**Syntax.** `{{...}}` references are *values* in the expression — use them directly, never
+inside quotes: `{{param.x}}`, `{{step.output}}`, `{{step.output.json.path}}`, `{{step.status}}`
+(`succeeded|failed|skipped|cancelled|noaction`), `{{step.errorMessage}}`. Literals: `'text'` or
+`"text"`, numbers, `true`, `false`, `null`. Operators: `==` `!=` `<` `<=` `>` `>=` `&&` `||` `!`
+(aliases `and` `or` `not`), parentheses. Functions: `contains(text, needle)`, `startsWith`,
+`endsWith` (all case-insensitive), `matches(text, regex)`, `empty(x)`, `lower(x)`, `trim(x)`,
+`length(x)`, and the outcome functions `always()`, `success()`, `failure()`. `==` compares
+numerically when both sides are numbers, otherwise as case-insensitive text (`'Succeeded'` and
+`'succeeded'` both match); `null == ''`. A bare value is truthy unless it is empty or, ignoring
+case, `false`/`0`/`no`/`off`/`null`. Backslashes inside string literals are literal (write
+regexes as `'^\d+$'`); only `\'` / `\"` / `\\` are escapes.
+
+**Failures and `when`.** By default a step whose dependency failed is skipped *before* its
+condition is consulted (failures cascade). A condition that reasons about outcomes — it calls
+`failure()`, `success()` or `always()`, or references some step's `status`/`errorMessage` —
+suspends that cascade for its step, so the condition alone decides. This is how you write an
+on-failure handler:
+
+```yaml
+  - name: on-test-failure
+    type: Prompt
+    dependsOn: [run-tests]
+    when: "failure()"                      # or: "{{run-tests.status}} == 'failed'"
+    userPrompt: "Tests failed: {{run-tests.errorMessage}}. Suggest a fix."
+  - name: publish
+    dependsOn: [run-tests]
+    when: "success()"
+```
+
+A condition about something else (`when: "{{param.deploy}} == 'yes'"`) keeps the cascade: if
+`run-tests` fails, `deploy` is dependency-skipped without evaluating the condition.
+
+**Rules.**
+- In YAML, quote the whole expression when it starts with `{{` (otherwise YAML reads a flow mapping).
+- Every `{{step.*}}` reference must be a direct or transitive dependency of the step (the validator enforces this, like any other template).
+- A syntax error fails `orchestra validate`. An evaluation error at run time (e.g. an invalid regex) fails the step with error category `ConditionError`.
+- An unresolvable reference (a missing JSON-path field) evaluates to `null` (falsy) — the step is skipped, not failed.
+- A condition-skipped step is not checkpointed; on resume its condition is re-evaluated.
+- `enabled: false` is a *static* off switch (recorded as an empty success); `when` is the dynamic one.
 
 ### Prompt Step (type: "Prompt")
 
@@ -378,6 +449,7 @@ Makes an HTTP request, captures response body.
 | `headers` | object | No | {} |
 | `body` | string | No | null |
 | `contentType` | string | No | `"application/json"` |
+| `maxOutputBytes` | int | No | 10485760 (10 MiB); 0 = no cap |
 
 ### Transform Step (type: "Transform")
 
@@ -402,7 +474,7 @@ Do not use `Command` for shell snippets or wrappers such as `pwsh -Command`, `po
 | `environment` | object | No | {} |
 | `includeStdErr` | bool | No | false |
 | `stdin` | string | No | null |
-| `strictMode` | bool | No | null (auto) |
+| `maxOutputBytes` | int | No | 10485760 (10 MiB); 0 = no cap |
 
 ### Script Step (type: "Script")
 
@@ -419,8 +491,11 @@ Executes an inline or file-based script via a shell interpreter (e.g., `pwsh`, `
 | `includeStdErr` | bool | No | false |
 | `stdin` | string | No | null |
 | `strictMode` | bool | No | null (auto) |
+| `maxOutputBytes` | int | No | 10485760 (10 MiB); 0 = no cap |
 
 *Mutual exclusion: use `script` OR `scriptFile`, not both. `scriptFile` paths resolve relative to the orchestration file's directory.
+
+**`maxOutputBytes` (Command, Script, Http).** Every output-capturing step keeps at most 10 MiB of output by default (stdout and stderr combined; the response body for Http). Beyond that the rest is dropped, the step's output ends with `[output truncated: exceeded maxOutputBytes (...); N bytes dropped]`, and an `output-truncated` session warning is raised - the step still succeeds. Raise the value for legitimately large output, set `0` to disable the cap, or have the script write large data to a file and pass the path downstream.
 
 **`strictMode` (PowerShell only).** Controls the error-handling prologue the executor injects for `shell: pwsh|powershell`:
 
@@ -634,7 +709,11 @@ Multi-agent delegation within a single Prompt step.
 | `maxRetries` | int | 3 |
 | `backoffSeconds` | double | 1.0 |
 | `backoffMultiplier` | double | 2.0 |
+| `maxDelaySeconds` | double | null (uncapped) |
+| `jitterSeconds` | double | 0 |
 | `retryOnTimeout` | bool | true |
+
+Delay before retry N = `min(backoffSeconds * backoffMultiplier^(N-1), maxDelaySeconds) + random(0..jitterSeconds)`. Set `maxDelaySeconds` when `maxRetries` is large so exponential growth cannot turn into multi-minute waits, and `jitterSeconds` when several steps hit the same rate-limited dependency so their retries do not land on the same instant.
 
 ## Triggers
 
@@ -710,6 +789,9 @@ Syntax: `{{expression}}` -- supported in prompts, URLs, headers, bodies, templat
 | `{{env.VAR_NAME}}` | Environment variable |
 | `{{stepName.output}}` | Step's processed output |
 | `{{stepName.rawOutput}}` | Step's raw output (before output handler) |
+| `{{stepName.output.a.b}}` | A scalar plucked from the step's JSON output by dotted path |
+| `{{stepName.status}}` | Lowercase terminal status of any finished step: `succeeded`, `failed`, `skipped`, `cancelled`, `noaction` (the child run's status on an Orchestration step) |
+| `{{stepName.errorMessage}}` | The step's error text, or `""` (the child run's error on an Orchestration step) |
 | `{{stepName.files}}` | JSON array of saved file paths |
 | `{{stepName.files[N]}}` | Nth file path (0-indexed) |
 | `{{orchestration.name}}` | Orchestration name |
@@ -723,13 +805,11 @@ Syntax: `{{expression}}` -- supported in prompts, URLs, headers, bodies, templat
 | `{{step.type}}` | Current step type |
 | `{{server.url}}` | Orchestra server URL |
 
-**Orchestration-step accessors** (only on steps whose `type` is `Orchestration`):
+**Orchestration-step accessors** (only on steps whose `type` is `Orchestration`; `status` and `errorMessage` above work on every step type):
 
 | Expression | Description |
 |---|---|
 | `{{S.executionId}}` | Child run's execution id |
-| `{{S.status}}` | Lowercase child status (succeeded/failed/cancelled/pending) |
-| `{{S.errorMessage}}` | Child's top-level error |
 | `{{S.completionReason}}` | `orchestra_complete` reason if early-completed |
 | `{{S.childResult}}` | Full JSON of child run (executionId/status/error/finalContent/stepResults) |
 | `{{S.steps}}` | JSON map of all child step results |
