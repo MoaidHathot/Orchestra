@@ -33,6 +33,9 @@
     <!-- Serialization -->
     <PackageVersion Include="Nerdbank.MessagePack" Version="1.2.4" />
     <PackageVersion Include="YamlDotNet" Version="17.0.1" />
+    <!-- JSON Schema 2020-12 validator behind `orchestra validate` (schema mode). Pinned to the last MIT-licensed
+         major: 9.x binaries ship under an Open Source Maintenance Fee EULA. -->
+    <PackageVersion Include="JsonSchema.Net" Version="7.3.4" />
     <!-- Run-history index. A derived, always-rebuildable sidecar over the plain-on-disk run
          artifacts; never a source of truth. Microsoft.Data.Sqlite (not .Core) so the native
          e_sqlite3 bundle ships with the tool and no system SQLite is required.

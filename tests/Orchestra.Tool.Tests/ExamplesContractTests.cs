@@ -63,6 +63,21 @@ public class ExamplesContractTests
 
 	[Theory]
 	[MemberData(nameof(ExampleAndTemplateFiles))]
+	public void Example_ConformsToTheBundledSchema(string relativePath)
+	{
+		// The parser ignores unknown keys, so this is the only test that notices when an example
+		// (or the schema) drifts - e.g. a new property documented in the skill but missing from
+		// schemas/orchestration.schema.json, or a typo in an example that the parser skips.
+		var path = Path.Combine(RepoRoot(), relativePath);
+		var schemaPath = Path.Combine(RepoRoot(), "schemas", Orchestra.Cli.Validation.OrchestrationSchemaValidator.SchemaFileName);
+
+		var errors = Orchestra.Cli.Validation.OrchestrationSchemaValidator.ValidateFile(path, schemaPath);
+
+		errors.Should().BeEmpty($"'{relativePath}' must pass `orchestra validate --schema`:\n  - {string.Join("\n  - ", errors)}");
+	}
+
+	[Theory]
+	[MemberData(nameof(ExampleAndTemplateFiles))]
 	public void Example_DoesNotReferenceARetiredModel(string relativePath)
 	{
 		var content = File.ReadAllText(Path.Combine(RepoRoot(), relativePath));

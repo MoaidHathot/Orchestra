@@ -1264,7 +1264,7 @@ public partial class OrchestrationExecutor
 	/// behavior of collecting required parameter names from step-level <c>Parameters</c> arrays.
 	/// </summary>
 	/// <returns>The effective parameters dictionary with defaults applied.</returns>
-	private static Dictionary<string, string>? ValidateAndApplyDefaults(Orchestration orchestration, Dictionary<string, string>? parameters)
+	internal static Dictionary<string, string>? ValidateAndApplyDefaults(Orchestration orchestration, Dictionary<string, string>? parameters)
 	{
 		if (orchestration.Inputs is not null)
 			return ValidateWithInputSchema(orchestration, parameters);

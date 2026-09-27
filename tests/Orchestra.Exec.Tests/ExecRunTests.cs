@@ -88,8 +88,8 @@ public sealed class ExecRunTests : IDisposable
 		var data = NewTempDir();
 		var file = TestOrchestrations.WritePromptOrchestration(work, "hello");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run-file", file, "--data-path", data, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunFile = file, DataPath = data, Quiet = true },
 			Hooks(FakeAgentBuilder.Returning("hi there")));
 
 		exit.Should().Be(0);
@@ -102,8 +102,8 @@ public sealed class ExecRunTests : IDisposable
 		var data = NewTempDir();
 		var file = TestOrchestrations.WritePromptOrchestration(work, "boom");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run-file", file, "--data-path", data, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunFile = file, DataPath = data, Quiet = true },
 			Hooks(FakeAgentBuilder.Throwing()));
 
 		exit.Should().Be(1);
@@ -116,8 +116,8 @@ public sealed class ExecRunTests : IDisposable
 		var data = NewTempDir();
 		TestOrchestrations.WritePromptOrchestration(Path.Combine(workspace, "orchestrations"), "byname");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run", "byname", "--orchestrations-path", workspace, "--data-path", data, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunId = "byname", OrchestrationsPath = workspace, DataPath = data, Quiet = true },
 			Hooks(FakeAgentBuilder.Returning("ok")));
 
 		exit.Should().Be(0);
@@ -128,8 +128,8 @@ public sealed class ExecRunTests : IDisposable
 	{
 		var data = NewTempDir();
 
-		var exit = await ExecProgram.RunAsync(
-			["--run", "does-not-exist", "--data-path", data, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunId = "does-not-exist", DataPath = data, Quiet = true },
 			Hooks(FakeAgentBuilder.Returning("ok")));
 
 		exit.Should().Be(ExecProgram.LaunchErrorExitCode);
@@ -148,8 +148,8 @@ public sealed class ExecRunTests : IDisposable
 		OrchestrationHostOptions? capturedOptions = null;
 		TriggerManager? capturedTriggers = null;
 
-		var exit = await ExecProgram.RunAsync(
-			["--run", "manual-one", "--orchestrations-path", workspace, "--data-path", data, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunId = "manual-one", OrchestrationsPath = workspace, DataPath = data, Quiet = true },
 			Hooks(
 				FakeAgentBuilder.Returning("ok"),
 				onStarted: sp =>
@@ -172,8 +172,8 @@ public sealed class ExecRunTests : IDisposable
 		var data = NewTempDir();
 		var file = TestOrchestrations.WriteApprovalOrchestration(work, "gate-noninteractive");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run-file", file, "--data-path", data, "--no-interactive", "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunFile = file, DataPath = data, NoInteractive = true, Quiet = true },
 			Hooks(FakeAgentBuilder.Returning("unused")));
 
 		exit.Should().Be(2);
@@ -186,8 +186,8 @@ public sealed class ExecRunTests : IDisposable
 		var data = NewTempDir();
 		var file = TestOrchestrations.WriteApprovalOrchestration(work, "gate-approved");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run-file", file, "--data-path", data, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunFile = file, DataPath = data, Quiet = true },
 			Hooks(FakeAgentBuilder.Returning("unused"), prompter: new ScriptedPrompter(choice: "approve")));
 
 		exit.Should().Be(0);
@@ -201,8 +201,8 @@ public sealed class ExecRunTests : IDisposable
 		var file = TestOrchestrations.WritePromptOrchestration(work, "withresult");
 		var outFile = Path.Combine(NewTempDir(), "out.txt");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run-file", file, "--data-path", data, "--output", outFile, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunFile = file, DataPath = data, OutputFile = outFile, Quiet = true },
 			Hooks(FakeAgentBuilder.Returning("hello-result")));
 
 		exit.Should().Be(0);
@@ -218,8 +218,8 @@ public sealed class ExecRunTests : IDisposable
 		var file = TestOrchestrations.WritePromptOrchestration(work, "report-json");
 		var reportFile = Path.Combine(NewTempDir(), "report.json");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run-file", file, "--data-path", data, "--report", "json", "--report-output", reportFile, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunFile = file, DataPath = data, Report = ReportFormat.Json, ReportOutput = reportFile, Quiet = true },
 			Hooks(FakeAgentBuilder.Returning("report-content")));
 
 		exit.Should().Be(0);
@@ -235,8 +235,8 @@ public sealed class ExecRunTests : IDisposable
 		var file = TestOrchestrations.WritePromptOrchestration(work, "report-md");
 		var reportFile = Path.Combine(NewTempDir(), "report.md");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run-file", file, "--data-path", data, "--report", "markdown", "--report-output", reportFile, "--quiet"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunFile = file, DataPath = data, Report = ReportFormat.Markdown, ReportOutput = reportFile, Quiet = true },
 			Hooks(FakeAgentBuilder.Returning("md-content")));
 
 		exit.Should().Be(0);
@@ -251,8 +251,8 @@ public sealed class ExecRunTests : IDisposable
 		var data = NewTempDir();
 		var file = TestOrchestrations.WritePromptOrchestration(work, "detailed");
 
-		var exit = await ExecProgram.RunAsync(
-			["--run-file", file, "--data-path", data, "--detailed"],
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { RunFile = file, DataPath = data, Detailed = true },
 			Hooks(FakeAgentBuilder.Returning("ok")));
 
 		exit.Should().Be(0);
@@ -267,8 +267,8 @@ public sealed class ExecRunTests : IDisposable
 		var file = TestOrchestrations.WritePromptOrchestration(work, "remote-hello");
 		await using var server = await TestServerHost.StartAsync(FakeAgentBuilder.Returning("hi"), NewTempDir());
 
-		var exit = await ExecProgram.RunAsync(
-			["--mode", "existing", "--server", server.Url, "--run-file", file, "--quiet"]);
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { Mode = ExecMode.Existing, ServerUrl = server.Url, RunFile = file, Quiet = true });
 
 		exit.Should().Be(0);
 
@@ -288,8 +288,8 @@ public sealed class ExecRunTests : IDisposable
 		var file = TestOrchestrations.WritePromptOrchestration(work, "remote-tagged");
 		await using var server = await TestServerHost.StartAsync(FakeAgentBuilder.Returning("hi"), NewTempDir());
 
-		var exit = await ExecProgram.RunAsync(
-			["--mode", "existing", "--server", server.Url, "--run-file", file, "--tag", "smoke", "--keep-registered", "--quiet"]);
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { Mode = ExecMode.Existing, ServerUrl = server.Url, RunFile = file, KeepRegistered = true, Quiet = true, Tags = ["smoke"] });
 
 		exit.Should().Be(0);
 		var entry = server.Services.GetRequiredService<OrchestrationRegistry>().GetByIdOrName("remote-tagged");
@@ -311,8 +311,8 @@ public sealed class ExecRunTests : IDisposable
 			await seedClient.RegisterOrchestrationAsync(file);
 		}
 
-		var exit = await ExecProgram.RunAsync(
-			["--mode", "existing", "--server", server.Url, "--run-file", file, "--quiet"]);
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { Mode = ExecMode.Existing, ServerUrl = server.Url, RunFile = file, Quiet = true });
 
 		exit.Should().Be(0);
 		// We only remove what WE add; a pre-existing registration must survive.
@@ -328,7 +328,8 @@ public sealed class ExecRunTests : IDisposable
 		await using var server = await TestServerHost.StartAsync(FakeAgentBuilder.Returning("hi"), NewTempDir());
 
 		// mode defaults to auto; --server is configured and healthy, so it should be used.
-		var exit = await ExecProgram.RunAsync(["--server", server.Url, "--run-file", file, "--quiet"]);
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { ServerUrl = server.Url, RunFile = file, Quiet = true });
 
 		exit.Should().Be(0);
 		using var http = new HttpClient { BaseAddress = new Uri(server.Url) };
@@ -342,8 +343,8 @@ public sealed class ExecRunTests : IDisposable
 		var file = TestOrchestrations.WritePromptOrchestration(work, "noserver");
 		var deadUrl = $"http://127.0.0.1:{FreeLoopbackPort()}"; // nothing is listening here
 
-		var exit = await ExecProgram.RunAsync(
-			["--mode", "existing", "--server", deadUrl, "--run-file", file, "--quiet"]);
+		var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { Mode = ExecMode.Existing, ServerUrl = deadUrl, RunFile = file, Quiet = true });
 
 		exit.Should().Be(ExecProgram.LaunchErrorExitCode);
 	}
@@ -357,8 +358,8 @@ public sealed class ExecRunTests : IDisposable
 			var file = TestOrchestrations.WritePromptOrchestration(work, "noconfig");
 			string? capturedLogLevel = null;
 
-			var exit = await ExecProgram.RunAsync(
-				["--mode", "isolated", "--run-file", file, "--data-path", NewTempDir(), "--no-config", "--quiet"],
+			var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { Mode = ExecMode.Isolated, RunFile = file, DataPath = NewTempDir(), NoConfig = true, Quiet = true },
 				Hooks(
 					FakeAgentBuilder.Returning("ok"),
 					onStarted: sp => capturedLogLevel = sp.GetRequiredService<OrchestrationHostOptions>().LogLevel));
@@ -377,8 +378,8 @@ public sealed class ExecRunTests : IDisposable
 			var file = TestOrchestrations.WritePromptOrchestration(work, "withconfig");
 			string? capturedLogLevel = null;
 
-			var exit = await ExecProgram.RunAsync(
-				["--mode", "isolated", "--run-file", file, "--data-path", NewTempDir(), "--quiet"],
+			var exit = await ExecProgram.RunCoreAsync(
+			new ExecOptions { Mode = ExecMode.Isolated, RunFile = file, DataPath = NewTempDir(), Quiet = true },
 				Hooks(
 					FakeAgentBuilder.Returning("ok"),
 					onStarted: sp => capturedLogLevel = sp.GetRequiredService<OrchestrationHostOptions>().LogLevel));

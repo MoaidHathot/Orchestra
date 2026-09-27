@@ -84,7 +84,9 @@ applies everywhere else.
 cost — it exits `0`/`1`/`2` so CI and Script steps can branch on it:
 
 ```bash
-orchestra validate ./orchestrations/hello.yaml
+orchestra validate ./orchestrations/hello.yaml                  # parser + template checks
+orchestra validate ./orchestrations/hello.yaml --schema         # + JSON Schema: typos, bad values
+orchestra run --run-file ./orchestrations/hello.yaml --dry-run  # print the layered plan, run nothing
 ```
 
 ## Your first orchestration
@@ -149,7 +151,8 @@ dnx Orchestra --yes -- run --run-file ./orchestrations/hello.yaml --param topic=
 ```bash
 orchestra run hello --param topic="vector databases"   # registered, on your server (auto)
 orchestra exec --run-file ./orchestrations/hello.yaml  # self-contained one-shot
-orchestra portal                                       # long-running host + web UI
+orchestra portal --open                                # long-running host + web UI, opens the browser
+orchestra config show                                  # which orchestra.json is in effect, and why
 ```
 
 The portal (`orchestra portal`) serves the dashboard, REST API, and MCP endpoints; the client
@@ -251,8 +254,13 @@ can discover and invoke them. See [`docs/host.md`](docs/host.md).
 | [`docs/getting-started.md`](docs/getting-started.md) | Install, first run, workspace layout, rolling out to a team |
 | [`docs/cli.md`](docs/cli.md) | Full `orchestra` command reference + exit codes |
 | [`docs/engine.md`](docs/engine.md) | Step types, triggers, hooks, checkpointing, template expressions |
-| [`docs/host.md`](docs/host.md) | Configuration reference, REST API, MCP server, retention |
+| [`docs/host.md`](docs/host.md) | Configuration reference, REST API, MCP server, retention, observability (log file, health, OpenTelemetry) |
+| [`docs/api-reference.md`](docs/api-reference.md) | Every REST endpoint with request/response shapes, plus the dashboard SSE events |
 | [`docs/copilot.md`](docs/copilot.md) | Agent providers, per-step controls, capability matrix |
+| [`docs/run-storage.md`](docs/run-storage.md) | On-disk layout of run history and the search index |
+| [`docs/orchestration-step-deep-dive.md`](docs/orchestration-step-deep-dive.md) | Composing orchestrations from orchestrations (the `Orchestration` step) |
+| [`docs/codebase-overview.md`](docs/codebase-overview.md) | Repository layout, layering, dependencies, how to build and test |
+| [`docs/plans/`](docs/plans/) | Design documents and forward-looking plans (HITL, hooks/watchers, composition) |
 | [`skills/orchestration-authoring/`](skills/orchestration-authoring/) | The authoring skill (full schema reference + examples) |
 | [`templates/`](templates/) | Starter orchestrations scaffolded by `orchestra init` |
 | [`examples/`](examples/) | Runnable example orchestrations |

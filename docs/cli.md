@@ -136,26 +136,64 @@ For unattended use set `COPILOT_GITHUB_TOKEN`, `GH_TOKEN`, or `GITHUB_TOKEN` ins
 ### `validate` — check an orchestration without running it
 
 Runs the same two gates the executor applies before a real run: the orchestration parser and
-the template-expression validator. No server, no agent, no cost.
+the template-expression validator. No server, no agent, no cost. Add `--schema` to also check
+the file against the bundled JSON Schema, which catches what the parser silently ignores —
+unknown or misspelled keys (`maxConcurency`), bad enum values (`onStepFailure: halt`), a
+negative `maxOutputBytes`.
 
 ```bash
 orchestra validate ./orchestrations/hello.yaml
+orchestra validate ./draft.yaml --schema
 orchestra validate ./draft.yaml --format json
 ```
 
 | Exit code | Meaning |
 |---|---|
 | `0` | Valid. |
-| `1` | Parses but is invalid, or does not parse at all. |
-| `2` | File missing or unreadable. |
+| `1` | Parses but is invalid, does not parse at all, or (with `--schema`) violates the schema. |
+| `2` | File missing or unreadable; with `--schema`, the schema itself is missing (`--schema-file` points elsewhere or the install is broken). |
 
 The distinct exit codes let a `Script` step branch on the result, which is how the `generate`
 template machine-checks its own output before writing a file.
+
+Schema errors are reported as `[schema] /json/pointer: message`, deepest location first, so the
+specific cause (`/steps/0/maxOutputBytes: -5 should be at least 0`) precedes the consequence.
+When a property of an object fails validation, JSON Schema also reports its valid siblings as
+"unknown or misplaced" — fix the specific error first and re-run.
 
 The most common failure it catches is a **bare `{{name}}` expression**. Only the
 namespace-prefixed forms resolve (`{{param.name}}`, `{{vars.name}}`, `{{env.NAME}}`,
 `{{stepName.output}}`); a bare `{{name}}` is passed through to the model as literal text. To
 show template syntax to a model deliberately, escape it as `\{{...}}`.
+
+### `run --dry-run` — preview the plan
+
+```bash
+orchestra run --run-file ./pipeline.yaml --dry-run --param topic=AI
+orchestra run nightly-digest --dry-run --report json
+```
+
+Performs the executor's pre-flight — parameter validation with input defaults applied,
+template validation, DAG validation — and prints the execution plan: the parallel layers in
+order, each step with its type, dependencies and `when` condition, the effective parameters,
+and any warnings (an undeclared `--param` is reported as a probable typo). With `--run-file`
+nothing is registered and no host is started; with a registered name the plan comes from the
+host's own projection. Exit `0` when the run could start, `1` when it could not, `3` when the
+file or orchestration cannot be found. `--report json` makes the plan machine-readable.
+
+### `config show` — which configuration is in effect
+
+```bash
+orchestra config show
+orchestra config show --format json
+```
+
+Prints the `orchestra.json` that discovery selected and why (`from ORCHESTRA_CONFIG_PATH`,
+`project-local`, `from XDG_CONFIG_HOME`, `user-global`), the sidecar files that go with it
+(and any user-global copy being ignored because a project file wins), the resolved settings
+every host started from this directory would use (data path, scan root, default model,
+concurrency, logging, retention...), and the environment variables that influenced the result.
+Exit `1` when the selected file does not parse.
 
 ---
 
@@ -219,7 +257,7 @@ Project-local beats the user-global locations, matching how `.editorconfig`, `gl
 and `Directory.Build.props` behave. `orchestra.mcp.json` and `orchestra.services.json` are
 looked up next to whichever `orchestra.json` won, falling back to the user-global directory.
 
-Run `orchestra doctor` to see which file is actually in effect.
+Run `orchestra config show` to see which file is actually in effect, where it came from, and the settings it resolves to (`orchestra doctor` reports the same path as part of its wider check-up).
 
 ### Environment variables
 
@@ -298,8 +336,9 @@ Every command supports `--help`. The summaries here are the same text Spectre pr
 | `orchestra new <NAME> [-t ID] [-f]` / `orchestra new --list` | Add another orchestration to the workspace from a template, renamed to `<NAME>`. |
 | `orchestra login [-p PROVIDER] [--device-code]` | Sign in to the agent provider by running `copilot login` or `opencode auth login`. |
 | `orchestra doctor [--format text\|json] [-p PROVIDER] [--fix] [--offline]` | Check prerequisites: config, data path, agent CLI, credentials, server. |
+| `orchestra config show [--format text\|json]` | Show which `orchestra.json` is in effect, where it came from, its sidecars and the resolved settings. |
 | `orchestra schemas [-o DIR] [-f]` | Copy the bundled JSON schemas into a local directory (default `./.orchestra/schemas`). |
-| `orchestra validate <PATH> [--format text\|json]` | Parse an orchestration and check its template expressions without running it. |
+| `orchestra validate <PATH> [--schema] [--schema-file PATH] [--format text\|json]` | Parse an orchestration and check its template expressions without running it; `--schema` also validates against the bundled JSON Schema (catches unknown keys and bad enum values). |
 
 See [Quick start](#quick-start) for the full option tables.
 
@@ -336,10 +375,10 @@ orchestra list --filter research --tag prod --enabled
 
 | Command | Purpose |
 |---|---|
-| `orchestra run [NAME] [--run-file PATH] [--mode MODE] [--param k=v ...] [--report FORMAT] [--detailed] [--no-interactive] [-q\|--quiet] [-V\|--verbose] [--by NAME]` | Run one orchestration to completion, streaming live SSE and prompting inline on HITL pauses. |
+| `orchestra run [NAME] [--run-file PATH] [--mode MODE] [--param k=v ...] [--report FORMAT] [--detailed] [--no-interactive] [-q\|--quiet] [-V\|--verbose] [--by NAME] [--dry-run]` | Run one orchestration to completion, streaming live SSE and prompting inline on HITL pauses. `--dry-run` validates and prints the layered plan instead of running. |
 | `orchestra exec [...same flags]` | Shorthand for `run --mode isolated`: always self-contained. |
 | `orchestra attach <orchestration> <run-id> [--no-interactive] [-q] [-V] [--by NAME]` | Re-attach to a still-running run and stream the remaining events. |
-| `orchestra portal [--urls URLS] [--data-path DIR] [--orchestrations-path DIR]` | Launch the long-running host + Portal web UI (blocks). |
+| `orchestra portal [--urls URLS] [--data-path DIR] [--orchestrations-path DIR] [--open]` | Launch the long-running host + Portal web UI (blocks). `--open` launches the default browser once the host is listening. |
 | `orchestra active` | List currently active executions. |
 | `orchestra cancel <execution-id> [--reason TEXT] [--source LABEL]` | Cancel a running execution. `--source` defaults to `cli`. |
 

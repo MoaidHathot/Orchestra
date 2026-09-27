@@ -1,3 +1,5 @@
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Logging.Console;
 using Orchestra.Composition;
 using Orchestra.Engine;
@@ -16,6 +18,14 @@ internal static class PortalApp
 	}
 
 	public static async Task RunAsync(string[] args, Type loggerCategoryType, bool useAppBaseContentRoot)
+		=> await RunAsync(args, loggerCategoryType, useAppBaseContentRoot, onStarted: null);
+
+	/// <summary>
+	/// Builds and runs the portal host. <paramref name="onStarted"/> receives the addresses
+	/// Kestrel actually bound once the server is listening (so <c>--open</c> can launch a browser
+	/// at the real port even when 0 or a config default was used).
+	/// </summary>
+	public static async Task RunAsync(string[] args, Type loggerCategoryType, bool useAppBaseContentRoot, Action<IReadOnlyList<string>>? onStarted)
 	{
 		ConfigureThreadPool();
 		var orchestraConfig = OrchestraConfigLoader.Load();
@@ -94,6 +104,16 @@ internal static class PortalApp
 		app.MapOrchestraHostEndpoints();
 		app.MapOrchestraMcpEndpoints();
 		MapPortalEndpoints(app);
+
+		if (onStarted is not null)
+		{
+			app.Lifetime.ApplicationStarted.Register(() =>
+			{
+				var addresses = app.Services.GetService<IServer>()?.Features.Get<IServerAddressesFeature>()?.Addresses.ToArray()
+					?? app.Urls.ToArray();
+				onStarted(addresses);
+			});
+		}
 
 		await app.RunAsync();
 	}

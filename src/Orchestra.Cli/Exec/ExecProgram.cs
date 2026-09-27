@@ -49,29 +49,6 @@ internal static class ExecProgram
 	public static readonly string[] DefaultRegistrationTags = ["ephemeral", "run-once"];
 
 	/// <summary>
-	/// argv entry used by tests and the legacy parser. Parses, handles <c>--help</c>/errors, then
-	/// delegates to <see cref="RunCoreAsync"/>.
-	/// </summary>
-	public static async Task<int> RunAsync(string[] args, ExecHooks? hooks = null)
-	{
-		var options = ExecOptions.Parse(args);
-
-		if (options.ShowHelp)
-		{
-			AnsiConsole.WriteLine(ExecOptions.HelpText);
-			return 0;
-		}
-
-		if (options.Error is not null)
-		{
-			AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(options.Error)}");
-			return LaunchErrorExitCode;
-		}
-
-		return await RunCoreAsync(options, hooks);
-	}
-
-	/// <summary>
 	/// Runs a single orchestration from an already-validated <see cref="ExecOptions"/>. This is the
 	/// shared core called by both the argv entry above and the Spectre <c>run</c>/<c>exec</c> commands.
 	/// </summary>
@@ -107,6 +84,10 @@ internal static class ExecProgram
 			return LaunchErrorExitCode;
 		}
 
+		// --dry-run with a file never needs a host: parse, pre-flight and print the plan locally.
+		if (options.DryRun && runFileFullPath is not null)
+			return DryRunFile(runFileFullPath, options);
+
 		// Attach to a running instance or spawn a throwaway one-shot host — the shared
 		// connect-or-spawn machinery used by the managed verbs too.
 		var request = new HostSessionRequest
@@ -137,6 +118,10 @@ internal static class ExecProgram
 		}
 
 		await using var session = sessionResult.Session!;
+
+		// --dry-run by name: the registry knows the definition; render its plan and stop.
+		if (options.DryRun)
+			return await DryRunRegisteredAsync(session.Client, runTarget, options);
 
 		// Only tag/clean up registrations on a shared running instance; a throwaway instance is
 		// discarded wholesale, so there is nothing to tag or remove afterward.
@@ -187,6 +172,191 @@ internal static class ExecProgram
 	/// </summary>
 	private static string? ResolveServerUrl(ExecOptions options)
 		=> ClientFactory.ResolveServerUrlOrNull(options.ServerUrl, options.NoConfig);
+
+	// ── --dry-run ──────────────────────────────────────────────────────────────
+
+	/// <summary>Exit code when a dry run finds problems that would stop the run.</summary>
+	public const int DryRunInvalidExitCode = 1;
+
+	/// <summary>
+	/// Local dry run of a file: the executor's own pre-flight (<see cref="RunPlan"/>) plus the
+	/// layered plan, without a host. Exit 0 when the run could start, 1 otherwise.
+	/// </summary>
+	internal static int DryRunFile(string runFileFullPath, ExecOptions options)
+	{
+		Orchestration orchestration;
+		try
+		{
+			orchestration = OrchestrationParser.ParseOrchestrationFile(runFileFullPath, availableMcps: []);
+		}
+		catch (Exception ex)
+		{
+			AnsiConsole.MarkupLine($"[red]Error:[/] failed to parse orchestration file: {Markup.Escape(ex.Message)}");
+			return LaunchErrorExitCode;
+		}
+
+		var plan = RunPlan.Build(orchestration, options.Parameters);
+		RenderPlan(plan.Orchestration.Name, runFileFullPath, plan.Layers.Select(l => l.Select(DryRunStep.From).ToList()).ToList(), plan.EffectiveParameters, plan.Errors, plan.Warnings, options);
+		return plan.IsValid ? 0 : DryRunInvalidExitCode;
+	}
+
+	/// <summary>
+	/// Dry run of a registered orchestration: renders the host's own layered projection of it
+	/// (<c>GET /api/orchestrations/{id}</c>) and checks the supplied parameters against the
+	/// declared inputs. The host has already parsed and validated the definition to register it.
+	/// </summary>
+	internal static async Task<int> DryRunRegisteredAsync(OrchestraClient client, string runTarget, ExecOptions options)
+	{
+		JsonElement detail;
+		try
+		{
+			detail = await client.GetOrchestrationAsync(runTarget);
+		}
+		catch (HttpRequestException ex)
+		{
+			AnsiConsole.MarkupLine($"[red]Error:[/] {Markup.Escape(ex.Message)}");
+			return LaunchErrorExitCode;
+		}
+
+		var steps = detail.TryGetProperty("steps", out var stepsEl) && stepsEl.ValueKind == JsonValueKind.Array
+			? stepsEl.EnumerateArray().Select(DryRunStep.From).ToDictionary(s => s.Name, StringComparer.OrdinalIgnoreCase)
+			: new Dictionary<string, DryRunStep>(StringComparer.OrdinalIgnoreCase);
+
+		var layers = new List<List<DryRunStep>>();
+		if (detail.TryGetProperty("layers", out var layersEl) && layersEl.ValueKind == JsonValueKind.Array)
+		{
+			foreach (var layer in layersEl.EnumerateArray())
+			{
+				if (!layer.TryGetProperty("steps", out var names) || names.ValueKind != JsonValueKind.Array)
+					continue;
+				layers.Add(names.EnumerateArray()
+					.Select(n => n.GetString())
+					.Where(n => n is not null)
+					.Select(n => steps.TryGetValue(n!, out var s) ? s : new DryRunStep(n!, "?", [], null))
+					.ToList());
+			}
+		}
+
+		var errors = new List<string>();
+		var warnings = new List<string>();
+		var effective = new Dictionary<string, string>(options.Parameters ?? new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase);
+		var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+		if (detail.TryGetProperty("inputs", out var inputs) && inputs.ValueKind == JsonValueKind.Object)
+		{
+			foreach (var input in inputs.EnumerateObject())
+			{
+				declared.Add(input.Name);
+				var required = !input.Value.TryGetProperty("required", out var req) || req.ValueKind != JsonValueKind.False;
+				var hasDefault = input.Value.TryGetProperty("default", out var def) && def.ValueKind != JsonValueKind.Null;
+				if (!effective.ContainsKey(input.Name))
+				{
+					if (hasDefault)
+						effective[input.Name] = def.ValueKind == JsonValueKind.String ? def.GetString()! : def.ToString();
+					else if (required)
+						errors.Add($"missing required input '{input.Name}'. Provide it with --param {input.Name}=<value>.");
+				}
+			}
+		}
+		else if (detail.TryGetProperty("parameters", out var parameters) && parameters.ValueKind == JsonValueKind.Array)
+		{
+			foreach (var p in parameters.EnumerateArray().Select(p => p.GetString()).Where(p => p is not null))
+			{
+				declared.Add(p!);
+				if (!effective.ContainsKey(p!))
+					errors.Add($"missing required parameter '{p}'. Provide it with --param {p}=<value>.");
+			}
+		}
+
+		foreach (var key in effective.Keys.Where(k => !declared.Contains(k)))
+			warnings.Add($"parameter '{key}' is not declared by the orchestration; it is still available as {{{{param.{key}}}}}.");
+
+		if (detail.TryGetProperty("validationErrors", out var ve) && ve.ValueKind == JsonValueKind.Array)
+			errors.AddRange(ve.EnumerateArray().Select(e => e.GetString()).Where(e => !string.IsNullOrWhiteSpace(e))!);
+
+		var name = detail.TryGetProperty("name", out var n) ? n.GetString() ?? runTarget : runTarget;
+		var path = detail.TryGetProperty("path", out var p2) ? p2.GetString() : null;
+		RenderPlan(name, path, layers, effective, errors, warnings, options);
+		return errors.Count == 0 ? 0 : DryRunInvalidExitCode;
+	}
+
+	/// <summary>One row of the plan; built from the engine model or from the host's JSON projection.</summary>
+	internal sealed record DryRunStep(string Name, string Type, IReadOnlyList<string> DependsOn, string? When)
+	{
+		public static DryRunStep From(OrchestrationStep step)
+			=> new(step.Name, step.Type.ToString(), step.DependsOn, step.When);
+
+		public static DryRunStep From(JsonElement step)
+		{
+			var name = step.TryGetProperty("name", out var n) ? n.GetString() ?? "?" : "?";
+			var type = step.TryGetProperty("type", out var t) ? t.GetString() ?? "?" : "?";
+			var deps = step.TryGetProperty("dependsOn", out var d) && d.ValueKind == JsonValueKind.Array
+				? d.EnumerateArray().Select(x => x.GetString()).Where(x => x is not null).Select(x => x!).ToList()
+				: [];
+			var when = step.TryGetProperty("when", out var w) && w.ValueKind == JsonValueKind.String ? w.GetString() : null;
+			return new DryRunStep(name, type, deps, when);
+		}
+	}
+
+	private static void RenderPlan(
+		string name,
+		string? path,
+		IReadOnlyList<List<DryRunStep>> layers,
+		IReadOnlyDictionary<string, string> effectiveParameters,
+		IReadOnlyList<string> errors,
+		IReadOnlyList<string> warnings,
+		ExecOptions options)
+	{
+		var stepCount = layers.Sum(l => l.Count);
+
+		if (options.Report == ReportFormat.Json)
+		{
+			var json = JsonSerializer.Serialize(new
+			{
+				dryRun = true,
+				valid = errors.Count == 0,
+				name,
+				path,
+				stepCount,
+				layers = layers.Select((l, i) => new
+				{
+					layer = i + 1,
+					steps = l.Select(s => new { s.Name, type = s.Type, dependsOn = s.DependsOn, when = s.When }),
+				}),
+				parameters = effectiveParameters,
+				errors,
+				warnings,
+			}, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase });
+			Console.Out.WriteLine(json);
+			return;
+		}
+
+		var verdict = errors.Count == 0 ? "[green]plan[/]" : "[red]plan (would not start)[/]";
+		AnsiConsole.MarkupLine($"{verdict}  {Markup.Escape(name)} ({stepCount} step{(stepCount == 1 ? "" : "s")}, {layers.Count} layer{(layers.Count == 1 ? "" : "s")}){(path is null ? string.Empty : "  " + Markup.Escape(path))}");
+
+		for (var i = 0; i < layers.Count; i++)
+		{
+			AnsiConsole.MarkupLine($"  [grey]layer {i + 1}:[/]");
+			foreach (var step in layers[i])
+			{
+				var deps = step.DependsOn.Count > 0 ? $"  [grey]after[/] {Markup.Escape(string.Join(", ", step.DependsOn))}" : string.Empty;
+				var when = step.When is not null ? $"  [grey]when[/] {Markup.Escape(step.When)}" : string.Empty;
+				AnsiConsole.MarkupLine($"    {Markup.Escape(step.Name)} [grey]({Markup.Escape(step.Type)})[/]{deps}{when}");
+			}
+		}
+
+		if (effectiveParameters.Count > 0)
+		{
+			AnsiConsole.MarkupLine("  [grey]parameters:[/]");
+			foreach (var (key, value) in effectiveParameters.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+				AnsiConsole.MarkupLine($"    {Markup.Escape(key)} = {Markup.Escape(value)}");
+		}
+
+		foreach (var warning in warnings)
+			AnsiConsole.MarkupLine($"  [yellow]warning:[/] {Markup.Escape(warning)}");
+		foreach (var error in errors)
+			AnsiConsole.MarkupLine($"  [red]error:[/] {Markup.Escape(error)}");
+	}
 
 	private static async Task<int> DriveRunAsync(
 		OrchestraClient client,

@@ -69,6 +69,10 @@ public sealed class RunSettings : StreamingSettings
 	[Description("Leave a --run-file orchestration registered in a running instance after the run.")]
 	public bool KeepRegistered { get; set; }
 
+	[CommandOption("--dry-run")]
+	[Description("Validate the orchestration and print its execution plan (layers, steps, parameters) without running it. With --run-file nothing is registered and no host is started.")]
+	public bool DryRun { get; set; }
+
 	public override ValidationResult Validate()
 	{
 		var hasName = !string.IsNullOrWhiteSpace(Name);
@@ -137,6 +141,7 @@ public class RunCommand : AsyncCommand<RunSettings>
 			NoConfig = s.NoConfig,
 			Tags = s.Tags ?? [],
 			KeepRegistered = s.KeepRegistered,
+			DryRun = s.DryRun,
 		};
 	}
 

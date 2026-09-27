@@ -181,6 +181,31 @@ public class ProgramWiringTests
 		result.Output.Should().Contain("--lines").And.Contain("--follow").And.Contain("--level").And.Contain("--mode");
 	}
 
+	[Fact]
+	public void ConfigShowHelp_IsRegistered()
+	{
+		var result = NewTester().Run("config", "show", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--format");
+	}
+
+	[Fact]
+	public void PortalHelp_ShowsOpen()
+	{
+		var result = NewTester().Run("portal", "--help");
+
+		result.ExitCode.Should().Be(0);
+		result.Output.Should().Contain("--open");
+	}
+
+	[Fact]
+	public void RunHelp_ShowsDryRun_AndValidateHelpShowsSchema()
+	{
+		NewTester().Run("run", "--help").Output.Should().Contain("--dry-run");
+		NewTester().Run("validate", "--help").Output.Should().Contain("--schema").And.Contain("--schema-file");
+	}
+
 	[Theory]
 	[InlineData("--level", "loud", "*not a log level*")]
 	[InlineData("--lines", "-1", "*--lines must be 0 or greater*")]

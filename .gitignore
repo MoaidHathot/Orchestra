@@ -462,3 +462,7 @@ FodyWeavers.xsd
 /_*.json
 /_*.txt
 /_*.py
+
+# Local scratch directories created by ad-hoc tooling at the repo root
+.tmp-*/
+/runs/

@@ -60,7 +60,7 @@ Orchestra/
 ├── OrchestrationEngine.slnx      # Solution file
 ├── Directory.Build.props         # Global MSBuild settings (net10.0)
 ├── Directory.Packages.props      # Central NuGet versioning
-├── nuget.config                  # NuGet feed config
+├── nuget.config                  # (none - NuGet feeds come from the user/machine config)
 └── .editorconfig                 # Code style enforcement
 ```
 
@@ -84,7 +84,8 @@ Orchestra/
 - **Orchestra.ProcessHost** - supervises the external processes declared in `orchestra.services.json`.
 - **Orchestra.Client** - HTTP/SSE client SDK plus the shared interactive run stack (observers, HITL prompters, exit codes).
 - **Orchestra.Cli** - the packaged `orchestra` tool: Spectre.Console command app, one-shot exec engine, and the embedded portal.
-- **Playground** - three runnable surfaces (Console, Terminal, Portal). The Portal project physically owns the React SPA that `orchestra portal` serves.
+- **Orchestra.Portal** (`src/Orchestra.Portal`) - the host + React SPA that `orchestra portal` serves; the Vite project lives in its `portal/` folder.
+- **Playground** - two runnable dev surfaces (Console, Terminal) for exercising the engine without the web UI.
 
 For deep-dives on specific subsystems:
 
@@ -138,14 +139,16 @@ For deep-dives on specific subsystems:
 
 | Package | Version | Type | Purpose |
 |---|---|---|---|
-| `Microsoft.Extensions.Logging.Abstractions` | 10.0.2 | .NET Prod | Logging abstraction (`ILogger`) |
-| `Microsoft.Extensions.Hosting` | 10.0.2 | .NET Prod | Generic host / DI / lifetime |
-| `Microsoft.Extensions.Http` | 10.0.2 | .NET Prod | `HttpClient` factory |
-| `Microsoft.Extensions.Options` | 10.0.2 | .NET Prod | Options pattern (`IOptions<T>`) |
-| `GitHub.Copilot.SDK` | 0.1.29 | .NET Prod | Copilot agent integration |
-| `ModelContextProtocol` | 0.2.0-preview.2 | .NET Prod | MCP server/client protocol |
+| `Microsoft.Extensions.Logging.Abstractions` | 10.0.9 | .NET Prod | Logging abstraction (`ILogger`) |
+| `Microsoft.Extensions.Hosting` | 10.0.9 | .NET Prod | Generic host / DI / lifetime |
+| `Microsoft.Extensions.Http` | 10.0.9 | .NET Prod | `HttpClient` factory |
+| `Microsoft.Extensions.Options` | 10.0.9 | .NET Prod | Options pattern (`IOptions<T>`) |
+| `GitHub.Copilot.SDK` | 1.0.14 | .NET Prod | Copilot agent integration |
+| `ModelContextProtocol` | 1.3.0 | .NET Prod | MCP server/client protocol |
 | `Cronos` | 0.8.4 | .NET Prod | Cron expression parsing |
 | `Spectre.Console` | 0.50.0 | .NET Prod | Rich terminal UI |
+| `JsonSchema.Net` | 7.3.4 (MIT) | .NET Prod | JSON Schema 2020-12 validation behind `orchestra validate --schema` |
+| `OpenTelemetry.*` | 1.15.x | .NET Prod | OTLP export of the engine's spans and metrics (opt-in) |
 | `Microsoft.AspNetCore.App` | — | .NET Prod (framework ref) | ASP.NET Core web framework |
 | `react` / `react-dom` | ^18.3.1 | JS Prod | Portal UI framework |
 | `mermaid` | ^10.9.3 | JS Prod | Diagram/graph rendering |
@@ -153,9 +156,9 @@ For deep-dives on specific subsystems:
 | `typescript` | ^5.7.3 | JS Dev | Type-safe JavaScript |
 | `@vitejs/plugin-react` | ^4.3.4 | JS Dev | Vite React plugin |
 | `xunit` / `xunit.runner.visualstudio` | 2.9.2 / 3.0.0 | .NET Test | Test framework + runner |
-| `FluentAssertions` | — | .NET Test | Assertion library |
-| `NSubstitute` | — | .NET Test | Mocking framework |
-| `Microsoft.AspNetCore.Mvc.Testing` | 10.0.0-preview.1 | .NET Test | Integration test host |
+| `FluentAssertions` | 7.0.0 | .NET Test | Assertion library |
+| `NSubstitute` | 5.3.0 | .NET Test | Mocking framework |
+| `Microsoft.AspNetCore.Mvc.Testing` | 10.0.9 | .NET Test | Integration test host |
 | `Microsoft.Playwright` / `.Xunit` | — | .NET Test | E2E browser testing |
 
 ### Risk Assessment
@@ -164,7 +167,7 @@ For deep-dives on specific subsystems:
 
 | Risk | Severity | Detail |
 |---|---|---|
-| **`net10.0` preview runtime** | 🔴 High | Entire platform is pre-GA. API surface may shift before the Nov 2025 release. |
+| **`net10.0` runtime** | Low | .NET 10 is GA; the repo tracks the current 10.0.x servicing releases. |
 | **`GitHub.Copilot.SDK` 0.1.29** | 🔴 High | Pre-1.0; no stability guarantees. Breaking changes are likely as the Copilot platform matures. |
 | **`ModelContextProtocol` 0.2.0-preview.2** | 🔴 High | Rapidly evolving spec; SDK API surface expected to change significantly before stable release. |
 | **`mermaid` ^10.9.3** | 🟡 Medium | One major version behind (v11.x is stable); migration effort is low but should be tracked. |
@@ -180,7 +183,7 @@ For deep-dives on specific subsystems:
 
 ### Prerequisites
 
-- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) (preview)
+- [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - [Node.js](https://nodejs.org/) ≥ 20 (for the Portal frontend)
 - Docker (optional)
 - A GitHub Copilot-enabled account / token (for Copilot playground surfaces)
@@ -249,10 +252,10 @@ template-expression validator, so a broken example fails the build.
 
 5. **Introduce architecture decision records (ADRs).** The project makes several bold technology choices (MCP, Copilot SDK, net10). Capturing *why* in `docs/adr/` helps future maintainers avoid re-litigating decisions.
 
-6. **Add a health-check endpoint to the Portal playground.** This makes CI smoke-tests more reliable (`/healthz` via `Microsoft.AspNetCore.Diagnostics.HealthChecks`).
+6. ~~Add a health-check endpoint.~~ Done: `GET /api/health` is a real readiness probe (data path, providers, scheduler, logging, telemetry) and answers 503 when unhealthy.
 
 ### Low Priority / Nice-to-Have
 
 7. **Upgrade React to v19.** React 18 is still maintained, but v19 is stable and brings performance improvements and improved server-component support that may benefit the Portal.
 
-8. **Consider a `docker-compose.yml`** that brings up the Portal playground together with any MCP servers, lowering the barrier for local end-to-end development.
+8. **Consider a `docker-compose.yml`** that brings up `orchestra portal` together with any MCP servers, lowering the barrier for local end-to-end development.

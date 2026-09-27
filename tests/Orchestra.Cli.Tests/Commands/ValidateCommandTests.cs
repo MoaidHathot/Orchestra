@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluentAssertions;
 using Orchestra.Cli.Commands;
 using Spectre.Console.Cli;
@@ -202,5 +203,80 @@ public sealed class ValidateCommandTests : IDisposable
 
 		act.Should().Throw<CommandRuntimeException>()
 			.Where(ex => ex.Message.Contains("text") && ex.Message.Contains("json"));
+	}
+
+	// ── --schema ──
+
+	[Fact]
+	public void ValidateSchema_ValidFile_ExitsZero()
+	{
+		var path = WriteFile("valid-schema.yaml", ValidOrchestration);
+
+		var result = NewTester().Run("validate", path, "--schema");
+
+		result.ExitCode.Should().Be(0, "the bundled schema must accept a file the parser accepts; output: {0}", result.Output);
+	}
+
+	[Fact]
+	public void ValidateSchema_TypoInTopLevelKey_IsCaught_WhereThePlainParserIsSilent()
+	{
+		// The deserializer ignores unknown keys, so `maxConcurency` silently means "unbounded".
+		var path = WriteFile("typo.yaml", ValidOrchestration + "\nmaxConcurency: 2\n");
+
+		var plain = NewTester().Run("validate", path);
+		var schema = NewTester().Run("validate", path, "--schema", "--format", "json");
+
+		plain.ExitCode.Should().Be(0, "the parser alone cannot see the typo");
+		schema.ExitCode.Should().Be(1);
+		using var doc = JsonDocument.Parse(schema.Output);
+		var errors = doc.RootElement.GetProperty("errors").EnumerateArray().Select(e => e.GetString()!).ToList();
+		errors.Should().Contain(e => e.Contains("/maxConcurency") && e.Contains("unknown or misplaced property"));
+		errors.Should().Contain(e => e.Contains("hint: check the spelling"));
+	}
+
+	[Fact]
+	public void ValidateSchema_BadEnumAndNegativeCap_ReportBothSchemaAndParserErrors()
+	{
+		var path = WriteFile("bad-values.yaml", """
+			name: bad
+			description: d
+			onStepFailure: halt
+			steps:
+			  - name: a
+			    type: Command
+			    command: echo
+			    maxOutputBytes: -5
+			""");
+
+		var result = NewTester().Run("validate", path, "--schema", "--format", "json");
+
+		result.ExitCode.Should().Be(1);
+		using var doc = JsonDocument.Parse(result.Output);
+		var errors = doc.RootElement.GetProperty("errors").EnumerateArray().Select(e => e.GetString()!).ToList();
+		errors.Should().Contain(e => e.Contains("/onStepFailure") && e.Contains("enum"));
+		errors.Should().Contain(e => e.Contains("/steps/0/maxOutputBytes") && e.Contains("at least 0"));
+		// The parser's own complaint follows the schema's; both are reported in one pass.
+		errors.Should().Contain(e => e.Contains("StepFailurePolicy") || e.Contains("onStepFailure"));
+		// A failing `if` selector (type != Prompt) must not be reported as an enum error on `type`.
+		errors.Should().NotContain(e => e.Contains("/steps/0/type"));
+	}
+
+	[Fact]
+	public void ValidateSchema_MissingSchemaFile_IsAToolingError_ExitTwo()
+	{
+		var path = WriteFile("valid-for-missing-schema.yaml", ValidOrchestration);
+
+		var result = NewTester().Run("validate", path, "--schema", "--schema-file", Path.Combine(_tempDir, "nope.schema.json"));
+
+		result.ExitCode.Should().Be(ValidateCommand.FileErrorExitCode);
+		result.Output.Should().Contain("Schema file not found");
+	}
+
+	[Fact]
+	public void ValidateSchema_SchemaFileWithoutSchemaFlag_IsRejected()
+	{
+		Action act = () => NewTester().Run("validate", "x.yaml", "--schema-file", "s.json");
+
+		act.Should().Throw<CommandRuntimeException>().WithMessage("*--schema-file requires --schema*");
 	}
 }

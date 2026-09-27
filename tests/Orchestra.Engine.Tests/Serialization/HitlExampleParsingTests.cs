@@ -36,11 +36,11 @@ public class HitlExampleParsingTests
 
 	private static string GetRepoRoot()
 	{
-		// Walk up until we find HITL-plan.md or the README
+		// Walk up until we find the solution file or the README
 		var dir = AppContext.BaseDirectory;
 		while (dir is not null)
 		{
-			if (File.Exists(Path.Combine(dir, "HITL-plan.md"))
+			if (File.Exists(Path.Combine(dir, "OrchestrationEngine.slnx"))
 				|| File.Exists(Path.Combine(dir, "README.md")) && Directory.Exists(Path.Combine(dir, "examples")))
 			{
 				return dir;

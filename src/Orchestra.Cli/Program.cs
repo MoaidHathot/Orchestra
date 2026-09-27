@@ -129,7 +129,8 @@ public class Program
 			.WithDescription("Run a single orchestration to completion. Uses a running instance when one is configured and healthy (auto), else spawns an isolated one-shot host.")
 			.WithExample("run", "research-assistant", "--param", "topic=AI")
 			.WithExample("run", "--run-file", "./pipeline.yaml", "--report", "markdown")
-			.WithExample("run", "deploy-pipeline", "--mode", "existing", "-q");
+			.WithExample("run", "deploy-pipeline", "--mode", "existing", "-q")
+			.WithExample("run", "--run-file", "./pipeline.yaml", "--dry-run");
 
 		config.AddCommand<ExecCommand>("exec")
 			.WithDescription("Run a single orchestration in a self-contained, throwaway host (alias of `run --mode isolated`).")
@@ -159,7 +160,8 @@ public class Program
 		config.AddCommand<PortalCommand>("portal")
 			.WithDescription("Launch the Orchestra host + Portal web UI (long-running).")
 			.WithExample("portal")
-			.WithExample("portal", "--urls", "http://localhost:5100");
+			.WithExample("portal", "--urls", "http://localhost:5100")
+			.WithExample("portal", "--open");
 
 		config.AddCommand<SchemasCliCommand>("schemas")
 			.WithDescription("Copy the bundled JSON schemas into a local directory for editor $schema validation.")
@@ -168,7 +170,18 @@ public class Program
 		config.AddCommand<ValidateCommand>("validate")
 			.WithDescription("Parse an orchestration file and check its template expressions without running it.")
 			.WithExample("validate", "./orchestrations/hello.yaml")
+			.WithExample("validate", "./draft.yaml", "--schema")
 			.WithExample("validate", "./draft.yaml", "--format", "json");
+
+		// ── Configuration (branch) ───────────────────────────────────────────────
+		config.AddBranch("config", branch =>
+		{
+			branch.SetDescription("Inspect the configuration in effect.");
+			branch.AddCommand<ConfigShowCommand>("show")
+				.WithDescription("Show which orchestra.json is in effect, where it came from, its sidecars and the resolved settings.")
+				.WithExample("config", "show")
+				.WithExample("config", "show", "--format", "json");
+		});
 
 		// ── Run history (branch) ─────────────────────────────────────────────────
 		config.AddBranch("runs", branch =>

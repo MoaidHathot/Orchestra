@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using Orchestra.Cli.Validation;
 using Orchestra.Engine;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -20,6 +21,14 @@ public sealed class ValidateSettings : CommandSettings
 	[DefaultValue("text")]
 	public string Format { get; set; } = "text";
 
+	[CommandOption("--schema")]
+	[Description("Also validate the file against the bundled orchestration JSON Schema. Catches unknown keys and bad enum values the parser silently ignores (e.g. a misspelled property).")]
+	public bool Schema { get; set; }
+
+	[CommandOption("--schema-file <PATH>")]
+	[Description("Schema to use with --schema instead of the bundled orchestration.schema.json.")]
+	public string? SchemaFile { get; set; }
+
 	public override ValidationResult Validate()
 	{
 		if (!string.Equals(Format, "text", StringComparison.OrdinalIgnoreCase)
@@ -27,6 +36,9 @@ public sealed class ValidateSettings : CommandSettings
 		{
 			return ValidationResult.Error($"Invalid --format '{Format}' (expected text or json).");
 		}
+
+		if (SchemaFile is not null && !Schema)
+			return ValidationResult.Error("--schema-file requires --schema.");
 
 		return ValidationResult.Success();
 	}
@@ -69,7 +81,34 @@ public sealed class ValidateCommand : Command<ValidateSettings>
 			return FileErrorExitCode;
 		}
 
-		Orchestration orchestration;
+		var errors = new List<string>();
+
+		// Schema first: its messages name the exact key and allowed values, which is far more
+		// useful than the deserializer's exception when both reject the same mistake.
+		if (settings.Schema)
+		{
+			var schemaPath = settings.SchemaFile is not null ? System.IO.Path.GetFullPath(settings.SchemaFile) : OrchestrationSchemaValidator.LocateBundledSchema();
+			if (schemaPath is null || !File.Exists(schemaPath))
+			{
+				// Not a verdict on the file: the tool itself is missing its schema.
+				Report(_console, json, path, valid: false, errors: [settings.SchemaFile is not null
+					? $"Schema file not found: {schemaPath}"
+					: $"The bundled {OrchestrationSchemaValidator.SchemaFileName} is missing from this installation ({AppContext.BaseDirectory}). Reinstall the tool or pass --schema-file."]);
+				return FileErrorExitCode;
+			}
+
+			try
+			{
+				errors.AddRange(OrchestrationSchemaValidator.ValidateFile(path, schemaPath).Select(e => $"[schema] {e}"));
+			}
+			catch (Exception ex)
+			{
+				// Unreadable YAML/JSON: the parser below will say the same thing in its own words.
+				errors.Add($"[schema] could not read the document: {ex.Message}");
+			}
+		}
+
+		Orchestration? orchestration = null;
 		try
 		{
 			orchestration = OrchestrationParser.ParseOrchestrationFile(path, availableMcps: []);
@@ -78,18 +117,21 @@ public sealed class ValidateCommand : Command<ValidateSettings>
 		{
 			// A parse failure is a validation failure, not a tooling error: the file is the
 			// thing under test, so report it through the same channel as expression errors.
-			Report(_console, json, path, valid: false, errors: [ex.Message]);
-			return 1;
+			errors.Add(ex.Message);
 		}
 
-		var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
-		if (result.IsValid)
+		if (orchestration is not null)
+		{
+			var result = TemplateExpressionValidator.ValidateOrchestration(orchestration);
+			errors.AddRange(result.Errors.Select(FormatError));
+		}
+
+		if (errors.Count == 0)
 		{
 			Report(_console, json, path, valid: true, errors: [], orchestration: orchestration);
 			return 0;
 		}
 
-		var errors = result.Errors.Select(FormatError).ToArray();
 		Report(_console, json, path, valid: false, errors, orchestration);
 		return 1;
 	}

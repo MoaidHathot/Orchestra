@@ -22,6 +22,10 @@ public sealed class PortalSettings : CommandSettings
 	[CommandOption("--orchestrations-path <DIR>")]
 	[Description("Workspace directory scanned for orchestrations.")]
 	public string? OrchestrationsPath { get; set; }
+
+	[CommandOption("--open")]
+	[Description("Open the portal in the default browser once the host is listening.")]
+	public bool Open { get; set; }
 }
 
 /// <summary>
@@ -53,7 +57,20 @@ public sealed class PortalCommand : AsyncCommand<PortalSettings>
 			args.Add(settings.OrchestrationsPath);
 		}
 
-		await PortalApp.RunAsync(args.ToArray(), typeof(Program), useAppBaseContentRoot: true);
+		Action<IReadOnlyList<string>>? onStarted = settings.Open
+			? addresses =>
+			{
+				var url = Hosting.BrowserLauncher.PickBrowsableAddress(addresses);
+				if (url is null)
+					return;
+				if (Hosting.BrowserLauncher.TryOpen(url))
+					Console.Error.WriteLine($"Opened {url} in your browser.");
+				else
+					Console.Error.WriteLine($"Could not open a browser; the portal is at {url}");
+			}
+			: null;
+
+		await PortalApp.RunAsync(args.ToArray(), typeof(Program), useAppBaseContentRoot: true, onStarted);
 		return 0;
 	}
 }
