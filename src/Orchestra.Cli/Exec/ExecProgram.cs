@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.DependencyInjection;
 using Orchestra.Cli.Commands;
 using Orchestra.Cli.Hosting;
+using Orchestra.Cli.Validation;
 using Orchestra.Client;
 using Orchestra.Client.Run;
 using Orchestra.Engine;
@@ -184,10 +185,15 @@ internal static class ExecProgram
 	/// </summary>
 	internal static int DryRunFile(string runFileFullPath, ExecOptions options)
 	{
+		// Same MCP catalog the host would use, so a globally declared MCP does not fail the plan.
+		var globalMcps = GlobalMcpCatalog.Load(out var mcpError);
+		if (mcpError is not null)
+			AnsiConsole.MarkupLine($"[yellow]Warning:[/] {Markup.Escape(mcpError)}");
+
 		Orchestration orchestration;
 		try
 		{
-			orchestration = OrchestrationParser.ParseOrchestrationFile(runFileFullPath, availableMcps: []);
+			orchestration = OrchestrationParser.ParseOrchestrationFile(runFileFullPath, globalMcps);
 		}
 		catch (Exception ex)
 		{

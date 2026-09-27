@@ -108,10 +108,16 @@ public sealed class ValidateCommand : Command<ValidateSettings>
 			}
 		}
 
+		// Global MCPs (orchestra.mcp.json beside the effective orchestra.json) are part of what the
+		// host accepts, so a step that references one must validate here too.
+		var globalMcps = GlobalMcpCatalog.Load(out var mcpError);
+		if (mcpError is not null)
+			errors.Add($"[mcp] {mcpError}");
+
 		Orchestration? orchestration = null;
 		try
 		{
-			orchestration = OrchestrationParser.ParseOrchestrationFile(path, availableMcps: []);
+			orchestration = OrchestrationParser.ParseOrchestrationFile(path, globalMcps);
 		}
 		catch (Exception ex)
 		{
