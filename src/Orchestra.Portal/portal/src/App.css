@@ -4150,3 +4150,79 @@
       border-color: var(--accent);
       color: var(--accent);
     }
+
+/* ── Host panel (health / logs / maintenance) ─────────────────────────────── */
+.status-bar-button {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+.status-bar-button:hover { background: var(--surface); color: var(--text); }
+.tabs .tab[role="tab"] { background: none; border-top: none; border-left: none; border-right: none; font: inherit; }
+.host-health-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  text-transform: capitalize;
+}
+.host-health-summary .text-muted { text-transform: none; }
+.host-health-summary.degraded { border-color: var(--warning); }
+.host-health-summary.unhealthy { border-color: var(--error); }
+.host-health-summary .status-indicator,
+.host-checks .status-indicator {
+  width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0;
+  background: var(--text-dim);
+}
+.host-health-summary .status-indicator.online, .host-checks .status-indicator.online { background: var(--success); }
+.host-health-summary .status-indicator.degraded, .host-checks .status-indicator.degraded { background: var(--warning); }
+.host-health-summary .status-indicator.offline, .host-checks .status-indicator.offline { background: var(--error); }
+.host-checks { width: 100%; border-collapse: collapse; font-size: 13px; }
+.host-checks td { padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.host-check-status { width: 24px; }
+.host-check-name { width: 140px; font-weight: 500; }
+.host-check-detail { color: var(--text-muted); word-break: break-word; }
+.host-check.degraded .host-check-detail { color: var(--warning); }
+.host-check.unhealthy .host-check-detail { color: var(--error); }
+.host-error {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; margin-bottom: 12px;
+  border: 1px solid var(--error); border-radius: 6px; color: var(--error);
+}
+.host-logs { display: flex; flex-direction: column; gap: 10px; min-height: 320px; }
+.host-logs-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.host-logs-toolbar .form-input { flex: 1; min-width: 160px; }
+.host-logs-follow { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.host-logs-file { font-size: 12px; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+.host-logs-output {
+  margin: 0; padding: 10px 12px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+  font-family: 'SF Mono', Monaco, Consolas, monospace; font-size: 12px; line-height: 1.5;
+  max-height: 55vh; overflow: auto; white-space: pre-wrap; word-break: break-word;
+}
+.host-log-line.level-warning { color: var(--warning); }
+.host-log-line.level-error, .host-log-line.level-critical { color: var(--error); }
+.host-log-line.level-debug, .host-log-line.level-trace { color: var(--text-dim); }
+.host-log-line.continuation { color: var(--text-muted); padding-left: 16px; }
+.host-maintenance { display: flex; flex-direction: column; gap: 12px; }
+.host-maintenance-toggle, .host-maintenance-overrides label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.host-maintenance-overrides { display: flex; flex-direction: column; gap: 8px; padding-left: 24px; }
+.host-maintenance-overrides .form-input { width: 90px; }
+.host-maintenance-actions { display: flex; gap: 10px; }
+.host-prune-result { border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; }
+.host-prune-runs { margin: 0; padding-left: 18px; font-size: 13px; max-height: 240px; overflow: auto; }
+.host-prune-orch { font-weight: 500; }
+.text-danger { color: var(--error); }
+.execution-settings { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.output-truncated-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 10px; padding: 2px 8px; border-radius: 10px;
+  background: rgba(210, 153, 34, 0.15); color: var(--warning); font-size: 11px; font-weight: 500;
+}

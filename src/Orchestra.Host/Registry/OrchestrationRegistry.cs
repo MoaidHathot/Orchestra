@@ -62,6 +62,32 @@ public partial class OrchestrationRegistry
 	public IOrchestrationVersionStore? VersionStore => _versionStore;
 
 	/// <summary>
+	/// Raised after the set of registered orchestrations changes (register, update, remove,
+	/// clear, directory sync). The argument is a short reason such as <c>"registered"</c>.
+	/// Consumers (the dashboard SSE broadcaster) use it to push a refresh instead of polling.
+	/// Handlers run synchronously on the mutating thread and must not throw.
+	/// </summary>
+	public event Action<string>? Changed;
+
+	// Set while SyncDirectory runs so its per-file Register/Remove calls do not each notify.
+	private volatile bool _suppressChangeNotifications;
+
+	private void NotifyChanged(string reason)
+	{
+		if (_suppressChangeNotifications)
+			return;
+
+		try
+		{
+			Changed?.Invoke(reason);
+		}
+		catch (Exception ex)
+		{
+			LogChangedHandlerFailed(ex, reason);
+		}
+	}
+
+	/// <summary>
 	/// Registers an orchestration from a file path.
 	/// If a managed orchestrations directory is configured, the file is copied there
 	/// and the managed path is stored instead of the original.
@@ -120,6 +146,7 @@ public partial class OrchestrationRegistry
 		if (persist)
 			SaveToDisk();
 
+		NotifyChanged("registered");
 		return entry;
 	}
 
@@ -216,7 +243,10 @@ public partial class OrchestrationRegistry
 	{
 		var removed = _entries.TryRemove(id, out _);
 		if (removed)
+		{
 			SaveToDisk();
+			NotifyChanged("removed");
+		}
 		return removed;
 	}
 
@@ -227,6 +257,7 @@ public partial class OrchestrationRegistry
 	{
 		_entries.Clear();
 		SaveToDisk();
+		NotifyChanged("cleared");
 	}
 
 	/// <summary>
@@ -344,6 +375,27 @@ public partial class OrchestrationRegistry
 		if (!Directory.Exists(directory))
 			return new SyncResult();
 
+		// One notification for the whole sync rather than one per file: Register/Remove
+		// below would otherwise fire dozens of dashboard events for a single scan.
+		_suppressChangeNotifications = true;
+		try
+		{
+			var result = SyncDirectoryCore(directory, recursive);
+			if (result.Added > 0 || result.Updated > 0 || result.Removed > 0)
+			{
+				_suppressChangeNotifications = false;
+				NotifyChanged("synced");
+			}
+			return result;
+		}
+		finally
+		{
+			_suppressChangeNotifications = false;
+		}
+	}
+
+	private SyncResult SyncDirectoryCore(string directory, bool recursive)
+	{
 		var searchOption = recursive
 			? SearchOption.AllDirectories
 			: SearchOption.TopDirectoryOnly;
@@ -499,6 +551,9 @@ public partial class OrchestrationRegistry
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Skipping invalid orchestration file '{File}'")]
 	private partial void LogSkippingInvalidOrchestrationFile(Exception ex, string file);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "An OrchestrationRegistry.Changed handler threw for reason '{Reason}'")]
+	private partial void LogChangedHandlerFailed(Exception ex, string reason);
 }
 
 /// <summary>

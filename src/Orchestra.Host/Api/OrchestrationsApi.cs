@@ -55,6 +55,11 @@ public static class OrchestrationsApi
 						description = o.Orchestration.Description,
 						version = o.Orchestration.Version,
 						contentHash = o.ContentHash,
+						// Execution settings (null when the orchestration leaves them to the host defaults)
+						defaultModel = o.Orchestration.DefaultModel,
+						timeoutSeconds = o.Orchestration.TimeoutSeconds is > 0 ? o.Orchestration.TimeoutSeconds : null,
+						maxConcurrency = o.Orchestration.MaxConcurrency,
+						onStepFailure = o.Orchestration.OnStepFailure.ToString().ToLowerInvariant(),
 						tags = effectiveTags,
 						stepCount = o.Orchestration.Steps.Length,
 						steps = o.Orchestration.Steps.Select(s =>
@@ -273,6 +278,10 @@ public static class OrchestrationsApi
 				description = o.Description,
 				version = o.Version,
 				contentHash = entry.ContentHash,
+				defaultModel = o.DefaultModel,
+				timeoutSeconds = o.TimeoutSeconds is > 0 ? o.TimeoutSeconds : null,
+				maxConcurrency = o.MaxConcurrency,
+				onStepFailure = o.OnStepFailure.ToString().ToLowerInvariant(),
 				tags = tagStore.GetEffectiveTags(entry.Id, o.Tags),
 				versionCount,
 				validationErrors,

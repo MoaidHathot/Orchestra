@@ -166,6 +166,17 @@ public sealed partial class DashboardEventBroadcaster : IDisposable
 	}
 
 	/// <summary>
+	/// Broadcasts that the registered orchestrations - or which of them are enabled - changed
+	/// (registered, removed, directory sync, trigger enabled/disabled). The Portal should refresh
+	/// <c>/api/orchestrations</c>. Emitted by <see cref="OrchestrationChangeNotifier"/>, which
+	/// coalesces bursts so a directory scan yields one event.
+	/// </summary>
+	public void BroadcastOrchestrationsChanged(string reason)
+	{
+		Publish("orchestrations-changed", new { reason });
+	}
+
+	/// <summary>
 	/// Broadcasts that an orchestration is awaiting human input. The Portal should add the
 	/// run to its "Waiting Inputs" list (or refresh the list from <c>GET /api/runs/pending</c>).
 	/// Mirrors the per-execution <c>awaiting-input</c> SSE event payload but is fanned out on the

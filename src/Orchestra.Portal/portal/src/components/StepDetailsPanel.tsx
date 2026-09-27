@@ -1,6 +1,7 @@
 import React from 'react';
 import type { Step, SubagentInfo } from '../types';
 import CollapsibleText from './CollapsibleText';
+import { describeOutputCap } from '../utils';
 
 interface Props {
   step: Step | string | null;
@@ -110,6 +111,7 @@ const KNOWN_PROPS: ReadonlySet<string> = new Set([
   'skillDirectories',
   'loop',
   'enabled',
+  'maxOutputBytes',
 ]);
 
 export default function StepDetailsPanel({ step }: Props): React.JSX.Element | null {
@@ -565,7 +567,30 @@ export default function StepDetailsPanel({ step }: Props): React.JSX.Element | n
         </div>
       )}
 
+      {/* Command / Script / Http: captured-output cap */}
+      {(() => {
+        const type = (step.type ?? '').toLowerCase();
+        const capturesOutput = type === 'command' || type === 'script' || type === 'http' || step.command != null || step.url != null;
+        const cap = describeOutputCap(step.maxOutputBytes, capturesOutput);
+        if (!cap) return null;
+        return (
+          <div style={{ marginBottom: '12px' }} data-testid="output-cap">
+            <div
+              className="text-muted"
+              style={{ fontSize: '11px', textTransform: 'uppercase', marginBottom: '4px' }}
+            >
+              Output cap
+            </div>
+            <div style={{ fontSize: '12px' }}>
+              {cap}
+              <span className="text-muted"> - output beyond this is dropped and the step reports an output-truncated warning</span>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Transform Step: Template */}
+
       {step.template != null && (
         <CollapsibleText label="Template" text={step.template} maxCollapsedHeight={80} />
       )}

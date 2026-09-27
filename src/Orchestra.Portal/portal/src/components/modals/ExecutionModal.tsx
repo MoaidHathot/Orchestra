@@ -4,6 +4,7 @@ import { Icons } from '../../icons';
 import RunAnnotationEditor from '../RunAnnotationEditor';
 import { renderExecutionDag } from '../../mermaid';
 import { formatLogContent } from '../../formatLogContent';
+import { formatBytes, isOutputTruncated } from '../../utils';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import ZoomableDag from '../ZoomableDag';
 import SubagentCard from '../SubagentCard';
@@ -133,13 +134,6 @@ interface StepModelState {
 function formatNumber(value: number | undefined): string | null {
   if (value == null) return null;
   return new Intl.NumberFormat().format(value);
-}
-
-function formatBytes(value: number | undefined): string | null {
-  if (value == null) return null;
-  if (value < 1024) return `${value} B`;
-  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
-  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function modelDetailRows(info: ModelInfo): Array<{ label: string; value: string }> {
@@ -3462,6 +3456,15 @@ export default function ExecutionModal({
                         ? 'Result'
                         : 'Agent Output'}
                   </span>
+                  {selectedStep && isOutputTruncated(displayContent.content) && (
+                    <span
+                      className="output-truncated-badge"
+                      data-testid="output-truncated-badge"
+                      title="The step produced more output than its maxOutputBytes cap; the rest was dropped. Raise maxOutputBytes on the step, set it to 0 to disable the cap, or write large output to a file."
+                    >
+                      <Icons.Warning /> output truncated
+                    </span>
+                  )}
                   {status === 'running' && !selectedStep && (
                     <div
                       className="spinner"

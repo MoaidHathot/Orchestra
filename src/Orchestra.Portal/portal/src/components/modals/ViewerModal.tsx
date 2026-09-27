@@ -260,6 +260,27 @@ function ViewerModal({ open, orchestration, onClose, onRun, onTagsChanged }: Pro
                     <p>{displayOrch.description || 'No description'}</p>
                   </div>
 
+                  {/* Execution settings - only the values the file sets; the rest come from the host */}
+                  {(displayOrch.defaultModel || displayOrch.timeoutSeconds || displayOrch.maxConcurrency || displayOrch.onStepFailure === 'stop') && (
+                    <div className="form-group" data-testid="execution-settings">
+                      <label className="form-label">Execution settings</label>
+                      <div className="execution-settings">
+                        {displayOrch.defaultModel && (
+                          <div><span className="text-muted">Default model:</span> <code>{displayOrch.defaultModel}</code></div>
+                        )}
+                        {displayOrch.timeoutSeconds ? (
+                          <div><span className="text-muted">Timeout:</span> {displayOrch.timeoutSeconds}s</div>
+                        ) : null}
+                        {displayOrch.maxConcurrency ? (
+                          <div><span className="text-muted">Max concurrency:</span> {displayOrch.maxConcurrency} step{displayOrch.maxConcurrency === 1 ? '' : 's'} at a time</div>
+                        ) : null}
+                        {displayOrch.onStepFailure === 'stop' && (
+                          <div><span className="text-muted">On step failure:</span> <strong>stop</strong> <span className="text-muted">- cancel every unfinished step as soon as one fails</span></div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Tags (editable) */}
                   <div className="form-group">
                     <label className="form-label">Tags</label>

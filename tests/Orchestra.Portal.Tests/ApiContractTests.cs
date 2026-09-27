@@ -758,6 +758,47 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 	}
 
 	[Fact]
+	public async Task Contract_GetOrchestrations_ExecutionSettingsAreExposed()
+	{
+		// ViewerModal's "Execution settings" section reads these from both the list and the detail
+		// projection; StepDetailsPanel reads maxOutputBytes per step.
+		var name = $"Execution Settings {Guid.NewGuid():N}";
+		var json = $$$"""
+		{
+			"name": "{{{name}}}",
+			"description": "settings",
+			"defaultModel": "claude-opus-4.8",
+			"timeoutSeconds": 900,
+			"maxConcurrency": 3,
+			"onStepFailure": "stop",
+			"steps": [
+				{ "name": "build", "type": "Command", "command": "echo", "maxOutputBytes": 4096 },
+				{ "name": "fetch", "type": "Http", "url": "https://example.invalid", "dependsOn": ["build"] }
+			]
+		}
+		""";
+		var registered = await _client.PostAsJsonAsync("/api/orchestrations/json", new { json }, _jsonOptions);
+		registered.StatusCode.Should().Be(HttpStatusCode.OK);
+		var id = (await registered.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+
+		var detail = await (await _client.GetAsync($"/api/orchestrations/{id}")).Content.ReadFromJsonAsync<JsonElement>();
+		detail.GetProperty("defaultModel").GetString().Should().Be("claude-opus-4.8");
+		detail.GetProperty("timeoutSeconds").GetInt32().Should().Be(900);
+		detail.GetProperty("maxConcurrency").GetInt32().Should().Be(3);
+		detail.GetProperty("onStepFailure").GetString().Should().Be("stop");
+		var steps = detail.GetProperty("steps").EnumerateArray().ToList();
+		steps.First(s => s.GetProperty("name").GetString() == "build").GetProperty("maxOutputBytes").GetInt32().Should().Be(4096);
+		// Absent maxOutputBytes means the engine default; the host's JSON options drop the null.
+		steps.First(s => s.GetProperty("name").GetString() == "fetch").TryGetProperty("maxOutputBytes", out var fetchCap).Should().BeFalse();
+		_ = fetchCap;
+
+		var list = await (await _client.GetAsync("/api/orchestrations")).Content.ReadFromJsonAsync<JsonElement>();
+		var summary = list.GetProperty("orchestrations").EnumerateArray().First(o => o.GetProperty("id").GetString() == id);
+		summary.GetProperty("maxConcurrency").GetInt32().Should().Be(3);
+		summary.GetProperty("onStepFailure").GetString().Should().Be("stop");
+	}
+
+	[Fact]
 	public async Task Contract_GetOrchestrations_StepEnabledFalseIsPreserved()
 	{
 		var id = await RegisterOrchestrationWithDisabledStepAsync();

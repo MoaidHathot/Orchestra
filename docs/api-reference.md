@@ -782,6 +782,34 @@ POST /api/active/{executionId}/cancel
 
 ---
 
+## Dashboard Events (SSE)
+
+```http
+GET /api/events
+```
+
+A single long-lived `text/event-stream` the Portal uses to refresh on change instead of on a
+timer. The stream keeps **no replay**: on every (re)connect the client re-fetches the snapshots
+it needs (the Portal does a full reload on `connected`). Events carry a small JSON payload:
+
+| Event | Payload | Emitted when |
+|---|---|---|
+| `connected` | `{}` | The stream is established. |
+| `heartbeat` | `{}` | Periodically, to keep proxies from idling the connection out. |
+| `orchestrations-changed` | `{ reason }` | An orchestration was registered, updated, removed or synced from disk, or a trigger was registered, removed, enabled or disabled - anything that changes `/api/orchestrations`. Bursts (a directory scan, a profile flipping many triggers) are coalesced into one event; `reason` names the first change, e.g. `registry:synced`, `trigger:disabled`. |
+| `profiles-changed` | `{ reason }` | The profile list changed. |
+| `profile-active-set-changed` | `{ activatedOrchestrationIds, deactivatedOrchestrationIds, trigger }` | Profile activation changed the effective active orchestration set. |
+| `execution-started` | `{ executionId, orchestrationId, orchestrationName, triggeredBy }` | A run started (any origin). |
+| `execution-completed` | `{ executionId, orchestrationId, orchestrationName, status }` | A run reached a terminal state. |
+| `awaiting-input` / `input-received` / `input-timeout` | pending-input record | Human-in-the-loop waits begin, are answered, or time out. |
+
+Step-level progress inside a run is not on this stream; subscribe to the per-run stream
+(`GET /api/orchestrations/{id}/run` to start one, `GET /api/execution/{executionId}/attach` to
+join one) or poll `/api/active`.
+Returns `503` (problem+json, `Retry-After`) when the subscriber limit is reached.
+
+---
+
 ## Utility
 
 ### List MCPs

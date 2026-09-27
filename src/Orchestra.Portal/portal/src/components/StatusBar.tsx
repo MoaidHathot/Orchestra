@@ -7,9 +7,11 @@ import { api } from '../api';
 interface Props {
   status: ServerStatus;
   onlineStatus: OnlineStatus;
+  /** Opens the Host panel (health, logs, maintenance). Rendered as a button when provided. */
+  onOpenHost?: () => void;
 }
 
-export default function StatusBar({ status, onlineStatus }: Props): React.JSX.Element {
+export default function StatusBar({ status, onlineStatus, onOpenHost }: Props): React.JSX.Element {
   const getOutlookStatusClass = (): string => {
     if (!status.outlook) return 'not-configured';
     switch (status.outlook.status) {
@@ -63,6 +65,19 @@ export default function StatusBar({ status, onlineStatus }: Props): React.JSX.El
         <span className={`status-indicator ${getConnectionClass()}`} />
         <span>{getConnectionText()}</span>
       </div>
+
+      {onOpenHost && (
+        <button
+          type="button"
+          className="status-bar-item status-bar-button"
+          onClick={onOpenHost}
+          title="Host health, log file and maintenance"
+          aria-label="Open host panel"
+        >
+          <Icons.Heart />
+          <span>Host</span>
+        </button>
+      )}
 
       {/* Pending mutations indicator */}
       {pendingCount > 0 && (

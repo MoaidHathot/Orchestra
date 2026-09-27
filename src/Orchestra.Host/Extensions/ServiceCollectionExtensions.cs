@@ -130,6 +130,11 @@ public static class ServiceCollectionExtensions
 		// SSE clients so the UI can update in real time instead of polling.
 		services.TryAddSingleton<DashboardEventBroadcaster>();
 
+		// Turns registry / trigger mutations into `orchestrations-changed` dashboard events so
+		// the Portal refreshes its list on change instead of on a timer. Started in
+		// InitializeOrchestraHostAsync once the registry and trigger manager exist.
+		services.TryAddSingleton<OrchestrationChangeNotifier>();
+
 		// SseOptions: derived from OrchestrationHostOptions.Sse so SSE pipeline caps
 		// (replay buffer / channel capacity / subscriber limit / heartbeat) are configurable
 		// via orchestra.json or programmatic overrides. Resolved through the options
@@ -449,6 +454,7 @@ public static class ServiceProviderExtensions
 		var initLogger = loggerFactory.CreateLogger("Orchestra.Host.Initialization");
 
 		AttachFileLogging(loggerFactory, options, initLogger);
+		services.GetRequiredService<OrchestrationChangeNotifier>().Start();
 
 		// Determine whether to skip external service/MCP config loading.
 		// Tests should not load the developer's local orchestra.services.json (which

@@ -81,4 +81,16 @@ describe('createDashboardEventHandlers', () => {
     expect(actions.applyInputReceived).toHaveBeenCalledWith(record);
     expect(actions.applyInputTimeout).toHaveBeenCalledWith(record);
   });
+
+  it('onOrchestrationsChanged refreshes only the orchestration cards', () => {
+    // The host coalesces registry/trigger mutations into this one event; the cards' enabled
+    // flags and the registry list live in /api/orchestrations, nothing else needs a refetch.
+    const actions = makeActions();
+    createDashboardEventHandlers(actions).onOrchestrationsChanged!({ reason: 'trigger:disabled' });
+
+    expect(actions.refreshOrchestrations).toHaveBeenCalledTimes(1);
+    expect(actions.reloadAll).not.toHaveBeenCalled();
+    expect(actions.refreshActive).not.toHaveBeenCalled();
+    expect(actions.refreshHistory).not.toHaveBeenCalled();
+  });
 });

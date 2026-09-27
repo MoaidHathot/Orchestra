@@ -2,9 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import './App.css';
 import { api } from './api';
 import { Icons } from './icons';
-import { DEFAULT_POLLING, setServerConfig, type ServerConfig } from './serverConfig';
 import { activeOrchestrationMatchesSearch, formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch, buildRestoredStepStatusUpdates } from './utils';
-import type { RunOrigin } from './runFilters';
 import {
   type HistoryFilterState,
   buildFilterQueryString,
@@ -32,6 +30,8 @@ import type {
   StepActorStreams,
   ExecutionStateSnapshot,
   StepTiming,
+  HistoryListEntry,
+  RuntimeOrchestration,
 } from './types';
 import ActiveOrchestrationCard from './components/ActiveOrchestrationCard';
 import type { CardExecution } from './components/ActiveOrchestrationCard';
@@ -47,22 +47,13 @@ import McpsModal from './components/modals/McpsModal';
 import BuilderModal from './components/modals/BuilderModal';
 import ProfilesModal from './components/modals/ProfilesModal';
 import WaitingInputsModal from './components/modals/WaitingInputsModal';
+import HostModal from './components/modals/HostModal';
 import ProfileSelector from './components/ProfileSelector';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { useOnlineStatus } from './hooks/useOnlineStatus';
-import { useDashboardEvents } from './hooks/useDashboardEvents';
-import { createDashboardEventHandlers } from './dashboardEventHandlers';
+import { useDashboardData } from './hooks/useDashboardData';
 import { usePendingInputs } from './hooks/usePendingInputs';
 
 // ── API response types ──────────────────────────────────────────────────────
-
-interface OrchestrationsResponse {
-  orchestrations: RuntimeOrchestration[];
-}
-
-interface HistoryResponse {
-  runs: HistoryListEntry[];
-}
 
 type ActiveStatusFilter = 'all' | 'running' | 'enabled' | 'disabled';
 
@@ -177,60 +168,9 @@ interface ActiveModalState {
 }
 
 /** Execution entry as it appears in the left-pane history list (may be enriched with active info). */
-interface HistoryListEntry {
-  runId: string;
-  executionId?: string;
-  orchestrationId?: string;
-  orchestrationName: string;
-  status?: string;
-  completionReason?: string;
-  completedByStep?: string;
-  isActive?: boolean;
-  isIncomplete?: boolean;
-  startedAt?: string;
-  durationSeconds?: number;
-  parameters?: Record<string, unknown>;
-  /** Server-classified origin token (manual/scheduler/loop/...). Falls back to client classification of triggeredBy. */
-  origin?: RunOrigin;
-  /** Free-form trigger string from the run record; useful for tooltips and as a classification fallback. */
-  triggeredBy?: string;
-  // ── Lineage (filled in by /api/history projection) ─────────────
-  retriedFromRunId?: string | null;
-  retryMode?: string | null;
-  parentExecutionId?: string | null;
-  parentStepName?: string | null;
-  parentOrchestrationName?: string | null;
-  rootExecutionId?: string | null;
-  nestingDepth?: number;
-  // ── Curation (merged in from the run's annotation) ──────────────
-  favorite?: boolean;
-  title?: string | null;
-  tags?: string[];
-  note?: string | null;
-}
-
 // ── Helpers for SSE event handling ──────────────────────────────────────────
 
 /** Extended orchestration type for runtime fields returned by the API but not in the base Orchestration type. */
-interface RuntimeOrchestration extends Orchestration {
-  status?: string;
-  stepCount?: number;
-  triggerType?: string;
-  hasParameters?: boolean;
-  lastExecutionStatus?: string;
-  /**
-   * Total number of recorded runs for this orchestration, derived by the API from the
-   * persisted run store (with in-memory trigger counters as an overlay). Stable across
-   * server restarts; populated even for manual orchestrations that have no trigger.
-   */
-  runCount?: number;
-  /**
-   * Most-recent run start time. ISO-8601 UTC. Same source-of-truth semantics as
-   * <c>runCount</c>.
-   */
-  lastExecutionTime?: string;
-}
-
 type StepStatusValue = PortalStepStatus;
 
 interface SSEEventData {
@@ -259,22 +199,15 @@ interface FinalStepResultData {
 // ── The App component ───────────────────────────────────────────────────────
 
 function App(): React.JSX.Element {
-  const [orchestrations, setOrchestrations] = useState<RuntimeOrchestration[]>([]);
-  const [history, setHistory] = useState<HistoryListEntry[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [mainPaneSearchQuery, setMainPaneSearchQuery] = useState('');
   const [activeStatusFilter, setActiveStatusFilter] = useState<ActiveStatusFilter>('all');
   const [selectedOrchId, setSelectedOrchId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [historyLoading, setHistoryLoading] = useState(true);
-  const [activeData, setActiveData] = useState<ActiveData>({ running: [], pending: [] });
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Track run contexts per execution ID (from SSE run-context events)
   const runContextsRef = useRef<Map<string, RunContext>>(new Map());
 
-  // Polling config from server (loaded once on init)
-  const [pollingConfig, setPollingConfig] = useState<ServerConfig['polling']>(DEFAULT_POLLING);
 
   // Modal states
   const [viewerModal, setViewerModal] = useState<ViewerModalState>({ open: false, orchestration: null });
@@ -310,6 +243,7 @@ function App(): React.JSX.Element {
   const [builderModal, setBuilderModal] = useState(false);
   const [profilesModal, setProfilesModal] = useState(false);
   const [waitingInputsModal, setWaitingInputsModal] = useState(false);
+  const [hostModal, setHostModal] = useState(false);
 
   // Tracks orchestration runs paused on human input. State is owned here so the
   // sidebar count badge, the active-card chip, and the WaitingInputsModal all see
@@ -317,7 +251,6 @@ function App(): React.JSX.Element {
   const pendingInputs = usePendingInputs();
 
   // Profile data for filtering & membership display
-  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [profileFilter, setProfileFilter] = useState<string[]>([]); // empty = all, array of profile ids = multi-select
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [mainPaneProfileFilter, setMainPaneProfileFilter] = useState<string[]>([]); // same logic for main pane
@@ -377,281 +310,26 @@ function App(): React.JSX.Element {
     });
   }, []);
 
-  // Status bar state
-  const [serverStatus, setServerStatus] = useState<ServerStatus>({
-    outlook: null,
-    orchestrationCount: 0,
-    activeTriggers: 0,
-    runningExecutions: 0,
-    agentRuntime: null,
-  });
 
-  // Online/offline tracking
-  const onlineStatus = useOnlineStatus();
-
-  // Ref so setInterval callbacks always see the latest reachability
-  const serverReachableRef = useRef(true);
-  useEffect(() => { serverReachableRef.current = onlineStatus.isServerReachable; }, [onlineStatus.isServerReachable]);
-
-  // ── Load data ─────────────────────────────────────────────────────────────
-
-  const loadData = useCallback(async () => {
-    // Load orchestrations first (fast) so the list appears immediately,
-    // then load history and active data in the background.
-    try {
-      const orchData = await api.get<OrchestrationsResponse>('/api/orchestrations');
-      setOrchestrations(orchData.orchestrations || []);
-    } catch (err) {
-      console.error('Failed to load orchestrations:', err);
-    } finally {
-      setLoading(false);
-    }
-
-    // Load history and active data in parallel (may be slower due to cold index)
-    try {
-      const [histData, activeDataResult] = await Promise.all([
-        api.get<HistoryResponse>(historyUrlRef.current),
-        api.get<ActiveData>('/api/active'),
-      ]);
-      setHistory(histData.runs || []);
-      setActiveData(activeDataResult || { running: [], pending: [] });
-      // Full refresh: clear the missing-execution tracker to avoid stale retains
-      missingRunningIdsRef.current.clear();
-    } catch (err) {
-      console.error('Failed to load history/active data:', err);
-    } finally {
-      setHistoryLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  // Load server config (polling intervals, default model) once on init
-  useEffect(() => {
-    (async () => {
-      try {
-        const config = await api.get<ServerConfig>('/api/config');
-        setServerConfig(config);
-        if (config?.polling) {
-          setPollingConfig({ ...DEFAULT_POLLING, ...config.polling });
-        }
-      } catch (err) {
-        console.error('Failed to load config, using defaults:', err);
-      }
-    })();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Load profiles for filter & membership display
-  const loadProfiles = useCallback(async () => {
-    try {
-      const data = await api.get<{ count: number; profiles: Profile[] }>('/api/profiles');
-      setProfiles(data.profiles || []);
-    } catch (err) {
-      console.error('Failed to load profiles:', err);
-    }
-  }, []);
-
-  useEffect(() => { loadProfiles(); }, [loadProfiles]);
-
-  // Lightweight single-endpoint reloads used by the SSE dashboard-events stream
-  // to update individual sections in response to backend pushes (no polling needed).
-  const refreshActive = useCallback(async () => {
-    if (!serverReachableRef.current) return;
-    try {
-      const data = await api.get<ActiveData>('/api/active');
-      setActiveData(data || { running: [], pending: [] });
-    } catch (err) {
-      console.error('Failed to refresh active:', err);
-    }
-  }, []);
-
-  const refreshHistory = useCallback(async () => {
-    if (!serverReachableRef.current) return;
-    try {
-      const histData = await api.get<HistoryResponse>(historyUrlRef.current);
-      setHistory(histData.runs || []);
-    } catch (err) {
-      console.error('Failed to refresh history:', err);
-    }
-  }, []);
-
-  // Re-fetch history immediately when filters change (instead of waiting for the next poll
-  // tick). The initial mount fetches via loadData(); skip that one to avoid a duplicate request.
-  const initialHistoryFetchRef = useRef(true);
-  useEffect(() => {
-    if (initialHistoryFetchRef.current) {
-      initialHistoryFetchRef.current = false;
-      return;
-    }
-    refreshHistory();
-  }, [historyUrl, refreshHistory]);
-
-  const refreshOrchestrations = useCallback(async () => {
-    if (!serverReachableRef.current) return;
-    try {
-      const data = await api.get<OrchestrationsResponse>('/api/orchestrations');
-      setOrchestrations(data.orchestrations || []);
-    } catch (err) {
-      console.error('Failed to refresh orchestrations:', err);
-    }
-  }, []);
-
-  // Subscribe to the backend dashboard-events SSE stream so the UI reflects changes
-  // driven by schedulers / triggers immediately, without waiting for the next poll.
-  // On (re)connect we do a FULL snapshot re-sync (including the Active + Recent lists),
-  // because the backend keeps no event replay — see createDashboardEventHandlers.
-  useDashboardEvents(createDashboardEventHandlers({
-    reloadAll: () => { void loadData(); },
-    reloadProfiles: () => { void loadProfiles(); },
-    refreshOrchestrations: () => { void refreshOrchestrations(); },
-    refreshActive: () => { void refreshActive(); },
-    refreshHistory: () => { void refreshHistory(); },
-    refreshPendingInputs: () => { void pendingInputs.refresh(); },
-    applyAwaitingInput: pendingInputs.applyAwaitingInput,
-    applyInputReceived: pendingInputs.applyInputReceived,
-    applyInputTimeout: pendingInputs.applyInputTimeout,
-  }));
-
-  // Defense-in-depth polling fallback for /api/profiles.
-  // SSE is the primary update mechanism, but if a `profile-active-set-changed` event is
-  // ever missed (reconnect race, suppressed emission, transient backend hiccup), the
-  // selector's IsActive flags would otherwise stay stale until the next manual refresh.
-  // A low-frequency periodic reload is sufficient to self-heal without significant load.
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!serverReachableRef.current) return;
-      loadProfiles();
-    }, 30_000);
-    return () => clearInterval(interval);
-  }, [loadProfiles]);
-
-  // Reload data when coming back online
-  useEffect(() => {
-    if (onlineStatus.isOnline && onlineStatus.isServerReachable) {
-      loadData();
-    }
-  }, [onlineStatus.isOnline, onlineStatus.isServerReachable, loadData]);
-
-  // Track which execution IDs have been seen as missing (for 2-poll confirmation)
-  const missingRunningIdsRef = useRef<Set<string>>(new Set());
-
-  // Auto-refresh active orchestrations when there are running or pending ones
-  useEffect(() => {
-    const hasActiveOrPending = activeData.running.length > 0 || activeData.pending.length > 0;
-    const hasEnabledTriggers = orchestrations.some(o => o.enabled);
-
-    if (hasActiveOrPending || hasEnabledTriggers) {
-      const interval = setInterval(async () => {
-        if (!serverReachableRef.current) return; // Skip when server is down
-        try {
-          const data = await api.get<ActiveData>('/api/active');
-          const newRunning = data?.running || [];
-          const newRunningIds = new Set(newRunning.map(r => r.executionId));
-
-          // Reconcile: keep previously-running executions for one extra poll cycle
-          // to avoid transient disappearances from the UI
-          setActiveData(prev => {
-            const prevRunningIds = new Set(prev.running.map(r => r.executionId));
-            const retained: typeof prev.running = [];
-
-            for (const exec of prev.running) {
-              if (!exec.executionId) continue;
-              if (!newRunningIds.has(exec.executionId)) {
-                // This execution was running but is now missing from the server response
-                if (!missingRunningIdsRef.current.has(exec.executionId)) {
-                  // First time missing: retain it for one more cycle
-                  missingRunningIdsRef.current.add(exec.executionId);
-                  retained.push(exec);
-                }
-                // Second time missing: let it drop (confirmed gone)
-              }
-            }
-
-            // Clear missing tracker for IDs that reappeared
-            for (const id of missingRunningIdsRef.current) {
-              if (newRunningIds.has(id)) {
-                missingRunningIdsRef.current.delete(id);
-              }
-            }
-
-            // Clean up old entries from the missing tracker
-            for (const id of missingRunningIdsRef.current) {
-              if (!prevRunningIds.has(id)) {
-                missingRunningIdsRef.current.delete(id);
-              }
-            }
-
-            return {
-              running: [...newRunning, ...retained],
-              pending: data?.pending || [],
-            };
-          });
-        } catch (err) {
-          console.error('Failed to refresh active:', err);
-        }
-      }, pollingConfig.activeExecutionsMs);
-      return () => clearInterval(interval);
-    }
-  }, [activeData.running.length, activeData.pending.length, orchestrations, pollingConfig.activeExecutionsMs]);
-
-  // Auto-refresh orchestrations list for external changes
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      if (!serverReachableRef.current) return; // Skip when server is down
-      try {
-        const data = await api.get<OrchestrationsResponse>('/api/orchestrations');
-        setOrchestrations(data.orchestrations || []);
-      } catch (err) {
-        console.error('Failed to refresh orchestrations:', err);
-      }
-    }, pollingConfig.orchestrationsMs);
-    return () => clearInterval(interval);
-  }, [pollingConfig.orchestrationsMs]);
-
-  // Auto-refresh history when there are enabled triggers, active executions, or running items
-  useEffect(() => {
-    const hasEnabledTriggers = orchestrations.some(o => o.enabled);
-    const hasActiveInHistory = history.some(h => h.isActive);
-    const hasRunning = activeData.running.length > 0;
-    if (hasEnabledTriggers || hasActiveInHistory || hasRunning) {
-      const interval = setInterval(async () => {
-        if (!serverReachableRef.current) return; // Skip when server is down
-        try {
-          const histData = await api.get<HistoryResponse>(historyUrlRef.current);
-          setHistory(histData.runs || []);
-        } catch (err) {
-          console.error('Failed to refresh history:', err);
-        }
-      }, pollingConfig.historyMs);
-      return () => clearInterval(interval);
-    }
-  }, [orchestrations, history, activeData.running.length, pollingConfig.historyMs]);
-
-  // Poll server status (including Outlook connection status) every 5 seconds
-  useEffect(() => {
-    const fetchStatus = async () => {
-      if (!serverReachableRef.current) return; // Skip when server is down
-      try {
-        const status = await api.get<ServerStatus>('/api/status');
-        setServerStatus({
-          outlook: status.outlook || null,
-          orchestrationCount: status.orchestrationCount || 0,
-          activeTriggers: status.activeTriggers || 0,
-          runningExecutions: status.runningExecutions || 0,
-          agentRuntime: status.agentRuntime ?? null,
-          agentRuntimes: status.agentRuntimes ?? undefined,
-          defaultProvider: status.defaultProvider,
-          providers: status.providers,
-        });
-      } catch (err) {
-        console.error('Failed to fetch server status:', err);
-      }
-    };
-
-    fetchStatus();
-    const interval = setInterval(fetchStatus, pollingConfig.serverStatusMs);
-    return () => clearInterval(interval);
-  }, [pollingConfig.serverStatusMs]);
+  // ── Server-derived dashboard state ─────────────────────────────────────────
+  // Orchestrations, Recent Executions, Active list, profiles and the status-bar payload,
+  // refreshed by the /api/events push stream with interval polling as fallback. See
+  // useDashboardData for the refresh policy.
+  const dashboard = useDashboardData({ historyUrl, pendingInputs });
+  const {
+    orchestrations,
+    history,
+    setHistory,
+    activeData,
+    profiles,
+    serverStatus,
+    loading,
+    historyLoading,
+    onlineStatus,
+    loadData,
+    loadProfiles,
+    refreshHistory,
+  } = dashboard;
 
   // ── Profile membership helper ──────────────────────────────────────────────
 
@@ -2940,7 +2618,13 @@ function App(): React.JSX.Element {
       />
 
       {/* Status Bar */}
-      <StatusBar status={serverStatus} onlineStatus={onlineStatus} />
+      <HostModal
+        open={hostModal}
+        onClose={() => setHostModal(false)}
+        onRunsPruned={() => { void refreshHistory(); }}
+      />
+
+      <StatusBar status={serverStatus} onlineStatus={onlineStatus} onOpenHost={() => setHostModal(true)} />
     </div>
   );
 }

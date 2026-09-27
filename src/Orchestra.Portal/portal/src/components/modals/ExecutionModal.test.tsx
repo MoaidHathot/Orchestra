@@ -683,3 +683,24 @@ describe('ExecutionModal child-run badge', () => {
     expect(screen.queryByTestId('child-run-badge')).not.toBeInTheDocument();
   });
 });
+
+describe('ExecutionModal output truncation badge', () => {
+  it('flags a selected step whose output carries the engine truncation marker', async () => {
+    const props = makeProps({
+      stepResults: { analyze: 'line 1\nline 2\n[output truncated: exceeded maxOutputBytes (2,048 bytes); 18,000 bytes dropped]' },
+    });
+
+    render(<ExecutionModal {...props} />);
+
+    await waitFor(() => expect(screen.getByText(/Step Output: analyze/i)).toBeInTheDocument());
+    expect(screen.getByTestId('output-truncated-badge')).toHaveTextContent('output truncated');
+    expect(screen.getByTestId('output-truncated-badge')).toHaveAttribute('title', expect.stringContaining('maxOutputBytes'));
+  });
+
+  it('shows no badge for ordinary output', async () => {
+    render(<ExecutionModal {...makeProps({ stepResults: { analyze: 'all good' } })} />);
+
+    await waitFor(() => expect(screen.getByText(/Step Output: analyze/i)).toBeInTheDocument());
+    expect(screen.queryByTestId('output-truncated-badge')).not.toBeInTheDocument();
+  });
+});

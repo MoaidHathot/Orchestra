@@ -78,6 +78,20 @@ describe('useDashboardEvents', () => {
     expect(onConnected).toHaveBeenCalledTimes(1);
   });
 
+  it('invokes onOrchestrationsChanged with the reason and reports connection state changes', () => {
+    const changed = vi.fn();
+    const connection = vi.fn();
+    renderHook(() => useDashboardEvents({ onOrchestrationsChanged: changed, onConnectionChanged: connection }));
+    const stream = MockEventSource.instances[0];
+
+    act(() => stream.dispatch('connected', {}));
+    act(() => stream.dispatch('orchestrations-changed', { reason: 'registry:synced' }));
+    act(() => stream.dispatch('error'));
+
+    expect(changed).toHaveBeenCalledWith({ reason: 'registry:synced' });
+    expect(connection.mock.calls.map(c => c[0])).toEqual([true, false]);
+  });
+
   it('invokes onProfileActiveSetChanged with parsed payload', () => {
     const handler = vi.fn();
     renderHook(() =>

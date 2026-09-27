@@ -60,6 +60,11 @@ export function createDashboardEventHandlers(actions: DashboardResyncActions): D
       // The profile list itself changed (file added/updated/deleted in the watched directory).
       actions.reloadProfiles();
     },
+    onOrchestrationsChanged: () => {
+      // The registry or a trigger's enabled state changed (file sync, add/remove, enable/disable,
+      // possibly from another client). Refresh the cards; the host coalesces bursts.
+      actions.refreshOrchestrations();
+    },
     onExecutionStarted: () => {
       // A new execution started (trigger, manual, resume). Surface it in BOTH the Active list
       // and Recent Executions (which renders running rows) immediately, rather than waiting for

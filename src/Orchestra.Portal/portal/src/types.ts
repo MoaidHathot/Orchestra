@@ -1,3 +1,5 @@
+import type { RunOrigin } from './runFilters';
+
 // Orchestration data from /api/orchestrations
 export interface Orchestration {
   id: string;
@@ -19,6 +21,75 @@ export interface Orchestration {
   registeredAt?: string;
   contentHash?: string;
   tags?: string[];
+
+  // ── Execution settings (null/absent = host default) ──────────────────────
+  /** Default model for Prompt steps that set none. */
+  defaultModel?: string | null;
+  /** Orchestration-level timeout; absent when disabled. */
+  timeoutSeconds?: number | null;
+  /** Cap on simultaneously executing steps; absent = host default / unbounded. */
+  maxConcurrency?: number | null;
+  /** `continue` (default) or `stop` (fail fast on the first failed step). */
+  onStepFailure?: 'continue' | 'stop' | string;
+}
+
+// ── Host diagnostics (GET /api/health, /api/logs, POST /api/history/prune) ──
+
+export type HealthStatus = 'healthy' | 'degraded' | 'unhealthy';
+
+export interface HealthCheck {
+  name: string;
+  status: HealthStatus | string;
+  detail: string;
+}
+
+export interface HealthReport {
+  status: HealthStatus | string;
+  version: string;
+  timestamp: string;
+  /** .NET TimeSpan serialized as "d.hh:mm:ss.fffffff" or "hh:mm:ss.fffffff". */
+  uptime: string;
+  activeRuns: number;
+  checks: HealthCheck[];
+}
+
+export interface LogTail {
+  directory: string;
+  file: string;
+  path: string;
+  sizeBytes: number;
+  /** Pass back as `offset` (with `file`) to receive only what was appended since. */
+  offset: number;
+  truncated: boolean;
+  /** Whether this host writes the file; false still serves files left by earlier hosts. */
+  enabled: boolean;
+  lines: string[];
+}
+
+export interface PrunePolicy {
+  maxRunsPerOrchestration?: number | null;
+  maxRunAgeDays?: number | null;
+  source: 'request' | 'orchestra.json' | string;
+}
+
+export interface PruneRunView {
+  runId: string;
+  orchestrationName: string;
+  status: string;
+  startedAt: string;
+  folderPath: string;
+}
+
+export interface PruneResult {
+  dryRun: boolean;
+  policy: PrunePolicy;
+  /** Dry run only. */
+  wouldDelete?: number;
+  /** Real run only. */
+  deleted?: number;
+  failed?: number;
+  runs: PruneRunView[];
+  failedRuns?: PruneRunView[];
 }
 
 export interface HookDefinition {
@@ -736,4 +807,65 @@ export interface ExecutionStateSnapshot {
    */
   lastEventSequence: number;
   isCompleted: boolean;
+}
+
+// ── Dashboard list payloads (moved from App.tsx so hooks can share them) ─────
+
+export interface OrchestrationsResponse {
+  orchestrations: RuntimeOrchestration[];
+}
+
+export interface HistoryResponse {
+  runs: HistoryListEntry[];
+}
+
+export interface HistoryListEntry {
+  runId: string;
+  executionId?: string;
+  orchestrationId?: string;
+  orchestrationName: string;
+  status?: string;
+  completionReason?: string;
+  completedByStep?: string;
+  isActive?: boolean;
+  isIncomplete?: boolean;
+  startedAt?: string;
+  durationSeconds?: number;
+  parameters?: Record<string, unknown>;
+  /** Server-classified origin token (manual/scheduler/loop/...). Falls back to client classification of triggeredBy. */
+  origin?: RunOrigin;
+  /** Free-form trigger string from the run record; useful for tooltips and as a classification fallback. */
+  triggeredBy?: string;
+  // ── Lineage (filled in by /api/history projection) ─────────────
+  retriedFromRunId?: string | null;
+  retryMode?: string | null;
+  parentExecutionId?: string | null;
+  parentStepName?: string | null;
+  parentOrchestrationName?: string | null;
+  rootExecutionId?: string | null;
+  nestingDepth?: number;
+  // ── Curation (merged in from the run's annotation) ──────────────
+  favorite?: boolean;
+  title?: string | null;
+  tags?: string[];
+  note?: string | null;
+}
+
+export interface RuntimeOrchestration extends Orchestration {
+  status?: string;
+  stepCount?: number;
+  triggerType?: string;
+  hasParameters?: boolean;
+  lastExecutionStatus?: string;
+  /**
+   * Total number of recorded runs for this orchestration, derived by the API from the
+   * persisted run store (with in-memory trigger counters as an overlay). Stable across
+   * server restarts; populated even for manual orchestrations that have no trigger.
+   */
+  runCount?: number;
+  /**
+   * Most-recent run start time. ISO-8601 UTC. Same source-of-truth semantics as
+   * <c>runCount</c>.
+   */
+  lastExecutionTime?: string;
 }

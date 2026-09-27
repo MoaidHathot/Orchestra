@@ -65,6 +65,25 @@ public partial class TriggerManager : BackgroundService
 	/// </summary>
 	public Engine.Mcp[] GlobalMcps { get; set; } = [];
 
+	/// <summary>
+	/// Raised after a trigger is registered, removed, enabled or disabled - the changes that
+	/// alter what <c>/api/orchestrations</c> reports as <c>enabled</c>. The argument is a short
+	/// reason. Handlers run synchronously on the mutating thread and must not throw.
+	/// </summary>
+	public event Action<string>? TriggersChanged;
+
+	private void NotifyTriggersChanged(string reason)
+	{
+		try
+		{
+			TriggersChanged?.Invoke(reason);
+		}
+		catch (Exception ex)
+		{
+			LogTriggersChangedHandlerFailed(reason, ex);
+		}
+	}
+
 	public TriggerManager(
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
@@ -255,6 +274,7 @@ public partial class TriggerManager : BackgroundService
 		}
 
 		LogTriggerRegistered(id, orchestrationPath, config.Type.ToString(), source.ToString());
+		NotifyTriggersChanged("registered");
 
 		return registration;
 	}
@@ -281,6 +301,7 @@ public partial class TriggerManager : BackgroundService
 			}
 
 			LogTriggerRemoved(id);
+			NotifyTriggersChanged("removed");
 			return true;
 		}
 		return false;
@@ -320,6 +341,7 @@ public partial class TriggerManager : BackgroundService
 		}
 
 		LogTriggerEnabledChanged(id, enabled);
+		NotifyTriggersChanged(enabled ? "enabled" : "disabled");
 		return true;
 	}
 
@@ -1665,4 +1687,7 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Debug, Message = "Failed to delete trigger override file '{Path}'")]
 	private partial void LogOverrideDeleteFailed(string path, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "A TriggerManager.TriggersChanged handler threw for reason '{Reason}'")]
+	private partial void LogTriggersChangedHandlerFailed(string reason, Exception ex);
 }

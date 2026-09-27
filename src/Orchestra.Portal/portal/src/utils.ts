@@ -250,3 +250,33 @@ export function activeOrchestrationMatchesSearch(
     fieldMatchesSearch(execution.webhookUrl, q)
   );
 }
+
+/** Human-readable byte count: `512 B`, `1.5 KB`, `10.0 MB`. */
+export function formatBytes(value: number | undefined | null): string | null {
+  if (value == null) return null;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** The engine's default cap on captured Command/Script/Http output (10 MiB). */
+export const DEFAULT_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * Describes a step's `maxOutputBytes`: absent means the engine default, `0` means no cap.
+ * Returns null for step types that do not capture output.
+ */
+export function describeOutputCap(maxOutputBytes: number | null | undefined, capturesOutput: boolean): string | null {
+  if (!capturesOutput) return null;
+  if (maxOutputBytes == null) return `${formatBytes(DEFAULT_MAX_OUTPUT_BYTES)} (default)`;
+  if (maxOutputBytes === 0) return 'unlimited';
+  return formatBytes(maxOutputBytes);
+}
+
+/** Marker the engine appends to output that hit `maxOutputBytes`. */
+export const OUTPUT_TRUNCATED_MARKER = '[output truncated:';
+
+/** Whether a step's captured output carries the engine's truncation marker. */
+export function isOutputTruncated(content: string | null | undefined): boolean {
+  return typeof content === 'string' && content.includes(OUTPUT_TRUNCATED_MARKER);
+}

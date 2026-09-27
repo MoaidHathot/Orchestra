@@ -18,6 +18,13 @@ export interface DashboardEventHandlers {
     reason: string;
   }) => void;
 
+  /** Fired when the registered orchestrations - or which of them are enabled - change
+   *  (registered, removed, directory sync, trigger enabled/disabled). The Portal should
+   *  refresh `/api/orchestrations`. Bursts are coalesced server-side into one event. */
+  onOrchestrationsChanged?: (evt: {
+    reason: string;
+  }) => void;
+
   /** Fired when any orchestration execution starts (manual, schedule, webhook, resume, ...). */
   onExecutionStarted?: (evt: {
     executionId: string;
@@ -62,6 +69,11 @@ export interface DashboardEventHandlers {
 
   /** Fired once when the stream is first established (useful for triggering a full refresh). */
   onConnected?: () => void;
+
+  /** Fired whenever the stream's connection state changes. `true` after the server's
+   *  `connected` handshake, `false` when the stream drops (until it reconnects). Lets
+   *  pollers slow down while pushes are flowing and speed back up when they are not. */
+  onConnectionChanged?: (connected: boolean) => void;
 }
 
 // Re-export so consumers don't need a separate types import for kind narrowing.
@@ -100,6 +112,7 @@ export function useDashboardEvents(handlers: DashboardEventHandlers): void {
 
       eventSource.addEventListener('connected', () => {
         handlersRef.current.onConnected?.();
+        handlersRef.current.onConnectionChanged?.(true);
       });
 
       eventSource.addEventListener('profile-active-set-changed', (e) => {
@@ -117,6 +130,15 @@ export function useDashboardEvents(handlers: DashboardEventHandlers): void {
           handlersRef.current.onProfilesChanged?.(data);
         } catch (err) {
           console.error('Failed to parse profiles-changed event:', err);
+        }
+      });
+
+      eventSource.addEventListener('orchestrations-changed', (e) => {
+        try {
+          const data = JSON.parse((e as MessageEvent).data);
+          handlersRef.current.onOrchestrationsChanged?.(data);
+        } catch (err) {
+          console.error('Failed to parse orchestrations-changed event:', err);
         }
       });
 
@@ -171,6 +193,7 @@ export function useDashboardEvents(handlers: DashboardEventHandlers): void {
         // EventSource auto-reconnects by default, but when the server is down we want
         // an explicit close + backoff so we don't hammer it.
         if (closed) return;
+        handlersRef.current.onConnectionChanged?.(false);
         if (eventSource && eventSource.readyState === EventSource.CLOSED) {
           scheduleReconnect();
         }
