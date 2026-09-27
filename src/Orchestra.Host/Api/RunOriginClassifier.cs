@@ -37,6 +37,9 @@ public enum RunOriginKind
 
 	/// <summary>Run created by resuming from a checkpoint.</summary>
 	Resume,
+
+	/// <summary>Run launched by a watcher trigger (<c>triggeredBy</c> is <c>watcher:&lt;name&gt;</c>).</summary>
+	Watcher,
 }
 
 /// <summary>
@@ -46,6 +49,7 @@ public enum RunOriginKind
 public static class RunOriginClassifier
 {
 	private const string OrchestrationPrefix = "orchestration:";
+	private const string WatcherPrefix = "watcher:";
 
 	/// <summary>
 	/// Returns the origin kind for the given <paramref name="triggeredBy"/> value.
@@ -62,6 +66,10 @@ public static class RunOriginClassifier
 		if (triggeredBy.StartsWith(OrchestrationPrefix, StringComparison.OrdinalIgnoreCase))
 			return RunOriginKind.Orchestration;
 
+		// Watcher dispatches carry the watcher name after the colon.
+		if (triggeredBy.StartsWith(WatcherPrefix, StringComparison.OrdinalIgnoreCase))
+			return RunOriginKind.Watcher;
+
 		return triggeredBy.ToLowerInvariant() switch
 		{
 			"manual" => RunOriginKind.Manual,
@@ -71,6 +79,7 @@ public static class RunOriginClassifier
 			"mcp" => RunOriginKind.Mcp,
 			"retry" => RunOriginKind.Retry,
 			"resume" => RunOriginKind.Resume,
+			"watcher" => RunOriginKind.Watcher,
 			_ => RunOriginKind.Unknown,
 		};
 	}
@@ -90,6 +99,7 @@ public static class RunOriginClassifier
 		RunOriginKind.Orchestration => "orchestration",
 		RunOriginKind.Retry => "retry",
 		RunOriginKind.Resume => "resume",
+		RunOriginKind.Watcher => "watcher",
 		_ => "unknown",
 	};
 
@@ -119,6 +129,7 @@ public static class RunOriginClassifier
 				"orchestration" => RunOriginKind.Orchestration,
 				"retry" => RunOriginKind.Retry,
 				"resume" => RunOriginKind.Resume,
+				"watcher" => RunOriginKind.Watcher,
 				"unknown" => RunOriginKind.Unknown,
 				_ => (RunOriginKind?)null,
 			};

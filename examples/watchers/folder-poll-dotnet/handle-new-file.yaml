@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../../../schemas/orchestration.schema.json
+name: handle-new-file-dotnet
+description: >
+  Reacts to new .txt files seen by the local-folder-dotnet watcher (declared in the
+  orchestra.watchers.json beside this file, fetched by the .NET single-file program
+  fetch.cs). Same behaviour as the PowerShell variant - compare the two fetchers.
+defaultModel: claude-opus-4.8
+
+inputs:
+  path:
+    type: string
+    required: true
+    description: Full path of the new file (filled by the watcher from item.path).
+  name:
+    type: string
+    required: true
+    description: File name (filled by the watcher from item.name).
+
+trigger:
+  type: watcher
+  watcher: local-folder-dotnet
+  enabled: true
+  maxConcurrent: 2
+  catchup: from-now
+  parameters:
+    path: "{{item.path}}"
+    name: "{{item.name}}"
+
+steps:
+  - name: greet
+    type: Prompt
+    systemPrompt: You are a terse assistant. Reply with exactly one sentence.
+    userPrompt: |
+      A new file appeared: {{param.name}} at {{param.path}}.
+      Write a one-sentence note acknowledging it.

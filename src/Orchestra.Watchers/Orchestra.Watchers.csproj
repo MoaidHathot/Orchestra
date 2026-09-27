@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Orchestra.Watchers</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Orchestra.Watchers.Tests" />
+    <InternalsVisibleTo Include="Orchestra.Host.Tests" />
+    <InternalsVisibleTo Include="Orchestra.Cli" />
+    <InternalsVisibleTo Include="Orchestra.Cli.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Orchestra.Engine\Orchestra.Engine.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Cronos" />
+    <PackageReference Include="JsonSchema.Net" />
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+
+  <!--
+    The canonical fetcher-output schema lives in schemas/ for editor tooling; the runtime
+    validator reads this embedded copy so no file lookup or network fetch is needed. A test
+    asserts the two never drift.
+  -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\schemas\watchers\v1\fetcher-output.schema.json"
+                      LogicalName="Orchestra.Watchers.Schemas.v1.fetcher-output.schema.json" />
+    <EmbeddedResource Include="..\..\schemas\watchers\v1\fetcher-input.schema.json"
+                      LogicalName="Orchestra.Watchers.Schemas.v1.fetcher-input.schema.json" />
+    <EmbeddedResource Include="..\..\schemas\orchestra.watchers.schema.json"
+                      LogicalName="Orchestra.Watchers.Schemas.orchestra.watchers.schema.json" />
+  </ItemGroup>
+
+</Project>

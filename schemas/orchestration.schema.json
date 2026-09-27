@@ -895,7 +895,7 @@
         "type": {
           "type": "string",
           "description": "Trigger type.",
-          "enum": ["manual", "scheduler", "loop", "webhook", "Manual", "Scheduler", "Loop", "Webhook"]
+          "enum": ["manual", "scheduler", "loop", "webhook", "watcher", "Manual", "Scheduler", "Loop", "Webhook", "Watcher"]
         },
         "enabled": {
           "type": "boolean",
@@ -1024,8 +1024,146 @@
             },
             "unevaluatedProperties": false
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": { "enum": ["watcher", "Watcher"] }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": true,
+              "enabled": true,
+              "inputHandlerPrompt": true,
+              "inputHandlerModel": true,
+              "watcher": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Name of a watcher declared in orchestra.watchers.json. Mutually exclusive with 'definition'."
+              },
+              "definition": {
+                "$ref": "#/$defs/watcherInlineDefinition",
+                "description": "Inline watcher definition (same shape as a library entry plus a required 'name'). Mutually exclusive with 'watcher'."
+              },
+              "maxConcurrent": {
+                "type": "integer",
+                "description": "Maximum number of items handed to the launcher in parallel per tick. Bounds parallel launches, not in-flight runs.",
+                "default": 1,
+                "minimum": 1
+              },
+              "catchup": {
+                "type": "string",
+                "enum": ["from-now", "all"],
+                "default": "from-now",
+                "description": "Backlog behaviour when this orchestration first subscribes: 'from-now' skips items the watcher has already seen, 'all' dispatches every item currently visible."
+              },
+              "parameters": {
+                "type": "object",
+                "description": "Maps a fetched item to orchestration parameters. Values are templates: '{{item}}' is the whole item as JSON, '{{item.path.to.field}}' a nested field (missing paths render as the literal 'null').",
+                "additionalProperties": { "type": ["string", "number", "boolean"] }
+              }
+            },
+            "oneOf": [
+              { "required": ["watcher"], "not": { "required": ["definition"] } },
+              { "required": ["definition"], "not": { "required": ["watcher"] } }
+            ],
+            "unevaluatedProperties": false
+          }
         }
       ]
+    },
+
+    "watcherInlineDefinition": {
+      "type": "object",
+      "description": "A watcher defined inline on a trigger. Mirrors an orchestra.watchers.json entry; 'name' is required so the watcher has a stable identity for state files and logs and must not collide with a library watcher name.",
+      "required": ["name", "type", "schedule", "fetch"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Stable identity for state files and logs. Must not collide with any watcher declared in orchestra.watchers.json."
+        },
+        "type": {
+          "type": "string",
+          "enum": ["poll-command", "poll-script"],
+          "description": "How items are fetched: 'poll-command' runs an executable, 'poll-script' runs a script through a shell interpreter."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "When false the watcher never starts."
+        },
+        "schedule": {
+          "type": "object",
+          "description": "When the watcher polls. Exactly one of 'intervalSeconds' or 'cron'.",
+          "properties": {
+            "intervalSeconds": { "type": "integer", "minimum": 1, "description": "Fixed cadence between ticks, in seconds." },
+            "cron": { "type": "string", "minLength": 1, "description": "Cron expression in UTC (5-field, or 6-field with leading seconds)." }
+          },
+          "additionalProperties": false,
+          "oneOf": [
+            { "required": ["intervalSeconds"], "not": { "required": ["cron"] } },
+            { "required": ["cron"], "not": { "required": ["intervalSeconds"] } }
+          ]
+        },
+        "fetch": {
+          "type": "object",
+          "description": "How to run the fetcher. 'command' for poll-command; 'shell' plus exactly one of 'scriptFile' / 'script' for poll-script.",
+          "properties": {
+            "command": { "type": "string", "minLength": 1, "description": "Executable name or absolute path (poll-command)." },
+            "shell": { "type": "string", "minLength": 1, "description": "Interpreter such as pwsh, bash, python or node (poll-script)." },
+            "scriptFile": { "type": ["string", "null"], "description": "Script path, relative to the orchestration file's directory (poll-script)." },
+            "script": { "type": ["string", "null"], "description": "Inline script body (poll-script)." },
+            "arguments": { "type": "array", "items": { "type": "string" }, "description": "Extra arguments." },
+            "workingDirectory": { "type": ["string", "null"], "description": "Working directory; relative to the orchestration file's directory." },
+            "env": { "type": ["object", "null"], "additionalProperties": { "type": "string" }, "description": "Environment overrides." },
+            "timeoutSeconds": { "type": "integer", "minimum": 1, "default": 60, "description": "Maximum wall-clock time for one fetch." },
+            "includeStdErr": { "type": "boolean", "default": false, "description": "Merge stderr into stdout before parsing." },
+            "config": { "type": ["object", "null"], "description": "Passed verbatim to the fetcher as stdin 'config'." }
+          },
+          "additionalProperties": false
+        },
+        "items": {
+          "type": "object",
+          "description": "Where items live in the fetcher's output (default '$.items[*]').",
+          "properties": {
+            "jsonPath": { "type": "string", "minLength": 1, "default": "$.items[*]", "description": "Simple JSONPath (root, member access, index, trailing [*])." }
+          },
+          "additionalProperties": false
+        },
+        "dedup": {
+          "type": "object",
+          "description": "How items are recognised across ticks.",
+          "properties": {
+            "key": { "type": "string", "minLength": 1, "description": "Dedup key template, e.g. '{{item.id}}'." },
+            "mode": { "type": "string", "enum": ["fifo", "presence"], "default": "fifo", "description": "'fifo' remembers recent keys; 'presence' tracks keys currently visible at the source." },
+            "fifo": {
+              "type": "object",
+              "properties": {
+                "maxEntries": { "type": "integer", "minimum": 1, "default": 10000 },
+                "ttlDays": { "type": "integer", "minimum": 1, "default": 14 }
+              },
+              "additionalProperties": false
+            },
+            "presence": {
+              "type": "object",
+              "properties": {
+                "graceTicks": { "type": "integer", "minimum": 1, "default": 3 }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "failurePolicy": {
+          "type": "string",
+          "enum": ["warn", "ignore", "fail"],
+          "default": "warn",
+          "description": "'warn' / 'ignore' keep polling with back-off after a failed fetch; 'fail' stops this watcher's loop."
+        }
+      },
+      "additionalProperties": false
     },
 
     "webhookResponseConfig": {

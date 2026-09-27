@@ -97,6 +97,9 @@ public static class InitScaffolder
 		"orchestra.schema.json",
 		"orchestra.mcp.schema.json",
 		"orchestra.services.schema.json",
+		"orchestra.watchers.schema.json",
+		Path.Combine("watchers", "v1", "fetcher-input.schema.json"),
+		Path.Combine("watchers", "v1", "fetcher-output.schema.json"),
 	];
 
 	// Matches the `# yaml-language-server: $schema=...` directive the bundled templates carry.
@@ -449,6 +452,7 @@ public static class InitScaffolder
 				continue;
 
 			var target = Path.Combine(targetDirectory, fileName);
+			Directory.CreateDirectory(Path.GetDirectoryName(target)!); // protocol schemas live in watchers/v1/
 			if (File.Exists(target) && !force)
 			{
 				files.Add(new InitFileResult(target, InitFileOutcome.Skipped));

@@ -299,6 +299,7 @@ export function getOriginIcon(origin: RunOrigin | undefined): React.JSX.Element 
 }
 
 export function getTriggerIcon(triggeredBy: string | undefined): React.JSX.Element {
+  if (triggeredBy?.startsWith('watcher:')) return <Icons.Eye />;
   switch (triggeredBy) {
     case 'manual':
       return <Icons.Play />;
@@ -308,6 +309,8 @@ export function getTriggerIcon(triggeredBy: string | undefined): React.JSX.Eleme
       return <Icons.Steps />;
     case 'webhook':
       return <Icons.Tool />;
+    case 'watcher':
+      return <Icons.Eye />;
     case 'email':
       return <Icons.Mail />;
     default:

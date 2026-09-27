@@ -1,0 +1,36 @@
+# yaml-language-server: $schema=../../../schemas/orchestration.schema.json
+name: handle-new-file-pwsh
+description: >
+  Reacts to new .txt files seen by the local-folder-pwsh watcher (declared in the
+  orchestra.watchers.json beside this file). Each new file launches one run; the presence
+  dedup mode means a file fires once and only fires again if it disappears for a few ticks
+  and then comes back.
+defaultModel: claude-opus-4.8
+
+inputs:
+  path:
+    type: string
+    required: true
+    description: Full path of the new file (filled by the watcher from item.path).
+  name:
+    type: string
+    required: true
+    description: File name (filled by the watcher from item.name).
+
+trigger:
+  type: watcher
+  watcher: local-folder-pwsh
+  enabled: true
+  maxConcurrent: 2
+  catchup: from-now
+  parameters:
+    path: "{{item.path}}"
+    name: "{{item.name}}"
+
+steps:
+  - name: greet
+    type: Prompt
+    systemPrompt: You are a terse assistant. Reply with exactly one sentence.
+    userPrompt: |
+      A new file appeared: {{param.name}} at {{param.path}}.
+      Write a one-sentence note acknowledging it.

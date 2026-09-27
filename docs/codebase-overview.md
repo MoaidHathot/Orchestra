@@ -34,17 +34,18 @@ Orchestra is an open-source AI orchestration framework written in C# targeting .
 
 ```
 Orchestra/
-├── src/                          # Source (9 projects)
+├── src/                          # Source (10 projects)
 │   ├── Orchestra.Engine/         # Core orchestration runtime (class library)
 │   ├── Orchestra.Host/           # Hosting/API layer, persistence, MCP server
 │   ├── Orchestra.Copilot/        # GitHub Copilot provider
 │   ├── Orchestra.OpenCode/       # OpenCode provider
 │   ├── Orchestra.ProcessHost/    # External process supervision (orchestra.services.json)
+│   ├── Orchestra.Watchers/       # Watcher runtime: pollers behind trigger.type = watcher (orchestra.watchers.json)
 │   ├── Orchestra.Client/         # HTTP/SSE client SDK + interactive run stack
 │   ├── Orchestra.Cli/            # The packaged `orchestra` dotnet tool
 │   ├── Orchestra.Portal/         # Web portal host + React SPA (`orchestra portal`)
 │   └── Orchestra.Server/         # Standalone API-only ASP.NET host
-├── tests/                        # Test projects (13 total)
+├── tests/                        # Test projects (14 total)
 ├── templates/                    # Starter orchestrations scaffolded by `orchestra init`
 ├── schemas/                      # JSON schemas (orchestration, orchestra, mcp, services)
 ├── skills/                       # Agent Skills, incl. orchestration-authoring
@@ -82,6 +83,7 @@ Orchestra/
 - **Orchestra.Host** - the ASP.NET Core hosting layer: minimal-API endpoint groups, SSE reporters, the MCP server, persistence, retention, and `orchestra.json` loading.
 - **Orchestra.Copilot / Orchestra.OpenCode** - the two agent providers, registered keyed so a step's `provider` field is honored.
 - **Orchestra.ProcessHost** - supervises the external processes declared in `orchestra.services.json`.
+- **Orchestra.Watchers** - the watcher runtime behind `trigger.type: watcher`: `orchestra.watchers.json` loading, command/script fetchers speaking the v1 stdin/stdout protocol, per-subscriber dedup state under `.orchestra/watchers/`, and the `WatcherManager` hosted service the trigger manager subscribes through.
 - **Orchestra.Client** - HTTP/SSE client SDK plus the shared interactive run stack (observers, HITL prompters, exit codes).
 - **Orchestra.Cli** - the packaged `orchestra` tool: Spectre.Console command app, one-shot exec engine, and the embedded portal.
 - **Orchestra.Portal** (`src/Orchestra.Portal`) - the host + React SPA that `orchestra portal` serves; the Vite project lives in its `portal/` folder.

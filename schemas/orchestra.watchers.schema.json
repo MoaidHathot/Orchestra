@@ -1,0 +1,273 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orchestra.invalid/schemas/orchestra.watchers.json",
+  "title": "Orchestra watcher library (orchestra.watchers.json)",
+  "description": "Declares named watchers: pollers that fetch items from a source on a schedule, deduplicate them per subscriber and launch every orchestration whose trigger references the watcher (trigger.type = watcher). A watcher only runs while at least one enabled orchestration subscribes to it.",
+  "type": "object",
+  "required": ["watchers"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional pointer to this schema for editor validation."
+    },
+    "watchers": {
+      "type": "object",
+      "description": "Map of watcher name to watcher definition. The key is the canonical name used by trigger.watcher references and in state-file names.",
+      "additionalProperties": { "$ref": "#/$defs/WatcherEntry" },
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Watcher name. Any characters are allowed; the name is sanitized for file names."
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "WatcherEntry": {
+      "description": "A watcher definition. The 'type' discriminator selects how items are fetched: 'poll-command' runs an executable, 'poll-script' runs a script through a shell interpreter.",
+      "oneOf": [
+        { "$ref": "#/$defs/PollCommandWatcher" },
+        { "$ref": "#/$defs/PollScriptWatcher" }
+      ]
+    },
+
+    "WatcherCommonProperties": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "When false the watcher is never started, even if orchestrations reference it. Subscriptions to a disabled watcher are rejected at registration."
+        },
+        "schedule": { "$ref": "#/$defs/WatcherSchedule" },
+        "items": { "$ref": "#/$defs/WatcherItemsConfig" },
+        "dedup": { "$ref": "#/$defs/WatcherDedup" },
+        "failurePolicy": {
+          "type": "string",
+          "enum": ["warn", "ignore", "fail"],
+          "default": "warn",
+          "description": "What a failed fetch does: 'warn' logs a warning and keeps polling (with back-off), 'ignore' logs at debug level and keeps polling, 'fail' logs an error and stops this watcher's loop until the host restarts or its subscriptions change."
+        }
+      }
+    },
+
+    "PollCommandWatcher": {
+      "description": "Runs an executable on every tick. The fetcher protocol payload is written to its stdin; its stdout must be a fetcher-output JSON document.",
+      "allOf": [
+        { "$ref": "#/$defs/WatcherCommonProperties" },
+        {
+          "type": "object",
+          "required": ["type", "schedule", "fetch"],
+          "properties": {
+            "type": { "const": "poll-command", "description": "Discriminator: run an executable." },
+            "enabled": true,
+            "schedule": true,
+            "items": true,
+            "dedup": true,
+            "failurePolicy": true,
+            "fetch": { "$ref": "#/$defs/WatcherFetchCommandConfig" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "PollScriptWatcher": {
+      "description": "Runs a script through a shell interpreter (pwsh, bash, python, node, ...) on every tick. The fetcher protocol payload is written to its stdin; its stdout must be a fetcher-output JSON document.",
+      "allOf": [
+        { "$ref": "#/$defs/WatcherCommonProperties" },
+        {
+          "type": "object",
+          "required": ["type", "schedule", "fetch"],
+          "properties": {
+            "type": { "const": "poll-script", "description": "Discriminator: run a script via a shell interpreter." },
+            "enabled": true,
+            "schedule": true,
+            "items": true,
+            "dedup": true,
+            "failurePolicy": true,
+            "fetch": { "$ref": "#/$defs/WatcherFetchScriptConfig" }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "WatcherFetchCommonProperties": {
+      "type": "object",
+      "properties": {
+        "arguments": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Arguments passed to the command or appended after the script path."
+        },
+        "workingDirectory": {
+          "type": ["string", "null"],
+          "description": "Working directory for the child process. Relative paths resolve against the directory containing the file that declares the watcher. Defaults to that directory."
+        },
+        "env": {
+          "type": ["object", "null"],
+          "additionalProperties": { "type": "string" },
+          "description": "Environment variables merged on top of the host environment for the child process."
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 60,
+          "description": "Maximum wall-clock time for one fetch. The process is killed on expiry and the tick counts as a failure."
+        },
+        "includeStdErr": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, stderr is merged into stdout before JSON parsing. Stderr is always captured and logged on failure regardless of this flag."
+        },
+        "config": {
+          "type": ["object", "null"],
+          "description": "Free-form object passed verbatim to the fetcher as the 'config' field of its stdin payload."
+        }
+      }
+    },
+
+    "WatcherFetchCommandConfig": {
+      "description": "How to run the fetcher executable.",
+      "allOf": [
+        { "$ref": "#/$defs/WatcherFetchCommonProperties" },
+        {
+          "type": "object",
+          "required": ["command"],
+          "properties": {
+            "command": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Executable name (resolved via PATH) or absolute path."
+            },
+            "arguments": true,
+            "workingDirectory": true,
+            "env": true,
+            "timeoutSeconds": true,
+            "includeStdErr": true,
+            "config": true
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+
+    "WatcherFetchScriptConfig": {
+      "description": "How to run the fetcher script. Exactly one of 'scriptFile' or 'script' must be set.",
+      "allOf": [
+        { "$ref": "#/$defs/WatcherFetchCommonProperties" },
+        {
+          "type": "object",
+          "required": ["shell"],
+          "properties": {
+            "shell": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Interpreter: pwsh, powershell, bash, sh, python, python3, node, or any executable that accepts a script path as its first argument."
+            },
+            "scriptFile": {
+              "type": ["string", "null"],
+              "description": "Path to the script file. Relative paths resolve against the directory containing the file that declares the watcher. Mutually exclusive with 'script'."
+            },
+            "script": {
+              "type": ["string", "null"],
+              "description": "Inline script body, written to a temporary file for the interpreter. Mutually exclusive with 'scriptFile'."
+            },
+            "arguments": true,
+            "workingDirectory": true,
+            "env": true,
+            "timeoutSeconds": true,
+            "includeStdErr": true,
+            "config": true
+          },
+          "additionalProperties": false,
+          "oneOf": [
+            { "required": ["scriptFile"], "properties": { "scriptFile": { "type": "string", "minLength": 1 } }, "not": { "required": ["script"], "properties": { "script": { "type": "string" } } } },
+            { "required": ["script"], "properties": { "script": { "type": "string", "minLength": 1 } }, "not": { "required": ["scriptFile"], "properties": { "scriptFile": { "type": "string" } } } }
+          ]
+        }
+      ]
+    },
+
+    "WatcherSchedule": {
+      "type": "object",
+      "description": "When the watcher polls. Exactly one of 'intervalSeconds' or 'cron' must be set.",
+      "properties": {
+        "intervalSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Fixed cadence between ticks, in seconds, measured from the start of the previous tick."
+        },
+        "cron": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Cron expression evaluated in UTC. Standard 5-field (minute precision) or 6-field with a leading seconds field."
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        { "required": ["intervalSeconds"], "not": { "required": ["cron"] } },
+        { "required": ["cron"], "not": { "required": ["intervalSeconds"] } }
+      ]
+    },
+
+    "WatcherItemsConfig": {
+      "type": "object",
+      "description": "Where the items live inside the fetcher's stdout document. Only needed when the fetcher does not follow the standard protocol shape ({ items: [...] }).",
+      "properties": {
+        "jsonPath": {
+          "type": "string",
+          "minLength": 1,
+          "default": "$.items[*]",
+          "description": "Simple JSONPath: '$' root, '.name' / ['name'] member access, '[n]' index and a trailing '[*]' to enumerate an array. Filters and recursive descent are not supported."
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "WatcherDedup": {
+      "type": "object",
+      "description": "How items are recognised across ticks so each subscriber dispatches once per genuinely new item. If omitted, the default is fifo mode keyed by a hash of the whole item.",
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Template producing the dedup key, e.g. '{{item.id}}'. '{{item}}' is the whole item as JSON; missing paths render as the literal 'null'. When omitted the key is a SHA-256 prefix of the item's canonical JSON."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["fifo", "presence"],
+          "default": "fifo",
+          "description": "'fifo' remembers the most recent keys (bounded by maxEntries / ttlDays); 'presence' tracks the keys currently visible at the source and forgets a key after it has been absent for graceTicks ticks."
+        },
+        "fifo": {
+          "type": "object",
+          "description": "Options for mode = fifo. Not allowed with mode = presence.",
+          "properties": {
+            "maxEntries": { "type": "integer", "minimum": 1, "default": 10000, "description": "Maximum remembered keys per subscriber; the oldest are evicted first." },
+            "ttlDays": { "type": "integer", "minimum": 1, "default": 14, "description": "Keys older than this are forgotten." }
+          },
+          "additionalProperties": false
+        },
+        "presence": {
+          "type": "object",
+          "description": "Options for mode = presence. Not allowed with mode = fifo.",
+          "properties": {
+            "graceTicks": { "type": "integer", "minimum": 1, "default": 3, "description": "Consecutive ticks a key may be missing before it is forgotten (and would dispatch again if it reappears)." }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "presence" } }, "required": ["mode"] },
+          "then": { "not": { "required": ["fifo"] } },
+          "else": { "not": { "required": ["presence"] } }
+        }
+      ]
+    }
+  }
+}

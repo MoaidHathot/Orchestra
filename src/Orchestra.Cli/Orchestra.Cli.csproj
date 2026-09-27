@@ -41,6 +41,7 @@
     <ProjectReference Include="..\Orchestra.Copilot\Orchestra.Copilot.csproj" />
     <ProjectReference Include="..\Orchestra.OpenCode\Orchestra.OpenCode.csproj" />
     <ProjectReference Include="..\Orchestra.Host\Orchestra.Host.csproj" />
+    <ProjectReference Include="..\Orchestra.Watchers\Orchestra.Watchers.csproj" />
     <!-- Portal host + UI (the `orchestra portal` subcommand). -->
     <ProjectReference Include="..\Orchestra.Portal\Orchestra.Portal.csproj" />
   </ItemGroup>
@@ -70,6 +71,11 @@
              Pack="false" />
     <Content Include="..\..\schemas\*.json"
              Link="schemas\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             Pack="false" />
+    <Content Include="..\..\schemas\watchers\v1\*.json"
+             Link="schemas\watchers\v1\%(Filename)%(Extension)"
              CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest"
              Pack="false" />

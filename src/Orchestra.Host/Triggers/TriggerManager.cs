@@ -7,6 +7,8 @@ using Orchestra.Engine;
 using Orchestra.Host.Api;
 using Orchestra.Host.Registry;
 using Orchestra.Host.Services;
+using Orchestra.Watchers;
+using Orchestra.Watchers.Runtime;
 
 namespace Orchestra.Host.Triggers;
 
@@ -64,6 +66,13 @@ public partial class TriggerManager : BackgroundService
 	/// Set by the host during initialization.
 	/// </summary>
 	public Engine.Mcp[] GlobalMcps { get; set; } = [];
+
+	/// <summary>
+	/// Where watcher triggers register their subscriptions. Set by the host during DI wiring; when
+	/// <see langword="null"/> (hosts without the watcher runtime) watcher triggers register in the
+	/// <see cref="TriggerStatus.Error"/> state with an explanatory <see cref="TriggerRegistration.LastError"/>.
+	/// </summary>
+	public IWatcherSubscriptionSink? WatcherSink { get; set; }
 
 	/// <summary>
 	/// Raised after a trigger is registered, removed, enabled or disabled - the changes that
@@ -162,6 +171,9 @@ public partial class TriggerManager : BackgroundService
 			PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
 			WriteIndented = true,
 			DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+			// Enums as their wire names so a persisted trigger's "type" parses back through the
+			// same code path an orchestration file uses.
+			Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
 		};
 	}
 
@@ -265,6 +277,16 @@ public partial class TriggerManager : BackgroundService
 			registration.NextFireTime = CalculateNextFireTime(schedulerConfig, registration.LastFireTime);
 		}
 
+		if (config is WatcherTriggerConfig watcherConfig)
+		{
+			// A re-registration replaces the previous subscription for this id (the sink handles that);
+			// a disabled trigger must not hold one.
+			if (config.Enabled)
+				SubscribeWatcherTrigger(registration, watcherConfig);
+			else
+				WatcherSink?.Unsubscribe(id);
+		}
+
 		_triggers[id] = registration;
 
 		// Persist if user-defined
@@ -286,7 +308,9 @@ public partial class TriggerManager : BackgroundService
 	{
 		if (_triggers.TryRemove(id, out var reg))
 		{
-			// Remove persisted override file (user triggers)
+			if (reg.Config is WatcherTriggerConfig)
+				WatcherSink?.Unsubscribe(id);
+
 			var sidecarPath = GetSidecarPath(reg.OrchestrationPath);
 			if (File.Exists(sidecarPath))
 			{
@@ -329,6 +353,14 @@ public partial class TriggerManager : BackgroundService
 		else if (!enabled)
 		{
 			reg.NextFireTime = null;
+		}
+
+		if (reg.Config is WatcherTriggerConfig watcherConfig)
+		{
+			if (enabled)
+				SubscribeWatcherTrigger(reg, watcherConfig);
+			else
+				WatcherSink?.Unsubscribe(id);
 		}
 
 		if (reg.Source == TriggerSource.User)
@@ -423,6 +455,91 @@ public partial class TriggerManager : BackgroundService
 
 		var executionId = await ExecuteOrchestrationAsync(reg, mergedParams);
 		return (true, executionId);
+	}
+
+	/// <summary>
+	/// Launches one orchestration run for an item produced by a watcher, through the same execution
+	/// path as every other trigger (run count, history, execution callbacks and the input-handler
+	/// prompt all apply). The returned task completes as soon as the run has been <em>launched</em>
+	/// - with its execution id, or <see langword="null"/> when the trigger is missing, disabled,
+	/// paused or the launch failed - and never waits for the orchestration to finish; the run is
+	/// tracked as a background task for graceful shutdown.
+	/// </summary>
+	public Task<string?> DispatchWatcherItemAsync(string triggerId, Dictionary<string, string>? itemParameters)
+	{
+		if (!_triggers.TryGetValue(triggerId, out var reg) || reg.Config is not WatcherTriggerConfig)
+		{
+			LogWatcherDispatchUnknownTrigger(triggerId);
+			return Task.FromResult<string?>(null);
+		}
+
+		if (!reg.Config.Enabled || reg.Status == TriggerStatus.Paused || _isStopping)
+			return Task.FromResult<string?>(null);
+
+		var mergedParams = new Dictionary<string, string>(reg.Parameters ?? []);
+		if (itemParameters is not null)
+		{
+			foreach (var kv in itemParameters)
+				mergedParams[kv.Key] = kv.Value;
+		}
+
+		var launched = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+		TrackBackgroundTask(RunAsync());
+		return launched.Task;
+
+		async Task RunAsync()
+		{
+			try
+			{
+				var (executionId, result) = await ExecuteOrchestrationCoreAsync(
+					reg, mergedParams, slotReserved: false, onLaunched: id => launched.TrySetResult(id));
+
+				if (executionId is not null && result is not null)
+					HandlePostExecutionTriggerStatus(reg, result, mergedParams);
+			}
+			catch (Exception ex)
+			{
+				LogTriggerExecutionFailed(ex, reg.Id);
+			}
+			finally
+			{
+				// Launch failed (or the core returned early): release the waiting dispatcher.
+				launched.TrySetResult(null);
+			}
+		}
+	}
+
+	/// <summary>
+	/// Registers <paramref name="reg"/> with the watcher runtime. Failures never throw out of
+	/// trigger registration: the trigger is kept in the <see cref="TriggerStatus.Error"/> state with
+	/// the actionable message in <see cref="TriggerRegistration.LastError"/> so the dashboard and
+	/// <c>/api/triggers</c> surface the misconfiguration while the host keeps running.
+	/// </summary>
+	private void SubscribeWatcherTrigger(TriggerRegistration reg, WatcherTriggerConfig config)
+	{
+		if (WatcherSink is null)
+		{
+			reg.Status = TriggerStatus.Error;
+			reg.LastError = "Watcher triggers are not available on this host (watcher runtime not registered).";
+			LogWatcherSubscriptionFailed(reg.Id, reg.LastError);
+			return;
+		}
+
+		var sourcePath = reg.OrchestrationSourcePath ?? reg.OrchestrationPath;
+		var baseDirectory = string.IsNullOrWhiteSpace(sourcePath) ? null : Path.GetDirectoryName(Path.GetFullPath(sourcePath));
+
+		try
+		{
+			WatcherSink.Subscribe(new WatcherSubscriptionRequest(reg.Id, reg.Id, config, baseDirectory));
+			reg.Status = TriggerStatus.Waiting;
+			reg.LastError = null;
+		}
+		catch (WatcherInitializationException ex)
+		{
+			reg.Status = TriggerStatus.Error;
+			reg.LastError = ex.Message;
+			LogWatcherSubscriptionFailed(reg.Id, ex.Message);
+		}
 	}
 
 	/// <summary>
@@ -635,9 +752,7 @@ public partial class TriggerManager : BackgroundService
 				}
 
 				// Re-parse the trigger config
-				var triggerJson = JsonSerializer.Serialize(data.Trigger, _jsonOptions);
-				var triggerElement = JsonDocument.Parse(triggerJson).RootElement;
-				var config = DeserializeTriggerConfig(triggerElement);
+				var config = DeserializeTriggerConfig(data.Trigger);
 
 				if (config != null)
 				{
@@ -1068,14 +1183,15 @@ public partial class TriggerManager : BackgroundService
 	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationCoreAsync(
 		TriggerRegistration reg,
 		Dictionary<string, string>? parameters,
-		bool slotReserved = false)
+		bool slotReserved = false,
+		Action<string>? onLaunched = null)
 	{
 		if (!slotReserved)
 			reg.ReserveExecutionSlot();
 
 		try
 		{
-			return await ExecuteOrchestrationCoreUnguardedAsync(reg, parameters);
+			return await ExecuteOrchestrationCoreUnguardedAsync(reg, parameters, onLaunched);
 		}
 		finally
 		{
@@ -1086,7 +1202,8 @@ public partial class TriggerManager : BackgroundService
 
 	private async Task<(string? ExecutionId, OrchestrationResult? Result)> ExecuteOrchestrationCoreUnguardedAsync(
 		TriggerRegistration reg,
-		Dictionary<string, string>? parameters)
+		Dictionary<string, string>? parameters,
+		Action<string>? onLaunched = null)
 	{
 		reg.Status = TriggerStatus.Running;
 		reg.LastFireTime = DateTime.UtcNow;
@@ -1157,7 +1274,9 @@ public partial class TriggerManager : BackgroundService
 			OrchestrationSourcePath = reg.OrchestrationSourcePath,
 			Parameters = parameters,
 			Mode = ChildLaunchMode.Sync,
-			TriggeredBy = reg.Config.Type.ToString().ToLowerInvariant(),
+			TriggeredBy = reg.Config is WatcherTriggerConfig watcherTrigger
+				? WatcherDispatchMetadata.TriggeredBy(watcherTrigger.ResolveWatcherName() ?? "unknown")
+				: reg.Config.Type.ToString().ToLowerInvariant(),
 			TriggerId = reg.Id,
 			Reporter = reporter,
 			PreExecutionParameterTransform = inputHandlerTransform,
@@ -1179,6 +1298,7 @@ public partial class TriggerManager : BackgroundService
 
 		var executionId = handle.ExecutionId;
 		reg.ActiveExecutionId = executionId;
+		onLaunched?.Invoke(executionId);
 
 		// Notify the callback that the execution has started so it can wire reporter
 		// callbacks to refresh the dashboard / Portal.
@@ -1262,6 +1382,12 @@ public partial class TriggerManager : BackgroundService
 		{
 			reg.Status = TriggerStatus.Waiting;
 		}
+		else if (reg.Config is WatcherTriggerConfig)
+		{
+			// Watcher dispatches are fire-and-forget from the watcher loop; the trigger keeps
+			// waiting for the next item just like a webhook waits for the next request.
+			reg.Status = TriggerStatus.Waiting;
+		}
 		else if (reg.Config is SchedulerTriggerConfig schedulerConfig)
 		{
 			reg.Status = TriggerStatus.Waiting;
@@ -1299,7 +1425,9 @@ public partial class TriggerManager : BackgroundService
 			{
 				OrchestrationPath = reg.OrchestrationPath,
 				OrchestrationSourcePath = reg.OrchestrationSourcePath,
-				Trigger = reg.Config,
+				// Serialize with the runtime type: through the abstract TriggerConfig contract the
+				// derived fields (cron, secret, watcher, ...) would be dropped.
+				Trigger = JsonSerializer.SerializeToElement(reg.Config, reg.Config.GetType(), _jsonOptions),
 				Parameters = reg.Parameters,
 			};
 
@@ -1503,6 +1631,18 @@ public partial class TriggerManager : BackgroundService
 				InputHandlerPrompt = m.InputHandlerPrompt,
 				InputHandlerModel = m.InputHandlerModel,
 			},
+			WatcherTriggerConfig wt => new WatcherTriggerConfig
+			{
+				Type = wt.Type,
+				Enabled = enabled,
+				InputHandlerPrompt = wt.InputHandlerPrompt,
+				InputHandlerModel = wt.InputHandlerModel,
+				Watcher = wt.Watcher,
+				Definition = wt.Definition?.DeepClone().AsObject(),
+				MaxConcurrent = wt.MaxConcurrent,
+				Parameters = wt.Parameters is null ? null : new Dictionary<string, string>(wt.Parameters, StringComparer.Ordinal),
+				Catchup = wt.Catchup,
+			},
 			_ => config,
 		};
 	}
@@ -1562,8 +1702,23 @@ public partial class TriggerManager : BackgroundService
 				InputHandlerPrompt = inputHandlerPrompt,
 				InputHandlerModel = inputHandlerModel,
 			},
+			// The engine parser owns the (richer) watcher shape; reuse it so persisted overrides
+			// round-trip exactly what an orchestration file would have produced.
+			TriggerType.Watcher => TryParseWithEngine(element),
 			_ => null,
 		};
+
+		static TriggerConfig? TryParseWithEngine(JsonElement element)
+		{
+			try
+			{
+				return OrchestrationParser.ParseTriggerConfig(element);
+			}
+			catch (JsonException)
+			{
+				return null;
+			}
+		}
 	}
 
 	private static WebhookResponseConfig DeserializeWebhookResponseConfig(JsonElement element)
@@ -1580,7 +1735,10 @@ public partial class TriggerManager : BackgroundService
 	{
 		public required string OrchestrationPath { get; init; }
 		public string? OrchestrationSourcePath { get; init; }
-		public required TriggerConfig Trigger { get; init; }
+
+		/// <summary>The trigger block as JSON; parsed with <see cref="DeserializeTriggerConfig"/> on load (the base type is abstract).</summary>
+		public required JsonElement Trigger { get; init; }
+
 		public Dictionary<string, string>? Parameters { get; init; }
 	}
 
@@ -1690,4 +1848,10 @@ public partial class TriggerManager : BackgroundService
 
 	[LoggerMessage(Level = LogLevel.Warning, Message = "A TriggerManager.TriggersChanged handler threw for reason '{Reason}'")]
 	private partial void LogTriggersChangedHandlerFailed(string reason, Exception ex);
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Watcher trigger '{TriggerId}' could not subscribe: {Reason}")]
+	private partial void LogWatcherSubscriptionFailed(string triggerId, string reason);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Watcher dispatch ignored: trigger '{TriggerId}' is not a registered watcher trigger")]
+	private partial void LogWatcherDispatchUnknownTrigger(string triggerId);
 }

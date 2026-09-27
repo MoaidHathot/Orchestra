@@ -16,6 +16,9 @@ public class SchemasCommandTests : IDisposable
 		"orchestra.schema.json",
 		"orchestra.mcp.schema.json",
 		"orchestra.services.schema.json",
+		"orchestra.watchers.schema.json",
+		Path.Combine("watchers", "v1", "fetcher-input.schema.json"),
+		Path.Combine("watchers", "v1", "fetcher-output.schema.json"),
 	];
 
 	public SchemasCommandTests()
@@ -28,7 +31,11 @@ public class SchemasCommandTests : IDisposable
 		Directory.CreateDirectory(_workingDir);
 
 		foreach (var name in s_expectedSchemas)
-			File.WriteAllText(Path.Combine(_bundledSchemasDir, name), $"{{ \"name\": \"{name}\" }}");
+		{
+			var path = Path.Combine(_bundledSchemasDir, name);
+			Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+			File.WriteAllText(path, $"{{ \"name\": \"{name.Replace('\\', '/')}\" }}");
+		}
 	}
 
 	public void Dispose()

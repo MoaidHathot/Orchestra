@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Orchestra.ProcessHost.Tests" />
+    <InternalsVisibleTo Include="Orchestra.Host.Tests" />
   </ItemGroup>
 
   <ItemGroup>

@@ -15,6 +15,9 @@ public class BundledSchemasTests
 		"orchestration.schema.json",
 		"orchestra.mcp.schema.json",
 		"orchestra.services.schema.json",
+		"orchestra.watchers.schema.json",
+		Path.Combine("watchers", "v1", "fetcher-input.schema.json"),
+		Path.Combine("watchers", "v1", "fetcher-output.schema.json"),
 	];
 
 	[Fact]

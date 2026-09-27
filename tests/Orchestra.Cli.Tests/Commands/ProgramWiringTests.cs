@@ -40,7 +40,8 @@ public class ProgramWiringTests
 			.And.Contain("profiles")
 			.And.Contain("tags")
 			.And.Contain("pending")
-			.And.Contain("respond");
+			.And.Contain("respond")
+			.And.Contain("watcher");
 	}
 
 	[Fact]

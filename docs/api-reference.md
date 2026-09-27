@@ -364,7 +364,7 @@ GET /api/history?limit=10
 
 **Query Parameters:**
 - `limit`: Number of records to return (default: 15)
-- `origins`: Comma-separated origin kinds (`manual`, `scheduler`, `loop`, `webhook`, `mcp`, `orchestration`, `retry`, `resume`)
+- `origins`: Comma-separated origin kinds (`manual`, `scheduler`, `loop`, `webhook`, `watcher`, `mcp`, `orchestration`, `retry`, `resume`). Watcher-launched runs carry `triggeredBy: watcher:<name>` and classify as `watcher`.
 - `roots`: `true` = roots only, `false` = children only, omitted = no scope filter
 - `statuses`: Comma-separated `ExecutionStatus` names
 - `favorites`: `true` = favorited runs only, `false` = unfavorited only

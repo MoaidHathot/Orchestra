@@ -747,6 +747,120 @@ public class OrchestrationParserTests
 	}
 
 	[Fact]
+	public void ParseOrchestration_WatcherTrigger_LibraryReference_ParsesCorrectly()
+	{
+		var yaml = """
+			name: watcher-ref
+			description: Test
+			trigger:
+			  type: watcher
+			  watcher: github-pr-comments
+			  maxConcurrent: 4
+			  catchup: all
+			  parameters:
+			    comment: "{{item}}"
+			    count: 3
+			steps: []
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(OrchestrationParser.ConvertYamlToJson(yaml), []);
+
+		var trigger = orchestration.Trigger.Should().BeOfType<WatcherTriggerConfig>().Subject;
+		trigger.Type.Should().Be(TriggerType.Watcher);
+		trigger.Watcher.Should().Be("github-pr-comments");
+		trigger.Definition.Should().BeNull();
+		trigger.MaxConcurrent.Should().Be(4);
+		trigger.Catchup.Should().Be(WatcherCatchupMode.All);
+		trigger.Parameters.Should().Equal(new Dictionary<string, string> { ["comment"] = "{{item}}", ["count"] = "3" });
+		trigger.ResolveWatcherName().Should().Be("github-pr-comments");
+	}
+
+	[Fact]
+	public void ParseOrchestration_WatcherTrigger_InlineDefinition_KeepsRawDefinitionAndDefaults()
+	{
+		var json = """
+			{
+				"name": "watcher-inline",
+				"description": "Test",
+				"trigger": {
+					"type": "Watcher",
+					"definition": {
+						"name": "pr-comments-local",
+						"type": "poll-script",
+						"schedule": { "intervalSeconds": 30 },
+						"fetch": { "shell": "pwsh", "scriptFile": "./fetch.ps1" }
+					}
+				},
+				"steps": []
+			}
+			""";
+
+		var orchestration = OrchestrationParser.ParseOrchestration(json, []);
+
+		var trigger = orchestration.Trigger.Should().BeOfType<WatcherTriggerConfig>().Subject;
+		trigger.Watcher.Should().BeNull();
+		trigger.Definition.Should().NotBeNull();
+		trigger.Definition!["name"]!.GetValue<string>().Should().Be("pr-comments-local");
+		trigger.Definition["schedule"]!["intervalSeconds"]!.GetValue<int>().Should().Be(30);
+		trigger.MaxConcurrent.Should().Be(1);
+		trigger.Catchup.Should().Be(WatcherCatchupMode.FromNow);
+		trigger.Parameters.Should().BeNull();
+		trigger.Enabled.Should().BeTrue();
+		trigger.ResolveWatcherName().Should().Be("pr-comments-local");
+	}
+
+	[Theory]
+	[InlineData("from-now", WatcherCatchupMode.FromNow)]
+	[InlineData("fromNow", WatcherCatchupMode.FromNow)]
+	[InlineData("FromNow", WatcherCatchupMode.FromNow)]
+	[InlineData("all", WatcherCatchupMode.All)]
+	public void ParseOrchestration_WatcherTrigger_AcceptsCatchupSpellings(string spelling, WatcherCatchupMode expected)
+	{
+		var json = $$"""
+			{ "name": "w", "description": "d", "trigger": { "type": "watcher", "watcher": "x", "catchup": "{{spelling}}" }, "steps": [] }
+			""";
+
+		var trigger = (WatcherTriggerConfig)OrchestrationParser.ParseOrchestration(json, []).Trigger;
+		trigger.Catchup.Should().Be(expected);
+	}
+
+	[Fact]
+	public void ParseOrchestration_WatcherTrigger_UnknownCatchup_Throws()
+	{
+		var json = """
+			{ "name": "w", "description": "d", "trigger": { "type": "watcher", "watcher": "x", "catchup": "later" }, "steps": [] }
+			""";
+
+		var act = () => OrchestrationParser.ParseOrchestration(json, []);
+
+		act.Should().Throw<Exception>().Which.Message.Should().Contain("catchup");
+	}
+
+	[Fact]
+	public void ParseOrchestration_UnknownTriggerType_ThrowsNamingTheType()
+	{
+		var json = """
+			{ "name": "w", "description": "d", "trigger": { "type": "carrier-pigeon" }, "steps": [] }
+			""";
+
+		var act = () => OrchestrationParser.ParseOrchestration(json, []);
+
+		act.Should().Throw<Exception>().Which.Message.Should().Contain("carrier-pigeon");
+	}
+
+	[Fact]
+	public void ParseTriggerConfig_IsSharedWithSerializer_RoundTripsWatcher()
+	{
+		using var doc = JsonDocument.Parse("""{ "type": "watcher", "watcher": "lib", "enabled": false, "maxConcurrent": 2 }""");
+
+		var trigger = OrchestrationParser.ParseTriggerConfig(doc.RootElement).Should().BeOfType<WatcherTriggerConfig>().Subject;
+
+		trigger.Watcher.Should().Be("lib");
+		trigger.Enabled.Should().BeFalse();
+		trigger.MaxConcurrent.Should().Be(2);
+	}
+
+	[Fact]
 	public void ParseOrchestration_LoopTrigger_ParsesCorrectly()
 	{
 		// Arrange

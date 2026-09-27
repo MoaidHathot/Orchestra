@@ -29,6 +29,9 @@ public class SchemaContractTests
 	[InlineData("orchestra.schema.json")]
 	[InlineData("orchestra.mcp.schema.json")]
 	[InlineData("orchestra.services.schema.json")]
+	[InlineData("orchestra.watchers.schema.json")]
+	[InlineData("watchers/v1/fetcher-input.schema.json")]
+	[InlineData("watchers/v1/fetcher-output.schema.json")]
 	public void Schema_IsWellFormedJson(string fileName)
 	{
 		// Guards against a hand-edit dropping a brace: the schemas are edited as text far more
@@ -36,6 +39,56 @@ public class SchemaContractTests
 		var act = () => Load(fileName).Dispose();
 
 		act.Should().NotThrow();
+	}
+
+	[Fact]
+	public void TriggerSchema_DeclaresWatcherTriggerType_WithReferenceOrInlineDefinition()
+	{
+		// Every TriggerType the parser accepts must be schema-valid, or an editor flags a working file.
+		using var doc = Load("orchestration.schema.json");
+		var trigger = doc.RootElement.GetProperty("$defs").GetProperty("trigger");
+		var typeEnum = trigger.GetProperty("properties").GetProperty("type").GetProperty("enum")
+			.EnumerateArray().Select(e => e.GetString()).ToHashSet(StringComparer.Ordinal);
+
+		foreach (var name in Enum.GetNames<Orchestra.Engine.TriggerType>())
+			typeEnum.Should().Contain(JsonNamingPolicy.CamelCase.ConvertName(name), $"TriggerType.{name} is parsed by the engine but missing from the schema enum");
+
+		var watcherBranch = trigger.GetProperty("allOf").EnumerateArray()
+			.Single(b => b.GetProperty("if").GetProperty("properties").GetProperty("type").GetProperty("enum").EnumerateArray().Any(e => e.GetString() == "watcher"))
+			.GetProperty("then");
+		var props = watcherBranch.GetProperty("properties");
+		foreach (var key in new[] { "watcher", "definition", "maxConcurrent", "catchup", "parameters" })
+			props.TryGetProperty(key, out _).Should().BeTrue($"watcher trigger property '{key}' must be declared");
+
+		watcherBranch.TryGetProperty("oneOf", out _).Should().BeTrue("exactly one of watcher / definition is required");
+		doc.RootElement.GetProperty("$defs").GetProperty("watcherInlineDefinition").GetProperty("required")
+			.EnumerateArray().Select(e => e.GetString()).Should().Contain("name", "inline definitions need a stable identity for state files");
+	}
+
+	[Fact]
+	public void WatchersSchema_DeclaresBothWatcherKinds_AndMutualExclusions()
+	{
+		using var doc = Load("orchestra.watchers.schema.json");
+		var defs = doc.RootElement.GetProperty("$defs");
+
+		defs.GetProperty("PollCommandWatcher").GetRawText().Should().Contain("poll-command");
+		defs.GetProperty("PollScriptWatcher").GetRawText().Should().Contain("poll-script");
+		defs.GetProperty("WatcherSchedule").TryGetProperty("oneOf", out _).Should().BeTrue("intervalSeconds xor cron");
+		defs.GetProperty("WatcherDedup").GetProperty("properties").GetProperty("mode").GetProperty("enum")
+			.EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo("fifo", "presence");
+		defs.GetProperty("WatcherCommonProperties").GetProperty("properties").GetProperty("failurePolicy").GetProperty("enum")
+			.EnumerateArray().Select(e => e.GetString()).Should().BeEquivalentTo("warn", "ignore", "fail");
+	}
+
+	[Fact]
+	public void FetcherOutputSchema_RejectsUnknownTopLevelKeys()
+	{
+		// The protocol is closed on purpose: a fetcher that emits "hasChanges" or a typo must fail loudly.
+		using var doc = Load("watchers/v1/fetcher-output.schema.json");
+
+		doc.RootElement.GetProperty("additionalProperties").GetBoolean().Should().BeFalse();
+		doc.RootElement.GetProperty("properties").EnumerateObject().Select(p => p.Name)
+			.Should().BeEquivalentTo("protocolVersion", "items", "cursor", "diagnostics");
 	}
 
 	[Fact]

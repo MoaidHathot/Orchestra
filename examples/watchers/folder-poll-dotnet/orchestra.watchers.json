@@ -1,0 +1,17 @@
+{
+  "$schema": "../../../schemas/orchestra.watchers.schema.json",
+  "watchers": {
+    "local-folder-dotnet": {
+      "type": "poll-command",
+      "schedule": { "intervalSeconds": 5 },
+      "fetch": {
+        "command": "dotnet",
+        "arguments": ["run", "fetch.cs"],
+        "timeoutSeconds": 60,
+        "config": { "folder": "./inbox" }
+      },
+      "dedup": { "key": "{{item.path}}", "mode": "presence" },
+      "failurePolicy": "warn"
+    }
+  }
+}

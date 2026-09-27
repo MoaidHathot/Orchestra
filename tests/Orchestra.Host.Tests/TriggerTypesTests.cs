@@ -343,6 +343,8 @@ public class TriggerTypesTests
 		values.Should().Contain(TriggerType.Scheduler);
 		values.Should().Contain(TriggerType.Loop);
 		values.Should().Contain(TriggerType.Webhook);
+		values.Should().Contain(TriggerType.Manual);
+		values.Should().Contain(TriggerType.Watcher);
 	}
 
 	[Fact]

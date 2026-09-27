@@ -17,11 +17,19 @@ export type RunOrigin =
   | 'orchestration'
   | 'retry'
   | 'resume'
+  | 'watcher'
   | 'unknown';
 
 export const ALL_RUN_ORIGINS: readonly RunOrigin[] = [
-  'manual', 'scheduler', 'loop', 'webhook', 'mcp', 'orchestration', 'retry', 'resume',
+  'manual', 'scheduler', 'loop', 'webhook', 'watcher', 'mcp', 'orchestration', 'retry', 'resume',
 ] as const;
+
+/**
+ * Origins introduced after the v1 filter state first shipped. A stored allow-list that still
+ * contains every earlier origin (the user never narrowed it) gets these added on load so new
+ * run kinds do not silently disappear from the history of existing users.
+ */
+const ORIGINS_ADDED_LATER: readonly RunOrigin[] = ['watcher'];
 
 /** Human-readable label for each origin (used in the filter combo). */
 export const RUN_ORIGIN_LABELS: Record<RunOrigin, string> = {
@@ -29,6 +37,7 @@ export const RUN_ORIGIN_LABELS: Record<RunOrigin, string> = {
   scheduler: 'Scheduler',
   loop: 'Loop',
   webhook: 'Webhook',
+  watcher: 'Watcher',
   mcp: 'MCP',
   orchestration: 'Child orchestration',
   retry: 'Retry',
@@ -45,6 +54,7 @@ export function classifyRunOrigin(triggeredBy: string | undefined | null): RunOr
   if (!triggeredBy) return 'unknown';
   const t = triggeredBy.toLowerCase();
   if (t.startsWith('orchestration:')) return 'orchestration';
+  if (t.startsWith('watcher:')) return 'watcher';
   switch (t) {
     case 'manual': return 'manual';
     case 'scheduler': return 'scheduler';
@@ -53,6 +63,7 @@ export function classifyRunOrigin(triggeredBy: string | undefined | null): RunOr
     case 'mcp': return 'mcp';
     case 'retry': return 'retry';
     case 'resume': return 'resume';
+    case 'watcher': return 'watcher';
     default: return 'unknown';
   }
 }
@@ -183,6 +194,13 @@ export function loadFilterState(): HistoryFilterState {
     const origins = Array.isArray(parsed.origins)
       ? (parsed.origins.filter((v): v is RunOrigin => ALL_RUN_ORIGINS.includes(v as RunOrigin)))
       : [...ALL_RUN_ORIGINS];
+
+    const earlierOrigins = ALL_RUN_ORIGINS.filter((o) => !ORIGINS_ADDED_LATER.includes(o));
+    if (earlierOrigins.every((o) => origins.includes(o))) {
+      for (const added of ORIGINS_ADDED_LATER) {
+        if (!origins.includes(added)) origins.push(added);
+      }
+    }
 
     const statuses = Array.isArray(parsed.statuses)
       ? (parsed.statuses.filter((v): v is RunStatusFilterValue => ALL_RUN_STATUS_FILTERS.includes(v as RunStatusFilterValue)))

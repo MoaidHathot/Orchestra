@@ -1,0 +1,17 @@
+{
+  "$schema": "../../../schemas/orchestra.watchers.schema.json",
+  "watchers": {
+    "local-folder-pwsh": {
+      "type": "poll-script",
+      "schedule": { "intervalSeconds": 5 },
+      "fetch": {
+        "shell": "pwsh",
+        "scriptFile": "./fetch.ps1",
+        "timeoutSeconds": 10,
+        "config": { "folder": "./inbox" }
+      },
+      "dedup": { "key": "{{item.path}}", "mode": "presence" },
+      "failurePolicy": "warn"
+    }
+  }
+}

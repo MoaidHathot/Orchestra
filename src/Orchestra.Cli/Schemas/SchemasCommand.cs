@@ -16,6 +16,9 @@ public static class SchemasCommand
 		"orchestra.schema.json",
 		"orchestra.mcp.schema.json",
 		"orchestra.services.schema.json",
+		"orchestra.watchers.schema.json",
+		Path.Combine("watchers", "v1", "fetcher-input.schema.json"),
+		Path.Combine("watchers", "v1", "fetcher-output.schema.json"),
 	];
 
 	public static int Execute(
@@ -101,6 +104,7 @@ public static class SchemasCommand
 			}
 
 			var targetPath = Path.Combine(outputDirectory, fileName);
+			Directory.CreateDirectory(Path.GetDirectoryName(targetPath)!); // protocol schemas live in watchers/v1/
 			if (File.Exists(targetPath) && !force)
 			{
 				stdout.WriteLine($"Skipped (already exists): {targetPath}");

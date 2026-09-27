@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orchestra.invalid/schemas/watchers/v1/fetcher-input.json",
+  "title": "Orchestra watcher fetcher input (protocol v1)",
+  "description": "The JSON document Orchestra writes to a watcher fetcher's stdin on every tick.",
+  "type": "object",
+  "required": ["protocolVersion", "watcher"],
+  "properties": {
+    "protocolVersion": {
+      "const": "1",
+      "description": "Fetcher protocol version. Always \"1\" for v1."
+    },
+    "watcher": {
+      "type": "string",
+      "description": "Watcher name (the library map key, or the inline definition's name)."
+    },
+    "cursor": {
+      "description": "Opaque cursor returned by the previous successful fetch, or null on the first run / after a state reset. Orchestra never interprets it."
+    },
+    "subscribers": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Orchestration ids currently subscribed to this watcher. Informational; fetchers may ignore it."
+    },
+    "config": {
+      "type": ["object", "null"],
+      "description": "Verbatim copy of the watcher's fetch.config block, or null when it has none."
+    }
+  },
+  "additionalProperties": false
+}

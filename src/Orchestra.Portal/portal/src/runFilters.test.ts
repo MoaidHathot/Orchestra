@@ -22,8 +22,16 @@ describe('classifyRunOrigin', () => {
     ['mcp', 'mcp'],
     ['retry', 'retry'],
     ['resume', 'resume'],
+    ['watcher', 'watcher'],
   ] as const)('classifies %s as %s', (input, expected) => {
     expect(classifyRunOrigin(input)).toBe(expected);
+  });
+
+  it.each([
+    'watcher:local-folder',
+    'WATCHER:Upper-Case',
+  ])('classifies %s as watcher', (input) => {
+    expect(classifyRunOrigin(input)).toBe('watcher');
   });
 
   it.each([
@@ -181,6 +189,34 @@ describe('loadFilterState / saveFilterState', () => {
 
     const loaded = loadFilterState();
     expect(loaded.origins).toEqual(['manual', 'scheduler']);
+  });
+
+  it('adds origins introduced after v1 when the stored allow-list still had every earlier origin', () => {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({
+      scope: 'all',
+      origins: ['manual', 'scheduler', 'loop', 'webhook', 'mcp', 'orchestration', 'retry', 'resume'],
+      statuses: [...ALL_RUN_STATUS_FILTERS],
+      hideIncomplete: true,
+      favoritesOnly: false,
+      tags: [],
+    }));
+
+    const loaded = loadFilterState();
+    expect(loaded.origins).toContain('watcher');
+    expect(loaded.origins).toHaveLength(ALL_RUN_ORIGINS.length);
+  });
+
+  it('does not add later origins when the user had narrowed the allow-list', () => {
+    localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify({
+      scope: 'all',
+      origins: ['manual', 'scheduler'],
+      statuses: [...ALL_RUN_STATUS_FILTERS],
+      hideIncomplete: true,
+      favoritesOnly: false,
+      tags: [],
+    }));
+
+    expect(loadFilterState().origins).toEqual(['manual', 'scheduler']);
   });
 
   it('drops unknown status tokens during deserialisation', () => {

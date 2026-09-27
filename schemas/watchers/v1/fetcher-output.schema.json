@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orchestra.invalid/schemas/watchers/v1/fetcher-output.json",
+  "title": "Orchestra watcher fetcher output (protocol v1)",
+  "description": "The JSON document a watcher fetcher must write to stdout when it exits with code 0. Empty or omitted 'items' means nothing new this tick.",
+  "type": "object",
+  "properties": {
+    "protocolVersion": {
+      "type": "string",
+      "description": "Protocol version of this document. Optional; when omitted Orchestra assumes the version it sent (\"1\")."
+    },
+    "items": {
+      "type": ["array", "null"],
+      "description": "Items produced this tick. Each element is an arbitrary JSON value; objects are recommended so dedup keys and parameter templates can address fields. Empty or null means nothing new."
+    },
+    "cursor": {
+      "description": "Opaque cursor Orchestra should remember and send back on the next tick. Null or omitted leaves the stored cursor unchanged."
+    },
+    "diagnostics": {
+      "type": ["object", "null"],
+      "description": "Optional structured information logged by Orchestra at Information level. Never used for dispatch.",
+      "properties": {
+        "message": { "type": "string", "description": "Human-readable note about this tick." },
+        "details": { "type": "object", "description": "Arbitrary structured details." }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -43,4 +43,16 @@ internal static partial class HostInitializationLog
 		Level = LogLevel.Warning,
 		Message = "Host log file disabled: the log directory '{Directory}' is not writable. Console logging continues.")]
 	public static partial void FileLoggingUnavailable(ILogger logger, string directory, Exception exception);
+
+	[LoggerMessage(
+		EventId = 7,
+		Level = LogLevel.Information,
+		Message = "Skipping watcher library (orchestra.watchers.json): {Reason}")]
+	public static partial void WatcherLibrarySkipped(ILogger logger, string reason);
+
+	[LoggerMessage(
+		EventId = 8,
+		Level = LogLevel.Error,
+		Message = "orchestra.watchers.json at '{Path}' could not be loaded; watcher triggers that reference the library will fail to register: {Reason}")]
+	public static partial void WatcherLibraryLoadFailed(ILogger logger, string path, string reason, Exception exception);
 }

@@ -195,6 +195,28 @@ every host started from this directory would use (data path, scan root, default 
 concurrency, logging, retention...), and the environment variables that influenced the result.
 Exit `1` when the selected file does not parse.
 
+### `watcher test` - run a watcher fetcher without a host
+
+```bash
+orchestra watcher test --watcher github-pr-comments
+orchestra watcher test --watcher local-folder --config-path ./orchestra.watchers.json --subscribers handle-new-file --ticks 2
+orchestra watcher test --watcher local-folder --save-state ./state.json     # then: --from-state ./state.json
+```
+
+Loads `orchestra.watchers.json` (the one beside the effective `orchestra.json`, or
+`--config-path`), runs the named watcher's fetcher exactly as the host would and prints a
+report: the stdin payload sent (`--print-input` for the full indented document), the stdout
+received with exit code and timing, schema validation against the v1 fetcher-output
+protocol, the extracted items with their dedup keys, and the cursor before/after. With
+`--subscribers a,b` it also shows which items each simulated subscriber would dispatch
+(`new` vs `seen`); `--save-state` / `--from-state` carry the cursor and seen keys between
+runs, and `--ticks N` chains several fetches in one go. Read-only: it never starts the host,
+touches its watcher state or launches an orchestration.
+
+Exit `0` when every tick fetched, validated and extracted cleanly; `1` on a fetch failure,
+invalid output or a bad `items.jsonPath`; `2` for configuration errors (no library, unknown
+watcher, invalid library). See [host.md](host.md#watcher-trigger) for the watcher model.
+
 ---
 
 ## Installation & invocation
@@ -509,6 +531,12 @@ holding the saved artifacts, renamed from their GUIDs to the step that produced 
 | `orchestra triggers enable <id>` | Enable a trigger. |
 | `orchestra triggers disable <id>` | Disable a trigger. |
 | `orchestra triggers fire <id> [--param k=v ...]` | Fire a trigger manually. |
+
+### Watchers
+
+| Command | Purpose |
+|---|---|
+| `orchestra watcher test --watcher <name> [--config-path <file>] [--subscribers a,b] [--ticks N] [--from-state <file> | --empty-state] [--save-state <file>] [--print-input]` | Run a watcher's fetcher once without a host and report what it returned; see [`watcher test`](#watcher-test---run-a-watcher-fetcher-without-a-host). Exit 0/1/2. |
 
 ### Profiles
 

@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
+using Orchestra.Engine.Serialization;
 using Orchestra.Host.Api;
 using Orchestra.Host.Export;
 using Orchestra.Host.Hosting;
@@ -16,6 +17,9 @@ using Orchestra.Host.Registry;
 using Orchestra.Host.Services;
 using Orchestra.Host.Triggers;
 using Orchestra.ProcessHost;
+using Orchestra.Watchers;
+using Orchestra.Watchers.Runtime;
+using Orchestra.Watchers.State;
 
 namespace Orchestra.Host.Extensions;
 
@@ -259,11 +263,9 @@ public static class ServiceCollectionExtensions
 			// Track PIDs next to the orchestra.json that is actually in effect, not the
 			// user-global default. The services being tracked come from the discovered
 			// orchestra.services.json (which sits beside the resolved config), so pinning the
-			// PID file to the default location would make one project's tracker adopt — and on
-			// shutdown, kill — processes started for a different project.
-			var configPath = OrchestraConfigLoader.ResolveConfigPath()
-				?? OrchestraConfigLoader.GetDefaultConfigPath();
-			var configDir = Path.GetDirectoryName(Path.GetFullPath(configPath))!;
+			// PID file to the default location would make one project's tracker adopt - and on
+			// shutdown, kill - processes started for a different project.
+			var configDir = OrchestraConfigLoader.ResolveConfigDirectory();
 			var pidFilePath = Path.Combine(configDir, ".orchestra.pids.json");
 			return new ProcessTracker(pidFilePath, sp.GetRequiredService<ILogger<ProcessTracker>>());
 		});
@@ -347,9 +349,20 @@ public static class ServiceCollectionExtensions
 			// Disable the scheduling loop for API-only / isolated one-shot hosts.
 			triggerManager.SchedulingEnabled = opts.EnableScheduler;
 
+			// Watcher triggers subscribe through the watcher runtime (registered below).
+			triggerManager.WatcherSink = sp.GetRequiredService<IWatcherSubscriptionSink>();
+
 			return triggerManager;
 		});
 		services.AddHostedService(sp => sp.GetRequiredService<TriggerManager>());
+
+		// Watcher runtime. Registered after TriggerManager so it starts after it and, more
+		// importantly, stops BEFORE it (hosted services stop in reverse order): no new watcher
+		// dispatches arrive while the trigger manager drains in-flight runs. Dispatches go through
+		// TriggerManager so watcher-launched runs count on the trigger like every other origin.
+		// State lives beside the orchestra.json in effect - the same root as the PID file above.
+		services.TryAddSingleton<IWatcherDispatcher>(sp => new TriggerManagerWatcherDispatcher(sp));
+		services.AddOrchestraWatchers(static _ => FileWatcherStateStore.ResolveStateDirectory(OrchestraConfigLoader.ResolveConfigDirectory()));
 
 		// Run retention background service — registered unconditionally; the service
 		// itself checks at resolution time whether retention is configured.
@@ -494,6 +507,39 @@ public static class ServiceProviderExtensions
 		else
 		{
 			initLogger.LogInformation("Skipping external MCP config (orchestra.mcp.json) in test environment");
+		}
+
+		// Watcher library. Loaded before triggers are registered below so watcher triggers can
+		// resolve library references. Mirrors skip-services: the Testing environment and the
+		// skip-watchers configuration key leave the library empty (inline definitions still work,
+		// which is what host tests exercise). A broken file is logged and treated as empty so the
+		// host still starts; the affected triggers surface the problem as an Error status.
+		var skipWatchers = hostEnv?.IsEnvironment("Testing") == true
+			|| string.Equals(config?[WatcherServiceCollectionExtensions.SkipWatchersConfigurationKey], "true", StringComparison.OrdinalIgnoreCase);
+		var watcherManager = services.GetService<WatcherManager>();
+		if (watcherManager is not null)
+		{
+			if (skipWatchers)
+			{
+				HostInitializationLog.WatcherLibrarySkipped(initLogger, hostEnv?.IsEnvironment("Testing") == true ? "Testing environment" : "skip-watchers=true");
+			}
+			else
+			{
+				var watchersSidecar = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.WatchersConfigFileName);
+				if (watchersSidecar.ShadowedGlobalPath is not null)
+					HostInitializationLog.GlobalSidecarShadowed(initLogger, OrchestraConfigLoader.WatchersConfigFileName, watchersSidecar.ShadowedGlobalPath, OrchestraConfigLoader.ResolveConfigPath()!);
+				if (watchersSidecar.EffectivePath is not null)
+				{
+					try
+					{
+						watcherManager.LoadLibrary(watchersSidecar.EffectivePath);
+					}
+					catch (Exception ex) when (ex is WatcherValidationException or IOException or UnauthorizedAccessException or EnvironmentVariableExpansionException)
+					{
+						HostInitializationLog.WatcherLibraryLoadFailed(initLogger, watchersSidecar.EffectivePath, ex.Message, ex);
+					}
+				}
+			}
 		}
 
 		// Starting external infrastructure — the processes in orchestra.services.json and the MCP proxy

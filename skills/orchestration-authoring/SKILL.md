@@ -20,7 +20,7 @@ Orchestrations are single JSON or YAML objects. Three fields are required: `name
 1. **Public URL** (works anywhere, requires network the first time):
    - JSON: `"$schema": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json"`
    - YAML: `# yaml-language-server: $schema=https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json`
-   - Same pattern for `orchestra.mcp.schema.json` and `orchestra.services.schema.json`.
+   - Same pattern for `orchestra.mcp.schema.json`, `orchestra.services.schema.json` and `orchestra.watchers.schema.json`.
    - For version-pinned validation, replace `main` with a release tag (e.g., `v0.2.0`).
 
 2. **Local copy bundled with the tool** (offline, version-pinned to your installed Orchestra):
@@ -748,6 +748,26 @@ trigger:
 | `response` | WebhookResponseConfig | null |
 
 WebhookResponseConfig: `waitForResult` (bool), `responseTemplate` (string), `timeoutSeconds` (int, default 120).
+
+### Watcher
+Subscribes the orchestration to a poller declared in `orchestra.watchers.json` (or defined inline). One run per new item; dedup is per orchestration.
+
+| Property | Type | Default |
+|---|---|---|
+| `watcher` | string | null (library name; exactly one of `watcher` / `definition`) |
+| `definition` | object | null (inline entry: `name` + same shape as a library watcher) |
+| `maxConcurrent` | int | 1 (parallel launches per tick) |
+| `catchup` | `from-now` \| `all` | `from-now` |
+| `parameters` | map | null (`{{item}}` = whole item JSON, `{{item.a.b}}` = field; missing renders `null`) |
+
+```yaml
+trigger:
+  type: watcher
+  watcher: github-pr-comments
+  parameters: { comment: "{{item}}", author: "{{item.user.login}}" }
+```
+
+Declare the matching `inputs` and read them with `{{param.comment}}`. Test a fetcher without a host: `orchestra watcher test --watcher <name>`.
 
 All triggers share: `type` (required), `enabled` (bool, default true), `inputHandlerPrompt` (string), `inputHandlerModel` (string).
 

@@ -73,6 +73,7 @@ public sealed class ConfigShowCommand : Command<ConfigShowSettings>
 		_console.MarkupLine("[bold]Sidecars[/]");
 		RenderSidecar(report.McpConfig, OrchestraConfigLoader.McpConfigFileName);
 		RenderSidecar(report.ServicesConfig, OrchestraConfigLoader.ServiceConfigFileName);
+		RenderSidecar(report.WatchersConfig, OrchestraConfigLoader.WatchersConfigFileName);
 
 		_console.WriteLine();
 		_console.MarkupLine("[bold]Effective settings[/]");
@@ -126,6 +127,7 @@ public sealed class ConfigReport
 	public string? Error { get; init; }
 	public SidecarReport McpConfig { get; init; } = new(null, null);
 	public SidecarReport ServicesConfig { get; init; } = new(null, null);
+	public SidecarReport WatchersConfig { get; init; } = new(null, null);
 	public IReadOnlyList<KeyValuePair<string, string>> Effective { get; init; } = [];
 	public IReadOnlyList<KeyValuePair<string, string>> EnvironmentOverrides { get; init; } = [];
 
@@ -138,6 +140,7 @@ public sealed class ConfigReport
 
 		var mcp = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.McpConfigFileName);
 		var services = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.ServiceConfigFileName);
+		var watchers = OrchestraConfigLoader.ResolveSidecar(OrchestraConfigLoader.WatchersConfigFileName);
 
 		var effective = new List<KeyValuePair<string, string>>
 		{
@@ -177,6 +180,7 @@ public sealed class ConfigReport
 			Error = diagnostic.Parsed ? null : diagnostic.Error ?? "the file could not be parsed",
 			McpConfig = new SidecarReport(mcp.EffectivePath, mcp.ShadowedGlobalPath),
 			ServicesConfig = new SidecarReport(services.EffectivePath, services.ShadowedGlobalPath),
+			WatchersConfig = new SidecarReport(watchers.EffectivePath, watchers.ShadowedGlobalPath),
 			Effective = effective,
 			EnvironmentOverrides = env,
 		};

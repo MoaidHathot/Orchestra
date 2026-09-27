@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Orchestra.Engine\Orchestra.Engine.csproj" />
     <ProjectReference Include="..\Orchestra.ProcessHost\Orchestra.ProcessHost.csproj" />
+    <ProjectReference Include="..\Orchestra.Watchers\Orchestra.Watchers.csproj" />
   </ItemGroup>
 
   <ItemGroup>

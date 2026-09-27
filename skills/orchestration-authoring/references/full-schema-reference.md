@@ -26,6 +26,7 @@ This is the complete property-level reference for every field, step type, trigge
   - [Scheduler Trigger](#scheduler-trigger)
   - [Loop Trigger](#loop-trigger)
   - [Webhook Trigger](#webhook-trigger)
+  - [Watcher Trigger](#watcher-trigger)
 - [MCP Definitions](#mcp-definitions)
 - [Template Expressions](#template-expressions)
 - [Enums Reference](#enums-reference)
@@ -758,7 +759,7 @@ All trigger types share these properties:
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `type` | `string` | **Yes** | -- | Trigger type: `"manual"`, `"scheduler"`, `"loop"`, or `"webhook"`. |
+| `type` | `string` | **Yes** | -- | Trigger type: `"manual"`, `"scheduler"`, `"loop"`, `"webhook"`, or `"watcher"`. |
 | `enabled` | `bool` | No | `true` | Whether the trigger is active. |
 | `inputHandlerPrompt` | `string` | No | `null` | LLM prompt to transform raw trigger input into expected parameters. |
 | `inputHandlerModel` | `string` | No | `null` | Model to use for the input handler prompt. |
@@ -804,6 +805,34 @@ All trigger types share these properties:
 | `waitForResult` | `bool` | `false` | Whether to block the HTTP response until orchestration completes. |
 | `responseTemplate` | `string` | `null` | Template string for formatting the response body. |
 | `timeoutSeconds` | `int` | `120` | Maximum seconds to wait for completion. Returns 504 on timeout. |
+
+### Watcher Trigger
+
+**Type value:** `"watcher"`
+
+Subscribes the orchestration to a watcher - an in-process poller that runs a fetcher command or script on a schedule, deduplicates the returned items per subscribing orchestration and launches one run per new item. Watchers are declared in `orchestra.watchers.json` beside `orchestra.json` (schema `schemas/orchestra.watchers.schema.json`) and referenced by name, or defined inline. A watcher only runs while at least one enabled orchestration subscribes to it.
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `watcher` | `string` | `null` | Name of a library watcher. Exactly one of `watcher` / `definition` is required. |
+| `definition` | `object` | `null` | Inline watcher: a library entry plus a required `name` (must not collide with a library name). Relative `fetch` paths resolve against the orchestration file's folder. |
+| `maxConcurrent` | `int` | `1` | Parallel launches per tick for this subscription (not a cap on in-flight runs). |
+| `catchup` | `string` | `"from-now"` | `"from-now"` skips items the watcher has already seen when this orchestration first subscribes; `"all"` dispatches every item currently visible. |
+| `parameters` | `map` | `null` | Item-to-input templates: `{{item}}` is the whole item as JSON, `{{item.path.to.field}}` a nested field (`[n]` indexes arrays). Missing paths render as the literal `null`. |
+
+**Library entry** (`orchestra.watchers.json` is `{ "watchers": { "<name>": <entry> } }`):
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `type` | `string` | -- | `"poll-command"` (run an executable) or `"poll-script"` (run a script through `shell`). |
+| `enabled` | `bool` | `true` | Disabled watchers reject subscriptions. |
+| `schedule` | `object` | -- | Exactly one of `intervalSeconds` (int) or `cron` (UTC; 5 fields, or 6 with leading seconds). |
+| `fetch` | `object` | -- | `command` + `arguments` (poll-command) or `shell` + exactly one of `scriptFile` / `script` (poll-script); plus `workingDirectory`, `env`, `timeoutSeconds` (60), `includeStdErr` (false), `config` (passed verbatim to the fetcher). |
+| `items` | `object` | `{ jsonPath: "$.items[*]" }` | Where items live in the output (simple JSONPath: root, member, `[n]`, trailing `[*]`). |
+| `dedup` | `object` | fifo, hash of whole item | `key` template; `mode` `fifo` (`fifo.maxEntries` 10000, `fifo.ttlDays` 14) or `presence` (`presence.graceTicks` 3). |
+| `failurePolicy` | `string` | `"warn"` | `warn` / `ignore` keep polling with exponential back-off (2s doubling, capped at 300s); `fail` stops this watcher's loop. |
+
+**Fetcher protocol v1.** stdin: `{ "protocolVersion": "1", "watcher": "<name>", "cursor": <previous or null>, "subscribers": [ids], "config": <fetch.config or null> }`. stdout (exit 0): `{ "protocolVersion": "1", "items": [...], "cursor": <opaque, optional>, "diagnostics": { "message": "..." } }`. Empty `items` means nothing new; the cursor is stored and sent back next tick. Try a fetcher with `orchestra watcher test --watcher <name>`.
 
 ---
 
@@ -897,7 +926,7 @@ Runtime file-writing steps should receive absolute paths. Build paths relative t
 `Low`, `Medium`, `High`, `XHigh`, `Max` (case-insensitive; `xhigh`/`max` require a model that advertises them)
 
 ### Trigger Type
-`Manual` (default), `Scheduler`, `Loop`, `Webhook`
+`Manual` (default), `Scheduler`, `Loop`, `Webhook`, `Watcher`
 
 ### MCP Type
 `Local` (stdio), `Remote` (HTTP)

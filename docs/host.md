@@ -577,6 +577,100 @@ Re-runs the orchestration when it completes.
 }
 ```
 
+### Watcher Trigger
+
+Subscribes the orchestration to a **watcher**: an in-process poller that runs a *fetcher*
+(a command or a script) on a schedule, deduplicates the items it returns per subscriber and
+launches one run per genuinely new item. Watchers are declared once in
+`orchestra.watchers.json` (beside `orchestra.json`, like the MCP and services sidecars) and
+referenced by name; a watcher only runs while at least one enabled orchestration subscribes
+to it.
+
+```yaml
+trigger:
+  type: watcher
+  watcher: github-pr-comments      # a key in orchestra.watchers.json
+  maxConcurrent: 4                 # parallel launches per tick (default 1)
+  catchup: from-now                # skip the existing backlog (default); "all" dispatches it
+  parameters:                      # item -> orchestration inputs
+    comment: "{{item}}"            # whole item as JSON
+    author: "{{item.user.login}}"  # nested field; missing paths render as the literal null
+```
+
+Small one-off watchers can be defined inline instead of in the library - `definition` takes
+the same shape as a library entry plus a required `name`, and relative paths resolve against
+the orchestration file's folder:
+
+```yaml
+trigger:
+  type: watcher
+  definition:
+    name: local-inbox
+    type: poll-script
+    schedule: { intervalSeconds: 30 }
+    fetch: { shell: pwsh, scriptFile: ./fetch.ps1, config: { folder: ./inbox } }
+    dedup: { key: "{{item.path}}", mode: presence }
+  parameters: { path: "{{item.path}}" }
+```
+
+Exactly one of `watcher` / `definition` is required; an unknown library name, an inline name
+that collides with a library watcher, or a disabled watcher leaves the trigger registered in
+the `Error` state with the reason in `lastError` - the host keeps running.
+
+**`orchestra.watchers.json`** is a map of name to definition (schema:
+`schemas/orchestra.watchers.schema.json`):
+
+```jsonc
+{
+  "watchers": {
+    "github-pr-comments": {
+      "type": "poll-command",                       // or "poll-script"
+      "schedule": { "intervalSeconds": 15 },        // or { "cron": "*/30 * * * * *" } (UTC; 5 or 6 fields)
+      "fetch": {
+        "command": "dnx",                           // poll-script: "shell" + "scriptFile" | "script"
+        "arguments": ["Gh.Cli", "--", "pr-comments", "--json"],
+        "timeoutSeconds": 60,
+        "config": { "repo": "contoso/app" }        // passed verbatim to the fetcher
+      },
+      "items": { "jsonPath": "$.items[*]" },        // only for non-standard output shapes
+      "dedup": { "key": "{{item.id}}", "mode": "fifo", "fifo": { "maxEntries": 10000, "ttlDays": 14 } },
+      "failurePolicy": "warn"                       // warn | ignore | fail (stops this watcher only)
+    }
+  }
+}
+```
+
+**Fetcher protocol (v1).** Every tick the fetcher receives a JSON document on stdin -
+`{ "protocolVersion": "1", "watcher": "<name>", "cursor": <previous cursor or null>,
+"subscribers": [...], "config": <fetch.config or null> }` - and must exit 0 with a JSON
+document on stdout: `{ "protocolVersion": "1", "items": [...], "cursor": <opaque, optional>,
+"diagnostics": { "message": "..." } }`. Empty or omitted `items` means nothing new. The
+cursor is stored per watcher and sent back on the next tick; return only what changed since
+it when the source supports that. Schemas: `schemas/watchers/v1/fetcher-input.schema.json`
+and `fetcher-output.schema.json`; stdout larger than 16 MB, a non-zero exit, a timeout, or
+output that fails the schema counts as a failed tick.
+
+**Dedup.** Per (watcher, orchestration). `fifo` (default) remembers the most recent
+`maxEntries` keys for `ttlDays`; `presence` tracks the keys currently visible at the source and
+forgets one after it has been absent for `graceTicks` (default 3) ticks. Without `dedup.key`
+the key is a hash of the whole item. A fetcher that returns its entire history every tick
+under `fifo` eventually re-dispatches trimmed keys - the host logs a `FIFO trim rate`
+warning when evictions exceed 10% of `maxEntries` per hour; switch to a cursor-aware fetcher
+or `presence` mode.
+
+**Failures and back-off.** After a failed tick the next one waits an extra
+`min(2s x 2^(failures-1), 300s)`; the schedule stays the floor. `failurePolicy: fail` stops
+that watcher's loop (subscriptions stay registered; it restarts when they change or the host
+restarts).
+
+**State** is written atomically to `.orchestra/watchers/` beside the `orchestra.json` in
+effect (`<watcher>.state.json` shared cursor + seen keys, `<watcher>--<orchestration>.state.json`
+per subscriber) and survives restarts. Loading the library is skipped in the `Testing`
+environment or with the `skip-watchers=true` configuration key (inline definitions still
+work). Watcher-launched runs report `triggeredBy: watcher:<name>` and the run origin
+`watcher`. Use [`orchestra watcher test`](cli.md#watcher-test---run-a-watcher-fetcher-without-a-host) to run a fetcher once without
+a host. Worked examples: `examples/watchers/folder-poll-pwsh` and `folder-poll-dotnet`.
+
 ### Email Trigger
 
 Polls an Outlook mailbox for new emails.

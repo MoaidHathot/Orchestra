@@ -21,6 +21,7 @@ public class RunOriginClassifierTests
 	[InlineData("mcp", RunOriginKind.Mcp)]
 	[InlineData("retry", RunOriginKind.Retry)]
 	[InlineData("resume", RunOriginKind.Resume)]
+	[InlineData("watcher", RunOriginKind.Watcher)]
 	public void Classify_ExactMatchTokens_ReturnsKind(string triggeredBy, RunOriginKind expected)
 	{
 		RunOriginClassifier.Classify(triggeredBy).Should().Be(expected);
@@ -34,6 +35,22 @@ public class RunOriginClassifierTests
 	public void Classify_OrchestrationPrefix_ReturnsOrchestration(string triggeredBy)
 	{
 		RunOriginClassifier.Classify(triggeredBy).Should().Be(RunOriginKind.Orchestration);
+	}
+
+	[Theory]
+	[InlineData("watcher:local-folder")]
+	[InlineData("WATCHER:Upper")]
+	public void Classify_WatcherPrefix_ReturnsWatcher(string triggeredBy)
+	{
+		RunOriginClassifier.Classify(triggeredBy).Should().Be(RunOriginKind.Watcher);
+	}
+
+	[Fact]
+	public void ToWireValue_Watcher_RoundTripsThroughParseWireValues()
+	{
+		var wire = RunOriginClassifier.ToWireValue(RunOriginKind.Watcher);
+		wire.Should().Be("watcher");
+		RunOriginClassifier.ParseWireValues([wire]).Should().Equal(RunOriginKind.Watcher);
 	}
 
 	[Theory]

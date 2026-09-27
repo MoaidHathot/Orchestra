@@ -236,6 +236,17 @@ public class Program
 				.WithExample("triggers", "fire", "nightly-deploy", "--param", "env=staging");
 		});
 
+		// -- Watchers (branch) ----------------------------------------------------
+		config.AddBranch("watcher", branch =>
+		{
+			branch.SetDescription("Work with watchers (pollers declared in orchestra.watchers.json that drive trigger.type = watcher).");
+			branch.AddCommand<WatcherTestCommand>("test")
+				.WithDescription("Run a watcher's fetcher once without starting the host: shows the stdin payload, validates the output against the protocol schema, lists extracted items and simulates dedup. Exit 0 = OK, 1 = fetch/validation failure, 2 = config error.")
+				.WithExample("watcher", "test", "--watcher", "github-pr-comments")
+				.WithExample("watcher", "test", "--watcher", "local-folder", "--subscribers", "handle-new-file", "--ticks", "2")
+				.WithExample("watcher", "test", "--watcher", "local-folder", "--config-path", "./orchestra.watchers.json", "--save-state", "./state.json");
+		});
+
 		// ── Profiles (branch) ────────────────────────────────────────────────────
 		config.AddBranch("profiles", branch =>
 		{

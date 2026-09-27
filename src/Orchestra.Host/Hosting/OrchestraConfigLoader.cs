@@ -224,6 +224,32 @@ public static class OrchestraConfigLoader
 	public const string ServiceConfigFileName = "orchestra.services.json";
 
 	/// <summary>
+	/// The watcher library file name, co-located with orchestra.json.
+	/// </summary>
+	public const string WatchersConfigFileName = "orchestra.watchers.json";
+
+	/// <summary>
+	/// The directory that holds the <c>orchestra.json</c> in effect (or would hold the default one
+	/// when none exists). Every per-installation artifact that must sit beside the configuration -
+	/// the <c>ProcessTracker</c> PID file and the watcher state directory - derives from this single
+	/// helper so they can never disagree about which project they belong to.
+	/// </summary>
+	public static string ResolveConfigDirectory()
+	{
+		var configPath = ResolveConfigPath() ?? GetDefaultConfigPath();
+		return Path.GetDirectoryName(Path.GetFullPath(configPath))!;
+	}
+
+	/// <summary>
+	/// Resolves the path to the orchestra.watchers.json in effect (co-located with orchestra.json).
+	/// Returns null if none exists.
+	/// </summary>
+	public static string? ResolveWatchersConfigPath()
+	{
+		return ResolveSidecar(WatchersConfigFileName).EffectivePath;
+	}
+
+	/// <summary>
 	/// Resolves the path to the global orchestra.mcp.json file.
 	/// It lives in the same directory as orchestra.json.
 	/// Returns null if no orchestra.mcp.json exists.

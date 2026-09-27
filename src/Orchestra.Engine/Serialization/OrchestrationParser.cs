@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Orchestra.Engine.Serialization;
 using YamlDotNet.Serialization;
@@ -502,16 +503,34 @@ public static class OrchestrationParser
 		}
 	}
 
+	/// <summary>
+	/// Parses a trigger block (the JSON object under an orchestration's <c>trigger</c> key) into the
+	/// matching <see cref="TriggerConfig"/> subtype. Shared by the serializer converter and by the
+	/// host's persisted-trigger loader so both accept exactly the same shapes.
+	/// </summary>
+	/// <exception cref="JsonException">The <c>type</c> is missing or unknown.</exception>
+	public static TriggerConfig ParseTriggerConfig(JsonElement root)
+		=> TriggerConfigConverter.Parse(root);
+
 	private sealed class TriggerConfigConverter : JsonConverter<TriggerConfig>
 	{
 		public override TriggerConfig Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
 		{
 			using var doc = JsonDocument.ParseValue(ref reader);
-			var root = doc.RootElement;
+			return Parse(doc.RootElement);
+		}
 
-			var type = root.TryGetProperty("type", out var typeProp)
-				? Enum.Parse<TriggerType>(typeProp.GetString()!, ignoreCase: true)
-				: throw new JsonException("Missing 'type' property on trigger configuration.");
+		internal static TriggerConfig Parse(JsonElement root)
+		{
+			if (root.ValueKind != JsonValueKind.Object)
+				throw new JsonException("Trigger configuration must be a JSON object.");
+
+			var typeText = root.TryGetProperty("type", out var typeProp) ? typeProp.GetString() : null;
+			if (string.IsNullOrWhiteSpace(typeText))
+				throw new JsonException("Missing 'type' property on trigger configuration.");
+
+			if (!Enum.TryParse<TriggerType>(typeText, ignoreCase: true, out var type))
+				throw new JsonException($"Unknown trigger type: '{typeText}'.");
 
 			var enabled = root.TryGetProperty("enabled", out var enabledProp)
 				? enabledProp.GetBoolean()
@@ -567,8 +586,76 @@ public static class OrchestrationParser
 				InputHandlerPrompt = inputHandlerPrompt,
 				InputHandlerModel = inputHandlerModel,
 			},
+			TriggerType.Watcher => new WatcherTriggerConfig
+			{
+				Type = TriggerType.Watcher,
+				Enabled = enabled,
+				InputHandlerPrompt = inputHandlerPrompt,
+				InputHandlerModel = inputHandlerModel,
+				Watcher = root.TryGetProperty("watcher", out var watcherProp) ? watcherProp.GetString() : null,
+				Definition = root.TryGetProperty("definition", out var definitionProp)
+					? ParseWatcherDefinition(definitionProp)
+					: null,
+				MaxConcurrent = root.TryGetProperty("maxConcurrent", out var watcherMaxConc) ? watcherMaxConc.GetInt32() : 1,
+				Catchup = root.TryGetProperty("catchup", out var catchupProp)
+					? ParseWatcherCatchup(catchupProp)
+					: WatcherCatchupMode.FromNow,
+				Parameters = root.TryGetProperty("parameters", out var watcherParams)
+					? ParseWatcherParameters(watcherParams)
+					: null,
+			},
 			_ => throw new JsonException($"Unknown trigger type: '{type}'."),
 			};
+		}
+
+		/// <summary>
+		/// Captures the inline watcher definition as an independent <see cref="JsonObject"/> (a copy,
+		/// not a view over the transient <see cref="JsonDocument"/>) so the host can hand it to the
+		/// watcher config loader after parsing completes.
+		/// </summary>
+		private static JsonObject? ParseWatcherDefinition(JsonElement element)
+		{
+			if (element.ValueKind == JsonValueKind.Null)
+				return null;
+
+			if (element.ValueKind != JsonValueKind.Object)
+				throw new JsonException("Watcher trigger 'definition' must be a JSON object.");
+
+			return JsonNode.Parse(element.GetRawText())!.AsObject();
+		}
+
+		private static WatcherCatchupMode ParseWatcherCatchup(JsonElement element)
+		{
+			var text = element.GetString();
+			return text?.Replace("-", "", StringComparison.Ordinal).ToLowerInvariant() switch
+			{
+				null or "" or "fromnow" => WatcherCatchupMode.FromNow,
+				"all" => WatcherCatchupMode.All,
+				_ => throw new JsonException($"Unknown watcher catchup mode '{text}' (expected 'from-now' or 'all')."),
+			};
+		}
+
+		/// <summary>
+		/// Trigger parameters are string templates; scalars written without quotes in YAML/JSON are
+		/// accepted and carried as their JSON text so authors can write <c>count: 3</c>.
+		/// </summary>
+		private static Dictionary<string, string> ParseWatcherParameters(JsonElement element)
+		{
+			if (element.ValueKind == JsonValueKind.Null)
+				return [];
+
+			if (element.ValueKind != JsonValueKind.Object)
+				throw new JsonException("Watcher trigger 'parameters' must be a JSON object of name/template pairs.");
+
+			var result = new Dictionary<string, string>(StringComparer.Ordinal);
+			foreach (var property in element.EnumerateObject())
+			{
+				result[property.Name] = property.Value.ValueKind == JsonValueKind.String
+					? property.Value.GetString() ?? string.Empty
+					: property.Value.GetRawText();
+			}
+
+			return result;
 		}
 
 		private static WebhookResponseConfig ParseWebhookResponseConfig(JsonElement element)
