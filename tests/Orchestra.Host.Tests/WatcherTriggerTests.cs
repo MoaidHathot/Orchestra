@@ -234,7 +234,7 @@ public class WatcherTriggerTests : IDisposable
 	}
 
 	[Fact]
-	public void TriggerManagerWatcherDispatcher_RoutesToDispatchWatcherItem()
+	public async Task TriggerManagerWatcherDispatcher_RoutesToDispatchWatcherItem()
 	{
 		var mgr = CreateTriggerManager();
 		var reg = Register(mgr, WatcherConfig());
@@ -247,8 +247,10 @@ public class WatcherTriggerTests : IDisposable
 
 		var task = dispatcher.DispatchAsync(new WatcherDispatch(subscription, entry, null, "k", new Dictionary<string, string> { ["p"] = "v" }, null), CancellationToken.None);
 
-		_launcher.WaitForLaunchAsync(1).GetAwaiter().GetResult().Request.Parameters.Should().ContainKey("p");
-		task.Should().NotBeNull();
+		var launch = await _launcher.WaitForLaunchAsync(1);
+		launch.Request.Parameters.Should().ContainKey("p");
+		launch.Request.TriggeredBy.Should().Be("watcher:lib");
+		(await task.WaitAsync(TimeSpan.FromSeconds(5))).Should().Be(launch.ExecutionId);
 	}
 
 	[Fact]
