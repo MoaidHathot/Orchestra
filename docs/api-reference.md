@@ -930,7 +930,7 @@ connect-or-spawn probe treats as "no usable host here".
 ```json
 {
   "status": "healthy",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "timestamp": "2026-09-27T10:15:42Z",
   "uptime": "00:12:03.4567890",
   "activeRuns": 1,
