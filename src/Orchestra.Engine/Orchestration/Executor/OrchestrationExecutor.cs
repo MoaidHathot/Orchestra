@@ -479,6 +479,36 @@ public partial class OrchestrationExecutor
 			await SaveInitialCheckpointAsync(runId, orchestration, runStartedAt, effectiveParams, triggerId, CancellationToken.None);
 		}
 
+		// Resolution order for the persisted trigger source:
+		//   1. retryMetadata.TriggeredBy - a retry preserves the original run's source.
+		//   2. triggeredBy - the host's explicit launch context (e.g. "scheduler", "watcher:<name>",
+		//      "orchestration:<parent>", "mcp").
+		//   3. "manual" - final fallback for direct ExecuteAsync calls without context.
+		// Without (2), runs invoked via the data-plane MCP or as child orchestrations were
+		// previously persisted as "manual", losing the parent/lineage information that was
+		// available on the in-memory ChildLaunchRequest.
+		var resolvedTriggeredBy = retryMetadata?.TriggeredBy ?? triggeredBy ?? "manual";
+
+		// Where the run store will persist this run (the folder is created when the record is
+		// saved). Resolved once so the early run-context, the final run-context and the persisted
+		// record all agree.
+		var runDirectory = _runStore.ResolveRunDirectory(orchestration.Name, orchestration.Version, resolvedTriggeredBy, runStartedAt, runId);
+
+		// Tell live viewers about the run as soon as it exists - id, trigger source and the run
+		// directory - instead of only at the end. Resolved variables and accessed environment
+		// variables are not known yet; the complete context is reported again after the run.
+		_reporter.ReportRunContext(new RunContext
+		{
+			RunId = runId,
+			OrchestrationName = orchestration.Name,
+			OrchestrationVersion = orchestration.Version,
+			StartedAt = runStartedAt,
+			TriggeredBy = resolvedTriggeredBy,
+			TriggerId = triggerId,
+			Parameters = effectiveParams,
+			Variables = orchestration.Variables,
+			DataDirectory = runDirectory,
+		});
 		// Restore completed steps from checkpoint if resuming
 		if (checkpoint is not null)
 		{
@@ -1006,16 +1036,6 @@ public partial class OrchestrationExecutor
 		var finalContent = BuildFinalContent(orchestrationResult);
 		await ExecuteOrchestrationHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, runCompletedAt, triggerId, stepRecords, hookExecutions, finalContent, orchestrationResult.Status, CancellationToken.None).ConfigureAwait(false);
 
-		// Determine the run's TriggeredBy. Resolution order:
-		//   1. retryMetadata.TriggeredBy — explicit retry path always wins.
-		//   2. triggeredBy parameter — supplied by the caller (e.g. ChildOrchestrationLauncher
-		//      forwarding ChildLaunchRequest.TriggeredBy such as "orchestration:<parent>" or "mcp").
-		//   3. "manual" — final fallback for direct ExecuteAsync calls without context.
-		// Without (2), runs invoked via the data-plane MCP or as child orchestrations were
-		// previously persisted as "manual", losing the parent/lineage information that was
-		// available on the in-memory ChildLaunchRequest.
-		var resolvedTriggeredBy = retryMetadata?.TriggeredBy ?? triggeredBy ?? "manual";
-
 		var runRecord = new OrchestrationRunRecord
 		{
 			RunId = runId,
@@ -1050,12 +1070,13 @@ public partial class OrchestrationExecutor
 				OrchestrationName = orchestration.Name,
 				OrchestrationVersion = orchestration.Version,
 				StartedAt = runStartedAt,
-				TriggeredBy = retryMetadata?.TriggeredBy ?? triggeredBy ?? (triggerId is not null ? "trigger" : "manual"),
+				TriggeredBy = resolvedTriggeredBy,
 				TriggerId = triggerId,
 				Parameters = effectiveParams,
 				Variables = orchestration.Variables,
 				ResolvedVariables = new Dictionary<string, string>(context.ResolutionTracker.ResolvedVariables),
 				AccessedEnvironmentVariables = new Dictionary<string, string?>(context.ResolutionTracker.AccessedEnvironmentVariables),
+				DataDirectory = runDirectory,
 			},
 		};
 

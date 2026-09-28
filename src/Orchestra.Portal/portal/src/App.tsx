@@ -28,6 +28,7 @@ import type {
   ActorContext,
   ActorStream,
   StepActorStreams,
+  StepProcess,
   ExecutionStateSnapshot,
   StepTiming,
   HistoryListEntry,
@@ -224,6 +225,7 @@ function App(): React.JSX.Element {
     stepTraces: {},
     stepAuditLogs: {},
     stepActorStreams: {},
+    stepProcesses: {},
     streamingContent: '',
     finalResult: '',
     status: 'idle',
@@ -540,6 +542,7 @@ function App(): React.JSX.Element {
     // with an `actor`; older Hosts won't, so we maintain a per-step temporal-
     // scope stack of currently-active sub-agent toolCallIds as a fallback). ──
     const stepActorStreams: Record<string, StepActorStreams> = {};
+    const stepProcesses: Record<string, StepProcess> = {};
     /** Per-step stack of active sub-agent toolCallIds (innermost on top). */
     const subagentScopeByStep: Record<string, string[]> = {};
     /** Per-step lookup: toolCallId → ActorContext (filled on subagent-started). */
@@ -657,9 +660,13 @@ function App(): React.JSX.Element {
       if (!stepEvents[stepName]) {
         stepEvents[stepName] = [];
       }
+      // Prefer the server's emission time: buffered events are replayed to late-attaching
+      // viewers, and stamping those with the receive time made a replayed step-started look
+      // like it happened when the modal was opened.
+      const emittedAt = typeof data.timestamp === 'string' && data.timestamp ? data.timestamp : new Date().toISOString();
       stepEvents[stepName].push({
-        time: new Date().toLocaleTimeString(),
-        timestamp: new Date().toISOString(),
+        time: new Date(emittedAt).toLocaleTimeString(),
+        timestamp: emittedAt,
         type,
         ...data,
       } as StepEvent);
@@ -705,6 +712,10 @@ function App(): React.JSX.Element {
         if (data.status === 'Cancelling') {
           setExecutionModal(prev => ({ ...prev, status: 'cancelling' }));
         }
+        if (typeof data.runDirectory === 'string' && data.runDirectory) {
+          const runDirectory = data.runDirectory;
+          setExecutionModal(prev => ({ ...prev, runDirectory }));
+        }
       } catch { /* ignore */ }
     });
 
@@ -736,6 +747,15 @@ function App(): React.JSX.Element {
             if (step.trace) {
               stepTraces[stepName] = step.trace as unknown as TraceData;
             }
+            if (step.process) {
+              stepProcesses[stepName] = step.process;
+            }
+            // Seed the step's timing from the authoritative snapshot so the elapsed badge is
+            // right even when the step-started event has already rolled off the replay buffer.
+            if (step.startedAt) {
+              const main = ensureMainStream(stepName, step.startedAt);
+              if (step.completedAt && !main.completedAt) main.completedAt = step.completedAt;
+            }
             if (Array.isArray(step.savedFiles) && step.savedFiles.length > 0) {
               stepSavedFiles[stepName] = [...step.savedFiles];
             }
@@ -753,6 +773,8 @@ function App(): React.JSX.Element {
           stepTraces: { ...stepTraces },
           stepSavedFiles: { ...stepSavedFiles },
           stepAuditLogs: { ...stepAuditLogs },
+          stepProcesses: { ...stepProcesses },
+          stepActorStreams: { ...stepActorStreams },
           ...(snapshot.runContext ? { runContext: snapshot.runContext as unknown as RunContext } : {}),
           ...(snapshot.status === 'Cancelling' ? { status: 'cancelling' as const } : {}),
         }));
@@ -781,7 +803,7 @@ function App(): React.JSX.Element {
     eventSource.addEventListener('run-context', (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data) as RunContext;
-        setExecutionModal(prev => ({ ...prev, runContext: data }));
+        setExecutionModal(prev => ({ ...prev, runContext: data, ...(data.dataDirectory ? { runDirectory: data.dataDirectory } : {}) }));
         // Also store in the per-execution map so cards can display it
         if (trackedExecutionId) {
           runContextsRef.current.set(trackedExecutionId, data);
@@ -814,6 +836,18 @@ function App(): React.JSX.Element {
           flushActorStreams();
         }
         addStepEvent(data.stepName, 'step-started', data as Record<string, unknown>);
+      } catch { /* ignore */ }
+    });
+
+    // step-process: the OS process a Script/Command step spawned (pid, command line, inline
+    // script file). Shown in the step's Activity panel so a long-running step is not a black box.
+    eventSource.addEventListener('step-process', (e: MessageEvent) => {
+      try {
+        const data = JSON.parse(e.data) as StepProcess & { stepName?: string };
+        if (!data.stepName) return;
+        stepProcesses[data.stepName] = data;
+        setExecutionModal(prev => ({ ...prev, stepProcesses: { ...stepProcesses } }));
+        addStepEvent(data.stepName, 'step-process', data as unknown as Record<string, unknown>);
       } catch { /* ignore */ }
     });
 
@@ -1347,6 +1381,7 @@ function App(): React.JSX.Element {
       stepTraces: {},
       stepAuditLogs: {},
       stepActorStreams: {},
+      stepProcesses: {},
       streamingContent: '',
       finalResult: '',
       status: 'running',
@@ -1422,6 +1457,7 @@ function App(): React.JSX.Element {
       stepTraces: {},
       stepAuditLogs: {},
       stepActorStreams: {},
+      stepProcesses: {},
       streamingContent: '',
       finalResult: '',
       status: 'running',
@@ -1551,6 +1587,7 @@ function App(): React.JSX.Element {
       stepTraces: {},
       stepAuditLogs: {},
       stepActorStreams: {},
+      stepProcesses: {},
       streamingContent: '',
       finalResult: '',
       status: execution.status === 'Cancelling' ? 'cancelling' : 'running',
@@ -1597,6 +1634,7 @@ function App(): React.JSX.Element {
       stepTraces: {},
       stepAuditLogs: {},
       stepActorStreams: {},
+      stepProcesses: {},
       streamingContent: '',
       finalResult: '',
       status: 'loading',
@@ -1777,6 +1815,7 @@ function App(): React.JSX.Element {
         stepTraces,
         stepAuditLogs,
         stepActorStreams: {},
+        stepProcesses: {},
         stepTimings,
         streamingContent: finalResult,
         finalResult,
@@ -2485,6 +2524,7 @@ function App(): React.JSX.Element {
             stepTraces: {},
             stepAuditLogs: {},
             stepActorStreams: {},
+            stepProcesses: {},
             streamingContent: '',
             finalResult: '',
             status: 'idle',

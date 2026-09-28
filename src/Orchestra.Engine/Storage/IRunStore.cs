@@ -36,4 +36,12 @@ public interface IRunStore
 	/// </summary>
 	/// <returns>True if the record was deleted, false if it was not found.</returns>
 	Task<bool> DeleteRunAsync(string orchestrationName, string runId, CancellationToken cancellationToken = default);
+
+	/// <summary>
+	/// Resolves the directory a run's record will be persisted to, using exactly the same naming
+	/// rule as <see cref="SaveRunAsync"/>, so the path can be surfaced to live viewers while the
+	/// run is still in flight (the directory itself is created when the record is saved).
+	/// Returns <c>null</c> for stores that do not persist runs to a file system.
+	/// </summary>
+	string? ResolveRunDirectory(string orchestrationName, string orchestrationVersion, string triggeredBy, DateTimeOffset startedAt, string runId) => null;
 }

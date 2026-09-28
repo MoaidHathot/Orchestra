@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry, StepActorStreams, HookExecution, ModelInfo, StepTiming } from '../../types';
+import type { Orchestration, StepEvent, TraceData, Step, StepMcpRef, RunContext, AuditLogEntry, StepActorStreams, HookExecution, ModelInfo, StepTiming, StepProcess } from '../../types';
 import { Icons } from '../../icons';
 import RunAnnotationEditor from '../RunAnnotationEditor';
 import { renderExecutionDag } from '../../mermaid';
@@ -9,6 +9,8 @@ import { useFocusTrap } from '../../hooks/useFocusTrap';
 import ZoomableDag from '../ZoomableDag';
 import SubagentCard from '../SubagentCard';
 import StepTimingBadge from '../StepTimingBadge';
+import StepActivityPanel from '../StepActivityPanel';
+import CopyButton from '../CopyButton';
 import MarkdownContent from '../MarkdownContent';
 
 /** Extract a display name from a step MCP reference (string or object). */
@@ -252,6 +254,10 @@ interface Props {
    * sub-agent activity as inline indented cards.
    */
   stepActorStreams: Record<string, StepActorStreams>;
+  /** The OS process each Script/Command step spawned (live runs; from step-process / the snapshot). */
+  stepProcesses?: Record<string, StepProcess>;
+  /** Folder the run is (or will be) persisted to, when the host reported it. */
+  runDirectory?: string | null;
   /**
    * Per-step wall-clock timing for the historical view (startedAt/completedAt/
    * durationSeconds from the run detail endpoint). For live runs this is omitted
@@ -305,6 +311,8 @@ export default function ExecutionModal({
   stepTraces,
   stepAuditLogs,
   stepActorStreams,
+  stepProcesses,
+  runDirectory,
   stepTimings,
   streamingContent,
   finalResult,
@@ -1013,6 +1021,19 @@ export default function ExecutionModal({
                 {retryMode ? `${retryMode.startsWith('from-step:') ? 'Retry from step' : `Retry (${retryMode})`} of ` : 'Retried from '}
                 <code>{retriedFromRunId.slice(0, 8)}</code>
               </button>
+            )}
+            {executionId && (
+              <span className="execution-ref" title="Execution id">
+                <code className="execution-ref-value">{executionId}</code>
+                <CopyButton value={executionId} label="execution id" />
+              </span>
+            )}
+            {runDirectory && (
+              <span className="execution-ref" title={runDirectory}>
+                <Icons.Folder />
+                <code className="execution-ref-value execution-ref-path">{runDirectory}</code>
+                <CopyButton value={runDirectory} label="run folder path" />
+              </span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -1876,6 +1897,18 @@ export default function ExecutionModal({
                               highlight={!!stepModelInfo.requestedModel && stepModelInfo.actualModel !== stepModelInfo.requestedModel}
                             />
                           </div>
+                        )}
+
+                        {selectedStep && (
+                          <StepActivityPanel
+                            stepName={selectedStep}
+                            status={selectedStepStatus}
+                            stepType={selectedStepData?.type}
+                            process={stepProcesses?.[selectedStep]}
+                            startedAt={selectedStepTiming?.startedAt}
+                            timeoutSeconds={selectedStepData?.timeoutSeconds ?? orchestration?.defaultStepTimeoutSeconds}
+                            hasOutput={!!stepActorStreams?.[selectedStep]?.main?.content || !!stepResults?.[selectedStep]}
+                          />
                         )}
 
                         {selectedStepSavedFiles.length > 0 && (

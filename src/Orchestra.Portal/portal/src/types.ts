@@ -27,6 +27,8 @@ export interface Orchestration {
   defaultModel?: string | null;
   /** Orchestration-level timeout; absent when disabled. */
   timeoutSeconds?: number | null;
+  /** Default per-step timeout applied to steps that set none; absent when disabled. */
+  defaultStepTimeoutSeconds?: number | null;
   /** Cap on simultaneously executing steps; absent = host default / unbounded. */
   maxConcurrency?: number | null;
   /** `continue` (default) or `stop` (fail fast on the first failed step). */
@@ -191,6 +193,8 @@ export interface Step {
   // Skill directories
   skillDirectories?: string[];
   handler?: HandlerConfig;
+  /** Per-step timeout; absent/null means the step may run indefinitely. */
+  timeoutSeconds?: number | null;
 }
 
 export interface LoopConfig {
@@ -407,6 +411,8 @@ export interface ActiveExecution {
   totalSteps?: number;
   completedSteps?: number;
   currentStep?: string;
+  /** Folder the run is (or will be) persisted to, reported by the engine at run start. */
+  runDirectory?: string | null;
 }
 
 export interface PendingExecution {
@@ -483,6 +489,10 @@ export interface ExecutionModalState {
    * of merging everything into a single flat <c>streamingContent</c> string.
    */
   stepActorStreams: Record<string, StepActorStreams>;
+  /** The OS process each Script/Command step spawned (from <c>step-process</c> / the snapshot). */
+  stepProcesses: Record<string, StepProcess>;
+  /** Folder the run is (or will be) persisted to, from <c>execution-info</c> / <c>run-context</c>. */
+  runDirectory?: string | null;
   /**
    * Per-step wall-clock timing. Populated for historical runs from the run
    * detail endpoint (which carries authoritative startedAt/completedAt/duration).
@@ -753,6 +763,24 @@ export interface HumanInputResponse {
  * so the Portal can render the DAG and per-step details correctly even when the
  * earliest <c>step-started</c> / <c>step-completed</c> events have been overwritten.
  */
+/**
+ * Payload of the <c>step-process</c> SSE event: the operating-system process a Script or
+ * Command step spawned, reported the moment it starts so a viewer can see what a
+ * long-running step is executing (and locate its inline script file) while it runs.
+ */
+export interface StepProcess {
+  stepName?: string;
+  processId: number;
+  /** Executable that was started (pwsh, cmd.exe, /bin/sh, ...). */
+  fileName: string;
+  /** Display command line (interpreter flags, script path, user arguments / shell wrapper + command). */
+  arguments: string;
+  workingDirectory?: string | null;
+  /** Script file being executed (Script steps only; inline scripts point at a temp orchestra-<guid> file). */
+  scriptPath?: string | null;
+  startedAt: string;
+}
+
 export interface SnapshotStepState {
   stepName: string;
   /**
@@ -770,6 +798,8 @@ export interface SnapshotStepState {
   contentPreview?: string | null;
   /** Raw <c>step-trace</c> JSON payload kept as an opaque object for the trace panel. */
   trace?: unknown;
+  /** The OS process a Script/Command step spawned (<c>step-process</c> payload). */
+  process?: StepProcess | null;
   savedFiles?: string[];
   /** Raw <c>audit-log</c> JSON payloads in arrival order. */
   auditEntries?: unknown[];

@@ -1137,4 +1137,66 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 	}
 
 	#endregion
+
+	#region GET /api/active - run directory for in-flight runs
+
+	[Fact]
+	public async Task GetActive_RunningExecution_ExposesRunDirectoryReportedByEngine()
+	{
+		// Arrange - the engine reports the run directory through run-context at run start; the
+		// active list must surface it so operators can locate an in-flight run on disk.
+		var executionId = $"test-exec-{Guid.NewGuid():N}";
+		var cts = new CancellationTokenSource();
+		var reporter = new SseReporter();
+		var activeInfos = _factory.Services.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>();
+		var startedAt = DateTimeOffset.UtcNow;
+		var expectedDirectory = Path.Combine("X:", "executions", "active-dir-orch", $"active-dir-orch_1.0.0_manual_{startedAt:yyyyMMdd-HHmmss}_{executionId}");
+
+		activeInfos[executionId] = new ActiveExecutionInfo
+		{
+			ExecutionId = executionId,
+			OrchestrationId = "active-dir-orch-id",
+			OrchestrationName = "active-dir-orch",
+			StartedAt = startedAt,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cts,
+			Reporter = reporter,
+			Status = HostExecutionStatus.Running,
+		};
+
+		try
+		{
+			// Before the engine reported anything the field is simply absent/null.
+			var before = await (await _client.GetAsync("/api/active")).Content.ReadFromJsonAsync<JsonElement>();
+			var entryBefore = before.GetProperty("running").EnumerateArray().Single(e => e.GetProperty("executionId").GetString() == executionId);
+			(entryBefore.TryGetProperty("runDirectory", out var dirBefore) && dirBefore.ValueKind == JsonValueKind.String).Should().BeFalse();
+
+			reporter.ReportRunContext(new RunContext
+			{
+				RunId = executionId,
+				OrchestrationName = "active-dir-orch",
+				OrchestrationVersion = "1.0.0",
+				StartedAt = startedAt,
+				TriggeredBy = "manual",
+				DataDirectory = expectedDirectory,
+			});
+
+			// Act
+			var response = await _client.GetAsync("/api/active");
+
+			// Assert
+			response.StatusCode.Should().Be(HttpStatusCode.OK);
+			var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+			var entry = result.GetProperty("running").EnumerateArray().Single(e => e.GetProperty("executionId").GetString() == executionId);
+			entry.GetProperty("runDirectory").GetString().Should().Be(expectedDirectory);
+		}
+		finally
+		{
+			activeInfos.TryRemove(executionId, out _);
+			reporter.Dispose();
+			cts.Dispose();
+		}
+	}
+
+	#endregion
 }

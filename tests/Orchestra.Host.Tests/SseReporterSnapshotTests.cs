@@ -48,6 +48,40 @@ public class SseReporterSnapshotTests : IDisposable
 	}
 
 	[Fact]
+	public void Snapshot_KeepsStepProcess_SoLateAttachersSeeWhatIsExecuting()
+	{
+		// A viewer that attaches after the step-process event was emitted (or after it was
+		// evicted from the replay buffer) must still learn which process the step is running.
+		_reporter.ReportStepStarted("refresh");
+		_reporter.ReportStepProcessStarted("refresh", new StepProcessInfo
+		{
+			ProcessId = 4242,
+			FileName = "pwsh",
+			Arguments = "-NoProfile -File C:\\Temp\\orchestra-x.ps1",
+			ScriptPath = "C:\\Temp\\orchestra-x.ps1",
+			StartedAt = DateTimeOffset.UtcNow,
+		});
+
+		var step = _reporter.GetCurrentSnapshot().Steps["refresh"];
+		step.Status.Should().Be("running");
+		step.Process.Should().NotBeNull();
+		step.Process!.Value.GetProperty("processId").GetInt32().Should().Be(4242);
+		step.Process!.Value.GetProperty("scriptPath").GetString().Should().Be("C:\\Temp\\orchestra-x.ps1");
+
+		// And it round-trips through the serialized snapshot the /state endpoint returns.
+		var json = JsonSerializer.Serialize(_reporter.GetCurrentSnapshot(), new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+		using var doc = JsonDocument.Parse(json);
+		doc.RootElement.GetProperty("steps").GetProperty("refresh").GetProperty("process").GetProperty("fileName").GetString().Should().Be("pwsh");
+	}
+
+	[Fact]
+	public void Snapshot_StepWithoutProcess_HasNullProcess()
+	{
+		_reporter.ReportStepStarted("prompt-step");
+
+		_reporter.GetCurrentSnapshot().Steps["prompt-step"].Process.Should().BeNull();
+	}
+	[Fact]
 	public void Snapshot_ReflectsStepCompletedWithModelAndPreview()
 	{
 		_reporter.ReportStepStarted("fetch");

@@ -649,6 +649,10 @@ public static partial class RunsApi
 					totalSteps = info.TotalSteps,
 					completedSteps = info.CompletedSteps,
 					currentStep = info.CurrentStep,
+					// Where the run will be persisted (reported by the engine at run start; the folder
+					// is created when the run completes). Lets operators locate a run on disk while
+					// it is still in flight.
+					runDirectory = (info.Reporter as SseReporter)?.RunDirectory,
 					// Surface lineage so Portal and external clients can follow active
 					// parent → child chains without needing a separate per-active lookup.
 					// Null for top-level executions (NestingMetadata is null in that case).

@@ -51,6 +51,14 @@ public sealed record StepStateSnapshot
 	[JsonConverter(typeof(RawJsonElementConverter))]
 	public JsonElement? Trace { get; init; }
 
+	/// <summary>
+	/// The operating-system process a Script/Command step spawned (raw <c>step-process</c>
+	/// payload: pid, command line, script path, working directory, startedAt). Present while and
+	/// after the step ran its process; lets a viewer that attaches late still see what is executing.
+	/// </summary>
+	[JsonConverter(typeof(RawJsonElementConverter))]
+	public JsonElement? Process { get; init; }
+
 	public IReadOnlyList<string> SavedFiles { get; init; } = [];
 
 	/// <summary>

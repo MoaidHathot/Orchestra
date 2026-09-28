@@ -427,7 +427,8 @@ public static partial class ExecutionApi
 			startedAt = info.StartedAt,
 			triggeredBy = info.TriggeredBy,
 			status = info.Status,
-			parameters = info.Parameters
+			parameters = info.Parameters,
+			runDirectory = sseReporter.RunDirectory,
 		}, jsonOptions)}\n\n");
 		await httpContext.Response.Body.FlushAsync();
 

@@ -1876,4 +1876,56 @@ public class ScriptStepExecutorTests
 	}
 
 	#endregion
+
+	#region Process reporting
+
+	[Fact]
+	public async Task ExecuteAsync_InlineScript_ReportsSpawnedProcessWithTempScriptPath()
+	{
+		// Arrange - the step-process report is what lets the portal show WHICH process a
+		// long-running step is executing (pid + interpreter command line + the inline script
+		// file the engine materialised) instead of only "step started".
+		var executor = CreateExecutor();
+		var step = CreateScriptStep(shell: "pwsh", script: "Write-Output 'hi'", arguments: ["alpha"]);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded, because: $"output was: {result.Content}");
+		_reporterSubstitute.Received(1).ReportStepProcessStarted("script-step", Arg.Is<StepProcessInfo>(p =>
+			p.ProcessId > 0
+			&& p.FileName.Contains("pwsh", StringComparison.OrdinalIgnoreCase)
+			&& p.Arguments.Contains("-File", StringComparison.Ordinal)
+			&& p.Arguments.Contains("alpha", StringComparison.Ordinal)
+			&& p.ScriptPath != null
+			&& p.ScriptPath.Contains("orchestra-", StringComparison.Ordinal)
+			&& p.ScriptPath.EndsWith(".ps1", StringComparison.Ordinal)
+			&& p.Arguments.Contains(p.ScriptPath, StringComparison.Ordinal)
+			&& p.StartedAt <= DateTimeOffset.UtcNow));
+	}
+
+	[Fact]
+	public async Task ExecuteAsync_ProcessReportThrows_StepStillSucceeds()
+	{
+		// Arrange - process reporting is observability only; a misbehaving reporter must never
+		// turn a healthy step into a failure.
+		var throwingReporter = Substitute.For<IOrchestrationReporter>();
+		throwingReporter
+			.When(r => r.ReportStepProcessStarted(Arg.Any<string>(), Arg.Any<StepProcessInfo>()))
+			.Do(_ => throw new InvalidOperationException("reporter exploded"));
+		var executor = new ScriptStepExecutor(throwingReporter, _logger);
+		var step = CreateScriptStep(shell: "pwsh", script: "Write-Output 'still fine'");
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded, because: $"output was: {result.Content}");
+		result.Content.Should().Contain("still fine");
+	}
+
+	#endregion
 }

@@ -87,6 +87,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		"run-context",
 		"status-changed",
 		"step-started",
+		"step-process",
 		"step-completed",
 		"step-error",
 		"step-cancelled",
@@ -688,6 +689,22 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		OnStepStarted?.Invoke(stepName);
 	}
 
+	public void ReportStepProcessStarted(string stepName, StepProcessInfo process)
+	{
+		// Lets the portal show WHAT a long-running Script/Command step is executing (pid,
+		// resolved command line, inline script file, working directory) while it runs.
+		Write("step-process", new
+		{
+			stepName,
+			processId = process.ProcessId,
+			fileName = process.FileName,
+			arguments = process.Arguments,
+			workingDirectory = process.WorkingDirectory,
+			scriptPath = process.ScriptPath,
+			startedAt = process.StartedAt.ToString("o"),
+		});
+	}
+
 	public void ReportLoopIteration(string checkerStepName, string targetStepName, int iteration, int maxIterations)
 	{
 		Write("loop-iteration", new { checkerStepName, targetStepName, iteration, maxIterations });
@@ -946,8 +963,16 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		});
 	}
 
+	/// <summary>
+	/// Directory the run store will persist (or has persisted) this run to, as reported by the engine
+	/// through <see cref="ReportRunContext"/>. <c>null</c> until the engine reports it or when the run
+	/// store does not use the file system.
+	/// </summary>
+	public string? RunDirectory { get; private set; }
+
 	public void ReportRunContext(RunContext context)
 	{
+		RunDirectory = context.DataDirectory ?? RunDirectory;
 		Write("run-context", new
 		{
 			runId = context.RunId,
@@ -1107,8 +1132,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 
 	private void Write(string eventType, object data)
 	{
-		var json = JsonSerializer.Serialize(data, s_jsonOptions);
-
+		var json = WithServerTimestamp(JsonSerializer.Serialize(data, s_jsonOptions));
 		lock (_lock)
 		{
 			if (_isCompleted || _disposed)
@@ -1152,6 +1176,25 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 				channel.Writer.TryWrite(evt);
 			}
 		}
+	}
+
+	/// <summary>
+	/// Stamps the payload with the server time it was emitted (<c>timestamp</c>, ISO 8601 UTC)
+	/// unless the payload already carries one. Events are buffered and replayed to viewers that
+	/// attach later; without a server timestamp the client could only use its receive time, so a
+	/// replayed <c>step-started</c> showed the attach time instead of when the step really started.
+	/// Every payload is a JSON object, so the property is spliced in textually rather than paying
+	/// for a JsonNode round-trip on the (very frequent) content-delta path.
+	/// </summary>
+	internal static string WithServerTimestamp(string json)
+	{
+		if (json.Length < 2 || json[0] != '{' || json.Contains("\"timestamp\":", StringComparison.Ordinal))
+			return json;
+
+		var stamp = "\"timestamp\":\"" + DateTimeOffset.UtcNow.ToString("o") + "\"";
+		return json.Length == 2
+			? "{" + stamp + "}"
+			: "{" + stamp + "," + json.AsSpan(1).ToString();
 	}
 
 	/// <summary>
@@ -1331,14 +1374,23 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					}
 					break;
 
+				case "step-process":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var stepName = GetString(doc.RootElement, "stepName");
+						if (stepName is null) break;
+						var state = GetOrAddStep(stepName);
+						state.Process = doc.RootElement.Clone();
+					}
+					break;
+
 				case "step-trace":
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
 						if (stepName is null) break;
 						var state = GetOrAddStep(stepName);
-						state.Trace = doc.RootElement.Clone();
-						state.ConfiguredProvider = GetString(doc.RootElement, "configuredProvider") ?? state.ConfiguredProvider;
+						state.Trace = doc.RootElement.Clone();						state.ConfiguredProvider = GetString(doc.RootElement, "configuredProvider") ?? state.ConfiguredProvider;
 						state.ActualProvider = GetString(doc.RootElement, "actualProvider") ?? state.ActualProvider;
 					}
 					break;
@@ -1537,6 +1589,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		public string? Output { get; set; }
 		public string? ContentPreview { get; set; }
 		public JsonElement? Trace { get; set; }
+		public JsonElement? Process { get; set; }
 		public List<string> SavedFiles { get; } = [];
 		public List<JsonElement> AuditEntries { get; } = [];
 		public string? RequestedModel { get; set; }
@@ -1557,6 +1610,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 			Output = Output,
 			ContentPreview = ContentPreview,
 			Trace = Trace,
+			Process = Process,
 			SavedFiles = SavedFiles.ToArray(),
 			AuditEntries = AuditEntries.ToArray(),
 			RequestedModel = RequestedModel,

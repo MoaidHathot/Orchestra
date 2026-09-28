@@ -106,9 +106,15 @@ GET /api/orchestrations/{id}
   ],
   "parameters": ["topic"],
   "trigger": null,
-  "mcps": []
+  "mcps": [],
+  "timeoutSeconds": null,
+  "defaultStepTimeoutSeconds": 600
 }
 ```
+
+> Each step also carries its authored `timeoutSeconds` (`null` = inherits
+> `defaultStepTimeoutSeconds`, `0` = explicitly no timeout) so viewers can show the effective
+> per-step timeout - or warn that a running step has none.
 
 ### Register Orchestrations
 
@@ -214,11 +220,17 @@ Accept: text/event-stream
 event: execution-started
 data: {"executionId":"a1b2c3d4e5f6"}
 
+event: run-context
+data: {"timestamp":"2024-01-15T10:30:00.1234567+00:00","runId":"a1b2c3d4e5f6","orchestrationName":"research-assistant","orchestrationVersion":"1.0.0","startedAt":"2024-01-15T10:30:00.1200000+00:00","triggeredBy":"manual","dataDirectory":"C:\\Users\\me\\AppData\\Local\\OrchestraHost\\executions\\research-assistant\\research-assistant_1.0.0_manual_20240115-103000_a1b2c3d4e5f6"}
+
 event: session-started
-data: {"requestedModel":"claude-opus-4.8","selectedModel":"claude-opus-4.8"}
+data: {"timestamp":"2024-01-15T10:30:00.2000000+00:00","requestedModel":"claude-opus-4.8","selectedModel":"claude-opus-4.8"}
 
 event: step-started
-data: {"stepName":"research"}
+data: {"timestamp":"2024-01-15T10:30:00.3000000+00:00","stepName":"research","startedAt":"2024-01-15T10:30:00.3000000+00:00"}
+
+event: step-process
+data: {"timestamp":"2024-01-15T10:30:00.4000000+00:00","stepName":"fetch","processId":31108,"fileName":"pwsh","arguments":"-NoProfile -File C:\\Users\\me\\AppData\\Local\\Temp\\orchestra-de4996bb.ps1","workingDirectory":null,"scriptPath":"C:\\Users\\me\\AppData\\Local\\Temp\\orchestra-de4996bb.ps1","startedAt":"2024-01-15T10:30:00.4000000+00:00"}
 
 event: content-delta
 data: {"stepName":"research","chunk":"The field of"}
@@ -242,6 +254,26 @@ event: orchestration-done
 data: {"status":"Succeeded","results":{"research":{"status":"Succeeded","contentPreview":"...","error":null}}}
 ```
 
+> **Event timestamps.** Every event emitted by the run's reporter carries a `timestamp`
+> (ISO 8601 UTC, the moment the host emitted it). Buffered events are replayed verbatim to
+> clients that attach later, so a replayed `step-started` still shows when the step really
+> started rather than when the viewer connected. (`execution-started`, `execution-info` and
+> `heartbeat` are written by the endpoint itself and are not replayed.) Examples above omit
+> the field after the first few events for brevity.
+
+> **`run-context`** is emitted twice: once as soon as the run exists (id, version, trigger
+> source, parameters, variables and `dataDirectory` - the folder the run will be persisted
+> to, created when the run completes) and once at the end with the complete context
+> (resolved variables, accessed environment variables).
+
+> **`step-process`** is emitted by Script and Command steps the moment their operating-system
+> process starts: `processId`, the executable (`fileName`) and display `arguments`,
+> `workingDirectory`, and for Script steps the `scriptPath` being executed (inline scripts
+> point at the temporary `orchestra-<guid>.<ext>` file, which exists only while the step
+> runs). It lets a viewer tell what a long-running step is doing instead of only seeing
+> "step started"; the Portal renders it in the step's **Activity** panel together with the
+> effective step timeout and whether any stdout has arrived yet.
+
 ### Attach to Execution
 
 ```http
@@ -249,7 +281,24 @@ GET /api/execution/{executionId}/attach
 Accept: text/event-stream
 ```
 
-Attaches to an existing execution stream. Events that occurred before attachment are replayed.
+Attaches to an existing execution stream. The first frame is `execution-info`
+(`executionId`, `orchestrationId`, `orchestrationName`, `startedAt`, `triggeredBy`, `status`,
+`parameters`, `runDirectory`), followed by the authoritative `execution-snapshot`
+(per-step `status`, `startedAt`, `completedAt`, `output`, `trace`, `process`, ...), then the
+replay of buffered events, then live events.
+
+### Execution State
+
+```http
+GET /api/execution/{executionId}/state
+GET /api/orchestrations/{orchestrationName}/runs/{runId}/state
+```
+
+Returns the same snapshot the attach stream starts with, as plain JSON. Each entry in `steps`
+carries `status`, `startedAt`, `completedAt`, `error`, `output` (capped), `contentPreview`,
+`trace`, `process` (the `step-process` payload, when the step spawned one), `savedFiles`,
+`auditEntries`, model/provider fields, `activeSubagents` and `retryCount`. `404` when the
+execution is not active.
 
 ---
 
@@ -747,6 +796,7 @@ GET /api/active
       "totalSteps": 3,
       "completedSteps": 1,
       "currentStep": "analyze",
+      "runDirectory": "C:\\Users\\me\\AppData\\Local\\OrchestraHost\\executions\\research-assistant\\research-assistant_1.0.0_manual_20240115-103000_a1b2c3d4e5f6",
       "parentExecutionId": "root-exec-id-xyz",
       "parentStepName": "invoke-research",
       "rootExecutionId": "root-exec-id-xyz",
@@ -773,6 +823,10 @@ GET /api/active
 > this run via an `Orchestration` step or via the `invoke_orchestration` MCP tool).
 > Top-level executions omit them. Observers can use these to render "running inside
 > chain X" or to scope the data-plane `list_child_runs` tool to the caller's tree.
+
+> **`runDirectory`** is the folder the run store will persist this run to (reported by the
+> engine at run start; the folder itself is created when the run completes). It is `null` until
+> the engine has reported it or when the run store does not use the file system.
 
 ### Cancel Execution
 

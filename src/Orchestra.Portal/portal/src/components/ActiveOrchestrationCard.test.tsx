@@ -15,6 +15,7 @@ vi.mock('../icons', () => ({
     Play: () => <span data-testid="icon-play" />,
     X: () => <span data-testid="icon-x" />,
     Copy: () => <span data-testid="icon-copy" />,
+    Check: () => <span data-testid="icon-check" />,
     Tag: () => <span data-testid="icon-tag" />,
     Shield: () => <span data-testid="icon-shield" />,
     Ban: () => <span data-testid="icon-ban" />,
@@ -1488,5 +1489,55 @@ describe('ActiveOrchestrationCard – Kebab Run fallback', () => {
     // For running webhook cards, no kebab actions remain (the Copy webhook
     // URL item is also gated on !isRunning), so the kebab is omitted entirely.
     expect(container.querySelector('.card-kebab-button')).toBeNull();
+  });
+});
+
+// ── Execution id / run folder (copyable) ───────────────────────────────────
+
+describe('ActiveOrchestrationCard - Execution id and run folder', () => {
+  it('shows the full execution id with a copy button instead of a truncated prefix', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    const onView = vi.fn();
+    renderCard({
+      type: 'running',
+      onView,
+      execution: { executionId: '96085866766f', status: 'Running', startedAt: new Date().toISOString() },
+    });
+
+    expect(screen.getByText('96085866766f')).toBeInTheDocument();
+    expect(screen.queryByText(/^96085866\.\.\.$/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Copy execution id' }));
+
+    expect(writeText).toHaveBeenCalledWith('96085866766f');
+    // The copy click must not bubble into the card's own click handler.
+    expect(onView).not.toHaveBeenCalled();
+  });
+
+  it('shows the run folder with a copy button when the host reported one', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const runDirectory = 'C:\\Users\\me\\AppData\\Local\\OrchestraHost\\executions\\orch\\orch_1.0.0_scheduler_20260928-215237_96085866766f';
+
+    renderCard({
+      type: 'running',
+      execution: { executionId: '96085866766f', status: 'Running', startedAt: new Date().toISOString(), runDirectory },
+    });
+
+    expect(screen.getByText('Run folder')).toBeInTheDocument();
+    expect(screen.getByText(runDirectory)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy run folder path' }));
+    expect(writeText).toHaveBeenCalledWith(runDirectory);
+  });
+
+  it('omits the run folder row when the host has not reported one', () => {
+    renderCard({
+      type: 'running',
+      execution: { executionId: 'exec-1', status: 'Running', startedAt: new Date().toISOString() },
+    });
+
+    expect(screen.queryByText('Run folder')).not.toBeInTheDocument();
   });
 });

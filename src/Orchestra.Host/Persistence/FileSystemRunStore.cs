@@ -67,6 +67,22 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 	public string RootPath => _rootPath;
 
 	/// <summary>
+	/// Builds the run directory: <c>{root}/{name}/{name}_{version}_{trigger}_{yyyyMMdd-HHmmss}_{id}</c>.
+	/// Shared by <see cref="SaveRunAsync"/> and the live-run path surfaced through
+	/// <see cref="IRunStore.ResolveRunDirectory"/> so both always agree.
+	/// </summary>
+	public string ResolveRunDirectory(string orchestrationName, string orchestrationVersion, string triggeredBy, DateTimeOffset startedAt, string runId)
+	{
+		var sanitizedName = SanitizePath(orchestrationName);
+		var version = SanitizePath(orchestrationVersion);
+		var trigger = SanitizePath(triggeredBy);
+		var timestamp = startedAt.ToString("yyyyMMdd-HHmmss");
+
+		var folderName = $"{sanitizedName}_{version}_{trigger}_{timestamp}_{SanitizePath(runId)}";
+		return Path.Combine(_rootPath, sanitizedName, folderName);
+	}
+
+	/// <summary>
 	/// Saves a run record with the enhanced folder structure.
 	/// </summary>
 	public async Task SaveRunAsync(
@@ -78,14 +94,7 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 		// If we write first and then load, we'd read back what we just wrote.
 		await EnsureIndexLoadedAsync(cancellationToken);
 
-		// Format: {name}_{version}_{trigger}_{timestamp}_{id}
-		var sanitizedName = SanitizePath(record.OrchestrationName);
-		var version = SanitizePath(record.OrchestrationVersion);
-		var trigger = SanitizePath(record.TriggeredBy);
-		var timestamp = record.StartedAt.ToString("yyyyMMdd-HHmmss");
-
-		var folderName = $"{sanitizedName}_{version}_{trigger}_{timestamp}_{SanitizePath(record.RunId)}";
-		var runDir = Path.Combine(_rootPath, sanitizedName, folderName);
+		var runDir = ResolveRunDirectory(record.OrchestrationName, record.OrchestrationVersion, record.TriggeredBy, record.StartedAt, record.RunId);
 
 		// Serialize file writes per orchestration to avoid Windows file locking conflicts
 		// when multiple concurrent saves target the same orchestration directory.

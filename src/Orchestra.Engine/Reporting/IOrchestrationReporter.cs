@@ -185,4 +185,15 @@ public interface IOrchestrationReporter
 	/// <param name="record">The fully-built step record. References the same instance the
 	/// run will eventually persist, so reading via the reporter exposes identical data.</param>
 	void PublishStepRecord(string key, StepRunRecord record) { }
+
+	// ── Step process activity ──
+
+	/// <summary>
+	/// Reports that a Script or Command step has spawned its operating-system process. Fired
+	/// immediately after the process starts so live viewers can show what a long-running step
+	/// is executing (pid, resolved command line, script file, working directory) while it is
+	/// still running. Default implementation is a no-op for back-compat with reporters that
+	/// don't surface process activity.
+	/// </summary>
+	void ReportStepProcessStarted(string stepName, StepProcessInfo process) { }
 }

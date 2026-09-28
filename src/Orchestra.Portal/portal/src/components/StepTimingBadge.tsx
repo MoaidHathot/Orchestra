@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import type { StepTiming } from '../types';
 
 /** Format a millisecond span as a compact human string: 850ms, 12.3s, 2m 5s, 1h 3m. */
-function formatMs(ms: number): string {
+export function formatMs(ms: number): string {
   const clamped = Math.max(0, ms);
   if (clamped < 1000) return `${Math.round(clamped)}ms`;
   if (clamped < 60_000) return `${(clamped / 1000).toFixed(1)}s`;

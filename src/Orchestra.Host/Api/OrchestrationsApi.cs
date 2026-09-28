@@ -58,6 +58,7 @@ public static class OrchestrationsApi
 						// Execution settings (null when the orchestration leaves them to the host defaults)
 						defaultModel = o.Orchestration.DefaultModel,
 						timeoutSeconds = o.Orchestration.TimeoutSeconds is > 0 ? o.Orchestration.TimeoutSeconds : null,
+						defaultStepTimeoutSeconds = o.Orchestration.DefaultStepTimeoutSeconds is > 0 ? o.Orchestration.DefaultStepTimeoutSeconds : null,
 						maxConcurrency = o.Orchestration.MaxConcurrency,
 						onStepFailure = o.Orchestration.OnStepFailure.ToString().ToLowerInvariant(),
 						tags = effectiveTags,
@@ -76,6 +77,8 @@ public static class OrchestrationsApi
 								parameters = s.Parameters,
 								enabled = s.Enabled,
 								when = s.When,
+								// Per-step timeout as authored (null = inherit defaultStepTimeoutSeconds, 0 = explicitly none).
+								timeoutSeconds = s.TimeoutSeconds,
 								condition = s.When,
 								model = ps?.Model,
 								mcps = ps?.Mcps.Select(m => new
@@ -200,6 +203,8 @@ public static class OrchestrationsApi
 					parameters = s.Parameters,
 					enabled = s.Enabled,
 					when = s.When,
+					// Per-step timeout as authored (null = inherit defaultStepTimeoutSeconds, 0 = explicitly none).
+					timeoutSeconds = s.TimeoutSeconds,
 					condition = s.When,
 					model = ps?.Model,
 					reasoningLevel = ps?.ReasoningLevel?.ToString(),
@@ -280,6 +285,7 @@ public static class OrchestrationsApi
 				contentHash = entry.ContentHash,
 				defaultModel = o.DefaultModel,
 				timeoutSeconds = o.TimeoutSeconds is > 0 ? o.TimeoutSeconds : null,
+				defaultStepTimeoutSeconds = o.DefaultStepTimeoutSeconds is > 0 ? o.DefaultStepTimeoutSeconds : null,
 				maxConcurrency = o.MaxConcurrency,
 				onStepFailure = o.OnStepFailure.ToString().ToLowerInvariant(),
 				tags = tagStore.GetEffectiveTags(entry.Id, o.Tags),

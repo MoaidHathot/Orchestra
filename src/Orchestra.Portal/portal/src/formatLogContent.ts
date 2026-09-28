@@ -19,6 +19,12 @@ export interface LogEvent {
 
 export function formatLogContent(log: LogEvent): string {
   if (log.type === 'step-started') return 'Step started';
+  if (log.type === 'step-process') {
+    const pid = typeof log.processId === 'number' ? ` (pid ${log.processId})` : '';
+    const fileName = typeof log.fileName === 'string' ? log.fileName : 'process';
+    const args = typeof log.arguments === 'string' && log.arguments ? ` ${log.arguments}` : '';
+    return `Process started${pid}: ${fileName}${args}`;
+  }
   if (log.type === 'step-completed') {
     if (log.actualModel) return `Completed (${log.actualModel})`;
     if (log.stepType) return `Completed (${log.stepType})`;

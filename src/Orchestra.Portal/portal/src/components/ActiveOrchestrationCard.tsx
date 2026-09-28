@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import CopyButton from './CopyButton';
 import { Icons, getTriggerIcon } from '../icons';
 import { formatTimeAgo, formatTimeUntil, getMatchingProfiles } from '../utils';
 import type { Orchestration, Profile, RunContext } from '../types';
@@ -17,6 +18,8 @@ export interface CardExecution {
   totalSteps?: number;
   completedSteps?: number;
   currentStep?: string;
+  /** Folder the run is (or will be) persisted to; reported by the engine at run start. */
+  runDirectory?: string | null;
   nextFireTime?: string;
   lastFireTime?: string;
   runCount?: number;
@@ -311,11 +314,13 @@ export default function ActiveOrchestrationCard({
             <>
               <div className="card-meta-item">
                 <div className="card-meta-label">Execution ID</div>
-                <div
-                  className="card-meta-value"
-                  style={{ fontFamily: 'monospace', fontSize: '11px' }}
-                >
-                  {execution.executionId?.slice(0, 8)}...
+                <div className="card-meta-value card-meta-value-copyable">
+                  <span className="card-meta-mono" title={execution.executionId}>
+                    {execution.executionId}
+                  </span>
+                  {execution.executionId && (
+                    <CopyButton value={execution.executionId} label="execution id" />
+                  )}
                 </div>
               </div>
               <div className="card-meta-item">
@@ -339,8 +344,19 @@ export default function ActiveOrchestrationCard({
                 </div>
               </div>
 
-              {/* Progress bar for running orchestrations */}
-              {execution.totalSteps != null && execution.totalSteps > 0 && (
+              {execution.runDirectory && (
+                <div className="card-meta-item" style={{ gridColumn: '1 / -1' }}>
+                  <div className="card-meta-label">Run folder</div>
+                  <div className="card-meta-value card-meta-value-copyable">
+                    <span className="card-meta-mono card-meta-path" title={execution.runDirectory}>
+                      {execution.runDirectory}
+                    </span>
+                    <CopyButton value={execution.runDirectory} label="run folder path" />
+                  </div>
+                </div>
+              )}
+
+              {/* Progress bar for running orchestrations */}              {execution.totalSteps != null && execution.totalSteps > 0 && (
                 <div className="card-meta-item" style={{ gridColumn: '1 / -1' }}>
                   <div
                     className="card-meta-label"

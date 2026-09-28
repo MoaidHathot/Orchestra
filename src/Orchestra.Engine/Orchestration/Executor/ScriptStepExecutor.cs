@@ -521,6 +521,8 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs);
 			}
 
+			ReportProcessStarted(step.Name, process, startInfo, workingDirectory, scriptFilePath);
+
 			process.BeginOutputReadLine();
 			process.BeginErrorReadLine();
 
@@ -1240,6 +1242,31 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 	private const int CancelKillGraceSeconds = 5;
 
 	/// <summary>
+	/// Tells the reporter which OS process the step spawned (pid, interpreter command line, script
+	/// file, working directory). Purely observability: a failure here must never affect the step,
+	/// so every exception is logged and swallowed.
+	/// </summary>
+	private void ReportProcessStarted(string stepName, Process process, ProcessStartInfo startInfo, string? workingDirectory, string scriptFilePath)
+	{
+		try
+		{
+			_reporter.ReportStepProcessStarted(stepName, new StepProcessInfo
+			{
+				ProcessId = process.Id,
+				FileName = startInfo.FileName,
+				Arguments = string.Join(' ', startInfo.ArgumentList),
+				WorkingDirectory = workingDirectory,
+				ScriptPath = scriptFilePath,
+				StartedAt = DateTimeOffset.UtcNow,
+			});
+		}
+		catch (Exception ex)
+		{
+			LogProcessReportFailed(stepName, ex);
+		}
+	}
+
+	/// <summary>
 	/// Force-kills <paramref name="process"/> and its entire descendant tree
 	/// (e.g. <c>pwsh</c> -&gt; <c>cmd.exe</c> -&gt; <c>az.cmd</c>) and waits
 	/// briefly for the OS to release the process's file handles. Used on the
@@ -1435,6 +1462,12 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' script output exceeded maxOutputBytes; {DroppedBytes} bytes dropped")]
 	private partial void LogScriptOutputTruncated(string stepName, long droppedBytes);
+
+	[LoggerMessage(
+		EventId = 16,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' could not report its spawned process to the reporter; live process details will be missing")]
+	private partial void LogProcessReportFailed(string stepName, Exception ex);
 
 	#endregion
 }

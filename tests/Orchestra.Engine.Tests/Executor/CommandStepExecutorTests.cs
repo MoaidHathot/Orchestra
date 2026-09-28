@@ -727,4 +727,32 @@ public class CommandStepExecutorTests
 		("pwsh", ["-NoProfile", "-Command", $"Write-Output '{stdoutText}'; [Console]::Error.WriteLine('{stderrText}')"]);
 
 	#endregion
+
+	#region Process reporting
+
+	[Fact]
+	public async Task ExecuteAsync_Command_ReportsSpawnedShellProcess()
+	{
+		// Arrange - Command steps run through the platform shell; the report must name that
+		// shell and carry the resolved command line so a viewer can recognise the process.
+		var executor = CreateExecutor();
+		var (cmd, args) = GetEchoCommand("process-probe");
+		var step = CreateCommandStep(command: cmd, arguments: args);
+		var context = new OrchestrationExecutionContext { OrchestrationInfo = s_defaultInfo, Parameters = new Dictionary<string, string>() };
+
+		// Act
+		var result = await executor.ExecuteAsync(step, context);
+
+		// Assert
+		result.Status.Should().Be(ExecutionStatus.Succeeded, because: $"output was: {result.Content}");
+		var expectedShell = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/sh";
+		_reporter.Received(1).ReportStepProcessStarted("cmd-step", Arg.Is<StepProcessInfo>(p =>
+			p.ProcessId > 0
+			&& p.FileName == expectedShell
+			&& p.Arguments.Contains("process-probe", StringComparison.Ordinal)
+			&& p.ScriptPath == null
+			&& p.StartedAt <= DateTimeOffset.UtcNow));
+	}
+
+	#endregion
 }

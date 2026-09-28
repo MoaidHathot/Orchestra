@@ -55,6 +55,82 @@ public class SseReporterTests : IDisposable
 	}
 
 	[Fact]
+	public void ReportStepProcessStarted_AddsEventWithProcessDetails()
+	{
+		// The step-process event is how a live viewer learns WHAT a long-running Script/Command
+		// step is executing: pid, interpreter command line, the inline script file and cwd.
+		var startedAt = new DateTimeOffset(2026, 9, 28, 21, 52, 37, TimeSpan.Zero);
+		_reporter.ReportStepProcessStarted("refresh", new StepProcessInfo
+		{
+			ProcessId = 31108,
+			FileName = "pwsh",
+			Arguments = "-NoProfile -File C:\\Temp\\orchestra-abc.ps1",
+			WorkingDirectory = "C:\\work",
+			ScriptPath = "C:\\Temp\\orchestra-abc.ps1",
+			StartedAt = startedAt,
+		});
+
+		var events = _reporter.AccumulatedEvents;
+		events.Should().ContainSingle();
+		events[0].Type.Should().Be("step-process");
+		using var doc = System.Text.Json.JsonDocument.Parse(events[0].Data);
+		var root = doc.RootElement;
+		root.GetProperty("stepName").GetString().Should().Be("refresh");
+		root.GetProperty("processId").GetInt32().Should().Be(31108);
+		root.GetProperty("fileName").GetString().Should().Be("pwsh");
+		root.GetProperty("arguments").GetString().Should().Be("-NoProfile -File C:\\Temp\\orchestra-abc.ps1");
+		root.GetProperty("workingDirectory").GetString().Should().Be("C:\\work");
+		root.GetProperty("scriptPath").GetString().Should().Be("C:\\Temp\\orchestra-abc.ps1");
+		root.GetProperty("startedAt").GetString().Should().Be(startedAt.ToString("o"));
+	}
+
+	[Fact]
+	public void EveryEvent_CarriesServerTimestamp_SoReplayedEventsKeepTheirRealTime()
+	{
+		// Buffered events are replayed to viewers that attach later. Without a server-side
+		// timestamp the client could only stamp them with its receive time, which made a
+		// replayed step-started look like it happened when the modal was opened.
+		var before = DateTimeOffset.UtcNow;
+		_reporter.ReportStepStarted("s");
+		_reporter.ReportContentDelta("s", "chunk");
+		_reporter.ReportStepSkipped("t", "because");
+		var after = DateTimeOffset.UtcNow;
+
+		foreach (var evt in _reporter.AccumulatedEvents)
+		{
+			using var doc = System.Text.Json.JsonDocument.Parse(evt.Data);
+			doc.RootElement.TryGetProperty("timestamp", out var ts).Should().BeTrue($"{evt.Type} must carry a timestamp");
+			var stamp = DateTimeOffset.Parse(ts.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+			stamp.Should().BeOnOrAfter(before.AddMilliseconds(-1)).And.BeOnOrBefore(after.AddMilliseconds(1));
+		}
+	}
+
+	[Theory]
+	[InlineData("{\"a\":1}", true)]
+	[InlineData("{}", true)]
+	[InlineData("{\"timestamp\":\"2026-01-01T00:00:00Z\",\"a\":1}", false)]
+	[InlineData("[1,2]", false)]
+	[InlineData("null", false)]
+	public void WithServerTimestamp_OnlyStampsObjectPayloadsWithoutOne(string json, bool expectStamped)
+	{
+		var result = SseReporter.WithServerTimestamp(json);
+
+		using var doc = System.Text.Json.JsonDocument.Parse(result);
+		if (expectStamped)
+		{
+			doc.RootElement.ValueKind.Should().Be(System.Text.Json.JsonValueKind.Object);
+			doc.RootElement.TryGetProperty("timestamp", out var ts).Should().BeTrue();
+			DateTimeOffset.TryParse(ts.GetString(), System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out _).Should().BeTrue();
+			// Original members survive.
+			if (json != "{}")
+				doc.RootElement.GetProperty("a").GetInt32().Should().Be(1);
+		}
+		else
+		{
+			result.Should().Be(json, "payloads that already carry a timestamp, or are not objects, are left untouched");
+		}
+	}
+	[Fact]
 	public void ReportStepStarted_StampsServerSideTimestamp_ForReplayCorrectness()
 	{
 		// Without a server-side timestamp on the SSE event, late-attaching clients fall back

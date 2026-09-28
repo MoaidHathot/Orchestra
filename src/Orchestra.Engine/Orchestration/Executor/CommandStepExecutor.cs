@@ -295,6 +295,8 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				return ExecutionResult.Failed(errorMessage, rawDependencyOutputs);
 			}
 
+			ReportProcessStarted(step.Name, process, startInfo, workingDirectory);
+
 			process.BeginOutputReadLine();
 			process.BeginErrorReadLine();
 
@@ -391,6 +393,30 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 	/// equivalent constant in <see cref="ScriptStepExecutor"/>.
 	/// </summary>
 	private const int CancelKillGraceSeconds = 5;
+
+	/// <summary>
+	/// Tells the reporter which OS process the step spawned (pid, shell command line, working
+	/// directory). Purely observability: a failure here must never affect the step, so every
+	/// exception is logged and swallowed.
+	/// </summary>
+	private void ReportProcessStarted(string stepName, Process process, ProcessStartInfo startInfo, string? workingDirectory)
+	{
+		try
+		{
+			_reporter.ReportStepProcessStarted(stepName, new StepProcessInfo
+			{
+				ProcessId = process.Id,
+				FileName = startInfo.FileName,
+				Arguments = startInfo.ArgumentList.Count > 0 ? string.Join(' ', startInfo.ArgumentList) : startInfo.Arguments,
+				WorkingDirectory = workingDirectory,
+				StartedAt = DateTimeOffset.UtcNow,
+			});
+		}
+		catch (Exception ex)
+		{
+			LogProcessReportFailed(stepName, ex);
+		}
+	}
 
 	/// <summary>
 	/// Force-kills <paramref name="process"/> and its entire descendant tree
@@ -528,6 +554,12 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 		Level = LogLevel.Warning,
 		Message = "Step '{StepName}' failed to kill command process tree on cancel (process may have already exited)")]
 	private partial void LogCommandKillFailed(string stepName, Exception ex);
+
+	[LoggerMessage(
+		EventId = 10,
+		Level = LogLevel.Warning,
+		Message = "Step '{StepName}' could not report its spawned process to the reporter; live process details will be missing")]
+	private partial void LogProcessReportFailed(string stepName, Exception ex);
 
 	[LoggerMessage(
 		EventId = 8,
