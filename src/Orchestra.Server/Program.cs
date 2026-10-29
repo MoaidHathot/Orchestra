@@ -98,7 +98,7 @@ builder.Services.AddOrchestraHostCors();
 // OpenAPI
 builder.Services.AddOpenApi();
 
-var app = builder.Build();
+await using var app = builder.Build();
 
 // Initialize Orchestra Host - loads persisted orchestrations and registers triggers
 await app.Services.InitializeOrchestraHostAsync();

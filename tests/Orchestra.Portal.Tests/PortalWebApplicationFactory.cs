@@ -96,6 +96,7 @@ public class PortalWebApplicationFactory : WebApplicationFactory<Orchestra.Porta
 	}
 
 	public string TestDataPath => _testDataPath;
+	protected string ConfigDirectory => Path.GetDirectoryName(_configPath)!;
 
 	protected override void Dispose(bool disposing)
 	{

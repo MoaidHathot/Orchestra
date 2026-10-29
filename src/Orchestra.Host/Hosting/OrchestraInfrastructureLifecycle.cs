@@ -25,34 +25,18 @@ internal static class OrchestraInfrastructureLifecycle
 		Func<CancellationToken, Task> stopMcpsAsync,
 		CancellationToken cancellationToken = default)
 	{
-		using var startupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-
-		var serviceInitialization = StartLifecycleTask(initializeServicesAsync, startupCts.Token);
-		var mcpInitialization = StartLifecycleTask(initializeMcpsAsync, startupCts.Token);
-
 		try
 		{
-			var firstCompleted = await Task.WhenAny(serviceInitialization, mcpInitialization);
-			if (!firstCompleted.IsCompletedSuccessfully)
-			{
-				startupCts.Cancel();
-			}
-
-			await Task.WhenAll(serviceInitialization, mcpInitialization);
+			cancellationToken.ThrowIfCancellationRequested();
+			// Services can host the MCP endpoints. Finish orphan cleanup, process startup,
+			// and configured readiness checks before opening any backend sessions.
+			await initializeServicesAsync(cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
+			await initializeMcpsAsync(cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
 		}
 		catch
 		{
-			startupCts.Cancel();
-
-			try
-			{
-				await Task.WhenAll(serviceInitialization, mcpInitialization);
-			}
-			catch
-			{
-				// Preserve the original startup failure; cleanup is best-effort here.
-			}
-
 			try
 			{
 				await StopAsync(stopServicesAsync, stopMcpsAsync, CancellationToken.None);
@@ -89,7 +73,7 @@ internal static class OrchestraInfrastructureLifecycle
 	private static Task StartLifecycleTask(
 		Func<CancellationToken, Task> operation,
 		CancellationToken cancellationToken)
-		// Schedule each lifecycle operation independently so synchronous setup work
+		// Schedule each shutdown operation independently so synchronous setup work
 		// before the first await cannot serialize the other operation.
 		=> Task.Run(() => operation(cancellationToken));
 }

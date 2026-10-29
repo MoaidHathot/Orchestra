@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Host.Extensions;
+using Orchestra.Host.Mcp;
 using Orchestra.Host.Registry;
 using Xunit;
 
@@ -105,12 +106,10 @@ public class StartExternalServicesTests : IDisposable
 	}
 
 	[Fact]
-	public async Task StartExternalServicesTrue_LoadsGlobalMcpDefinitions()
+	public async Task StartExternalServicesTrue_UnavailableGlobalMcp_FailsStartup()
 	{
-		// The normal path loads definitions too (and would also start them — not asserted here).
-		var globalMcps = await InitAndGetGlobalMcpsAsync(startExternalServices: true, skipServices: false);
-
-		globalMcps.Should().ContainSingle(m => m.Name == "foo");
+		var initialize = () => InitAndGetGlobalMcpsAsync(startExternalServices: true, skipServices: false);
+		await initialize.Should().ThrowAsync<McpInitializationException>().WithMessage("*foo*");
 	}
 
 	[Fact]

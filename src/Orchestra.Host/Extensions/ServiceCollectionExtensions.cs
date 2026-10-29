@@ -483,9 +483,8 @@ public static class ServiceProviderExtensions
 		// long-running hooks instead of waiting for the full timeout to expire.
 		var shutdownToken = lifetime?.ApplicationStopping ?? CancellationToken.None;
 
-		// Load external service and MCP configuration up front, then initialize both
-		// managers together. There is no explicit dependency model between these files,
-		// so startup should not serialize service readiness and MCP proxy startup.
+		// Load both configurations up front. The lifecycle waits for service readiness
+		// before validating MCP backends, since those services may host the MCP routes.
 		ServiceEntry[] serviceEntries = [];
 		Engine.Mcp[] globalMcps = [];
 

@@ -45,6 +45,8 @@ public static class McpServerExtensions
 				options.DefaultMcpToolCallTimeoutSeconds = mcpConfig.DefaultMcpToolCallTimeoutSeconds.Value;
 			if (mcpConfig.DefaultInvokeOrchestrationSyncTimeoutSeconds.HasValue)
 				options.DefaultInvokeOrchestrationSyncTimeoutSeconds = mcpConfig.DefaultInvokeOrchestrationSyncTimeoutSeconds.Value;
+			if (mcpConfig.BackendStartupTimeoutSeconds.HasValue)
+				options.BackendStartupTimeoutSeconds = mcpConfig.BackendStartupTimeoutSeconds.Value;
 			if (mcpConfig.ToolDiscoveryProbeTimeoutSeconds.HasValue)
 				options.ToolDiscoveryProbeTimeoutSeconds = mcpConfig.ToolDiscoveryProbeTimeoutSeconds.Value;
 			if (mcpConfig.EndpointReachabilityProbeTimeoutSeconds.HasValue)

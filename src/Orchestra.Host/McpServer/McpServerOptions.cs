@@ -101,6 +101,14 @@ public class McpServerOptions
 	public int DefaultInvokeOrchestrationSyncTimeoutSeconds { get; set; } = 300;
 
 	/// <summary>
+	/// Per-backend startup budget, in seconds, for establishing an MCP session and
+	/// discovering tools. Startup fails when a backend errors or exceeds this budget.
+	/// Independent of tool-call and step pre-flight timeouts. Default: 60 seconds.
+	/// Values less than 1 are clamped to 1.
+	/// </summary>
+	public int BackendStartupTimeoutSeconds { get; set; } = 60;
+
+	/// <summary>
 	/// Per-server timeout (seconds) applied by <c>McpManager.GetGlobalMcpToolCountsAsync</c>
 	/// when probing a global MCP's <c>tools/list</c> at step start to detect the
 	/// "Connected but zero tools" failure mode that the Copilot SDK's

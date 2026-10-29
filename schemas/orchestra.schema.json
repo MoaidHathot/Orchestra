@@ -361,6 +361,11 @@
           "minimum": 0,
           "description": "How long a synchronous invoke_orchestration call waits for the child run. Default: 300."
         },
+        "backendStartupTimeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-backend startup budget for MCP connection and tool discovery. A failure aborts host startup. Default: 60."
+        },
         "toolDiscoveryProbeTimeoutSeconds": {
           "type": "integer",
           "minimum": 0,

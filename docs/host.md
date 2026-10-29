@@ -102,6 +102,39 @@ Run **`orchestra doctor`** to see which file is actually in effect and whether i
 > built-in defaults, so none of your settings apply and nothing obvious tells you. `doctor`
 > reports it as a failure for exactly that reason.
 
+### Global MCP startup
+
+Execution hosts, including `orchestra portal`, **validate every global MCP before startup
+completes**. Startup proceeds in this order:
+
+1. Start managed services and wait for their configured readiness checks.
+2. Connect each global MCP and perform `tools/list` where supported. This also checks backends
+   behind another proxy that defers authentication until discovery.
+3. Start serving the portal and executing orchestrations.
+
+A connection or discovery failure aborts startup immediately, names the failing MCP, and
+preserves its transport error or process stderr. Already-open MCP connections and managed
+services are cleaned up. The CLI exits with a nonzero status. Local MCP launchers are started
+serially, avoiding overlapping restores within this host's MCP startup phase.
+
+Each backend gets a separate **60-second** connection-and-discovery budget. Configure it with
+`mcpServer.backendStartupTimeoutSeconds` in `orchestra.json`; this is independent of tool-call
+timeouts and the shorter per-step discovery probe. Increase it when discovery or interactive
+sign-in needs longer; backend/SDK timeouts can still fail earlier. A successful startup cannot
+guarantee a backend stays healthy, so the existing per-step checks still apply.
+
+For startup failures:
+
+- **Connection refused:** start the upstream server and check the configured endpoint's port.
+- **HTTP 404 with `Mcp-Session-Id`:** the upstream rejected the session. Check whether it restarted
+  during initialization and verify its MCP route. Restarting Orchestra creates fresh sessions.
+- **NuGet package file in use:** another process holds the package file. Let its restore finish
+  or stop the stale process, then restart Orchestra.
+
+Unpinned `dnx` commands can resolve different package versions across machines or over time.
+When comparing laptops, compare the effective configuration, .NET SDK, and resolved tool versions
+as well as running processes and cache state. Pin package versions for reproducible launches.
+
 ### Editor support
 
 `orchestra.schema.json` ships with the tool and describes every key with its default. Bind it

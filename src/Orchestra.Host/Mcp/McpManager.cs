@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using ModelContextProtocol;
 using Orchestra.Engine;
 using Orchestra.Host.McpServer;
 
@@ -16,10 +17,10 @@ namespace Orchestra.Host.Mcp;
 
 /// <summary>
 /// Manages globally shared MCP servers defined in the global orchestra.mcp.json file.
-/// Uses the McpProxy SDK to host an in-process proxy that aggregates all global
-/// MCP servers into a single Streamable HTTP endpoint. Steps that reference global
-/// MCPs have their configurations transparently replaced with a single
-/// <see cref="RemoteMcp"/> pointing to the unified proxy endpoint.
+/// Uses the McpProxy SDK to host an in-process proxy with isolated Streamable HTTP
+/// routes for global MCP servers. Backends are validated at startup and shared
+/// across steps. Steps that reference global MCPs have their configurations
+/// transparently replaced with a <see cref="RemoteMcp"/> pointing to that server's route.
 /// </summary>
 public partial class McpManager : IMcpResolver, IAsyncDisposable
 {
@@ -94,13 +95,15 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 	/// <summary>
 	/// Initializes the MCP proxy with the given global MCPs from orchestra.mcp.json.
-	/// Starts an in-process proxy using the McpProxy SDK.
+	/// Connects and validates every backend before starting the proxy. A failed
+	/// backend aborts initialization and disposes all connections already opened.
 	/// </summary>
 	public async Task InitializeAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken = default)
 	{
 		if (_initialized)
 			throw new InvalidOperationException("McpManager has already been initialized.");
 
+		cancellationToken.ThrowIfCancellationRequested();
 		_initialized = true;
 
 		if (globalMcps.Length == 0)
@@ -126,12 +129,18 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		try
 		{
 			await StartProxyAsync(globalMcps, cancellationToken);
+			cancellationToken.ThrowIfCancellationRequested();
 		}
-		catch (Exception)
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
-			// StartProxyAsync is expected to handle its own exceptions internally,
-			// but if a subclass override throws, we handle it here as a fallback.
-			_proxyBaseUrl = null;
+			await StopProxyAsync(CancellationToken.None);
+			throw;
+		}
+		catch (Exception ex)
+		{
+			LogProxyStartFailed(ex);
+			await StopProxyAsync(CancellationToken.None);
+			throw;
 		}
 
 		if (_proxyBaseUrl is not null)
@@ -378,10 +387,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	/// <c>http://localhost:{port}/mcp/{name}</c>, so the count is exactly what
 	/// <c>tools/list</c> would return for the Copilot SDK.
 	/// <para>
-	/// Each probe is bounded by <see cref="ToolProbeTimeout"/>. Names that don't
-	/// match a registered global MCP, or whose probe times out / throws, are mapped
-	/// to <see langword="null"/> so callers can distinguish "0 tools (definite)"
-	/// from "unknown".
+	/// Each probe is bounded by <see cref="ToolProbeTimeout"/>. Unknown names and
+	/// timed-out probes are mapped to <see langword="null"/>. Backend failures return
+	/// 0 so callers can fail fast with the recorded error rather than run without tools.
 	/// </para>
 	/// </remarks>
 	public async Task<IReadOnlyDictionary<string, int?>> GetGlobalMcpToolCountsAsync(
@@ -422,9 +430,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 	/// <summary>
 	/// Probes a single backend's <c>tools/list</c> via the in-process proxy's
-	/// <see cref="SingleServerProxy"/>. Returns the tool count, or <see langword="null"/>
-	/// when the probe fails / times out / the registrar isn't available. Exceptions and
-	/// timeouts are swallowed by design — a probe failure must not abort the step.
+	/// <see cref="SingleServerProxy"/>. Returns the tool count, 0 for backend failures,
+	/// or <see langword="null"/> when the probe times out or the registrar isn't available.
+	/// Caller cancellation propagates.
 	/// </summary>
 	/// <remarks>
 	/// Test-only: <see cref="McpManagerTests"/>' <c>TestableMcpManager</c> overrides
@@ -713,9 +721,12 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	{
 		host = string.Empty;
 		port = 0;
-		if (string.IsNullOrWhiteSpace(endpoint)) return false;
-		if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri)) return false;
-		if (string.IsNullOrEmpty(uri.Host)) return false;
+		if (string.IsNullOrWhiteSpace(endpoint))
+			return false;
+		if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+			return false;
+		if (string.IsNullOrEmpty(uri.Host))
+			return false;
 		host = uri.Host;
 		port = uri.Port > 0 ? uri.Port : uri.Scheme switch
 		{
@@ -775,13 +786,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	/// "0 tools / pending OAuth" generic diagnostic.
 	/// </summary>
 	/// <remarks>
-	/// The proxy's <c>IHealthTracker</c> is populated by McpProxy.Sdk's
-	/// <c>McpClientManager</c> when a deferred connection attempt throws. Older
-	/// SDK versions never recorded auth failures here (the catch block only
-	/// logged), so the tracker returns no <c>LastError</c> for missing fixes —
-	/// rendering a <c>null</c> backend error and our fallback diagnostic message.
-	/// Once the SDK fix ships, the tracker carries the actual auth-failure text
-	/// (e.g. <c>"AADSTS50105: ..."</c>), which propagates here unchanged.
+	/// A real <see cref="HealthTracker"/> is registered during proxy startup because
+	/// the SDK defaults to a no-op tracker. Deferred connection failures populate
+	/// it with the underlying transport, authentication, or stdio stderr diagnostic.
 	/// </remarks>
 	private IHealthTracker? TryGetHealthTracker()
 	{
@@ -859,8 +866,6 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 	protected virtual async Task StartProxyAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken)
 	{
-		try
-		{
 		var builder = WebApplication.CreateSlimBuilder();
 
 		// Suppress Kestrel and hosting logs for the internal proxy
@@ -872,7 +877,11 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		builder.WebHost.UseUrls($"http://127.0.0.1:{_proxyPort}");
 
 		// Configure the MCP proxy with per-server routing.
-		// Each global MCP gets its own isolated route: /mcp/{serverName}
+		// Each global MCP gets its own isolated route: /mcp/{serverName}.
+		// The SDK's eager initializer logs connection failures and continues. Register
+		// deferred backends so ValidateBackendsAsync can explicitly connect them here,
+		// with per-backend deadlines and fail-fast errors, before the proxy is ready.
+		builder.Services.AddSingleton<IHealthTracker, HealthTracker>();
 		builder.Services.AddMcpProxy(proxy =>
 		{
 			proxy.WithServerInfo(
@@ -888,7 +897,8 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 				{
 					case LocalMcp local:
 						var stdioBuilder = proxy.AddStdioServer(mcp.Name, local.Command, local.Arguments)
-							.WithTitle(mcp.Name);
+							.WithTitle(mcp.Name)
+							.WithDeferConnection();
 						// McpProxy.Sdk 1.19's IServerBuilder.WithEnvironment(Dictionary<string,string>)
 						// forwards env vars to the spawned MCP stdio process; mirrors the new
 						// LocalMcp.Environment Orchestra schema field. Skip when no env was
@@ -904,7 +914,8 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 					case RemoteMcp remote:
 						var serverBuilder = proxy.AddHttpServer(mcp.Name, remote.Endpoint)
-							.WithTitle(mcp.Name);
+							.WithTitle(mcp.Name)
+							.WithDeferConnection();
 						if (remote.Headers.Count > 0)
 						{
 							serverBuilder.WithHeaders(remote.Headers.ToDictionary(
@@ -926,8 +937,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 		_proxyApp = builder.Build();
 
-		// Initialize backend connections and configure SingleServerProxy hook pipelines
+		// Register deferred backends and configure SingleServerProxy hook pipelines.
 		await _proxyApp.InitializeMcpProxyAsync(cancellationToken);
+		await ValidateBackendsAsync(_proxyApp, globalMcps, cancellationToken);
 
 		// Map unified endpoint (all tools aggregated) and per-server endpoints
 		// (isolated tools per backend, both MCP Streamable HTTP and REST sub-routes).
@@ -938,12 +950,62 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		await _proxyApp.StartAsync(cancellationToken);
 
 		LogProxyReady(_proxyPort);
-		}
-		catch (Exception ex)
+	}
+
+	private async Task ValidateBackendsAsync(
+		WebApplication app,
+		Engine.Mcp[] globalMcps,
+		CancellationToken cancellationToken)
+	{
+		var clients = app.Services.GetRequiredService<McpClientManager>();
+		var registrar = app.Services.GetRequiredService<IPerServerProxyRegistrar>();
+		var timeoutSeconds = Math.Max(1, _mcpServerOptions.BackendStartupTimeoutSeconds);
+
+		// Connect serially so local package launchers do not race one another during
+		// startup, and stop immediately on the first failure. Services are already ready.
+		foreach (var mcp in globalMcps)
 		{
-			LogProxyStartFailed(ex);
-			_proxyApp = null;
-			_proxyBaseUrl = null;
+			var target = mcp is RemoteMcp remote ? remote.Endpoint : ((LocalMcp)mcp).Command;
+			using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+			timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+			LogBackendValidationStarting(mcp.Name, target, timeoutSeconds);
+
+			try
+			{
+				if (!await clients.EnsureDeferredClientConnectedAsync(mcp.Name, timeout.Token))
+					throw new InvalidOperationException("The backend did not establish an MCP session.");
+
+				// A proxy may accept initialize while its own backend/authentication is
+				// deferred. Discover tools now to validate that extra hop before any run.
+				int? toolCount = null;
+				try
+				{
+					var tools = await registrar.GetProxy(mcp.Name).ListToolsAsync(timeout.Token);
+					toolCount = tools.Tools.Count;
+				}
+				catch (McpProtocolException ex) when (ex.ErrorCode == McpErrorCode.MethodNotFound)
+				{
+					// MCP permits resource/prompt-only servers without a tools/list method.
+					// Their successful handshake is sufficient for startup validation.
+				}
+
+				timeout.Token.ThrowIfCancellationRequested();
+				LogBackendValidated(mcp.Name, toolCount);
+			}
+			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+			{
+				throw;
+			}
+			catch (OperationCanceledException ex) when (timeout.IsCancellationRequested)
+			{
+				throw new McpInitializationException(mcp.Name, target, new TimeoutException(
+					$"Connection and discovery timed out after {timeoutSeconds}s " +
+					"(mcpServer.backendStartupTimeoutSeconds).", ex));
+			}
+			catch (Exception ex)
+			{
+				throw new McpInitializationException(mcp.Name, target, ex);
+			}
 		}
 	}
 
@@ -963,25 +1025,39 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 		_stopped = true;
 
-		if (_proxyApp is not null)
+		await StopProxyAsync(cancellationToken);
+		LogProxyStopped();
+	}
+
+	private async Task StopProxyAsync(CancellationToken cancellationToken)
+	{
+		var app = _proxyApp;
+		_proxyApp = null;
+		_proxyBaseUrl = null;
+		if (app is null)
+			return;
+
+		try
 		{
+			await app.StopAsync(cancellationToken);
+		}
+		catch (Exception ex)
+		{
+			LogProxyStopError(ex.Message);
+		}
+		finally
+		{
+			// Dispose even if stop failed or was cancelled. Losing the app reference
+			// without disposal can orphan stdio children and retain package file locks.
 			try
 			{
-				await _proxyApp.StopAsync(cancellationToken);
-				await _proxyApp.DisposeAsync();
+				await app.DisposeAsync();
 			}
 			catch (Exception ex)
 			{
 				LogProxyStopError(ex.Message);
 			}
-			finally
-			{
-				_proxyApp = null;
-				_proxyBaseUrl = null;
-			}
 		}
-
-		LogProxyStopped();
 	}
 
 	public async ValueTask DisposeAsync()
@@ -1000,7 +1076,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	[LoggerMessage(
 		EventId = 2,
 		Level = LogLevel.Information,
-		Message = "MCP proxy started on port {Port} with {Count} global MCP(s): [{McpNames}]")]
+		Message = "MCP proxy started on port {Port} with {Count} validated global MCP(s): [{McpNames}].")]
 	private partial void LogProxyStarted(int port, int count, string mcpNames);
 
 	[LoggerMessage(
@@ -1009,7 +1085,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		Message = "MCP proxy is ready on port {Port}.")]
 	private partial void LogProxyReady(int port);
 
-	[LoggerMessage(Level = LogLevel.Error, Message = "MCP proxy failed to start. Global MCPs will be unavailable.")]
+	[LoggerMessage(Level = LogLevel.Error, Message = "MCP startup validation failed. Orchestra startup is aborted.")]
 	private partial void LogProxyStartFailed(Exception ex);
 
 	[LoggerMessage(
@@ -1071,7 +1147,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 	[LoggerMessage(
 		EventId = 14,
 		Level = LogLevel.Warning,
-		Message = "MCP tool-discovery probe FAILED for '{McpName}' after {ElapsedMs}ms: {Error}. The step will treat the tool count as unknown and rely on SDK status only.")]
+		Message = "MCP tool-discovery probe FAILED for '{McpName}' after {ElapsedMs}ms: {Error}. The backend is unavailable (0 tools).")]
 	private partial void LogToolProbeFailed(string mcpName, long elapsedMs, string error);
 
 	[LoggerMessage(
@@ -1115,6 +1191,18 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		Level = LogLevel.Warning,
 		Message = "MCP endpoint reachability probe skipped for '{McpName}': the configured endpoint '{Endpoint}' could not be parsed as an absolute URL.")]
 	private partial void LogReachabilityProbeBadEndpoint(string mcpName, string endpoint);
+
+	[LoggerMessage(
+		EventId = 22,
+		Level = LogLevel.Information,
+		Message = "Validating MCP backend '{McpName}' at {Target} (startup timeout: {TimeoutSeconds}s).")]
+	private partial void LogBackendValidationStarting(string mcpName, string target, int timeoutSeconds);
+
+	[LoggerMessage(
+		EventId = 23,
+		Level = LogLevel.Information,
+		Message = "MCP backend '{McpName}' passed startup validation ({ToolCount} tools).")]
+	private partial void LogBackendValidated(string mcpName, int? toolCount);
 
 	#endregion
 }

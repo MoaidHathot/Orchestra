@@ -89,7 +89,7 @@ internal static class PortalApp
 		builder.Services.AddOrchestraHostCors();
 		builder.Services.AddSingleton<PortalStatusService>();
 
-		var app = builder.Build();
+		await using var app = builder.Build();
 
 		await app.Services.InitializeOrchestraHostAsync();
 

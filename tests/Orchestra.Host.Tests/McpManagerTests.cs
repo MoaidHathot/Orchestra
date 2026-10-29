@@ -508,7 +508,8 @@ public class McpManagerTests : IAsyncLifetime
 		// Arrange — use a manager whose proxy fails to start
 		await using var failingManager = new FailingProxyMcpManager();
 		var globalMcp = CreateLocalMcp("server1");
-		await failingManager.InitializeAsync([globalMcp]);
+		await failingManager.Awaiting(m => m.InitializeAsync([globalMcp]))
+			.Should().ThrowAsync<InvalidOperationException>().WithMessage("Simulated proxy startup failure");
 
 		// Act — the proxy failed, so Resolve should return original MCPs
 		var input = new Engine.Mcp[] { globalMcp };
@@ -524,7 +525,8 @@ public class McpManagerTests : IAsyncLifetime
 		// Arrange
 		await using var failingManager = new FailingProxyMcpManager();
 		var globalMcp = CreateLocalMcp("server1");
-		await failingManager.InitializeAsync([globalMcp]);
+		await failingManager.Awaiting(m => m.InitializeAsync([globalMcp]))
+			.Should().ThrowAsync<InvalidOperationException>().WithMessage("Simulated proxy startup failure");
 
 		// Assert
 		failingManager.IsRunning.Should().BeFalse();
@@ -1746,7 +1748,8 @@ public class McpManagerTests : IAsyncLifetime
 		{
 			ProbeCallCount++;
 			ProbedRemotes.Add((mcpName, endpoint, timeout));
-			if (_probeException is not null) throw _probeException;
+			if (_probeException is not null)
+				throw _probeException;
 			if (_remoteResults is not null && _remoteResults.TryGetValue(mcpName, out var result))
 				return Task.FromResult(result);
 			return Task.FromResult(new McpEndpointReachability(

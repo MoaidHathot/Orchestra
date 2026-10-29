@@ -1139,6 +1139,13 @@ public class McpServerConfig
 	public int? DefaultInvokeOrchestrationSyncTimeoutSeconds { get; set; }
 
 	/// <summary>
+	/// Per-backend budget for startup connection and tool discovery. A failure aborts
+	/// host startup. Maps to <see cref="McpServerOptions.BackendStartupTimeoutSeconds"/>.
+	/// Default: 60 seconds. Values less than 1 are clamped to 1.
+	/// </summary>
+	public int? BackendStartupTimeoutSeconds { get; set; }
+
+	/// <summary>
 	/// Per-server timeout (seconds) applied by <c>McpManager.GetGlobalMcpToolCountsAsync</c>
 	/// when probing a required MCP's <c>tools/list</c> at step start. Raise this above the
 	/// default for backends that use deferred-connection / interactive-OAuth: the first

@@ -48,7 +48,8 @@ internal sealed class OrchestraHostSession : IAsyncDisposable
 		{
 			// Best-effort graceful stop: a throwaway instance is discarded, so a teardown hiccup
 			// must not surface as a command failure.
-			try { await App.StopAsync(); }
+			try
+			{ await App.StopAsync(); }
 			catch { /* ignore */ }
 			await App.DisposeAsync();
 		}
@@ -260,22 +261,30 @@ internal static class OrchestraHostSessionFactory
 
 		var app = builder.Build();
 
-		await app.Services.InitializeOrchestraHostAsync();
-
-		app.UseOrchestraHostProblemDetails();
-		app.MapOrchestraHostEndpoints();
-		app.MapOrchestraMcpEndpoints();
-
-		await app.StartAsync();
-		request.OnHostStarted?.Invoke(app.Services);
-
-		return new OrchestraHostSession
+		try
 		{
-			Client = new OrchestraClient(url),
-			BaseUrl = url,
-			Spawned = true,
-			App = app,
-		};
+			await app.Services.InitializeOrchestraHostAsync();
+
+			app.UseOrchestraHostProblemDetails();
+			app.MapOrchestraHostEndpoints();
+			app.MapOrchestraMcpEndpoints();
+
+			await app.StartAsync();
+			request.OnHostStarted?.Invoke(app.Services);
+
+			return new OrchestraHostSession
+			{
+				Client = new OrchestraClient(url),
+				BaseUrl = url,
+				Spawned = true,
+				App = app,
+			};
+		}
+		catch
+		{
+			await app.DisposeAsync();
+			throw;
+		}
 	}
 
 	/// <summary>
