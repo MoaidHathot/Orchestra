@@ -67,6 +67,8 @@ steps:
 | `defaultReasoningLevel` | `string` | No | `null` | Default reasoning effort for all Prompt steps that set no `reasoningLevel`. Same values as `reasoningLevel`. Resolution per step: step `reasoningLevel` -> `defaultReasoningLevel` -> host `defaultReasoningLevel` (`orchestra.json`) -> provider/model default. |
 | `agentPool` | `AgentPoolConfig` | No | Provider defaults | Provider worker-pool capacity request for prompt execution. Providers map instances to their own resources, such as Copilot CLI clients. |
 | `defaultSystemPromptMode` | `string` | No | `null` | Default system prompt mode for all Prompt steps. Values: `"append"`, `"replace"`, or `"customize"`. |
+| `defaultEnableConfigDiscovery` | `bool` | No | `null` | Copilot ambient configuration discovery default. Step overrides orchestration, then provider host default (false). |
+| `defaultEnableOnDemandInstructionDiscovery` | `bool` | No | `null` | Copilot nested-instruction discovery after file reads. |
 | `defaultRetryPolicy` | `RetryPolicy` | No | `null` | Default retry policy applied to all steps unless overridden at the step level. |
 | `defaultStepTimeoutSeconds` | `int` | No | `null` | Default per-step timeout in seconds. Individual steps can override this. |
 | `timeoutSeconds` | `int` | No | `0` (disabled) | Maximum time in seconds for the entire orchestration run. `0` or `null` means no orchestration-level timeout. |
@@ -313,9 +315,9 @@ Sends a prompt to an LLM and captures the response as output. Supports input/out
 | `reasoningLevel` | `string` | No | from `defaultReasoningLevel` | Reasoning effort requested from the model (forwarded as the provider's `reasoning_effort`). Values: `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"` (case-insensitive). `xhigh`/`max` are only honoured by models that advertise them (GPT-5.x/6 and Claude Opus 4.7+); older models stop at `high`. Falls back to the orchestration's `defaultReasoningLevel`, then the host's, then the provider default. |
 | `reasoningSummary` | `string` | No | `null` | Verbosity of the model's reasoning summary. Values: `"none"`, `"concise"`, `"detailed"`. Opt-in. |
 | `contextTier` | `string` | No | `null` | Context-window tier. `"default"` or `"longContext"` (opts into the model's extended context window where supported). Opt-in. |
-| `workingDirectory` | `string` | No | `null` | Working directory for the agent's shell/file tools and config discovery (custom instructions, `.github/agents`, `.github/mcp.json`). Template-resolved (`{{param.*}}`/`{{env.*}}`/`{{vars.*}}`) and validated to exist at run time. |
+| `workingDirectory` | `string` | No | Definition directory | Working directory for tools and discovery. Relative overrides resolve from the orchestration file directory; in-memory definitions without source metadata inherit process CWD. Template-resolved and validated to exist. |
 | `githubToken` | `string` | No | `null` | GitHub token for this step's Copilot session, overriding the host default. Prefer a template reference such as `{{env.GITHUB_TOKEN}}`; never logged. Falls back to `orchestra.json` `copilot.gitHubToken`/`useLoggedInUser`, then the CLI's stored credentials. |
-| `humanInput` | `bool` | No | `false` | When `true`, the agent's elicitation and exit-plan-mode (plan approval) requests are routed to Orchestra's human-in-the-loop instead of resolving autonomously. See [Human-in-the-Loop](#human-in-the-loop). |
+| `humanInput` | `bool` | No | `false` | True selects interactive guidance and native questions/elicitation. False selects non-interactive guidance. The legacy request_user_input opt-in implies true only when this field is omitted. See [Human-in-the-Loop](#human-in-the-loop). |
 | `permissionPolicy` | `PermissionPolicy` | No | `null` | Controls how the agent's permission requests (shell/file/url/mcp/…) are resolved. See [Permission Policy](#permission-policy). Overrides `defaultPermissionPolicy`; omit for auto-approve. |
 | `sandbox` | `SandboxPolicy` | No | `null` | Opt-in filesystem/network sandbox for this step's tool access. See [Sandbox](#sandbox). Overrides `defaultSandboxPolicy`; omit for no sandbox. |
 | `systemPromptMode` | `string` | No | `null` | How the system prompt interacts with the SDK's built-in prompts. `"append"` adds to them; `"replace"` removes them; `"customize"` selectively overrides individual sections. |
@@ -326,13 +328,26 @@ Sends a prompt to an LLM and captures the response as output. Supports input/out
 | `loop` | `LoopConfig` | No | `null` | Loop/checker configuration for iterative refinement. |
 | `subagents` | `Subagent[]` | No | `[]` | Subagent definitions for multi-agent delegation. |
 | `skillDirectories` | `string[]` | No | `[]` | Directories containing `SKILL.md` files that provide additional context/instructions. |
-| `enableTools` | `string[]` | No | `null` | Opt-in engine tool names this Prompt step grants the agent access to. Currently supports `"request_user_input"` (the LLM-decided human-in-the-loop tool). Falls back to the orchestration's `defaultEnableTools` when null. Always-on tools (`orchestra_set_status`, `orchestra_complete`, file save/read) are unaffected. |
+| `instructionDirectories` | `string[]` | No | `null` | Explicit instruction directories, relative to the definition file. Copilot omission uses its legacy skill-directory fallback; [] disables it. OpenCode V2 omission adds none; explicit directories load Markdown files recursively. |
+| `enableConfigDiscovery` | `bool` | No | `null` | Copilot ambient configuration discovery from the agent working directory; also discovers supported agents, MCPs and plugins. |
+| `enableOnDemandInstructionDiscovery` | `bool` | No | `null` | Copilot nested instruction discovery following file reads. Separate from root instructions. |
+| `responseSchema` | `object` | No | `null` | JSON Schema contract for final successful output and output handlers. Copilot: native constrained generation. OpenCode V2: schema guidance. Both: strict engine validation. Completion-tool filtering is internal; authors simply request fields and consume them downstream. |
+| `executionPolicy` | `object` | No | `standard` | `mode`: `standard` or `autopilot`; `maxContinues`: non-negative integer, default 5. Autopilot is native in Copilot and Orchestra-managed in OpenCode V2. Exhaustion fails the step. Counts continuations, not tool calls; timeout/cancellation still apply. Scoped to one Prompt session, separate from DAG loops and retries. |
+| `enableTools` | `string[]` | No | `null` | Opt-in engine tool names, currently `"request_user_input"`. Falls back to `defaultEnableTools`. Structured/autopilot steps internally omit immediate-stop tools (`orchestra_set_status`, `orchestra_complete`); file tools remain available. |
 
 > **\*Mutual exclusion rules:**
 > - Exactly one of `systemPrompt` or `systemPromptFile` is required.
 > - Exactly one of `userPrompt` or `userPromptFile` is required.
 > - `inputHandlerPrompt` and `inputHandlerPromptFile` are mutually exclusive.
 > - `outputHandlerPrompt` and `outputHandlerPromptFile` are mutually exclusive.
+
+For JSON steps, authors set `responseSchema` and describe the desired fields. Do not add
+internal completion markers or special stop-tool instructions. Branch downstream with the
+validated data. OpenCode V2 accepts ambient/nested discovery `true`, but rejects explicit or
+inherited `false`; Copilot supports both values independently.
+OpenCode autopilot uses its existing continuation budget to correct invalid JSON before
+completion. Subagent-specific MCPs/skills and `infer: false` require Copilot. See
+[provider-controls.md](provider-controls.md) for the full authoring contract and examples.
 
 #### System Prompt Section Overrides
 
@@ -449,7 +464,7 @@ These per-step Copilot controls are all opt-in; omit a field to inherit the host
 
 #### Human-in-the-Loop
 
-`humanInput: true` routes the agent's **elicitation** and **exit-plan-mode (plan approval)** requests to Orchestra's human-in-the-loop — the same pending-input surface as the `Approval` step and `orchestra_request_user_input` (operators answer via `POST /api/orchestrations/{name}/runs/{runId}/respond`). Like the engine-tool variant, these waits are session-bound and do **not** survive a host restart. Default (off) resolves them autonomously. Pairs naturally with `permissionPolicy: requireHumanApproval`.
+`humanInput: true` selects interactive guidance and routes native `ask_user`, elicitation and plan approval to Orchestra's human-input surface (operators answer via `POST /api/orchestrations/{name}/runs/{runId}/respond`). False/omitted selects non-interactive guidance, except that the existing request_user_input opt-in retains interactive behavior when this field is omitted. Explicit false overrides the opt-in. These waits are session-bound and do not survive a host restart. Copilot memory and cross-session history remain disabled; per-session conversation and SQL todos remain available.
 
 #### Permission Policy
 
@@ -535,7 +550,7 @@ Do not use `Command` for shell snippets or wrappers such as `pwsh -Command`, `po
 |---|---|---|---|---|
 | `command` | `string` | **Yes** | -- | Executable to run (e.g., `"dotnet"`, `"python"`, `"git"`). |
 | `arguments` | `string[]` | No | `[]` | Command-line arguments. Each element supports template expressions. |
-| `workingDirectory` | `string` | No | Current directory | Working directory for the process. |
+| `workingDirectory` | `string` | No | Definition directory | Working directory for the process. Relative overrides use the orchestration file directory. |
 | `environment` | `object` | No | `{}` | Environment variables to set. Values support template expressions. |
 | `includeStdErr` | `bool` | No | `false` | Whether to append stderr to the captured output. |
 | `stdin` | `string` | No | `null` | Content to pipe to the process's standard input. |
@@ -555,7 +570,7 @@ Executes an inline or file-based script via a shell interpreter. The script's st
 | `script` | `string` | **Yes*** | -- | Inline script content. Mutually exclusive with `scriptFile`. |
 | `scriptFile` | `string` | **Yes*** | -- | Path to an external script file. Relative paths resolve from the orchestration file's directory. |
 | `arguments` | `string[]` | No | `[]` | Arguments passed to the script. |
-| `workingDirectory` | `string` | No | Current directory | Working directory for the process. |
+| `workingDirectory` | `string` | No | Definition directory | Working directory for the process. Relative overrides use the orchestration file directory. |
 | `environment` | `object` | No | `{}` | Environment variables to set. |
 | `includeStdErr` | `bool` | No | `false` | Whether to append stderr to the captured output. |
 | `stdin` | `string` | No | `null` | Content to pipe to the process's standard input. |

@@ -104,6 +104,47 @@ public class OrchestrationsApiTests : IDisposable
 		return path;
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task PromptControls_AppearInDetailAndListMetadata(bool list)
+	{
+		var path = CreateOrchestrationFile("prompt-controls", JsonSerializer.Serialize(new
+		{
+			name = "prompt-controls",
+			description = "Metadata preserves agent controls",
+			defaultModel = "test-model",
+			defaultEnableConfigDiscovery = true,
+			defaultEnableOnDemandInstructionDiscovery = true,
+			steps = new[] { new
+			{
+				name = "task", type = "Prompt", systemPrompt = "", userPrompt = "hello",
+				enableConfigDiscovery = false, enableOnDemandInstructionDiscovery = true, humanInput = false,
+				workingDirectory = _tempDir, instructionDirectories = new[] { "./instructions" },
+				responseSchema = JsonSerializer.Deserialize<JsonElement>("""{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"]}"""),
+				executionPolicy = new { mode = "autopilot", maxContinues = 2 },
+			} },
+		}));
+		var registry = new OrchestrationRegistry(_persistPath, NullLoggerFactory.Instance.CreateLogger<OrchestrationRegistry>());
+		var entry = registry.Register(path, null, persist: false);
+		using var host = CreateTestHost(registry);
+		using var response = await host.GetTestClient().GetAsync(list ? "/api/orchestrations" : $"/api/orchestrations/{entry.Id}");
+		response.StatusCode.Should().Be(HttpStatusCode.OK);
+		using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+		var document = list ? json.RootElement.GetProperty("orchestrations")[0] : json.RootElement;
+		document.GetProperty("defaultEnableConfigDiscovery").GetBoolean().Should().BeTrue();
+		document.GetProperty("defaultEnableOnDemandInstructionDiscovery").GetBoolean().Should().BeTrue();
+		var step = document.GetProperty("steps")[0];
+		step.GetProperty("enableConfigDiscovery").GetBoolean().Should().BeFalse();
+		step.GetProperty("enableOnDemandInstructionDiscovery").GetBoolean().Should().BeTrue();
+		step.GetProperty("humanInput").GetBoolean().Should().BeFalse();
+		step.GetProperty("workingDirectory").GetString().Should().Be(_tempDir);
+		step.GetProperty("instructionDirectories")[0].GetString().Should().Be(Path.Combine(_tempDir, "instructions"));
+		step.GetProperty("responseSchema").GetProperty("properties").GetProperty("count").GetProperty("type").GetString().Should().Be("integer");
+		step.GetProperty("executionPolicy").GetProperty("mode").GetString().Should().Be("autopilot");
+		step.GetProperty("executionPolicy").GetProperty("maxContinues").GetInt32().Should().Be(2);
+	}
+
 	[Fact]
 	public async Task GetOrchestrationById_WithInvalidDependency_ReturnsOrchestrationWithValidationErrors()
 	{

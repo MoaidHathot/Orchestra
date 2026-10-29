@@ -57,6 +57,8 @@ public static class OrchestrationsApi
 						contentHash = o.ContentHash,
 						// Execution settings (null when the orchestration leaves them to the host defaults)
 						defaultModel = o.Orchestration.DefaultModel,
+						defaultEnableConfigDiscovery = o.Orchestration.DefaultEnableConfigDiscovery,
+						defaultEnableOnDemandInstructionDiscovery = o.Orchestration.DefaultEnableOnDemandInstructionDiscovery,
 						timeoutSeconds = o.Orchestration.TimeoutSeconds is > 0 ? o.Orchestration.TimeoutSeconds : null,
 						defaultStepTimeoutSeconds = o.Orchestration.DefaultStepTimeoutSeconds is > 0 ? o.Orchestration.DefaultStepTimeoutSeconds : null,
 						maxConcurrency = o.Orchestration.MaxConcurrency,
@@ -99,6 +101,13 @@ public static class OrchestrationsApi
 									description = sa.Description
 								}).ToArray() : null,
 								skillDirectories = ps?.SkillDirectories.Length > 0 ? ps.SkillDirectories : null,
+								instructionDirectories = ps?.InstructionDirectories,
+								enableConfigDiscovery = ps?.EnableConfigDiscovery,
+								enableOnDemandInstructionDiscovery = ps?.EnableOnDemandInstructionDiscovery,
+								humanInput = ps?.HumanInput,
+								responseSchema = ps?.ResponseSchema,
+								executionPolicy = ps?.ExecutionPolicy is { } policy ? new { mode = policy.Mode.ToString().ToLowerInvariant(), maxContinues = policy.MaxContinues } : null,
+								workingDirectory = ps?.WorkingDirectory ?? cs?.WorkingDirectory,
 								// Http step fields
 								method = hs?.Method,
 								url = hs?.Url,
@@ -134,9 +143,9 @@ public static class OrchestrationsApi
 						runCount = trigger?.RunCount ?? 0,
 						lastExecutionId = trigger?.LastExecutionId,
 						hasInlineMcps = o.Orchestration.Mcps.Length > 0,
-					mcps = o.Orchestration.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray(),
-					hooks = BuildCombinedHookInfo(hostOptions.Hooks, o.Orchestration.Hooks),
-					models = o.Orchestration.Steps
+						mcps = o.Orchestration.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray(),
+						hooks = BuildCombinedHookInfo(hostOptions.Hooks, o.Orchestration.Hooks),
+						models = o.Orchestration.Steps
 						.OfType<PromptOrchestrationStep>()
 							.Select(s => s.Model)
 							.Where(m => !string.IsNullOrEmpty(m))
@@ -238,6 +247,12 @@ public static class OrchestrationsApi
 						infer = sa.Infer
 					}).ToArray() : null,
 					skillDirectories = ps?.SkillDirectories.Length > 0 ? ps.SkillDirectories : null,
+					instructionDirectories = ps?.InstructionDirectories,
+					enableConfigDiscovery = ps?.EnableConfigDiscovery,
+					enableOnDemandInstructionDiscovery = ps?.EnableOnDemandInstructionDiscovery,
+					humanInput = ps?.HumanInput,
+					responseSchema = ps?.ResponseSchema,
+					executionPolicy = ps?.ExecutionPolicy is { } policy ? new { mode = policy.Mode.ToString().ToLowerInvariant(), maxContinues = policy.MaxContinues } : null,
 					// Http step fields
 					method = hs?.Method,
 					url = hs?.Url,
@@ -247,7 +262,7 @@ public static class OrchestrationsApi
 					// Command step fields
 					command = cs?.Command,
 					arguments = cs?.Arguments.Length > 0 ? cs.Arguments : null,
-					workingDirectory = cs?.WorkingDirectory,
+					workingDirectory = ps?.WorkingDirectory ?? cs?.WorkingDirectory,
 					// Output cap shared by Command / Script / Http (null = engine default 10 MiB, 0 = no cap)
 					maxOutputBytes = (s as CommandOrchestrationStep)?.MaxOutputBytes
 						?? (s as ScriptOrchestrationStep)?.MaxOutputBytes
@@ -284,6 +299,8 @@ public static class OrchestrationsApi
 				version = o.Version,
 				contentHash = entry.ContentHash,
 				defaultModel = o.DefaultModel,
+				defaultEnableConfigDiscovery = o.DefaultEnableConfigDiscovery,
+				defaultEnableOnDemandInstructionDiscovery = o.DefaultEnableOnDemandInstructionDiscovery,
 				timeoutSeconds = o.TimeoutSeconds is > 0 ? o.TimeoutSeconds : null,
 				defaultStepTimeoutSeconds = o.DefaultStepTimeoutSeconds is > 0 ? o.DefaultStepTimeoutSeconds : null,
 				maxConcurrency = o.MaxConcurrency,
@@ -345,18 +362,18 @@ public static class OrchestrationsApi
 						name = entry.Orchestration.Name
 					});
 
-				// Register trigger for this orchestration
-				if (entry.Orchestration.Trigger.Enabled)
-				{
-					triggerManager.RegisterTrigger(
-						entry.Path,
-						entry.Orchestration.Trigger,
-						null,
-						TriggerSource.Json,
-						entry.Id,
-						entry.Orchestration,
-						entry.SourcePath);
-				}
+					// Register trigger for this orchestration
+					if (entry.Orchestration.Trigger.Enabled)
+					{
+						triggerManager.RegisterTrigger(
+							entry.Path,
+							entry.Orchestration.Trigger,
+							null,
+							TriggerSource.Json,
+							entry.Id,
+							entry.Orchestration,
+							entry.SourcePath);
+					}
 				}
 				catch (Exception ex)
 				{
@@ -377,18 +394,18 @@ public static class OrchestrationsApi
 
 				var entry = registry.RegisterFromJson(request.Json);
 
-			// Register trigger for this orchestration
-			if (entry.Orchestration.Trigger.Enabled)
-			{
-				triggerManager.RegisterTrigger(
-					entry.Path,
-					entry.Orchestration.Trigger,
-					null,
-					TriggerSource.Json,
-					entry.Id,
-					entry.Orchestration,
-					entry.SourcePath);
-			}
+				// Register trigger for this orchestration
+				if (entry.Orchestration.Trigger.Enabled)
+				{
+					triggerManager.RegisterTrigger(
+						entry.Path,
+						entry.Orchestration.Trigger,
+						null,
+						TriggerSource.Json,
+						entry.Id,
+						entry.Orchestration,
+						entry.SourcePath);
+				}
 
 				return Results.Json(new
 				{
@@ -751,7 +768,8 @@ public static class OrchestrationsApi
 
 		void Scan(string? text)
 		{
-			if (string.IsNullOrEmpty(text)) return;
+			if (string.IsNullOrEmpty(text))
+				return;
 			foreach (Match m in EnvExpressionPattern.Matches(text))
 				envVars.Add(m.Groups[1].Value);
 		}
@@ -763,11 +781,13 @@ public static class OrchestrationsApi
 		// Scan MCP endpoints/commands
 		foreach (var mcp in orchestration.Mcps)
 		{
-			if (mcp is RemoteMcp remote) Scan(remote.Endpoint);
+			if (mcp is RemoteMcp remote)
+				Scan(remote.Endpoint);
 			if (mcp is LocalMcp local)
 			{
 				Scan(local.Command);
-				foreach (var arg in local.Arguments) Scan(arg);
+				foreach (var arg in local.Arguments)
+					Scan(arg);
 			}
 		}
 
@@ -783,11 +803,13 @@ public static class OrchestrationsApi
 				Scan(ps.Model);
 				foreach (var mcp in ps.Mcps)
 				{
-					if (mcp is RemoteMcp remote) Scan(remote.Endpoint);
+					if (mcp is RemoteMcp remote)
+						Scan(remote.Endpoint);
 					if (mcp is LocalMcp local)
 					{
 						Scan(local.Command);
-						foreach (var arg in local.Arguments) Scan(arg);
+						foreach (var arg in local.Arguments)
+							Scan(arg);
 					}
 				}
 			}
@@ -795,13 +817,16 @@ public static class OrchestrationsApi
 			{
 				Scan(hs.Url);
 				Scan(hs.Body);
-				foreach (var h in hs.Headers.Values) Scan(h);
+				foreach (var h in hs.Headers.Values)
+					Scan(h);
 			}
 			else if (step is CommandOrchestrationStep cs)
 			{
 				Scan(cs.Command);
-				foreach (var arg in cs.Arguments) Scan(arg);
-				foreach (var env in cs.Environment.Values) Scan(env);
+				foreach (var arg in cs.Arguments)
+					Scan(arg);
+				foreach (var env in cs.Environment.Values)
+					Scan(env);
 			}
 			else if (step is TransformOrchestrationStep ts)
 			{

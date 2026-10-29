@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: copilot-structured-output
+description: Compute a structured result with Copilot and consume its validated JSON deterministically.
+defaultProvider: copilot
+defaultModel: claude-opus-4.8
+defaultSystemPromptMode: append
+
+steps:
+  - name: data
+    type: Transform
+    template: |
+      {"items":[{"name":"notebook","quantity":2,"unitPrice":12},{"name":"pen","quantity":3,"unitPrice":2}]}
+
+  - name: summarize
+    type: Prompt
+    dependsOn: [data]
+    systemPrompt: You are a careful purchasing assistant.
+    userPrompt: Calculate the total cost and the total number of units from the supplied items. Provide a short summary.
+    humanInput: false
+    responseSchema:
+      type: object
+      properties:
+        totalCost:
+          type: number
+        units:
+          type: integer
+        summary:
+          type: string
+      required: [totalCost, units, summary]
+      additionalProperties: false
+
+  - name: report
+    type: Transform
+    dependsOn: [summarize]
+    template: "{{summarize.output.units}} units; total cost {{summarize.output.totalCost}}. {{summarize.output.summary}}"

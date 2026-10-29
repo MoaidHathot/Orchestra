@@ -1,0 +1,2341 @@
+{
+  "date": "2026-10-29",
+  "orchestraCommit": "4ac95a7742159b6db92dfe4000d245b6803ef423",
+  "sdkVersion": "1.0.14",
+  "reviewedSdkSourceCommit": "e60d9037353249ef16b349eb4012e8c1d113fda5",
+  "runtimeVersion": "1.0.85",
+  "runtimeSha256": "564b1f20a359042c198ad6fb23be23272c090a9a5f9554748bd392d32100c788",
+  "installedCliVersionProbed": "1.0.91",
+  "model": "claude-sonnet-5",
+  "reasoningEffort": "high",
+  "primaryExperiments": [
+    "instructions-baseline",
+    "baseline-complete"
+  ],
+  "supplementalExperiments": [
+    "discovery-enabled",
+    "explicit-skills",
+    "nested-baseline",
+    "nested-enabled",
+    "nested-discovery-only",
+    "interactive-tui-confirmation"
+  ],
+  "rawEvidenceRoot": "artifacts/copilot-parity",
+  "primaryResults": [
+    {
+      "experiment": "instructions-baseline",
+      "case": "instructions",
+      "arm": "cli",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 5,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "glob": 1,
+        "skill": 1,
+        "view": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "9fb9bd3be974a23a0432be71344291989e24741ff7c829ddbdd5b4491083440c",
+      "telemetrySha256": "8163d16c599e3890fba0816d270959018f61a38383925ed1e12742b62039000b",
+      "evidence": "instructions-baseline/instructions/1/cli"
+    },
+    {
+      "experiment": "instructions-baseline",
+      "case": "instructions",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "grader_completed"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 2,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "skill": 1
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "2d75fc722adb950b4b4d5cc5be1322d216d29013c0cc284606f9a7959a896f33",
+      "telemetrySha256": "6f910036c9ce2e80d911ef05b1fe31468271e8374f9875428e14662a80eb4903",
+      "evidence": "instructions-baseline/instructions/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 375,
+        "transcriptFinalCharacters": 375,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "instructions-baseline",
+      "case": "instructions",
+      "arm": "orchestra",
+      "repeat": 1,
+      "exitCode": 1,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "grader_completed"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 3,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "glob": 1,
+        "orchestra_set_status": 1,
+        "skill": 1
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "03e52f7a4983193ef6110107e6a9290481872b3960f7c4c2f3a81f3e57df36a0",
+      "telemetrySha256": "1ba245f0bab62c50e78b744bf3bfa0df2c37e014f822068eb279de53365c6b9e",
+      "evidence": "instructions-baseline/instructions/1/orchestra",
+      "outputProjection": {
+        "status": "Failed",
+        "deliveredCharacters": 0,
+        "transcriptFinalCharacters": 468,
+        "deliveredEqualsTranscriptFinal": false,
+        "deliveredInstructionMarkers": {
+          "agents_md": false,
+          "copilot_instructions_md": false
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "repair",
+      "arm": "cli",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 9,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "edit": 1,
+        "powershell": 2,
+        "view": 7
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "a71589a371cf477b82fc1d85b770e677a58b4f33965f1d76083107b479af3120",
+      "telemetrySha256": "bd75f415136aee7613539b81ecbe084fd4c1201e61a8e460e4be1f24d8470b50",
+      "evidence": "baseline-complete/repair/1/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "repair",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 8,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "edit": 1,
+        "powershell": 2,
+        "view": 7
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "5f05c628dd79fb49bbbd139a2f0a7e3c90ff9f53dbf4262638999d99e5a6c696",
+      "telemetrySha256": "b1da5e92869e8c466eff190b7cc83fcc128d1c7ab2b6b7ab0780fe945cda73e1",
+      "evidence": "baseline-complete/repair/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 850,
+        "transcriptFinalCharacters": 850,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "repair",
+      "arm": "orchestra",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 8,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "edit": 1,
+        "powershell": 2,
+        "view": 6
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "e2ff03c0f07a3f6b353393c28a8c7bf366561977f19c81c6687fcb8291fb09da",
+      "telemetrySha256": "4c06b7c4f10794725ebae182b02d5cc7bfa172cd6896ca378e5ca2834b2c8454",
+      "evidence": "baseline-complete/repair/1/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 981,
+        "transcriptFinalCharacters": 981,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "graph",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 13,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "edit": 3,
+        "powershell": 4,
+        "view": 11
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "6266caf06d39757e463a87086ca06b0047a7843697f58babdcba0615f9b5c034",
+      "telemetrySha256": "5202db4b9ced4beca8f992fa135414dc669bdfe8f40a37001227488cb2acc90f",
+      "evidence": "baseline-complete/graph/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 834,
+        "transcriptFinalCharacters": 834,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "graph",
+      "arm": "orchestra",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 18,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "edit": 4,
+        "powershell": 5,
+        "view": 14
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "44c817ba9297f8f2132aebf268988a077032be0d116bba4993c1427c3182ec8c",
+      "telemetrySha256": "5213d187e9b7f65552b8a8970ef595bdb558fc366c5b561ca365278b164c82b4",
+      "evidence": "baseline-complete/graph/1/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 972,
+        "transcriptFinalCharacters": 972,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "graph",
+      "arm": "cli",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 12,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 3,
+        "edit": 3,
+        "powershell": 2,
+        "view": 11
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "41a48f6b9f6363bd4ab74dbebd2387f8f33f122f818350f6a369682e0dabcf71",
+      "telemetrySha256": "6c6f02121c0ad1939879874db24e2857698c645a5b793418319fdd6d5a8f5b62",
+      "evidence": "baseline-complete/graph/1/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "analysis",
+      "arm": "orchestra",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 7,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 1,
+        "view": 14
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "7cc5fd90cd6c81e0ed630feb96cc534b7e99c593f4bbf07655ddf88f9a2940e9",
+      "telemetrySha256": "efa7b5a6713f22837352f21034ccd43df609bd3161f7599ea05a0fe677f3ecdd",
+      "evidence": "baseline-complete/analysis/1/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 807,
+        "transcriptFinalCharacters": 807,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "analysis",
+      "arm": "cli",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 7,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 1,
+        "view": 14
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "fcb9b40186795d5de19089fde4541aea4194e1dd021209ed3e444a49af24a77f",
+      "telemetrySha256": "407817d9f4fffb288ee5a12660369e3683af23832cb59589d6c3616d267feabe",
+      "evidence": "baseline-complete/analysis/1/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "analysis",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 7,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 1,
+        "view": 14
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "360c6ee3dffb87df8a25b9be6639cceb61afb14d27fe019ff188039e869d966c",
+      "telemetrySha256": "abae5be57c5599e1dd3f3e1d96b0c538f4e41b4e8b04a3c52e3e236f75520da1",
+      "evidence": "baseline-complete/analysis/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 1094,
+        "transcriptFinalCharacters": 1094,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "automation",
+      "arm": "cli",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "added_tests"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 24,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 19,
+        "view": 4
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 1,
+        "commitIds": [
+          "9b67f45a7d5cd70978eba5f689116606b880ade2"
+        ],
+        "noCommitInstructionSatisfied": false
+      },
+      "resultSha256": "74fb2637117744bca42a04f1aae1373af30e82cb318a4242fecf4f6ea7be2814",
+      "telemetrySha256": "05366ec99c7c1943f5c2a34088e45233b6cd8d0f09bc04fd3b759e9ebfeabb66",
+      "evidence": "baseline-complete/automation/1/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "automation",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "added_tests"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 19,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 13,
+        "view": 5
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "5cd86ef2a84e479e548e568b0a961e30848ca6b54a3c3bf5de5be9689e3d5a93",
+      "telemetrySha256": "b46f86ee7b53a37ac33dce57d1e05e29895d4e5d0efc88ae66e2d12cf86ee7ce",
+      "evidence": "baseline-complete/automation/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 665,
+        "transcriptFinalCharacters": 665,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "automation",
+      "arm": "orchestra",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "added_tests"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 25,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 20,
+        "view": 4
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "a7417bc7812242edda526516833d33937d512f85633bd5614c29897f9654843b",
+      "telemetrySha256": "8c2ece287906c154090ea313cf88746ba7eb1aeba95f922315239738b57263e1",
+      "evidence": "baseline-complete/automation/1/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 979,
+        "transcriptFinalCharacters": 979,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "mcp-recovery",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 4,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "fixture-lookup_rate": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "4f0d18612c0784071bed59ea91a93dd3fc1cabd769f0729138a986a0891b5f82",
+      "telemetrySha256": "c02f171c6d87742718180435e40e0e4ff7aec7b2627f6e4ea1a546c2884f4f9f",
+      "evidence": "baseline-complete/mcp-recovery/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 201,
+        "transcriptFinalCharacters": 201,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "mcp-recovery",
+      "arm": "orchestra",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 4,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "fixture-lookup_rate": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "afebef201c7461167b4529934cc44ee59806a9a768ab4abdb66378c0d074c0fa",
+      "telemetrySha256": "54264066f9de6e3a4332864b67fb5cd70cc788c4a651a6472983c71c2e43366a",
+      "evidence": "baseline-complete/mcp-recovery/1/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 235,
+        "transcriptFinalCharacters": 235,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "mcp-recovery",
+      "arm": "cli",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 4,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "fixture-lookup_rate": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "00d37b1e7ac140706ee32560a4d2e9c3c3e1be1c41e954524c7328e26d228733",
+      "telemetrySha256": "58a731d6501cd25eec08a297fc0892a924cb2aa788c6c2189c29210cf9def8cf",
+      "evidence": "baseline-complete/mcp-recovery/1/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "repair",
+      "arm": "sdk",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 8,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "edit": 1,
+        "powershell": 2,
+        "view": 6
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "d26827fc8a3194dcef50b81c2daf273b5f5c02df50fe47cbc5e44551a537e137",
+      "telemetrySha256": "3051da329c2fb47c520c081b6758e5f75cffd21b4c03e4e9714c6c77cc241389",
+      "evidence": "baseline-complete/repair/2/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 864,
+        "transcriptFinalCharacters": 864,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "repair",
+      "arm": "orchestra",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 8,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "edit": 1,
+        "powershell": 2,
+        "view": 7
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "8de2841823e6896269ebf8bf639bd22a568a07930219cc00b51b7588418a9052",
+      "telemetrySha256": "bb90c8619997e34031b8ddfba3d4b0d09d0f0424079623ad9581bd8048a77751",
+      "evidence": "baseline-complete/repair/2/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 983,
+        "transcriptFinalCharacters": 983,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "repair",
+      "arm": "cli",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 8,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "edit": 1,
+        "powershell": 2,
+        "view": 7
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "aca96258aa4a9c1c63855ab60d70dedcaf0d117e3b332b9589736e4ded205b88",
+      "telemetrySha256": "bc95b7a937dbfe9bc6dde7bc08c0746b3368680ac595c8bfa77ba56ea4028113",
+      "evidence": "baseline-complete/repair/2/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "graph",
+      "arm": "orchestra",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 11,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "edit": 3,
+        "powershell": 2,
+        "view": 11
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "2c8788a2bb9bda82e9c5543ce6d27aaa18e07fa0031b85bfbd3ce3ea4b66792e",
+      "telemetrySha256": "e54f9d48eb006a6c5917185c159dc80666a56576bd9b77d422adfaacd137095a",
+      "evidence": "baseline-complete/graph/2/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 423,
+        "transcriptFinalCharacters": 423,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "graph",
+      "arm": "cli",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 13,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "edit": 3,
+        "powershell": 2,
+        "view": 13
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "37deaf5c505fae7e6c35808f0ce684bd80bc85c86164947d2294383ef9cadb8c",
+      "telemetrySha256": "714d7b895ab5a3c4786e5d3f7f0d9a0a9a2a21c02fcfe52f4f4d12d77e87c243",
+      "evidence": "baseline-complete/graph/2/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "graph",
+      "arm": "sdk",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 11,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "edit": 3,
+        "powershell": 2,
+        "view": 11
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "1a6657880910baa84b45b7ab456eb31068bdf7de9e541556c6c9db70796f1a3a",
+      "telemetrySha256": "d10c2e35200b6db538ecf0ecb19bf2d2dcba2aded5f15f780a09ba73a1483a56",
+      "evidence": "baseline-complete/graph/2/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 604,
+        "transcriptFinalCharacters": 604,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "analysis",
+      "arm": "cli",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 7,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 1,
+        "view": 14
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "5d9fe618e2fa6e7a7afa97b455fbb0de6d2d21e07f2e3082b0ca0bc776f9cb42",
+      "telemetrySha256": "b123e4b87a91c2e9f8c84bd356fa0a7c2bbb59a9459f888ac2630148da828de6",
+      "evidence": "baseline-complete/analysis/2/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "analysis",
+      "arm": "sdk",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 8,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "edit": 1,
+        "powershell": 1,
+        "view": 14
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "830946a7671ea769036456f7db42c0097581160584adefdc345195db2ba0832b",
+      "telemetrySha256": "1ee5a083c072d7d8ed99bfa3abf4a962af9418c56bea386489ae6d39e4cb8892",
+      "evidence": "baseline-complete/analysis/2/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 734,
+        "transcriptFinalCharacters": 734,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "analysis",
+      "arm": "orchestra",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 7,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 1,
+        "view": 14
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "3ba29e5f5dc9df71b518388b84454835dadbf7ffaa57a991b422106265dab1ca",
+      "telemetrySha256": "0dbcfe795120467ffc62a904252f5ac44066e4fcbaeb04543a0da8475be1715b",
+      "evidence": "baseline-complete/analysis/2/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 542,
+        "transcriptFinalCharacters": 542,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "automation",
+      "arm": "sdk",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "added_tests"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 23,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 16,
+        "view": 6
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "35d3b70e566088022b83830bf1204e5176b9ed769c035a574e50b6039c5a7412",
+      "telemetrySha256": "c51895bc93ce24f361a375aa4698947de4ff2410e98a79f473940a76b4c96739",
+      "evidence": "baseline-complete/automation/2/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 786,
+        "transcriptFinalCharacters": 786,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "automation",
+      "arm": "orchestra",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "added_tests"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 24,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "edit": 1,
+        "powershell": 16,
+        "view": 11
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "e01ba0d13d6108becbb3964fbd427fb8caf759e46bcfdcc052475523edf2835f",
+      "telemetrySha256": "de76a2d0b921e74028d472a60e0f0cb7ad52049309b851832386b10d877e6080",
+      "evidence": "baseline-complete/automation/2/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 913,
+        "transcriptFinalCharacters": 913,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "automation",
+      "arm": "cli",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "added_tests"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 20,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 2,
+        "powershell": 15,
+        "view": 4
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "f63baf14af09d9677bb8a966c410aa05ca147d5169f4eebdcf64e3de09c50183",
+      "telemetrySha256": "e748accea4c38542f43bd3b0b1363fdc9f6dcec9f48a396b595f674207d0ae8e",
+      "evidence": "baseline-complete/automation/2/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "mcp-recovery",
+      "arm": "orchestra",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 4,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "fixture-lookup_rate": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "846048417e4f8333897ffdbec50909aee9da631b52311080ae3fce1ac411c2e6",
+      "telemetrySha256": "75ea1856adbf1f6203ead4f15318349ffcdb4beebda324a3cc0fcd467a30423d",
+      "evidence": "baseline-complete/mcp-recovery/2/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 209,
+        "transcriptFinalCharacters": 209,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "mcp-recovery",
+      "arm": "cli",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 4,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "fixture-lookup_rate": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "96ae12b1dcb7333c05f3d88f362bcb691220a8cc3cda15722a5f4f2b072f2fe4",
+      "telemetrySha256": "629239780320db6a3197e5cf5b21e558f799824e6aac95cd709433dff46db3bb",
+      "evidence": "baseline-complete/mcp-recovery/2/cli"
+    },
+    {
+      "experiment": "baseline-complete",
+      "case": "mcp-recovery",
+      "arm": "sdk",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 4,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "fixture-lookup_rate": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "a34c33c8c2852aa5435c1f2d062d627eedf439a266b6d44f6a480481ae4b8b52",
+      "telemetrySha256": "2edd5dce811808db87b273a7fd8bb576e5022208b7eb15d348cc8d41a9c73d83",
+      "evidence": "baseline-complete/mcp-recovery/2/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 224,
+        "transcriptFinalCharacters": 224,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    }
+  ],
+  "supplementalResults": [
+    {
+      "experiment": "discovery-enabled",
+      "case": "instructions",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 5,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "glob": 1,
+        "skill": 1,
+        "view": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "99a9cac0563cadf0c275c861b3eef587a839949cee7b0876ab233b6b1283448d",
+      "telemetrySha256": "0751907de903cb73db2da4c5364116f59f17c774d0ad3f499ee8df4409acee10",
+      "evidence": "discovery-enabled/instructions/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 341,
+        "transcriptFinalCharacters": 341,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "discovery-enabled",
+      "case": "instructions",
+      "arm": "sdk",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 5,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "glob": 1,
+        "skill": 1,
+        "view": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "30432ee06b1cbd089cce77a18adfce60d9e511546018ded86d2e1d064fd41217",
+      "telemetrySha256": "a6ace0273d8232787cc3c1ab6dbde4d454d448e68f1b08726d33b9e430c4783b",
+      "evidence": "discovery-enabled/instructions/2/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 346,
+        "transcriptFinalCharacters": 346,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "explicit-skills",
+      "case": "instructions",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 5,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "glob": 1,
+        "skill": 1,
+        "view": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "1c6cc0101a16c5b7ff37e10df83f5d8ca924db75447cd4d63dde1b0371448df9",
+      "telemetrySha256": "c9878e4271dfc366f1560506324cb55e32c9bd3431cfbaba7751336766117b5f",
+      "evidence": "explicit-skills/instructions/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 385,
+        "transcriptFinalCharacters": 385,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "explicit-skills",
+      "case": "instructions",
+      "arm": "orchestra",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 5,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "glob": 1,
+        "skill": 1,
+        "view": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "03b427d212623b18f28988c5c3d8f0e944b41f85a5337788180e01cf24f48fa5",
+      "telemetrySha256": "64a13c123ff14fa585067816078f57a99e17d2f95d07a5ff5463ddcf75adfa36",
+      "evidence": "explicit-skills/instructions/1/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 405,
+        "transcriptFinalCharacters": 405,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "nested-baseline",
+      "case": "nested-instructions",
+      "arm": "cli",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 3,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "view": 1
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "5c6139d8628e15b22f5d668c3d0a250864ceb45cbcd6dfd33f0e774db5301739",
+      "telemetrySha256": "371b13e305245acbabcf94523dbf0a64e4109aeac28284b50eb5d78bdc9a7bbc",
+      "evidence": "nested-baseline/nested-instructions/1/cli"
+    },
+    {
+      "experiment": "nested-baseline",
+      "case": "nested-instructions",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "nested_instruction_applied"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 4,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "glob": 1,
+        "view": 1
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "21b13ab795fec28235a528e2a4e3c00e2249e80eddbe86bb60e710a0e0d56b98",
+      "telemetrySha256": "052f4013ecb3d14b6829627996cc1e00405b9822d880569208a4b3b188020623",
+      "evidence": "nested-baseline/nested-instructions/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 139,
+        "transcriptFinalCharacters": 139,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "nested-baseline",
+      "case": "nested-instructions",
+      "arm": "orchestra",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "nested_instruction_applied"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 3,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "view": 1
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "edf80c6d9cc92a44ff5efdc4c8fdf676e5babeea335a0dc0f53b0aeb1f761928",
+      "telemetrySha256": "718fa9ac2154f6abaa97015c1b64eb70d41618112dd0059208f493bf85e72851",
+      "evidence": "nested-baseline/nested-instructions/1/orchestra",
+      "outputProjection": {
+        "status": "Succeeded",
+        "deliveredCharacters": 132,
+        "transcriptFinalCharacters": 132,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "nested-enabled",
+      "case": "nested-instructions",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 4,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "glob": 1,
+        "view": 1
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "8ae612cdde0046c35545b1c49135dcf9c66197627b3f3e9b0c734c1b1f4bdbec",
+      "telemetrySha256": "ba713c18ef7aad70430479a19c032257dcae630f8278846871e0ed47c818a9e0",
+      "evidence": "nested-enabled/nested-instructions/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 190,
+        "transcriptFinalCharacters": 190,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "nested-enabled",
+      "case": "nested-instructions",
+      "arm": "sdk",
+      "repeat": 2,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 3,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "view": 1
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "58352d9785737eeae2e33f43c84328a53536e0972d9104d95a84d268b9caf344",
+      "telemetrySha256": "ea5d4b5616f4ac756cc90b369751b37e7098d0dfca8572a415bb1b718f2056be",
+      "evidence": "nested-enabled/nested-instructions/2/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 175,
+        "transcriptFinalCharacters": 175,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "nested-discovery-only",
+      "case": "nested-instructions",
+      "arm": "sdk",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": false,
+      "failedChecks": [
+        "nested_instruction_applied"
+      ],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 3,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "view": 1
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "e5ef9a575b3874110b9ded4f2f8a7a6e5d6c90919c0160d59da3e46bd5be57de",
+      "telemetrySha256": "71cfdbda4b817a9c66907ea2e2391ae2ad457ee0d14549bcef3aae82b989c2ef",
+      "evidence": "nested-discovery-only/nested-instructions/1/sdk",
+      "outputProjection": {
+        "status": "completed",
+        "deliveredCharacters": 106,
+        "transcriptFinalCharacters": 106,
+        "deliveredEqualsTranscriptFinal": true,
+        "deliveredInstructionMarkers": {
+          "agents_md": true,
+          "copilot_instructions_md": true
+        }
+      }
+    },
+    {
+      "experiment": "interactive-tui-confirmation",
+      "case": "instructions",
+      "arm": "tui",
+      "repeat": 1,
+      "exitCode": 0,
+      "timedOut": false,
+      "artifactAcceptance": true,
+      "failedChecks": [],
+      "instructionMarkers": {
+        "agents_md": true,
+        "copilot_instructions_md": true
+      },
+      "modelCalls": 5,
+      "responseModels": [
+        "claude-sonnet-5"
+      ],
+      "reasoningEfforts": [
+        "high"
+      ],
+      "observedTools": {
+        "create": 1,
+        "glob": 1,
+        "skill": 1,
+        "view": 2
+      },
+      "postRunGitAudit": {
+        "initialCommitCount": 0,
+        "finalCommitCount": 0,
+        "commitIds": [],
+        "noCommitInstructionSatisfied": true
+      },
+      "resultSha256": "08040835d0d5c9cbb31a1df0e315b9e6975abb62fb013dc238314e1125625a19",
+      "telemetrySha256": "3624105629d37eda0cec18707a885b7e106b48af4d907fce73a4c14db57947ab",
+      "evidence": "interactive-tui-confirmation"
+    }
+  ],
+  "requestComparisons": [
+    {
+      "case": "instructions",
+      "repeat": 1,
+      "left": "cli",
+      "right": "sdk",
+      "normalizedSystemPromptsEqual": false,
+      "commonToolCount": 22,
+      "leftOnlyTools": [
+        "fetch_copilot_cli_documentation",
+        "session_store_sql"
+      ],
+      "rightOnlyTools": [],
+      "changedCommonToolDefinitions": []
+    },
+    {
+      "case": "instructions",
+      "repeat": 1,
+      "left": "sdk",
+      "right": "orchestra",
+      "normalizedSystemPromptsEqual": true,
+      "commonToolCount": 22,
+      "leftOnlyTools": [],
+      "rightOnlyTools": [
+        "orchestra_complete",
+        "orchestra_read_file",
+        "orchestra_save_file",
+        "orchestra_set_status"
+      ],
+      "changedCommonToolDefinitions": []
+    },
+    {
+      "case": "instructions",
+      "repeat": 1,
+      "left": "cli",
+      "right": "orchestra",
+      "normalizedSystemPromptsEqual": false,
+      "commonToolCount": 22,
+      "leftOnlyTools": [
+        "fetch_copilot_cli_documentation",
+        "session_store_sql"
+      ],
+      "rightOnlyTools": [
+        "orchestra_complete",
+        "orchestra_read_file",
+        "orchestra_save_file",
+        "orchestra_set_status"
+      ],
+      "changedCommonToolDefinitions": []
+    }
+  ],
+  "sdkProfiles": [
+    {
+      "experiment": "sdk-profiles",
+      "profile": "defaults",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.85",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "interactive",
+      "skillNames": [
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {}
+    },
+    {
+      "experiment": "sdk-profiles",
+      "profile": "discovery",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.85",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "interactive",
+      "skillNames": [
+        "triage-policy",
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {
+        "enableConfigDiscovery": true
+      }
+    },
+    {
+      "experiment": "sdk-profiles",
+      "profile": "plan",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.85",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "plan",
+      "skillNames": [
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {},
+      "planExists": true,
+      "planContent": "# SDK plan probe\n\n- [ ] Verify runtime-owned plan storage.\n"
+    },
+    {
+      "experiment": "sdk-profiles",
+      "profile": "autopilot",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.85",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "autopilot",
+      "skillNames": [
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {}
+    },
+    {
+      "experiment": "sdk-profiles",
+      "profile": "cli-features",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.85",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "interactive",
+      "skillNames": [
+        "triage-policy",
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {
+        "enableConfigDiscovery": true,
+        "enableSessionStore": true,
+        "memoryEnabled": true
+      },
+      "offeredTools": [
+        "create",
+        "edit",
+        "github-mcp-server-get_copilot_space",
+        "github-mcp-server-get_file_contents",
+        "github-mcp-server-list_copilot_spaces",
+        "github-mcp-server-search_code",
+        "github-mcp-server-search_users",
+        "glob",
+        "grep",
+        "list_agents",
+        "list_powershell",
+        "powershell",
+        "read_agent",
+        "read_powershell",
+        "session_store_sql",
+        "skill",
+        "sql",
+        "stop_powershell",
+        "store_memory",
+        "task",
+        "view",
+        "vote_memory",
+        "web_fetch",
+        "web_search",
+        "write_agent"
+      ],
+      "telemetrySha256": "227eeec1335a0194b946c219f4b5a6822a43150efe62e7c2bc9d609775cfb50f",
+      "nonInteractivePreamble": false
+    },
+    {
+      "experiment": "sdk-profiles-1.0.91",
+      "profile": "defaults",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.91",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "interactive",
+      "skillNames": [
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {}
+    },
+    {
+      "experiment": "sdk-profiles-1.0.91",
+      "profile": "discovery",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.91",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "interactive",
+      "skillNames": [
+        "triage-policy",
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {
+        "enableConfigDiscovery": true
+      }
+    },
+    {
+      "experiment": "sdk-profiles-1.0.91",
+      "profile": "plan",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.91",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "plan",
+      "skillNames": [
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {},
+      "planExists": true,
+      "planContent": "# SDK plan probe\n\n- [ ] Verify runtime-owned plan storage.\n"
+    },
+    {
+      "experiment": "sdk-profiles-1.0.91",
+      "profile": "autopilot",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.91",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "autopilot",
+      "skillNames": [
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {}
+    },
+    {
+      "experiment": "sdk-surface-profiles",
+      "profile": "sdk-noninteractive",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.85",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "interactive",
+      "skillNames": [
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {
+        "runningInInteractiveMode": false
+      },
+      "offeredTools": [
+        "create",
+        "edit",
+        "github-mcp-server-get_copilot_space",
+        "github-mcp-server-get_file_contents",
+        "github-mcp-server-list_copilot_spaces",
+        "github-mcp-server-search_code",
+        "github-mcp-server-search_users",
+        "glob",
+        "grep",
+        "list_agents",
+        "list_powershell",
+        "powershell",
+        "read_agent",
+        "read_powershell",
+        "skill",
+        "sql",
+        "stop_powershell",
+        "task",
+        "view",
+        "web_fetch",
+        "web_search",
+        "write_agent"
+      ],
+      "telemetrySha256": "8e8fd7582251cd9617e0162e40d44ffe30f756747fba74830d743e73bb478b0f",
+      "nonInteractivePreamble": true
+    },
+    {
+      "experiment": "sdk-surface-profiles",
+      "profile": "cli-interactive-context",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.85",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "interactive",
+      "skillNames": [
+        "triage-policy",
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {
+        "enableConfigDiscovery": true,
+        "enableOnDemandInstructions": true,
+        "enableSessionStore": true,
+        "memoryEnabled": true,
+        "agentContext": "cli",
+        "runningInInteractiveMode": true
+      },
+      "offeredTools": [
+        "create",
+        "edit",
+        "github-mcp-server-get_copilot_space",
+        "github-mcp-server-get_file_contents",
+        "github-mcp-server-list_copilot_spaces",
+        "github-mcp-server-search_code",
+        "github-mcp-server-search_users",
+        "glob",
+        "grep",
+        "list_agents",
+        "list_powershell",
+        "powershell",
+        "read_agent",
+        "read_powershell",
+        "session_store_sql",
+        "skill",
+        "sql",
+        "stop_powershell",
+        "store_memory",
+        "task",
+        "view",
+        "vote_memory",
+        "web_fetch",
+        "web_search",
+        "write_agent"
+      ],
+      "telemetrySha256": "810804c05d5bf5e377eba163984550bd024c7431a980f9f0a2e8d634b696fde6",
+      "nonInteractivePreamble": false
+    },
+    {
+      "experiment": "sdk-surface-profiles",
+      "profile": "cli-prompt-context",
+      "exitCode": 0,
+      "runtime": {
+        "version": "1.0.85",
+        "protocolVersion": 3
+      },
+      "initialMode": "interactive",
+      "selectedMode": "interactive",
+      "skillNames": [
+        "triage-policy",
+        "customize-cloud-agent",
+        "github-pr-media"
+      ],
+      "explicitSettings": {
+        "enableConfigDiscovery": true,
+        "enableOnDemandInstructions": true,
+        "enableSessionStore": true,
+        "memoryEnabled": false,
+        "agentContext": "cli",
+        "runningInInteractiveMode": false
+      },
+      "offeredTools": [
+        "create",
+        "edit",
+        "github-mcp-server-get_copilot_space",
+        "github-mcp-server-get_file_contents",
+        "github-mcp-server-list_copilot_spaces",
+        "github-mcp-server-search_code",
+        "github-mcp-server-search_users",
+        "glob",
+        "grep",
+        "list_agents",
+        "list_powershell",
+        "powershell",
+        "read_agent",
+        "read_powershell",
+        "session_store_sql",
+        "skill",
+        "sql",
+        "stop_powershell",
+        "task",
+        "view",
+        "web_fetch",
+        "web_search",
+        "write_agent"
+      ],
+      "telemetrySha256": "5ea9f3c6447afa368ecad53f4932e0b1b17ae7acc6ec8d7ee4cf1701daa321cf",
+      "nonInteractivePreamble": true
+    }
+  ],
+  "mixedCli": {
+    "exitCode": 0,
+    "acceptance": {
+      "supplied_inputs_unchanged": true,
+      "correct_policy": true,
+      "correct_classifications": true,
+      "downstream_command_executed": true,
+      "cli_succeeded": true,
+      "report_written": true
+    },
+    "runStatus": "Succeeded",
+    "isIncomplete": false,
+    "steps": {
+      "report": "Succeeded",
+      "verify": "Succeeded",
+      "task": "Succeeded",
+      "prepare": "Succeeded"
+    },
+    "finalContent": "Deterministic verification: DAG_VERIFIED",
+    "reportSha256": "9396bb68ac76902cb0b06b4ef7df26e3a8a96f3eb3151faee3fa2fc068fb376b",
+    "evidence": "mixed-cli"
+  },
+  "lifecycleProbe": {
+    "status": "protocol-probed",
+    "synthetic": true,
+    "liveModelCalls": 0,
+    "completedWhileChildTracked": false,
+    "completedAfterLateChildIdle": true,
+    "expectedCompletedAfterChildIdle": false,
+    "defectReproduced": true,
+    "processExitCode": 1,
+    "evidence": "lifecycle-confirmation",
+    "resultSha256": "7a8a10c07c75d66b3884e4029a1997fbbe0f52b2ba727a90c45551587b14dab4"
+  },
+  "manualReviewNotes": [
+    {
+      "evidence": "baseline-complete/analysis/1/cli/workspace/report.md",
+      "sha256": "c7debc534cb5389a21a7fcad300ebbbf1186edf916ac5b707d0a3ceb9d20c026",
+      "observation": "The required decision and cost are correct, but the prose describes the budget reduction from 12000 to 11500 as roughly 3%; it is 4.1667%.",
+      "scope": "Incidental prose arithmetic not covered by the automated acceptance checks; no general quality ranking inferred."
+    }
+  ]
+}

@@ -42,6 +42,10 @@ internal sealed partial class CopilotSessionHandler
 		string? AgentDisplayName);
 
 	private string? _finalContent;
+	private readonly bool _autopilot;
+	private readonly object _autopilotGate = new();
+	private readonly List<SessionAutopilotStoppedData> _autopilotStops = [];
+	private string? _autopilotRequestId;
 	private string? _selectedModel;
 	private string? _actualModel;
 	private AgentUsage? _usage;
@@ -100,12 +104,14 @@ internal sealed partial class CopilotSessionHandler
 		IOrchestrationReporter reporter,
 		string requestedModel,
 		TaskCompletionSource done,
-		ILogger<CopilotSessionHandler>? logger = null)
+		ILogger<CopilotSessionHandler>? logger = null,
+		bool autopilot = false)
 	{
 		_writer = writer;
 		_reporter = reporter;
 		_requestedModel = requestedModel;
 		_done = done;
+		_autopilot = autopilot;
 		_logger = logger ?? NullLogger<CopilotSessionHandler>.Instance;
 	}
 
@@ -127,6 +133,28 @@ internal sealed partial class CopilotSessionHandler
 	public string? ActualModel => _actualModel;
 	public AgentUsage? Usage => _usage;
 
+	/// <summary>Bind completion to this send, including events that raced the send RPC response.</summary>
+	public void BindAutopilotRequest(string requestId)
+	{
+		lock (_autopilotGate)
+		{
+			_autopilotRequestId = requestId;
+			foreach (var stopped in _autopilotStops)
+				CompleteAutopilot(stopped);
+			_autopilotStops.Clear();
+		}
+	}
+
+	private void CompleteAutopilot(SessionAutopilotStoppedData stopped)
+	{
+		if (stopped.RequestId != _autopilotRequestId || _autopilotRequestId is null)
+			return;
+		if (stopped.Reason == "task_complete")
+			_done.TrySetResult();
+		else
+			_done.TrySetException(new InvalidOperationException($"Autopilot stopped without completing the task: {stopped.Reason}."));
+	}
+
 	/// <summary>
 	/// SDK 1.0.0 end-of-session billing summary projected from
 	/// <c>SessionShutdownEvent</c>. Replaces the per-usage QuotaSnapshots / TotalNanoAiu
@@ -143,8 +171,29 @@ internal sealed partial class CopilotSessionHandler
 	/// </summary>
 	public void HandleEvent(SessionEvent evt)
 	{
+		// AgentId is authoritative even after a child frame has been removed or when
+		// a child's lifecycle events were not observed. Child terminal events are not
+		// terminal for the parent session (including child errors/shutdowns).
+		if (evt.AgentId is not null && evt is AssistantIdleEvent or SessionIdleEvent
+			or SessionTaskCompleteEvent or SessionShutdownEvent or SessionErrorEvent or SessionAutopilotStoppedEvent)
+		{
+			LogChildTerminalIgnored(evt.AgentId, evt.Type);
+			return;
+		}
+
 		switch (evt)
 		{
+			case SessionAutopilotStoppedEvent stopped when _autopilot:
+				lock (_autopilotGate)
+				{
+					if (_autopilotRequestId is null)
+						_autopilotStops.Add(stopped.Data);
+					else
+						CompleteAutopilot(stopped.Data);
+				}
+				break;
+			case SessionIdleEvent when _autopilot:
+				break; // Native continuation can schedule more work after an idle turn.
 			case SessionStartEvent start:
 				HandleSessionStart(start);
 				break;
@@ -217,186 +266,186 @@ internal sealed partial class CopilotSessionHandler
 				HandleWarning(warning);
 				break;
 
-		case SessionInfoEvent info:
-			HandleInfo(info);
-			break;
+			case SessionInfoEvent info:
+				HandleInfo(info);
+				break;
 
 #pragma warning disable GHCP001 // SessionPermissionsChangedEvent is evaluation-only as of SDK 1.0.14.
-		case SessionPermissionsChangedEvent permissions:
-			HandleSessionPermissionsChanged(permissions);
-			break;
+			case SessionPermissionsChangedEvent permissions:
+				HandleSessionPermissionsChanged(permissions);
+				break;
 #pragma warning restore GHCP001
 
-		case PermissionRequestedEvent permissionRequested:
-			HandlePermissionRequested(permissionRequested);
-			break;
+			case PermissionRequestedEvent permissionRequested:
+				HandlePermissionRequested(permissionRequested);
+				break;
 
-		case PermissionCompletedEvent permissionCompleted:
-			HandlePermissionCompleted(permissionCompleted);
-			break;
+			case PermissionCompletedEvent permissionCompleted:
+				HandlePermissionCompleted(permissionCompleted);
+				break;
 
-		case SessionMcpServersLoadedEvent mcpLoaded:
-			HandleMcpServersLoaded(mcpLoaded);
-			break;
+			case SessionMcpServersLoadedEvent mcpLoaded:
+				HandleMcpServersLoaded(mcpLoaded);
+				break;
 
-		case SessionMcpServerStatusChangedEvent mcpStatusChanged:
-			HandleMcpServerStatusChanged(mcpStatusChanged);
-			break;
+			case SessionMcpServerStatusChangedEvent mcpStatusChanged:
+				HandleMcpServerStatusChanged(mcpStatusChanged);
+				break;
 
-		case SessionCompactionStartEvent:
-			HandleCompactionStart();
-			break;
+			case SessionCompactionStartEvent:
+				HandleCompactionStart();
+				break;
 
-		case SessionCompactionCompleteEvent compactionComplete:
-			HandleCompactionComplete(compactionComplete);
-			break;
+			case SessionCompactionCompleteEvent compactionComplete:
+				HandleCompactionComplete(compactionComplete);
+				break;
 
-		// ── Hook lifecycle events ──
-		case HookStartEvent hookStart:
-			HandleHookStart(hookStart);
-			break;
+			// ── Hook lifecycle events ──
+			case HookStartEvent hookStart:
+				HandleHookStart(hookStart);
+				break;
 
-		case HookEndEvent hookEnd:
-			HandleHookEnd(hookEnd);
-			break;
+			case HookEndEvent hookEnd:
+				HandleHookEnd(hookEnd);
+				break;
 
-		// ── Turn tracking events ──
-		case AssistantTurnStartEvent turnStart:
-			HandleTurnStart(turnStart);
-			break;
+			// ── Turn tracking events ──
+			case AssistantTurnStartEvent turnStart:
+				HandleTurnStart(turnStart);
+				break;
 
-		case AssistantTurnEndEvent turnEnd:
-			HandleTurnEnd(turnEnd);
-			break;
+			case AssistantTurnEndEvent turnEnd:
+				HandleTurnEnd(turnEnd);
+				break;
 
-		// ── External tool events (host-side tool execution) ──
-		case ExternalToolRequestedEvent externalToolRequested:
-			HandleExternalToolRequested(externalToolRequested);
-			break;
+			// ── External tool events (host-side tool execution) ──
+			case ExternalToolRequestedEvent externalToolRequested:
+				HandleExternalToolRequested(externalToolRequested);
+				break;
 
-		// ── Session usage info ──
-		case SessionUsageInfoEvent usageInfo:
-			HandleSessionUsageInfo(usageInfo);
-			break;
+			// ── Session usage info ──
+			case SessionUsageInfoEvent usageInfo:
+				HandleSessionUsageInfo(usageInfo);
+				break;
 
-		// ── Model-call failure (SDK 1.0.0) ──
-		// Observational only: the CLI's own retry budget normally recovers; if it
-		// can't, a SessionErrorEvent with exhaustedCliRetries=true follows and the
-		// existing swap loop kicks in. Emitting an AgentEvent gives the Portal /
-		// operator logs an early warning of upstream flakiness.
-		case ModelCallFailureEvent modelCallFailure:
-			HandleModelCallFailure(modelCallFailure);
-			break;
+			// ── Model-call failure (SDK 1.0.0) ──
+			// Observational only: the CLI's own retry budget normally recovers; if it
+			// can't, a SessionErrorEvent with exhaustedCliRetries=true follows and the
+			// existing swap loop kicks in. Emitting an AgentEvent gives the Portal /
+			// operator logs an early warning of upstream flakiness.
+			case ModelCallFailureEvent modelCallFailure:
+				HandleModelCallFailure(modelCallFailure);
+				break;
 
-		// ── Informational events (silently consumed — no engine-level processing needed) ──
-		//
-		// These events are acknowledged but produce no AgentEvent and no audit-log entry.
-		// They are listed here (rather than letting them fall through to HandleUnknownEvent)
-		// to suppress the "[unhandled_sdk_event]" warning while documenting that we have
-		// reviewed each one and decided no engine-level action is needed today.
-		//
-		// A few entries carry richer payloads that may be worth elevating in the future:
-		//
-		//   * AssistantMessageStartEvent — start-of-message marker (MessageId, Phase) paired
-		//     with the already-handled AssistantMessageDeltaEvent / AssistantMessageEvent.
-		//     Nothing actionable; could be wired into per-message lifecycle telemetry.
-		//
-		//   * HookProgressEvent — interim progress messages from long-running hooks. Adding
-		//     these to the audit log would balloon it; silently consumed by default.
-		//
-		//   * McpAppToolCallCompleteEvent — SDK 1.0.0 emits this alongside the regular
-		//     ToolExecutionCompleteEvent for MCP tool calls, with extra structured fields
-		//     (ServerName, Arguments, Result, Error, Success, DurationMs, ToolMeta). The
-		//     regular event is already wired into HandleToolExecutionComplete, so this is
-		//     redundant for today's needs — but it is the cleanest hook point if we ever
-		//     add a step-level "fail on MCP tool error" feature (see StepErrorCategory.ToolError,
-		//     which is declared but currently unused).
-		//
-		//   * SessionPermissionsChangedEvent — handled explicitly by
-		//     HandleSessionPermissionsChanged. Flipping AllowAllPermissions on
-		//     mid-session is a security-relevant signal we surface as a warning;
-		//     this event is therefore NOT listed below.
-		//
-		// Everything else here is IDE / UI / canvas / scheduling plumbing that does not
-		// apply to Orchestra's automated host execution.
-		case PendingMessagesModifiedEvent:
-		case SessionCustomAgentsUpdatedEvent:
-		case SessionToolsUpdatedEvent:
-		case UserMessageEvent:
-		case AssistantStreamingDeltaEvent:
-		case ExternalToolCompletedEvent:     // UI dismissal signal for external tools
-		case AssistantIntentEvent:
-		case AssistantMessageStartEvent:     // SDK 1.0.0 start-of-message marker (paired with AssistantMessageDeltaEvent)
-		case CapabilitiesChangedEvent:
-		case CommandCompletedEvent:
-		case CommandExecuteEvent:
-		case CommandQueuedEvent:
-		case CommandsChangedEvent:
-		case ElicitationCompletedEvent:
-		case ElicitationRequestedEvent:
-		case ExitPlanModeCompletedEvent:
-		case ExitPlanModeRequestedEvent:
-		case HookProgressEvent:              // SDK 1.0.0 hook progress message stream
-		case McpAppToolCallCompleteEvent:    // SDK 1.0.0 structured MCP tool-call summary (duplicate of ToolExecutionCompleteEvent)
-		case McpOauthCompletedEvent:
-		case McpOauthRequiredEvent:
-		case SamplingCompletedEvent:
-		case SamplingRequestedEvent:
-		case SessionAutopilotObjectiveChangedEvent:    // Autopilot mode — Orchestra does not use autopilot
-		case SessionBackgroundTasksChangedEvent:
+			// ── Informational events (silently consumed — no engine-level processing needed) ──
+			//
+			// These events are acknowledged but produce no AgentEvent and no audit-log entry.
+			// They are listed here (rather than letting them fall through to HandleUnknownEvent)
+			// to suppress the "[unhandled_sdk_event]" warning while documenting that we have
+			// reviewed each one and decided no engine-level action is needed today.
+			//
+			// A few entries carry richer payloads that may be worth elevating in the future:
+			//
+			//   * AssistantMessageStartEvent — start-of-message marker (MessageId, Phase) paired
+			//     with the already-handled AssistantMessageDeltaEvent / AssistantMessageEvent.
+			//     Nothing actionable; could be wired into per-message lifecycle telemetry.
+			//
+			//   * HookProgressEvent — interim progress messages from long-running hooks. Adding
+			//     these to the audit log would balloon it; silently consumed by default.
+			//
+			//   * McpAppToolCallCompleteEvent — SDK 1.0.0 emits this alongside the regular
+			//     ToolExecutionCompleteEvent for MCP tool calls, with extra structured fields
+			//     (ServerName, Arguments, Result, Error, Success, DurationMs, ToolMeta). The
+			//     regular event is already wired into HandleToolExecutionComplete, so this is
+			//     redundant for today's needs — but it is the cleanest hook point if we ever
+			//     add a step-level "fail on MCP tool error" feature (see StepErrorCategory.ToolError,
+			//     which is declared but currently unused).
+			//
+			//   * SessionPermissionsChangedEvent — handled explicitly by
+			//     HandleSessionPermissionsChanged. Flipping AllowAllPermissions on
+			//     mid-session is a security-relevant signal we surface as a warning;
+			//     this event is therefore NOT listed below.
+			//
+			// Everything else here is IDE / UI / canvas / scheduling plumbing that does not
+			// apply to Orchestra's automated host execution.
+			case PendingMessagesModifiedEvent:
+			case SessionCustomAgentsUpdatedEvent:
+			case SessionToolsUpdatedEvent:
+			case UserMessageEvent:
+			case AssistantStreamingDeltaEvent:
+			case ExternalToolCompletedEvent:     // UI dismissal signal for external tools
+			case AssistantIntentEvent:
+			case AssistantMessageStartEvent:     // SDK 1.0.0 start-of-message marker (paired with AssistantMessageDeltaEvent)
+			case CapabilitiesChangedEvent:
+			case CommandCompletedEvent:
+			case CommandExecuteEvent:
+			case CommandQueuedEvent:
+			case CommandsChangedEvent:
+			case ElicitationCompletedEvent:
+			case ElicitationRequestedEvent:
+			case ExitPlanModeCompletedEvent:
+			case ExitPlanModeRequestedEvent:
+			case HookProgressEvent:              // SDK 1.0.0 hook progress message stream
+			case McpAppToolCallCompleteEvent:    // SDK 1.0.0 structured MCP tool-call summary (duplicate of ToolExecutionCompleteEvent)
+			case McpOauthCompletedEvent:
+			case McpOauthRequiredEvent:
+			case SamplingCompletedEvent:
+			case SamplingRequestedEvent:
+			case SessionAutopilotObjectiveChangedEvent:    // Autopilot mode — Orchestra does not use autopilot
+			case SessionBackgroundTasksChangedEvent:
 #pragma warning disable GHCP001 // SessionCanvas* events are experimental in the SDK; Orchestra deliberately ignores them (headless host, no IDE canvas UI).
-		case SessionCanvasOpenedEvent:                 // IDE canvas UI — N/A for headless host
-		case SessionCanvasRegistryChangedEvent:        // IDE canvas UI — N/A for headless host
+			case SessionCanvasOpenedEvent:                 // IDE canvas UI — N/A for headless host
+			case SessionCanvasRegistryChangedEvent:        // IDE canvas UI — N/A for headless host
 #pragma warning restore GHCP001
-		case SessionContextChangedEvent:
-		case SessionCustomNotificationEvent:           // Extension-defined notifications — none configured today
-		case SessionExtensionsAttachmentsPushedEvent:  // Extension attachments — N/A for orchestrated steps
-		case SessionExtensionsLoadedEvent:
-		case SessionHandoffEvent:
-		case SessionModeChangedEvent:
-		case SessionPlanChangedEvent:
-		case SessionRemoteSteerableChangedEvent:
-		case SessionScheduleCancelledEvent:            // SDK scheduling — Orchestra uses its own scheduler
-		case SessionScheduleCreatedEvent:              // SDK scheduling — Orchestra uses its own scheduler
-		case SessionSkillsLoadedEvent:
-		case SessionSnapshotRewindEvent:
-		case SessionTitleChangedEvent:
-		case SessionTruncationEvent:
-		case SessionWorkspaceFileChangedEvent:
-		case SkillInvokedEvent:
-		case SystemMessageEvent:
-		case ToolExecutionPartialResultEvent:
-		case ToolExecutionProgressEvent:
-		case ToolUserRequestedEvent:
-		case UserInputCompletedEvent:
-		case UserInputRequestedEvent:
-		case AbortEvent:
-			break;
+			case SessionContextChangedEvent:
+			case SessionCustomNotificationEvent:           // Extension-defined notifications — none configured today
+			case SessionExtensionsAttachmentsPushedEvent:  // Extension attachments — N/A for orchestrated steps
+			case SessionExtensionsLoadedEvent:
+			case SessionHandoffEvent:
+			case SessionModeChangedEvent:
+			case SessionPlanChangedEvent:
+			case SessionRemoteSteerableChangedEvent:
+			case SessionScheduleCancelledEvent:            // SDK scheduling — Orchestra uses its own scheduler
+			case SessionScheduleCreatedEvent:              // SDK scheduling — Orchestra uses its own scheduler
+			case SessionSkillsLoadedEvent:
+			case SessionSnapshotRewindEvent:
+			case SessionTitleChangedEvent:
+			case SessionTruncationEvent:
+			case SessionWorkspaceFileChangedEvent:
+			case SkillInvokedEvent:
+			case SystemMessageEvent:
+			case ToolExecutionPartialResultEvent:
+			case ToolExecutionProgressEvent:
+			case ToolUserRequestedEvent:
+			case UserInputCompletedEvent:
+			case UserInputRequestedEvent:
+			case AbortEvent:
+				break;
 
-		case SessionResumeEvent resumeEvt:
-			HandleSessionResume(resumeEvt);
-			break;
+			case SessionResumeEvent resumeEvt:
+				HandleSessionResume(resumeEvt);
+				break;
 
-		case SessionErrorEvent err:
-			HandleError(err);
-			break;
+			case SessionErrorEvent err:
+				HandleError(err);
+				break;
 
-		case SessionShutdownEvent shutdown:
-			HandleShutdown(shutdown);
-			break;
+			case SessionShutdownEvent shutdown:
+				HandleShutdown(shutdown);
+				break;
 
-		case SessionTaskCompleteEvent taskComplete:
-			HandleTaskComplete(taskComplete);
-			break;
+			case SessionTaskCompleteEvent taskComplete:
+				HandleTaskComplete(taskComplete);
+				break;
 
-		// SDK 1.0.0 per-agent idle marker. Used as a completion fallback for the ROOT
-		// agent only (sub-agent idles are ignored) — see HandleAssistantIdle for why.
-		case AssistantIdleEvent assistantIdle:
-			HandleAssistantIdle(assistantIdle);
-			break;
+			// Per-agent idle is not whole-session completion. A model retry, queued work,
+			// or a final structured response may still follow.
+			case AssistantIdleEvent assistantIdle:
+				HandleAssistantIdle(assistantIdle);
+				break;
 
-			case SessionIdleEvent:
-				HandleIdle();
+			case SessionIdleEvent idle:
+				HandleIdle(idle);
 				break;
 
 			default:
@@ -646,9 +695,9 @@ internal sealed partial class CopilotSessionHandler
 		//   * Cost is decorated with the SDK's GHCP001 "evaluation-only" attribute;
 		//     suppressed locally because the field is still wire-compatible with 0.3.0
 		//     and our consumers already treat it as best-effort.
-		#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only by the SDK
+#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only by the SDK
 		var cost = usageEvt.Data.Cost;
-		#pragma warning restore GHCP001
+#pragma warning restore GHCP001
 		var durationSeconds = usageEvt.Data.Duration is { } d
 			? (double?)d.TotalSeconds
 			: null;
@@ -686,13 +735,15 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleMessageDelta(AssistantMessageDeltaEvent delta)
 	{
-		_accumulatedContent.Append(delta.Data.DeltaContent);
+		var parent = ReadParentToolCallId(delta.Data);
+		if (delta.AgentId is null && parent is null)
+			_accumulatedContent.Append(delta.Data.DeltaContent);
 		_currentTurnMessageDeltaCount++;
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.MessageDelta,
 			Content = delta.Data.DeltaContent,
-		}, ResolveActor(ReadParentToolCallId(delta.Data)));
+		}, ResolveMessageActor(delta.AgentId, parent));
 	}
 
 	private void HandleReasoningDelta(AssistantReasoningDeltaEvent reasoningDelta)
@@ -709,7 +760,9 @@ internal sealed partial class CopilotSessionHandler
 
 	private void HandleMessage(AssistantMessageEvent msg)
 	{
-		_finalContent = msg.Data.Content;
+		var parent = ReadParentToolCallId(msg.Data);
+		if (msg.AgentId is null && parent is null)
+			_finalContent = msg.Data.Content;
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.Message,
@@ -721,7 +774,17 @@ internal sealed partial class CopilotSessionHandler
 			MessageOutputTokens = msg.Data.OutputTokens,
 			MessageRequestId = msg.Data.RequestId,
 			MessageTurnId = msg.Data.TurnId,
-		}, ResolveActor(ReadParentToolCallId(msg.Data)));
+		}, ResolveMessageActor(msg.AgentId, parent));
+	}
+
+	private ActorContext ResolveMessageActor(string? agentId, string? parentToolCallId)
+	{
+		if (agentId is null && parentToolCallId is null)
+			return ActorContext.Main;
+		if (agentId is not null && parentToolCallId is null)
+			return new ActorContext(agentId, agentId, null, 1);
+		var actor = ResolveActor(parentToolCallId);
+		return actor.IsMain ? new ActorContext(agentId, agentId, parentToolCallId, 1) : actor;
 	}
 
 	private void HandleReasoning(AssistantReasoningEvent reasoning)
@@ -743,7 +806,8 @@ internal sealed partial class CopilotSessionHandler
 		string? serializedArgs = null;
 		if (toolStart.Data.Arguments is not null)
 		{
-			try { serializedArgs = JsonSerializer.Serialize(toolStart.Data.Arguments); }
+			try
+			{ serializedArgs = JsonSerializer.Serialize(toolStart.Data.Arguments); }
 			catch { /* ignore serialization failures - arguments are optional for trace */ }
 		}
 
@@ -1051,31 +1115,41 @@ internal sealed partial class CopilotSessionHandler
 
 	private static string? FormatMcpTarget(string? serverName, string? toolName)
 	{
-		if (string.IsNullOrEmpty(serverName) && string.IsNullOrEmpty(toolName)) return null;
-		if (string.IsNullOrEmpty(serverName)) return toolName;
-		if (string.IsNullOrEmpty(toolName)) return serverName;
+		if (string.IsNullOrEmpty(serverName) && string.IsNullOrEmpty(toolName))
+			return null;
+		if (string.IsNullOrEmpty(serverName))
+			return toolName;
+		if (string.IsNullOrEmpty(toolName))
+			return serverName;
 		return $"{serverName}::{toolName}";
 	}
 
 	private static string? FormatExtensionMgmtTarget(string? extensionName, string? operation)
 	{
-		if (string.IsNullOrEmpty(extensionName) && string.IsNullOrEmpty(operation)) return null;
-		if (string.IsNullOrEmpty(operation)) return extensionName;
-		if (string.IsNullOrEmpty(extensionName)) return operation;
+		if (string.IsNullOrEmpty(extensionName) && string.IsNullOrEmpty(operation))
+			return null;
+		if (string.IsNullOrEmpty(operation))
+			return extensionName;
+		if (string.IsNullOrEmpty(extensionName))
+			return operation;
 		return $"{extensionName} ({operation})";
 	}
 
 	private static string? FormatContentExclusionReason(string? message, string? path)
 	{
-		if (string.IsNullOrEmpty(message) && string.IsNullOrEmpty(path)) return null;
-		if (string.IsNullOrEmpty(path)) return message;
-		if (string.IsNullOrEmpty(message)) return path;
+		if (string.IsNullOrEmpty(message) && string.IsNullOrEmpty(path))
+			return null;
+		if (string.IsNullOrEmpty(path))
+			return message;
+		if (string.IsNullOrEmpty(message))
+			return path;
 		return $"{message} (path: {path})";
 	}
 
 	private static string? FormatRuleList(PermissionRule[]? rules)
 	{
-		if (rules is null || rules.Length == 0) return null;
+		if (rules is null || rules.Length == 0)
+			return null;
 		return string.Join(", ", rules.Select(r => string.IsNullOrEmpty(r.Argument) ? r.Kind : $"{r.Kind}:{r.Argument}"));
 	}
 
@@ -1088,7 +1162,8 @@ internal sealed partial class CopilotSessionHandler
 	private static string? TruncateForAudit(string? value)
 	{
 		const int MaxChars = 500;
-		if (string.IsNullOrEmpty(value)) return value;
+		if (string.IsNullOrEmpty(value))
+			return value;
 		return value.Length > MaxChars ? value[..MaxChars] + "…" : value;
 	}
 
@@ -1297,7 +1372,8 @@ internal sealed partial class CopilotSessionHandler
 		string? serializedArgs = null;
 		if (externalTool.Data.Arguments is not null)
 		{
-			try { serializedArgs = JsonSerializer.Serialize(externalTool.Data.Arguments); }
+			try
+			{ serializedArgs = JsonSerializer.Serialize(externalTool.Data.Arguments); }
 			catch { /* ignore serialization failures - arguments are optional for trace */ }
 		}
 
@@ -1478,7 +1554,10 @@ internal sealed partial class CopilotSessionHandler
 			Type = AgentEventType.SessionIdle,
 			Content = $"Session shutdown ({shutdownType})",
 		});
-		_done.TrySetResult();
+		if (_autopilot)
+			_done.TrySetException(new InvalidOperationException("Autopilot session shut down before request-correlated task completion."));
+		else
+			_done.TrySetResult();
 	}
 
 	/// <summary>
@@ -1512,8 +1591,9 @@ internal sealed partial class CopilotSessionHandler
 			var projected = new Dictionary<string, AgentShutdownModelMetric>(metrics.Count, StringComparer.Ordinal);
 			foreach (var (model, metric) in metrics)
 			{
-				if (metric is null) continue;
-				#pragma warning disable GHCP001 // ShutdownModelMetric.TotalNanoAiu / Requests.* are evaluation-only
+				if (metric is null)
+					continue;
+#pragma warning disable GHCP001 // ShutdownModelMetric.TotalNanoAiu / Requests.* are evaluation-only
 				projected[model] = new AgentShutdownModelMetric
 				{
 					TotalNanoAiu = metric.TotalNanoAiu,
@@ -1529,14 +1609,14 @@ internal sealed partial class CopilotSessionHandler
 							ReasoningTokens: u.ReasoningTokens)
 						: null,
 				};
-				#pragma warning restore GHCP001
+#pragma warning restore GHCP001
 			}
 			modelMetrics = projected;
 		}
 
-		#pragma warning disable GHCP001 // SessionShutdownData.TotalNanoAiu is evaluation-only
+#pragma warning disable GHCP001 // SessionShutdownData.TotalNanoAiu is evaluation-only
 		var totalNanoAiu = data.TotalNanoAiu;
-		#pragma warning restore GHCP001
+#pragma warning restore GHCP001
 
 		return new AgentSessionShutdownSummary
 		{
@@ -1555,11 +1635,12 @@ internal sealed partial class CopilotSessionHandler
 	{
 		EmitEvent(new AgentEvent
 		{
-			Type = AgentEventType.SessionIdle,
+			Type = AgentEventType.Info,
+			DiagnosticType = "task_complete",
 			Content = taskComplete.Data.Summary,
 		});
-		// Task is done — complete the TCS. SessionIdleEvent may or may not follow.
-		_done.TrySetResult();
+		// This is the model's declaration, not the runtime's quiescence signal. The
+		// runtime may still deliver final text/JSON or process queued work before idle.
 	}
 
 	private void HandleUnknownEvent(SessionEvent evt)
@@ -1576,8 +1657,17 @@ internal sealed partial class CopilotSessionHandler
 		});
 	}
 
-	private void HandleIdle()
+	private void HandleIdle(SessionIdleEvent idle)
 	{
+		if (idle.Data.Aborted == true)
+		{
+			const string message = "Copilot session became idle after an aborted run.";
+			EmitEvent(new AgentEvent { Type = AgentEventType.Error, ErrorMessage = message });
+			_done.TrySetException(new CopilotSessionFailedException(
+				CopilotSessionFailureKind.SessionError, _requestedModel, message, reason: "session_aborted"));
+			return;
+		}
+
 		EmitEvent(new AgentEvent
 		{
 			Type = AgentEventType.SessionIdle,
@@ -1586,49 +1676,16 @@ internal sealed partial class CopilotSessionHandler
 	}
 
 	/// <summary>
-	/// SDK 1.0.0 emits <c>AssistantIdleEvent</c> when an individual agent (the root agent
-	/// or a sub-agent) finishes its work and goes idle for the current prompt. It carries
-	/// the same <c>Aborted</c> flag as <see cref="SessionIdleEvent"/> but is scoped to a
-	/// single <c>AgentId</c> and can fire more than once per prompt (the bundled CLI's
-	/// internal retry loop emits one per aborted attempt — observed when the CLI has lost
-	/// its Copilot auth, which is exactly the "two unhandled AssistantIdleEvent" shape that
-	/// motivated handling it here).
-	///
-	/// Completion authority still rests primarily with the session-level
-	/// <see cref="SessionIdleEvent"/> / <c>SessionTaskCompleteEvent</c> /
-	/// <c>SessionShutdownEvent</c>. This handler adds a <em>fallback</em> completion for the
-	/// ROOT agent only: some CLI flows emit <c>AssistantIdle</c> without a following
-	/// <c>SessionIdle</c>, which previously left the step waiting for its per-step timeout
-	/// with no final event. Completing here closes that gap.
-	///
-	/// Guard: while any sub-agent frame is active the root agent is blocked awaiting the
-	/// sub-agent's tool result and therefore cannot itself be idle, so an <c>AssistantIdle</c>
-	/// seen in that window belongs to the sub-agent and must NOT complete the parent session
-	/// (doing so would truncate the root agent's output). The completion is idempotent
-	/// (<see cref="TaskCompletionSource.TrySetResult()"/>), so a later <c>SessionIdle</c>, a
-	/// repeated <c>AssistantIdle</c>, or a preceding error event (which faults the completion
-	/// first) all remain correct.
+	/// Individual agents can become idle before the session has finished, including
+	/// between the runtime's own retries. Observe this event without completing the
+	/// step; session.idle, fatal session errors, shutdown, and cancellation own completion.
 	/// </summary>
 	private void HandleAssistantIdle(AssistantIdleEvent assistantIdle)
 	{
 		var agentId = assistantIdle.AgentId ?? "(root)";
 
-		// Sub-agent idle: informational only. Attribution is by active-frame count because
-		// the root agent cannot be idle while it is awaiting a sub-agent tool call.
-		if (_activeSubagentFrames.Count > 0)
-		{
-			LogAssistantIdleIgnoredForSubagent(agentId, _activeSubagentFrames.Count);
-			return;
-		}
-
 		var aborted = assistantIdle.Data?.Aborted == true;
-		LogAssistantIdleCompletingRoot(agentId, aborted);
-		EmitEvent(new AgentEvent
-		{
-			Type = AgentEventType.SessionIdle,
-			Content = aborted ? "Assistant idle (aborted)" : "Assistant idle",
-		});
-		_done.TrySetResult();
+		LogAssistantIdleObserved(agentId, aborted);
 	}
 
 	/// <summary>
@@ -1686,9 +1743,12 @@ internal sealed partial class CopilotSessionHandler
 		// Structured status-code path first — most reliable when the SDK supplies one.
 		if (statusCode is { } code)
 		{
-			if (code >= 500 && code <= 599) return true;
-			if (code == 429) return true;
-			if (code == 403) return true;
+			if (code >= 500 && code <= 599)
+				return true;
+			if (code == 429)
+				return true;
+			if (code == 403)
+				return true;
 		}
 
 		if (string.IsNullOrEmpty(message))
@@ -1875,23 +1935,19 @@ internal sealed partial class CopilotSessionHandler
 		Message = "Session permissions changed mid-session: permission mode {Previous} -> {Current}")]
 	private partial void LogSessionPermissionsChanged(string previous, string current);
 
-	// EventId 13: an AssistantIdleEvent attributed to an active sub-agent frame. Ignored for
-	// completion (the root agent owns the session outcome); Debug so it stays out of default
-	// logs but is available when triaging sub-agent lifecycles.
+	// Explicit child identity, rather than mutable frame bookkeeping, owns attribution.
 	[LoggerMessage(
 		EventId = 13,
 		Level = LogLevel.Debug,
-		Message = "AssistantIdle ignored for sub-agent (agentId={AgentId}); {ActiveFrames} sub-agent frame(s) active")]
-	private partial void LogAssistantIdleIgnoredForSubagent(string agentId, int activeFrames);
+		Message = "Ignoring child terminal event {EventType} for parent completion (agentId={AgentId})")]
+	private partial void LogChildTerminalIgnored(string agentId, string eventType);
 
-	// EventId 14: a root-agent AssistantIdleEvent used as a completion fallback. Information
-	// level — a session completing via AssistantIdle (rather than a session-level idle) is a
-	// notable signal that the CLI emitted no SessionIdle, worth seeing in default logs.
+	// An individual agent being idle does not establish whole-session completion.
 	[LoggerMessage(
 		EventId = 14,
-		Level = LogLevel.Information,
-		Message = "Root-agent AssistantIdle completed the session (agentId={AgentId}, aborted={Aborted}); no session-level idle was required")]
-	private partial void LogAssistantIdleCompletingRoot(string agentId, bool aborted);
+		Level = LogLevel.Debug,
+		Message = "AssistantIdle observed; awaiting session completion (agentId={AgentId}, aborted={Aborted})")]
+	private partial void LogAssistantIdleObserved(string agentId, bool aborted);
 
 	#endregion
 }

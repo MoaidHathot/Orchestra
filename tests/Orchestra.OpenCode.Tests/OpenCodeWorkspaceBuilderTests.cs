@@ -12,7 +12,9 @@ public class OpenCodeWorkspaceBuilderTests : IDisposable
 
 	public void Dispose()
 	{
-		try { Directory.Delete(_root, recursive: true); } catch { }
+		try
+		{ Directory.Delete(_root, recursive: true); }
+		catch { }
 	}
 
 	[Fact]
@@ -42,7 +44,7 @@ public class OpenCodeWorkspaceBuilderTests : IDisposable
 	}
 
 	[Fact]
-	public void Prepare_SkillDirectoryWithSkillMd_StagesUnderOpencodeSkills()
+	public void Prepare_SkillDirectoryWithSkillMd_PreservesSourceAndWorkingDirectory()
 	{
 		// A skill directory that directly contains SKILL.md is staged as one skill folder.
 		var skill = Path.Combine(_root, "my-skill");
@@ -52,18 +54,17 @@ public class OpenCodeWorkspaceBuilderTests : IDisposable
 
 		var ws = OpenCodeWorkspaceBuilder.Prepare(config: null, stepWorkingDirectory: null, skillDirectories: [skill], artifactDirectory: _root);
 
-		ws.WorkingDirectory.Should().NotBeNull();
-		ws.CreatedWorkingDirectory.Should().Be(ws.WorkingDirectory, "no step working dir was given, so a staging cwd was created");
-		var staged = Path.Combine(ws.WorkingDirectory!, ".opencode", "skills", "my-skill");
-		File.Exists(Path.Combine(staged, "SKILL.md")).Should().BeTrue();
-		File.Exists(Path.Combine(staged, "helper.py")).Should().BeTrue("supporting files are copied too");
+		ws.WorkingDirectory.Should().BeNull();
+		ws.StagedSkillPaths.Should().BeEmpty();
+		using var json = JsonDocument.Parse(File.ReadAllText(ws.ConfigFilePath!));
+		json.RootElement.GetProperty("skills")[0].GetString().Should().Be(skill);
 
 		ws.Cleanup(NullLogger.Instance);
-		Directory.Exists(ws.CreatedWorkingDirectory).Should().BeFalse();
+		File.Exists(Path.Combine(skill, "helper.py")).Should().BeTrue();
 	}
 
 	[Fact]
-	public void Prepare_SkillDirectoryOfSubfolders_StagesEachSkill()
+	public void Prepare_SkillDirectoryOfSubfolders_UsesNativePathsWithoutProjectMutation()
 	{
 		// A directory holding multiple skill subfolders stages each one.
 		var skillsDir = Path.Combine(_root, "skills");
@@ -80,8 +81,9 @@ public class OpenCodeWorkspaceBuilderTests : IDisposable
 
 		ws.WorkingDirectory.Should().Be(workdir);
 		ws.CreatedWorkingDirectory.Should().BeNull("the step provided its own working directory");
-		File.Exists(Path.Combine(workdir, ".opencode", "skills", "alpha", "SKILL.md")).Should().BeTrue();
-		File.Exists(Path.Combine(workdir, ".opencode", "skills", "beta", "SKILL.md")).Should().BeTrue();
+		Directory.Exists(Path.Combine(workdir, ".opencode")).Should().BeFalse();
+		using var json = JsonDocument.Parse(File.ReadAllText(ws.ConfigFilePath!));
+		json.RootElement.GetProperty("skills")[0].GetString().Should().Be(skillsDir);
 
 		ws.Cleanup(NullLogger.Instance);
 		Directory.Exists(Path.Combine(workdir, ".opencode", "skills", "alpha")).Should().BeFalse("staged skills are cleaned up");

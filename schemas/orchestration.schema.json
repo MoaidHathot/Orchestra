@@ -50,6 +50,14 @@
       "$ref": "#/$defs/systemPromptMode",
       "description": "Default system prompt mode for all Prompt steps. Individual steps can override. When null, the SDK's default behavior is used."
     },
+    "defaultEnableConfigDiscovery": {
+      "type": "boolean",
+      "description": "Default ambient provider configuration discovery for Prompt steps. Copilot supports true/false; OpenCode V2 accepts true but rejects false. Step values override this."
+    },
+    "defaultEnableOnDemandInstructionDiscovery": {
+      "type": "boolean",
+      "description": "Default nested-instruction discovery for Prompt steps. Copilot supports true/false; OpenCode V2 accepts true but rejects false. Step values override this."
+    },
     "defaultRetryPolicy": {
       "$ref": "#/$defs/retryPolicy",
       "description": "Default retry policy applied to all steps that don't define their own. When absent, no retries are performed."
@@ -398,7 +406,7 @@
         },
         "workingDirectory": {
           "type": "string",
-          "description": "Working directory for the agent's shell/file tools and config discovery (custom instructions, .github/agents, .github/mcp.json). Supports {{param.*}}/{{env.*}}/{{vars.*}}; validated to exist at run time."
+          "description": "Working directory for tools and discovery. Defaults to the orchestration file directory; relative overrides use that directory too. In-memory definitions without a source directory inherit process CWD. Supports templates; validated to exist at run time."
         },
         "githubToken": {
           "type": "string",
@@ -406,7 +414,7 @@
         },
         "humanInput": {
           "type": "boolean",
-          "description": "When true, the agent's elicitation and exit-plan-mode (plan approval) requests for this step are routed to Orchestra's human-in-the-loop (UI/CLI/API) instead of resolving autonomously."
+          "description": "True selects interactive guidance and enables native questions/elicitation through Orchestra's human-input surface. False selects non-interactive guidance and disables the request_user_input opt-in tool. Omission defaults to false, except that an explicitly enabled request_user_input tool retains interactive behavior."
         },
         "permissionPolicy": {
           "$ref": "#/$defs/permissionPolicy",
@@ -443,6 +451,32 @@
 		  "description": "Paths to directories containing Agent Skills (SKILL.md files). Relative paths are resolved from the orchestration file directory. Skills provide specialized knowledge and workflows the agent can discover and activate on demand.",
           "items": {
             "type": "string"
+          }
+        },
+        "instructionDirectories": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Explicit additional instruction directories relative to the definition file. Copilot omission retains its legacy skillDirectories fallback; [] disables it. OpenCode omission adds none; explicit directories load Markdown files."
+        },
+        "enableConfigDiscovery": {
+          "type": "boolean",
+          "description": "Enable ambient configuration discovery from the agent working directory, including project skills, agents, MCPs and plugins. Overrides defaultEnableConfigDiscovery and the Copilot host default (false)."
+        },
+        "enableOnDemandInstructionDiscovery": {
+          "type": "boolean",
+          "description": "Discover nested instruction files such as AGENTS.md after successful file reads. Overrides the orchestration and Copilot host defaults (false). Separate from root instruction loading."
+        },
+        "responseSchema": {
+          "type": "object",
+          "description": "JSON Schema for successful output, including output handlers. Copilot constrains generation natively; OpenCode uses schema guidance. Orchestra validates both strictly. Immediate-stop engine tools are omitted internally. Omit for ordinary text."
+        },
+        "executionPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Step-local bounded continuation. Copilot uses native autopilot; OpenCode uses Orchestra-managed continuation. Independent of retries and DAG loops.",
+          "properties": {
+            "mode": { "type": "string", "enum": ["standard", "autopilot"], "default": "standard" },
+            "maxContinues": { "type": "integer", "minimum": 0, "default": 5, "description": "Maximum continuations after the initial turn; tool calls do not consume this budget. Exhaustion fails the step." }
           }
         },
         "systemPromptSections": {

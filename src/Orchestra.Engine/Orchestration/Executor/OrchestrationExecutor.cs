@@ -111,15 +111,15 @@ public partial class OrchestrationExecutor
 		_promptFormatter = promptFormatter ?? DefaultPromptFormatter.Instance;
 		_loggerFactory = loggerFactory;
 		_logger = loggerFactory.CreateLogger<OrchestrationExecutor>();
-			_runStore = runStore ?? NullRunStore.Instance;
-			_checkpointStore = checkpointStore ?? NullCheckpointStore.Instance;
-			_pendingInputStore = pendingInputStore ?? NullPendingInputStore.Instance;
-			_humanInputWaiter = humanInputWaiter ?? NullHumanInputWaiter.Instance;
-			_globalHooks = MarkHookSources(globalHooks ?? [], HookSource.Global);
-			_dataPath = dataPath;
-			_serverUrl = serverUrl;
-			_hostDefaults = hostDefaults ?? HostAgentDefaults.None;
-			_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
+		_runStore = runStore ?? NullRunStore.Instance;
+		_checkpointStore = checkpointStore ?? NullCheckpointStore.Instance;
+		_pendingInputStore = pendingInputStore ?? NullPendingInputStore.Instance;
+		_humanInputWaiter = humanInputWaiter ?? NullHumanInputWaiter.Instance;
+		_globalHooks = MarkHookSources(globalHooks ?? [], HookSource.Global);
+		_dataPath = dataPath;
+		_serverUrl = serverUrl;
+		_hostDefaults = hostDefaults ?? HostAgentDefaults.None;
+		_engineToolRegistry = engineToolRegistry ?? EngineToolRegistry.CreateDefault();
 
 		// If no registry is provided, create a default one with all built-in step types
 		if (stepExecutorRegistry is not null)
@@ -433,6 +433,8 @@ public partial class OrchestrationExecutor
 				: (parentContext.RootExecutionId ?? parentContext.ParentExecutionId),
 			Variables = orchestration.Variables,
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
+			DefaultEnableConfigDiscovery = orchestration.DefaultEnableConfigDiscovery,
+			DefaultEnableOnDemandInstructionDiscovery = orchestration.DefaultEnableOnDemandInstructionDiscovery,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
 			DefaultModel = orchestration.DefaultModel ?? _hostDefaults.Model,
 			DefaultReasoningLevel = orchestration.DefaultReasoningLevel ?? _hostDefaults.ReasoningLevel,
@@ -761,7 +763,9 @@ public partial class OrchestrationExecutor
 					{
 						Interlocked.CompareExchange(ref stopTriggeredByStep, step.Name, null);
 						LogStepFailureStop(step.Name, result.ErrorMessage ?? "(no message)");
-						try { orchestrationCompleteCts.Cancel(); } catch (ObjectDisposedException) { }
+						try
+						{ orchestrationCompleteCts.Cancel(); }
+						catch (ObjectDisposedException) { }
 
 						var stopReason = $"Cancelled: step '{step.Name}' failed and onStepFailure is 'stop'";
 						foreach (var (name, tcs) in completionSources)
@@ -794,7 +798,9 @@ public partial class OrchestrationExecutor
 						// Cancel all remaining steps by triggering the linked CTS.
 						// Steps already running will observe the cancellation token;
 						// steps not yet started will be cancelled when TryLaunchStep checks the token.
-						try { orchestrationCompleteCts.Cancel(); } catch (ObjectDisposedException) { }
+						try
+						{ orchestrationCompleteCts.Cancel(); }
+						catch (ObjectDisposedException) { }
 
 						// Complete all pending step TCSs with Cancelled results
 						foreach (var (name, tcs) in completionSources)
@@ -886,14 +892,14 @@ public partial class OrchestrationExecutor
 							allStepRecords[name] = cancelRecord;
 							_reporter.PublishStepRecord(name, cancelRecord);
 
-						_reporter.ReportStepCancelled(name);
-						tcs.TrySetResult(cancelledResult);
+							_reporter.ReportStepCancelled(name);
+							tcs.TrySetResult(cancelledResult);
+						}
 					}
 				}
-			}
-			// Use LongRunning so step threads don't compete with the thread pool
-			// that ASP.NET Core needs for incoming HTTP requests (e.g., self-referential
-			// MCP data-plane calls). Unwrap() converts Task<Task> to Task.
+				// Use LongRunning so step threads don't compete with the thread pool
+				// that ASP.NET Core needs for incoming HTTP requests (e.g., self-referential
+				// MCP data-plane calls). Unwrap() converts Task<Task> to Task.
 			}, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
 		}
 
@@ -1657,7 +1663,9 @@ public partial class OrchestrationExecutor
 		}
 		finally
 		{
-			try { limiter?.Release(); } catch (ObjectDisposedException) { /* run already torn down */ }
+			try
+			{ limiter?.Release(); }
+			catch (ObjectDisposedException) { /* run already torn down */ }
 		}
 	}
 
@@ -2500,7 +2508,8 @@ public partial class OrchestrationExecutor
 
 		foreach (var record in stepRecords)
 		{
-			if (record.Usage is null) continue;
+			if (record.Usage is null)
+				continue;
 			hasUsage = true;
 
 			totalInput += record.Usage.InputTokens;
@@ -2514,7 +2523,8 @@ public partial class OrchestrationExecutor
 				totalDuration = (totalDuration ?? 0) + record.Usage.Duration.Value;
 		}
 
-		if (!hasUsage) return null;
+		if (!hasUsage)
+			return null;
 
 		return new TokenUsage
 		{

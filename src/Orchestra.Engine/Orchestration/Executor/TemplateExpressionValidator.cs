@@ -792,6 +792,9 @@ public static partial class TemplateExpressionValidator
 			yield return ("OutputHandlerPrompt", step.OutputHandlerPrompt);
 		foreach (var (i, dir) in step.SkillDirectories.Select((d, i) => (i, d)))
 			yield return ($"SkillDirectories[{i}]", dir);
+		if (step.InstructionDirectories is not null)
+			foreach (var (i, dir) in step.InstructionDirectories.Select((d, i) => (i, d)))
+				yield return ($"InstructionDirectories[{i}]", dir);
 	}
 
 	private static IEnumerable<(string, string)> GetCommandStepFields(CommandOrchestrationStep step)

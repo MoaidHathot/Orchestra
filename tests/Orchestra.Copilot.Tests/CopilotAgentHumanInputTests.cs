@@ -59,6 +59,7 @@ public class CopilotAgentHumanInputTests
 
 		config.OnElicitationRequest.Should().BeNull();
 		config.OnExitPlanModeRequest.Should().BeNull();
+		config.OnUserInputRequest.Should().BeNull();
 	}
 
 	[Fact]
@@ -68,6 +69,33 @@ public class CopilotAgentHumanInputTests
 
 		config.OnElicitationRequest.Should().BeNull();
 		config.OnExitPlanModeRequest.Should().BeNull();
+		config.OnUserInputRequest.Should().BeNull();
+	}
+
+	[Fact]
+	public async Task NativeAskUser_RoutesChoicesAndReply_AndSurvivesResume()
+	{
+		var waiter = new StubWaiter();
+		var agent = CreateAgent(humanInput: true, engineToolContext: Context(waiter));
+		var config = agent.BuildSessionConfig();
+		config.OnUserInputRequest.Should().NotBeNull();
+		var responseTask = config.OnUserInputRequest!(new UserInputRequest { Question = "Which region?", Choices = ["east", "west"] }, new UserInputInvocation { SessionId = "session" });
+		await waiter.WaitForRegistration();
+		waiter.Complete(new UserInputResponse { Choice = "west", RespondedAt = DateTimeOffset.UtcNow });
+		var response = await responseTask;
+		response.Answer.Should().Be("west");
+		response.WasFreeform.Should().BeFalse();
+		agent.BuildResumeSessionConfig(config).OnUserInputRequest.Should().BeSameAs(config.OnUserInputRequest);
+		config.EnableSessionStore.Should().BeFalse();
+		config.Memory!.Enabled.Should().BeFalse("human interaction must not enable persistent recall");
+	}
+
+	[Fact]
+	public async Task NativeAskUser_MissingRunIdentity_DoesNotInventAnOperatorAnswer()
+	{
+		var config = CreateAgent(humanInput: true, engineToolContext: new EngineToolContext()).BuildSessionConfig();
+		var ask = () => config.OnUserInputRequest!(new UserInputRequest { Question = "Which region?" }, new UserInputInvocation { SessionId = "session" });
+		await ask.Should().ThrowAsync<InvalidOperationException>().WithMessage("*operator context*");
 	}
 
 	[Fact]

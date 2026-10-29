@@ -21,6 +21,49 @@ public class CopilotAgentBuilderTests
 		caps.Should().BeEquivalentTo(AgentProviderCapabilities.All("copilot"));
 	}
 
+	[Theory]
+	[InlineData(null, true)]
+	[InlineData(false, false)]
+	[InlineData(true, true)]
+	public async Task BuildAgent_ResolvesDiscoveryOverProviderHostDefaults(bool? stepValue, bool expected)
+	{
+		var factory = new ConfigurationOnlyClientFactory();
+		await using var builder = new CopilotAgentBuilder(NullLoggerFactory.Instance, new CopilotAgentPoolOptions
+		{
+			EnableConfigDiscovery = true,
+			EnableOnDemandInstructionDiscovery = true,
+		}, factory);
+		await using var scope = await builder.CreateRunScopeAsync();
+		var agent = (CopilotAgent)await builder.BuildAgentAsync(new AgentBuildConfig
+		{
+			Model = "test-model",
+			EnableConfigDiscovery = stepValue,
+			EnableOnDemandInstructionDiscovery = stepValue,
+		});
+		var config = agent.BuildSessionConfig();
+		config.EnableConfigDiscovery.Should().Be(expected);
+		config.EnableOnDemandInstructionDiscovery.Should().Be(expected);
+	}
+
+	private sealed class ConfigurationOnlyClientFactory : ICopilotClientFactory
+	{
+		public ICopilotClient CreateClient() => new ConfigurationOnlyClient();
+	}
+
+	private sealed class ConfigurationOnlyClient : ICopilotClient
+	{
+		public int DiagnosticHash => GetHashCode();
+		public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+		public Task StopAsync() => Task.CompletedTask;
+		public Task PingAsync(string message, CancellationToken cancellationToken) => Task.CompletedTask;
+		public Task<ICopilotSession> CreateSessionAsync(GitHub.Copilot.SessionConfig config, CancellationToken cancellationToken) => throw new InvalidOperationException("Configuration test must not create a session.");
+		public Task<ICopilotSession> ResumeSessionAsync(string sessionId, GitHub.Copilot.ResumeSessionConfig config, CancellationToken cancellationToken) => throw new InvalidOperationException("Configuration test must not resume a session.");
+		public Task<string?> GetLastSessionIdAsync(CancellationToken cancellationToken) => Task.FromResult<string?>(null);
+		public Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken) => Task.CompletedTask;
+		public Task<IReadOnlyList<GitHub.Copilot.ModelInfo>> ListModelsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<GitHub.Copilot.ModelInfo>>([]);
+		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+	}
+
 	[Fact]
 	public async Task BuildAgentAsync_WithNullModel_ThrowsArgumentException()
 	{
@@ -438,8 +481,8 @@ public class CopilotAgentBuilderTests
 					TaskCreationOptions.LongRunning,
 					TaskScheduler.Default);
 
-			clientHashInsideTask.Should().Be(clientHash,
-				"the run-scoped pool diagnostic must flow into child step tasks for that orchestration run");
+				clientHashInsideTask.Should().Be(clientHash,
+					"the run-scoped pool diagnostic must flow into child step tasks for that orchestration run");
 
 				// Keep the scope alive briefly so both tasks overlap in practice while capturing hashes.
 				await Task.Delay(250);

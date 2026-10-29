@@ -236,6 +236,16 @@
     "copilot": {
       "type": "object",
       "properties": {
+        "enableConfigDiscovery": {
+          "type": "boolean",
+          "default": false,
+          "description": "Default ambient configuration discovery for Copilot sessions, based on the agent working directory. Orchestration and step settings override this."
+        },
+        "enableOnDemandInstructionDiscovery": {
+          "type": "boolean",
+          "default": false,
+          "description": "Default discovery of nested instruction files after agent file reads. Orchestration and step settings override this."
+        },
         "gitHubToken": {
           "type": "string",
           "description": "Token used for Copilot authentication. Prefer \"${GITHUB_TOKEN}\" over a literal. When unset, the Copilot CLI's stored credentials are used."
@@ -291,11 +301,12 @@
         },
         "serverUsername": {
           "type": "string",
-          "description": "Basic-auth username for the spawned server. Default: opencode."
+          "const": "opencode",
+          "description": "OpenCode V2 uses the fixed Basic-auth username opencode."
         },
         "serverPassword": {
           "type": "string",
-          "description": "Basic-auth password for the spawned server. Prefer \"${VAR}\" over a literal."
+          "description": "Basic-auth password for the private V2 server. Generated automatically when omitted. Prefer \"${VAR}\" over a literal."
         },
         "fallbackProvider": {
           "type": "string",

@@ -7,6 +7,7 @@ namespace Orchestra.Engine;
 public sealed record AgentBuildConfig
 {
 	public required string Model { get; init; }
+	public AgentExecutionPolicy? ExecutionPolicy { get; init; }
 	public string? SystemPrompt { get; init; }
 	public Mcp[] Mcps { get; init; } = [];
 	public Subagent[] Subagents { get; init; } = [];
@@ -24,7 +25,7 @@ public sealed record AgentBuildConfig
 	/// <summary>Optional per-step GitHub token overriding the host default (maps to SDK SessionConfig.GitHubToken).</summary>
 	public string? GitHubToken { get; init; }
 
-	/// <summary>When true, route Copilot elicitation / exit-plan-mode requests to Orchestra's human-in-the-loop.</summary>
+	/// <summary>Use interactive guidance and route native questions/elicitation to human input. False selects non-interactive guidance.</summary>
 	public bool HumanInput { get; init; }
 
 	/// <summary>Optional policy controlling how Copilot permission requests are resolved (null = approve-all).</summary>
@@ -44,6 +45,18 @@ public sealed record AgentBuildConfig
 	/// and activate on demand.
 	/// </summary>
 	public string[] SkillDirectories { get; init; } = [];
+
+	/// <summary>Additional instruction directories. Null preserves the provider's legacy defaults; an empty array supplies none.</summary>
+	public string[]? InstructionDirectories { get; init; }
+
+	/// <summary>Opt into the provider's ambient configuration discovery. Null inherits provider host settings.</summary>
+	public bool? EnableConfigDiscovery { get; init; }
+
+	/// <summary>Discover instructions covering files as the agent reads them. Null inherits provider host settings.</summary>
+	public bool? EnableOnDemandInstructionDiscovery { get; init; }
+
+	/// <summary>JSON Schema contract for final output. Native generation support is declared separately by the provider.</summary>
+	public System.Text.Json.JsonElement? ResponseSchema { get; init; }
 
 	/// <summary>
 	/// Section-level overrides for the system prompt when using <see cref="Engine.SystemPromptMode.Customize"/>.

@@ -69,14 +69,20 @@ internal static class AgentProviderRegistration
 			ResumeAlreadyInUsePollInterval = TimeSpan.FromMilliseconds(Math.Max(1, swap.ResumeAlreadyInUsePollIntervalMs)),
 			GitHubToken = options.Copilot.GitHubToken,
 			UseLoggedInUser = options.Copilot.UseLoggedInUser,
+			EnableConfigDiscovery = options.Copilot.EnableConfigDiscovery,
+			EnableOnDemandInstructionDiscovery = options.Copilot.EnableOnDemandInstructionDiscovery,
 			McpStartupTimeout = options.Copilot.McpStartupTimeoutSeconds is { } mcpStartupSeconds
 				? TimeSpan.FromSeconds(Math.Max(0, mcpStartupSeconds))
 				: new CopilotAgentPoolOptions().McpStartupTimeout,
 		};
-		if (options.AgentPool.MinInstances is { } copilotMin) copilotPoolOptions.DefaultMinInstances = copilotMin;
-		if (options.AgentPool.MaxInstances is { } copilotMax) copilotPoolOptions.DefaultMaxInstancesPerRun = copilotMax;
-		if (options.AgentPool.MaxSessionsPerInstance is { } copilotSessions) copilotPoolOptions.DefaultMaxSessionsPerInstance = copilotSessions;
-		if (options.AgentPool.IdleTimeoutSeconds is { } copilotIdle) copilotPoolOptions.DefaultIdleTimeoutSeconds = copilotIdle;
+		if (options.AgentPool.MinInstances is { } copilotMin)
+			copilotPoolOptions.DefaultMinInstances = copilotMin;
+		if (options.AgentPool.MaxInstances is { } copilotMax)
+			copilotPoolOptions.DefaultMaxInstancesPerRun = copilotMax;
+		if (options.AgentPool.MaxSessionsPerInstance is { } copilotSessions)
+			copilotPoolOptions.DefaultMaxSessionsPerInstance = copilotSessions;
+		if (options.AgentPool.IdleTimeoutSeconds is { } copilotIdle)
+			copilotPoolOptions.DefaultIdleTimeoutSeconds = copilotIdle;
 
 		return new CopilotAgentBuilder(loggerFactory, copilotPoolOptions);
 	}
@@ -90,20 +96,33 @@ internal static class AgentProviderRegistration
 		var poolOptions = new OpenCodeAgentPoolOptions();
 		// Only override the built-in defaults when the host actually set a value; otherwise the
 		// options-class defaults (kept in sync across providers) are the single source of truth.
-		if (options.AgentPool.MinInstances is { } ocMin) poolOptions.DefaultMinInstances = ocMin;
-		if (options.AgentPool.MaxInstances is { } ocMax) poolOptions.DefaultMaxInstancesPerRun = ocMax;
-		if (options.AgentPool.MaxSessionsPerInstance is { } ocSessions) poolOptions.DefaultMaxSessionsPerInstance = ocSessions;
-		if (options.AgentPool.IdleTimeoutSeconds is { } ocIdle) poolOptions.DefaultIdleTimeoutSeconds = ocIdle;
+		if (options.AgentPool.MinInstances is { } ocMin)
+			poolOptions.DefaultMinInstances = ocMin;
+		if (options.AgentPool.MaxInstances is { } ocMax)
+			poolOptions.DefaultMaxInstancesPerRun = ocMax;
+		if (options.AgentPool.MaxSessionsPerInstance is { } ocSessions)
+			poolOptions.DefaultMaxSessionsPerInstance = ocSessions;
+		if (options.AgentPool.IdleTimeoutSeconds is { } ocIdle)
+			poolOptions.DefaultIdleTimeoutSeconds = ocIdle;
 
-		if (!string.IsNullOrWhiteSpace(oc.CliPath)) poolOptions.CliPath = oc.CliPath;
-		if (!string.IsNullOrWhiteSpace(oc.Hostname)) poolOptions.Hostname = oc.Hostname!;
-		if (!string.IsNullOrWhiteSpace(oc.ServerPassword)) poolOptions.ServerPassword = oc.ServerPassword;
-		if (!string.IsNullOrWhiteSpace(oc.ServerUsername)) poolOptions.ServerUsername = oc.ServerUsername!;
-		if (!string.IsNullOrWhiteSpace(oc.FallbackProvider)) poolOptions.FallbackProvider = oc.FallbackProvider!;
-		if (oc.StartupTimeoutSeconds is > 0) poolOptions.StartupTimeout = TimeSpan.FromSeconds(oc.StartupTimeoutSeconds.Value);
-		if (oc.EngineToolBridgeEnabled.HasValue) poolOptions.EngineToolBridgeEnabled = oc.EngineToolBridgeEnabled.Value;
-		if (oc.SwapBudgetPerStep is >= 0) poolOptions.SwapBudgetPerStep = oc.SwapBudgetPerStep.Value;
-		if (oc.ResumeOnSwapEnabled.HasValue) poolOptions.ResumeOnSwapEnabled = oc.ResumeOnSwapEnabled.Value;
+		if (!string.IsNullOrWhiteSpace(oc.CliPath))
+			poolOptions.CliPath = oc.CliPath;
+		if (!string.IsNullOrWhiteSpace(oc.Hostname))
+			poolOptions.Hostname = oc.Hostname!;
+		if (!string.IsNullOrWhiteSpace(oc.ServerPassword))
+			poolOptions.ServerPassword = oc.ServerPassword;
+		if (!string.IsNullOrWhiteSpace(oc.ServerUsername))
+			poolOptions.ServerUsername = oc.ServerUsername!;
+		if (!string.IsNullOrWhiteSpace(oc.FallbackProvider))
+			poolOptions.FallbackProvider = oc.FallbackProvider!;
+		if (oc.StartupTimeoutSeconds is > 0)
+			poolOptions.StartupTimeout = TimeSpan.FromSeconds(oc.StartupTimeoutSeconds.Value);
+		if (oc.EngineToolBridgeEnabled.HasValue)
+			poolOptions.EngineToolBridgeEnabled = oc.EngineToolBridgeEnabled.Value;
+		if (oc.SwapBudgetPerStep is >= 0)
+			poolOptions.SwapBudgetPerStep = oc.SwapBudgetPerStep.Value;
+		if (oc.ResumeOnSwapEnabled.HasValue)
+			poolOptions.ResumeOnSwapEnabled = oc.ResumeOnSwapEnabled.Value;
 
 		return new OpenCodeAgentBuilder(loggerFactory, poolOptions);
 	}

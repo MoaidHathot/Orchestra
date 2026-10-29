@@ -121,6 +121,24 @@ public class SchemaContractTests
 	}
 
 	[Fact]
+	public void PromptAndHostSchemas_DeclareDiscoveryAndStructuredResponseControls()
+	{
+		using var orchestration = Load("orchestration.schema.json");
+		var root = orchestration.RootElement.GetProperty("properties");
+		root.GetProperty("defaultEnableConfigDiscovery").GetProperty("type").GetString().Should().Be("boolean");
+		root.GetProperty("defaultEnableOnDemandInstructionDiscovery").GetProperty("type").GetString().Should().Be("boolean");
+		var step = orchestration.RootElement.GetProperty("$defs").GetProperty("promptStepProperties").GetProperty("properties");
+		step.GetProperty("enableConfigDiscovery").GetProperty("type").GetString().Should().Be("boolean");
+		step.GetProperty("enableOnDemandInstructionDiscovery").GetProperty("type").GetString().Should().Be("boolean");
+		step.GetProperty("instructionDirectories").GetProperty("type").GetString().Should().Be("array");
+		step.GetProperty("responseSchema").GetProperty("type").GetString().Should().Be("object");
+		using var host = Load("orchestra.schema.json");
+		var copilot = host.RootElement.GetProperty("definitions").GetProperty("copilot").GetProperty("properties");
+		copilot.GetProperty("enableConfigDiscovery").GetProperty("default").GetBoolean().Should().BeFalse();
+		copilot.GetProperty("enableOnDemandInstructionDiscovery").GetProperty("default").GetBoolean().Should().BeFalse();
+	}
+
+	[Fact]
 	public void HostSchema_ScanDescriptionWarnsThatDirectoryIsTheWorkspaceRoot()
 	{
 		// Pointing scan.directory at ./orchestrations makes the host look for

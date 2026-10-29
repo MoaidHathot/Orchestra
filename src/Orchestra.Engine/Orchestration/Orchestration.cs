@@ -42,6 +42,12 @@ public class Orchestration
 	/// </remarks>
 	public SystemPromptMode? DefaultSystemPromptMode { get; init; }
 
+	/// <summary>Default ambient configuration discovery for Prompt steps. Null inherits provider host settings.</summary>
+	public bool? DefaultEnableConfigDiscovery { get; init; }
+
+	/// <summary>Default on-demand nested instruction discovery for Prompt steps. Null inherits provider host settings.</summary>
+	public bool? DefaultEnableOnDemandInstructionDiscovery { get; init; }
+
 	/// <summary>
 	/// Default retry policy applied to all steps that don't define their own.
 	/// When null, no retries are performed on step failures.

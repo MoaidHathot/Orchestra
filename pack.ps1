@@ -47,11 +47,11 @@ function Invoke-Step {
     }
 }
 
-if (Test-Path $artifactsRoot) {
-    Remove-Item $artifactsRoot -Recurse -Force
+if (Test-Path $packageOutput) {
+    Remove-Item $packageOutput -Recurse -Force
 }
 
-New-Item -ItemType Directory -Path $packageOutput | Out-Null
+New-Item -ItemType Directory -Path $packageOutput -Force | Out-Null
 
 $portalProject = Join-Path $repoRoot 'src/Orchestra.Portal/Orchestra.Portal.csproj'
 $toolProject = Join-Path $repoRoot 'src/Orchestra.Cli/Orchestra.Cli.csproj'

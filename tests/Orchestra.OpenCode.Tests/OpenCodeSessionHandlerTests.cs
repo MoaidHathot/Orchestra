@@ -107,11 +107,11 @@ public class OpenCodeSessionHandlerTests
 	}
 
 	[Fact]
-	public void SessionIdle_CompletesDone()
+	public void SessionIdle_DoesNotSubstituteForDurableCompletion()
 	{
 		var (handler, _, done) = Create();
 		handler.Handle(TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }"""));
-		done.Task.IsCompletedSuccessfully.Should().BeTrue();
+		done.Task.IsCompleted.Should().BeFalse();
 	}
 
 	[Fact]

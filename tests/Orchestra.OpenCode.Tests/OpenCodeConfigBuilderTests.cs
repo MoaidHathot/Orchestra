@@ -9,7 +9,7 @@ public class OpenCodeConfigBuilderTests
 	private static OpenCodeModelRef Model => OpenCodeModelRef.Parse("github-copilot/claude-opus-4.8", "github-copilot");
 
 	private static OpenCodeStepPlan Build(
-		string? system = "sys",
+		string? system = null,
 		ReasoningLevel? reasoning = null,
 		IReadOnlyList<Subagent>? subagents = null,
 		IReadOnlyList<Mcp>? mcps = null,
@@ -35,11 +35,10 @@ public class OpenCodeConfigBuilderTests
 		plan.HasConfig.Should().BeTrue();
 		plan.PrimaryAgentName.Should().Be("orchestra-primary");
 
-		var agent = ConfigJson(plan).GetProperty("agent").GetProperty("orchestra-primary");
+		var agent = ConfigJson(plan).GetProperty("agents").GetProperty("orchestra-primary");
 		agent.GetProperty("mode").GetString().Should().Be("primary");
-		agent.GetProperty("model").GetString().Should().Be("github-copilot/claude-opus-4.8");
-		agent.GetProperty("prompt").GetString().Should().Be("you are helpful");
-		agent.GetProperty("reasoningEffort").GetString().Should().Be("high");
+		agent.GetProperty("model").GetString().Should().Be("github-copilot/claude-opus-4.8#high");
+		agent.GetProperty("system").GetString().Should().Be("you are helpful");
 	}
 
 	// opencode's variant keys are the lower-case effort names ("xhigh", "max", ...), so the
@@ -54,8 +53,8 @@ public class OpenCodeConfigBuilderTests
 	{
 		var plan = Build(system: "sys", reasoning: level);
 
-		var agent = ConfigJson(plan).GetProperty("agent").GetProperty("orchestra-primary");
-		agent.GetProperty("reasoningEffort").GetString().Should().Be(expected);
+		var agent = ConfigJson(plan).GetProperty("agents").GetProperty("orchestra-primary");
+		agent.GetProperty("model").GetString().Should().Be("github-copilot/claude-opus-4.8#" + expected);
 	}
 
 	[Fact]
@@ -66,9 +65,9 @@ public class OpenCodeConfigBuilderTests
 		plan.HasConfig.Should().BeTrue();
 		plan.PrimaryAgentName.Should().Be("orchestra-primary");
 
-		var tools = ConfigJson(plan).GetProperty("agent").GetProperty("orchestra-primary").GetProperty("tools");
-		tools.GetProperty("bash").GetBoolean().Should().BeFalse();
-		tools.GetProperty("edit").GetBoolean().Should().BeFalse();
+		var rules = ConfigJson(plan).GetProperty("agents").GetProperty("orchestra-primary").GetProperty("permissions");
+		rules.EnumerateArray().Select(r => r.GetProperty("action").GetString()).Should().Equal("shell", "edit");
+		rules.EnumerateArray().Should().OnlyContain(r => r.GetProperty("effect").GetString() == "deny");
 	}
 
 	[Fact]
@@ -80,12 +79,11 @@ public class OpenCodeConfigBuilderTests
 			new Subagent { Name = "Writer", Prompt = "You write.", Model = "anthropic/claude-3-5-sonnet", Tools = ["read", "grep"] },
 		};
 
-		var agentMap = ConfigJson(Build(subagents: subagents)).GetProperty("agent");
+		var agentMap = ConfigJson(Build(subagents: subagents)).GetProperty("agents");
 
-		var task = agentMap.GetProperty("orchestra-primary").GetProperty("permission").GetProperty("task");
-		task.GetProperty("*").GetString().Should().Be("deny");
-		task.GetProperty("orchestra-sub-data-researcher").GetString().Should().Be("allow");
-		task.GetProperty("orchestra-sub-writer").GetString().Should().Be("allow");
+		var task = agentMap.GetProperty("orchestra-primary").GetProperty("permissions");
+		task.EnumerateArray().Select(r => r.GetProperty("resource").GetString()).Should().Equal("*", "orchestra-sub-data-researcher", "orchestra-sub-writer");
+		task.EnumerateArray().Select(r => r.GetProperty("effect").GetString()).Should().Equal("deny", "allow", "allow");
 
 		var researcher = agentMap.GetProperty("orchestra-sub-data-researcher");
 		researcher.GetProperty("mode").GetString().Should().Be("subagent");
@@ -94,7 +92,7 @@ public class OpenCodeConfigBuilderTests
 
 		var writer = agentMap.GetProperty("orchestra-sub-writer");
 		writer.GetProperty("model").GetString().Should().Be("anthropic/claude-3-5-sonnet");
-		writer.GetProperty("tools").GetProperty("read").GetBoolean().Should().BeTrue();
+		writer.GetProperty("permissions").EnumerateArray().Select(r => r.GetProperty("action").GetString()).Should().Equal("*", "read", "grep");
 	}
 
 	[Fact]
@@ -113,13 +111,13 @@ public class OpenCodeConfigBuilderTests
 			Timeout = TimeSpan.FromSeconds(30),
 		};
 
-		var entry = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("filesystem");
+		var entry = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("servers").GetProperty("filesystem");
 		entry.GetProperty("type").GetString().Should().Be("local");
 		entry.GetProperty("command").EnumerateArray().Select(e => e.GetString())
 			.Should().Equal("orchestra-fs-mcp-xyz", "-y", "@modelcontextprotocol/server-filesystem", "/data");
 		entry.GetProperty("environment").GetProperty("API_KEY").GetString().Should().Be("secret");
-		entry.GetProperty("enabled").GetBoolean().Should().BeTrue();
-		entry.GetProperty("timeout").GetInt64().Should().Be(30000);
+		entry.GetProperty("disabled").GetBoolean().Should().BeFalse();
+		entry.GetProperty("timeout").GetProperty("execution").GetInt64().Should().Be(30000);
 	}
 
 	[Fact]
@@ -149,7 +147,7 @@ public class OpenCodeConfigBuilderTests
 				Arguments = ["mcp"],
 			};
 
-			var command = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("recall")
+			var command = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("servers").GetProperty("recall")
 				.GetProperty("command").EnumerateArray().Select(e => e.GetString()).ToArray();
 
 			command.Should().HaveCount(2);
@@ -162,7 +160,9 @@ public class OpenCodeConfigBuilderTests
 		finally
 		{
 			Environment.SetEnvironmentVariable("PATH", originalPath);
-			try { Directory.Delete(tempDir, recursive: true); } catch { /* best effort */ }
+			try
+			{ Directory.Delete(tempDir, recursive: true); }
+			catch { /* best effort */ }
 		}
 	}
 
@@ -177,7 +177,7 @@ public class OpenCodeConfigBuilderTests
 			Headers = new Dictionary<string, string> { ["Authorization"] = "Bearer x" },
 		};
 
-		var entry = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("orchestra");
+		var entry = ConfigJson(Build(mcps: [mcp])).GetProperty("mcp").GetProperty("servers").GetProperty("orchestra");
 		entry.GetProperty("type").GetString().Should().Be("remote");
 		entry.GetProperty("url").GetString().Should().Be("https://host/mcp/data");
 		entry.GetProperty("headers").GetProperty("Authorization").GetString().Should().Be("Bearer x");

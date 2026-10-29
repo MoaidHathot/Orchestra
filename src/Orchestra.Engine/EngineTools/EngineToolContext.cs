@@ -6,6 +6,10 @@ namespace Orchestra.Engine;
 /// </summary>
 public sealed class EngineToolContext
 {
+	private readonly SemaphoreSlim _inputGate = new(1, 1);
+
+	/// <summary>Cancellation for the whole step, including host cancellation, timeout, and terminal engine tools.</summary>
+	public CancellationToken StepCancellationToken { get; internal set; }
 	/// <summary>
 	/// The temp file store for the current orchestration run.
 	/// Provides file I/O operations scoped to a run-specific temp directory.
@@ -195,6 +199,15 @@ public sealed class EngineToolContext
 		string[]? choices,
 		PendingInputKind kind,
 		CancellationToken cancellationToken)
+	{
+		await _inputGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		try
+		{ return await RequestHumanInputCoreAsync(prompt, choices, kind, cancellationToken).ConfigureAwait(false); }
+		finally { _inputGate.Release(); }
+	}
+
+	private async Task<UserInputResponse?> RequestHumanInputCoreAsync(
+		string prompt, string[]? choices, PendingInputKind kind, CancellationToken cancellationToken)
 	{
 		var stepName = StepName;
 		var orchestrationName = OrchestrationName;

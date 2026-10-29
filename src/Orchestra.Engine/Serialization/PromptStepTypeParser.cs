@@ -68,6 +68,17 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 			SkillDirectories = root.TryGetProperty("skillDirectories", out var skillDirs)
 				? skillDirs.EnumerateArray().Select(e => ResolveSkillDirectoryPath(e.GetString()!, context)).ToArray()
 				: [],
+			InstructionDirectories = root.TryGetProperty("instructionDirectories", out var instructionDirs)
+				? instructionDirs.EnumerateArray().Select(e => ResolvePathRelativeToBaseDirectory(e.GetString()!, context)).ToArray()
+				: null,
+			EnableConfigDiscovery = root.TryGetProperty("enableConfigDiscovery", out var discovery)
+				? discovery.GetBoolean() : null,
+			EnableOnDemandInstructionDiscovery = root.TryGetProperty("enableOnDemandInstructionDiscovery", out var onDemand)
+				? onDemand.GetBoolean() : null,
+			ResponseSchema = root.TryGetProperty("responseSchema", out var responseSchema)
+				? ReadResponseSchema(responseSchema, stepName) : null,
+			ExecutionPolicy = root.TryGetProperty("executionPolicy", out var executionPolicy)
+				? ReadExecutionPolicy(executionPolicy) : null,
 			InfiniteSessions = root.TryGetProperty("infiniteSessions", out var infSessions)
 				? DeserializeInfiniteSessionConfig(infSessions)
 				: null,
@@ -96,6 +107,25 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 				? failOnToolError.GetBoolean()
 				: null,
 		};
+	}
+
+	private static JsonElement ReadResponseSchema(JsonElement schema, string stepName)
+	{
+		if (schema.ValueKind != JsonValueKind.Object)
+			throw new JsonException($"Step '{stepName}': responseSchema must be a JSON Schema object.");
+		return schema.Clone();
+	}
+
+	private static AgentExecutionPolicy ReadExecutionPolicy(JsonElement value)
+	{
+		var policy = new AgentExecutionPolicy
+		{
+			Mode = value.TryGetProperty("mode", out var mode)
+				? Enum.Parse<AgentExecutionMode>(mode.GetString()!, ignoreCase: true) : AgentExecutionMode.Standard,
+			MaxContinues = value.TryGetProperty("maxContinues", out var max) ? max.GetInt32() : 5,
+		};
+		policy.Validate();
+		return policy;
 	}
 
 	/// <summary>

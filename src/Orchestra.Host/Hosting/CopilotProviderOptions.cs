@@ -10,6 +10,12 @@ namespace Orchestra.Host.Hosting;
 /// </summary>
 public sealed class CopilotProviderOptions
 {
+	/// <summary>Opt into ambient configuration discovery from the agent working directory. Step/orchestration values override this default.</summary>
+	public bool EnableConfigDiscovery { get; set; }
+
+	/// <summary>Opt into nested instruction discovery after file reads. Step/orchestration values override this default.</summary>
+	public bool EnableOnDemandInstructionDiscovery { get; set; }
+
 	/// <summary>
 	/// Settings for the CLI-swap-and-resume recovery loop in <c>CopilotAgent</c>.
 	/// </summary>

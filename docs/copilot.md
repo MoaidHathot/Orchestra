@@ -13,6 +13,21 @@ Orchestra.Copilot provides a GitHub Copilot SDK implementation of the agent inte
 
 This package bridges Orchestra with GitHub Copilot, enabling orchestrations to leverage Copilot's AI capabilities. It implements the `IAgent` and `AgentBuilder` abstractions, handling all the complexity of communicating with the Copilot SDK.
 
+## Copilot CLI parity
+
+The SDK drives the real Copilot runtime: one Prompt step can perform multiple model calls,
+native tool executions, edits, and verification commands. Matching the prompt and model
+alone does not match the CLI's effective configuration. Select the intended `workingDirectory`,
+enable configuration/on-demand instruction discovery or supply explicit directories, and
+preserve the runtime system prompt with `Append` when CLI-like behavior is desired.
+Prompt steps use non-interactive guidance by default and normally have separate sessions.
+Copilot memory and cross-session history are explicitly disabled, including on resume.
+
+The [October 2026 evidence-based investigation](research/copilot-harness-parity-2026-10-29.md)
+compares direct CLI, direct SDK, and Orchestra runs, including an actual interactive CLI
+probe and a mixed deterministic/AI orchestration. It documents discovery, memory, native
+mode, tool-catalog, and completion differences, with a reproducible experiment suite.
+
 ## Installation
 
 The Copilot provider ships inside the `Orchestra` tool - there is no `Orchestra.Copilot`
@@ -321,8 +336,8 @@ builder.WithSystemPromptMode(SystemPromptMode.Append);
 
 ## Per-step Copilot options (orchestration JSON)
 
-Prompt steps expose several **opt-in** Copilot controls. Each is off by default, so
-existing orchestrations are unchanged; set a field to turn the behavior on. The full
+Prompt steps expose **opt-in** discovery, model-tuning, and structured-output controls.
+`humanInput` selects interactive versus non-interactive guidance. The full
 schema lives in [`schemas/orchestration.schema.json`](../schemas/orchestration.schema.json);
 worked examples are in [`examples/governed-prompt-step.json`](../examples/governed-prompt-step.json)
 and [`examples/tuned-prompt-step.json`](../examples/tuned-prompt-step.json).
@@ -360,9 +375,114 @@ and [`examples/tuned-prompt-step.json`](../examples/tuned-prompt-step.json).
 
 ### Working directory
 
-`workingDirectory` sets the agent's working directory for shell/file tools and config
-discovery (custom instructions, `.github/agents`, `.github/mcp.json`). It is
-template-resolved (`{{param.*}}`/`{{env.*}}`/`{{vars.*}}`) and validated to exist at run time.
+`workingDirectory` defaults to the **orchestration file's directory**, equivalent to
+`workingDirectory: "{{orchestration.sourceDirectory}}"`. This also applies when Orchestra
+runs as a .NET tool. Prompt, Command, and Script steps share this rule.
+
+Explicit values are template-resolved; relative values resolve against the orchestration
+file's directory. Use `workingDirectory: ".."` to work in its parent directory, or supply an
+absolute project path. Prompt directories are validated to exist. In-memory definitions
+without a source directory retain the process-current-directory fallback. The installation
+directory is never the automatic base.
+
+### Discovery and explicit directories
+
+| Step field | Behavior |
+|---|---|
+| `enableConfigDiscovery` | Enable the runtime's ambient configuration discovery: project skills, custom agents, MCP configuration, plugins, and other supported configuration. |
+| `enableOnDemandInstructionDiscovery` | Discover instructions covering files after successful agent file reads, including nested `AGENTS.md`. Separate from root instruction loading. |
+| `skillDirectories` | Additional explicit skill directories, usable even when ambient discovery is disabled. |
+| `instructionDirectories` | Additional explicit instruction directories, usable independently of skill directories. An explicit `[]` supplies none. When omitted, the legacy skill-directory fallback applies. |
+
+Boolean precedence is **step → orchestration `defaultEnableConfigDiscovery` /
+`defaultEnableOnDemandInstructionDiscovery` → `orchestra.json`'s corresponding `copilot`
+settings → false**. Explicit `false` overrides an inherited `true`.
+
+Automatic discovery uses the agent working directory, repository context, user configuration,
+and the runtime's discovery rules. On-demand discovery follows the files actually read.
+Relative **explicit** skill/instruction directories, including template-resolved relative
+values, resolve from the orchestration file's directory. These are intentionally different
+bases: moving the agent working directory does not relocate explicitly referenced files.
+
+The skill engine remains enabled: disabling ambient discovery does not disable explicitly
+registered or built-in skills. These discovery controls currently require the Copilot provider;
+a provider that cannot honor a requested control fails before running the agent.
+
+### Structured JSON responses
+
+Set `responseSchema` to a JSON Schema object. Orchestra forwards it to Copilot's native
+structured-output API and validates the final successful step output against the same schema.
+The schema is passed verbatim; supported schema keywords depend on the model/provider.
+
+```yaml
+responseSchema:
+  type: object
+  properties:
+    count:
+      type: integer
+    summary:
+      type: string
+  required: [count, summary]
+  additionalProperties: false
+```
+
+The step still runs the full agent loop and can use tools before returning JSON. Downstream
+steps can use expressions such as `{{analyze.output.count}}`. Omission requests ordinary text.
+See [`examples/copilot-structured-output.yaml`](../examples/copilot-structured-output.yaml).
+
+- Validation covers the exported result, including an optional output handler. The output
+  handler receives the same native schema request.
+- Output handlers preserve the step's authentication, directory, discovery, permissions, and
+  sandbox settings. They run as non-interactive transformations without the main session's
+  autopilot policy or orchestration-control tools.
+- Invalid JSON/schema output fails with a validation error and preserves the response in
+  diagnostics. Markdown fences and prose are not silently stripped to manufacture valid JSON.
+- **Authoring:** set `responseSchema` and describe the data you want. No special completion
+  prompt or tool call is needed. Use the validated fields in downstream conditions/scripts;
+  a JSON field named `status` is data, not an automatic Orchestra status override.
+- **Internal behavior:** Orchestra omits `orchestra_set_status` and `orchestra_complete`
+  from these steps because they interrupt final JSON delivery. Authors do not need to
+  manage this filtering. File tools and other agent tools remain available.
+- OpenCode V2 supports the same validated contract using schema guidance rather than native
+  constrained generation. See [provider contracts](providers.md) for the distinction.
+
+### Session isolation and execution modes
+
+Copilot `Memory.Enabled` and `EnableSessionStore` are set to **false** on creation and resume.
+The native persistent-memory and cross-session-history tools are therefore unavailable.
+Ordinary conversation history and the current session's `sql` workspace, including `todos`
+and `todo_deps`, remain available. The model chooses whether to use todos; offering the tool
+does not force every Prompt step to build a todo list. Explicit MCP integrations, such as a
+Zakira memory service, are configured through the usual `mcps` mechanism.
+
+Each Prompt step gets its own conversation. Dependencies pass explicit outputs/artifacts;
+worker recovery can resume that same step's session. Normal internal planning remains
+available. Orchestra does not select native **plan** mode.
+
+### Opt-in autopilot
+
+```yaml
+executionPolicy:
+  mode: autopilot
+  maxContinues: 3
+timeoutSeconds: 300
+```
+
+Omission selects `standard`: the ordinary full agent/tool loop with non-interactive guidance
+unless `humanInput` overrides it. `autopilot` additionally lets the runtime continue after
+an otherwise finished turn when the task is not complete. It uses Copilot SDK **1.0.28** and
+the pinned CLI **1.0.105**, native session mode, and native continuation options.
+
+`maxContinues` defaults to 5 and accepts non-negative integers; 0 permits the initial
+agent/tool loop but no automatic continuations. This is a continuation limit, not a tool-call
+or token limit. No active objective is created (objectives have different budgeting rules).
+Timeout/cancellation still stop the step. A native stop without task completion, including
+budget exhaustion, fails it. Recovery/retry budgets remain separate.
+
+Autopilot stays inside one Prompt session; it does not advance or rewrite the DAG. It can be
+combined with `responseSchema`. Immediate-stop engine tools are filtered internally, and
+completion is correlated with the native request's `session.autopilot_stopped` event rather
+than an intermediate idle or child-agent event. See [the cross-provider example](../examples/provider-autopilot.yaml).
 
 ### Authentication
 
@@ -373,11 +493,19 @@ default lives in `orchestra.json` (`copilot.gitHubToken` / `copilot.useLoggedInU
 
 ### Human-in-the-loop
 
-`humanInput: true` routes the agent's **elicitation** and **exit-plan-mode (plan approval)**
-requests to Orchestra's human-in-the-loop — the same pending-input surface as
-`request_user_input` and `Approval` steps (Portal/CLI/API). Operators see the request via
-`GET /api/runs/pending` and answer with `POST /api/orchestrations/{name}/runs/{runId}/respond`.
-Default (off) resolves these autonomously.
+`humanInput: false` (the default) selects non-interactive model guidance and disables native
+questions. `humanInput: true` selects interactive guidance and routes native **`ask_user`**,
+**elicitation**, and **exit-plan-mode** requests to Orchestra's human-input surface
+(Portal/CLI/API). Operators see requests via `GET /api/runs/pending` and answer with
+`POST /api/orchestrations/{name}/runs/{runId}/respond`.
+
+For compatibility, enabling the existing `request_user_input` engine tool implies interactive
+behavior when `humanInput` is omitted. Explicit `humanInput: false` overrides that opt-in.
+Native memory/history remain disabled in interactive steps. Tool permission policy is a
+separate setting: an unattended step may still require operator approval for specific actions.
+
+`Replace` system-prompt mode can remove the generated interaction guidance. Use `Append` or
+targeted `Customize` overrides when preserving the native harness instructions is intended.
 
 ### Permission policy
 
@@ -529,5 +657,5 @@ Console.WriteLine($"Tokens: {result.Usage?.InputTokens} in, {result.Usage?.Outpu
 
 - **Target Framework**: .NET 10.0
 - **Project Reference**: `Orchestra.Engine`
-- **Package Reference**: `GitHub.Copilot.SDK` (v0.1.29)
+- **Package Reference**: `GitHub.Copilot.SDK` (v1.0.28)
 {% endraw %}

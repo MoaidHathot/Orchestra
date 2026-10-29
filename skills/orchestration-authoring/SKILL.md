@@ -1,6 +1,6 @@
 ---
 name: orchestration-authoring
-description: Creates and validates Orchestra orchestration files (JSON/YAML) that define DAGs of steps (Prompt, Command, Script, Http, Transform, Approval, Orchestration) with triggers, hooks, MCPs, subagents, loops, typed inputs, human-in-the-loop pauses, per-step Copilot controls (model tuning, working directory, auth, permission policies, sandboxing), and template expressions. Use when authoring new orchestrations, generating orchestration files from descriptions, reviewing existing orchestrations for correctness, or debugging orchestration issues.
+description: Creates and validates Orchestra orchestration files (JSON/YAML) with DAG steps, Copilot/OpenCode V2 providers, validated JSON responses, bounded autopilot, definition-relative working directories, skills/instructions, MCPs, subagents, human input, triggers, hooks, loops, and template expressions. Use when authoring or generating orchestrations, reviewing existing workflows, or debugging orchestration issues.
 ---
 
 # Orchestra Orchestration Authoring Reference
@@ -8,6 +8,7 @@ description: Creates and validates Orchestra orchestration files (JSON/YAML) tha
 Complete reference for creating valid, idiomatic Orchestra orchestration files.
 
 **Detailed references** (read on demand):
+- [references/provider-controls.md](references/provider-controls.md) -- Orchestra 0.11+ provider matrix, JSON/autopilot examples, working-directory migration, and interaction rules
 - [references/examples.md](references/examples.md) -- Full real-world example orchestrations
 - [references/full-schema-reference.md](references/full-schema-reference.md) -- Complete property-level documentation with all edge cases
 
@@ -53,6 +54,8 @@ YAML modelines work in VS Code (Red Hat YAML extension), JetBrains IDEs, and any
 | `defaultProvider` | string | No | null | Default agent provider for Prompt steps: `"copilot"` or `"opencode"`. Resolution per step: step `provider` -> `defaultProvider` -> host default. |
 | `agentPool` | object | No | provider defaults | Provider worker-pool capacity request (see Agent Pool) |
 | `defaultSystemPromptMode` | string | No | null | `"append"`, `"replace"`, or `"customize"` for all Prompt steps |
+| `defaultEnableConfigDiscovery` | bool | No | null | Copilot ambient discovery default; step values override it, then the Copilot host default applies |
+| `defaultEnableOnDemandInstructionDiscovery` | bool | No | null | Copilot nested-instruction discovery default |
 | `defaultRetryPolicy` | RetryPolicy | No | null | Default retry for all steps |
 | `defaultStepTimeoutSeconds` | int | No | null | Default per-step timeout |
 | `timeoutSeconds` | int | No | 0 (disabled) | Orchestration-level timeout. 0 or null means no timeout |
@@ -74,7 +77,7 @@ Every Prompt step runs on an agent provider. Resolution is **step `provider` -> 
 | Provider | Notes |
 |---|---|
 | `copilot` | GitHub Copilot CLI via the Copilot SDK. Supports the full feature surface. |
-| `opencode` | Spawns an `opencode serve` HTTP server. Requires OpenCode installed on PATH. |
+| `opencode` | Uses a private OpenCode V2 HTTP server. Requires authenticated V2 installed on PATH. See the provider-controls reference for supported settings. |
 
 A single orchestration can mix providers per step:
 
@@ -302,7 +305,7 @@ Calls an LLM.
 | `reasoningLevel` | string | No | from `defaultReasoningLevel` |
 | `reasoningSummary` | string | No | null |
 | `contextTier` | string | No | null |
-| `workingDirectory` | string | No | null |
+| `workingDirectory` | string | No | orchestration file directory |
 | `githubToken` | string | No | null |
 | `humanInput` | bool | No | false |
 | `permissionPolicy` | PermissionPolicy | No | null |
@@ -315,6 +318,11 @@ Calls an LLM.
 | `loop` | LoopConfig | No | null |
 | `subagents` | Subagent[] | No | [] |
 | `skillDirectories` | string[] | No | [] |
+| `instructionDirectories` | string[] | No | null |
+| `enableConfigDiscovery` | bool | No | null |
+| `enableOnDemandInstructionDiscovery` | bool | No | null |
+| `responseSchema` | object | No | null |
+| `executionPolicy` | object | No | standard, maxContinues: 5 |
 | `enableTools` | string[] | No | null | Opt-in engine tool names this Prompt step grants the agent access to. Currently supports `"request_user_input"` (the LLM-decided human-in-the-loop tool). Falls back to the orchestration's `defaultEnableTools` when null. |
 
 *Mutual exclusion: use `systemPrompt` OR `systemPromptFile`, not both. Same for `userPrompt`/`userPromptFile`, `inputHandlerPrompt`/`inputHandlerPromptFile`, `outputHandlerPrompt`/`outputHandlerPromptFile`.
@@ -402,7 +410,58 @@ Per-step Copilot controls, all opt-in (omit to inherit the host/provider default
 
 ### Human-in-the-Loop (`humanInput`)
 
-`humanInput: true` routes the agent's **elicitation** and **exit-plan-mode (plan approval)** requests to Orchestra's human-in-the-loop — the same pending-input surface as the `Approval` step and `orchestra_request_user_input` (answer via `POST /api/orchestrations/{name}/runs/{runId}/respond`). Session-bound (does NOT survive a host restart). Default (off) resolves them autonomously. Pairs naturally with `permissionPolicy: requireHumanApproval`.
+`humanInput: true` selects interactive guidance and routes native questions/elicitation to Orchestra's human-input surface (Copilot callbacks; OpenCode V2 forms). False/omitted uses non-interactive guidance. The existing `request_user_input` opt-in implies interactive guidance when `humanInput` is omitted; explicit false overrides it. Waits are session-bound (do not survive a host restart). Copilot native persistent memory and cross-session history are disabled in both modes.
+
+### Discovery and working directory
+
+- `enableConfigDiscovery` enables ambient configuration discovery (skills, agents, MCPs and plugins) from the agent working directory. `enableOnDemandInstructionDiscovery` separately enables nested instructions after file reads. Precedence: step -> orchestration default -> Copilot host default -> false.
+- Prompt, Command, and Script `workingDirectory` defaults to the orchestration file's directory, equivalent to `{{orchestration.sourceDirectory}}`, including when installed as a .NET tool. Relative overrides also resolve from that directory; use `..` for its parent. In-memory definitions without a source directory inherit process CWD.
+- Explicit `skillDirectories` and `instructionDirectories` resolve relative to the orchestration file. On Copilot they work with discovery disabled; omitted `instructionDirectories` retains its legacy skill-directory fallback, while `[]` disables it. OpenCode omission supplies no extra instruction files and keeps skills lazy. Root instruction loading is distinct from the on-demand switch.
+- OpenCode V2 uses native explicit skill paths and Markdown instruction files without copying skills into the project. Its ambient/nested discovery is enabled: explicit `true` is accepted, but explicit/inherited `false` is rejected because equivalent independent disable controls are unavailable.
+
+### Structured JSON output (`responseSchema`)
+
+Set a JSON Schema object and describe the fields wanted. Successful output is strictly
+validated, including output handlers, and can be read with `{{step.output.property}}`.
+Copilot constrains generation natively; OpenCode V2 uses schema guidance plus the same engine
+validation. Invalid JSON, Markdown fences, or schema violations fail the step.
+
+```yaml
+responseSchema:
+  type: object
+  properties:
+    count: { type: integer }
+  required: [count]
+  additionalProperties: false
+```
+
+**Authors do not need special completion prompts or tool calls.** Orchestra internally
+omits `orchestra_set_status` and `orchestra_complete` for structured steps so the agent can
+deliver its final JSON. Use downstream conditions/scripts for branching; a `status` field in
+JSON is data, not an engine status override. Do not add internal completion markers to schemas.
+
+### Bounded autopilot (`executionPolicy`)
+
+```yaml
+executionPolicy:
+  mode: autopilot
+  maxContinues: 3
+timeoutSeconds: 300
+```
+
+Omission or `mode: standard` retains the normal full tool loop. Autopilot adds automatic
+continuation when the task is unfinished: native in Copilot, Orchestra-managed in OpenCode V2.
+`maxContinues` defaults to 5; 0 allows the initial tool loop but no continuation. It does not
+count individual tool calls. Exhaustion or a non-completion stop fails the step. Timeout and
+cancellation still apply. Retry/worker-recovery budgets are separate.
+
+The policy stays within one Prompt session and can be combined with `responseSchema`.
+OpenCode autopilot spends the same continuation budget correcting invalid JSON from completed
+work. Standard mode makes no extra correction calls. See [provider controls](references/provider-controls.md)
+for provider differences, output-handler behavior, and unsupported subagent settings.
+It does not share sessions between DAG steps, rewrite the DAG, or select native plan mode.
+Immediate-stop tools and provider-specific completion signals are managed internally.
+No author-supplied stop instruction or completion marker is required.
 
 ### Permission Policy (`permissionPolicy`)
 
@@ -470,7 +529,7 @@ Do not use `Command` for shell snippets or wrappers such as `pwsh -Command`, `po
 |---|---|---|---|
 | `command` | string | Yes | -- |
 | `arguments` | string[] | No | [] |
-| `workingDirectory` | string | No | current dir |
+| `workingDirectory` | string | No | orchestration file directory |
 | `environment` | object | No | {} |
 | `includeStdErr` | bool | No | false |
 | `stdin` | string | No | null |
@@ -486,7 +545,7 @@ Executes an inline or file-based script via a shell interpreter (e.g., `pwsh`, `
 | `script` | string | Yes* | -- |
 | `scriptFile` | string | Yes* | -- |
 | `arguments` | string[] | No | [] |
-| `workingDirectory` | string | No | current dir |
+| `workingDirectory` | string | No | orchestration file directory |
 | `environment` | object | No | {} |
 | `includeStdErr` | bool | No | false |
 | `stdin` | string | No | null |
@@ -1225,7 +1284,7 @@ Orchestrations can be registered in Orchestra via:
 26. **`humanInput` waits do NOT survive host restarts.** Like `orchestra_request_user_input`, elicitation/plan-approval pauses are session-bound. Use the declarative `Approval` step for restart-durable gates.
 27. **`permissionPolicy.deny` is only used in `denyList` mode.** In `approveAll` (default) and `requireHumanApproval` modes the `deny` list is ignored.
 28. **Sandbox paths are passed verbatim** (NOT template-resolved), and sandbox enforcement is provided on Linux/macOS. By contrast, `workingDirectory` and `githubToken` ARE template-resolved via `{{env.*}}`/`{{param.*}}`/`{{vars.*}}`.
-29. **Per-step Copilot controls are opt-in.** `reasoningSummary`, `contextTier`, `workingDirectory`, `githubToken`, `humanInput`, `permissionPolicy`, and `sandbox` all default to off/unset — existing orchestrations are unchanged.
+29. **Select agent context explicitly.** Discovery and structured output are opt-in. Copilot Prompt steps use non-interactive guidance by default; `humanInput: true` opts into native questions. Persistent native memory/history are disabled. Use Append/Customize to retain native harness guidance.
 
 ## Naming Conventions
 

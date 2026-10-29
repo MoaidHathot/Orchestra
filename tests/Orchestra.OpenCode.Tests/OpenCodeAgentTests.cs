@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Orchestra.Engine;
@@ -25,14 +26,14 @@ public class OpenCodeAgentTests
 	};
 
 	private static async Task<(AgentResult Result, List<AgentEvent> Events)> RunAsync(
-		FakeOpenCodeClient client, AgentBuildConfig config)
+		FakeOpenCodeClient client, AgentBuildConfig config, List<AgentEvent>? capturedEvents = null)
 	{
 		var builder = new OpenCodeAgentBuilder(NullLoggerFactory.Instance, ConnectOptions(), new FakeFactory(client));
 		await using var scope = await builder.CreateRunScopeAsync();
 		var agent = await builder.BuildAgentAsync(config);
 
 		var task = agent.SendAsync("do the thing", CancellationToken.None);
-		var events = new List<AgentEvent>();
+		var events = capturedEvents ?? new List<AgentEvent>();
 		await foreach (var e in task)
 			events.Add(e);
 		var result = await task.GetResultAsync();
@@ -66,6 +67,40 @@ public class OpenCodeAgentTests
 		caps.ReasoningSummary.Should().BeFalse();
 		caps.ContextTier.Should().BeFalse();
 		caps.GitHubToken.Should().BeFalse();
+	}
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public async Task Autopilot_ContinuesInSameSession_AndEnforcesBudget(bool finishes)
+	{
+		var client = new FakeOpenCodeClient(Sid)
+		{
+			Responses = new Queue<string>(["I have more work to do", finishes
+				? "{\"count\":42}\n" + AgentContinuation.CompletionMarker : "Still incomplete"]),
+		};
+		var config = new AgentBuildConfig { Model = "model", ExecutionPolicy = new() { Mode = AgentExecutionMode.Autopilot, MaxContinues = 1 } };
+		if (finishes)
+			(await RunAsync(client, config)).Result.Content.Should().Be("{\"count\":42}");
+		else
+		{
+			Func<Task> run = async () => await RunAsync(client, config);
+			await run.Should().ThrowAsync<InvalidOperationException>().WithMessage("*maxContinues (1)*");
+		}
+		client.CreateCount.Should().Be(1);
+		client.PromptSessionIds.Should().Equal(Sid, Sid);
+		client.SessionDeleted.Should().BeTrue();
+	}
+
+	[Fact]
+	public async Task DurableWaitTransportFailure_UsesSharedSwapAndResumesSameSession()
+	{
+		var client = new FakeOpenCodeClient(Sid) { Responses = new Queue<string>(["done"]), WaitFailures = 1 };
+		var (result, events) = await RunAsync(client, new AgentBuildConfig { Model = "model" });
+		result.Content.Should().Be("done");
+		client.CreateCount.Should().Be(1);
+		client.PromptSessionIds.Should().Equal(Sid, Sid);
+		events.Should().ContainSingle(e => e.Type == AgentEventType.CliInstanceSwapped && e.SwapMode == "resume");
 	}
 
 	[Fact]
@@ -155,7 +190,8 @@ public class OpenCodeAgentTests
 		var agent = await builder.BuildAgentAsync(new AgentBuildConfig { Model = "github-copilot/claude-opus-4.8" });
 
 		var task = agent.SendAsync("go", CancellationToken.None);
-		await foreach (var _ in task) { }
+		await foreach (var _ in task)
+		{ }
 		var act = async () => await task.GetResultAsync();
 
 		await act.Should().ThrowAsync<OpenCodeSessionFailedException>().WithMessage("*kaboom*");
@@ -168,7 +204,7 @@ public class OpenCodeAgentTests
 		{
 			Events =
 			[
-				TestEvents.Event("permission.updated", $$"""{ "sessionID": "{{Sid}}", "id": "perm1", "type": "bash", "title": "rm -rf /tmp" }"""),
+				TestEvents.Event("permission.asked", $$"""{ "sessionID": "{{Sid}}", "id": "perm1", "action": "shell", "resources": ["rm -rf /tmp"] }"""),
 				TestEvents.Event("session.idle", $$"""{ "sessionID": "{{Sid}}" }"""),
 			],
 		};
@@ -176,7 +212,7 @@ public class OpenCodeAgentTests
 		var config = new AgentBuildConfig
 		{
 			Model = "github-copilot/claude-opus-4.8",
-			PermissionPolicy = new PermissionPolicy { Mode = PermissionMode.DenyList, Deny = ["bash"] },
+			PermissionPolicy = new PermissionPolicy { Mode = PermissionMode.DenyList, Deny = ["shell"] },
 		};
 		await RunAsync(client, config);
 
@@ -214,7 +250,7 @@ public class OpenCodeAgentTests
 	}
 
 	[Fact]
-	public async Task SendAsync_NoReasoningNoSubagents_SendsSystemInlineWithoutAgent()
+	public async Task SendAsync_NoReasoningNoSubagents_UsesConfiguredAgentForSystemPrompt()
 	{
 		var client = new FakeOpenCodeClient(Sid)
 		{
@@ -223,8 +259,8 @@ public class OpenCodeAgentTests
 
 		await RunAsync(client, new AgentBuildConfig { Model = "github-copilot/claude-opus-4.8", SystemPrompt = "plain" });
 
-		client.LastPrompt!.Agent.Should().BeNull();
-		client.LastPrompt.System.Should().Be("plain");
+		client.LastPrompt!.Agent.Should().Be("orchestra-primary");
+		client.LastPrompt.System.Should().BeNull();
 	}
 
 	[Fact]
@@ -248,7 +284,10 @@ public class OpenCodeAgentTests
 			],
 		};
 
-		var (_, events) = await RunAsync(client, config);
+		var events = new List<AgentEvent>();
+		Func<Task> run = async () => await RunAsync(client, config, events);
+		await run.Should().ThrowAsync<OpenCodeSessionFailedException>().WithMessage("*missing-mcp*No prompt*");
+		client.LastPrompt.Should().BeNull();
 
 		var loaded = events.Should().ContainSingle(e => e.Type == AgentEventType.McpServersLoaded).Subject;
 		loaded.McpServerStatuses!.Single(s => s.Name == "present-mcp").Status.Should().Be("Connected");
@@ -353,6 +392,18 @@ public class OpenCodeAgentTests
 
 	private sealed class FakeOpenCodeClient(string sessionId) : IOpenCodeClient
 	{
+		public Task EnsureReadyAsync(OpenCodeModelDto model, string? agent, TimeSpan timeout, CancellationToken token) => Task.CompletedTask;
+		public Task<bool> IsSessionWithinAsync(string candidate, string root, CancellationToken token) => Task.FromResult(candidate == root);
+		public Task<JsonElement> GetFormAsync(string session, string form, CancellationToken token) => throw new NotSupportedException();
+		public Task ReplyFormAsync(string session, string form, object? answer, CancellationToken token) => throw new NotSupportedException();
+		public Task<IReadOnlyList<string>> WaitForMcpNamesAsync(IReadOnlyCollection<string> required, TimeSpan timeout, CancellationToken token) => ListMcpNamesAsync(token);
+		public Queue<string>? Responses { get; init; }
+		public int WaitFailures { get; set; }
+		private readonly TaskCompletionSource _prompted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private readonly TaskCompletionSource _eventsDelivered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		private string _requestId = "";
+		public int CreateCount { get; private set; }
+		public List<string> PromptSessionIds { get; } = [];
 		public string BaseUrl => "http://fake-opencode";
 		public List<OpenCodeServerEvent> Events { get; init; } = [];
 		public List<string> McpNames { get; init; } = ["build", "general"];
@@ -362,7 +413,35 @@ public class OpenCodeAgentTests
 
 		public Task<bool> HealthAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 
-		public Task<string> CreateSessionAsync(string? title, CancellationToken cancellationToken) => Task.FromResult(sessionId);
+		public Task<string> CreateSessionAsync(OpenCodeCreateSessionRequest request, CancellationToken cancellationToken)
+		{
+			CreateCount++;
+			return Task.FromResult(sessionId);
+		}
+
+		public async Task<IReadOnlyList<JsonElement>> WaitForMessagesAsync(string id, CancellationToken cancellationToken)
+		{
+			if (WaitFailures-- > 0)
+				throw new HttpRequestException("Connection reset during V2 wait.");
+			await _eventsDelivered.Task.WaitAsync(cancellationToken);
+			var text = new Dictionary<string, string>();
+			var assistant = new Dictionary<string, object> { ["type"] = "assistant" };
+			foreach (var evt in Events)
+			{
+				if (evt.Type == "message.part.updated" && evt.Properties.TryGetProperty("part", out var part) && part.GetProperty("type").GetString() == "text")
+					text[part.GetProperty("id").GetString()!] = part.GetProperty("text").GetString()!;
+				if (evt.Type == "message.updated" && evt.Properties.TryGetProperty("info", out var info))
+				{
+					assistant["model"] = new { providerID = info.GetProperty("providerID").GetString(), id = info.GetProperty("modelID").GetString() };
+					if (info.TryGetProperty("tokens", out var tokens))
+						assistant["tokens"] = tokens;
+					if (info.TryGetProperty("cost", out var cost))
+						assistant["cost"] = cost;
+				}
+			}
+			assistant["content"] = new[] { new { type = "text", text = Responses?.Dequeue() ?? string.Concat(text.Values) } };
+			return [JsonSerializer.SerializeToElement(new { type = "user", id = _requestId }), JsonSerializer.SerializeToElement(assistant), JsonSerializer.SerializeToElement(new { type = "idle", outcome = "succeeded" })];
+		}
 
 		public Task DeleteSessionAsync(string sessionIdArg, CancellationToken cancellationToken)
 		{
@@ -370,10 +449,13 @@ public class OpenCodeAgentTests
 			return Task.CompletedTask;
 		}
 
-		public Task PromptAsync(string sessionIdArg, OpenCodePromptRequest request, CancellationToken cancellationToken)
+		public Task<string> PromptAsync(string sessionIdArg, OpenCodePromptRequest request, CancellationToken cancellationToken)
 		{
 			LastPrompt = request;
-			return Task.CompletedTask;
+			PromptSessionIds.Add(sessionIdArg);
+			_requestId = "msg-" + PromptSessionIds.Count;
+			_prompted.TrySetResult();
+			return Task.FromResult(_requestId);
 		}
 
 		public Task AbortSessionAsync(string sessionIdArg, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -395,12 +477,16 @@ public class OpenCodeAgentTests
 
 		public async IAsyncEnumerable<OpenCodeServerEvent> SubscribeAsync([EnumeratorCancellation] CancellationToken cancellationToken)
 		{
+			yield return TestEvents.Event("server.connected", "{}");
+			await _prompted.Task.WaitAsync(cancellationToken);
 			foreach (var e in Events)
 			{
 				cancellationToken.ThrowIfCancellationRequested();
 				yield return e;
 				await Task.Yield();
 			}
+			_eventsDelivered.TrySetResult();
+			await Task.Delay(Timeout.Infinite, cancellationToken);
 		}
 
 		public ValueTask DisposeAsync() => ValueTask.CompletedTask;
@@ -412,6 +498,12 @@ public class OpenCodeAgentTests
 	/// </summary>
 	private sealed class SwapScriptedClient(string sessionId) : IOpenCodeClient
 	{
+		public Task EnsureReadyAsync(OpenCodeModelDto model, string? agent, TimeSpan timeout, CancellationToken token) => Task.CompletedTask;
+		public Task<bool> IsSessionWithinAsync(string candidate, string root, CancellationToken token) => Task.FromResult(candidate == root);
+		public Task<JsonElement> GetFormAsync(string session, string form, CancellationToken token) => throw new NotSupportedException();
+		public Task ReplyFormAsync(string session, string form, object? answer, CancellationToken token) => throw new NotSupportedException();
+		public Task<IReadOnlyList<string>> WaitForMcpNamesAsync(IReadOnlyCollection<string> required, TimeSpan timeout, CancellationToken token) => ListMcpNamesAsync(token);
+		private TaskCompletionSource _prompted = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public int CreateCount { get; private set; }
 		public int SubscribeCount { get; private set; }
 		public List<string> PromptSessionIds { get; } = [];
@@ -420,7 +512,7 @@ public class OpenCodeAgentTests
 
 		public Task<bool> HealthAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 
-		public Task<string> CreateSessionAsync(string? title, CancellationToken cancellationToken)
+		public Task<string> CreateSessionAsync(OpenCodeCreateSessionRequest request, CancellationToken cancellationToken)
 		{
 			CreateCount++;
 			return Task.FromResult(sessionId);
@@ -428,10 +520,20 @@ public class OpenCodeAgentTests
 
 		public Task DeleteSessionAsync(string sessionIdArg, CancellationToken cancellationToken) => Task.CompletedTask;
 
-		public Task PromptAsync(string sessionIdArg, OpenCodePromptRequest request, CancellationToken cancellationToken)
+		public Task<string> PromptAsync(string sessionIdArg, OpenCodePromptRequest request, CancellationToken cancellationToken)
 		{
 			PromptSessionIds.Add(sessionIdArg);
-			return Task.CompletedTask;
+			_prompted.TrySetResult();
+			return Task.FromResult("request");
+		}
+
+		public async Task<IReadOnlyList<JsonElement>> WaitForMessagesAsync(string id, CancellationToken cancellationToken)
+		{
+			if (SubscribeCount == 1)
+				await Task.Delay(Timeout.Infinite, cancellationToken);
+			return [JsonSerializer.SerializeToElement(new { type = "user", id = "request" }),
+				JsonSerializer.SerializeToElement(new { type = "assistant", content = new[] { new { type = "text", text = "ok" } } }),
+				JsonSerializer.SerializeToElement(new { type = "idle", outcome = "succeeded" })];
 		}
 
 		public Task AbortSessionAsync(string sessionIdArg, CancellationToken cancellationToken) => Task.CompletedTask;
@@ -449,6 +551,9 @@ public class OpenCodeAgentTests
 		public async IAsyncEnumerable<OpenCodeServerEvent> SubscribeAsync([EnumeratorCancellation] CancellationToken cancellationToken)
 		{
 			SubscribeCount++;
+			_prompted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+			yield return TestEvents.Event("server.connected", "{}");
+			await _prompted.Task.WaitAsync(cancellationToken);
 			if (SubscribeCount == 1)
 			{
 				// First attempt: simulate a lost event stream. PumpEventsAsync converts this into
@@ -457,9 +562,7 @@ public class OpenCodeAgentTests
 				throw new IOException("event stream lost");
 			}
 
-			// Recovery attempt: a clean idle completes the turn.
-			yield return TestEvents.Event("session.idle", $$"""{ "sessionID": "{{sessionId}}" }""");
-			await Task.Yield();
+			await Task.Delay(Timeout.Infinite, cancellationToken);
 		}
 
 		public ValueTask DisposeAsync() => ValueTask.CompletedTask;

@@ -60,13 +60,16 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 		}
 		catch
 		{
-			try { await pool.DisposeAsync().ConfigureAwait(false); } catch { }
+			try
+			{ await pool.DisposeAsync().ConfigureAwait(false); }
+			catch { }
 			holder.Pool = null;
 			throw;
 		}
 
 		holder.Pool = pool;
-		lock (_activePoolsLock) { _activePools.Add(pool); }
+		lock (_activePoolsLock)
+		{ _activePools.Add(pool); }
 		LogRunScopeCreated(scopeId, pool.Diagnostic);
 		return new RunScope(this, holder, pool);
 	}
@@ -76,7 +79,8 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 	public override AgentRuntimeStatus GetRuntimeStatus()
 	{
 		OpenCodeServerPool[] pools;
-		lock (_activePoolsLock) { pools = [.. _activePools]; }
+		lock (_activePoolsLock)
+		{ pools = [.. _activePools]; }
 
 		var instances = 0;
 		var sessions = 0;
@@ -119,13 +123,9 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 	}
 
 	/// <summary>
-	/// OpenCode honors the model, system prompt (Replace semantics — the universal baseline),
-	/// MCP servers, inline sub-agents, reasoning level, working directory, skill directories,
-	/// engine tools, attachments, human-input routing, permission policy, excluded tools (mapped to
-	/// OpenCode's agent <c>tools</c> deny map; names use OpenCode's vocabulary), and infinite
-	/// sessions (the enable/disable toggle, via OPENCODE_DISABLE_AUTOCOMPACT). Anything not listed
-	/// here — reasoning summary, context tier, GitHub token, sandbox policy, and Append/Customize
-	/// system-prompt modes + sections — is not supported, and a step that uses one fails fast.
+	/// V2 capabilities. Structured output uses schema guidance plus shared engine validation;
+	/// autopilot uses the shared bounded continuation policy. Ambient discovery remains enabled.
+	/// Unsupported Copilot-specific controls fail the engine's capability check before inference.
 	/// </summary>
 	public override AgentProviderCapabilities GetCapabilities() => new()
 	{
@@ -135,6 +135,11 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 		ReasoningLevel = true,
 		WorkingDirectory = true,
 		SkillDirectories = true,
+		InstructionDirectories = true,
+		ConfigDiscoveryAlwaysEnabled = true,
+		OnDemandInstructionDiscoveryAlwaysEnabled = true,
+		StructuredOutput = true,
+		Autopilot = true,
 		EngineTools = true,
 		Attachments = true,
 		HumanInput = true,
@@ -174,7 +179,8 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 
 	private void UnregisterActivePool(OpenCodeServerPool pool)
 	{
-		lock (_activePoolsLock) { _activePools.Remove(pool); }
+		lock (_activePoolsLock)
+		{ _activePools.Remove(pool); }
 	}
 
 	private sealed class RunScope(OpenCodeAgentBuilder builder, PoolHolder holder, OpenCodeServerPool pool) : IAsyncDisposable
@@ -182,7 +188,8 @@ public sealed partial class OpenCodeAgentBuilder : AgentBuilder, IAsyncDisposabl
 		public async ValueTask DisposeAsync()
 		{
 			holder.Pool = null;
-			try { await pool.DisposeAsync().ConfigureAwait(false); }
+			try
+			{ await pool.DisposeAsync().ConfigureAwait(false); }
 			finally { builder.UnregisterActivePool(pool); }
 		}
 	}

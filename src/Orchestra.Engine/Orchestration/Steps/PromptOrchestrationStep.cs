@@ -76,6 +76,21 @@ public class PromptOrchestrationStep : OrchestrationStep
 	/// </summary>
 	public string[] SkillDirectories { get; internal set; } = [];
 
+	/// <summary>Additional instruction directories, resolved relative to the orchestration file. Null preserves legacy provider behavior.</summary>
+	public string[]? InstructionDirectories { get; internal set; }
+
+	/// <summary>Enable ambient provider configuration discovery in the agent's working directory (also includes skills, agents, MCPs and plugins).</summary>
+	public bool? EnableConfigDiscovery { get; init; }
+
+	/// <summary>Discover nested instructions such as AGENTS.md after successful file reads.</summary>
+	public bool? EnableOnDemandInstructionDiscovery { get; init; }
+
+	/// <summary>JSON Schema requested natively from the provider and validated against the final successful step output.</summary>
+	public System.Text.Json.JsonElement? ResponseSchema { get; init; }
+
+	/// <summary>Opt-in bounded automatic continuation within this step's session.</summary>
+	public AgentExecutionPolicy? ExecutionPolicy { get; init; }
+
 	/// <summary>
 	/// Optional configuration for infinite sessions (automatic context compaction).
 	/// When null, the SDK default is used (infinite sessions enabled).
@@ -104,10 +119,9 @@ public class PromptOrchestrationStep : OrchestrationStep
 	public string[]? EnableTools { get; init; }
 
 	/// <summary>
-	/// Opt-in: when <c>true</c>, the Copilot SDK's elicitation and exit-plan-mode requests
-	/// for this step are routed to Orchestra's human-in-the-loop (the same pending-input
-	/// surface as <c>request_user_input</c> / Approval steps) instead of the autonomous
-	/// default. Null/false preserves current behavior (no human gate).
+	/// When true, use interactive agent guidance and route native questions/elicitation to
+	/// Orchestra's human-in-the-loop. False uses non-interactive guidance. When omitted,
+	/// defaults to false unless the existing request_user_input engine tool was enabled.
 	/// </summary>
 	public bool? HumanInput { get; init; }
 

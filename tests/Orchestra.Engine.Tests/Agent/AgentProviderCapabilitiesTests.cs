@@ -30,12 +30,32 @@ public class AgentProviderCapabilitiesTests
 			ReasoningLevel = ReasoningLevel.High,
 			WorkingDirectory = "/tmp/work",
 			SkillDirectories = ["/tmp/skills"],
+			InstructionDirectories = ["/tmp/instructions"],
+			EnableConfigDiscovery = true,
+			EnableOnDemandInstructionDiscovery = false,
+			ResponseSchema = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>("{\"type\":\"object\"}"),
 			Attachments = [new BlobImageAttachment { Data = "AAEC", MimeType = "image/png" }],
 			HumanInput = true,
 			ExcludedTools = ["shell"],
 		};
 
 		caps.FindUnsupported(config).Should().BeEmpty();
+	}
+
+	[Fact]
+	public void FindUnsupported_ReportsExplicitDiscoveryDisableAndStructuredOutput()
+	{
+		var config = new AgentBuildConfig
+		{
+			Model = "test-model",
+			InstructionDirectories = ["instructions"],
+			EnableConfigDiscovery = false,
+			EnableOnDemandInstructionDiscovery = false,
+			ResponseSchema = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>("{\"type\":\"object\"}"),
+		};
+		new AgentProviderCapabilities { Provider = "limited" }.FindUnsupported(config).Should().BeEquivalentTo(
+			nameof(config.InstructionDirectories), nameof(config.EnableConfigDiscovery),
+			nameof(config.EnableOnDemandInstructionDiscovery), nameof(config.ResponseSchema));
 	}
 
 	[Fact]
@@ -268,7 +288,8 @@ public class AgentProviderCapabilitiesTests
 		{
 			if (level >= LogLevel.Warning)
 			{
-				lock (_gate) { _warnings.Add(message); }
+				lock (_gate)
+				{ _warnings.Add(message); }
 			}
 		}
 

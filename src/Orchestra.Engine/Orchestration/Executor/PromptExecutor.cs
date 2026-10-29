@@ -93,6 +93,53 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		OrchestrationExecutionContext context,
 		CancellationToken cancellationToken = default)
 	{
+		Json.Schema.JsonSchema? responseContract = null;
+		if (step.ResponseSchema is { } schema)
+		{
+			try
+			{
+				responseContract = StructuredResponseValidator.ParseSchema(schema);
+			}
+			catch (Exception ex)
+			{
+				var message = $"Step '{step.Name}' has an invalid responseSchema: {ex.Message}";
+				LogStructuredResponseInvalid(step.Name, message);
+				_reporter.ReportStepError(step.Name, message);
+				return ExecutionResult.Failed(message, errorCategory: StepErrorCategory.ValidationError);
+			}
+		}
+
+		var result = await ExecuteWithRecoveryAsync(step, context, cancellationToken).ConfigureAwait(false);
+		if (result.Status != ExecutionStatus.Succeeded || responseContract is null)
+			return result;
+
+		var validationError = StructuredResponseValidator.Validate(responseContract, result.Content);
+		if (validationError is null)
+			return result;
+
+		var errorMessage = $"Step '{step.Name}': {validationError}";
+		LogStructuredResponseInvalid(step.Name, validationError);
+		_reporter.ReportStepError(step.Name, errorMessage);
+		// Validate after output handlers and status-tool short circuits too. A declared
+		// success must not override the step's output contract, including whole-run halt.
+		return result with
+		{
+			Status = ExecutionStatus.Failed,
+			Content = string.Empty,
+			RawContent = result.RawContent ?? result.Content,
+			ErrorMessage = errorMessage,
+			ErrorCategory = StepErrorCategory.ValidationError,
+			CapturedStatusOverride = null,
+			OrchestrationCompleteStatus = result.OrchestrationCompleteRequested ? ExecutionStatus.Failed : null,
+			OrchestrationCompleteReason = result.OrchestrationCompleteRequested ? errorMessage : null,
+		};
+	}
+
+	private async Task<ExecutionResult> ExecuteWithRecoveryAsync(
+		PromptOrchestrationStep step,
+		OrchestrationExecutionContext context,
+		CancellationToken cancellationToken)
+	{
 		var attempt = 0;
 		while (true)
 		{
@@ -144,7 +191,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private static bool IsExecutorSwapEligible(ExecutionResult result)
 	{
 		var details = result.ErrorDetails;
-		if (details is null) return false;
+		if (details is null)
+			return false;
 		return details.ExhaustedCliRetries || details.TransientUpstreamFailure;
 	}
 
@@ -243,16 +291,15 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		// Resolve the optional per-step working directory (supports ${env:*}/{{vars.*}}/param)
 		// and fail fast if it is set but does not exist — the agent's shell/file tools and
 		// config discovery would otherwise run against the wrong (or no) directory.
-		string? resolvedWorkingDirectory = null;
+		string? resolvedWorkingDirectory = ExecutionWorkingDirectory.Resolve(null, context.OrchestrationInfo.SourceDirectory);
 		if (!string.IsNullOrWhiteSpace(step.WorkingDirectory))
 		{
-			resolvedWorkingDirectory = TemplateResolver.ResolveStatic(step.WorkingDirectory, context.Parameters, context);
-			if (!string.IsNullOrWhiteSpace(resolvedWorkingDirectory) && !Directory.Exists(resolvedWorkingDirectory))
-			{
-				throw new InvalidOperationException(
-					$"Step '{step.Name}': workingDirectory '{resolvedWorkingDirectory}' does not exist.");
-			}
+			resolvedWorkingDirectory = ExecutionWorkingDirectory.Resolve(
+				TemplateResolver.ResolveStatic(step.WorkingDirectory, context.Parameters, context), context.OrchestrationInfo.SourceDirectory);
 		}
+		if (resolvedWorkingDirectory is not null && !Directory.Exists(resolvedWorkingDirectory))
+			throw new InvalidOperationException($"Step '{step.Name}': workingDirectory '{resolvedWorkingDirectory}' does not exist.");
+		eventProcessor.WorkingDirectory = resolvedWorkingDirectory ?? Environment.CurrentDirectory;
 
 		// Resolve the optional per-step GitHub token (e.g. {{env.GITHUB_TOKEN}}). Never logged.
 		var resolvedGitHubToken = string.IsNullOrWhiteSpace(step.GitHubToken)
@@ -338,6 +385,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 		// Create a fresh engine tool context for this execution
 		var enabledOptInTools = ResolveEnabledOptInTools(step, context);
+		var humanInput = step.HumanInput ?? enabledOptInTools.Contains(RequestUserInputTool.OptInName);
 		var respondUrlBuilder = _serverUrl is null
 			? (Func<string, string, string, string?>?)null
 			: (orchestrationName, runId, stepName) =>
@@ -357,17 +405,20 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			OnAwaitingInput = context.OnAwaitingInput,
 			OnInputResolved = context.OnInputResolved,
 		};
-		var engineTools = BuildEngineToolsForStep(enabledOptInTools);
+		var engineTools = BuildEngineToolsForStep(enabledOptInTools,
+			step.ResponseSchema.HasValue || step.ExecutionPolicy?.Mode == AgentExecutionMode.Autopilot);
 
 		// Create a CTS that engine tools (e.g., set_status) can cancel to signal
 		// that the step is done and the agent should stop immediately.
 		using var stepCompletionCts = new CancellationTokenSource();
 		engineToolCtx.StepCompletionCts = stepCompletionCts;
 		using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, stepCompletionCts.Token);
+		engineToolCtx.StepCancellationToken = linkedCts.Token;
 		string? userPrompt = null;
 
 		try
 		{
+			step.ExecutionPolicy?.Validate();
 			// Build the user prompt, incorporating dependency outputs and parameters
 			userPrompt = BuildUserPrompt(step, context);
 
@@ -387,7 +438,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				ContextTier = step.ContextTier,
 				WorkingDirectory = resolvedWorkingDirectory,
 				GitHubToken = resolvedGitHubToken,
-				HumanInput = step.HumanInput ?? false,
+				HumanInput = humanInput,
 				PermissionPolicy = step.PermissionPolicy ?? context.DefaultPermissionPolicy,
 				SandboxPolicy = step.Sandbox ?? context.DefaultSandboxPolicy,
 				SystemPromptMode = step.SystemPromptMode ?? context.DefaultSystemPromptMode,
@@ -395,8 +446,14 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				EngineTools = engineTools,
 				EngineToolCtx = engineToolCtx,
 				SkillDirectories = step.SkillDirectories
-					.Select(dir => TemplateResolver.Resolve(dir, context.Parameters, context, step.DependsOn, step))
+					.Select(dir => ResolveInstructionDirectory(dir, step, context))
 					.ToArray(),
+				InstructionDirectories = step.InstructionDirectories?
+					.Select(dir => ResolveInstructionDirectory(dir, step, context)).ToArray(),
+				EnableConfigDiscovery = step.EnableConfigDiscovery ?? context.DefaultEnableConfigDiscovery,
+				EnableOnDemandInstructionDiscovery = step.EnableOnDemandInstructionDiscovery ?? context.DefaultEnableOnDemandInstructionDiscovery,
+				ResponseSchema = step.ResponseSchema,
+				ExecutionPolicy = step.ExecutionPolicy,
 				SystemPromptSections = step.SystemPromptSections,
 				InfiniteSessionConfig = step.InfiniteSessions,
 				Attachments = ResolveAttachments(step.Attachments, context, step),
@@ -531,7 +588,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			if (resolvedOutputHandlerPrompt is not null)
 			{
 				rawContent = content;
-				var handlerResult = await RunHandlerAsync(agentBuilder, resolvedOutputHandlerPrompt, content, resolvedModel, step.Name, cancellationToken);
+				var handlerResult = await RunHandlerAsync(agentBuilder, resolvedOutputHandlerPrompt, content, config, step.Name, cancellationToken);
 				content = handlerResult.Content;
 				outputHandlerResult = handlerResult.FellBackToOriginal
 					? $"[OUTPUT HANDLER FALLBACK] Original content used — handler returned empty/whitespace. Original: {rawContent}"
@@ -748,7 +805,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 					// (AggregateException, etc.) typically don't carry one of their own.
 					errorDetails = sessionFailed.Details;
 				}
-				if (probe.InnerException is null) break;
+				if (probe.InnerException is null)
+					break;
 			}
 
 			// Fallback exhaustion / transient-upstream detection: when the CLI surfaces
@@ -913,7 +971,18 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		if (source.Length == 0)
 			return Array.Empty<string>();
 
-		return new HashSet<string>(source, StringComparer.OrdinalIgnoreCase);
+		var enabled = new HashSet<string>(source, StringComparer.OrdinalIgnoreCase);
+		if (step.HumanInput == false)
+			enabled.Remove(RequestUserInputTool.OptInName);
+		return enabled;
+	}
+
+	private static string ResolveInstructionDirectory(string directory, PromptOrchestrationStep step, OrchestrationExecutionContext context)
+	{
+		var resolved = TemplateResolver.Resolve(directory, context.Parameters, context, step.DependsOn, step);
+		return !Path.IsPathRooted(resolved) && context.OrchestrationInfo.SourceDirectory is { } sourceDirectory
+			? Path.GetFullPath(Path.Combine(sourceDirectory, resolved))
+			: resolved;
 	}
 
 	/// <summary>
@@ -921,9 +990,16 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	/// registry; opt-in tools (currently <c>request_user_input</c>) are appended only
 	/// when the step's <c>enableTools</c> set lists them.
 	/// </summary>
-	private IReadOnlyCollection<IEngineTool> BuildEngineToolsForStep(IReadOnlyCollection<string> enabledOptInTools)
+	private IReadOnlyCollection<IEngineTool> BuildEngineToolsForStep(IReadOnlyCollection<string> enabledOptInTools, bool structuredOutput)
 	{
 		var alwaysOn = _engineToolRegistry.GetAll();
+		if (structuredOutput)
+		{
+			// These two tools terminate before the provider can emit its final JSON.
+			// Structured steps complete through the native response instead; workflow
+			// decisions can consume that validated response in subsequent steps.
+			alwaysOn = alwaysOn.Where(tool => tool.Name is not "orchestra_set_status" and not "orchestra_complete").ToArray();
+		}
 		if (enabledOptInTools.Count == 0)
 			return alwaysOn;
 
@@ -1045,7 +1121,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		AgentBuilder agentBuilder,
 		string handlerPrompt,
 		string content,
-		string model,
+		AgentBuildConfig sourceConfig,
 		string stepName,
 		CancellationToken cancellationToken)
 	{
@@ -1053,12 +1129,18 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		{
 			var systemPrompt = _formatter.BuildTransformationSystemPrompt(handlerPrompt);
 
-			var config = new AgentBuildConfig
+			var config = sourceConfig with
 			{
-				Model = model,
 				SystemPrompt = systemPrompt,
 				SystemPromptMode = SystemPromptMode.Replace,
+				SystemPromptSections = null,
 				Mcps = [],
+				Subagents = [],
+				Attachments = [],
+				EngineTools = [],
+				EngineToolCtx = null,
+				HumanInput = false,
+				ExecutionPolicy = null,
 				Reporter = _reporter,
 			};
 
@@ -1198,6 +1280,9 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		Level = LogLevel.Information,
 		Message = "Step '{StepName}' marked as no_action by engine tool: {Reason}")]
 	private partial void LogEngineToolNoActionOverride(string stepName, string reason);
+
+	[LoggerMessage(EventId = 40, Level = LogLevel.Error, Message = "Step {StepName} structured response validation failed: {Error}")]
+	private partial void LogStructuredResponseInvalid(string stepName, string error);
 
 	[LoggerMessage(
 		EventId = 6,

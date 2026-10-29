@@ -5,6 +5,86 @@ namespace Orchestra.Engine.Tests.EngineTools;
 public class EngineToolContextTests
 {
 	[Fact]
+	public async Task ConcurrentInputKinds_DoNotOverwriteTheSameStepWait()
+	{
+		var waiter = new SerialInputWaiter();
+		var context = new EngineToolContext { OrchestrationName = "test", RunId = "run", StepName = "step", HumanInputWaiter = waiter };
+		var first = context.RequestHumanInputAsync("native", null, PendingInputKind.Elicitation, default);
+		await waiter.Entered.Task.WaitAsync(TimeSpan.FromSeconds(2));
+		var second = context.RequestHumanInputAsync("engine", null, PendingInputKind.EngineTool, default);
+		waiter.Count.Should().Be(1);
+		waiter.Release.TrySetResult();
+		await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(2));
+		waiter.Count.Should().Be(2);
+	}
+
+	[Fact]
+	public async Task CancellingAQueuedQuestion_DoesNotDisturbTheActiveWaitOrBlockLaterQuestions()
+	{
+		var waiter = new SerialInputWaiter();
+		var prompts = new List<string>();
+		var context = new EngineToolContext
+		{
+			OrchestrationName = "test",
+			RunId = "run",
+			StepName = "step",
+			HumanInputWaiter = waiter,
+			OnAwaitingInput = record => prompts.Add(record.Prompt),
+		};
+		var first = context.RequestHumanInputAsync("active", null, PendingInputKind.Elicitation, default);
+		await waiter.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		using var cancellation = new CancellationTokenSource();
+		var queued = context.RequestHumanInputAsync("cancelled", null, PendingInputKind.Permission, cancellation.Token);
+		await cancellation.CancelAsync();
+		Func<Task> cancelled = async () => await queued.WaitAsync(TimeSpan.FromSeconds(5));
+		await cancelled.Should().ThrowAsync<OperationCanceledException>();
+		first.IsCompleted.Should().BeFalse();
+		waiter.Count.Should().Be(1);
+		prompts.Should().Equal("active");
+		waiter.Release.TrySetResult();
+		await first.WaitAsync(TimeSpan.FromSeconds(5));
+		var last = await context.RequestHumanInputAsync("next", null, PendingInputKind.EngineTool, default).WaitAsync(TimeSpan.FromSeconds(5));
+		last!.ResolveContent().Should().Be("answer");
+		prompts.Should().Equal("active", "next");
+		waiter.Count.Should().Be(2);
+	}
+
+	[Fact]
+	public async Task CancellingTheActiveQuestion_ReleasesTheGateForTheNextQuestion()
+	{
+		var waiter = new SerialInputWaiter();
+		var context = new EngineToolContext { OrchestrationName = "test", RunId = "run", StepName = "step", HumanInputWaiter = waiter };
+		using var cancellation = new CancellationTokenSource();
+		var first = context.RequestHumanInputAsync("active", null, PendingInputKind.Elicitation, cancellation.Token);
+		await waiter.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		var queued = context.RequestHumanInputAsync("next", null, PendingInputKind.Permission, default);
+		await cancellation.CancelAsync();
+		Func<Task> cancelled = async () => await first.WaitAsync(TimeSpan.FromSeconds(5));
+		await cancelled.Should().ThrowAsync<OperationCanceledException>();
+		waiter.Release.TrySetResult();
+		(await queued.WaitAsync(TimeSpan.FromSeconds(5)))!.ResolveContent().Should().Be("answer");
+		waiter.Count.Should().Be(2);
+	}
+
+	private sealed class SerialInputWaiter : IHumanInputWaiter
+	{
+		public int Count { get; private set; }
+		public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public async Task<UserInputResponse> WaitAsync(string orchestration, string run, string step, CancellationToken token)
+		{
+			Count++;
+			Entered.TrySetResult();
+			await Release.Task.WaitAsync(token);
+			return new() { Reply = "answer", RespondedAt = DateTimeOffset.UtcNow };
+		}
+		public bool TryComplete(string orchestration, string run, string step, UserInputResponse response) => false;
+		public bool TryCancel(string orchestration, string run, string step) => false;
+		public void BeginWait(string run, string step) { }
+		public void EndWait(string run, string step) { }
+	}
+
+	[Fact]
 	public void NewContext_HasNoStatusOverride()
 	{
 		var context = new EngineToolContext();

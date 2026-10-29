@@ -19,6 +19,7 @@ inputs ─▶ ┌─ research ─┐                       orchestra init
 - **Pluggable agents.** Run any Prompt step on `copilot` or `opencode`, selectable per step or per orchestration.
 - **MCP-native.** Attach Model Context Protocol servers to steps, and expose your orchestrations *as* an MCP server.
 - **Agent Skills.** Drop `SKILL.md` directories onto a step so the agent gains specialized, on-demand workflows.
+- **Structured results and bounded autopilot.** Set `responseSchema` for validated JSON and opt into `executionPolicy.mode: autopilot` for bounded continuation within a step. See [provider contracts](docs/providers.md).
 - **Operate it.** A web portal, triggers (cron/webhook/file/manual), durable checkpoint/resume, profiles & tags, and a full CLI — all under the single `orchestra` command.
 
 ## Install
@@ -173,6 +174,11 @@ verbs (`orchestra list`, `get`, `register`, `attach`, `runs`, `triggers`, `profi
 
 ## Agent providers
 
+Starting with **0.11**, Prompt, Command, and Script steps default to the orchestration file's
+directory. Use `workingDirectory: ".."` for a definition stored one level below its project
+root. OpenCode steps require V2. The bundled authoring skill documents the new provider
+controls and migration rules.
+
 Every `Prompt` step runs on an agent provider, chosen by precedence **step `provider` →
 orchestration `defaultProvider` → host default**:
 
@@ -188,8 +194,8 @@ steps:
     userPrompt: "..."
 ```
 
-- **`copilot`** — GitHub Copilot CLI via the Copilot SDK (supports the full feature surface).
-- **`opencode`** — spawns an `opencode serve` HTTP server; supports MCPs, subagents, reasoning, working dir, skills, engine tools, attachments, permissions, excluded tools, infinite-session toggle, and worker swap with session resume.
+- **`copilot`** — GitHub Copilot's agent runtime via the Copilot SDK. See the [CLI parity investigation](docs/research/copilot-harness-parity-2026-10-29.md) for tested capabilities and configuration differences.
+- **`opencode`** — uses the [OpenCode V2 HTTP API](docs/opencode.md); supports MCPs, subagents, model variants, explicit skills/instructions, engine tools, attachments, native questions, permissions, validated JSON, and Orchestra-managed bounded continuation.
 
 The engine **fails a step fast** if it uses a feature the chosen provider doesn't support
 (rather than silently dropping it). See [`docs/copilot.md`](docs/copilot.md) and the provider

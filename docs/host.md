@@ -242,6 +242,25 @@ that step's session.
 }
 ```
 
+### Copilot discovery defaults
+
+Set host defaults for Copilot Prompt steps in `orchestra.json`:
+
+```json
+{
+  "copilot": {
+    "enableConfigDiscovery": true,
+    "enableOnDemandInstructionDiscovery": true
+  }
+}
+```
+
+Both default to false. Orchestration `defaultEnableConfigDiscovery` /
+`defaultEnableOnDemandInstructionDiscovery` values override the host defaults, and explicit
+per-step values override both. Discovery uses the agent working directory and runtime rules;
+explicit `skillDirectories` / `instructionDirectories` use the orchestration file as their
+relative-path base. See [Copilot discovery and session controls](copilot.md#discovery-and-explicit-directories).
+
 ### Copilot MCP-startup timeout
 
 A Copilot session's `create`/`resume` call spawns the step's inline `type: local` MCP stdio

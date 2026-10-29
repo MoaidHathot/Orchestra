@@ -19,6 +19,12 @@ public sealed class CopilotAgentPoolOptions
 	public int DefaultMaxSessionsPerInstance { get; set; } = 1;
 	public int DefaultIdleTimeoutSeconds { get; set; } = 120;
 
+	/// <summary>Default ambient configuration discovery for Copilot sessions. Steps/orchestrations can override it.</summary>
+	public bool EnableConfigDiscovery { get; set; }
+
+	/// <summary>Default nested instruction discovery after file reads. Steps/orchestrations can override it.</summary>
+	public bool EnableOnDemandInstructionDiscovery { get; set; }
+
 	/// <summary>
 	/// Upper bound on how long a single <c>CreateSessionAsync</c>/<c>ResumeSessionAsync</c> call
 	/// may take. This call spawns the session's inline MCP stdio servers and performs their

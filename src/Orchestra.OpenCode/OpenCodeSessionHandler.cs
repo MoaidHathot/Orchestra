@@ -6,13 +6,12 @@ using Orchestra.Engine;
 namespace Orchestra.OpenCode;
 
 /// <summary>
-/// Translates OpenCode <c>GET /event</c> bus events for a single session into engine-neutral
+/// Translates OpenCode <c>GET /api/event</c> events and durable messages into engine-neutral
 /// <see cref="AgentEvent"/>s and accumulates the final assistant content, model, and token
 /// usage. Plays the role <c>CopilotSessionHandler</c> plays for the Copilot SDK. All OpenCode
 /// wire-shape interpretation lives here so it can be unit-tested from JSON fixtures.
 ///
-/// Threading: <see cref="Handle"/> is invoked sequentially from the agent's single SSE read
-/// loop; internal state is not synchronized.
+/// The event pump and durable-message reconciliation synchronize through the same gate.
 /// </summary>
 internal sealed partial class OpenCodeSessionHandler
 {
@@ -40,6 +39,9 @@ internal sealed partial class OpenCodeSessionHandler
 
 	private string? _actualModel;
 	private AgentUsage? _usage;
+	private string? _finalResponse;
+	private readonly Dictionary<string, string> _toolNames = [];
+	private readonly object _gate = new();
 
 	public OpenCodeSessionHandler(
 		string sessionId,
@@ -58,26 +60,150 @@ internal sealed partial class OpenCodeSessionHandler
 	}
 
 	/// <summary>
-	/// The assistant's final text, assembled from all text parts in arrival order. OpenCode
-	/// streams growing per-part text, so the final value is the concatenation of each text
-	/// part's latest content.
+	/// Final root assistant text from the current prompt's durable projection.
 	/// </summary>
-	public string? FinalContent => _textPartOrder.Count > 0
+	public string? FinalContent => _finalResponse ?? (_textPartOrder.Count > 0
 		? string.Concat(_textPartOrder.Select(id => _textParts[id]))
-		: null;
+		: null);
 
 	public string? ActualModel => _actualModel;
 	public AgentUsage? Usage => _usage;
 
+	/// <summary>Durable V2 messages are authoritative, including failures whose SSE event was missed.</summary>
+	public void ApplyMessages(IReadOnlyList<JsonElement> messages, string requestId)
+	{
+		lock (_gate)
+			ApplyMessagesCore(messages, requestId);
+	}
+
+	private void ApplyMessagesCore(IReadOnlyList<JsonElement> messages, string requestId)
+	{
+		var requestIndex = -1;
+		var idleIndex = -1;
+		for (var index = 0; index < messages.Count; index++)
+		{
+			if (GetString(messages[index], "id") == requestId && GetString(messages[index], "type") == "user")
+				requestIndex = index;
+			if (GetString(messages[index], "type") == "idle")
+				idleIndex = index;
+		}
+		if (requestIndex < 0 || idleIndex <= requestIndex)
+			throw new OpenCodeSessionFailedException($"OpenCode returned no durable completion for prompt '{requestId}'.");
+		var turn = messages.Skip(requestIndex + 1).Take(idleIndex - requestIndex - 1).ToArray();
+		var assistant = turn.LastOrDefault(m => GetString(m, "type") == "assistant");
+		var idle = messages[idleIndex];
+		double input = 0, output = 0, reasoning = 0, read = 0, write = 0, cost = 0;
+		foreach (var message in messages.Where(m => GetString(m, "type") == "assistant"))
+		{
+			foreach (var tool in message.GetProperty("content").EnumerateArray().Where(p => GetString(p, "type") == "tool"))
+			{
+				var state = tool.GetProperty("state");
+				var id = GetString(tool, "id");
+				var name = GetString(tool, "name");
+				_toolNames[id!] = name!;
+				if (state.TryGetProperty("input", out var args))
+					HandleToolPart(JsonSerializer.SerializeToElement(new { id, tool = name == "subagent" ? "task" : name, state = new { status = "running", input = args } }));
+				var status = GetString(state, "status");
+				if (status is "completed" or "error")
+					HandleV2Tool(new OpenCodeServerEvent
+					{
+						Type = status == "completed" ? "session.tool.success" : "session.tool.failed",
+						Properties = JsonSerializer.SerializeToElement(new
+						{
+							id,
+							content = state.TryGetProperty("content", out var content) ? content : JsonSerializer.SerializeToElement(Array.Empty<object>()),
+							error = state.TryGetProperty("error", out var error) ? error.ToString() : null
+						})
+					});
+			}
+			if (message.TryGetProperty("tokens", out var tokens))
+			{
+				input += GetDouble(tokens, "input") ?? 0;
+				output += GetDouble(tokens, "output") ?? 0;
+				reasoning += GetDouble(tokens, "reasoning") ?? 0;
+				if (tokens.TryGetProperty("cache", out var cache))
+				{
+					read += GetDouble(cache, "read") ?? 0;
+					write += GetDouble(cache, "write") ?? 0;
+				}
+			}
+			cost += GetDouble(message, "cost") ?? 0;
+		}
+		_usage = new AgentUsage
+		{
+			InputTokens = input,
+			OutputTokens = output,
+			ReasoningTokens = reasoning,
+			CacheReadTokens = read,
+			CacheWriteTokens = write,
+			Cost = cost
+		};
+		if (GetString(idle, "outcome") != "succeeded")
+		{
+			var error = idle.TryGetProperty("error", out var idleError) ? idleError
+				: assistant.ValueKind == JsonValueKind.Object && assistant.TryGetProperty("error", out var assistantError) ? assistantError : default;
+			var message = GetString(error, "message") ?? $"OpenCode execution ended with outcome '{GetString(idle, "outcome") ?? "missing"}'.";
+			throw new OpenCodeSessionFailedException(message, new AgentSessionErrorDetails { ErrorType = GetString(error, "type"), TransientUpstreamFailure = LooksTransient(GetString(error, "type"), message) });
+		}
+		if (assistant.ValueKind != JsonValueKind.Object)
+			throw new OpenCodeSessionFailedException("OpenCode completed the current prompt without an assistant response.");
+		_finalResponse = string.Concat(assistant.GetProperty("content").EnumerateArray()
+			.Where(p => GetString(p, "type") == "text").Select(p => GetString(p, "text")));
+		if (assistant.TryGetProperty("model", out var model))
+			_actualModel = $"{GetString(model, "providerID")}/{GetString(model, "id")}";
+	}
+
 	public void Handle(OpenCodeServerEvent evt)
+	{
+		lock (_gate)
+			HandleCore(evt);
+	}
+
+	private void HandleCore(OpenCodeServerEvent evt)
 	{
 		// Ignore events that belong to a different session on the same (possibly shared) instance.
 		var sessionId = TryGetSessionId(evt);
-		if (sessionId is not null && !string.Equals(sessionId, _sessionId, StringComparison.Ordinal))
+		if (!string.Equals(sessionId, _sessionId, StringComparison.Ordinal))
 			return;
 
 		switch (evt.Type)
 		{
+			case "session.step.started":
+				if (evt.Properties.TryGetProperty("model", out var model))
+					_actualModel = $"{GetString(model, "providerID")}/{GetString(model, "id")}";
+				break;
+			case "session.text.delta":
+			case "session.reasoning.delta":
+				Emit(new AgentEvent
+				{
+					Type = evt.Type == "session.text.delta" ? AgentEventType.MessageDelta : AgentEventType.ReasoningDelta,
+					Content = GetString(evt.Properties, "delta")
+				});
+				break;
+			case "session.tool.input.started":
+				if (GetString(evt.Properties, "id") is { } toolId)
+					_toolNames[toolId] = GetString(evt.Properties, "name") ?? "unknown";
+				break;
+			case "session.tool.called":
+			case "session.tool.success":
+			case "session.tool.failed":
+				HandleV2Tool(evt);
+				break;
+			case "permission.asked":
+				Emit(new AgentEvent
+				{
+					Type = AgentEventType.PermissionRequested,
+					PermissionRequestId = GetString(evt.Properties, "id"),
+					PermissionKind = GetString(evt.Properties, "action"),
+					PermissionTarget = evt.Properties.TryGetProperty("resources", out var resources) ? resources.GetRawText() : null
+				});
+				break;
+			case "session.execution.failed":
+				HandleSessionError(evt.Properties);
+				break;
+			case "session.execution.interrupted":
+				_done.TrySetException(new OpenCodeSessionFailedException("OpenCode execution was interrupted."));
+				break;
 			case "message.part.updated":
 				HandlePartUpdated(evt.Properties);
 				break;
@@ -85,7 +211,7 @@ internal sealed partial class OpenCodeSessionHandler
 				HandleMessageUpdated(evt.Properties);
 				break;
 			case "session.idle":
-				_done.TrySetResult();
+				// Only a durable idle after this prompt's message can prove completion.
 				break;
 			case "session.error":
 				HandleSessionError(evt.Properties);
@@ -119,6 +245,24 @@ internal sealed partial class OpenCodeSessionHandler
 			default:
 				break; // step-start / step-finish / file / snapshot — no engine event needed
 		}
+	}
+
+	private void HandleV2Tool(OpenCodeServerEvent evt)
+	{
+		var data = evt.Properties;
+		var id = GetString(data, "id");
+		if (id is null)
+			return;
+		_toolNames.TryGetValue(id, out var name);
+		var status = evt.Type == "session.tool.called" ? "running" : evt.Type == "session.tool.success" ? "completed" : "error";
+		var state = new Dictionary<string, object?> { ["status"] = status };
+		if (data.TryGetProperty("input", out var input))
+			state["input"] = input;
+		if (data.TryGetProperty("content", out var content))
+			state["output"] = string.Join("\n", content.EnumerateArray().Select(p => GetString(p, "text") ?? p.GetRawText()));
+		if (data.TryGetProperty("error", out var error))
+			state["error"] = error.ValueKind == JsonValueKind.String ? error.GetString() : error.GetRawText();
+		HandleToolPart(JsonSerializer.SerializeToElement(new { id, tool = name == "subagent" ? "task" : name, state }));
 	}
 
 	private void EmitTextDelta(JsonElement part, AgentEventType eventType, Dictionary<string, string> store, List<string>? order)
@@ -425,7 +569,8 @@ internal sealed partial class OpenCodeSessionHandler
 
 	private static string RawJson(JsonElement element)
 	{
-		try { return element.GetRawText(); }
+		try
+		{ return element.GetRawText(); }
 		catch { return string.Empty; }
 	}
 }

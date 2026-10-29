@@ -34,7 +34,8 @@ public class OrchestraConfigLoaderTests : IDisposable
 
 		if (Directory.Exists(_tempDir))
 		{
-			try { Directory.Delete(_tempDir, recursive: true); }
+			try
+			{ Directory.Delete(_tempDir, recursive: true); }
 			catch { /* best-effort cleanup */ }
 		}
 	}
@@ -71,6 +72,22 @@ public class OrchestraConfigLoaderTests : IDisposable
 	}
 
 	// ── ApplyConfig tests ──
+
+	[Theory]
+	[InlineData(true)]
+	[InlineData(false)]
+	public void CopilotDiscovery_JsonValuesReachHostOptions_IncludingExplicitFalse(bool enabled)
+	{
+		var config = System.Text.Json.JsonSerializer.Deserialize<OrchestraConfigFile>(
+			$"{{\"copilot\":{{\"enableConfigDiscovery\":{enabled.ToString().ToLowerInvariant()},\"enableOnDemandInstructionDiscovery\":{enabled.ToString().ToLowerInvariant()}}}}}",
+			new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+		var options = new OrchestrationHostOptions();
+		options.Copilot.EnableConfigDiscovery = !enabled;
+		options.Copilot.EnableOnDemandInstructionDiscovery = !enabled;
+		OrchestraConfigLoader.ApplyConfig(options, config);
+		options.Copilot.EnableConfigDiscovery.Should().Be(enabled);
+		options.Copilot.EnableOnDemandInstructionDiscovery.Should().Be(enabled);
+	}
 
 	[Fact]
 	public void ApplyConfig_NullFields_DoesNotOverrideDefaults()

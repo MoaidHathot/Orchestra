@@ -30,20 +30,22 @@ internal sealed class OpenCodeEngineToolFunction : AIFunction
 	public override string Description => _definition.Description;
 	public override JsonElement JsonSchema => _schema;
 
-	protected override ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
+	protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
 	{
 		cancellationToken.ThrowIfCancellationRequested();
 
 		var binding = _holder.Current;
 		if (binding is null)
-			return new ValueTask<object?>($"Engine tool '{_definition.Name}' is unavailable: no active orchestration step.");
+			return $"Engine tool '{_definition.Name}' is unavailable: no active orchestration step.";
 
 		var tool = binding.Tools.FirstOrDefault(t => string.Equals(t.Name, _definition.Name, StringComparison.OrdinalIgnoreCase));
 		if (tool is null)
-			return new ValueTask<object?>($"Engine tool '{_definition.Name}' is not enabled for this step.");
+			return $"Engine tool '{_definition.Name}' is not enabled for this step.";
 
 		var argsJson = JsonSerializer.Serialize(arguments.ToDictionary(kv => kv.Key, kv => kv.Value));
-		var result = tool.Execute(argsJson, binding.Context);
-		return new ValueTask<object?>(result);
+		using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, binding.Context.StepCancellationToken);
+		return tool is IAsyncEngineTool asyncTool
+			? await asyncTool.ExecuteAsync(argsJson, binding.Context, linked.Token).ConfigureAwait(false)
+			: tool.Execute(argsJson, binding.Context);
 	}
 }

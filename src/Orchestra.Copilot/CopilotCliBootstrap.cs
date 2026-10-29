@@ -33,11 +33,11 @@ internal static partial class CopilotCliBootstrap
 {
 	/// <summary>
 	/// Mirrors <c>$(CopilotCliVersion)</c> in <c>GitHub.Copilot.SDK.props</c> shipped
-	/// with the SDK NuGet (currently 1.0.85 in SDK 1.0.14). When bumping
+	/// with the SDK NuGet (currently 1.0.105 in SDK 1.0.28). When bumping
 	/// <c>GitHub.Copilot.SDK</c> in <c>Directory.Packages.props</c>, update this constant
 	/// to match.
 	/// </summary>
-	public const string CopilotCliVersion = "1.0.85";
+	public const string CopilotCliVersion = "1.0.105";
 
 	private const string DefaultNpmRegistry = "https://registry.npmjs.org";
 
@@ -191,15 +191,21 @@ internal static partial class CopilotCliBootstrap
 
 		if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
 		{
-			os = "win"; npmOs = "win32"; binaryName = "copilot.exe";
+			os = "win";
+			npmOs = "win32";
+			binaryName = "copilot.exe";
 		}
 		else if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
 		{
-			os = "osx"; npmOs = "darwin"; binaryName = "copilot";
+			os = "osx";
+			npmOs = "darwin";
+			binaryName = "copilot";
 		}
 		else if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
 		{
-			os = "linux"; npmOs = "linux"; binaryName = "copilot";
+			os = "linux";
+			npmOs = "linux";
+			binaryName = "copilot";
 		}
 		else
 		{
@@ -353,7 +359,9 @@ internal static partial class CopilotCliBootstrap
 			LogExtractStarting(logger, archivePath, cacheDir);
 			await ExtractTarGzAsync(archivePath, cacheDir, cancellationToken).ConfigureAwait(false);
 
-			try { File.Delete(archivePath); } catch { /* best-effort: archive is in our cache */ }
+			try
+			{ File.Delete(archivePath); }
+			catch { /* best-effort: archive is in our cache */ }
 
 			if (!File.Exists(binaryPath))
 			{
@@ -732,7 +740,8 @@ internal static partial class CopilotCliBootstrap
 				continue;
 			}
 			var relative = name[(firstSlash + 1)..];
-			if (string.IsNullOrEmpty(relative)) continue;
+			if (string.IsNullOrEmpty(relative))
+				continue;
 
 			var destinationPath = Path.GetFullPath(Path.Combine(targetDir, relative));
 
@@ -751,7 +760,8 @@ internal static partial class CopilotCliBootstrap
 				case TarEntryType.V7RegularFile:
 				case TarEntryType.ContiguousFile:
 					var parent = Path.GetDirectoryName(destinationPath);
-					if (parent is not null) Directory.CreateDirectory(parent);
+					if (parent is not null)
+						Directory.CreateDirectory(parent);
 					await entry.ExtractToFileAsync(destinationPath, overwrite: true, cancellationToken).ConfigureAwait(false);
 					break;
 				default:

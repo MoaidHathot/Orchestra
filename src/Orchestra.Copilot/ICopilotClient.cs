@@ -43,7 +43,13 @@ internal interface ICopilotSession : IAsyncDisposable
 	string SessionId { get; }
 	IDisposable On(Action<SessionEvent> handler);
 	Task<string> SendAsync(MessageOptions options, CancellationToken cancellationToken);
+	Task<string> SendStructuredAsync(string prompt, IList<Attachment>? attachments, System.Text.Json.JsonElement schema, CancellationToken cancellationToken)
+		=> throw new NotSupportedException("This Copilot session does not implement native structured responses.");
 	Task AbortAsync(CancellationToken cancellationToken = default);
+
+	/// <summary>Set model-facing interactive guidance and native question-tool availability.</summary>
+	Task ConfigureInteractionAsync(bool humanInput, CancellationToken cancellationToken) => Task.CompletedTask;
+	Task ConfigureExecutionAsync(Orchestra.Engine.AgentExecutionPolicy policy, CancellationToken cancellationToken) => Task.CompletedTask;
 
 	/// <summary>
 	/// Applies an opt-in sandbox policy to the live session via the runtime's options-update RPC.
@@ -121,6 +127,50 @@ internal sealed class CopilotSdkSessionAdapter : ICopilotSession
 	// SandboxConfig + OptionsApi are evaluation-only SDK APIs (GHCP001); the options-update RPC
 	// is the supported way to patch a live session's sandbox, so suppress narrowly here.
 #pragma warning disable GHCP001
+	public async Task ConfigureExecutionAsync(Orchestra.Engine.AgentExecutionPolicy policy, CancellationToken cancellationToken)
+	{
+		policy.Validate();
+		var autopilot = policy.Mode == Orchestra.Engine.AgentExecutionMode.Autopilot;
+		await _session.Rpc.Options.UpdateAsync(autopilot: new GitHub.Copilot.Rpc.AutopilotOptions
+		{
+			ContinuationEnabled = autopilot,
+			MaxContinues = policy.MaxContinues,
+		}, cancellationToken: cancellationToken).ConfigureAwait(false);
+		await _session.Rpc.Mode.SetAsync(autopilot ? SessionMode.Autopilot : SessionMode.Interactive,
+			cancellationToken: cancellationToken).ConfigureAwait(false);
+	}
+
+	public async Task ConfigureInteractionAsync(bool humanInput, CancellationToken cancellationToken)
+	{
+		await _session.Rpc.Options.UpdateAsync(
+			runningInInteractiveMode: humanInput,
+			askUserDisabled: !humanInput,
+			cancellationToken: cancellationToken).ConfigureAwait(false);
+	}
+
+	public async Task<string> SendStructuredAsync(string prompt, IList<Attachment>? attachments, System.Text.Json.JsonElement schema, CancellationToken cancellationToken)
+	{
+		var activity = System.Diagnostics.Activity.Current;
+		var result = await _session.Rpc.SendAsync(
+			prompt,
+			attachments: attachments,
+			responseFormat: BuildResponseFormat(schema),
+			traceparent: activity?.IdFormat == System.Diagnostics.ActivityIdFormat.W3C ? activity.Id : null,
+			tracestate: activity?.TraceStateString,
+			cancellationToken: cancellationToken).ConfigureAwait(false);
+		return result.MessageId;
+	}
+
+	internal static GitHub.Copilot.Rpc.ResponseFormatJsonSchema BuildResponseFormat(System.Text.Json.JsonElement schema) => new()
+	{
+		JsonSchema = new GitHub.Copilot.Rpc.JsonSchemaResponseFormat
+		{
+			Name = "orchestra_response",
+			Schema = schema.Clone(),
+			Strict = true,
+		},
+	};
+
 	public async Task ApplySandboxAsync(Orchestra.Engine.SandboxPolicy policy, CancellationToken cancellationToken)
 	{
 		var sandbox = BuildSandboxConfig(policy);

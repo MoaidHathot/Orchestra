@@ -145,7 +145,7 @@ For deep-dives on specific subsystems:
 | `Microsoft.Extensions.Hosting` | 10.0.9 | .NET Prod | Generic host / DI / lifetime |
 | `Microsoft.Extensions.Http` | 10.0.9 | .NET Prod | `HttpClient` factory |
 | `Microsoft.Extensions.Options` | 10.0.9 | .NET Prod | Options pattern (`IOptions<T>`) |
-| `GitHub.Copilot.SDK` | 1.0.14 | .NET Prod | Copilot agent integration |
+| `GitHub.Copilot.SDK` | 1.0.28 | .NET Prod | Copilot agent integration |
 | `ModelContextProtocol` | 1.3.0 | .NET Prod | MCP server/client protocol |
 | `Cronos` | 0.8.4 | .NET Prod | Cron expression parsing |
 | `Spectre.Console` | 0.50.0 | .NET Prod | Rich terminal UI |

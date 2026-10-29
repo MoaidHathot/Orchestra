@@ -31,19 +31,12 @@ internal sealed class OpenCodeEngineToolBridge : IAsyncDisposable
 		EngineToolContextHolder holder,
 		string hostname,
 		ILoggerFactory loggerFactory,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		IReadOnlyCollection<IEngineTool>? definitions = null)
 	{
-		// The fixed engine-tool catalogue. Definitions (name/description/schema) come from the
-		// built-in tools; per-step enablement is enforced at dispatch against the bound holder.
-		IEngineTool[] definitions =
-		[
-			new SetStatusTool(),
-			new CompleteTool(),
-			new SaveToFileTool(),
-			new ReadFromFileTool(),
-			new RequestUserInputTool(),
-		];
-		var tools = definitions
+		// Advertise only this step's enabled tools. Dispatch-time denial alone still exposes
+		// unavailable status/question tools to the model and encourages invalid calls.
+		var tools = (definitions ?? [])
 			.Select(d => McpServerTool.Create(new OpenCodeEngineToolFunction(d, holder)))
 			.ToList();
 
@@ -59,11 +52,14 @@ internal sealed class OpenCodeEngineToolBridge : IAsyncDisposable
 		var app = builder.Build();
 		app.Urls.Add($"http://{hostname}:0");
 		app.MapMcp("/mcp");
-		await app.StartAsync(cancellationToken).ConfigureAwait(false);
-
-		var baseUrl = app.Urls.FirstOrDefault()?.TrimEnd('/')
-			?? throw new InvalidOperationException("OpenCode engine-tool bridge did not bind a URL.");
-		return new OpenCodeEngineToolBridge(app, baseUrl + "/mcp");
+		try
+		{
+			await app.StartAsync(cancellationToken).ConfigureAwait(false);
+			var baseUrl = app.Urls.FirstOrDefault()?.TrimEnd('/')
+				?? throw new InvalidOperationException("OpenCode engine-tool bridge did not bind a URL.");
+			return new OpenCodeEngineToolBridge(app, baseUrl + "/mcp");
+		}
+		catch { await app.DisposeAsync().ConfigureAwait(false); throw; }
 	}
 
 	public async ValueTask DisposeAsync()

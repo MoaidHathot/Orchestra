@@ -36,6 +36,10 @@ public class OrchestrationExecutionContext
 	/// </summary>
 	public SystemPromptMode? DefaultSystemPromptMode { get; init; }
 
+	/// <summary>Orchestration-level defaults for provider configuration and nested instruction discovery.</summary>
+	public bool? DefaultEnableConfigDiscovery { get; init; }
+	public bool? DefaultEnableOnDemandInstructionDiscovery { get; init; }
+
 	/// <summary>
 	/// Default retry policy from the orchestration.
 	/// Applied to steps that don't define their own retry policy.

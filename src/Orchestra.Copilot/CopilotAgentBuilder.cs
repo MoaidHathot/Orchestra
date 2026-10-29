@@ -80,7 +80,9 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		catch (Exception ex)
 		{
 			LogRunScopeStartFailed(ex, scopeId, sw.ElapsedMilliseconds);
-			try { await pool.DisposeAsync().ConfigureAwait(false); } catch { }
+			try
+			{ await pool.DisposeAsync().ConfigureAwait(false); }
+			catch { }
 			// Clear the holder on failure so callers don't observe a half-initialised scope.
 			holder.Pool = null;
 			throw;
@@ -103,10 +105,40 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		=> _runScopedClient.Value?.Pool?.Diagnostic;
 
 	/// <summary>
-	/// Copilot is the reference provider and supports every step-level feature.
+	/// Explicitly opt into implemented features; future flags must not become supported silently.
 	/// </summary>
 	public override AgentProviderCapabilities GetCapabilities()
-		=> AgentProviderCapabilities.All("copilot");
+		=> new()
+		{
+			Provider = "copilot",
+			Mcps = true,
+			Subagents = true,
+			SubagentMcps = true,
+			SubagentSkills = true,
+			ExplicitSubagentSelection = true,
+			ReasoningLevel = true,
+			ReasoningSummary = true,
+			ContextTier = true,
+			WorkingDirectory = true,
+			GitHubToken = true,
+			HumanInput = true,
+			PermissionPolicy = true,
+			SandboxPolicy = true,
+			SystemPromptMode = true,
+			SystemPromptSections = true,
+			EngineTools = true,
+			SkillDirectories = true,
+			InstructionDirectories = true,
+			ConfigDiscovery = true,
+			OnDemandInstructionDiscovery = true,
+			StructuredOutput = true,
+			NativeStructuredOutput = true,
+			Autopilot = true,
+			InfiniteSession = true,
+			InfiniteSessionThresholds = true,
+			Attachments = true,
+			ExcludedTools = true,
+		};
 
 	public override AgentRuntimeStatus GetRuntimeStatus()
 	{
@@ -201,7 +233,9 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			swapOptions: CopilotAgentSwapOptions.FromPoolOptions(_poolOptions),
 			logger: _loggerFactory.CreateLogger<CopilotAgent>(),
 			loggerFactory: _loggerFactory,
-			excludedTools: excludedTools
+			excludedTools: excludedTools,
+			enableConfigDiscovery: _poolOptions.EnableConfigDiscovery,
+			enableOnDemandInstructionDiscovery: _poolOptions.EnableOnDemandInstructionDiscovery
 		);
 	}
 
@@ -234,7 +268,12 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			gitHubToken: config.GitHubToken,
 			humanInput: config.HumanInput,
 			permissionPolicy: config.PermissionPolicy,
-			sandboxPolicy: config.SandboxPolicy
+			sandboxPolicy: config.SandboxPolicy,
+			instructionDirectories: config.InstructionDirectories,
+			enableConfigDiscovery: config.EnableConfigDiscovery ?? _poolOptions.EnableConfigDiscovery,
+			enableOnDemandInstructionDiscovery: config.EnableOnDemandInstructionDiscovery ?? _poolOptions.EnableOnDemandInstructionDiscovery,
+			responseSchema: config.ResponseSchema,
+			executionPolicy: config.ExecutionPolicy
 		);
 	}
 
@@ -290,7 +329,8 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			_holder.Pool = null;
 
 			var sw = System.Diagnostics.Stopwatch.StartNew();
-			try { await _pool.DisposeAsync().ConfigureAwait(false); }
+			try
+			{ await _pool.DisposeAsync().ConfigureAwait(false); }
 			catch (Exception ex) { _builder.LogRunScopeDisposeError(ex, _scopeId); }
 			finally { _builder.UnregisterActivePool(_pool); }
 

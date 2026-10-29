@@ -29,6 +29,11 @@ public partial class CopilotAgent : IAgent
 	private readonly IReadOnlyCollection<IEngineTool> _engineTools;
 	private readonly EngineToolContext? _engineToolContext;
 	private readonly string[] _skillDirectories;
+	private readonly string[]? _instructionDirectories;
+	private readonly bool _enableConfigDiscovery;
+	private readonly bool _enableOnDemandInstructionDiscovery;
+	private readonly System.Text.Json.JsonElement? _responseSchema;
+	private readonly AgentExecutionPolicy? _executionPolicy;
 	private readonly Engine.InfiniteSessionConfig? _infiniteSessionConfig;
 	private readonly ImageAttachment[] _attachments;
 	/// <summary>
@@ -145,7 +150,12 @@ public partial class CopilotAgent : IAgent
 			string? gitHubToken = null,
 			bool humanInput = false,
 			Engine.PermissionPolicy? permissionPolicy = null,
-			Engine.SandboxPolicy? sandboxPolicy = null)
+			Engine.SandboxPolicy? sandboxPolicy = null,
+			string[]? instructionDirectories = null,
+			bool enableConfigDiscovery = false,
+			bool enableOnDemandInstructionDiscovery = false,
+			System.Text.Json.JsonElement? responseSchema = null,
+			AgentExecutionPolicy? executionPolicy = null)
 	{
 		_clientPool = clientPool;
 		_model = model;
@@ -166,6 +176,12 @@ public partial class CopilotAgent : IAgent
 		_engineTools = engineTools;
 		_engineToolContext = engineToolContext;
 		_skillDirectories = skillDirectories;
+		_instructionDirectories = instructionDirectories is null ? null : [.. instructionDirectories];
+		_enableConfigDiscovery = enableConfigDiscovery;
+		_enableOnDemandInstructionDiscovery = enableOnDemandInstructionDiscovery;
+		_responseSchema = responseSchema?.Clone();
+		executionPolicy?.Validate();
+		_executionPolicy = executionPolicy;
 		_infiniteSessionConfig = infiniteSessionConfig;
 		_attachments = attachments;
 		// SDK 1.0.0 PR #1098: forwarded to DefaultAgentConfig.ExcludedTools in
@@ -306,7 +322,8 @@ public partial class CopilotAgent : IAgent
 			// materialisation and our subscription were dropped. With OnEvent set at config
 			// time the runtime invokes the handler from the first event onward.
 			var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-			var handler = new CopilotSessionHandler(writer, _reporter, _model, done, _loggerFactory.CreateLogger<CopilotSessionHandler>());
+			var handler = new CopilotSessionHandler(writer, _reporter, _model, done, _loggerFactory.CreateLogger<CopilotSessionHandler>(),
+				autopilot: _executionPolicy?.Mode == AgentExecutionMode.Autopilot);
 
 			var attemptSessionConfig = BuildSessionConfig(handler.HandleEvent, cancellationToken);
 
@@ -462,6 +479,12 @@ public partial class CopilotAgent : IAgent
 			attemptSessionIdBox.Value = session.SessionId;
 			await using var _sessionDispose = session;
 
+			// Headless transport and automatic permissions do not select non-interactive
+			// model guidance. Apply the actual interaction setting on create AND resume.
+			await session.ConfigureInteractionAsync(_humanInput && _engineToolContext is not null, cancellationToken)
+				.ConfigureAwait(false);
+			await session.ConfigureExecutionAsync(_executionPolicy ?? new AgentExecutionPolicy(), cancellationToken).ConfigureAwait(false);
+
 			// Opt-in sandbox: constrain the freshly created/resumed session's shell/file/network
 			// tool access via the runtime's options-update RPC. No-op on non-SDK session fakes.
 			if (_sandboxPolicy is { Enabled: true })
@@ -530,7 +553,12 @@ public partial class CopilotAgent : IAgent
 			{
 				LogSessionSendStarting(session.SessionId, _model, prompt.Length, _attachments.Length);
 				var sendSw = System.Diagnostics.Stopwatch.StartNew();
-				await session.SendAsync(messageOptions, cancellationToken).ConfigureAwait(false);
+				string messageId;
+				if (_responseSchema is { } schema)
+					messageId = await session.SendStructuredAsync(messageOptions.Prompt, messageOptions.Attachments, schema, cancellationToken).ConfigureAwait(false);
+				else
+					messageId = await session.SendAsync(messageOptions, cancellationToken).ConfigureAwait(false);
+				handler.BindAutopilotRequest(messageId);
 				LogSessionSendCompleted(session.SessionId, _model, sendSw.ElapsedMilliseconds);
 			}
 			catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -831,12 +859,18 @@ public partial class CopilotAgent : IAgent
 			// SDK 1.0.0 added InstructionDirectories — carry it across resume so the agent
 			// has the same auxiliary-instructions surface after a swap as the original create.
 			InstructionDirectories = baseConfig.InstructionDirectories,
+			EnableConfigDiscovery = baseConfig.EnableConfigDiscovery,
+			EnableOnDemandInstructionDiscovery = baseConfig.EnableOnDemandInstructionDiscovery,
+			EnableSkills = true,
+			EnableSessionStore = false,
+			Memory = new MemoryConfiguration { Enabled = false },
 			InfiniteSessions = baseConfig.InfiniteSessions,
 			Hooks = baseConfig.Hooks,
 			WorkingDirectory = baseConfig.WorkingDirectory,
 			// Carry the opt-in HITL handlers across a CLI swap+resume so plan/elicitation
 			// gating still routes to the operator on the resumed session.
 			OnElicitationRequest = baseConfig.OnElicitationRequest,
+			OnUserInputRequest = baseConfig.OnUserInputRequest,
 			OnExitPlanModeRequest = baseConfig.OnExitPlanModeRequest,
 			// SDK 1.0.0 lets us register the event handler at config-time via OnEvent
 			// rather than calling session.On(...) after CreateSessionAsync/ResumeSessionAsync
@@ -858,6 +892,15 @@ public partial class CopilotAgent : IAgent
 			Model = _model,
 			Streaming = true,
 			OnPermissionRequest = BuildPermissionHandler(cancellationToken),
+			EnableConfigDiscovery = _enableConfigDiscovery,
+			EnableOnDemandInstructionDiscovery = _enableOnDemandInstructionDiscovery,
+			// Disabling ambient discovery must not disable explicitly registered or
+			// runtime-built-in skills. The runtime otherwise derives this from discovery.
+			EnableSkills = true,
+			// Runs use explicit inputs/artifacts (and opt-in MCP tools) for cross-run
+			// context. Copilot's persistent recall is deliberately disabled.
+			EnableSessionStore = false,
+			Memory = new MemoryConfiguration { Enabled = false },
 			// SDK 1.0.0 lets us register the event handler at config-time via OnEvent
 			// rather than calling session.On(...) after CreateSessionAsync returns. The
 			// post-create subscription window had a tiny race where events fired between
@@ -983,15 +1026,12 @@ public partial class CopilotAgent : IAgent
 				config.InfiniteSessions.BufferExhaustionThreshold = _infiniteSessionConfig.BufferExhaustionThreshold.Value;
 		}
 
-		// SDK 1.0.0: forward Orchestra's skill directories as instruction directories too
-		// so the runtime's instruction-discovery pass picks up any *.md files alongside
-		// any *.skill.yml files. Skill directories remain the primary registration; this
-		// is an additive enhancement that turns directories with mixed contents into a
-		// one-stop-shop for both kinds.
-		if (_skillDirectories.Length > 0)
-		{
+		// Explicit instruction directories take precedence, including an explicit [].
+		// Omission retains the legacy skill-directory fallback for existing workflows.
+		if (_instructionDirectories is not null)
+			config.InstructionDirectories = [.. _instructionDirectories];
+		else if (_skillDirectories.Length > 0)
 			config.InstructionDirectories = [.. _skillDirectories];
-		}
 
 		// Configure session hooks for structured audit logging
 		config.Hooks = BuildSessionHooks();
@@ -1017,11 +1057,31 @@ public partial class CopilotAgent : IAgent
 		// has no context and falls through to the runtime default.
 		if (_humanInput && _engineToolContext is not null)
 		{
+			// The SDK's default ask_user variant needs this callback; registering only
+			// OnElicitationRequest does not enable the native question tool.
+			config.OnUserInputRequest = (request, invocation) => HandleUserInputAsync(request, cancellationToken);
 			config.OnElicitationRequest = ctx => HandleElicitationAsync(ctx, cancellationToken);
 			config.OnExitPlanModeRequest = (req, invocation) => HandleExitPlanModeAsync(req, invocation, cancellationToken);
 		}
 
 		return config;
+	}
+
+	private async Task<GitHub.Copilot.UserInputResponse> HandleUserInputAsync(UserInputRequest request, CancellationToken cancellationToken)
+	{
+		var response = await _engineToolContext!.RequestHumanInputAsync(
+			request.Question,
+			request.Choices is null ? null : [.. request.Choices],
+			Engine.PendingInputKind.EngineTool,
+			cancellationToken).ConfigureAwait(false);
+		if (response is null)
+			throw new InvalidOperationException("No operator context is available to answer the agent's question.");
+
+		return new GitHub.Copilot.UserInputResponse
+		{
+			Answer = response.ResolveContent(),
+			WasFreeform = string.IsNullOrWhiteSpace(response.Choice),
+		};
 	}
 
 	/// <summary>
@@ -1319,7 +1379,8 @@ public partial class CopilotAgent : IAgent
 				string? argsJson = null;
 				if (input.ToolArgs is not null)
 				{
-					try { argsJson = System.Text.Json.JsonSerializer.Serialize(input.ToolArgs); }
+					try
+					{ argsJson = System.Text.Json.JsonSerializer.Serialize(input.ToolArgs); }
 					catch { /* ignore */ }
 				}
 
@@ -1364,7 +1425,8 @@ public partial class CopilotAgent : IAgent
 				string? argsJson = null;
 				if (input.ToolArgs is not null)
 				{
-					try { argsJson = System.Text.Json.JsonSerializer.Serialize(input.ToolArgs); }
+					try
+					{ argsJson = System.Text.Json.JsonSerializer.Serialize(input.ToolArgs); }
 					catch { /* ignore: arguments are best-effort for the trace */ }
 				}
 

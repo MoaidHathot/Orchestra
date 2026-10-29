@@ -13,8 +13,8 @@ public sealed class OpenCodeAgentPoolOptions
 	/// config (MCP servers, skills, working directory, excluded tools, disabled auto-compaction)
 	/// run on their own dedicated server anyway, so a prewarmed pool worker is usually wasted. With
 	/// no prewarm an idle run reports 0 instances / 0 sessions and instances materialize per
-	/// in-flight step (instance count tracks session count). Plain text-prompt steps still spawn a
-	/// pooled worker lazily on first use and reuse it within the run.
+	/// in-flight step (instance count tracks session count). V2 Prompt steps use a dedicated
+	/// configured primary agent/server, including plain text steps.
 	/// </summary>
 	public int DefaultMinInstances { get; set; } = 0;
 
@@ -55,12 +55,12 @@ public sealed class OpenCodeAgentPoolOptions
 	public string Hostname { get; set; } = "127.0.0.1";
 
 	/// <summary>
-	/// Optional HTTP basic-auth password the server requires (OpenCode <c>OPENCODE_SERVER_PASSWORD</c>).
-	/// Applied to spawned servers and sent on requests to connected servers. Null = no auth.
+	/// Optional HTTP basic-auth password (V2 <c>OPENCODE_PASSWORD</c>).
+	/// Null generates a private password for spawned servers.
 	/// </summary>
 	public string? ServerPassword { get; set; }
 
-	/// <summary>Basic-auth username paired with <see cref="ServerPassword"/>. Default <c>opencode</c>.</summary>
+	/// <summary>V2's fixed Basic-auth username: <c>opencode</c>. Other values are rejected.</summary>
 	public string ServerUsername { get; set; } = "opencode";
 
 	/// <summary>
@@ -70,7 +70,7 @@ public sealed class OpenCodeAgentPoolOptions
 	/// </summary>
 	public string FallbackProvider { get; set; } = "github-copilot";
 
-	/// <summary>Maximum time to wait for a spawned server's <c>/global/health</c> to report ready.</summary>
+	/// <summary>Maximum time for V2 server readiness and model/agent catalog loading.</summary>
 	public TimeSpan StartupTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
 	/// <summary>

@@ -25,6 +25,8 @@ export interface Orchestration {
   // ── Execution settings (null/absent = host default) ──────────────────────
   /** Default model for Prompt steps that set none. */
   defaultModel?: string | null;
+  defaultEnableConfigDiscovery?: boolean | null;
+  defaultEnableOnDemandInstructionDiscovery?: boolean | null;
   /** Orchestration-level timeout; absent when disabled. */
   timeoutSeconds?: number | null;
   /** Default per-step timeout applied to steps that set none; absent when disabled. */
@@ -192,6 +194,12 @@ export interface Step {
   subagents?: SubagentInfo[];
   // Skill directories
   skillDirectories?: string[];
+  instructionDirectories?: string[] | null;
+  enableConfigDiscovery?: boolean | null;
+  enableOnDemandInstructionDiscovery?: boolean | null;
+  humanInput?: boolean | null;
+  responseSchema?: Record<string, unknown> | null;
+  executionPolicy?: { mode: 'standard' | 'autopilot'; maxContinues: number } | null;
   handler?: HandlerConfig;
   /** Per-step timeout; absent/null means the step may run indefinitely. */
   timeoutSeconds?: number | null;

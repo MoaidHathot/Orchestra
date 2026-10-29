@@ -153,10 +153,11 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 				.ToArray();
 
 			// Resolve template expressions in working directory
-			string? workingDirectory = null;
+			string? workingDirectory = ExecutionWorkingDirectory.Resolve(null, context.OrchestrationInfo.SourceDirectory);
 			if (commandStep.WorkingDirectory is not null)
 			{
-				workingDirectory = TemplateResolver.Resolve(commandStep.WorkingDirectory, context.Parameters, context, step.DependsOn, step);
+				workingDirectory = ExecutionWorkingDirectory.Resolve(
+					TemplateResolver.Resolve(commandStep.WorkingDirectory, context.Parameters, context, step.DependsOn, step), context.OrchestrationInfo.SourceDirectory);
 			}
 
 			// Resolve template expressions in stdin content
@@ -435,7 +436,8 @@ public sealed partial class CommandStepExecutor : IStepExecutor
 	private void TerminateProcessTreeOnCancel(Process process, string stepName)
 	{
 		int processId;
-		try { processId = process.Id; }
+		try
+		{ processId = process.Id; }
 		catch { processId = -1; }
 
 		LogCommandCancelled(stepName, processId);

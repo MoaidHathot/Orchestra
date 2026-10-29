@@ -52,7 +52,7 @@ internal sealed class EngineToolAIFunction : AIFunction
 	/// </summary>
 	public override IReadOnlyDictionary<string, object?> AdditionalProperties => s_skipPermissionProps;
 
-	protected override ValueTask<object?> InvokeCoreAsync(
+	protected override async ValueTask<object?> InvokeCoreAsync(
 		AIFunctionArguments arguments,
 		CancellationToken cancellationToken)
 	{
@@ -62,7 +62,9 @@ internal sealed class EngineToolAIFunction : AIFunction
 		var argsJson = JsonSerializer.Serialize(
 			arguments.ToDictionary(kv => kv.Key, kv => kv.Value));
 
-		var result = _tool.Execute(argsJson, _context);
-		return new ValueTask<object?>(result);
+		using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _context.StepCancellationToken);
+		return _tool is IAsyncEngineTool asyncTool
+			? await asyncTool.ExecuteAsync(argsJson, _context, linked.Token).ConfigureAwait(false)
+			: _tool.Execute(argsJson, _context);
 	}
 }

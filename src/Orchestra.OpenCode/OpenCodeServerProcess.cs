@@ -49,7 +49,7 @@ internal static class OpenCodeServerBootstrap
 	internal static string ResolveExecutable(string command)
 	{
 		if (command.Contains(Path.DirectorySeparatorChar) || command.Contains(Path.AltDirectorySeparatorChar))
-			return command;
+			return ResolveNpmShim(command);
 
 		var exts = OperatingSystem.IsWindows()
 			? (Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.CMD;.BAT").Split(';', StringSplitOptions.RemoveEmptyEntries)
@@ -65,7 +65,7 @@ internal static class OpenCodeServerBootstrap
 				{
 					var candidate = Path.Combine(dir.Trim(), command + ext);
 					if (File.Exists(candidate))
-						return candidate;
+						return ResolveNpmShim(candidate);
 				}
 				catch
 				{
@@ -75,6 +75,17 @@ internal static class OpenCodeServerBootstrap
 		}
 
 		return command;
+	}
+
+	private static string ResolveNpmShim(string path)
+	{
+		if (OperatingSystem.IsWindows() && Path.GetExtension(path).Equals(".cmd", StringComparison.OrdinalIgnoreCase))
+		{
+			var native = Path.Combine(Path.GetDirectoryName(path)!, "node_modules", "@opencode", "cli", "bin", "opencode.exe");
+			if (File.Exists(native))
+				return native;
+		}
+		return path;
 	}
 }
 
@@ -120,20 +131,24 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 		_configFilePath = configFilePath;
 		_workingDirectory = workingDirectory;
 		_extraEnvironment = extraEnvironment;
+		_password = string.IsNullOrWhiteSpace(options.ServerPassword) && plan.IsSpawn ? Guid.NewGuid().ToString("N") : options.ServerPassword;
 	}
 
 	public string BaseUrl { get; private set; } = string.Empty;
+	private readonly string? _password;
 	public bool IsSpawned => _plan.IsSpawn;
 	public IOpenCodeClient Client { get; private set; } = null!;
 
 	public async Task StartAsync(CancellationToken cancellationToken)
 	{
+		if (_options.ServerUsername != "opencode")
+			throw new InvalidOperationException("OpenCode V2 requires serverUsername 'opencode'.");
 		if (_plan.IsSpawn)
 			await SpawnAsync(cancellationToken).ConfigureAwait(false);
 		else
 			BaseUrl = _plan.Url!;
 
-		Client = _clientFactory.Create(BaseUrl, _options.ServerUsername, _options.ServerPassword);
+		Client = _clientFactory.Create(BaseUrl, "opencode", _password);
 		await WaitForHealthyAsync(cancellationToken).ConfigureAwait(false);
 	}
 
@@ -160,10 +175,9 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 		psi.ArgumentList.Add(_options.Hostname);
 		psi.ArgumentList.Add("--port");
 		psi.ArgumentList.Add(port.ToString(System.Globalization.CultureInfo.InvariantCulture));
-		if (!string.IsNullOrEmpty(_options.ServerPassword))
+		if (!string.IsNullOrEmpty(_password))
 		{
-			psi.Environment["OPENCODE_SERVER_PASSWORD"] = _options.ServerPassword;
-			psi.Environment["OPENCODE_SERVER_USERNAME"] = _options.ServerUsername;
+			psi.Environment["OPENCODE_PASSWORD"] = _password;
 		}
 		if (!string.IsNullOrWhiteSpace(_configFilePath))
 		{
@@ -208,6 +222,8 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 
 	private async Task WaitForHealthyAsync(CancellationToken cancellationToken)
 	{
+		using var deadlineCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		deadlineCts.CancelAfter(_options.StartupTimeout);
 		var deadline = DateTimeOffset.UtcNow + _options.StartupTimeout;
 		var sw = Stopwatch.StartNew();
 		while (DateTimeOffset.UtcNow < deadline)
@@ -222,7 +238,7 @@ internal sealed partial class OpenCodeServerProcess : IAsyncDisposable
 					message: $"OpenCode server exited during startup (code {_process.ExitCode}).");
 			}
 
-			if (await Client.HealthAsync(cancellationToken).ConfigureAwait(false))
+			if (await Client.HealthAsync(deadlineCts.Token).ConfigureAwait(false))
 			{
 				LogReady(BaseUrl, sw.ElapsedMilliseconds, IsSpawned);
 				return;

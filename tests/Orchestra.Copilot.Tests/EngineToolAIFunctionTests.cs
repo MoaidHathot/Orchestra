@@ -7,6 +7,34 @@ namespace Orchestra.Copilot.Tests;
 
 public class EngineToolAIFunctionTests
 {
+	[Fact]
+	public async Task AsyncTool_UsesCancellableNonBlockingDispatch()
+	{
+		var tool = new WaitingTool();
+		var function = new EngineToolAIFunction(tool, new());
+		using var cancellation = new CancellationTokenSource();
+		var invoke = function.InvokeAsync(new AIFunctionArguments(), cancellation.Token).AsTask();
+		await tool.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+		await cancellation.CancelAsync();
+		Func<Task> result = async () => await invoke.WaitAsync(TimeSpan.FromSeconds(2));
+		await result.Should().ThrowAsync<OperationCanceledException>();
+	}
+
+	private sealed class WaitingTool : IAsyncEngineTool
+	{
+		public string Name => "wait";
+		public string Description => "wait";
+		public string ParametersSchema => "{\"type\":\"object\"}";
+		public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public string Execute(string args, EngineToolContext context) => throw new InvalidOperationException("Synchronous dispatch is not allowed.");
+		public async Task<string> ExecuteAsync(string args, EngineToolContext context, CancellationToken token)
+		{
+			Started.TrySetResult();
+			await Task.Delay(Timeout.Infinite, token);
+			return "done";
+		}
+	}
+
 	#region Schema Parsing
 
 	[Fact]

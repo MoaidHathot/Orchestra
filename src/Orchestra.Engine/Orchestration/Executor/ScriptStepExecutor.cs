@@ -358,10 +358,11 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 				.ToArray();
 
 			// Resolve template expressions in working directory
-			string? workingDirectory = null;
+			string? workingDirectory = ExecutionWorkingDirectory.Resolve(null, context.OrchestrationInfo.SourceDirectory);
 			if (scriptStep.WorkingDirectory is not null)
 			{
-				workingDirectory = TemplateResolver.Resolve(scriptStep.WorkingDirectory, context.Parameters, context, step.DependsOn, step);
+				workingDirectory = ExecutionWorkingDirectory.Resolve(
+					TemplateResolver.Resolve(scriptStep.WorkingDirectory, context.Parameters, context, step.DependsOn, step), context.OrchestrationInfo.SourceDirectory);
 			}
 
 			// Resolve template expressions in stdin content
@@ -1284,7 +1285,8 @@ public sealed partial class ScriptStepExecutor : IStepExecutor
 		// throw InvalidOperationException when reading Id from a disposed
 		// or already-exited process.
 		int processId;
-		try { processId = process.Id; }
+		try
+		{ processId = process.Id; }
 		catch { processId = -1; }
 
 		LogScriptCancelled(stepName, processId);

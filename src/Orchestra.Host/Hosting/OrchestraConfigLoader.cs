@@ -689,6 +689,11 @@ public static class OrchestraConfigLoader
 
 		if (config.Copilot is { } copilotConfig)
 		{
+			if (copilotConfig.EnableConfigDiscovery.HasValue)
+				options.Copilot.EnableConfigDiscovery = copilotConfig.EnableConfigDiscovery.Value;
+			if (copilotConfig.EnableOnDemandInstructionDiscovery.HasValue)
+				options.Copilot.EnableOnDemandInstructionDiscovery = copilotConfig.EnableOnDemandInstructionDiscovery.Value;
+
 			if (!string.IsNullOrWhiteSpace(copilotConfig.GitHubToken))
 				options.Copilot.GitHubToken = copilotConfig.GitHubToken;
 
@@ -1196,6 +1201,12 @@ public class ScanConfigFile
 /// </summary>
 public class CopilotProviderConfig
 {
+	/// <summary>Default ambient configuration discovery for Copilot sessions.</summary>
+	public bool? EnableConfigDiscovery { get; set; }
+
+	/// <summary>Default nested instruction discovery after agent file reads.</summary>
+	public bool? EnableOnDemandInstructionDiscovery { get; set; }
+
 	/// <summary>
 	/// Settings for the CLI-swap-and-resume recovery loop in <c>CopilotAgent</c>.
 	/// </summary>

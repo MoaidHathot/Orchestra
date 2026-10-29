@@ -14,7 +14,7 @@ namespace Orchestra.OpenCode.Tests;
 [Trait("Category", "E2E")]
 public class OpenCodeServerE2ETests
 {
-	private const string Model = "github-copilot/claude-opus-4.8";
+	private static string Model => Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_TEST_MODEL") ?? "github-copilot/claude-opus-4.8";
 
 	private static OpenCodeAgentPoolOptions Options() => new()
 	{
@@ -75,7 +75,8 @@ public class OpenCodeServerE2ETests
 
 		using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 		var task = agent.SendAsync("Acknowledge and then mark the step successful via the status tool.", cts.Token);
-		await foreach (var _ in task.WithCancellation(cts.Token)) { }
+		await foreach (var _ in task.WithCancellation(cts.Token))
+		{ }
 		await task.GetResultAsync();
 
 		engineCtx.HasStatusOverride.Should().BeTrue("the model should have called orchestra_set_status via the MCP bridge");
@@ -99,7 +100,8 @@ public class OpenCodeServerE2ETests
 
 		using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(2));
 		var task = agent.SendAsync("Reply with exactly: reasoning-ok", cts.Token);
-		await foreach (var _ in task.WithCancellation(cts.Token)) { }
+		await foreach (var _ in task.WithCancellation(cts.Token))
+		{ }
 		var result = await task.GetResultAsync();
 
 		result.Content.Should().NotBeNullOrWhiteSpace();
@@ -115,9 +117,9 @@ public class OpenCodeServerE2ETests
 		var options = new OpenCodeAgentPoolOptions { DefaultMinInstances = 0, EngineToolBridgeEnabled = false };
 		var configFile = Path.Combine(Path.GetTempPath(), $"opencode-e2e-config-{Guid.NewGuid():N}.json");
 		await File.WriteAllTextAsync(configFile, """
-			{ "agent": {
-			  "orchestra-primary": { "mode": "primary", "description": "probe primary", "prompt": "hi", "reasoningEffort": "high" },
-			  "orchestra-sub-probe": { "mode": "subagent", "description": "probe sub", "prompt": "you are a sub" }
+			{ "agents": {
+			  "orchestra-primary": { "mode": "primary", "description": "probe primary", "system": "hi" },
+			  "orchestra-sub-probe": { "mode": "subagent", "description": "probe sub", "system": "you are a sub" }
 			} }
 			""");
 
@@ -128,13 +130,17 @@ public class OpenCodeServerE2ETests
 			using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(1));
 			await process.StartAsync(cts.Token);
 
+			var model = OpenCodeModelRef.Parse(Model, "github-copilot");
+			await process.Client.EnsureReadyAsync(new OpenCodeModelDto { ProviderId = model.ProviderId, ModelId = model.ModelId }, "orchestra-primary", TimeSpan.FromSeconds(30), cts.Token);
 			var agents = await process.Client.ListAgentNamesAsync(cts.Token);
 			agents.Should().Contain("orchestra-primary");
 			agents.Should().Contain("orchestra-sub-probe");
 		}
 		finally
 		{
-			try { File.Delete(configFile); } catch { }
+			try
+			{ File.Delete(configFile); }
+			catch { }
 		}
 	}
 
@@ -159,11 +165,13 @@ public class OpenCodeServerE2ETests
 			await process.StartAsync(cts.Token);
 
 			var mcps = await process.Client.ListMcpNamesAsync(cts.Token);
-			mcps.Should().Contain("orchestra-test-mcp");
+			mcps.Should().NotContain("orchestra-test-mcp", "a registered but unreachable MCP must not be reported as connected");
 		}
 		finally
 		{
-			try { File.Delete(configFile); } catch { }
+			try
+			{ File.Delete(configFile); }
+			catch { }
 		}
 	}
 

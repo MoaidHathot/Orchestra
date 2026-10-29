@@ -52,27 +52,27 @@ public class CopilotSessionHandlerTests
 		int cacheWriteTokens = 5,
 		double cost = 0.001,
 		double durationSeconds = 1.5) => new()
-	{
-		// SDK 1.0.0 changes AssistantUsageData types:
-		//   * Token counts (Input/Output/CacheRead/CacheWrite) are now long? (auto-widen
-		//     from int implicitly so the int parameter shape can stay).
-		//   * Duration is TimeSpan? — the fixture used a "seconds as double" convention
-		//     so we forward by constructing a TimeSpan from the seconds value.
-		//   * Cost is decorated with the GHCP001 evaluation-only diagnostic; we suppress
-		//     locally because the field is wire-compatible with 0.3.0.
-#pragma warning disable GHCP001
-		Data = new AssistantUsageData
 		{
-			Model = model,
-			InputTokens = inputTokens,
-			OutputTokens = outputTokens,
-			CacheReadTokens = cacheReadTokens,
-			CacheWriteTokens = cacheWriteTokens,
-			Cost = cost,
-			Duration = TimeSpan.FromSeconds(durationSeconds),
-		}
+			// SDK 1.0.0 changes AssistantUsageData types:
+			//   * Token counts (Input/Output/CacheRead/CacheWrite) are now long? (auto-widen
+			//     from int implicitly so the int parameter shape can stay).
+			//   * Duration is TimeSpan? — the fixture used a "seconds as double" convention
+			//     so we forward by constructing a TimeSpan from the seconds value.
+			//   * Cost is decorated with the GHCP001 evaluation-only diagnostic; we suppress
+			//     locally because the field is wire-compatible with 0.3.0.
+#pragma warning disable GHCP001
+			Data = new AssistantUsageData
+			{
+				Model = model,
+				InputTokens = inputTokens,
+				OutputTokens = outputTokens,
+				CacheReadTokens = cacheReadTokens,
+				CacheWriteTokens = cacheWriteTokens,
+				Cost = cost,
+				Duration = TimeSpan.FromSeconds(durationSeconds),
+			}
 #pragma warning restore GHCP001
-	};
+		};
 
 	private static AssistantMessageDeltaEvent CreateMessageDeltaEvent(string deltaContent) => new()
 	{
@@ -116,35 +116,35 @@ public class CopilotSessionHandlerTests
 		string? mcpToolName = null,
 		string? mcpServerName = null,
 		Dictionary<string, object>? arguments = null) => new()
-	{
-		Data = new ToolExecutionStartData
 		{
-			ToolCallId = toolCallId,
-			ToolName = toolName,
-			McpToolName = mcpToolName,
-			McpServerName = mcpServerName,
-			// SDK 1.0.0 changed Arguments from Dictionary<string, object>? to JsonElement?
-			// (the schema-generator emits Dictionary-shaped payloads as JSON elements so
-			// the wire encoding is preserved). We serialize the legacy test-fixture dict
-			// into a JsonElement on the fly.
-			Arguments = arguments is null
+			Data = new ToolExecutionStartData
+			{
+				ToolCallId = toolCallId,
+				ToolName = toolName,
+				McpToolName = mcpToolName,
+				McpServerName = mcpServerName,
+				// SDK 1.0.0 changed Arguments from Dictionary<string, object>? to JsonElement?
+				// (the schema-generator emits Dictionary-shaped payloads as JSON elements so
+				// the wire encoding is preserved). We serialize the legacy test-fixture dict
+				// into a JsonElement on the fly.
+				Arguments = arguments is null
 				? null
 				: System.Text.Json.JsonSerializer.SerializeToElement(arguments),
-		}
-	};
+			}
+		};
 
 	private static ToolExecutionCompleteEvent CreateToolCompleteEvent(
 		string toolCallId,
 		bool success) => new()
-	{
-		Data = new ToolExecutionCompleteData
 		{
-			ToolCallId = toolCallId,
-			Success = success,
-			Result = null,
-			Error = null
-		}
-	};
+			Data = new ToolExecutionCompleteData
+			{
+				ToolCallId = toolCallId,
+				Success = success,
+				Result = null,
+				Error = null
+			}
+		};
 
 	private static SessionErrorEvent CreateErrorEvent(string message) => new()
 	{
@@ -173,17 +173,17 @@ public class CopilotSessionHandlerTests
 		string? providerCallId = null,
 		string? url = null,
 		string? stack = null) => new()
-	{
-		Data = new SessionErrorData
 		{
-			Message = message,
-			ErrorType = errorType!,
-			StatusCode = statusCode is null ? null : (int?)statusCode.Value,
-			ProviderCallId = providerCallId!,
-			Url = url!,
-			Stack = stack!,
-		}
-	};
+			Data = new SessionErrorData
+			{
+				Message = message,
+				ErrorType = errorType!,
+				StatusCode = statusCode is null ? null : (int?)statusCode.Value,
+				ProviderCallId = providerCallId!,
+				Url = url!,
+				Stack = stack!,
+			}
+		};
 
 	private static SessionIdleEvent CreateIdleEvent() => new()
 	{
@@ -199,57 +199,57 @@ public class CopilotSessionHandlerTests
 		string agentName,
 		string? displayName = null,
 		string[]? tools = null) => new()
-	{
-		Data = new SubagentSelectedData
 		{
-			AgentName = agentName,
-			AgentDisplayName = displayName!,
-			Tools = tools!
-		}
-	};
+			Data = new SubagentSelectedData
+			{
+				AgentName = agentName,
+				AgentDisplayName = displayName!,
+				Tools = tools!
+			}
+		};
 
 	private static SubagentStartedEvent CreateSubagentStartedEvent(
 		string agentName,
 		string? toolCallId = null,
 		string? displayName = null,
 		string? description = null) => new()
-	{
-		Data = new SubagentStartedData
 		{
-			ToolCallId = toolCallId!,
-			AgentName = agentName,
-			AgentDisplayName = displayName!,
-			AgentDescription = description!
-		}
-	};
+			Data = new SubagentStartedData
+			{
+				ToolCallId = toolCallId!,
+				AgentName = agentName,
+				AgentDisplayName = displayName!,
+				AgentDescription = description!
+			}
+		};
 
 	private static SubagentCompletedEvent CreateSubagentCompletedEvent(
 		string agentName,
 		string? toolCallId = null,
 		string? displayName = null) => new()
-	{
-		Data = new SubagentCompletedData
 		{
-			ToolCallId = toolCallId!,
-			AgentName = agentName,
-			AgentDisplayName = displayName!
-		}
-	};
+			Data = new SubagentCompletedData
+			{
+				ToolCallId = toolCallId!,
+				AgentName = agentName,
+				AgentDisplayName = displayName!
+			}
+		};
 
 	private static SubagentFailedEvent CreateSubagentFailedEvent(
 		string agentName,
 		string? toolCallId = null,
 		string? displayName = null,
 		string? error = null) => new()
-	{
-		Data = new SubagentFailedData
 		{
-			ToolCallId = toolCallId!,
-			AgentName = agentName,
-			AgentDisplayName = displayName!,
-			Error = error!
-		}
-	};
+			Data = new SubagentFailedData
+			{
+				ToolCallId = toolCallId!,
+				AgentName = agentName,
+				AgentDisplayName = displayName!,
+				Error = error!
+			}
+		};
 
 	private static SubagentDeselectedEvent CreateSubagentDeselectedEvent() => new()
 	{
@@ -678,26 +678,25 @@ public class CopilotSessionHandlerTests
 	}
 
 	[Fact]
-	public void HandleEvent_AssistantIdle_RootAgent_CompletesTaskCompletionSource()
+	public void HandleEvent_AssistantIdle_RootAgent_WaitsForWholeSessionIdle()
 	{
-		// No sub-agent frame is active, so an AssistantIdle belongs to the root agent and
-		// acts as a completion fallback (some CLI flows emit it without a SessionIdle).
 		_handler.HandleEvent(CreateAssistantIdleEvent());
 
-		_done.Task.IsCompleted.Should().BeTrue();
-		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
-		agentEvent!.Type.Should().Be(AgentEventType.SessionIdle);
+		_done.Task.IsCompleted.Should().BeFalse();
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+		_handler.HandleEvent(CreateIdleEvent());
+		_done.Task.IsCompletedSuccessfully.Should().BeTrue();
 	}
 
 	[Fact]
-	public void HandleEvent_AssistantIdle_Aborted_CompletesWithAbortedMarker()
+	public void HandleEvent_AssistantIdle_Aborted_DoesNotCutOffRuntimeRetry()
 	{
 		_handler.HandleEvent(CreateAssistantIdleEvent(aborted: true));
 
-		_done.Task.IsCompleted.Should().BeTrue();
-		_channel.Reader.TryRead(out var agentEvent).Should().BeTrue();
-		agentEvent!.Type.Should().Be(AgentEventType.SessionIdle);
-		agentEvent.Content.Should().Contain("aborted");
+		_done.Task.IsCompleted.Should().BeFalse();
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+		_handler.HandleEvent(CreateIdleEvent());
+		_done.Task.IsCompletedSuccessfully.Should().BeTrue();
 	}
 
 	[Fact]
@@ -719,10 +718,8 @@ public class CopilotSessionHandlerTests
 	}
 
 	[Fact]
-	public void HandleEvent_AssistantIdle_AfterSubagentCompletes_CompletesRoot()
+	public void HandleEvent_AssistantIdle_AfterSubagentCompletes_StillWaitsForSessionIdle()
 	{
-		// Sub-agent starts then completes → no active frames → a subsequent AssistantIdle is
-		// the root agent finishing and completes the session.
 		_handler.HandleEvent(CreateSubagentStartedEvent(agentName: "researcher", toolCallId: "sub-1"));
 		_handler.HandleEvent(CreateSubagentCompletedEvent(agentName: "researcher", toolCallId: "sub-1"));
 		while (_channel.Reader.TryRead(out _))
@@ -732,7 +729,65 @@ public class CopilotSessionHandlerTests
 
 		_handler.HandleEvent(CreateAssistantIdleEvent());
 
-		_done.Task.IsCompleted.Should().BeTrue();
+		_done.Task.IsCompleted.Should().BeFalse();
+		_handler.HandleEvent(CreateIdleEvent());
+		_done.Task.IsCompletedSuccessfully.Should().BeTrue();
+	}
+
+	[Theory]
+	[InlineData("assistant.idle")]
+	[InlineData("session.idle")]
+	[InlineData("session.task_complete")]
+	[InlineData("session.error")]
+	public void HandleEvent_LateChildTerminal_AfterFrameRemoval_DoesNotCompleteParent(string kind)
+	{
+		_handler.HandleEvent(CreateSubagentStartedEvent("child", "child-call"));
+		_handler.HandleEvent(CreateSubagentCompletedEvent("child", "child-call"));
+		while (_channel.Reader.TryRead(out _))
+		{ }
+
+		SessionEvent evt = kind switch
+		{
+			"assistant.idle" => CreateAssistantIdleEvent(),
+			"session.idle" => CreateIdleEvent(),
+			"session.error" => CreateErrorEvent("Child error handled by its parent"),
+			_ => new SessionTaskCompleteEvent { Data = new() { Summary = "Child finished" } },
+		};
+		evt.AgentId = "child-agent";
+		_handler.HandleEvent(evt);
+
+		_done.Task.IsCompleted.Should().BeFalse("an explicit child AgentId is never parent completion");
+		_channel.Reader.TryRead(out _).Should().BeFalse();
+		_handler.HandleEvent(CreateIdleEvent());
+		_done.Task.IsCompletedSuccessfully.Should().BeTrue();
+	}
+
+	[Fact]
+	public void HandleEvent_UntrackedChildIdle_IsNotParentCompletion()
+	{
+		var evt = CreateIdleEvent();
+		evt.AgentId = "untracked-child";
+		_handler.HandleEvent(evt);
+		_done.Task.IsCompleted.Should().BeFalse();
+	}
+
+	[Fact]
+	public void HandleEvent_TaskComplete_DoesNotCutOffFinalStructuredResponse()
+	{
+		_handler.HandleEvent(new SessionTaskCompleteEvent { Data = new() { Summary = "Tool work finished" } });
+		_done.Task.IsCompleted.Should().BeFalse();
+		_handler.HandleEvent(new AssistantMessageEvent { Data = new() { Content = "{\"count\":7}", MessageId = "final" } });
+		_handler.HandleEvent(CreateIdleEvent());
+		_done.Task.IsCompletedSuccessfully.Should().BeTrue();
+		_handler.FinalContent.Should().Be("{\"count\":7}");
+	}
+
+	[Fact]
+	public void HandleEvent_AbortedSessionIdle_FailsInsteadOfReportingSuccess()
+	{
+		_handler.HandleEvent(new SessionIdleEvent { Data = new() { Aborted = true } });
+		_done.Task.IsFaulted.Should().BeTrue();
+		_done.Task.Exception!.InnerException.Should().BeOfType<CopilotSessionFailedException>();
 	}
 
 	#endregion
@@ -1096,35 +1151,35 @@ public class CopilotSessionHandlerTests
 
 	private static SessionMcpServersLoadedEvent CreateMcpServersLoadedEvent(
 		params McpServersLoadedServer[] servers) => new()
-	{
-		Data = new SessionMcpServersLoadedData
 		{
-			Servers = servers
-		}
-	};
+			Data = new SessionMcpServersLoadedData
+			{
+				Servers = servers
+			}
+		};
 
 	private static McpServersLoadedServer CreateMcpServerItem(
 		string name,
 		McpServerStatus status,
 		string? source = null,
 		string? error = null) => new()
-	{
-		Name = name,
-		Status = status,
-		// SDK 1.0.0 changed Source from string to a McpServerSource? enum
-		// (User/Workspace/Plugin/Builtin). Tests use the new vocabulary directly so
-		// the assertion can match the handler's .ToString() projection.
-		Source = source switch
 		{
-			null => null,
-			"User" => McpServerSource.User,
-			"Workspace" => McpServerSource.Workspace,
-			"Plugin" => McpServerSource.Plugin,
-			"Builtin" => McpServerSource.Builtin,
-			_ => null,
-		},
-		Error = error!
-	};
+			Name = name,
+			Status = status,
+			// SDK 1.0.0 changed Source from string to a McpServerSource? enum
+			// (User/Workspace/Plugin/Builtin). Tests use the new vocabulary directly so
+			// the assertion can match the handler's .ToString() projection.
+			Source = source switch
+			{
+				null => null,
+				"User" => McpServerSource.User,
+				"Workspace" => McpServerSource.Workspace,
+				"Plugin" => McpServerSource.Plugin,
+				"Builtin" => McpServerSource.Builtin,
+				_ => null,
+			},
+			Error = error!
+		};
 
 	[Fact]
 	public void HandleEvent_McpServersLoaded_WritesMcpServersLoadedEvent()
@@ -1221,14 +1276,14 @@ public class CopilotSessionHandlerTests
 	private static SessionMcpServerStatusChangedEvent CreateMcpServerStatusChangedEvent(
 		string serverName,
 		McpServerStatus status) => new()
-	{
-		Data = new SessionMcpServerStatusChangedData
 		{
-			ServerName = serverName,
-			// Both enums share the same value layout; cast bridges the SDK 0.3.0 split.
-			Status = status
-		}
-	};
+			Data = new SessionMcpServerStatusChangedData
+			{
+				ServerName = serverName,
+				// Both enums share the same value layout; cast bridges the SDK 0.3.0 split.
+				Status = status
+			}
+		};
 
 	[Fact]
 	public void HandleEvent_McpServerStatusChanged_WritesMcpServerStatusChangedEvent()
@@ -2540,7 +2595,7 @@ public class CopilotSessionHandlerTests
 		// Arrange — SDK 1.0.0 added AssistantUsageData.InterTokenLatency (TimeSpan?).
 		// We project it to milliseconds on AgentEvent.InterTokenLatencyMs so consumers
 		// can graph streaming-perf without re-querying.
-		#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only
+#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only
 		var evt = new AssistantUsageEvent
 		{
 			Data = new AssistantUsageData
@@ -2551,7 +2606,7 @@ public class CopilotSessionHandlerTests
 				InterTokenLatency = TimeSpan.FromMilliseconds(42),
 			}
 		};
-		#pragma warning restore GHCP001
+#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -2617,7 +2672,7 @@ public class CopilotSessionHandlerTests
 		// that replaces the per-usage QuotaSnapshots / TotalNanoAiu of 0.3.0. Handler
 		// must project it into AgentSessionShutdownSummary and expose via
 		// ShutdownSummary so CopilotAgent can include it in AgentResult.FinalUsage.
-		#pragma warning disable GHCP001 // SessionShutdownData.TotalNanoAiu + ShutdownModelMetric.* are evaluation-only
+#pragma warning disable GHCP001 // SessionShutdownData.TotalNanoAiu + ShutdownModelMetric.* are evaluation-only
 		var evt = new SessionShutdownEvent
 		{
 			Data = new SessionShutdownData
@@ -2660,7 +2715,7 @@ public class CopilotSessionHandlerTests
 				}
 			}
 		};
-		#pragma warning restore GHCP001
+#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);
@@ -2736,7 +2791,7 @@ public class CopilotSessionHandlerTests
 		//   1. Projects TimeToFirstToken (TimeSpan) -> AgentUsage.TimeToFirstTokenMs (double, ms).
 		//   2. Surfaces ReasoningTokens unchanged.
 		//   3. Leaves TotalNanoAiu/QuotaSnapshots null on the agent-level shape.
-		#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only by the SDK
+#pragma warning disable GHCP001 // AssistantUsageData.Cost is marked evaluation-only by the SDK
 		var evt = new AssistantUsageEvent
 		{
 			Data = new AssistantUsageData
@@ -2750,7 +2805,7 @@ public class CopilotSessionHandlerTests
 				Duration = TimeSpan.FromSeconds(4.2),
 			}
 		};
-		#pragma warning restore GHCP001
+#pragma warning restore GHCP001
 
 		// Act
 		_handler.HandleEvent(evt);

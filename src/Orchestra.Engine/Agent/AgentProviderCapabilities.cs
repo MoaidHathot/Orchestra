@@ -22,6 +22,9 @@ public sealed record AgentProviderCapabilities
 
 	/// <summary>Inline sub-agents (<see cref="AgentBuildConfig.Subagents"/>).</summary>
 	public bool Subagents { get; init; }
+	public bool SubagentMcps { get; init; }
+	public bool SubagentSkills { get; init; }
+	public bool ExplicitSubagentSelection { get; init; }
 
 	/// <summary>Reasoning effort level (<see cref="AgentBuildConfig.ReasoningLevel"/>).</summary>
 	public bool ReasoningLevel { get; init; }
@@ -63,8 +66,31 @@ public sealed record AgentProviderCapabilities
 	/// <summary>Agent Skills directory discovery (<see cref="AgentBuildConfig.SkillDirectories"/>).</summary>
 	public bool SkillDirectories { get; init; }
 
+	/// <summary>Explicit additional instruction directories.</summary>
+	public bool InstructionDirectories { get; init; }
+
+	/// <summary>Explicit control of ambient configuration discovery.</summary>
+	public bool ConfigDiscovery { get; init; }
+	/// <summary>Ambient discovery is available but cannot be disabled by this adapter.</summary>
+	public bool ConfigDiscoveryAlwaysEnabled { get; init; }
+
+	/// <summary>Explicit control of nested instruction discovery after file reads.</summary>
+	public bool OnDemandInstructionDiscovery { get; init; }
+	/// <summary>Nested instruction discovery is available but cannot be disabled independently.</summary>
+	public bool OnDemandInstructionDiscoveryAlwaysEnabled { get; init; }
+
+	/// <summary>JSON Schema output contract (always validated by the engine).</summary>
+	public bool StructuredOutput { get; init; }
+	/// <summary>The provider can constrain generation natively, rather than through model guidance.</summary>
+	public bool NativeStructuredOutput { get; init; }
+
+	/// <summary>Bounded automatic continuation within one Prompt session.</summary>
+	public bool Autopilot { get; init; }
+
 	/// <summary>Infinite sessions / automatic compaction (<see cref="AgentBuildConfig.InfiniteSessionConfig"/>).</summary>
 	public bool InfiniteSession { get; init; }
+	/// <summary>Provider supports the configurable compaction utilization thresholds.</summary>
+	public bool InfiniteSessionThresholds { get; init; }
 
 	/// <summary>Image attachments (<see cref="AgentBuildConfig.Attachments"/>).</summary>
 	public bool Attachments { get; init; }
@@ -81,6 +107,9 @@ public sealed record AgentProviderCapabilities
 		Provider = provider,
 		Mcps = true,
 		Subagents = true,
+		SubagentMcps = true,
+		SubagentSkills = true,
+		ExplicitSubagentSelection = true,
 		ReasoningLevel = true,
 		ReasoningSummary = true,
 		ContextTier = true,
@@ -93,7 +122,14 @@ public sealed record AgentProviderCapabilities
 		SystemPromptSections = true,
 		EngineTools = true,
 		SkillDirectories = true,
+		InstructionDirectories = true,
+		ConfigDiscovery = true,
+		OnDemandInstructionDiscovery = true,
+		StructuredOutput = true,
+		NativeStructuredOutput = true,
+		Autopilot = true,
 		InfiniteSession = true,
+		InfiniteSessionThresholds = true,
 		Attachments = true,
 		ExcludedTools = true,
 	};
@@ -106,6 +142,9 @@ public sealed record AgentProviderCapabilities
 	public IEnumerable<string> FindUnsupported(AgentBuildConfig config)
 	{
 		ArgumentNullException.ThrowIfNull(config);
+		config.ExecutionPolicy?.Validate();
+		if (!Autopilot && config.ExecutionPolicy?.Mode == AgentExecutionMode.Autopilot)
+			yield return nameof(config.ExecutionPolicy);
 
 		if (!Mcps && config.Mcps.Length > 0)
 		{
@@ -115,6 +154,18 @@ public sealed record AgentProviderCapabilities
 		if (!Subagents && config.Subagents.Length > 0)
 		{
 			yield return nameof(config.Subagents);
+		}
+		else
+		{
+			foreach (var subagent in config.Subagents)
+			{
+				if (!SubagentMcps && subagent.Mcps.Length > 0)
+					yield return $"Subagents[{subagent.Name}].Mcps";
+				if (!SubagentSkills && subagent.Skills is { Length: > 0 })
+					yield return $"Subagents[{subagent.Name}].Skills";
+				if (!ExplicitSubagentSelection && !subagent.Infer)
+					yield return $"Subagents[{subagent.Name}].Infer=false";
+			}
 		}
 
 		if (!ReasoningLevel && config.ReasoningLevel is not null)
@@ -177,9 +228,25 @@ public sealed record AgentProviderCapabilities
 			yield return nameof(config.SkillDirectories);
 		}
 
+		if (!InstructionDirectories && config.InstructionDirectories is { Length: > 0 })
+			yield return nameof(config.InstructionDirectories);
+		if (!ConfigDiscovery && config.EnableConfigDiscovery.HasValue
+			&& !(ConfigDiscoveryAlwaysEnabled && config.EnableConfigDiscovery == true))
+			yield return nameof(config.EnableConfigDiscovery);
+		if (!OnDemandInstructionDiscovery && config.EnableOnDemandInstructionDiscovery.HasValue
+			&& !(OnDemandInstructionDiscoveryAlwaysEnabled && config.EnableOnDemandInstructionDiscovery == true))
+			yield return nameof(config.EnableOnDemandInstructionDiscovery);
+		if (!StructuredOutput && config.ResponseSchema.HasValue)
+			yield return nameof(config.ResponseSchema);
+
 		if (!InfiniteSession && config.InfiniteSessionConfig is not null)
 		{
 			yield return nameof(config.InfiniteSessionConfig);
+		}
+		else if (!InfiniteSessionThresholds && config.InfiniteSessionConfig is { } infinite
+			&& (infinite.BackgroundCompactionThreshold.HasValue || infinite.BufferExhaustionThreshold.HasValue))
+		{
+			yield return "InfiniteSessionConfig compaction thresholds";
 		}
 
 		if (!Attachments && config.Attachments.Length > 0)

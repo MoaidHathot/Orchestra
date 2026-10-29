@@ -41,11 +41,38 @@ internal static class OpenCodeConfigBuilder
 		IReadOnlyList<Subagent> subagents,
 		IReadOnlyList<Mcp> mcps,
 		IReadOnlyList<string> excludedTools,
-		string fallbackProvider)
+		string fallbackProvider,
+		PermissionPolicy? permissionPolicy = null)
 	{
 		var config = new Dictionary<string, object>(StringComparer.Ordinal);
 		var primaryAgentName = BuildAgentSection(config, model, systemPrompt, reasoningLevel, subagents, excludedTools, fallbackProvider);
 		BuildMcpSection(config, mcps);
+		if (permissionPolicy?.Mode == PermissionMode.DenyList)
+		{
+			// Native hard-deny policies cover root and child agents, even when their defaults allow a tool.
+			config["policies"] = permissionPolicy.Deny.SelectMany(pattern => new[]
+			{
+				new { action = "tool.use", resource = PermissionAction(pattern) + ":*", effect = "deny" },
+				new { action = "tool.use", resource = "*:" + pattern, effect = "deny" },
+			}).ToArray();
+		}
+		if (permissionPolicy?.Mode == PermissionMode.RequireHumanApproval)
+		{
+			config["permissions"] = new[] { new { action = "*", resource = "*", effect = "ask" } };
+			if (config.TryGetValue("agents", out var value) && value is Dictionary<string, object> agents)
+				foreach (var entry in agents.Values.Cast<Dictionary<string, object?>>())
+					if (entry.TryGetValue("permissions", out var rules) && rules is List<object> list)
+						entry["permissions"] = list.Select(rule =>
+						{
+							var json = System.Text.Json.JsonSerializer.SerializeToElement(rule);
+							return new
+							{
+								action = json.GetProperty("action").GetString(),
+								resource = json.GetProperty("resource").GetString(),
+								effect = json.GetProperty("effect").GetString() == "allow" ? "ask" : "deny"
+							};
+						}).ToArray();
+		}
 		return new OpenCodeStepPlan(config, primaryAgentName);
 	}
 
@@ -61,7 +88,7 @@ internal static class OpenCodeConfigBuilder
 	{
 		var hasSubagents = subagents.Count > 0;
 		var hasExcludedTools = excludedTools.Count > 0;
-		if (reasoningLevel is null && !hasSubagents && !hasExcludedTools)
+		if (reasoningLevel is null && !hasSubagents && !hasExcludedTools && string.IsNullOrWhiteSpace(systemPrompt))
 			return null;
 
 		var agents = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -73,27 +100,14 @@ internal static class OpenCodeConfigBuilder
 			["description"] = "Orchestra step primary agent",
 		};
 		if (!string.IsNullOrWhiteSpace(systemPrompt))
-			primary["prompt"] = systemPrompt;
+			primary["system"] = systemPrompt;
 		if (reasoningLevel is { } level)
-			primary["reasoningEffort"] = level.ToString().ToLowerInvariant();
-		if (hasExcludedTools)
-		{
-			// OpenCode disables a tool for an agent via `tools: { <name>: false }`. Tool names use
-			// OpenCode's vocabulary (bash, edit, write, read, webfetch, …) — distinct from Copilot's.
-			var tools = new Dictionary<string, object?>(StringComparer.Ordinal);
-			foreach (var tool in excludedTools)
-			{
-				if (!string.IsNullOrWhiteSpace(tool))
-					tools[tool] = false;
-			}
-
-			if (tools.Count > 0)
-				primary["tools"] = tools;
-		}
+			primary["model"] = model.ToString().Split('#')[0] + "#" + level.ToString().ToLowerInvariant();
+		var permissions = new List<object>();
 
 		if (hasSubagents)
 		{
-			var taskPermission = new Dictionary<string, object?>(StringComparer.Ordinal) { ["*"] = "deny" };
+			permissions.Add(new { action = "subagent", resource = "*", effect = "deny" });
 			var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 			foreach (var sub in subagents)
@@ -104,25 +118,29 @@ internal static class OpenCodeConfigBuilder
 					["mode"] = "subagent",
 					["model"] = ResolveSubagentModel(sub.Model, model, fallbackProvider),
 					["description"] = string.IsNullOrWhiteSpace(sub.Description) ? (sub.DisplayName ?? sub.Name) : sub.Description,
-					["prompt"] = sub.Prompt,
+					["system"] = sub.Prompt,
 				};
 				if (sub.Tools is { Length: > 0 })
 				{
-					var tools = new Dictionary<string, object?>(StringComparer.Ordinal);
+					var tools = new List<object> { new { action = "*", resource = "*", effect = "deny" } };
 					foreach (var tool in sub.Tools)
-						tools[tool] = true;
-					entry["tools"] = tools;
+						tools.Add(new { action = PermissionAction(tool), resource = "*", effect = "allow" });
+					entry["permissions"] = tools;
 				}
 
 				agents[name] = entry;
-				taskPermission[name] = "allow";
+				permissions.Add(new { action = "subagent", resource = name, effect = "allow" });
 			}
 
-			primary["permission"] = new Dictionary<string, object?>(StringComparer.Ordinal) { ["task"] = taskPermission };
 		}
+		// V2 is last-match-wins: exclusions must follow scoped delegation allows.
+		foreach (var tool in excludedTools.Where(t => !string.IsNullOrWhiteSpace(t)))
+			permissions.Add(new { action = PermissionAction(tool), resource = "*", effect = "deny" });
+		if (permissions.Count > 0)
+			primary["permissions"] = permissions;
 
 		agents[PrimaryAgentName] = primary;
-		config["agent"] = agents;
+		config["agents"] = agents;
 		return PrimaryAgentName;
 	}
 
@@ -135,9 +153,9 @@ internal static class OpenCodeConfigBuilder
 		var section = new Dictionary<string, object>(StringComparer.Ordinal);
 		foreach (var mcp in mcps)
 		{
-			var entry = new Dictionary<string, object?>(StringComparer.Ordinal) { ["enabled"] = true };
+			var entry = new Dictionary<string, object?>(StringComparer.Ordinal) { ["disabled"] = false };
 			if (mcp.Timeout is { } timeout && timeout > TimeSpan.Zero)
-				entry["timeout"] = (long)timeout.TotalMilliseconds;
+				entry["timeout"] = new { startup = (long)timeout.TotalMilliseconds, catalog = (long)timeout.TotalMilliseconds, execution = (long)timeout.TotalMilliseconds };
 
 			switch (mcp)
 			{
@@ -168,8 +186,16 @@ internal static class OpenCodeConfigBuilder
 		}
 
 		if (section.Count > 0)
-			config["mcp"] = section;
+			config["mcp"] = new { servers = section };
 	}
+
+	internal static string PermissionAction(string tool) => tool switch
+	{
+		"bash" => "shell",
+		"task" => "subagent",
+		"write" or "patch" => "edit",
+		_ => tool,
+	};
 
 	private static string ResolveSubagentModel(string? subModel, OpenCodeModelRef mainModel, string fallbackProvider)
 		=> string.IsNullOrWhiteSpace(subModel)

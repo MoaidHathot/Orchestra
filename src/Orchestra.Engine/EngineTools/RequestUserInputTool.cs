@@ -22,7 +22,7 @@ namespace Orchestra.Engine;
 /// Existing pipelines see no behavior change.
 /// </para>
 /// </summary>
-public sealed class RequestUserInputTool : IEngineTool
+public sealed class RequestUserInputTool : IAsyncEngineTool
 {
 	/// <summary>
 	/// Canonical opt-in name (matches the suffix of the tool name without the prefix).
@@ -65,7 +65,7 @@ public sealed class RequestUserInputTool : IEngineTool
 		// inside the agent's tool-call dispatch which is itself async, so the SDK's
 		// downstream orchestrator handles this OK — but we still want to respect any
 		// linked cancellation token via the StepCompletionCts wired by the executor.
-		var cancellationToken = context.StepCompletionCts?.Token ?? CancellationToken.None;
+		var cancellationToken = context.StepCancellationToken.CanBeCanceled ? context.StepCancellationToken : context.StepCompletionCts?.Token ?? CancellationToken.None;
 		try
 		{
 			return ExecuteAsync(arguments, context, cancellationToken).GetAwaiter().GetResult();
@@ -76,7 +76,7 @@ public sealed class RequestUserInputTool : IEngineTool
 		}
 	}
 
-	internal async Task<string> ExecuteAsync(string arguments, EngineToolContext context, CancellationToken cancellationToken)
+	public async Task<string> ExecuteAsync(string arguments, EngineToolContext context, CancellationToken cancellationToken)
 	{
 		string? prompt = null;
 		string[] choices = [];

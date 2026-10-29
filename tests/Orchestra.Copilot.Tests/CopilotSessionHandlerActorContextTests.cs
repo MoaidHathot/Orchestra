@@ -174,7 +174,7 @@ public class CopilotSessionHandlerActorContextTests
 	public void EventsBetweenStartAndComplete_AreAttributedToSubagent()
 	{
 		_handler.HandleEvent(SubagentStarted("sub-1", "researcher", "Researcher"));
-		_handler.HandleEvent(MessageDelta("partial answer"));
+		_handler.HandleEvent(MessageDelta("partial answer", parentToolCallId: "sub-1"));
 		_handler.HandleEvent(ReasoningDelta("inner thought"));
 		_handler.HandleEvent(ToolStart("inner-call", "search"));
 		_handler.HandleEvent(ToolComplete("inner-call"));
@@ -231,7 +231,7 @@ public class CopilotSessionHandlerActorContextTests
 		_handler.HandleEvent(SubagentStarted("outer", "outer-agent"));
 		_handler.HandleEvent(SubagentStarted("inner", "inner-agent"));
 
-		_handler.HandleEvent(MessageDelta("from inner")); // no parent → top
+		_handler.HandleEvent(MessageDelta("from inner", parentToolCallId: "inner"));
 		_handler.HandleEvent(MessageDelta("from outer", parentToolCallId: "outer"));
 		_handler.HandleEvent(MessageDelta("also inner", parentToolCallId: "inner"));
 
@@ -267,12 +267,12 @@ public class CopilotSessionHandlerActorContextTests
 	public void NestedSubagents_ReportCorrectDepthAndPopOrder()
 	{
 		_handler.HandleEvent(SubagentStarted("outer", "outer-agent"));
-		_handler.HandleEvent(MessageDelta("at depth 1"));
+		_handler.HandleEvent(MessageDelta("at depth 1", parentToolCallId: "outer"));
 		_handler.HandleEvent(SubagentStarted("inner", "inner-agent"));
-		_handler.HandleEvent(MessageDelta("at depth 2"));
+		_handler.HandleEvent(MessageDelta("at depth 2", parentToolCallId: "inner"));
 		_handler.HandleEvent(ReasoningDelta("inner thinking"));
 		_handler.HandleEvent(SubagentCompleted("inner", "inner-agent"));
-		_handler.HandleEvent(MessageDelta("back at depth 1"));
+		_handler.HandleEvent(MessageDelta("back at depth 1", parentToolCallId: "outer"));
 		_handler.HandleEvent(SubagentCompleted("outer", "outer-agent"));
 		_handler.HandleEvent(MessageDelta("back at main"));
 
@@ -308,7 +308,7 @@ public class CopilotSessionHandlerActorContextTests
 		// active sibling as the fallback current actor.
 		_handler.HandleEvent(SubagentCompleted("outer", "outer-agent"));
 
-		_handler.HandleEvent(MessageDelta("after weird pop"));
+		_handler.HandleEvent(MessageDelta("after weird pop", parentToolCallId: "inner"));
 
 		var delta = DrainChannel().Last(e => e.Type == AgentEventType.MessageDelta);
 		delta.ActorAgentName.Should().Be("inner-agent");
@@ -323,7 +323,7 @@ public class CopilotSessionHandlerActorContextTests
 	{
 		_handler.HandleEvent(SubagentStarted("sub-1", "researcher"));
 		_handler.HandleEvent(SubagentCompleted("ghost", "phantom"));
-		_handler.HandleEvent(MessageDelta("still inside researcher"));
+		_handler.HandleEvent(MessageDelta("still inside researcher", parentToolCallId: "sub-1"));
 
 		var delta = DrainChannel().Last(e => e.Type == AgentEventType.MessageDelta);
 		delta.ActorAgentName.Should().Be("researcher");
@@ -340,7 +340,7 @@ public class CopilotSessionHandlerActorContextTests
 	{
 		_handler.HandleEvent(SubagentStarted("sub-1", "researcher"));
 		_handler.HandleEvent(SubagentDeselected());
-		_handler.HandleEvent(MessageDelta("still inside researcher"));
+		_handler.HandleEvent(MessageDelta("still inside researcher", parentToolCallId: "sub-1"));
 
 		var delta = DrainChannel().Last(e => e.Type == AgentEventType.MessageDelta);
 		delta.ActorAgentName.Should().Be("researcher");

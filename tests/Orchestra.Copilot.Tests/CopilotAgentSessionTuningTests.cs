@@ -19,7 +19,11 @@ public class CopilotAgentSessionTuningTests
 		Orchestra.Engine.ContextTier? contextTier = null,
 		string? workingDirectory = null,
 		string? gitHubToken = null,
-		ReasoningLevel? reasoningLevel = null)
+		ReasoningLevel? reasoningLevel = null,
+		bool enableConfigDiscovery = false,
+		bool enableOnDemandInstructionDiscovery = false,
+		string[]? instructionDirectories = null,
+		string[]? skillDirectories = null)
 	{
 		return new CopilotAgent(
 			clientPool: new FixedCopilotClientPool(new CopilotSdkClientAdapter(new CopilotClient(), ownsClient: false)),
@@ -33,7 +37,7 @@ public class CopilotAgentSessionTuningTests
 			reporter: NullOrchestrationReporter.Instance,
 			engineTools: [],
 			engineToolContext: null,
-			skillDirectories: [],
+			skillDirectories: skillDirectories ?? [],
 			infiniteSessionConfig: null,
 			attachments: [],
 			swapOptions: null,
@@ -43,7 +47,10 @@ public class CopilotAgentSessionTuningTests
 			reasoningSummary: reasoningSummary,
 			contextTier: contextTier,
 			workingDirectory: workingDirectory,
-			gitHubToken: gitHubToken);
+			gitHubToken: gitHubToken,
+			instructionDirectories: instructionDirectories,
+			enableConfigDiscovery: enableConfigDiscovery,
+			enableOnDemandInstructionDiscovery: enableOnDemandInstructionDiscovery);
 	}
 
 	// Every ReasoningLevel member must map to the exact lower-case string the Copilot CLI
@@ -160,5 +167,48 @@ public class CopilotAgentSessionTuningTests
 		resume.ContextTier.Should().Be(GitHub.Copilot.ContextTier.LongContext);
 		resume.WorkingDirectory.Should().Be(dir);
 		resume.GitHubToken.Should().Be("tok-xyz");
+	}
+
+	[Theory]
+	[InlineData(false, false)]
+	[InlineData(true, false)]
+	[InlineData(false, true)]
+	[InlineData(true, true)]
+	public void DiscoverySettingsAndDisabledRecall_ArePreservedAcrossResume(bool discovery, bool onDemand)
+	{
+		var agent = CreateAgent(enableConfigDiscovery: discovery, enableOnDemandInstructionDiscovery: onDemand,
+			instructionDirectories: ["instructions"], skillDirectories: ["skills"]);
+		var create = agent.BuildSessionConfig();
+		var resume = agent.BuildResumeSessionConfig(create);
+		foreach (var config in new SessionConfigBase[] { create, resume })
+		{
+			config.EnableConfigDiscovery.Should().Be(discovery);
+			config.EnableOnDemandInstructionDiscovery.Should().Be(onDemand);
+			config.EnableSkills.Should().BeTrue("explicit and built-in skills remain usable when ambient discovery is off");
+			config.EnableSessionStore.Should().BeFalse();
+			config.Memory!.Enabled.Should().BeFalse();
+			config.InstructionDirectories.Should().Equal("instructions");
+			config.SkillDirectories.Should().Equal("skills");
+		}
+	}
+
+	[Fact]
+	public void ExplicitEmptyInstructionDirectories_OverrideLegacySkillDirectoryFallback()
+	{
+		CreateAgent(skillDirectories: ["skills"]).BuildSessionConfig().InstructionDirectories.Should().Equal("skills");
+		CreateAgent(instructionDirectories: [], skillDirectories: ["skills"]).BuildSessionConfig().InstructionDirectories.Should().BeEmpty();
+	}
+
+	[Fact]
+	public void NativeResponseFormat_PreservesSchemaAfterSourceDocumentIsDisposed()
+	{
+#pragma warning disable GHCP001
+		GitHub.Copilot.Rpc.ResponseFormatJsonSchema format;
+		using (var document = System.Text.Json.JsonDocument.Parse("""{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"],"additionalProperties":false}"""))
+			format = CopilotSdkSessionAdapter.BuildResponseFormat(document.RootElement);
+		format.JsonSchema.Name.Should().Be("orchestra_response");
+		format.JsonSchema.Strict.Should().BeTrue();
+		format.JsonSchema.Schema.GetProperty("properties").GetProperty("count").GetProperty("type").GetString().Should().Be("integer");
+#pragma warning restore GHCP001
 	}
 }

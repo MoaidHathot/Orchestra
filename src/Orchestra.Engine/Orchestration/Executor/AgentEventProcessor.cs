@@ -57,6 +57,7 @@ public class AgentEventProcessor
 	/// building traces so every trace carries the configured-vs-actual provider pair.
 	/// </summary>
 	public string? ConfiguredProvider { get; set; }
+	public string? WorkingDirectory { get; set; }
 
 	/// <summary>
 	/// The agent provider that actually ran the step (resolved builder capability key).
@@ -163,7 +164,7 @@ public class AgentEventProcessor
 
 			case AgentEventType.Warning:
 				HandleWarning(evt);
-			break;
+				break;
 
 			case AgentEventType.Info:
 				HandleInfo(evt);
@@ -193,13 +194,13 @@ public class AgentEventProcessor
 				HandleHookEnd(evt);
 				break;
 
-		case AgentEventType.TurnStart:
-			HandleTurnStart(evt);
-			break;
+			case AgentEventType.TurnStart:
+				HandleTurnStart(evt);
+				break;
 
-		case AgentEventType.TurnEnd:
-			HandleTurnEnd(evt);
-			break;
+			case AgentEventType.TurnEnd:
+				HandleTurnEnd(evt);
+				break;
 
 			case AgentEventType.SessionUsageInfo:
 				HandleSessionUsageInfo(evt);
@@ -793,6 +794,7 @@ public class AgentEventProcessor
 		return new StepExecutionTrace
 		{
 			ConfiguredProvider = ConfiguredProvider,
+			WorkingDirectory = WorkingDirectory,
 			ActualProvider = ActualProvider,
 			SystemPrompt = systemPrompt,
 			UserPromptRaw = userPromptRaw,
@@ -827,6 +829,7 @@ public class AgentEventProcessor
 		return new StepExecutionTrace
 		{
 			ConfiguredProvider = ConfiguredProvider,
+			WorkingDirectory = WorkingDirectory,
 			ActualProvider = ActualProvider,
 			SystemPrompt = systemPrompt,
 			UserPromptRaw = userPromptRaw,

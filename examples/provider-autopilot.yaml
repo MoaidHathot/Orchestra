@@ -1,0 +1,28 @@
+name: provider-autopilot
+description: Bounded agent work with a validated JSON result and downstream consumption.
+defaultProvider: copilot
+defaultModel: claude-opus-4.8
+
+# Set defaultProvider to opencode to use the V2 adapter with the same output contract.
+# workingDirectory defaults to this file's directory for Prompt, Command, and Script steps.
+steps:
+  - name: calculate
+    type: Prompt
+    systemPrompt: Complete the calculation and verify it with an available tool.
+    userPrompt: Calculate 17 + 25 and return count with the result.
+    timeoutSeconds: 180
+    executionPolicy:
+      mode: autopilot
+      maxContinues: 2
+    responseSchema:
+      type: object
+      properties:
+        count:
+          type: integer
+      required: [count]
+      additionalProperties: false
+
+  - name: consume
+    type: Transform
+    dependsOn: [calculate]
+    template: "The verified result is {{calculate.output.count}}."
