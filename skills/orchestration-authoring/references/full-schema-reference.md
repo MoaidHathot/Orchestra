@@ -68,6 +68,7 @@ steps:
 | `agentPool` | `AgentPoolConfig` | No | Provider defaults | Provider worker-pool capacity request for prompt execution. Providers map instances to their own resources, such as Copilot CLI clients. |
 | `defaultSystemPromptMode` | `string` | No | `null` | Default system prompt mode for all Prompt steps. Values: `"append"`, `"replace"`, or `"customize"`. |
 | `defaultEnableConfigDiscovery` | `bool` | No | `null` | Copilot ambient configuration discovery default. Step overrides orchestration, then provider host default (false). |
+| `defaultCapturePlans` | `bool` | No | `true` | Capture explicit provider task lists and plan documents for automatic live updates and durable execution history. Overridden by Prompt `capturePlans`. |
 | `defaultEnableOnDemandInstructionDiscovery` | `bool` | No | `null` | Copilot nested-instruction discovery after file reads. |
 | `defaultRetryPolicy` | `RetryPolicy` | No | `null` | Default retry policy applied to all steps unless overridden at the step level. |
 | `defaultStepTimeoutSeconds` | `int` | No | `null` | Default per-step timeout in seconds. Individual steps can override this. |
@@ -332,6 +333,7 @@ Sends a prompt to an LLM and captures the response as output. Supports input/out
 | `enableConfigDiscovery` | `bool` | No | `null` | Copilot ambient configuration discovery from the agent working directory; also discovers supported agents, MCPs and plugins. |
 | `enableOnDemandInstructionDiscovery` | `bool` | No | `null` | Copilot nested instruction discovery following file reads. Separate from root instructions. |
 | `responseSchema` | `object` | No | `null` | JSON Schema contract for final successful output and output handlers. Copilot: native constrained generation. OpenCode V2: schema guidance. Both: strict engine validation. Completion-tool filtering is internal; authors simply request fields and consume them downstream. |
+| `capturePlans` | `bool` | No | orchestration default (`true`) | Observe task/plan revisions without changing DAG outcomes or selecting plan mode. Copilot uses native reads/events; OpenCode supports native todo observations and a labelled shared-step planning tool. No plan is required for trivial work. |
 | `executionPolicy` | `object` | No | `standard` | `mode`: `standard` or `autopilot`; `maxContinues`: non-negative integer, default 5. Autopilot is native in Copilot and Orchestra-managed in OpenCode V2. Exhaustion fails the step. Counts continuations, not tool calls; timeout/cancellation still apply. Scoped to one Prompt session, separate from DAG loops and retries. |
 | `enableTools` | `string[]` | No | `null` | Opt-in engine tool names, currently `"request_user_input"`. Falls back to `defaultEnableTools`. Structured/autopilot steps internally omit immediate-stop tools (`orchestra_set_status`, `orchestra_complete`); file tools remain available. |
 

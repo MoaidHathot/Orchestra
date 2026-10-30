@@ -55,6 +55,7 @@ YAML modelines work in VS Code (Red Hat YAML extension), JetBrains IDEs, and any
 | `agentPool` | object | No | provider defaults | Provider worker-pool capacity request (see Agent Pool) |
 | `defaultSystemPromptMode` | string | No | null | `"append"`, `"replace"`, or `"customize"` for all Prompt steps |
 | `defaultEnableConfigDiscovery` | bool | No | null | Copilot ambient discovery default; step values override it, then the Copilot host default applies |
+| `defaultCapturePlans` | bool | No | true | Capture explicit agent task lists/documents for live views and durable history; overridden by Prompt `capturePlans` |
 | `defaultEnableOnDemandInstructionDiscovery` | bool | No | null | Copilot nested-instruction discovery default |
 | `defaultRetryPolicy` | RetryPolicy | No | null | Default retry for all steps |
 | `defaultStepTimeoutSeconds` | int | No | null | Default per-step timeout |
@@ -322,6 +323,7 @@ Calls an LLM.
 | `enableConfigDiscovery` | bool | No | null |
 | `enableOnDemandInstructionDiscovery` | bool | No | null |
 | `responseSchema` | object | No | null |
+| `capturePlans` | bool | No | from `defaultCapturePlans` (true) |
 | `executionPolicy` | object | No | standard, maxContinues: 5 |
 | `enableTools` | string[] | No | null | Opt-in engine tool names this Prompt step grants the agent access to. Currently supports `"request_user_input"` (the LLM-decided human-in-the-loop tool). Falls back to the orchestration's `defaultEnableTools` when null. |
 
@@ -439,6 +441,19 @@ responseSchema:
 omits `orchestra_set_status` and `orchestra_complete` for structured steps so the agent can
 deliver its final JSON. Use downstream conditions/scripts for branching; a `status` field in
 JSON is data, not an engine status override. Do not add internal completion markers to schemas.
+
+### Automatic plan capture (`capturePlans`)
+
+Explicit task lists and Markdown plans are captured by default, shown read-only in the Portal,
+and saved in execution history. Set `capturePlans: false` on a Prompt step or
+`defaultCapturePlans: false` on the orchestration to disable capture. This does not select plan
+mode, force a plan for trivial work, or change the DAG's completion rules.
+
+Copilot uses native todo/plan notifications and read APIs. OpenCode captures supported native
+todo updates and provides `orchestra_update_plan` as a labelled shared-step compatibility tool
+for runtimes such as 2.0.26 without native todos. Authors can ask agents to keep a task list
+current for complex work; no special completion markers are needed. Output handlers do not
+produce an additional plan stream.
 
 ### Bounded autopilot (`executionPolicy`)
 

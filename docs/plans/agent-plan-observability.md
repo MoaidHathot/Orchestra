@@ -61,4 +61,12 @@ plan panel. Plan progress is observational and independent of the orchestration 
   and provide a clearly labelled shared-step `orchestra_update_plan` compatibility tool.
   Do not infer a structured plan from prose. Capture evidence is under
   `artifacts/agent-plans/opencode-probe/`.
-- Provider capture, live API, Portal, and final verification remain in progress.
+- Provider adapters, live API, and the read-only Portal panel are implemented. Live Copilot
+  tests confirmed SQL task mutations and native plan-document updates/deletion; a live
+  OpenCode test confirmed checklist and Markdown updates through the compatibility tool.
+- Browser verification passed live updates, reconnect after replay eviction, and viewing
+  an older durable revision. Screenshot evidence is retained under `artifacts/agent-plans/browser`.
+- Integration testing found an existing cancellation path that discarded collected traces.
+  It now preserves partial traces and settles plan-producing steps before terminal snapshots;
+  success, failure, and cancellation persistence tests pass.
+- Final whole-suite verification and cleanup are in progress.

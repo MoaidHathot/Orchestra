@@ -99,6 +99,15 @@ dependencies. Normal internal planning is available; native plan mode is not sel
 Do not invent `autopilot: true`, `maxTurns`, `defaultExecutionPolicy`, or `responseFormat`
 fields. Use `executionPolicy` and `responseSchema` exactly as shown.
 
+## Automatic plan visibility
+
+`defaultCapturePlans` defaults to true and Prompt `capturePlans` overrides it. Explicit agent
+task lists/documents appear read-only in the Portal and are saved with execution history.
+This is separate from native plan mode, autopilot, and DAG completion. Copilot uses native
+plan/todo APIs; OpenCode also offers the labelled `orchestra_update_plan` compatibility tool
+for versions without native todos. A complex-work prompt may ask the agent to keep its plan
+current; simple tasks can finish with no plan. Output handlers do not create additional plans.
+
 ## Human input and errors
 
 `humanInput` defaults to false: complete the task autonomously instead of offering to proceed

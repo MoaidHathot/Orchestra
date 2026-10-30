@@ -76,6 +76,7 @@ Annotations are merged into history projections at read time, are searchable
 | `<step>-outputs.json` | The step's `Content`, `RawContent`, model metadata, `Usage`, and `SavedFiles`. Human-readable projection of outputs. | 1 KB – 100+ KB |
 | `<step>-result.json` | Status, timing, and `ErrorMessage`. Quick top-of-the-stack view. | <1 KB |
 | `result.md` | The run's final markdown content (`FinalContent`) when non-empty. Rendered for human readers. | depends |
+| `plan-events.jsonl` | Append-only observed agent-plan revisions, written while the run is active. Latest plans also appear in each step's `trace.plans`. | depends |
 
 The sidecar `-inputs.json` / `-outputs.json` / `-result.json` files are **redundant projections**
 of subsets of `run.json`. They exist for human inspection and external tooling that prefers

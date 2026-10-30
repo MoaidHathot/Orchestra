@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './App.css';
 import { api } from './api';
+import { mergePlanRevision } from './agentPlans';
 import { Icons } from './icons';
 import { activeOrchestrationMatchesSearch, formatTime, isIncompleteExecution, profileFilterMatchesOrchestration, getMatchingProfiles, orchestrationMatchesProfileFilter, orchestrationMatchesSearch, buildRestoredStepStatusUpdates } from './utils';
 import {
@@ -14,6 +15,7 @@ import HistoryRow from './components/HistoryRow';
 import type { PortalStepStatus } from './utils';
 import type {
   Orchestration,
+  AgentPlanRevision,
   ActiveData,
   ServerStatus,
   ExecutionModalState,
@@ -527,6 +529,7 @@ function App(): React.JSX.Element {
     const stepStatuses: Record<string, string> = { ...initialStatuses };
     const stepResults: Record<string, string> = {};
     const stepTraces: Record<string, TraceData> = {};
+    let planSnapshotSequence = 0;
     const stepAuditLogs: Record<string, AuditLogEntry[]> = {};
     const hookExecutions: HookExecution[] = [];
     const stepSavedFiles: Record<string, string[]> = {};
@@ -687,7 +690,8 @@ function App(): React.JSX.Element {
 
     const updateStepTrace = (stepName: string | undefined, trace: TraceData) => {
       if (!stepName) return;
-      stepTraces[stepName] = trace;
+      const plans = (trace.plans ?? []).reduce(mergePlanRevision, stepTraces[stepName]?.plans ?? []);
+      stepTraces[stepName] = { ...trace, plans };
       setExecutionModal(prev => ({
         ...prev,
         stepTraces: { ...stepTraces },
@@ -732,6 +736,7 @@ function App(): React.JSX.Element {
       try {
         const snapshot = JSON.parse(e.data) as ExecutionStateSnapshot;
         if (!snapshot) return;
+        planSnapshotSequence = snapshot.lastEventSequence;
 
         // Hydrate the local mutable state used by subsequent handlers so they see the
         // primed values rather than the empty initial dictionaries.
@@ -747,6 +752,7 @@ function App(): React.JSX.Element {
             if (step.trace) {
               stepTraces[stepName] = step.trace as unknown as TraceData;
             }
+            if (step.plans) stepTraces[stepName] = { ...stepTraces[stepName], plans: step.plans };
             if (step.process) {
               stepProcesses[stepName] = step.process;
             }
@@ -799,6 +805,15 @@ function App(): React.JSX.Element {
       } catch { /* ignore */ }
     });
 
+    eventSource.addEventListener('step-plan-updated', (event: MessageEvent) => {
+      try {
+        if (event.lastEventId && Number(event.lastEventId) <= planSnapshotSequence) return;
+        const data = JSON.parse(event.data) as { stepName: string; revision: AgentPlanRevision };
+        const previous = stepTraces[data.stepName] ?? {};
+        updateStepTrace(data.stepName, { ...previous, plans: mergePlanRevision(previous.plans ?? [], data.revision) });
+      } catch { /* malformed telemetry must not interrupt execution viewing */ }
+    });
+
     // run-context (sent when the run context is available)
     eventSource.addEventListener('run-context', (e: MessageEvent) => {
       try {
@@ -829,6 +844,10 @@ function App(): React.JSX.Element {
         const data: SSEEventData = JSON.parse(e.data);
         updateStepStatus(data.stepName, 'running');
         if (data.stepName) {
+          if (!e.lastEventId || Number(e.lastEventId) > planSnapshotSequence) {
+            stepTraces[data.stepName] = { ...stepTraces[data.stepName], plans: [] };
+            setExecutionModal(prev => ({ ...prev, stepTraces: { ...stepTraces } }));
+          }
           // Pre-create the main stream so reasoning/content can stream into a
           // ready bucket even before the first delta. Server stamps `startedAt`
           // on the event so replay produces correct elapsed durations.
@@ -926,7 +945,10 @@ function App(): React.JSX.Element {
     eventSource.addEventListener('step-trace', (e: MessageEvent) => {
       try {
         const data: SSEEventData = JSON.parse(e.data);
-        updateStepTrace(data.stepName, data as unknown as TraceData);
+        const trace = data as unknown as TraceData;
+        if (e.lastEventId && Number(e.lastEventId) <= planSnapshotSequence && data.stepName)
+          trace.plans = stepTraces[data.stepName]?.plans ?? [];
+        updateStepTrace(data.stepName, trace);
         // Forward the configured-vs-actual provider pair so the step detail can label it
         // live (the trace event is the first place the resolved provider is known).
         addStepEvent(data.stepName, 'step-trace', {
@@ -1109,6 +1131,10 @@ function App(): React.JSX.Element {
           delaySeconds?: number;
         };
         const attempt = data.attempt ?? '?';
+        if (data.stepName && (!e.lastEventId || Number(e.lastEventId) > planSnapshotSequence)) {
+          stepTraces[data.stepName] = { ...stepTraces[data.stepName], plans: [] };
+          setExecutionModal(prev => ({ ...prev, stepTraces: { ...stepTraces } }));
+        }
         const maxRetries = data.maxRetries ?? '?';
         const error = data.error || data.message || 'Unknown error';
         const delaySeconds = data.delaySeconds ?? 0;

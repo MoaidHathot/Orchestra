@@ -58,6 +58,7 @@ public static class OrchestrationsApi
 						// Execution settings (null when the orchestration leaves them to the host defaults)
 						defaultModel = o.Orchestration.DefaultModel,
 						defaultEnableConfigDiscovery = o.Orchestration.DefaultEnableConfigDiscovery,
+						defaultCapturePlans = o.Orchestration.DefaultCapturePlans,
 						defaultEnableOnDemandInstructionDiscovery = o.Orchestration.DefaultEnableOnDemandInstructionDiscovery,
 						timeoutSeconds = o.Orchestration.TimeoutSeconds is > 0 ? o.Orchestration.TimeoutSeconds : null,
 						defaultStepTimeoutSeconds = o.Orchestration.DefaultStepTimeoutSeconds is > 0 ? o.Orchestration.DefaultStepTimeoutSeconds : null,
@@ -302,6 +303,7 @@ public static class OrchestrationsApi
 				contentHash = entry.ContentHash,
 				defaultModel = o.DefaultModel,
 				defaultEnableConfigDiscovery = o.DefaultEnableConfigDiscovery,
+				defaultCapturePlans = o.DefaultCapturePlans,
 				defaultEnableOnDemandInstructionDiscovery = o.DefaultEnableOnDemandInstructionDiscovery,
 				timeoutSeconds = o.TimeoutSeconds is > 0 ? o.TimeoutSeconds : null,
 				defaultStepTimeoutSeconds = o.DefaultStepTimeoutSeconds is > 0 ? o.DefaultStepTimeoutSeconds : null,

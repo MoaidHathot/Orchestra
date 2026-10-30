@@ -19,6 +19,7 @@ inputs ─▶ ┌─ research ─┐                       orchestra init
 - **Pluggable agents.** Run any Prompt step on `copilot` or `opencode`, selectable per step or per orchestration.
 - **MCP-native.** Attach Model Context Protocol servers to steps, and expose your orchestrations *as* an MCP server.
 - **Agent Skills.** Drop `SKILL.md` directories onto a step so the agent gains specialized, on-demand workflows.
+- **Live agent plans.** Inspect read-only task progress, plan documents, and durable revision history during or after execution. See [agent plans](docs/agent-plans.md).
 - **Structured results and bounded autopilot.** Set `responseSchema` for validated JSON and opt into `executionPolicy.mode: autopilot` for bounded continuation within a step. See [provider contracts](docs/providers.md).
 - **Operate it.** A web portal, triggers (cron/webhook/file/manual), durable checkpoint/resume, profiles & tags, and a full CLI — all under the single `orchestra` command.
 

@@ -1,0 +1,19 @@
+name: agent-plan-observability
+description: Observe an agent's task progress and preserve its plan history.
+defaultModel: claude-opus-4.8
+defaultProvider: copilot
+defaultCapturePlans: true
+
+steps:
+  - name: calculate
+    type: Prompt
+    systemPrompt: Keep an explicit task list for this demonstration and verify the work.
+    userPrompt: |
+      Use your available planning tool to track calculating and verifying 17 + 25.
+      Update task statuses as you work. Verify the answer with a tool, then return it.
+    timeoutSeconds: 180
+    capturePlans: true
+  - name: report
+    type: Transform
+    dependsOn: [calculate]
+    template: "Result: {{calculate.output}}"

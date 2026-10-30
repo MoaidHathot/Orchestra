@@ -26,6 +26,7 @@ export interface Orchestration {
   /** Default model for Prompt steps that set none. */
   defaultModel?: string | null;
   defaultEnableConfigDiscovery?: boolean | null;
+  defaultCapturePlans?: boolean;
   defaultEnableOnDemandInstructionDiscovery?: boolean | null;
   /** Orchestration-level timeout; absent when disabled. */
   timeoutSeconds?: number | null;
@@ -199,6 +200,7 @@ export interface Step {
   enableOnDemandInstructionDiscovery?: boolean | null;
   humanInput?: boolean | null;
   responseSchema?: Record<string, unknown> | null;
+  capturePlans?: boolean | null;
   executionPolicy?: { mode: 'standard' | 'autopilot'; maxContinues: number } | null;
   handler?: HandlerConfig;
   /** Per-step timeout; absent/null means the step may run indefinitely. */
@@ -353,7 +355,35 @@ export interface AuditLogEntry {
   sessionEndReason?: string;
 }
 
+export interface AgentPlanRevision {
+  schemaVersion: number;
+  run: { runId: string; orchestrationName: string; orchestrationVersion: string; triggeredBy: string; startedAt: string };
+  stepName: string;
+  stepExecutionId: string;
+  loopIteration?: number | null;
+  streamId: string;
+  revision: number;
+  capturedAt: string;
+  plan: {
+    provider: string;
+    sessionId: string;
+    source: string;
+    actorId?: string | null;
+    actorName?: string | null;
+    shared: boolean;
+    title?: string | null;
+    tasks: Array<{ id?: string | null; title: string; description?: string | null; status: string; rawStatus?: string | null; priority?: string | null }>;
+    dependencies: Array<{ taskId: string; dependsOn: string }>;
+    markdown?: string | null;
+    documentPath?: string | null;
+    captureError?: string | null;
+  };
+}
+
+export interface PlanHistoryPage { items: AgentPlanRevision[]; nextCursor: number | null; isPartial: boolean }
+
 export interface TraceData {
+  plans?: AgentPlanRevision[];
   parameters?: Record<string, string>;
   dependencyOutputs?: Record<string, string>;
   rawDependencyOutputs?: Record<string, string>;
@@ -791,6 +821,7 @@ export interface StepProcess {
 
 export interface SnapshotStepState {
   stepName: string;
+  plans?: AgentPlanRevision[];
   /**
    * Lower-case status string matching the values the UI already maps:
    * <c>pending</c> | <c>running</c> | <c>completed</c> | <c>failed</c> |

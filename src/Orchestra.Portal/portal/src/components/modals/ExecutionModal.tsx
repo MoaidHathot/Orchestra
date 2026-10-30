@@ -12,6 +12,7 @@ import StepTimingBadge from '../StepTimingBadge';
 import StepActivityPanel from '../StepActivityPanel';
 import CopyButton from '../CopyButton';
 import MarkdownContent from '../MarkdownContent';
+import AgentPlanPanel from '../AgentPlanPanel';
 
 /** Extract a display name from a step MCP reference (string or object). */
 function mcpDisplayName(ref: StepMcpRef): string {
@@ -1897,6 +1898,16 @@ export default function ExecutionModal({
                               highlight={!!stepModelInfo.requestedModel && stepModelInfo.actualModel !== stepModelInfo.requestedModel}
                             />
                           </div>
+                        )}
+
+                        {selectedStep && (selectedStepData?.type?.toLowerCase() === 'prompt' || !!selectedStepTrace?.plans?.length) && (
+                          <AgentPlanPanel
+                            key={`${executionId ?? historicalRun?.runId}:${selectedStep}`}
+                            runId={executionId ?? historicalRun?.runId ?? runContext?.runId ?? null}
+                            stepName={selectedStep}
+                            plans={selectedStepTrace?.plans}
+                            enabled={selectedStepData?.capturePlans ?? orchestration?.defaultCapturePlans ?? true}
+                          />
                         )}
 
                         {selectedStep && (

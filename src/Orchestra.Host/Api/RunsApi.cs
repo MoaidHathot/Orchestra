@@ -294,6 +294,7 @@ public static partial class RunsApi
 					}).ToArray() : null,
 					trace = kv.Value.Trace is { } t ? new
 					{
+						plans = t.Plans,
 						parameters = t.Parameters.Count > 0 ? t.Parameters : kv.Value.Parameters.Count > 0 ? kv.Value.Parameters : null,
 						dependencyOutputs = t.DependencyOutputs.Count > 0 ? t.DependencyOutputs : null,
 						rawDependencyOutputs = t.RawDependencyOutputs.Count > 0 ? t.RawDependencyOutputs : kv.Value.RawDependencyOutputs.Count > 0 ? kv.Value.RawDependencyOutputs : null,
