@@ -180,12 +180,15 @@ public class OrchestrationExecutorTests
 		var executor = new OrchestrationExecutor(_scheduler, agentBuilder, _reporter, _loggerFactory);
 		var orchestration = TestOrchestrations.ComplexDag();
 
-		// Act
-		var result = await executor.ExecuteAsync(orchestration);
-
-		// Assert
-		result.Status.Should().Be(ExecutionStatus.Succeeded);
-		result.StepResults.Should().HaveCount(6);
+		// Exercise overlapping entry and merge completions, retaining the actual step
+		// diagnostics if trace collection or scheduling ever fails under concurrency.
+		for (var iteration = 0; iteration < 50; iteration++)
+		{
+			var result = await executor.ExecuteAsync(orchestration);
+			result.Status.Should().Be(ExecutionStatus.Succeeded,
+				$"iteration {iteration}: {System.Text.Json.JsonSerializer.Serialize(result.StepResults.ToDictionary(kv => kv.Key, kv => kv.Value.ErrorMessage))}");
+			result.StepResults.Should().HaveCount(6);
+		}
 	}
 
 	#endregion

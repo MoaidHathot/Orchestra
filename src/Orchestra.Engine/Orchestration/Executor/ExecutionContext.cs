@@ -189,6 +189,9 @@ public class OrchestrationExecutionContext
 
 	public IReadOnlyDictionary<string, ExecutionResult> Results => _results;
 
+	/// <summary>Atomically snapshots results before operations such as LINQ sorting materialize them.</summary>
+	internal KeyValuePair<string, ExecutionResult>[] SnapshotResults() => _results.ToArray();
+
 	/// <summary>
 	/// Whether any dependency ended in a state that blocks this step. A dependency skipped by
 	/// its own <c>when:</c> condition does <em>not</em> block (see

@@ -56,7 +56,10 @@ internal static class StepExecutionTraceExtensions
 		string[] currentStepFiles)
 	{
 		var accessible = new Dictionary<string, StepTraceStepData>(StringComparer.OrdinalIgnoreCase);
-		foreach (var (stepName, result) in context.Results.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+		// LINQ's ICollection fast path reads Count and calls CopyTo separately. On the
+		// live ConcurrentDictionary, another completed step can change the count between
+		// those calls. Its instance ToArray() takes the required atomic snapshot first.
+		foreach (var (stepName, result) in context.SnapshotResults().OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
 		{
 			accessible[stepName] = new StepTraceStepData
 			{
