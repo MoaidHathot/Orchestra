@@ -392,6 +392,7 @@ public class OpenCodeAgentTests
 
 	private sealed class FakeOpenCodeClient(string sessionId) : IOpenCodeClient
 	{
+		public Task<IReadOnlyList<JsonElement>> ReadMessagesAsync(string sessionId, CancellationToken token) => Task.FromResult<IReadOnlyList<JsonElement>>([]);
 		public Task EnsureReadyAsync(OpenCodeModelDto model, string? agent, TimeSpan timeout, CancellationToken token) => Task.CompletedTask;
 		public Task<bool> IsSessionWithinAsync(string candidate, string root, CancellationToken token) => Task.FromResult(candidate == root);
 		public Task<JsonElement> GetFormAsync(string session, string form, CancellationToken token) => throw new NotSupportedException();
@@ -498,6 +499,7 @@ public class OpenCodeAgentTests
 	/// </summary>
 	private sealed class SwapScriptedClient(string sessionId) : IOpenCodeClient
 	{
+		public Task<IReadOnlyList<JsonElement>> ReadMessagesAsync(string sessionId, CancellationToken token) => Task.FromResult<IReadOnlyList<JsonElement>>([]);
 		public Task EnsureReadyAsync(OpenCodeModelDto model, string? agent, TimeSpan timeout, CancellationToken token) => Task.CompletedTask;
 		public Task<bool> IsSessionWithinAsync(string candidate, string root, CancellationToken token) => Task.FromResult(candidate == root);
 		public Task<JsonElement> GetFormAsync(string session, string form, CancellationToken token) => throw new NotSupportedException();

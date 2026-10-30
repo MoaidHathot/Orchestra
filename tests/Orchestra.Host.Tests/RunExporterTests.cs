@@ -37,6 +37,7 @@ public class RunExporterTests : IDisposable
 
 	public void Dispose()
 	{
+		_runStore.Dispose();
 		if (Directory.Exists(_dataPath))
 		{
 			try { Directory.Delete(_dataPath, recursive: true); }
@@ -101,6 +102,34 @@ public class RunExporterTests : IDisposable
 	}
 
 	// ── The core case: artifacts live outside the execution folder ──
+
+	[Fact]
+	public async Task Bundle_PreservesTheFullPlanJournal()
+	{
+		await SaveRunAsync(new() { ["work"] = Step("work", "done") });
+		var run = (await _runStore.GetRunAsync(Orchestration, RunId))!;
+		var identity = new PlanRunIdentity(run.RunId, run.OrchestrationName, run.OrchestrationVersion, run.TriggeredBy, run.StartedAt);
+		for (var revision = 1; revision <= 2; revision++)
+		{
+			await _runStore.AppendPlanAsync(new()
+			{
+				Run = identity, StepName = "work", StepExecutionId = "execution", StreamId = "todos", Revision = revision,
+				CapturedAt = DateTimeOffset.UtcNow, Plan = new()
+				{
+					Provider = "test", SessionId = "session", Source = "todos",
+					Tasks = [new() { Title = "Work", Status = revision == 1 ? "pending" : "completed" }],
+				},
+			});
+		}
+		var archive = await _exporter.ExportToArchiveAsync(Orchestration, RunId, RunExportFormat.Bundle);
+		using var zip = new ZipArchive(new MemoryStream(archive.Content));
+		var entry = zip.GetEntry(FileSystemRunStore.PlanHistoryFileName);
+		entry.Should().NotBeNull();
+		using var reader = new StreamReader(entry!.Open());
+		var history = await reader.ReadToEndAsync();
+		history.Split('\n', StringSplitOptions.RemoveEmptyEntries).Should().HaveCount(2);
+		history.Should().Contain("pending").And.Contain("completed");
+	}
 
 	[Fact]
 	public async Task Bundle_IncludesTempStoreArtifacts_NotJustTheInlineSummary()

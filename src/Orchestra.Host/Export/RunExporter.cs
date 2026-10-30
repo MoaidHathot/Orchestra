@@ -242,6 +242,14 @@ public sealed partial class RunExporter
 			{
 				warnings.Add("orchestration.json was not present in the run folder.");
 			}
+
+			var planHistory = Path.Combine(index.FolderPath, FileSystemRunStore.PlanHistoryFileName);
+			if (File.Exists(planHistory))
+			{
+				var dest = Path.Combine(exportDir, FileSystemRunStore.PlanHistoryFileName);
+				File.Copy(planHistory, dest, overwrite: true);
+				written.Add(dest);
+			}
 		}
 
 		written.AddRange(await WriteStepPayloadsAsync(record, exportDir, warnings, cancellationToken));

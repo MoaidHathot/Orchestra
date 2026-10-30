@@ -26,6 +26,9 @@ internal interface IOpenCodeClient : IAsyncDisposable
 	/// <summary>Wait for the V2 agent loop and read its durable message projection.</summary>
 	Task<IReadOnlyList<JsonElement>> WaitForMessagesAsync(string sessionId, CancellationToken cancellationToken);
 
+	/// <summary>Reads the current durable message projection without waiting for the agent loop.</summary>
+	Task<IReadOnlyList<JsonElement>> ReadMessagesAsync(string sessionId, CancellationToken cancellationToken);
+
 	Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken);
 
 	/// <summary>Admits a V2 inbox prompt without waiting for execution to finish.</summary>
@@ -348,6 +351,11 @@ internal sealed class OpenCodeHttpClient : IOpenCodeClient
 	{
 		using var wait = await _http.PostAsync($"api/experimental/session/{Uri.EscapeDataString(sessionId)}/wait", null, cancellationToken).ConfigureAwait(false);
 		wait.EnsureSuccessStatusCode();
+		return await ReadMessagesAsync(sessionId, cancellationToken).ConfigureAwait(false);
+	}
+
+	public async Task<IReadOnlyList<JsonElement>> ReadMessagesAsync(string sessionId, CancellationToken cancellationToken)
+	{
 		var messages = new List<JsonElement>();
 		string? cursor = null;
 		var seenCursors = new HashSet<string>(StringComparer.Ordinal);

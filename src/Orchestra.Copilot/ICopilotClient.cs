@@ -143,8 +143,12 @@ internal sealed class CopilotSdkSessionAdapter : ICopilotSession, ICopilotPlanSe
 			{
 				Tasks = result.Rows.Select(row => new Orchestra.Engine.AgentPlanTask
 				{
-					Id = row.Id, Title = row.Title ?? row.Description ?? "Untitled task", Description = row.Description,
-					Status = Orchestra.Engine.AgentPlanTask.NormalizeStatus(row.Status), RawStatus = row.Status, CreatedAt = row.CreatedAt,
+					Id = row.Id,
+					Title = row.Title ?? row.Description ?? "Untitled task",
+					Description = row.Description,
+					Status = Orchestra.Engine.AgentPlanTask.NormalizeStatus(row.Status),
+					RawStatus = row.Status,
+					CreatedAt = row.CreatedAt,
 				}).ToArray(),
 				Dependencies = result.Dependencies.Select(edge => new Orchestra.Engine.AgentPlanDependency(edge.TodoId, edge.DependsOn)).ToArray(),
 			});

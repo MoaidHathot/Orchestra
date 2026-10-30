@@ -18,8 +18,12 @@ internal sealed class OpenCodePlanTool(ChannelWriter<AgentEvent> writer) : IEngi
 
 	public void Bind(string sessionId, bool resumed)
 	{
-		_sessionId = sessionId;
-		if (!resumed) Publish([]);
+		lock (_gate)
+		{
+			if (_sessionId != sessionId)
+				_markdown = null;
+			_sessionId = sessionId;
+		}
 	}
 
 	public string Execute(string arguments, EngineToolContext context)
@@ -28,10 +32,12 @@ internal sealed class OpenCodePlanTool(ChannelWriter<AgentEvent> writer) : IEngi
 		{
 			using var doc = JsonDocument.Parse(arguments);
 			var tasks = ParseTasks(doc.RootElement.GetProperty("tasks"));
-			if (tasks.Any(t => t.RawStatus is null)) throw new FormatException("Every task requires a status.");
+			if (tasks.Any(t => t.RawStatus is not ("pending" or "in_progress" or "completed" or "blocked" or "cancelled" or "failed")))
+				throw new FormatException("Every task requires a supported status: pending, in_progress, completed, blocked, cancelled, or failed.");
 			lock (_gate)
 			{
-				if (doc.RootElement.TryGetProperty("markdown", out var markdown)) _markdown = markdown.ValueKind == JsonValueKind.Null ? null : markdown.GetString();
+				if (doc.RootElement.TryGetProperty("markdown", out var markdown))
+					_markdown = markdown.ValueKind == JsonValueKind.Null ? null : markdown.GetString();
 				Publish(tasks);
 			}
 			return "Plan recorded. Continue the task and update the plan as progress changes.";
@@ -42,24 +48,43 @@ internal sealed class OpenCodePlanTool(ChannelWriter<AgentEvent> writer) : IEngi
 
 	private void Publish(IReadOnlyList<AgentPlanTask> tasks)
 	{
-		if (_sessionId is null) return;
-		writer.TryWrite(new() { Type = AgentEventType.PlanUpdated, Plan = new()
+		if (_sessionId is null)
+			return;
+		writer.TryWrite(new()
 		{
-			Provider = "opencode", SessionId = _sessionId, Source = "orchestra-plan-tool", Shared = true,
-			Title = "Shared step plan", Tasks = tasks, Markdown = _markdown,
-		} });
+			Type = AgentEventType.PlanUpdated,
+			Plan = new()
+			{
+				Provider = "opencode",
+				SessionId = _sessionId,
+				Source = "orchestra-plan-tool",
+				Shared = true,
+				Title = "Shared step plan",
+				Tasks = tasks,
+				Markdown = _markdown,
+			}
+		});
 	}
 
 	internal static AgentPlanTask[] ParseTasks(JsonElement values)
 	{
-		if (values.ValueKind != JsonValueKind.Array) throw new FormatException("tasks must be an array.");
+		if (values.ValueKind != JsonValueKind.Array)
+			throw new FormatException("tasks must be an array.");
 		return values.EnumerateArray().Select(task =>
 		{
 			var title = Text(task, "title") ?? Text(task, "content");
-			if (string.IsNullOrWhiteSpace(title)) throw new FormatException("Every task requires a title.");
+			if (string.IsNullOrWhiteSpace(title))
+				throw new FormatException("Every task requires a title.");
 			var status = Text(task, "status");
-			return new AgentPlanTask { Id = Text(task, "id"), Title = title, Description = Text(task, "description"),
-				RawStatus = status, Status = AgentPlanTask.NormalizeStatus(status), Priority = Text(task, "priority") };
+			return new AgentPlanTask
+			{
+				Id = Text(task, "id"),
+				Title = title,
+				Description = Text(task, "description"),
+				RawStatus = status,
+				Status = AgentPlanTask.NormalizeStatus(status),
+				Priority = Text(task, "priority")
+			};
 		}).ToArray();
 	}
 	private static string? Text(JsonElement obj, string key) => obj.ValueKind == JsonValueKind.Object && obj.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

@@ -20,11 +20,16 @@ public class OpenCodePlanE2ETests
 			var agent = await builder.BuildAgentAsync(new AgentBuildConfig
 			{
 				Model = Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_TEST_MODEL") ?? "github-copilot/claude-opus-4.8",
-				WorkingDirectory = directory, SystemPrompt = "Use the available orchestration planning tool to track the requested work.",
+				WorkingDirectory = directory,
+				SystemPrompt = "Use the available orchestration planning tool to track the requested work.",
 			});
 			using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
 			var task = agent.SendAsync("Use orchestra_update_plan to publish two tasks with IDs calc and verify, titles Calculate and Verify, and statuses in_progress and pending. Include a Markdown plan. Calculate 17+25 with the shell. Then update the entire plan with both tasks completed and return 42.", timeout.Token);
-			await foreach (var evt in task.WithCancellation(timeout.Token)) if (evt.Plan is { } plan) observations.Add(plan);
+			await foreach (var evt in task.WithCancellation(timeout.Token))
+			{
+				if (evt.Plan is { } plan)
+					observations.Add(plan);
+			}
 			(await task.GetResultAsync()).Content.Should().Contain("42");
 			observations.Should().Contain(p => p.Tasks.Any(t => t.Status == "in_progress"));
 			observations.Last().Tasks.Should().HaveCount(2).And.OnlyContain(t => t.Status == "completed");
@@ -38,7 +43,8 @@ public class OpenCodePlanE2ETests
 				Directory.CreateDirectory(output);
 				File.WriteAllText(Path.Combine(output, "opencode-plans-" + Guid.NewGuid().ToString("N") + ".json"), JsonSerializer.Serialize(observations));
 			}
-			try { Directory.Delete(directory, true); }
+			try
+			{ Directory.Delete(directory, true); }
 			catch (IOException) when (!Directory.EnumerateFileSystemEntries(directory).Any()) { }
 		}
 	}

@@ -1,20 +1,75 @@
+using System.Net;
 using System.Text.Json;
 using System.Threading.Channels;
 using FluentAssertions;
 using Orchestra.Engine;
-using System.Net;
 
 namespace Orchestra.OpenCode.Tests;
 
 public class OpenCodePlanTests
 {
 	[Fact]
+	public async Task NativeReconciliation_IgnoresMalformedUncommittedAndNonAssistantWrites()
+	{
+		using var http = new HttpClient(new OwnershipHandler());
+		await using var client = new OpenCodeHttpClient("http://localhost", null, null, http);
+		var channel = Channel.CreateUnbounded<AgentEvent>();
+		await using var capture = new OpenCodeNativePlanCapture("root", client, channel.Writer);
+		using var doc = JsonDocument.Parse("""
+			[
+			  null,
+			  {"type":"assistant","content":[null,{"type":"tool","id":"missing-state","name":"todowrite","state":{}}]},
+			  {"type":"assistant","content":[{"type":"tool","id":"failed","name":"todowrite","state":{"status":"completed","input":{"todos":[{"content":"Failed write","status":"completed"}]},"metadata":{"error":true}}}]},
+			  {"type":"user","content":[{"type":"tool","id":"spoofed","name":"todowrite","state":{"status":"completed","input":{"todos":[{"content":"User text","status":"completed"}]}}}]}
+			]
+			""");
+		capture.Reconcile(doc.RootElement.EnumerateArray().ToArray());
+		channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
+	public void CompatibilityDocument_SurvivesResumeButDoesNotLeakIntoANewSession()
+	{
+		var channel = Channel.CreateUnbounded<AgentEvent>();
+		var tool = new OpenCodePlanTool(channel.Writer);
+		tool.Bind("first", false);
+		tool.Execute("""{"tasks":[],"markdown":"# Plan"}""", new());
+		tool.Bind("first", true);
+		tool.Execute("""{"tasks":[{"title":"Verify","status":"completed"}]}""", new());
+		var events = new List<AgentEvent>();
+		while (channel.Reader.TryRead(out var evt))
+			events.Add(evt);
+		events.Last().Plan!.Markdown.Should().Be("# Plan");
+		tool.Bind("new-session", false);
+		tool.Execute("""{"tasks":[]}""", new());
+		channel.Reader.TryRead(out var restarted).Should().BeTrue();
+		restarted!.Plan!.Markdown.Should().BeNull();
+	}
+	[Fact]
+	public async Task OlderDurableProjection_DoesNotRevertANewerLiveObservation()
+	{
+		using var http = new HttpClient(new OwnershipHandler());
+		await using var client = new OpenCodeHttpClient("http://localhost", null, null, http);
+		var channel = Channel.CreateUnbounded<AgentEvent>();
+		await using var capture = new OpenCodeNativePlanCapture("root", client, channel.Writer);
+		await Send(capture, "root", "new", "session.tool.input.started", new { name = "todowrite" });
+		await Send(capture, "root", "new", "session.tool.called", new { input = new { todos = new[] { new { content = "Task", status = "completed" } } } });
+		await Send(capture, "root", "new", "session.tool.success", new { });
+		capture.Reconcile([JsonSerializer.SerializeToElement(new { type = "assistant", content = new[] {
+			new { type = "tool", id = "old", name = "todowrite", state = new { status = "completed", input = new { todos = new[] { new { content = "Task", status = "pending" } } } } },
+		} })]);
+		channel.Reader.TryRead(out var observed).Should().BeTrue();
+		observed!.Plan!.Tasks.Single().Status.Should().Be("completed");
+		channel.Reader.TryRead(out _).Should().BeFalse();
+	}
+
+	[Fact]
 	public async Task NativeTodos_AreCommittedOnlyOnSuccess_AndScopedToOwnedSessions()
 	{
 		using var http = new HttpClient(new OwnershipHandler());
 		await using var client = new OpenCodeHttpClient("http://localhost", null, null, http);
 		var channel = Channel.CreateUnbounded<AgentEvent>();
-		var capture = new OpenCodeNativePlanCapture("root", client, channel.Writer);
+		await using var capture = new OpenCodeNativePlanCapture("root", client, channel.Writer);
 		await Send(capture, "root", "failed", "session.tool.input.started", new { name = "todowrite" });
 		await Send(capture, "root", "failed", "session.tool.called", new { input = new { todos = new[] { new { content = "Ignore failed update", status = "completed" } } } });
 		channel.Reader.TryRead(out _).Should().BeFalse();
@@ -38,7 +93,7 @@ public class OpenCodePlanTests
 		using var http = new HttpClient(new OwnershipHandler());
 		await using var client = new OpenCodeHttpClient("http://localhost", null, null, http);
 		var channel = Channel.CreateUnbounded<AgentEvent>();
-		var capture = new OpenCodeNativePlanCapture("root", client, channel.Writer);
+		await using var capture = new OpenCodeNativePlanCapture("root", client, channel.Writer);
 		await Send(capture, "root", "old", "session.tool.input.started", new { name = "todowrite" });
 		await Send(capture, "root", "old", "session.tool.called", new { input = new { todos = new[] { new { content = "Task", status = "pending" } } } });
 		capture.Reconcile([JsonSerializer.SerializeToElement(new { type = "assistant", content = new[] {
@@ -73,8 +128,9 @@ public class OpenCodePlanTests
 		tool.Execute("""{"tasks":[{"id":"a","title":"Inspect","status":"in_progress"}],"markdown":"# Plan\nInspect and verify."}""", context);
 		tool.Execute("""{"tasks":[{"id":"a","title":"Inspect","status":"completed"}]}""", context);
 		var events = new List<AgentEvent>();
-		while (channel.Reader.TryRead(out var evt)) events.Add(evt);
-		events.Should().HaveCount(3);
+		while (channel.Reader.TryRead(out var evt))
+			events.Add(evt);
+		events.Should().HaveCount(2);
 		events.Last().Plan!.Tasks.Single().Status.Should().Be("completed");
 		events.Last().Plan!.Markdown.Should().Contain("Inspect and verify");
 		events.Last().Plan!.Shared.Should().BeTrue();

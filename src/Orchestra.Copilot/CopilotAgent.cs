@@ -332,7 +332,8 @@ public partial class CopilotAgent : IAgent
 			void HandleEvent(SessionEvent evt)
 			{
 				handler.HandleEvent(evt);
-				if (evt is SessionPlanChangedEvent or SessionTodosChangedEvent) planMonitor?.RequestRefresh();
+				if (evt is SessionPlanChangedEvent or SessionTodosChangedEvent)
+					planMonitor?.RequestRefresh();
 			}
 			var attemptSessionConfig = BuildSessionConfig(HandleEvent, cancellationToken);
 

@@ -89,6 +89,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 		ArgumentException.ThrowIfNullOrWhiteSpace(_model);
 		var modelRef = OpenCodeModelRef.Parse(_model, _options.FallbackProvider);
 		var continuation = new AgentContinuation(_config.ExecutionPolicy, _config.ResponseSchema);
+		var planTool = _config.CapturePlans && _options.EngineToolBridgeEnabled ? new OpenCodePlanTool(writer) : null;
 
 		// Each step uses a configured primary agent on a dedicated, capacity-bounded server.
 		// Its config stays isolated from concurrent steps; its Location controls native tools.
@@ -97,7 +98,8 @@ internal sealed partial class OpenCodeAgent : IAgent
 		var excludedTools = _humanInput ? _excludedTools : [.. _excludedTools, "question"];
 		var plan = OpenCodeConfigBuilder.Build(modelRef, systemPrompt, _reasoningLevel, _subagents, _mcps, excludedTools, _options.FallbackProvider, _permissionPolicy);
 		var stepConfig = new Dictionary<string, object>(plan.Config);
-		if (_config.CapturePlans) stepConfig["experimental"] = new { todo = true };
+		if (_config.CapturePlans)
+			stepConfig["experimental"] = new { todo = true };
 		// Skills remain lazy. OpenCode never used Copilot's legacy skill-directory instruction fallback.
 		var instructions = _config.InstructionDirectories ?? [];
 		if (instructions.Length > 0)
@@ -122,7 +124,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 		return await swapLoop.RunAsync(
 			runAttempt: (ctx, ct) => RunDedicatedAsync(prompt, writer, modelRef, plan, disableAutoCompact, ctx.PriorSessionId, ctx.SessionIdBox, ct, continuation,
-				_options.ResumeOnSwapEnabled && ctx.SwapAttempt < _options.SwapBudgetPerStep),
+				_options.ResumeOnSwapEnabled && ctx.SwapAttempt < _options.SwapBudgetPerStep, planTool),
 			writer: writer,
 			providerClassifier: ClassifyHttpTransportFailure,
 			cancellationToken: cancellationToken).ConfigureAwait(false);
@@ -143,7 +145,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 	/// spawns the server at the step's working directory,
 	/// and runs the turn (optionally through the per-step agent), with its own engine-tool bridge.
 	/// </summary>
-	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeStepPlan plan, bool disableAutoCompact, string? priorSessionId, SwapSessionIdBox sessionIdBox, CancellationToken cancellationToken, AgentContinuation continuation, bool allowResume)
+	private async Task<AgentResult> RunDedicatedAsync(string prompt, ChannelWriter<AgentEvent> writer, OpenCodeModelRef modelRef, OpenCodeStepPlan plan, bool disableAutoCompact, string? priorSessionId, SwapSessionIdBox sessionIdBox, CancellationToken cancellationToken, AgentContinuation continuation, bool allowResume, OpenCodePlanTool? planTool)
 	{
 		await using var slot = await _pool.AcquireDedicatedSlotAsync(cancellationToken).ConfigureAwait(false);
 		var workspace = OpenCodeWorkspaceBuilder.Prepare(plan.HasConfig ? plan.Config : null, _workingDirectory, _skillDirectories, _runArtifactDirectory);
@@ -156,7 +158,6 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 		var holder = new EngineToolContextHolder();
 		OpenCodeEngineToolBridge? bridge = null;
-		var planTool = _config.CapturePlans && _options.EngineToolBridgeEnabled ? new OpenCodePlanTool(writer) : null;
 		IReadOnlyCollection<IEngineTool> tools = planTool is null ? _engineTools : [.. _engineTools, planTool];
 		var toolContext = _engineToolContext ?? (planTool is null ? null : new EngineToolContext { StepName = _stepName });
 		// Reserve a pool capacity slot before spawning so dedicated servers are bounded by the run's
@@ -248,8 +249,15 @@ internal sealed partial class OpenCodeAgent : IAgent
 			// Tell the swap loop this attempt's session id (for swap-event attribution + resume).
 			sessionIdBox.Value = sessionId;
 			planTool?.Bind(sessionId, isResume);
-			var nativePlans = _config.CapturePlans ? new OpenCodeNativePlanCapture(sessionId, client, writer) : null;
-			if (nativePlans is not null) writer.TryWrite(new AgentEvent { Type = AgentEventType.PlanCaptureStarted });
+			await using var nativePlans = _config.CapturePlans ? new OpenCodeNativePlanCapture(sessionId, client, writer, ex =>
+			{
+				LogPlanCaptureFailed(ex);
+				writer.TryWrite(new() { Type = AgentEventType.Warning, DiagnosticType = "plan_capture_failed", Content = ex.Message });
+			}) : null;
+			if (nativePlans is not null)
+				writer.TryWrite(new AgentEvent { Type = AgentEventType.PlanCaptureStarted });
+			if (isResume && nativePlans is not null)
+				await CapturePlanMessagesAsync(client, nativePlans, writer).ConfigureAwait(false);
 
 			var failure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 			var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -295,6 +303,11 @@ internal sealed partial class OpenCodeAgent : IAgent
 				await streamCts.CancelAsync().ConfigureAwait(false);
 				if (!completed)
 					await CleanupSessionAsync(client, sessionId, abort: true).ConfigureAwait(false);
+				if (nativePlans is not null)
+				{
+					await nativePlans.DrainAsync().ConfigureAwait(false);
+					await CapturePlanMessagesAsync(client, nativePlans, writer).ConfigureAwait(false);
+				}
 				try
 				{ await pump.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false); }
 				catch (Exception ex) { LogSessionCleanupFailed(ex, sessionId); }
@@ -320,6 +333,26 @@ internal sealed partial class OpenCodeAgent : IAgent
 		if (failure.IsCompleted)
 			await failure.ConfigureAwait(false);
 		await operation.WaitAsync(cancellationToken).ConfigureAwait(false);
+	}
+
+	private async Task CapturePlanMessagesAsync(IOpenCodeClient client, OpenCodeNativePlanCapture plans, ChannelWriter<AgentEvent> writer)
+	{
+		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+		foreach (var session in plans.Sessions)
+		{
+			try
+			{
+				var messages = await client.ReadMessagesAsync(session, timeout.Token).WaitAsync(timeout.Token).ConfigureAwait(false);
+				plans.Reconcile(messages, session);
+			}
+			catch (Exception ex)
+			{
+				LogPlanCaptureFailed(ex);
+				writer.TryWrite(new() { Type = AgentEventType.Warning, DiagnosticType = "plan_capture_failed", Content = ex.Message });
+				if (timeout.IsCancellationRequested)
+					break;
+			}
+		}
 	}
 
 	private static async Task<T> AwaitOrFailureAsync<T>(Task<T> operation, Task failure, CancellationToken cancellationToken)
@@ -414,13 +447,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 				if (evt.Type == "server.connected")
 					ready.TrySetResult();
 				handler.Handle(evt);
-				if (plans is not null && evt.Type.StartsWith("session.tool.", StringComparison.Ordinal))
-				{
-					using var planTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-					planTimeout.CancelAfter(TimeSpan.FromSeconds(2));
-					try { await plans.HandleAsync(evt, planTimeout.Token).WaitAsync(planTimeout.Token).ConfigureAwait(false); }
-					catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { LogPlanCaptureFailed(ex); }
-				}
+				plans?.Enqueue(evt);
 
 				if (evt.Type == "permission.asked" && evt.Properties.TryGetProperty("sessionID", out var sid) && sid.ValueKind == JsonValueKind.String)
 					pending.Add(ResolvePermissionAsync(client, sessionId, evt, done, cancellationToken));
