@@ -249,6 +249,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				context.PlanRun ?? new PlanRunIdentity(info.RunId, info.Name, info.Version, "manual", info.StartedAt),
 				step.Name, context.PlanLoopIterations.TryGetValue(step.Name, out var iteration) ? iteration : null,
 				_reporter, _planHistory, _logger);
+			context.PlanTrackers[step.Name] = eventProcessor.PlanTracker;
 		}
 
 		// The provider the author configured for this step: step.provider →

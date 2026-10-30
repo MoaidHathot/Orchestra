@@ -6,11 +6,12 @@ internal static class StepExecutionTraceExtensions
 		this StepExecutionTrace trace,
 		OrchestrationExecutionContext context,
 		OrchestrationStep step,
-		string[]? currentStepFiles = null)
+		string[]? currentStepFiles = null,
+		IReadOnlyList<AgentPlanRevision>? plans = null)
 	{
 		return new StepExecutionTrace
 		{
-			Plans = trace.Plans,
+			Plans = plans ?? trace.Plans,
 			ConfiguredProvider = trace.ConfiguredProvider,
 			ActualProvider = trace.ActualProvider,
 			Parameters = new Dictionary<string, string>(context.Parameters),

@@ -7,6 +7,7 @@ public class OrchestrationExecutionContext
 	public bool DefaultCapturePlans { get; init; } = true;
 	public PlanRunIdentity? PlanRun { get; internal set; }
 	internal ConcurrentDictionary<string, int> PlanLoopIterations { get; } = new();
+	internal ConcurrentDictionary<string, AgentPlanTracker> PlanTrackers { get; } = new();
 	public Dictionary<string, string> Parameters { get; init; } = [];
 
 	/// <summary>

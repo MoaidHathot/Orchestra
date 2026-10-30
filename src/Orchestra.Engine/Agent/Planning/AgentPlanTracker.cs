@@ -11,7 +11,7 @@ public sealed partial class AgentPlanTracker(
 	IPlanHistoryStore? store, ILogger logger)
 {
 	private readonly string _executionId = Guid.NewGuid().ToString("N");
-	private readonly Dictionary<string, AgentPlanRevision> _latest = new(StringComparer.Ordinal);
+	private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AgentPlanRevision> _latest = new(StringComparer.Ordinal);
 	private long _revision;
 	public IReadOnlyList<AgentPlanRevision> Latest => _latest.Values.ToArray();
 

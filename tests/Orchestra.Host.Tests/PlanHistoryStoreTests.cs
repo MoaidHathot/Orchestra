@@ -3,11 +3,85 @@ using FluentAssertions;
 using Orchestra.Engine;
 using Orchestra.Host.Persistence;
 using Xunit;
+using System.Threading.Channels;
+using Microsoft.Extensions.Logging.Abstractions;
+using Orchestra.Host.Api;
 
 namespace Orchestra.Host.Tests;
 
 public class PlanHistoryStoreTests : IDisposable
 {
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ExecutionPipeline_PersistsBeforeCompletionAndKeepsLatestInSavedTrace(bool fail)
+	{
+		using var store = new FileSystemRunStore(_root);
+		using var reporter = new SseReporter();
+		var subscription = reporter.SubscribeWithSnapshot();
+		var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var builder = new PlanningBuilder(release, fail);
+		var executor = new OrchestrationExecutor(new OrchestrationScheduler(), builder, reporter, NullLoggerFactory.Instance, runStore: store);
+		var definition = OrchestrationParser.ParseOrchestration("""{"name":"workflow","description":"Plans","defaultModel":"test","steps":[{"name":"work","type":"Prompt","systemPrompt":"","userPrompt":"go"}]}""", []);
+		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		var running = executor.ExecuteAsync(definition, executionIdOverride: "pipeline-run", cancellationToken: timeout.Token);
+		while ((await subscription.Future!.ReadAsync(timeout.Token)).Type != "step-plan-updated") { }
+		(await store.ReadPlansAsync("pipeline-run")).Items.Should().ContainSingle();
+		running.IsCompleted.Should().BeFalse();
+		release.TrySetResult();
+		(await running).Status.Should().Be(fail ? ExecutionStatus.Failed : ExecutionStatus.Succeeded);
+		var saved = await store.GetRunAsync("workflow", "pipeline-run");
+		saved!.StepRecords["work"].Trace!.Plans.Single().Plan.Tasks.Single().Status.Should().Be(fail ? "blocked" : "completed");
+		(await store.ReadPlansAsync("pipeline-run")).Items.Should().HaveCount(2);
+	}
+
+	[Fact]
+	public async Task Cancellation_DrainsFinalPlanAndPersistsItInTheCancelledRun()
+	{
+		using var store = new FileSystemRunStore(_root);
+		using var reporter = new SseReporter();
+		var subscription = reporter.SubscribeWithSnapshot();
+		var executor = new OrchestrationExecutor(new OrchestrationScheduler(), new PlanningBuilder(new(), false), reporter, NullLoggerFactory.Instance, runStore: store);
+		var definition = OrchestrationParser.ParseOrchestration("""{"name":"workflow","description":"Plans","defaultModel":"test","steps":[{"name":"work","type":"Prompt","systemPrompt":"","userPrompt":"go"}]}""", []);
+		using var cancellation = new CancellationTokenSource();
+		var running = executor.ExecuteAsync(definition, executionIdOverride: "cancel-run", cancellationToken: cancellation.Token);
+		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		while ((await subscription.Future!.ReadAsync(timeout.Token)).Type != "step-plan-updated") { }
+		await cancellation.CancelAsync();
+		(await running.WaitAsync(timeout.Token)).Status.Should().Be(ExecutionStatus.Cancelled);
+		(await store.ReadPlansAsync("cancel-run")).Items.Last().Plan.Tasks.Single().Status.Should().Be("cancelled");
+		var saved = await store.GetRunAsync("workflow", "cancel-run");
+		saved!.StepRecords["work"].Trace!.Plans.Single().Plan.Tasks.Single().Status.Should().Be("cancelled");
+	}
+
+	private sealed class PlanningBuilder(TaskCompletionSource release, bool fail) : AgentBuilder
+	{
+		public override Task<IAgent> BuildAgentAsync(CancellationToken token = default) => Task.FromResult<IAgent>(new PlanningAgent(release, fail));
+		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken token = default) => BuildAgentAsync(token);
+		public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("test");
+	}
+	private sealed class PlanningAgent(TaskCompletionSource release, bool fail) : IAgent
+	{
+		public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
+		{
+			var channel = Channel.CreateUnbounded<AgentEvent>();
+			async Task<AgentResult> RunAsync()
+			{
+				void Publish(string status) => channel.Writer.TryWrite(new() { Type = AgentEventType.PlanUpdated,
+					Plan = new() { Provider = "test", SessionId = "session", Source = "todos", Tasks = [new() { Title = "Work", Status = status }] } });
+				try
+				{
+					Publish("in_progress");
+					await release.Task.WaitAsync(cancellationToken);
+					Publish(fail ? "blocked" : "completed");
+					if (fail) throw new InvalidOperationException("Task failed after reporting its plan.");
+					return new() { Content = "done" };
+				}
+				finally { if (cancellationToken.IsCancellationRequested) Publish("cancelled"); channel.Writer.Complete(); }
+			}
+			return new(channel.Reader, RunAsync());
+		}
+	}
 	private readonly string _root = Directory.CreateTempSubdirectory("orchestra-plans-").FullName;
 	private static readonly PlanRunIdentity Run = new("run1", "workflow", "1", "manual", DateTimeOffset.UtcNow);
 	private static AgentPlanRevision Revision(int n, string step = "step") => new()

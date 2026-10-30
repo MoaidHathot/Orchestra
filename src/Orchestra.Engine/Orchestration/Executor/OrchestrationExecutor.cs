@@ -665,6 +665,7 @@ public partial class OrchestrationExecutor
 		// Guards against launching the same step twice when multiple
 		// dependencies complete simultaneously and both try to launch it.
 		var launchedSteps = new ConcurrentDictionary<string, byte>();
+		var stepWorkers = new ConcurrentBag<Task>();
 
 		// Launch a step when all its dependencies are complete
 		void TryLaunchStep(string stepName)
@@ -680,7 +681,7 @@ public partial class OrchestrationExecutor
 			LogStepLaunchScheduled(stepName, Environment.CurrentManagedThreadId);
 			LogAsyncLocalDiagnostic("before-StartNew", RunScopedClientDiagnostics(), Environment.CurrentManagedThreadId);
 
-			_ = Task.Factory.StartNew(async () =>
+			var stepWorker = Task.Factory.StartNew(async () =>
 			{
 				LogStepTaskStarted(stepName, Environment.CurrentManagedThreadId);
 				LogAsyncLocalDiagnostic("inside-StartNew", RunScopedClientDiagnostics(), Environment.CurrentManagedThreadId);
@@ -704,8 +705,12 @@ public partial class OrchestrationExecutor
 
 					if (result.Status == ExecutionStatus.Cancelled && CancellationAlreadyRecorded())
 					{
-						completionSources[step.Name].TrySetResult(stepResults[step.Name]);
-						return;
+						if (!context.PlanTrackers.TryGetValue(step.Name, out var tracker) || tracker.Latest.Count == 0)
+						{
+							completionSources[step.Name].TrySetResult(stepResults[step.Name]);
+							return;
+						}
+						result = result with { ErrorMessage = stepResults[step.Name].ErrorMessage };
 					}
 
 					context.AddResult(step.Name, result);
@@ -827,15 +832,24 @@ public partial class OrchestrationExecutor
 
 					completionSources[step.Name].TrySetResult(stepResults[step.Name]);
 				}
-				catch (OperationCanceledException)
+				catch (OperationCanceledException ex)
 				{
 					if (CancellationAlreadyRecorded())
 					{
+						if (ex is StepExecutionCanceledException partial && context.PlanTrackers.TryGetValue(step.Name, out var tracker) && tracker.Latest.Count > 0)
+						{
+							var cancelled = EnrichResultTrace(step, context, partial.PartialResult) with { ErrorMessage = stepResults[step.Name].ErrorMessage };
+							context.AddResult(step.Name, cancelled);
+							stepResults[step.Name] = cancelled;
+							var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
+							stepRecords[step.Name] = record; allStepRecords[step.Name] = record;
+							_reporter.PublishStepRecord(step.Name, record);
+						}
 						completionSources[step.Name].TrySetResult(stepResults[step.Name]);
 					}
 					else
 					{
-						var cancelled = ExecutionResult.Cancelled();
+						var cancelled = ex is StepExecutionCanceledException partial ? EnrichResultTrace(step, context, partial.PartialResult) : ExecutionResult.Cancelled();
 						context.AddResult(step.Name, cancelled);
 						stepResults[step.Name] = cancelled;
 						var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
@@ -904,6 +918,7 @@ public partial class OrchestrationExecutor
 				// that ASP.NET Core needs for incoming HTTP requests (e.g., self-referential
 				// MCP data-plane calls). Unwrap() converts Task<Task> to Task.
 			}, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
+			stepWorkers.Add(stepWorker);
 		}
 
 		// Start all steps that have zero dependencies (or whose deps are all already complete from checkpoint)
@@ -924,6 +939,23 @@ public partial class OrchestrationExecutor
 
 		// Wait for all steps to complete
 		await Task.WhenAll(completionSources.Values.Select(tcs => tcs.Task));
+		if (orchestrationCompleteCts.IsCancellationRequested && context.PlanTrackers.Values.Any(t => t.Latest.Count > 0))
+		{
+			try { await Task.WhenAll(stepWorkers).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
+			catch (Exception ex) { LogPlanSettlementIncomplete(ex, runId); }
+		}
+		// Early-cancellation placeholders can precede provider teardown. Always preserve the
+		// last observed plan in the terminal record as well as the already-durable journal.
+		foreach (var (name, tracker) in context.PlanTrackers)
+		{
+			var latest = tracker.Latest;
+			if (latest.Count == 0 || !stepRecords.TryGetValue(name, out var record)) continue;
+			var trace = (record.Trace ?? new StepExecutionTrace()).WithContext(context, allSteps[name], record.SavedFiles, latest);
+			stepRecords[name] = CloneRecordWithError(record, record.ErrorMessage, trace);
+			foreach (var (key, item) in allStepRecords.Where(kv => kv.Value.StepName == name && kv.Value.LoopIteration == record.LoopIteration).ToArray())
+				allStepRecords[key] = CloneRecordWithError(item, item.ErrorMessage, trace);
+			if (stepResults.TryGetValue(name, out var result)) { result = result with { Trace = trace }; stepResults[name] = result; context.AddResult(name, result); }
+		}
 
 		// Log warnings for any unresolved template expressions
 		foreach (var unresolved in context.ResolutionTracker.UnresolvedExpressions)
@@ -994,7 +1026,7 @@ public partial class OrchestrationExecutor
 					&& existing.Status == ExecutionStatus.Cancelled
 					&& IsDefaultCancelledMessage(existing.ErrorMessage))
 				{
-					var replaced = ExecutionResult.Cancelled(enrichedMessage, existing.SavedFiles);
+					var replaced = existing with { ErrorMessage = enrichedMessage };
 					stepResults[name] = replaced;
 					context.AddResult(name, replaced);
 
@@ -2194,7 +2226,7 @@ public partial class OrchestrationExecutor
 	/// Used to enrich Cancelled step records with the determined cancellation cause without
 	/// losing any of the other fields the original record carried.
 	/// </summary>
-	private static StepRunRecord CloneRecordWithError(StepRunRecord record, string errorMessage) => new()
+	private static StepRunRecord CloneRecordWithError(StepRunRecord record, string? errorMessage, StepExecutionTrace? trace = null) => new()
 	{
 		StepName = record.StepName,
 		Status = record.Status,
@@ -2215,11 +2247,20 @@ public partial class OrchestrationExecutor
 		ConfiguredProvider = record.ConfiguredProvider,
 		ActualProvider = record.ActualProvider,
 		Usage = record.Usage,
-		Trace = record.Trace,
+		Trace = trace ?? record.Trace,
 		SavedFiles = record.SavedFiles,
 		RetryHistory = record.RetryHistory,
 		ErrorCategory = record.ErrorCategory,
+		ErrorDetails = record.ErrorDetails,
+		SkipKind = record.SkipKind,
+		Condition = record.Condition,
+		ChildExecutionId = record.ChildExecutionId,
+		ChildOrchestrationName = record.ChildOrchestrationName,
+		ChildStatus = record.ChildStatus,
 	};
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Plan-producing steps did not fully settle before finalizing run {RunId}")]
+	private partial void LogPlanSettlementIncomplete(Exception exception, string runId);
 
 	private static string BuildFinalContent(OrchestrationResult orchestrationResult)
 	{
