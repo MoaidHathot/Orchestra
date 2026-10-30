@@ -280,6 +280,8 @@ public enum StepErrorCategory
 /// </summary>
 public class StepExecutionTrace
 {
+	/// <summary>Latest observed plans for this step execution; full history is stored incrementally.</summary>
+	public IReadOnlyList<AgentPlanRevision> Plans { get; init; } = [];
 	/// <summary>
 	/// The agent provider this step was configured to run on (step <c>provider</c> →
 	/// orchestration <c>defaultProvider</c> → host default). Mirrors

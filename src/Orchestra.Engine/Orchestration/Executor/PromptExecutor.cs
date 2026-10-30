@@ -15,6 +15,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	private readonly ILogger<PromptExecutor> _logger;
 	private readonly int _maxAgentSwapAttempts;
 	private readonly RequestUserInputTool _requestUserInputTool = new();
+	private readonly IPlanHistoryStore? _planHistory;
 
 	/// <summary>
 	/// Default budget for executor-level CLI-swap retries when the underlying agent
@@ -35,7 +36,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		IPendingInputStore? pendingInputStore = null,
 		IHumanInputWaiter? humanInputWaiter = null,
 		string? serverUrl = null,
-		int maxAgentSwapAttempts = DefaultMaxAgentSwapAttempts)
+		int maxAgentSwapAttempts = DefaultMaxAgentSwapAttempts,
+		IPlanHistoryStore? planHistory = null)
 		: this(
 			new SingleAgentProviderRegistry(agentBuilder),
 			reporter,
@@ -46,7 +48,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			pendingInputStore,
 			humanInputWaiter,
 			serverUrl,
-			maxAgentSwapAttempts)
+			maxAgentSwapAttempts,
+			planHistory)
 	{
 	}
 
@@ -60,7 +63,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		IPendingInputStore? pendingInputStore = null,
 		IHumanInputWaiter? humanInputWaiter = null,
 		string? serverUrl = null,
-		int maxAgentSwapAttempts = DefaultMaxAgentSwapAttempts)
+		int maxAgentSwapAttempts = DefaultMaxAgentSwapAttempts,
+		IPlanHistoryStore? planHistory = null)
 	{
 		_providerRegistry = providerRegistry;
 		_reporter = reporter;
@@ -71,6 +75,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 		_humanInputWaiter = humanInputWaiter ?? NullHumanInputWaiter.Instance;
 		_serverUrl = serverUrl;
 		_logger = logger;
+		_planHistory = planHistory;
 		_maxAgentSwapAttempts = Math.Max(0, maxAgentSwapAttempts);
 	}
 
@@ -236,6 +241,15 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 
 		// Create event processor to handle agent events and collect trace data
 		var eventProcessor = new AgentEventProcessor(_reporter, step.Name);
+		var capturePlans = step.CapturePlans ?? context.DefaultCapturePlans;
+		if (capturePlans)
+		{
+			var info = context.OrchestrationInfo;
+			eventProcessor.PlanTracker = new AgentPlanTracker(
+				context.PlanRun ?? new PlanRunIdentity(info.RunId, info.Name, info.Version, "manual", info.StartedAt),
+				step.Name, context.PlanLoopIterations.TryGetValue(step.Name, out var iteration) ? iteration : null,
+				_reporter, _planHistory, _logger);
+		}
 
 		// The provider the author configured for this step: step.provider →
 		// orchestration defaultProvider → host default provider name. Recorded on the
@@ -430,6 +444,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 			var config = new AgentBuildConfig
 			{
 				Model = resolvedModel,
+				CapturePlans = capturePlans,
 				SystemPrompt = resolvedSystemPrompt,
 				Mcps = resolvedMcps,
 				Subagents = resolvedSubagents,
@@ -1141,6 +1156,7 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 				EngineToolCtx = null,
 				HumanInput = false,
 				ExecutionPolicy = null,
+				CapturePlans = false,
 				Reporter = _reporter,
 			};
 

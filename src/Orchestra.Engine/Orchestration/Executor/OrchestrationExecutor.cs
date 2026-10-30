@@ -131,7 +131,8 @@ public partial class OrchestrationExecutor
 			var promptExecutor = new PromptExecutor(_providerRegistry, reporter, _promptFormatter, loggerFactory.CreateLogger<PromptExecutor>(), _engineToolRegistry, mcpResolver,
 				pendingInputStore: _pendingInputStore,
 				humanInputWaiter: _humanInputWaiter,
-				serverUrl: _serverUrl);
+				serverUrl: _serverUrl,
+				planHistory: _runStore as IPlanHistoryStore);
 			_stepExecutorRegistry = new StepExecutorRegistry()
 				.Register(new PromptStepExecutor(promptExecutor))
 				.Register(new HttpStepExecutor(reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))
@@ -433,6 +434,7 @@ public partial class OrchestrationExecutor
 				: (parentContext.RootExecutionId ?? parentContext.ParentExecutionId),
 			Variables = orchestration.Variables,
 			DefaultSystemPromptMode = orchestration.DefaultSystemPromptMode,
+			DefaultCapturePlans = orchestration.DefaultCapturePlans,
 			DefaultEnableConfigDiscovery = orchestration.DefaultEnableConfigDiscovery,
 			DefaultEnableOnDemandInstructionDiscovery = orchestration.DefaultEnableOnDemandInstructionDiscovery,
 			DefaultRetryPolicy = orchestration.DefaultRetryPolicy,
@@ -490,6 +492,7 @@ public partial class OrchestrationExecutor
 		// previously persisted as "manual", losing the parent/lineage information that was
 		// available on the in-memory ChildLaunchRequest.
 		var resolvedTriggeredBy = retryMetadata?.TriggeredBy ?? triggeredBy ?? "manual";
+		context.PlanRun = new PlanRunIdentity(runId, orchestration.Name, orchestration.Version, resolvedTriggeredBy, runStartedAt);
 
 		// Where the run store will persist this run (the folder is created when the record is
 		// saved). Resolved once so the early run-context, the final run-context and the persisted
@@ -1800,6 +1803,7 @@ public partial class OrchestrationExecutor
 			context.ClearResult(loop.Target);
 
 			// Re-execute the target step
+			context.PlanLoopIterations[loop.Target] = iteration;
 			var targetStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(loop.Target);
 			var targetResult = await targetExecutor.ExecuteAsync(targetStep, context, cancellationToken);
@@ -1823,6 +1827,7 @@ public partial class OrchestrationExecutor
 			}
 
 			// Re-execute the checker step
+			context.PlanLoopIterations[checkerStep.Name] = iteration;
 			context.ClearResult(checkerStep.Name);
 
 			var checkerStartedAt = DateTimeOffset.UtcNow;

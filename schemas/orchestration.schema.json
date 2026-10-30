@@ -54,6 +54,11 @@
       "type": "boolean",
       "description": "Default ambient provider configuration discovery for Prompt steps. Copilot supports true/false; OpenCode V2 accepts true but rejects false. Step values override this."
     },
+    "defaultCapturePlans": {
+      "type": "boolean",
+      "default": true,
+      "description": "Capture explicit agent plans and task-list changes for live views and durable run history. Prompt steps can override capturePlans."
+    },
     "defaultEnableOnDemandInstructionDiscovery": {
       "type": "boolean",
       "description": "Default nested-instruction discovery for Prompt steps. Copilot supports true/false; OpenCode V2 accepts true but rejects false. Step values override this."
@@ -469,6 +474,10 @@
         "responseSchema": {
           "type": "object",
           "description": "JSON Schema for successful output, including output handlers. Copilot constrains generation natively; OpenCode uses schema guidance. Orchestra validates both strictly. Immediate-stop engine tools are omitted internally. Omit for ordinary text."
+        },
+        "capturePlans": {
+          "type": "boolean",
+          "description": "Capture this step's provider-published task lists and plan documents. Inherits defaultCapturePlans (true). Observational; does not select native plan mode or require a plan."
         },
         "executionPolicy": {
           "type": "object",

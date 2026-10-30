@@ -53,4 +53,12 @@ plan panel. Plan progress is observational and independent of the orchestration 
 
 ## Progress
 
-- Initial repository and API review complete. Implementation in progress.
+- Shared snapshots/revisions, capture controls, engine reduction, and append-only storage
+  implemented. Initial engine and storage tests pass, including restart, paging, partial-tail
+  repair, parallel writes, capture opt-out, and preserving the last known plan on errors.
+- Live OpenCode 2.0.26 probe: the documented experimental todo flag did not expose a native
+  todo tool (including a Code Mode catalog search). Support native todo events when present
+  and provide a clearly labelled shared-step `orchestra_update_plan` compatibility tool.
+  Do not infer a structured plan from prose. Capture evidence is under
+  `artifacts/agent-plans/opencode-probe/`.
+- Provider capture, live API, Portal, and final verification remain in progress.

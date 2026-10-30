@@ -90,6 +90,7 @@ public class PromptOrchestrationStep : OrchestrationStep
 
 	/// <summary>Opt-in bounded automatic continuation within this step's session.</summary>
 	public AgentExecutionPolicy? ExecutionPolicy { get; init; }
+	public bool? CapturePlans { get; init; }
 
 	/// <summary>
 	/// Optional configuration for infinite sessions (automatic context compaction).

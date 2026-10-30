@@ -4,6 +4,9 @@ namespace Orchestra.Engine;
 
 public class OrchestrationExecutionContext
 {
+	public bool DefaultCapturePlans { get; init; } = true;
+	public PlanRunIdentity? PlanRun { get; internal set; }
+	internal ConcurrentDictionary<string, int> PlanLoopIterations { get; } = new();
 	public Dictionary<string, string> Parameters { get; init; } = [];
 
 	/// <summary>

@@ -7,6 +7,7 @@ namespace Orchestra.Engine;
 public sealed record AgentBuildConfig
 {
 	public required string Model { get; init; }
+	public bool CapturePlans { get; init; } = true;
 	public AgentExecutionPolicy? ExecutionPolicy { get; init; }
 	public string? SystemPrompt { get; init; }
 	public Mcp[] Mcps { get; init; } = [];

@@ -196,4 +196,7 @@ public interface IOrchestrationReporter
 	/// don't surface process activity.
 	/// </summary>
 	void ReportStepProcessStarted(string stepName, StepProcessInfo process) { }
+
+	/// <summary>Reports an immutable plan observation for live clients and execution snapshots.</summary>
+	void ReportPlanUpdated(AgentPlanRevision revision) { }
 }

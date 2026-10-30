@@ -112,4 +112,5 @@ public enum AgentEventType
 	/// <see cref="AgentEvent.PermissionToolCallId"/>.
 	/// </summary>
 	PermissionCompleted,
+	PlanUpdated,
 }

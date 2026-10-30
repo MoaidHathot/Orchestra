@@ -64,6 +64,7 @@ public class AgentEventProcessor
 	/// Set by the executor once the provider is resolved.
 	/// </summary>
 	public string? ActualProvider { get; set; }
+	public AgentPlanTracker? PlanTracker { get; set; }
 
 	/// <summary>
 	/// Gets the collected reasoning content.
@@ -105,8 +106,25 @@ public class AgentEventProcessor
 		{
 			await foreach (var evt in events.WithCancellation(cancellationToken))
 			{
-				ProcessEvent(evt);
+				if (evt.Type == AgentEventType.PlanUpdated && evt.Plan is { } plan && PlanTracker is not null)
+					await PlanTracker.ObserveAsync(plan).ConfigureAwait(false);
+				else ProcessEvent(evt);
 			}
+		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && PlanTracker is not null)
+		{
+			// Providers flush a bounded final plan before closing their event channel. Preserve
+			// those observations even when the normal content reader has been cancelled.
+			using var drain = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+			try
+			{
+				await foreach (var evt in events.WithCancellation(drain.Token))
+					if (evt.Type == AgentEventType.PlanUpdated && evt.Plan is { } plan)
+						await PlanTracker.ObserveAsync(plan).ConfigureAwait(false);
+			}
+			catch (OperationCanceledException) when (drain.IsCancellationRequested) { }
+			catch (Exception ex) { _reporter.ReportSessionWarning("plan_capture_drain_failed", ex.Message); }
+			throw;
 		}
 		finally
 		{
@@ -793,6 +811,7 @@ public class AgentEventProcessor
 
 		return new StepExecutionTrace
 		{
+			Plans = PlanTracker?.Latest ?? [],
 			ConfiguredProvider = ConfiguredProvider,
 			WorkingDirectory = WorkingDirectory,
 			ActualProvider = ActualProvider,
@@ -828,6 +847,7 @@ public class AgentEventProcessor
 
 		return new StepExecutionTrace
 		{
+			Plans = PlanTracker?.Latest ?? [],
 			ConfiguredProvider = ConfiguredProvider,
 			WorkingDirectory = WorkingDirectory,
 			ActualProvider = ActualProvider,

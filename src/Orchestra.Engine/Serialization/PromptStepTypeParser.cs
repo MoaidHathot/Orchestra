@@ -21,6 +21,7 @@ public sealed partial class PromptStepTypeParser : IStepTypeParser
 		return new PromptOrchestrationStep
 		{
 			Name = stepName,
+			CapturePlans = root.TryGetProperty("capturePlans", out var capturePlans) ? capturePlans.GetBoolean() : null,
 			Type = OrchestrationStepType.Prompt,
 			DependsOn = baseFields.DependsOn,
 			Enabled = baseFields.Enabled,

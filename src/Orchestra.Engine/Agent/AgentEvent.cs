@@ -3,6 +3,7 @@ namespace Orchestra.Engine;
 public class AgentEvent
 {
 	public required AgentEventType Type { get; init; }
+	public AgentPlanSnapshot? Plan { get; init; }
 	public string? Content { get; init; }
 	public string? ErrorMessage { get; init; }
 

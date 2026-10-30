@@ -10,6 +10,7 @@ internal static class StepExecutionTraceExtensions
 	{
 		return new StepExecutionTrace
 		{
+			Plans = trace.Plans,
 			ConfiguredProvider = trace.ConfiguredProvider,
 			ActualProvider = trace.ActualProvider,
 			Parameters = new Dictionary<string, string>(context.Parameters),
