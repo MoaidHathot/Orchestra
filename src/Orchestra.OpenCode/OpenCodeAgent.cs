@@ -97,6 +97,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 		var excludedTools = _humanInput ? _excludedTools : [.. _excludedTools, "question"];
 		var plan = OpenCodeConfigBuilder.Build(modelRef, systemPrompt, _reasoningLevel, _subagents, _mcps, excludedTools, _options.FallbackProvider, _permissionPolicy);
 		var stepConfig = new Dictionary<string, object>(plan.Config);
+		if (_config.CapturePlans) stepConfig["experimental"] = new { todo = true };
 		// Skills remain lazy. OpenCode never used Copilot's legacy skill-directory instruction fallback.
 		var instructions = _config.InstructionDirectories ?? [];
 		if (instructions.Length > 0)
@@ -155,17 +156,20 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 		var holder = new EngineToolContextHolder();
 		OpenCodeEngineToolBridge? bridge = null;
+		var planTool = _config.CapturePlans && _options.EngineToolBridgeEnabled ? new OpenCodePlanTool(writer) : null;
+		IReadOnlyCollection<IEngineTool> tools = planTool is null ? _engineTools : [.. _engineTools, planTool];
+		var toolContext = _engineToolContext ?? (planTool is null ? null : new EngineToolContext { StepName = _stepName });
 		// Reserve a pool capacity slot before spawning so dedicated servers are bounded by the run's
 		// maxInstances cap and are counted in the pool snapshot (one instance / one session) while
 		// this step runs; the slot is released in the finally when the server is torn down.
 		var process = new OpenCodeServerProcess(connectPlan, _options, _clientFactory, _loggerFactory.CreateLogger<OpenCodeServerProcess>(), workspace.ConfigFilePath, workspace.WorkingDirectory, extraEnv);
 		try
 		{
-			if (_engineTools.Count > 0 && _engineToolContext is not null && _options.EngineToolBridgeEnabled)
-				bridge = await OpenCodeEngineToolBridge.StartAsync(holder, _options.Hostname, _loggerFactory, cancellationToken, _engineTools).ConfigureAwait(false);
+			if (tools.Count > 0 && toolContext is not null && _options.EngineToolBridgeEnabled)
+				bridge = await OpenCodeEngineToolBridge.StartAsync(holder, _options.Hostname, _loggerFactory, cancellationToken, tools).ConfigureAwait(false);
 
 			await process.StartAsync(cancellationToken).ConfigureAwait(false);
-			return await RunTurnAsync(process.Client, holder, bridge?.McpUrl, prompt, modelRef, plan.PrimaryAgentName, priorSessionId, sessionIdBox, writer, cancellationToken, continuation, allowResume).ConfigureAwait(false);
+			return await RunTurnAsync(process.Client, holder, bridge?.McpUrl, prompt, modelRef, plan.PrimaryAgentName, priorSessionId, sessionIdBox, writer, cancellationToken, continuation, allowResume, tools, toolContext, planTool).ConfigureAwait(false);
 		}
 		finally
 		{
@@ -200,8 +204,11 @@ internal sealed partial class OpenCodeAgent : IAgent
 		SwapSessionIdBox sessionIdBox,
 		ChannelWriter<AgentEvent> writer,
 		CancellationToken cancellationToken,
-		AgentContinuation? continuation = null,
-		bool allowResume = false)
+		AgentContinuation? continuation,
+		bool allowResume,
+		IReadOnlyCollection<IEngineTool> tools,
+		EngineToolContext? toolContext,
+		OpenCodePlanTool? planTool)
 	{
 		string? sessionId = null;
 		var completed = false;
@@ -212,10 +219,10 @@ internal sealed partial class OpenCodeAgent : IAgent
 			{ await client.EnsureReadyAsync(BuildModelDto(modelRef), agentName, _options.StartupTimeout, cancellationToken).ConfigureAwait(false); }
 			catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
 			{ throw new OpenCodeSessionFailedException("Timed out loading the OpenCode model/agent catalog.", innerException: ex); }
-			var hasEngineTools = _engineTools.Count > 0 && _engineToolContext is not null && _options.EngineToolBridgeEnabled;
+			var hasEngineTools = tools.Count > 0 && toolContext is not null && _options.EngineToolBridgeEnabled;
 			if (hasEngineTools)
 			{
-				holder.Set(_engineTools, _engineToolContext!);
+				holder.Set(tools, toolContext!);
 				if (engineToolMcpUrl is not null)
 					await RegisterEngineToolMcpAsync(client, engineToolMcpUrl, cancellationToken).ConfigureAwait(false);
 			}
@@ -240,6 +247,9 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 			// Tell the swap loop this attempt's session id (for swap-event attribution + resume).
 			sessionIdBox.Value = sessionId;
+			planTool?.Bind(sessionId, isResume);
+			var nativePlans = _config.CapturePlans ? new OpenCodeNativePlanCapture(sessionId, client, writer) : null;
+			if (nativePlans is not null) writer.TryWrite(new AgentEvent { Type = AgentEventType.PlanCaptureStarted });
 
 			var failure = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 			var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -255,7 +265,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 			// Subscribe BEFORE prompting so no events between session-create and send are missed.
 			using var streamCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-			var pump = PumpEventsAsync(client, sessionId, handler, failure, ready, streamCts.Token);
+			var pump = PumpEventsAsync(client, sessionId, handler, failure, ready, streamCts.Token, nativePlans);
 			try
 			{
 				await AwaitOrFailureAsync(ready.Task.WaitAsync(_options.StartupTimeout, cancellationToken), failure.Task, cancellationToken).ConfigureAwait(false);
@@ -264,6 +274,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 				{
 					var messages = await AwaitOrFailureAsync(client.WaitForMessagesAsync(sessionId, streamCts.Token), failure.Task, cancellationToken).ConfigureAwait(false);
 					handler.ApplyMessages(messages, requestId);
+					nativePlans?.Reconcile(messages);
 					var finalContent = handler.FinalContent ?? string.Empty;
 					if (continuation is null || continuation.TryComplete(finalContent, out finalContent))
 					{
@@ -334,7 +345,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 		{
 			// Idempotent by name: OpenCode overwrites an existing entry, so re-registering each
 			// step is harmless and keeps a pooled worker reusable across steps.
-			await client.AddMcpAsync("orchestra-engine-tools", new { type = "remote", url, disabled = false, oauth = false }, cancellationToken).ConfigureAwait(false);
+			await client.AddMcpAsync("orchestra-engine-tools", new { type = "remote", url, disabled = false, oauth = false, codemode = false }, cancellationToken).ConfigureAwait(false);
 		}
 		catch (Exception ex)
 		{
@@ -392,7 +403,8 @@ internal sealed partial class OpenCodeAgent : IAgent
 		OpenCodeSessionHandler handler,
 		TaskCompletionSource done,
 		TaskCompletionSource ready,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		OpenCodeNativePlanCapture? plans)
 	{
 		var pending = new List<Task>();
 		try
@@ -402,6 +414,13 @@ internal sealed partial class OpenCodeAgent : IAgent
 				if (evt.Type == "server.connected")
 					ready.TrySetResult();
 				handler.Handle(evt);
+				if (plans is not null && evt.Type.StartsWith("session.tool.", StringComparison.Ordinal))
+				{
+					using var planTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+					planTimeout.CancelAfter(TimeSpan.FromSeconds(2));
+					try { await plans.HandleAsync(evt, planTimeout.Token).WaitAsync(planTimeout.Token).ConfigureAwait(false); }
+					catch (Exception ex) when (!cancellationToken.IsCancellationRequested) { LogPlanCaptureFailed(ex); }
+				}
 
 				if (evt.Type == "permission.asked" && evt.Properties.TryGetProperty("sessionID", out var sid) && sid.ValueKind == JsonValueKind.String)
 					pending.Add(ResolvePermissionAsync(client, sessionId, evt, done, cancellationToken));
@@ -631,4 +650,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 
 	[LoggerMessage(EventId = 228, Level = LogLevel.Information, Message = "OpenCode session {SessionId} continuation {Continuation}: {Reason}")]
 	private partial void LogContinuing(string sessionId, int continuation, string reason);
+
+	[LoggerMessage(EventId = 229, Level = LogLevel.Warning, Message = "OpenCode native plan observation failed")]
+	private partial void LogPlanCaptureFailed(Exception exception);
 }

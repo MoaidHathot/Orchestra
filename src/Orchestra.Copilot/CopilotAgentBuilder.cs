@@ -273,7 +273,8 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 			enableConfigDiscovery: config.EnableConfigDiscovery ?? _poolOptions.EnableConfigDiscovery,
 			enableOnDemandInstructionDiscovery: config.EnableOnDemandInstructionDiscovery ?? _poolOptions.EnableOnDemandInstructionDiscovery,
 			responseSchema: config.ResponseSchema,
-			executionPolicy: config.ExecutionPolicy
+			executionPolicy: config.ExecutionPolicy,
+			capturePlans: config.CapturePlans
 		);
 	}
 

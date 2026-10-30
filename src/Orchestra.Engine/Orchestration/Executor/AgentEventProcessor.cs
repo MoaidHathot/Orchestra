@@ -65,6 +65,7 @@ public class AgentEventProcessor
 	/// </summary>
 	public string? ActualProvider { get; set; }
 	public AgentPlanTracker? PlanTracker { get; set; }
+	private bool _planCaptureStarted;
 
 	/// <summary>
 	/// Gets the collected reasoning content.
@@ -111,7 +112,7 @@ public class AgentEventProcessor
 				else ProcessEvent(evt);
 			}
 		}
-		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && PlanTracker is not null)
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && PlanTracker is not null && (_planCaptureStarted || PlanTracker.Latest.Count > 0))
 		{
 			// Providers flush a bounded final plan before closing their event channel. Preserve
 			// those observations even when the normal content reader has been cancelled.
@@ -140,6 +141,9 @@ public class AgentEventProcessor
 	{
 		switch (evt.Type)
 		{
+			case AgentEventType.PlanCaptureStarted:
+				_planCaptureStarted = true;
+				break;
 			case AgentEventType.MessageDelta:
 				HandleMessageDelta(evt);
 				break;

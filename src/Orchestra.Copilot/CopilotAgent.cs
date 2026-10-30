@@ -34,6 +34,7 @@ public partial class CopilotAgent : IAgent
 	private readonly bool _enableOnDemandInstructionDiscovery;
 	private readonly System.Text.Json.JsonElement? _responseSchema;
 	private readonly AgentExecutionPolicy? _executionPolicy;
+	private readonly bool _capturePlans;
 	private readonly Engine.InfiniteSessionConfig? _infiniteSessionConfig;
 	private readonly ImageAttachment[] _attachments;
 	/// <summary>
@@ -155,7 +156,8 @@ public partial class CopilotAgent : IAgent
 			bool enableConfigDiscovery = false,
 			bool enableOnDemandInstructionDiscovery = false,
 			System.Text.Json.JsonElement? responseSchema = null,
-			AgentExecutionPolicy? executionPolicy = null)
+			AgentExecutionPolicy? executionPolicy = null,
+			bool capturePlans = true)
 	{
 		_clientPool = clientPool;
 		_model = model;
@@ -182,6 +184,7 @@ public partial class CopilotAgent : IAgent
 		_responseSchema = responseSchema?.Clone();
 		executionPolicy?.Validate();
 		_executionPolicy = executionPolicy;
+		_capturePlans = capturePlans;
 		_infiniteSessionConfig = infiniteSessionConfig;
 		_attachments = attachments;
 		// SDK 1.0.0 PR #1098: forwarded to DefaultAgentConfig.ExcludedTools in
@@ -325,7 +328,13 @@ public partial class CopilotAgent : IAgent
 			var handler = new CopilotSessionHandler(writer, _reporter, _model, done, _loggerFactory.CreateLogger<CopilotSessionHandler>(),
 				autopilot: _executionPolicy?.Mode == AgentExecutionMode.Autopilot);
 
-			var attemptSessionConfig = BuildSessionConfig(handler.HandleEvent, cancellationToken);
+			AgentPlanMonitor? planMonitor = null;
+			void HandleEvent(SessionEvent evt)
+			{
+				handler.HandleEvent(evt);
+				if (evt is SessionPlanChangedEvent or SessionTodosChangedEvent) planMonitor?.RequestRefresh();
+			}
+			var attemptSessionConfig = BuildSessionConfig(HandleEvent, cancellationToken);
 
 			LogSessionCreating(
 				client.DiagnosticHash,
@@ -354,7 +363,7 @@ public partial class CopilotAgent : IAgent
 			{
 				if (isResumeAttempt)
 				{
-					var resumeConfig = BuildResumeSessionConfig(attemptSessionConfig, handler.HandleEvent);
+					var resumeConfig = BuildResumeSessionConfig(attemptSessionConfig, HandleEvent);
 					session = await client.ResumeSessionAsync(priorSessionId!, resumeConfig, createToken)
 						.ConfigureAwait(false);
 				}
@@ -478,6 +487,14 @@ public partial class CopilotAgent : IAgent
 			// over UnhealthyTriggeringSessionId for the resume target.
 			attemptSessionIdBox.Value = session.SessionId;
 			await using var _sessionDispose = session;
+			if (_capturePlans && session is ICopilotPlanSession planSession)
+			{
+				writer.TryWrite(new AgentEvent { Type = AgentEventType.PlanCaptureStarted });
+				planMonitor = new AgentPlanMonitor(planSession.ReadPlansAsync,
+					plan => writer.TryWrite(new AgentEvent { Type = AgentEventType.PlanUpdated, Plan = plan }), _logger,
+					message => writer.TryWrite(new AgentEvent { Type = AgentEventType.Warning, DiagnosticType = "plan_capture_failed", Content = message }));
+			}
+			await using var _planDispose = planMonitor;
 
 			// Headless transport and automatic permissions do not select non-interactive
 			// model guidance. Apply the actual interaction setting on create AND resume.

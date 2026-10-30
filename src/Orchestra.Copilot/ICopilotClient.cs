@@ -109,7 +109,12 @@ internal sealed class CopilotSdkClientAdapter : ICopilotClient
 		=> _ownsClient ? _client.DisposeAsync() : ValueTask.CompletedTask;
 }
 
-internal sealed class CopilotSdkSessionAdapter : ICopilotSession
+internal interface ICopilotPlanSession
+{
+	Task<IReadOnlyList<Orchestra.Engine.AgentPlanSnapshot>> ReadPlansAsync(CancellationToken cancellationToken);
+}
+
+internal sealed class CopilotSdkSessionAdapter : ICopilotSession, ICopilotPlanSession
 {
 	private readonly CopilotSession _session;
 
@@ -127,6 +132,34 @@ internal sealed class CopilotSdkSessionAdapter : ICopilotSession
 	// SandboxConfig + OptionsApi are evaluation-only SDK APIs (GHCP001); the options-update RPC
 	// is the supported way to patch a live session's sandbox, so suppress narrowly here.
 #pragma warning disable GHCP001
+	public async Task<IReadOnlyList<Orchestra.Engine.AgentPlanSnapshot>> ReadPlansAsync(CancellationToken cancellationToken)
+	{
+		var plans = new List<Orchestra.Engine.AgentPlanSnapshot>();
+		var tasks = new Orchestra.Engine.AgentPlanSnapshot { Provider = "copilot", SessionId = SessionId, Source = "sql-todos", Title = "Session tasks", Shared = true };
+		try
+		{
+			var result = await _session.Rpc.Plan.ReadSqlTodosWithDependenciesAsync(cancellationToken).ConfigureAwait(false);
+			plans.Add(tasks with
+			{
+				Tasks = result.Rows.Select(row => new Orchestra.Engine.AgentPlanTask
+				{
+					Id = row.Id, Title = row.Title ?? row.Description ?? "Untitled task", Description = row.Description,
+					Status = Orchestra.Engine.AgentPlanTask.NormalizeStatus(row.Status), RawStatus = row.Status, CreatedAt = row.CreatedAt,
+				}).ToArray(),
+				Dependencies = result.Dependencies.Select(edge => new Orchestra.Engine.AgentPlanDependency(edge.TodoId, edge.DependsOn)).ToArray(),
+			});
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException) { plans.Add(tasks with { CaptureError = ex.Message }); }
+		var document = tasks with { Source = "plan-document", Title = "Session plan" };
+		try
+		{
+			var result = await _session.Rpc.Plan.ReadAsync(cancellationToken).ConfigureAwait(false);
+			plans.Add(document with { Markdown = result.Exists ? result.Content : null, DocumentPath = result.Path });
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException) { plans.Add(document with { CaptureError = ex.Message }); }
+		return plans;
+	}
+
 	public async Task ConfigureExecutionAsync(Orchestra.Engine.AgentExecutionPolicy policy, CancellationToken cancellationToken)
 	{
 		policy.Validate();
