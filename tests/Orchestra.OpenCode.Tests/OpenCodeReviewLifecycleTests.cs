@@ -8,6 +8,34 @@ namespace Orchestra.OpenCode.Tests;
 
 public class OpenCodeReviewLifecycleTests
 {
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task EngineToolCatalog_MustBeReadyBeforeSubmittingTheFirstPrompt(bool fails)
+	{
+		var client = new Client { BlockEngineMcp = true, FailEngineMcp = fails };
+		await using var builder = new OpenCodeAgentBuilder(NullLoggerFactory.Instance,
+			new OpenCodeAgentPoolOptions { ServerUrl = "http://test", DefaultMinInstances = 0, SwapBudgetPerStep = 0, EngineToolBridgeEnabled = true }, new Factory(client));
+		await using var scope = await builder.CreateRunScopeAsync();
+		var agent = await builder.BuildAgentAsync(new AgentBuildConfig { Model = "model" });
+		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+		var task = agent.SendAsync("go", timeout.Token);
+		await client.EngineMcpWaitStarted.Task.WaitAsync(timeout.Token);
+		client.AdmissionStarted.Task.IsCompleted.Should().BeFalse();
+		client.ReleaseEngineMcp.TrySetResult();
+		await Drain(task).WaitAsync(timeout.Token);
+		if (fails)
+		{
+			await ((Func<Task>)(async () => await task.GetResultAsync())).Should().ThrowAsync<OpenCodeSessionFailedException>().WithMessage("*engine-tool MCP server failed to load*");
+			client.AdmissionStarted.Task.IsCompleted.Should().BeFalse();
+		}
+		else
+		{
+			(await task.GetResultAsync()).Content.Should().Be("ok");
+			client.AdmissionStarted.Task.IsCompleted.Should().BeTrue();
+		}
+	}
+
 	[Fact]
 	public async Task ChildPlanOwnershipLookup_DoesNotBlockTheTransportEventReader()
 	{
@@ -190,7 +218,20 @@ public class OpenCodeReviewLifecycleTests
 		public IReadOnlyList<OpenCodeServerEvent> Events { get; init; } = [];
 		public Task<JsonElement> GetFormAsync(string session, string form, CancellationToken token) => throw new NotSupportedException();
 		public Task ReplyFormAsync(string session, string form, object? answer, CancellationToken token) => throw new NotSupportedException();
-		public Task<IReadOnlyList<string>> WaitForMcpNamesAsync(IReadOnlyCollection<string> required, TimeSpan timeout, CancellationToken token) => ListMcpNamesAsync(token);
+		public async Task<IReadOnlyList<string>> WaitForMcpNamesAsync(IReadOnlyCollection<string> required, TimeSpan timeout, CancellationToken token)
+		{
+			if (BlockEngineMcp && required.Contains("orchestra-engine-tools"))
+			{
+				EngineMcpWaitStarted.TrySetResult();
+				await ReleaseEngineMcp.Task.WaitAsync(token);
+				return FailEngineMcp ? [] : ["orchestra-engine-tools"];
+			}
+			return await ListMcpNamesAsync(token);
+		}
+		public bool BlockEngineMcp { get; init; }
+		public bool FailEngineMcp { get; init; }
+		public TaskCompletionSource EngineMcpWaitStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+		public TaskCompletionSource ReleaseEngineMcp { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public string BaseUrl => "http://test";
 		public bool BlockAdmission { get; init; }
 		public bool FailSubscription { get; init; }

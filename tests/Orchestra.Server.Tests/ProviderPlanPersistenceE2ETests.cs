@@ -119,7 +119,15 @@ public sealed class ProviderPlanPersistenceE2ETests
 				latest.Plan.Tasks.Should().HaveCount(2).And.OnlyContain(t => t.Status == "completed");
 			}
 		}
-		finally { Directory.Delete(root, true); }
+		finally
+		{
+			// Windows can briefly retain a terminated shell's working-directory handle.
+			for (var attempt = 0; Directory.Exists(root); attempt++)
+			{
+				try { Directory.Delete(root, true); }
+				catch (IOException) when (attempt < 30) { await Task.Delay(100); }
+			}
+		}
 	}
 }
 

@@ -94,7 +94,7 @@ internal sealed partial class OpenCodeAgent : IAgent
 		// Each step uses a configured primary agent on a dedicated, capacity-bounded server.
 		// Its config stays isolated from concurrent steps; its Location controls native tools.
 		var systemPrompt = string.Join("\n\n", new[] { _systemPrompt, AgentExecutionGuidance.Interaction(_humanInput),
-			AgentExecutionGuidance.StructuredResponse(_config.ResponseSchema), continuation.Instructions }.Where(s => !string.IsNullOrWhiteSpace(s)));
+			AgentExecutionGuidance.StructuredResponse(_config.ResponseSchema), continuation.Instructions, planTool?.Instructions }.Where(s => !string.IsNullOrWhiteSpace(s)));
 		var excludedTools = _humanInput ? _excludedTools : [.. _excludedTools, "question"];
 		var plan = OpenCodeConfigBuilder.Build(modelRef, systemPrompt, _reasoningLevel, _subagents, _mcps, excludedTools, _options.FallbackProvider, _permissionPolicy);
 		var stepConfig = new Dictionary<string, object>(plan.Config);
@@ -378,7 +378,12 @@ internal sealed partial class OpenCodeAgent : IAgent
 		{
 			// Idempotent by name: OpenCode overwrites an existing entry, so re-registering each
 			// step is harmless and keeps a pooled worker reusable across steps.
-			await client.AddMcpAsync("orchestra-engine-tools", new { type = "remote", url, disabled = false, oauth = false, codemode = false }, cancellationToken).ConfigureAwait(false);
+			await client.AddMcpAsync(OpenCodeEngineToolBridge.ServerName, new { type = "remote", url, disabled = false, oauth = false, codemode = false }, cancellationToken).ConfigureAwait(false);
+			// Registration admits configuration before OpenCode has necessarily loaded the
+			// remote tool catalog. Prompting during that window silently omits engine tools.
+			var connected = await client.WaitForMcpNamesAsync([OpenCodeEngineToolBridge.ServerName], _options.StartupTimeout, cancellationToken).ConfigureAwait(false);
+			if (!connected.Contains(OpenCodeEngineToolBridge.ServerName, StringComparer.Ordinal))
+				throw new OpenCodeSessionFailedException("The required Orchestra engine-tool MCP server failed to load. No prompt was submitted.");
 		}
 		catch (Exception ex)
 		{

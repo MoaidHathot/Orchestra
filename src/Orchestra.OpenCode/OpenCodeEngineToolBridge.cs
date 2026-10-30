@@ -16,6 +16,7 @@ namespace Orchestra.OpenCode;
 /// </summary>
 internal sealed class OpenCodeEngineToolBridge : IAsyncDisposable
 {
+	public const string ServerName = "orchestra-engine-tools";
 	private readonly WebApplication _app;
 
 	private OpenCodeEngineToolBridge(WebApplication app, string mcpUrl)
@@ -45,7 +46,7 @@ internal sealed class OpenCodeEngineToolBridge : IAsyncDisposable
 		builder.Services.AddSingleton(loggerFactory);
 
 		builder.Services
-			.AddMcpServer(o => o.ServerInfo = new() { Name = "orchestra-engine-tools", Version = "1.0.0" })
+			.AddMcpServer(o => o.ServerInfo = new() { Name = ServerName, Version = "1.0.0" })
 			.WithHttpTransport()
 			.WithTools(tools);
 
