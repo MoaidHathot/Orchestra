@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Orchestra.Engine;
 
 namespace Orchestra.Host.Api;
 
@@ -19,6 +20,7 @@ namespace Orchestra.Host.Api;
 public sealed record StepStateSnapshot
 {
 	public required string StepName { get; init; }
+	public IReadOnlyList<AgentPlanRevision> Plans { get; init; } = [];
 
 	/// <summary>
 	/// Lifecycle status, lower-case strings matching what the Portal already maps in

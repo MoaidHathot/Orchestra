@@ -343,6 +343,8 @@ public static partial class ExecutionApi
 			await WriteSnapshotJsonAsync(httpContext, info, jsonOptions);
 		});
 
+		endpoints.MapPlanHistoryEndpoints(jsonOptions);
+
 		return endpoints;
 	}
 

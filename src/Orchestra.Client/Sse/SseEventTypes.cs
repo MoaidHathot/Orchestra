@@ -25,6 +25,7 @@ public static class SseEventTypes
 	public const string StepSkipped = "step-skipped";
 	public const string StepStatusSet = "step-status-set";
 	public const string StepRetry = "step-retry";
+	public const string StepPlanUpdated = "step-plan-updated";
 
 	// HITL
 	public const string AwaitingInput = "awaiting-input";

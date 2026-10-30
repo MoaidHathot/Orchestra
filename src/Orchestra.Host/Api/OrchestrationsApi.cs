@@ -107,6 +107,7 @@ public static class OrchestrationsApi
 								humanInput = ps?.HumanInput,
 								responseSchema = ps?.ResponseSchema,
 								executionPolicy = ps?.ExecutionPolicy is { } policy ? new { mode = policy.Mode.ToString().ToLowerInvariant(), maxContinues = policy.MaxContinues } : null,
+								capturePlans = ps?.CapturePlans,
 								workingDirectory = ps?.WorkingDirectory ?? cs?.WorkingDirectory,
 								// Http step fields
 								method = hs?.Method,
@@ -253,6 +254,7 @@ public static class OrchestrationsApi
 					humanInput = ps?.HumanInput,
 					responseSchema = ps?.ResponseSchema,
 					executionPolicy = ps?.ExecutionPolicy is { } policy ? new { mode = policy.Mode.ToString().ToLowerInvariant(), maxContinues = policy.MaxContinues } : null,
+					capturePlans = ps?.CapturePlans,
 					// Http step fields
 					method = hs?.Method,
 					url = hs?.Url,

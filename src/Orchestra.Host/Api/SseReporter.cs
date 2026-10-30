@@ -88,6 +88,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		"status-changed",
 		"step-started",
 		"step-process",
+		"step-plan-updated",
 		"step-completed",
 		"step-error",
 		"step-cancelled",
@@ -608,6 +609,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		Write("step-trace", new
 		{
 			stepName,
+			plans = trace.Plans,
 			parameters = trace.Parameters.Count > 0 ? trace.Parameters : null,
 			dependencyOutputs = trace.DependencyOutputs.Count > 0 ? trace.DependencyOutputs : null,
 			rawDependencyOutputs = trace.RawDependencyOutputs.Count > 0 ? trace.RawDependencyOutputs : null,
@@ -664,6 +666,9 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 			reasoningLevel = mismatch.ReasoningLevel,
 		});
 	}
+
+	public void ReportPlanUpdated(AgentPlanRevision revision)
+		=> Write("step-plan-updated", new { stepName = revision.StepName, revision });
 
 	public void ReportStepOutput(string stepName, string content)
 	{
@@ -1301,6 +1306,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 						if (stepName is null) break;
 						var state = GetOrAddStep(stepName);
 						state.Status = "running";
+						state.Plans.Clear();
 						state.StartedAt ??= TryGetDateTime(doc.RootElement, "startedAt") ?? DateTimeOffset.UtcNow;
 					}
 					break;
@@ -1371,6 +1377,23 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 						if (stepName is null) break;
 						var state = GetOrAddStep(stepName);
 						state.RetryCount++;
+						state.Plans.Clear();
+					}
+					break;
+
+				case "step-plan-updated":
+					{
+						using var doc = JsonDocument.Parse(json);
+						var revision = doc.RootElement.GetProperty("revision").Deserialize<AgentPlanRevision>(s_jsonOptions);
+						if (revision is null) break;
+						var state = GetOrAddStep(revision.StepName);
+						if (state.Plans.Values.Any(p => p.StepExecutionId != revision.StepExecutionId))
+						{
+							if (state.Plans.Values.Any(p => p.CapturedAt > revision.CapturedAt)) break;
+							state.Plans.Clear();
+						}
+						if (!state.Plans.TryGetValue(revision.StreamId, out var existing) || existing.Revision < revision.Revision)
+							state.Plans[revision.StreamId] = revision;
 					}
 					break;
 
@@ -1581,6 +1604,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 
 	private sealed class MutableStepState
 	{
+		public Dictionary<string, AgentPlanRevision> Plans { get; } = new(StringComparer.Ordinal);
 		public required string StepName { get; init; }
 		public string Status { get; set; } = "pending";
 		public DateTimeOffset? StartedAt { get; set; }
@@ -1603,6 +1627,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		public StepStateSnapshot ToImmutable() => new()
 		{
 			StepName = StepName,
+			Plans = Plans.Values.ToArray(),
 			Status = Status,
 			StartedAt = StartedAt,
 			CompletedAt = CompletedAt,
