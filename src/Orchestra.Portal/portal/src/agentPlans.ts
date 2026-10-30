@@ -6,7 +6,7 @@ export const planRevisionKey = (revision: AgentPlanRevision): string =>
 /** Keep current-step observations authoritative when older SSE replay follows a snapshot. */
 export function mergePlanRevision(current: AgentPlanRevision[], incoming: AgentPlanRevision): AgentPlanRevision[] {
   const differentAttempt = current.some(p => p.stepExecutionId !== incoming.stepExecutionId);
-  if (differentAttempt && current.some(p => p.capturedAt > incoming.capturedAt)) return current;
+  if (differentAttempt && current.some(p => Date.parse(p.capturedAt) > Date.parse(incoming.capturedAt))) return current;
   const plans = differentAttempt ? [] : current;
   const existing = plans.find(p => p.streamId === incoming.streamId);
   if (existing && existing.revision >= incoming.revision) return current;
@@ -16,5 +16,5 @@ export function mergePlanRevision(current: AgentPlanRevision[], incoming: AgentP
 export function mergePlanHistory(current: AgentPlanRevision[], incoming: AgentPlanRevision[]): AgentPlanRevision[] {
   const revisions = new Map(current.map(p => [planRevisionKey(p), p]));
   incoming.forEach(p => revisions.set(planRevisionKey(p), p));
-  return [...revisions.values()].sort((a, b) => b.capturedAt.localeCompare(a.capturedAt));
+  return [...revisions.values()].sort((a, b) => Date.parse(b.capturedAt) - Date.parse(a.capturedAt));
 }

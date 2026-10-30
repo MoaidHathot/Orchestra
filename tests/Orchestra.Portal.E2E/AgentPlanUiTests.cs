@@ -19,20 +19,33 @@ public class AgentPlanUiTests
 	public async Task LivePlans_ReconnectFromSnapshot_AndReadDurableRevisionHistory()
 	{
 		var root = new DirectoryInfo(AppContext.BaseDirectory);
-		while (root is not null && !File.Exists(Path.Combine(root.FullName, "OrchestrationEngine.slnx"))) root = root.Parent;
+		while (root is not null && !File.Exists(Path.Combine(root.FullName, "OrchestrationEngine.slnx")))
+			root = root.Parent;
 		Assert.NotNull(root);
-		var data = Directory.CreateTempSubdirectory("orchestra-plan-browser-").FullName;
-		var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-		using var store = new FileSystemRunStore(data);
+		using var data = new TestDirectory();
+		var json = new JsonSerializerOptions(Orchestra.Host.Extensions.EndpointRouteBuilderExtensions.DefaultJsonOptions);
+		using var store = new FileSystemRunStore(data.Path);
 		using var reporter = new SseReporter(null, new SseOptions { MaxAccumulatedEvents = 5 }, Microsoft.Extensions.Logging.Abstractions.NullLogger<SseReporter>.Instance);
 		var run = new PlanRunIdentity("browser-run", "plan-browser", "1", "manual", DateTimeOffset.UtcNow);
 		reporter.SetExecutionContext(run.RunId, "plan-browser", "plan-browser", run.StartedAt, "manual", []);
 		reporter.ReportStepStarted("work");
 		AgentPlanRevision Revision(long number, string status) => new()
 		{
-			Run = run, StepName = "work", StepExecutionId = "attempt", StreamId = "tasks", Revision = number, CapturedAt = DateTimeOffset.UtcNow,
-			Plan = new() { Provider = "test", SessionId = "session", Source = "tasks", Title = "Verification plan",
-				Tasks = [new() { Id = "verify", Title = "Verify behavior", Status = status }], Markdown = "## Validation\nRun the checks." },
+			Run = run,
+			StepName = "work",
+			StepExecutionId = "attempt",
+			StreamId = "tasks",
+			Revision = number,
+			CapturedAt = DateTimeOffset.UtcNow,
+			Plan = new()
+			{
+				Provider = "test",
+				SessionId = "session",
+				Source = "tasks",
+				Title = "Verification plan",
+				Tasks = [new() { Id = "verify", Title = "Verify behavior", Status = status }],
+				Markdown = "## Validation\nRun the checks."
+			},
 		};
 		var first = Revision(1, "in_progress");
 		await store.AppendPlanAsync(first);
@@ -40,13 +53,15 @@ public class AgentPlanUiTests
 		var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 		{
 			ContentRootPath = root!.FullName,
-			WebRootPath = Path.Combine(root.FullName, "src", "Orchestra.Portal", "wwwroot"), EnvironmentName = "Testing",
+			WebRootPath = Path.Combine(root.FullName, "src", "Orchestra.Portal", "wwwroot"),
+			EnvironmentName = "Testing",
 		});
 		builder.Logging.ClearProviders();
 		builder.Services.AddSingleton<IRunStore>(store);
 		await using var app = builder.Build();
 		app.Urls.Add("http://127.0.0.1:0");
-		app.UseDefaultFiles(); app.UseStaticFiles();
+		app.UseDefaultFiles();
+		app.UseStaticFiles();
 		var orchestration = new { id = "plan-browser", name = "plan-browser", description = "Plan browser integration", version = "1", steps = new[] { new { name = "work", type = "Prompt", model = "test" } } };
 		app.MapGet("/api/orchestrations", () => Results.Json(new { orchestrations = new[] { orchestration } }));
 		app.MapGet("/api/orchestrations/plan-browser", () => Results.Json(orchestration));
@@ -65,8 +80,13 @@ public class AgentPlanUiTests
 			try
 			{
 				await Send("execution-snapshot", JsonSerializer.Serialize(subscription.Snapshot, json), subscription.Snapshot.LastEventSequence);
-				foreach (var evt in subscription.Replay) await Send(evt.Type, evt.Data, evt.Sequence);
-				if (subscription.Future is not null) await foreach (var evt in subscription.Future.ReadAllAsync(context.RequestAborted)) await Send(evt.Type, evt.Data, evt.Sequence);
+				foreach (var evt in subscription.Replay)
+					await Send(evt.Type, evt.Data, evt.Sequence);
+				if (subscription.Future is not null)
+				{
+					await foreach (var evt in subscription.Future.ReadAllAsync(context.RequestAborted))
+						await Send(evt.Type, evt.Data, evt.Sequence);
+				}
 			}
 			catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested) { }
 			finally { reporter.Unsubscribe(subscription.Future); }
@@ -79,30 +99,54 @@ public class AgentPlanUiTests
 			using var playwright = await Microsoft.Playwright.Playwright.CreateAsync();
 			await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true, Channel = Environment.GetEnvironmentVariable("ORCHESTRA_PLAYWRIGHT_CHANNEL") });
 			var page = await browser.NewPageAsync();
-			await page.GotoAsync(app.Urls.Single());
-			await page.Locator(".orch-card").Filter(new() { HasText = "plan-browser" }).First.ClickAsync();
-			await page.Locator(".node").Filter(new() { HasText = "work" }).First.ClickAsync();
-			await Assertions.Expect(page.GetByText("0 of 1 tasks completed")).ToBeVisibleAsync();
-			await Assertions.Expect(page.GetByRole(AriaRole.Checkbox, new() { Name = "Verify behavior" })).ToBeDisabledAsync();
-			var final = Revision(2, "completed");
-			await store.AppendPlanAsync(final); reporter.ReportPlanUpdated(final);
-			await Assertions.Expect(page.GetByText("1 of 1 tasks completed")).ToBeVisibleAsync();
-			// Evict plan events and reconnect through the browser; state must come from snapshot.
-			for (var i = 0; i < 15; i++) reporter.ReportContentDelta("work", "progress ");
-			await page.ReloadAsync();
-			await page.Locator(".orch-card").Filter(new() { HasText = "plan-browser" }).First.ClickAsync();
-			await page.Locator(".node").Filter(new() { HasText = "work" }).First.ClickAsync();
-			await Assertions.Expect(page.GetByText("1 of 1 tasks completed")).ToBeVisibleAsync();
-			await page.GetByRole(AriaRole.Button, new() { Name = "Revision history", Exact = true }).ClickAsync();
-			await page.GetByLabel("Plan revision").SelectOptionAsync("attempt:tasks:1");
-			await Assertions.Expect(page.GetByText("0 of 1 tasks completed")).ToBeVisibleAsync();
-			if (Environment.GetEnvironmentVariable("ORCHESTRA_PLAN_BROWSER_EVIDENCE") is { Length: > 0 } evidence)
+			var errors = new System.Collections.Concurrent.ConcurrentQueue<string>();
+			page.PageError += (_, error) => errors.Enqueue(error);
+			try
 			{
-				Directory.CreateDirectory(evidence);
-				await page.ScreenshotAsync(new() { Path = Path.Combine(evidence, "plan-history.png"), FullPage = true });
+				await page.GotoAsync(app.Urls.Single());
+				await page.Locator(".orch-card").Filter(new() { HasText = run.RunId }).ClickAsync();
+				await page.Locator(".node").Filter(new() { HasText = "work" }).First.ClickAsync();
+				await Assertions.Expect(page.GetByText("0 of 1 tasks completed")).ToBeVisibleAsync();
+				await Assertions.Expect(page.GetByRole(AriaRole.Checkbox, new() { Name = "Verify behavior" })).ToBeDisabledAsync();
+				var final = Revision(2, "completed");
+				await store.AppendPlanAsync(final);
+				reporter.ReportPlanUpdated(final);
+				await Assertions.Expect(page.GetByText("1 of 1 tasks completed")).ToBeVisibleAsync();
+				// Evict plan events and reconnect through the browser; state must come from snapshot.
+				for (var i = 0; i < 15; i++)
+					reporter.ReportContentDelta("work", "progress ");
+				await page.ReloadAsync();
+				await page.Locator(".orch-card").Filter(new() { HasText = run.RunId }).ClickAsync();
+				await page.Locator(".node").Filter(new() { HasText = "work" }).First.ClickAsync();
+				await Assertions.Expect(page.GetByText("1 of 1 tasks completed")).ToBeVisibleAsync();
+				await page.GetByRole(AriaRole.Button, new() { Name = "Revision history", Exact = true }).ClickAsync();
+				await page.GetByLabel("Plan revision").SelectOptionAsync("attempt:tasks:1");
+				await Assertions.Expect(page.GetByRole(AriaRole.Button, new() { Name = "Load more revisions" })).ToHaveCountAsync(0);
+				await Assertions.Expect(page.GetByText("0 of 1 tasks completed")).ToBeVisibleAsync();
+				if (Environment.GetEnvironmentVariable("ORCHESTRA_PLAN_BROWSER_EVIDENCE") is { Length: > 0 } evidence)
+				{
+					Directory.CreateDirectory(evidence);
+					await page.ScreenshotAsync(new() { Path = Path.Combine(evidence, "plan-history.png"), FullPage = true });
+				}
+			}
+			catch
+			{
+				if (Environment.GetEnvironmentVariable("ORCHESTRA_PLAN_BROWSER_EVIDENCE") is { Length: > 0 } evidence)
+				{
+					Directory.CreateDirectory(evidence);
+					await page.ScreenshotAsync(new() { Path = Path.Combine(evidence, "failure.png"), FullPage = true });
+					await File.WriteAllTextAsync(Path.Combine(evidence, "failure.html"), await page.ContentAsync());
+					await File.WriteAllTextAsync(Path.Combine(evidence, "failure-state.json"), JsonSerializer.Serialize(new { errors, snapshot = reporter.GetCurrentSnapshot() }, json));
+				}
+				throw;
 			}
 		}
 		finally { await app.StopAsync(); }
-		// The fixture store is disposed by the using scope; its isolated files can be retained as evidence.
+	}
+
+	private sealed class TestDirectory : IDisposable
+	{
+		public string Path { get; } = Directory.CreateTempSubdirectory("orchestra-plan-browser-").FullName;
+		public void Dispose() => Directory.Delete(Path, true);
 	}
 }

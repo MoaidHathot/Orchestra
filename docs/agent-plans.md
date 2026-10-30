@@ -36,14 +36,19 @@ unavailable. History contains observed snapshots, not every underlying database 
 Successful recognizable native `todowrite` calls are captured when the runtime provides that
 tool. Failed calls do not publish task state. Durable message reconciliation repairs missed
 root-session observations without replaying older states over the newest one. Child-session
-ownership is checked before accepting native child plans.
+ownership is checked before accepting native child plans; those checks run away from the
+transport reader. Current durable messages are captured on resume and before teardown,
+including cancellation, for the root session and known plan-producing child sessions.
 
 Installed **2.0.26** did not expose `todowrite` in live probes, even with the current docs'
 `experimental.todo` flag and a Code Mode catalog search. Orchestra therefore also provides
-**`orchestra_update_plan`** when capture is enabled. It publishes a complete task list and
-optional Markdown, is labelled `orchestra-plan-tool`, and has a shared step scope. It is not
+**`orchestra_update_plan`** when capture and the engine-tool bridge are enabled (the defaults).
+It publishes a complete task list and optional Markdown, is labelled `orchestra-plan-tool`,
+and has a shared step scope. It is not
 presented as a native OpenCode plan API. Markdown survives same-session worker recovery and
 resets on a new session. No structured plan is inferred from ordinary prose or broad file scans.
+The provider waits for the internal MCP catalog and supplies its exact wire tool name in the
+agent's instructions, so authors can use the simpler planning request shown in the example.
 
 ## Portal
 
@@ -57,6 +62,8 @@ Select a Prompt step to see its Plan panel:
 Checkboxes are disabled and there is no plan-edit API. Reconnecting restores current plans
 from the authoritative execution snapshot, even after SSE buffer eviction. Historical runs
 read latest plans from saved traces. Older runs without plans remain readable.
+Plans restored from a prior run use their recorded run identity when opening history. Empty
+revisions remain selectable, so clearing a task list or deleting a document is visible.
 
 ## Saved data and APIs
 
@@ -80,6 +87,9 @@ Storage/read errors emit diagnostics and preserve the last known plan where avai
 A newline commits a journal record. Readers ignore an interrupted final record, and the
 next append removes that partial tail. A fresh store instance can read committed history
 after restart. Journal files live with their run so normal run deletion/retention owns them.
+Bundle exports include the journal alongside `run.json` and the other run artifacts.
+On cancellation, plan-producing steps get a bounded final-capture grace period. Uncooperative
+providers or storage failures produce diagnostics; already-observed plans remain available.
 
 ## References
 

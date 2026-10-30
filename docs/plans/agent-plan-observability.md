@@ -69,4 +69,12 @@ plan panel. Plan progress is observational and independent of the orchestration 
 - Integration testing found an existing cancellation path that discarded collected traces.
   It now preserves partial traces and settles plan-producing steps before terminal snapshots;
   success, failure, and cancellation persistence tests pass.
-- Final whole-suite verification and cleanup are in progress.
+- Final review also fixed restored-plan snapshot hydration, terminal history cursors, native
+  tool-payload handling, OpenCode engine-tool readiness/invocation guidance, journal exports,
+  and an existing concurrent-result trace projection race. Regression tests reproduce the
+  relevant failures and cover the corrected behavior.
+- All milestones are complete. Final verification passed **5,090 backend tests**, **481 Portal
+  tests**, **17 live/provider/browser checks**, TypeScript checking, production asset building,
+  and parser/schema validation of the example. See
+  [the verification record](../research/agent-plan-observability-verification.md) and
+  `artifacts/agent-plans/final/verification-summary.json`.

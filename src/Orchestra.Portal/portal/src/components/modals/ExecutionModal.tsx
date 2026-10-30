@@ -1743,7 +1743,7 @@ export default function ExecutionModal({
                     </div>
 
                     {/* Step Info: Type, Model, MCPs */}
-                    {(selectedStepData || stepModelInfo || selectedStepSavedFiles.length > 0) && (
+                    {(selectedStepData || stepModelInfo || selectedStepSavedFiles.length > 0 || !!selectedStepTrace?.plans?.length) && (
                       <div
                         className="step-info-section"
                         style={{

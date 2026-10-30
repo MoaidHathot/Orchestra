@@ -67,6 +67,36 @@ describe('AgentPlanPanel', () => {
     expect(signal.aborted).toBe(true);
   });
 
+  it('reads a restored loop plan from its captured run and original step name', async () => {
+    const empty = revision(2); empty.plan.tasks = [];
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ items: [empty], nextCursor: null, isPartial: false }) });
+    vi.stubGlobal('fetch', fetcher);
+    render(<AgentPlanPanel runId="retried-run" stepName="step:iteration-1" plans={[empty]} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Revision history' }));
+    await screen.findByRole('option', { name: /revision 2/ });
+    expect(fetcher.mock.calls[0][0]).toContain('/api/execution/run/plans?stepName=step&');
+    fireEvent.change(screen.getByLabelText('Plan revision'), { target: { value: planRevisionKey(empty) } });
+    expect(screen.getByText('This revision contains no tasks or plan text.')).toBeInTheDocument();
+  });
+
+  it('resets history and aborts the old request when switching runs', () => {
+    const fetcher = vi.fn(() => new Promise(() => {}));
+    vi.stubGlobal('fetch', fetcher);
+    const view = render(<AgentPlanPanel runId="one" stepName="step" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Revision history' }));
+    const signal = (fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].signal!;
+    view.rerender(<AgentPlanPanel runId="two" stepName="step" />);
+    expect(signal.aborted).toBe(true);
+    expect(screen.queryByLabelText('Plan revision')).not.toBeInTheDocument();
+  });
+
+  it('shows the API diagnostic when durable history is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ title: 'Unavailable', detail: 'This run store has no plan history.' }), { status: 501 })));
+    render(<AgentPlanPanel runId="run" stepName="step" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Revision history' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('This run store has no plan history.');
+  });
+
   it('preserves snapshot state when stale replay or a previous attempt arrives', () => {
     const current = [revision(3, 'completed')];
     expect(mergePlanRevision(current, revision(1))).toBe(current);
