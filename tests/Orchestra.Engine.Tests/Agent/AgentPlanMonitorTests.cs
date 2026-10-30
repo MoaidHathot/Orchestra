@@ -6,6 +6,23 @@ namespace Orchestra.Engine.Tests.Agent;
 public class AgentPlanMonitorTests
 {
 	[Fact]
+	public async Task NonCooperativeRead_IsBoundedWithoutStartingOverlappingRpcs()
+	{
+		var pending = new TaskCompletionSource<IReadOnlyList<AgentPlanSnapshot>>(TaskCreationOptions.RunContinuationsAsynchronously);
+		var timedOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var reads = 0;
+		var observed = new List<AgentPlanSnapshot>();
+		var monitor = new AgentPlanMonitor(_ => { Interlocked.Increment(ref reads); return pending.Task; },
+			observed.Add, NullLogger.Instance, _ => timedOut.TrySetResult(), TimeSpan.FromMilliseconds(50));
+		await timedOut.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		monitor.RequestRefresh();
+		await monitor.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+		reads.Should().Be(1);
+		observed.Should().BeEmpty();
+		pending.TrySetResult([]);
+	}
+
+	[Fact]
 	public async Task Refreshes_AreSerializedCoalescedAndFinalizedBeforeDisposal()
 	{
 		var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -21,14 +38,17 @@ public class AgentPlanMonitorTests
 			maximum = Math.Max(maximum, Interlocked.Increment(ref active));
 			try
 			{
-				if (count == 1) { entered.TrySetResult(); await release.Task.WaitAsync(token); }
-				if (count == 2) refreshed.TrySetResult();
+				if (count == 1)
+				{ entered.TrySetResult(); await release.Task.WaitAsync(token); }
+				if (count == 2)
+					refreshed.TrySetResult();
 				return [new AgentPlanSnapshot { Provider = "test", SessionId = "session", Source = "tasks", Title = "read " + count }];
 			}
 			finally { Interlocked.Decrement(ref active); }
 		}, observed.Enqueue, NullLogger.Instance);
 		await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-		for (var i = 0; i < 20; i++) monitor.RequestRefresh();
+		for (var i = 0; i < 20; i++)
+			monitor.RequestRefresh();
 		reads.Should().Be(1);
 		release.TrySetResult();
 		await refreshed.Task.WaitAsync(TimeSpan.FromSeconds(5));

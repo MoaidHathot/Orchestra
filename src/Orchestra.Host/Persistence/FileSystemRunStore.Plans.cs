@@ -23,14 +23,9 @@ public partial class FileSystemRunStore : IPlanHistoryStore
 			await using var stream = new FileStream(Path.Combine(directory, PlanHistoryFileName), FileMode.OpenOrCreate,
 				FileAccess.ReadWrite, FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough);
 			// A newline commits a record. Discard an interrupted final write before appending.
-			var end = stream.Length;
-			while (end > 0)
-			{
-				stream.Position = end - 1;
-				if (stream.ReadByte() == '\n') break;
-				end--;
-			}
-			if (end != stream.Length) stream.SetLength(end);
+			var end = await CommittedLengthAsync(stream, stream.Length, cancellationToken).ConfigureAwait(false);
+			if (end != stream.Length)
+				stream.SetLength(end);
 			stream.Position = end;
 			var bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(revision, PlanJson) + "\n");
 			await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
@@ -42,15 +37,26 @@ public partial class FileSystemRunStore : IPlanHistoryStore
 	public async Task<PlanHistoryPage> ReadPlansAsync(string runId, string? stepName = null, long after = 0, int limit = 100, CancellationToken cancellationToken = default)
 	{
 		ValidatePlanRunId(runId);
-		if (after < 0 || limit is < 1 or > 1000) throw new ArgumentOutOfRangeException(nameof(limit), "Plan history requires after >= 0 and limit between 1 and 1000.");
-		var directories = Directory.EnumerateDirectories(_rootPath)
-			.Where(d => !Path.GetFileName(d).StartsWith('.'))
-			.SelectMany(d => Directory.EnumerateDirectories(d))
-			.Where(d => Path.GetFileName(d).EndsWith("_" + runId, StringComparison.Ordinal)).Take(2).ToArray();
-		if (directories.Length == 0) return new([], null);
-		if (directories.Length > 1) throw new InvalidOperationException("The run ID matches more than one stored execution.");
+		if (after < 0 || limit is < 1 or > 1000)
+			throw new ArgumentOutOfRangeException(nameof(limit), "Plan history requires after >= 0 and limit between 1 and 1000.");
+		var directories = FindPlanDirectories(runId, cancellationToken);
+		if (directories.Length > 1)
+		{
+			// An execution ID may itself contain underscores. Folder suffixes are only a
+			// lookup hint; the journal's stored identity disambiguates e.g. run and other_run.
+			var matching = new List<string>();
+			foreach (var directory in directories)
+				if (await JournalBelongsToRunAsync(Path.Combine(directory, PlanHistoryFileName), runId, cancellationToken).ConfigureAwait(false))
+					matching.Add(directory);
+			directories = matching.ToArray();
+		}
+		if (directories.Length == 0)
+			return new([], null);
+		if (directories.Length > 1)
+			throw new InvalidOperationException("The run ID matches more than one stored execution.");
 		var path = Path.Combine(directories[0], PlanHistoryFileName);
-		if (!File.Exists(path)) return new([], null);
+		if (!File.Exists(path))
+			return new([], null);
 		var items = new List<AgentPlanRevision>();
 		var partial = false;
 		try
@@ -58,30 +64,34 @@ public partial class FileSystemRunStore : IPlanHistoryStore
 			await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
 			// Read a fixed committed prefix; a concurrent append never produces a torn JSON row.
 			var length = stream.Length;
-			if (length == 0) return new([], null);
-			stream.Position = length - 1;
-			var terminated = stream.ReadByte() == '\n';
+			if (length == 0)
+				return new([], null);
+			var committedLength = await CommittedLengthAsync(stream, length, cancellationToken).ConfigureAwait(false);
+			partial = committedLength != length;
 			stream.Position = 0;
-			using var prefix = new PlanHistoryPrefix(stream, length);
+			using var prefix = new PlanHistoryPrefix(stream, committedLength);
 			using var reader = new StreamReader(prefix, Encoding.UTF8);
 			long cursor = 0;
-			var nextLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
-			while (nextLine is { } line)
+			while (await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false) is { } line)
 			{
-				nextLine = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+				cancellationToken.ThrowIfCancellationRequested();
 				cursor++;
-				if (nextLine is null && !terminated) { partial = true; break; }
-				if (cursor <= after) continue;
+				if (cursor <= after)
+					continue;
 				AgentPlanRevision? revision;
-				try { revision = JsonSerializer.Deserialize<AgentPlanRevision>(line, PlanJson); }
+				try
+				{ revision = JsonSerializer.Deserialize<AgentPlanRevision>(line, PlanJson); }
 				catch (JsonException ex) { partial = true; LogInvalidPlanHistory(_logger, ex, runId, cursor); continue; }
-				if (revision?.Run is null || revision.Plan is null) { partial = true; continue; }
-				if (revision.Run.RunId != runId || (stepName is not null && revision.StepName != stepName)) continue;
-				if (items.Count == limit) return new(items, cursor - 1, partial);
+				if (revision?.Run is null || revision.Plan is null)
+				{ partial = true; continue; }
+				if (revision.Run.RunId != runId || (stepName is not null && revision.StepName != stepName))
+					continue;
+				if (items.Count == limit)
+					return new(items, cursor - 1, partial);
 				items.Add(revision);
 			}
 		}
-		catch (FileNotFoundException) { return new([], null); }
+		catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { return new([], null); }
 		return new(items, null, partial);
 	}
 
@@ -89,6 +99,67 @@ public partial class FileSystemRunStore : IPlanHistoryStore
 	{
 		if (string.IsNullOrWhiteSpace(runId) || runId.Length > 128 || runId.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '-' and not '_'))
 			throw new ArgumentException("Invalid execution ID.", nameof(runId));
+	}
+
+	private static async Task<long> CommittedLengthAsync(FileStream stream, long length, CancellationToken token)
+	{
+		var buffer = new byte[4096];
+		while (length > 0)
+		{
+			token.ThrowIfCancellationRequested();
+			var count = (int)Math.Min(length, buffer.Length);
+			var start = length - count;
+			stream.Position = start;
+			// A writer may be repairing an uncommitted tail concurrently. A short read is
+			// harmless: only an already-terminated prefix can be returned to the caller.
+			var read = await stream.ReadAtLeastAsync(buffer.AsMemory(0, count), count, throwOnEndOfStream: false, token).ConfigureAwait(false);
+			var newline = buffer.AsSpan(0, read).LastIndexOf((byte)'\n');
+			if (newline >= 0)
+				return start + newline + 1;
+			length = start;
+		}
+		return 0;
+	}
+
+	private string[] FindPlanDirectories(string runId, CancellationToken token)
+	{
+		var result = new List<string>();
+		try
+		{
+			foreach (var orchestration in Directory.GetDirectories(_rootPath))
+			{
+				token.ThrowIfCancellationRequested();
+				try
+				{
+					result.AddRange(Directory.GetDirectories(orchestration)
+						.Where(d => Path.GetFileName(d).EndsWith("_" + runId, StringComparison.Ordinal)));
+				}
+				catch (DirectoryNotFoundException) { /* concurrent run retention */ }
+			}
+		}
+		catch (DirectoryNotFoundException) { }
+		return result.ToArray();
+	}
+
+	private static async Task<bool> JournalBelongsToRunAsync(string path, string runId, CancellationToken token)
+	{
+		try
+		{
+			await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 4096, FileOptions.Asynchronous);
+			using var reader = new StreamReader(stream, Encoding.UTF8);
+			while (await reader.ReadLineAsync(token).ConfigureAwait(false) is { } line)
+			{
+				token.ThrowIfCancellationRequested();
+				try
+				{
+					if (JsonSerializer.Deserialize<AgentPlanRevision>(line, PlanJson)?.Run is { } run)
+						return run.RunId == runId;
+				}
+				catch (JsonException) { }
+			}
+		}
+		catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException) { }
+		return false;
 	}
 
 	private sealed class PlanHistoryPrefix(Stream source, long length) : Stream

@@ -90,6 +90,7 @@ public class PromptOrchestrationStep : OrchestrationStep
 
 	/// <summary>Opt-in bounded automatic continuation within this step's session.</summary>
 	public AgentExecutionPolicy? ExecutionPolicy { get; init; }
+	/// <summary>Plan observation override; null inherits the orchestration's enabled-by-default setting.</summary>
 	public bool? CapturePlans { get; init; }
 
 	/// <summary>

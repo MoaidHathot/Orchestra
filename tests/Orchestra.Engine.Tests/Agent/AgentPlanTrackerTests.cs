@@ -8,6 +8,13 @@ namespace Orchestra.Engine.Tests.Agent;
 
 public class AgentPlanTrackerTests
 {
+	[Fact]
+	public void Parser_PreservesPlanCaptureDefaultsAndOverrides()
+	{
+		var orchestration = OrchestrationParser.ParseOrchestration("""{"name":"plans","description":"controls","defaultCapturePlans":false,"steps":[{"name":"step","type":"Prompt","systemPrompt":"","userPrompt":"go","capturePlans":true}]}""", []);
+		orchestration.DefaultCapturePlans.Should().BeFalse();
+		((PromptOrchestrationStep)orchestration.Steps.Single()).CapturePlans.Should().BeTrue();
+	}
 	[Theory]
 	[InlineData(null, true, 1)]
 	[InlineData(false, true, 0)]
@@ -36,7 +43,9 @@ public class AgentPlanTrackerTests
 	private static readonly PlanRunIdentity Run = new("run", "workflow", "1", "manual", DateTimeOffset.UtcNow);
 	private static AgentPlanSnapshot Plan(string session = "session", string status = "pending") => new()
 	{
-		Provider = "provider", SessionId = session, Source = "todos",
+		Provider = "provider",
+		SessionId = session,
+		Source = "todos",
 		Tasks = [new() { Id = "task", Title = "Do work", Status = status, RawStatus = status }],
 	};
 
@@ -60,6 +69,16 @@ public class AgentPlanTrackerTests
 		await another.ObserveAsync(Plan());
 		store.Entries.Last().StepExecutionId.Should().NotBe(store.Entries[0].StepExecutionId);
 		reporter.Received(4).ReportPlanUpdated(Arg.Any<AgentPlanRevision>());
+	}
+
+	[Fact]
+	public async Task ConcurrentObservations_KeepSequentialUniqueRevisions()
+	{
+		var store = new Store();
+		var tracker = new AgentPlanTracker(Run, "step", null, Substitute.For<IOrchestrationReporter>(), store, NullLogger.Instance);
+		await Task.WhenAll(Enumerable.Range(0, 30).Select(i => Task.Run(() => tracker.ObserveAsync(Plan(session: "session-" + i)))));
+		store.Entries.Select(r => r.Revision).Should().Equal(Enumerable.Range(1, 30).Select(i => (long)i));
+		tracker.Latest.Should().HaveCount(30);
 	}
 
 	[Fact]

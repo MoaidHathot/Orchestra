@@ -12,10 +12,25 @@ public sealed partial class AgentPlanTracker(
 {
 	private readonly string _executionId = Guid.NewGuid().ToString("N");
 	private readonly System.Collections.Concurrent.ConcurrentDictionary<string, AgentPlanRevision> _latest = new(StringComparer.Ordinal);
+	private readonly SemaphoreSlim _observationGate = new(1, 1);
 	private long _revision;
+	private int _captureStarted;
+	internal bool CaptureStarted => Volatile.Read(ref _captureStarted) != 0;
+	internal DateTimeOffset StartedAt { get; } = DateTimeOffset.UtcNow;
+	internal int? LoopIteration => loopIteration;
+	internal void MarkCaptureStarted() => Volatile.Write(ref _captureStarted, 1);
 	public IReadOnlyList<AgentPlanRevision> Latest => _latest.Values.ToArray();
 
 	public async Task ObserveAsync(AgentPlanSnapshot snapshot)
+	{
+		MarkCaptureStarted();
+		await _observationGate.WaitAsync().ConfigureAwait(false);
+		try
+		{ await ObserveCoreAsync(snapshot).ConfigureAwait(false); }
+		finally { _observationGate.Release(); }
+	}
+
+	private async Task ObserveCoreAsync(AgentPlanSnapshot snapshot)
 	{
 		var identity = JsonSerializer.Serialize(new[] { snapshot.Provider, snapshot.SessionId, snapshot.Source, snapshot.ActorId });
 		var streamId = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).ToLowerInvariant();
@@ -25,18 +40,26 @@ public sealed partial class AgentPlanTracker(
 		{
 			if (snapshot.CaptureError is not null)
 				snapshot = prior.Plan with { CaptureError = snapshot.CaptureError };
-			if (JsonSerializer.Serialize(prior.Plan) == JsonSerializer.Serialize(snapshot)) return;
+			if (JsonSerializer.Serialize(prior.Plan) == JsonSerializer.Serialize(snapshot))
+				return;
 		}
 		var revision = new AgentPlanRevision
 		{
-			Run = run, StepName = stepName, StepExecutionId = _executionId, LoopIteration = loopIteration,
-			StreamId = streamId, Revision = ++_revision, CapturedAt = DateTimeOffset.UtcNow, Plan = snapshot,
+			Run = run,
+			StepName = stepName,
+			StepExecutionId = _executionId,
+			LoopIteration = loopIteration,
+			StreamId = streamId,
+			Revision = ++_revision,
+			CapturedAt = DateTimeOffset.UtcNow,
+			Plan = snapshot,
 		};
 		_latest[streamId] = revision;
 		if (store is not null)
 		{
 			using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-			try { await store.AppendPlanAsync(revision, timeout.Token).WaitAsync(timeout.Token).ConfigureAwait(false); }
+			try
+			{ await store.AppendPlanAsync(revision, timeout.Token).WaitAsync(timeout.Token).ConfigureAwait(false); }
 			catch (Exception ex)
 			{
 				LogPersistenceFailed(logger, ex, run.RunId, stepName);

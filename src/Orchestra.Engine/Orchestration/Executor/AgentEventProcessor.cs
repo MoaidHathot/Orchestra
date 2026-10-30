@@ -109,21 +109,26 @@ public class AgentEventProcessor
 			{
 				if (evt.Type == AgentEventType.PlanUpdated && evt.Plan is { } plan && PlanTracker is not null)
 					await PlanTracker.ObserveAsync(plan).ConfigureAwait(false);
-				else ProcessEvent(evt);
+				else
+					ProcessEvent(evt);
 			}
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested && PlanTracker is not null && (_planCaptureStarted || PlanTracker.Latest.Count > 0))
 		{
 			// Providers flush a bounded final plan before closing their event channel. Preserve
 			// those observations even when the normal content reader has been cancelled.
-			using var drain = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+			using var drain = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 			try
 			{
 				await foreach (var evt in events.WithCancellation(drain.Token))
+				{
+					drain.Token.ThrowIfCancellationRequested();
 					if (evt.Type == AgentEventType.PlanUpdated && evt.Plan is { } plan)
 						await PlanTracker.ObserveAsync(plan).ConfigureAwait(false);
+				}
 			}
-			catch (OperationCanceledException) when (drain.IsCancellationRequested) { }
+			catch (OperationCanceledException) when (drain.IsCancellationRequested)
+			{ _reporter.ReportSessionWarning("plan_capture_drain_timed_out", $"Final plan capture timed out for step '{_stepName}'; retaining its last observed plan."); }
 			catch (Exception ex) { _reporter.ReportSessionWarning("plan_capture_drain_failed", ex.Message); }
 			throw;
 		}
@@ -143,6 +148,7 @@ public class AgentEventProcessor
 		{
 			case AgentEventType.PlanCaptureStarted:
 				_planCaptureStarted = true;
+				PlanTracker?.MarkCaptureStarted();
 				break;
 			case AgentEventType.MessageDelta:
 				HandleMessageDelta(evt);

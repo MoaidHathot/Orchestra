@@ -351,7 +351,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 	/// </summary>
 	public void Unsubscribe(ChannelReader<SseEvent>? reader)
 	{
-		if (reader is null) return;
+		if (reader is null)
+			return;
 
 		lock (_lock)
 		{
@@ -378,7 +379,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 
 		lock (_lock)
 		{
-			if (_isCompleted) return;
+			if (_isCompleted)
+				return;
 
 			// Do NOT add heartbeats to the accumulator — they are ephemeral
 			foreach (var channel in _subscribers)
@@ -416,7 +418,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 
 	public void Dispose()
 	{
-		if (_disposed) return;
+		if (_disposed)
+			return;
 		_disposed = true;
 
 		lock (_lock)
@@ -1303,10 +1306,11 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.Status = "running";
-						state.Plans.Clear();
+						state.ResetPlans();
 						state.StartedAt ??= TryGetDateTime(doc.RootElement, "startedAt") ?? DateTimeOffset.UtcNow;
 					}
 					break;
@@ -1315,7 +1319,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.Status = "completed";
 						state.CompletedAt = TryGetDateTime(doc.RootElement, "completedAt") ?? DateTimeOffset.UtcNow;
@@ -1329,7 +1334,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.Status = "failed";
 						state.Error = GetString(doc.RootElement, "error");
@@ -1341,7 +1347,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.Status = "cancelled";
 						state.CompletedAt = TryGetDateTime(doc.RootElement, "completedAt") ?? DateTimeOffset.UtcNow;
@@ -1352,7 +1359,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.Status = "skipped";
 					}
@@ -1362,9 +1370,11 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var status = GetString(doc.RootElement, "status");
-						if (status is null) break;
+						if (status is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.Status = status.ToLowerInvariant();
 					}
@@ -1374,10 +1384,11 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.RetryCount++;
-						state.Plans.Clear();
+						state.ResetPlans();
 					}
 					break;
 
@@ -1385,15 +1396,9 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var revision = doc.RootElement.GetProperty("revision").Deserialize<AgentPlanRevision>(s_jsonOptions);
-						if (revision is null) break;
-						var state = GetOrAddStep(revision.StepName);
-						if (state.Plans.Values.Any(p => p.StepExecutionId != revision.StepExecutionId))
-						{
-							if (state.Plans.Values.Any(p => p.CapturedAt > revision.CapturedAt)) break;
-							state.Plans.Clear();
-						}
-						if (!state.Plans.TryGetValue(revision.StreamId, out var existing) || existing.Revision < revision.Revision)
-							state.Plans[revision.StreamId] = revision;
+						if (revision is null)
+							break;
+						GetOrAddStep(revision.StepName).ApplyPlan(revision);
 					}
 					break;
 
@@ -1401,7 +1406,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.Process = doc.RootElement.Clone();
 					}
@@ -1411,9 +1417,15 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
-						state.Trace = doc.RootElement.Clone();						state.ConfiguredProvider = GetString(doc.RootElement, "configuredProvider") ?? state.ConfiguredProvider;
+						state.Trace = doc.RootElement.Clone();
+						if (doc.RootElement.TryGetProperty("plans", out var plans) && plans.ValueKind == JsonValueKind.Array)
+							foreach (var plan in plans.EnumerateArray())
+								if (plan.Deserialize<AgentPlanRevision>(s_jsonOptions) is { } revision)
+									state.ApplyPlan(revision);
+						state.ConfiguredProvider = GetString(doc.RootElement, "configuredProvider") ?? state.ConfiguredProvider;
 						state.ActualProvider = GetString(doc.RootElement, "actualProvider") ?? state.ActualProvider;
 					}
 					break;
@@ -1422,9 +1434,11 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var content = GetString(doc.RootElement, "content");
-						if (content is null) break;
+						if (content is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.Output = content.Length > MaxSnapshotStepOutputLength
 							? content[..MaxSnapshotStepOutputLength]
@@ -1437,7 +1451,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
 						var filePath = GetString(doc.RootElement, "filePath");
-						if (stepName is null || filePath is null) break;
+						if (stepName is null || filePath is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						if (!state.SavedFiles.Contains(filePath))
 							state.SavedFiles.Add(filePath);
@@ -1448,7 +1463,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.AuditEntries.Add(doc.RootElement.Clone());
 						if (state.AuditEntries.Count > MaxSnapshotAuditEntriesPerStep)
@@ -1460,7 +1476,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.ActualModel ??= GetString(doc.RootElement, "model");
 					}
@@ -1477,7 +1494,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						state.ActiveSubagents++;
 					}
@@ -1488,7 +1506,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 					{
 						using var doc = JsonDocument.Parse(json);
 						var stepName = GetString(doc.RootElement, "stepName");
-						if (stepName is null) break;
+						if (stepName is null)
+							break;
 						var state = GetOrAddStep(stepName);
 						if (state.ActiveSubagents > 0)
 							state.ActiveSubagents--;
@@ -1508,7 +1527,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 							foreach (var entry in results.EnumerateObject())
 							{
 								var stepName = entry.Name;
-								if (string.IsNullOrEmpty(stepName)) continue;
+								if (string.IsNullOrEmpty(stepName))
+									continue;
 								var state = GetOrAddStep(stepName);
 								var status = GetString(entry.Value, "status");
 								if (status is not null)
@@ -1557,7 +1577,8 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		if (!el.TryGetProperty(property, out var p) || p.ValueKind != JsonValueKind.String)
 			return null;
 		var s = p.GetString();
-		if (s is null) return null;
+		if (s is null)
+			return null;
 		return DateTimeOffset.TryParse(s, System.Globalization.CultureInfo.InvariantCulture,
 			System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal,
 			out var parsed) ? parsed : null;
@@ -1604,6 +1625,7 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 
 	private sealed class MutableStepState
 	{
+		private readonly HashSet<string> _retiredPlanExecutions = new(StringComparer.Ordinal);
 		public Dictionary<string, AgentPlanRevision> Plans { get; } = new(StringComparer.Ordinal);
 		public required string StepName { get; init; }
 		public string Status { get; set; } = "pending";
@@ -1623,6 +1645,27 @@ public sealed partial class SseReporter : IOrchestrationReporter, IDisposable
 		public string? ActualProvider { get; set; }
 		public int ActiveSubagents { get; set; }
 		public int RetryCount { get; set; }
+
+		public void ResetPlans()
+		{
+			foreach (var plan in Plans.Values)
+				_retiredPlanExecutions.Add(plan.StepExecutionId);
+			Plans.Clear();
+		}
+
+		public void ApplyPlan(AgentPlanRevision revision)
+		{
+			if (revision.StepName != StepName || _retiredPlanExecutions.Contains(revision.StepExecutionId))
+				return;
+			if (Plans.Values.Any(p => p.StepExecutionId != revision.StepExecutionId))
+			{
+				if (Plans.Values.Any(p => p.CapturedAt > revision.CapturedAt))
+					return;
+				ResetPlans();
+			}
+			if (!Plans.TryGetValue(revision.StreamId, out var existing) || existing.Revision < revision.Revision)
+				Plans[revision.StreamId] = revision;
+		}
 
 		public StepStateSnapshot ToImmutable() => new()
 		{

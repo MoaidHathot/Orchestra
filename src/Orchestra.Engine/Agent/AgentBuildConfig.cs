@@ -7,6 +7,7 @@ namespace Orchestra.Engine;
 public sealed record AgentBuildConfig
 {
 	public required string Model { get; init; }
+	/// <summary>Observe explicit plan state without selecting plan mode or requiring a plan.</summary>
 	public bool CapturePlans { get; init; } = true;
 	public AgentExecutionPolicy? ExecutionPolicy { get; init; }
 	public string? SystemPrompt { get; init; }

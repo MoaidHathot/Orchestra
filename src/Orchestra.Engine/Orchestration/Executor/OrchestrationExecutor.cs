@@ -842,7 +842,8 @@ public partial class OrchestrationExecutor
 							context.AddResult(step.Name, cancelled);
 							stepResults[step.Name] = cancelled;
 							var record = BuildStepRecord(step, cancelled, effectiveParams, stepStartedAt);
-							stepRecords[step.Name] = record; allStepRecords[step.Name] = record;
+							stepRecords[step.Name] = record;
+							allStepRecords[step.Name] = record;
 							_reporter.PublishStepRecord(step.Name, record);
 						}
 						completionSources[step.Name].TrySetResult(stepResults[step.Name]);
@@ -939,22 +940,42 @@ public partial class OrchestrationExecutor
 
 		// Wait for all steps to complete
 		await Task.WhenAll(completionSources.Values.Select(tcs => tcs.Task));
-		if (orchestrationCompleteCts.IsCancellationRequested && context.PlanTrackers.Values.Any(t => t.Latest.Count > 0))
+		if (orchestrationCompleteCts.IsCancellationRequested && context.PlanTrackers.Values.Any(t => t.CaptureStarted))
 		{
-			try { await Task.WhenAll(stepWorkers).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false); }
+			try
+			{ await Task.WhenAll(stepWorkers).WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false); }
 			catch (Exception ex) { LogPlanSettlementIncomplete(ex, runId); }
 		}
 		// Early-cancellation placeholders can precede provider teardown. Always preserve the
 		// last observed plan in the terminal record as well as the already-durable journal.
-		foreach (var (name, tracker) in context.PlanTrackers)
+		if (orchestrationCompleteCts.IsCancellationRequested)
 		{
-			var latest = tracker.Latest;
-			if (latest.Count == 0 || !stepRecords.TryGetValue(name, out var record)) continue;
-			var trace = (record.Trace ?? new StepExecutionTrace()).WithContext(context, allSteps[name], record.SavedFiles, latest);
-			stepRecords[name] = CloneRecordWithError(record, record.ErrorMessage, trace);
-			foreach (var (key, item) in allStepRecords.Where(kv => kv.Value.StepName == name && kv.Value.LoopIteration == record.LoopIteration).ToArray())
-				allStepRecords[key] = CloneRecordWithError(item, item.ErrorMessage, trace);
-			if (stepResults.TryGetValue(name, out var result)) { result = result with { Trace = trace }; stepResults[name] = result; context.AddResult(name, result); }
+			foreach (var (name, tracker) in context.PlanTrackers)
+			{
+				var latest = tracker.Latest;
+				if (latest.Count == 0 || !stepRecords.TryGetValue(name, out var record))
+					continue;
+				if (record.Trace?.Plans.Count == latest.Count && latest.All(p => record.Trace.Plans.Any(saved =>
+					p.StepExecutionId == saved.StepExecutionId && p.StreamId == saved.StreamId && p.Revision == saved.Revision)))
+					continue;
+				// A cancelled loop iteration must not overwrite a previous iteration's record.
+				if (record.LoopIteration != tracker.LoopIteration)
+					record = BuildStepRecord(allSteps[name], ExecutionResult.Cancelled(), effectiveParams, tracker.StartedAt, tracker.LoopIteration);
+				var trace = (record.Trace ?? new StepExecutionTrace()).WithPlans(latest);
+				stepRecords[name] = CloneRecordWithError(record, record.ErrorMessage, trace);
+				var key = record.LoopIteration is { } iteration ? $"{name}:iteration-{iteration}" : name;
+				allStepRecords[key] = stepRecords[name];
+				_reporter.PublishStepRecord(name, stepRecords[name]);
+				if (key != name)
+					_reporter.PublishStepRecord(key, stepRecords[name]);
+				_reporter.ReportStepTrace(name, trace);
+				if (stepResults.TryGetValue(name, out var result))
+				{
+					result = result with { Status = record.Status, Content = record.Content, RawContent = record.RawContent, ErrorMessage = record.ErrorMessage, Trace = trace };
+					stepResults[name] = result;
+					context.AddResult(name, result);
+				}
+			}
 		}
 
 		// Log warnings for any unresolved template expressions
@@ -1816,6 +1837,20 @@ public partial class OrchestrationExecutor
 		var targetExecutor = _stepExecutorRegistry.Resolve(targetStep.Type);
 		var checkerExecutor = _stepExecutorRegistry.Resolve(checkerStep.Type);
 
+		void PreserveCancelledIteration(PromptOrchestrationStep step, OperationCanceledException error, DateTimeOffset startedAt, int iteration)
+		{
+			var cancelled = error is StepExecutionCanceledException partial ? partial.PartialResult : ExecutionResult.Cancelled();
+			cancelled = EnrichResultTrace(step, context, cancelled);
+			context.AddResult(step.Name, cancelled);
+			stepResults[step.Name] = cancelled;
+			var record = BuildStepRecord(step, cancelled, effectiveParams, startedAt, iteration);
+			stepRecords[step.Name] = record;
+			allStepRecords[$"{step.Name}:iteration-{iteration}"] = record;
+			_reporter.PublishStepRecord(step.Name, record);
+			_reporter.PublishStepRecord($"{step.Name}:iteration-{iteration}", record);
+			_reporter.ReportStepCancelled(step.Name);
+		}
+
 		for (var iteration = 1; iteration <= loop.MaxIterations; iteration++)
 		{
 			// Check exit condition on the checker's current result
@@ -1838,7 +1873,16 @@ public partial class OrchestrationExecutor
 			context.PlanLoopIterations[loop.Target] = iteration;
 			var targetStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(loop.Target);
-			var targetResult = await targetExecutor.ExecuteAsync(targetStep, context, cancellationToken);
+			ExecutionResult targetResult;
+			try
+			{ targetResult = await targetExecutor.ExecuteAsync(targetStep, context, cancellationToken); }
+			catch (OperationCanceledException ex)
+			{
+				PreserveCancelledIteration(targetStep, ex, targetStartedAt, iteration);
+				// The loop runs on the checker's worker. Do not attribute the target's partial
+				// response and plan to that checker when unwinding the worker's cancellation.
+				throw new OperationCanceledException(ex.Message, ex, cancellationToken);
+			}
 			targetResult = EnrichResultTrace(targetStep, context, targetResult);
 
 			context.AddResult(loop.Target, targetResult);
@@ -1864,7 +1908,14 @@ public partial class OrchestrationExecutor
 
 			var checkerStartedAt = DateTimeOffset.UtcNow;
 			_reporter.ReportStepStarted(checkerStep.Name);
-			var newCheckerResult = await checkerExecutor.ExecuteAsync(checkerStep, context, cancellationToken);
+			ExecutionResult newCheckerResult;
+			try
+			{ newCheckerResult = await checkerExecutor.ExecuteAsync(checkerStep, context, cancellationToken); }
+			catch (OperationCanceledException ex)
+			{
+				PreserveCancelledIteration(checkerStep, ex, checkerStartedAt, iteration);
+				throw new OperationCanceledException(ex.Message, ex, cancellationToken);
+			}
 			newCheckerResult = EnrichResultTrace(checkerStep, context, newCheckerResult);
 
 			context.AddResult(checkerStep.Name, newCheckerResult);

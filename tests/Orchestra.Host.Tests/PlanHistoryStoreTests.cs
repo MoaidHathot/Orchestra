@@ -25,7 +25,8 @@ public class PlanHistoryStoreTests : IDisposable
 		var definition = OrchestrationParser.ParseOrchestration("""{"name":"workflow","description":"Plans","defaultModel":"test","steps":[{"name":"work","type":"Prompt","systemPrompt":"","userPrompt":"go"}]}""", []);
 		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 		var running = executor.ExecuteAsync(definition, executionIdOverride: "pipeline-run", cancellationToken: timeout.Token);
-		while ((await subscription.Future!.ReadAsync(timeout.Token)).Type != "step-plan-updated") { }
+		while ((await subscription.Future!.ReadAsync(timeout.Token)).Type != "step-plan-updated")
+		{ }
 		(await store.ReadPlansAsync("pipeline-run")).Items.Should().ContainSingle();
 		running.IsCompleted.Should().BeFalse();
 		release.TrySetResult();
@@ -46,7 +47,8 @@ public class PlanHistoryStoreTests : IDisposable
 		using var cancellation = new CancellationTokenSource();
 		var running = executor.ExecuteAsync(definition, executionIdOverride: "cancel-run", cancellationToken: cancellation.Token);
 		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-		while ((await subscription.Future!.ReadAsync(timeout.Token)).Type != "step-plan-updated") { }
+		while ((await subscription.Future!.ReadAsync(timeout.Token)).Type != "step-plan-updated")
+		{ }
 		await cancellation.CancelAsync();
 		(await running.WaitAsync(timeout.Token)).Status.Should().Be(ExecutionStatus.Cancelled);
 		(await store.ReadPlansAsync("cancel-run")).Items.Last().Plan.Tasks.Single().Status.Should().Be("cancelled");
@@ -67,14 +69,18 @@ public class PlanHistoryStoreTests : IDisposable
 			var channel = Channel.CreateUnbounded<AgentEvent>();
 			async Task<AgentResult> RunAsync()
 			{
-				void Publish(string status) => channel.Writer.TryWrite(new() { Type = AgentEventType.PlanUpdated,
-					Plan = new() { Provider = "test", SessionId = "session", Source = "todos", Tasks = [new() { Title = "Work", Status = status }] } });
+				void Publish(string status) => channel.Writer.TryWrite(new()
+				{
+					Type = AgentEventType.PlanUpdated,
+					Plan = new() { Provider = "test", SessionId = "session", Source = "todos", Tasks = [new() { Title = "Work", Status = status }] }
+				});
 				try
 				{
 					Publish("in_progress");
 					await release.Task.WaitAsync(cancellationToken);
 					Publish(fail ? "blocked" : "completed");
-					if (fail) throw new InvalidOperationException("Task failed after reporting its plan.");
+					if (fail)
+						throw new InvalidOperationException("Task failed after reporting its plan.");
 					return new() { Content = "done" };
 				}
 				finally { if (cancellationToken.IsCancellationRequested) Publish("cancelled"); channel.Writer.Complete(); }
@@ -86,8 +92,13 @@ public class PlanHistoryStoreTests : IDisposable
 	private static readonly PlanRunIdentity Run = new("run1", "workflow", "1", "manual", DateTimeOffset.UtcNow);
 	private static AgentPlanRevision Revision(int n, string step = "step") => new()
 	{
-		Run = Run, StepName = step, StepExecutionId = "execution", StreamId = "stream", Revision = n,
-		CapturedAt = DateTimeOffset.UtcNow, Plan = new() { Provider = "test", SessionId = "session", Source = "todos", Tasks = [new() { Title = "Task " + n }] },
+		Run = Run,
+		StepName = step,
+		StepExecutionId = "execution",
+		StreamId = "stream",
+		Revision = n,
+		CapturedAt = DateTimeOffset.UtcNow,
+		Plan = new() { Provider = "test", SessionId = "session", Source = "todos", Tasks = [new() { Title = "Task " + n }] },
 	};
 
 	[Fact]
@@ -134,6 +145,32 @@ public class PlanHistoryStoreTests : IDisposable
 		page.Items.Should().HaveCount(40);
 		page.IsPartial.Should().BeFalse();
 		page.Items.Select(r => r.Revision).Should().OnlyHaveUniqueItems();
+	}
+
+	[Theory]
+	[InlineData("workflow")]
+	[InlineData(".workflow")]
+	public async Task Lookup_UsesStoredIdentity_WhenRunIdsShareAFolderSuffix(string name)
+	{
+		using var store = new FileSystemRunStore(_root);
+		await store.AppendPlanAsync(Revision(1) with { Run = Run with { OrchestrationName = name } });
+		await store.AppendPlanAsync(Revision(2) with { Run = Run with { OrchestrationName = name, RunId = "prefix_run1" } });
+		(await store.ReadPlansAsync("run1")).Items.Single().Revision.Should().Be(1);
+		(await store.ReadPlansAsync("prefix_run1")).Items.Single().Revision.Should().Be(2);
+	}
+
+	[Fact]
+	public async Task History_SkipsCorruptCommittedRows_AndRequiresANewlineCommit()
+	{
+		using var store = new FileSystemRunStore(_root);
+		await store.AppendPlanAsync(Revision(1));
+		var path = Path.Combine(store.ResolveRunDirectory(Run.OrchestrationName, Run.OrchestrationVersion, Run.TriggeredBy, Run.StartedAt, Run.RunId), FileSystemRunStore.PlanHistoryFileName);
+		await File.AppendAllTextAsync(path, "not-json\n{\"run\":null,\"stepName\":\"step\",\"stepExecutionId\":\"id\",\"streamId\":\"s\",\"plan\":null}\n");
+		await store.AppendPlanAsync(Revision(2));
+		await File.AppendAllTextAsync(path, JsonSerializer.Serialize(Revision(3), new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+		var page = await store.ReadPlansAsync("run1");
+		page.Items.Select(p => p.Revision).Should().Equal(1, 2);
+		page.IsPartial.Should().BeTrue();
 	}
 
 	[Theory]

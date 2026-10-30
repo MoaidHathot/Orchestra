@@ -5,6 +5,7 @@ namespace Orchestra.Engine;
 
 public class Orchestration
 {
+	/// <summary>Capture explicit agent plans during Prompt steps; individual steps can override this.</summary>
 	public bool DefaultCapturePlans { get; init; } = true;
 	public required string Name { get; init; }
 	public required string Description { get; init; }
