@@ -69,7 +69,9 @@ public class HistoryFilterUiTests : PlaywrightTestBase
 		await dropdown.WaitForAsync(new() { Timeout = 3000 });
 		(await dropdown.IsVisibleAsync()).Should().BeTrue();
 
-		var sectionHeaders = await Page.Locator(".history-filter-section-header").AllInnerTextsAsync();
+		// innerText includes CSS text-transform (the headings are displayed uppercase).
+		// Assert the DOM labels so presentation casing does not change this contract.
+		var sectionHeaders = await dropdown.Locator(".history-filter-section-header").AllTextContentsAsync();
 		var headerText = string.Join(", ", sectionHeaders);
 		headerText.Should().Contain("Scope", "the Scope radio section is required");
 		headerText.Should().Contain("Origins", "the Origins multi-select section is required");
