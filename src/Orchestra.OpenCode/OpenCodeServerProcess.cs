@@ -33,6 +33,7 @@ internal static class OpenCodeServerBootstrap
 
 		var cliPath = FirstNonEmpty(options.CliPath, Environment.GetEnvironmentVariable(ExplicitCliPathEnvVar))
 			?? "opencode";
+		if (cliPath == "opencode" && !File.Exists(ResolveExecutable(cliPath)) && File.Exists(OpenCodeCliInstaller.CachePath)) cliPath = OpenCodeCliInstaller.CachePath;
 		return OpenCodeConnectionPlan.Spawn(cliPath);
 	}
 

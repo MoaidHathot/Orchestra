@@ -12,9 +12,8 @@ public sealed record OpenCodeCliProbe(bool Available, string Path, string Source
 /// Read-only prerequisite check for the OpenCode provider, surfaced by <c>orchestra doctor</c>.
 /// </summary>
 /// <remarks>
-/// Unlike Copilot, OpenCode is never downloaded — it must already be installed. Today a missing
-/// binary only surfaces when the first Prompt step tries to spawn <c>opencode serve</c>, so this
-/// moves the answer to before the run.
+/// Checks an existing installation or the native binary installed by Portal setup. Runtime
+/// execution never installs OpenCode implicitly; the setup action owns that download.
 /// </remarks>
 public static class OpenCodePreflight
 {
@@ -39,6 +38,8 @@ public static class OpenCodePreflight
 		// "not found" for anything that wasn't already an absolute path.
 		var resolved = OpenCodeServerBootstrap.ResolveExecutable(command);
 		var available = File.Exists(resolved);
+		if (!available && source == "PATH" && File.Exists(OpenCodeCliInstaller.CachePath))
+			return new(true, OpenCodeCliInstaller.CachePath, "Orchestra download cache");
 
 		return new OpenCodeCliProbe(available, resolved, source);
 	}

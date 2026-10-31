@@ -20,9 +20,13 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
   Shared writers retain CLI compatibility facades. JSONC editing preserves comments and
   unknown fields; revisions detect stale saves. Verified with workspace/configuration API
   integrations, JSONC round trips, and 436 CLI scaffolding/validation regressions.
-- [ ] **3. Provider setup.** Add provider-neutral readiness, installation/login jobs, model
+- [x] **3. Provider setup.** Add provider-neutral readiness, installation/login jobs, model
   discovery, and connection checks backed by the existing provider adapters. Bootstrap
   remains usable before authentication. Jobs are bounded, cancellable and host-owned.
+  Uses Copilot preflight/native device login and OpenCode V2 integration APIs/private
+  servers. Native OpenCode installation verifies npm integrity. Job/API tests cover
+  cancellation, duplicate starts, credentials, and models; live probes against both
+  installed providers passed. MCP sidecar edits and redaction round trips are covered.
 - [ ] **4. Built-in assistants.** Ship normal orchestrations for authoring and configuration,
   reusing human-input, reporting, validation, registry and execution mechanisms. Validate
   generated artifacts in process, register saved workflows immediately, and use the

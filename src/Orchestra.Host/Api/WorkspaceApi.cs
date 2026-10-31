@@ -28,6 +28,7 @@ public static class WorkspaceApi
 		});
 		services.TryAddSingleton<WorkspaceSettingsStore>();
 		services.TryAddSingleton<PortalWorkspaceService>();
+		services.TryAddSingleton<WorkspaceIntegrations>();
 		return services;
 	}
 
@@ -37,6 +38,20 @@ public static class WorkspaceApi
 		group.MapGet("", (PortalWorkspaceService workspace) => Results.Ok(workspace.Status()));
 		group.MapPost("/dismiss", async (PortalWorkspaceService workspace, CancellationToken token) => { await workspace.DismissAsync(token); return Results.Ok(); });
 		group.MapGet("/settings", (WorkspaceSettingsStore settings) => Results.Ok(settings.Get()));
+		group.MapGet("/integrations", (WorkspaceIntegrations integrations) => integrations.Get());
+		group.MapPost("/integrations", async (IntegrationUpdate update, WorkspaceIntegrations integrations, CancellationToken token) =>
+			await Guard(async () => Results.Ok(await integrations.SaveAsync(update, token))));
+		group.MapPost("/integrations/{name}/test", async (string name, WorkspaceIntegrations integrations, CancellationToken token) =>
+			await Guard(async () => Results.Ok(await integrations.TestAsync(name, token))));
+		group.MapGet("/providers", (ProviderSetupJobs jobs) => Results.Ok(jobs.Inspect()));
+		group.MapPost("/providers/{provider}/operations", (string provider, ProviderOperation operation, ProviderSetupJobs jobs) =>
+		{
+			try { return Results.Ok(jobs.Start(provider, operation)); }
+			catch (ArgumentException ex) { return Results.Problem(ex.Message, statusCode: 400); }
+		});
+		group.MapGet("/jobs/{id}", (string id, ProviderSetupJobs jobs) => jobs.Get(id) is { } job ? Results.Ok(job) : Results.NotFound());
+		group.MapPost("/jobs/{id}/cancel", (string id, ProviderSetupJobs jobs) => jobs.Cancel(id) ? Results.Ok() : Results.NotFound());
+		group.MapPost("/jobs/{id}/code", (string id, CodeSubmission code, ProviderSetupJobs jobs) => jobs.SubmitCode(id, code.Code) ? Results.Ok() : Results.Problem("This job is not waiting for a code.", statusCode: 409));
 		group.MapPost("/settings", async (SettingsUpdate update, WorkspaceSettingsStore settings, CancellationToken token) =>
 			await Guard(async () => Results.Ok(await settings.SaveAsync(update, token))));
 		group.MapPost("/templates/{id}", async (string id, PortalWorkspaceService workspace, CancellationToken token) =>
@@ -60,4 +75,5 @@ public static class WorkspaceApi
 		{ return Results.Problem(ex.Message, statusCode: 400); }
 	}
 	public sealed record DocumentContent(string Content);
+	public sealed record CodeSubmission(string Code);
 }

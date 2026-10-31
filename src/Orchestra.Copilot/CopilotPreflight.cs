@@ -271,4 +271,13 @@ public static partial class CopilotPreflight
 			}
 		}
 	}
+
+	/// <summary>Lists account-accessible models using the same SDK/auth path as doctor.</summary>
+	public static async Task<IReadOnlyList<Orchestra.Engine.AvailableModelInfo>> ListModelsAsync(string? gitHubToken = null,
+		bool? useLoggedInUser = null, CancellationToken cancellationToken = default)
+	{
+		await using var client = new CopilotSdkClientFactory(null, gitHubToken, useLoggedInUser).CreateClient();
+		await client.StartAsync(cancellationToken);
+		return (await client.ListModelsAsync(cancellationToken)).Select(CopilotAgent.MapAvailableModelInfo).ToArray();
+	}
 }

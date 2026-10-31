@@ -1615,7 +1615,7 @@ public partial class CopilotAgent : IAgent
 			? null
 			: availableModels?.FirstOrDefault(m => string.Equals(m.Id, modelId, StringComparison.OrdinalIgnoreCase));
 
-	private static AvailableModelInfo MapAvailableModelInfo(ModelInfo model)
+	internal static AvailableModelInfo MapAvailableModelInfo(ModelInfo model)
 		=> new()
 		{
 			Id = model.Id,

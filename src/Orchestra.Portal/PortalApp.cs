@@ -91,6 +91,8 @@ internal static class PortalApp
 		builder.Services.AddOrchestraHostCors();
 		builder.Services.AddSingleton<PortalStatusService>();
 		builder.Services.AddPortalWorkspace();
+		builder.Services.AddSingleton<IProviderSetupBackend, ProviderSetupBackend>();
+		builder.Services.AddSingleton<ProviderSetupJobs>();
 
 		await using var app = builder.Build();
 

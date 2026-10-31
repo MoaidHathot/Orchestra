@@ -62,4 +62,22 @@ public class WorkspaceApiTests
 		factory.Services.GetRequiredService<OrchestrationHostOptions>().DefaultModel.Should().Be("test-model");
 		(await File.ReadAllTextAsync(settings.ConfigPath)).Should().Contain("5999");
 	}
+
+	[Fact]
+	public async Task Integrations_PreserveSecretsWhenEditingARedactedDefinition()
+	{
+		using var factory = new PortalWebApplicationFactory();
+		using var client = factory.CreateClient();
+		var initial = await client.GetFromJsonAsync<JsonElement>("/api/workspace/integrations");
+		var definition = new System.Text.Json.Nodes.JsonObject { ["name"] = "example", ["type"] = "Remote", ["endpoint"] = "https://example.test/mcp", ["headers"] = new System.Text.Json.Nodes.JsonObject { ["Authorization"] = "Bearer private-value" } };
+		var saved = await client.PostAsJsonAsync("/api/workspace/integrations", new IntegrationUpdate(initial.GetProperty("revision").GetString()!, definition));
+		saved.EnsureSuccessStatusCode();
+		var raw = await saved.Content.ReadAsStringAsync();
+		raw.Should().NotContain("private-value");
+		var snapshot = System.Text.Json.Nodes.JsonNode.Parse(raw)!;
+		var edited = snapshot["definitions"]![0]!.DeepClone().AsObject();
+		edited["endpoint"] = "https://example.test/updated";
+		(await client.PostAsJsonAsync("/api/workspace/integrations", new IntegrationUpdate(snapshot["revision"]!.GetValue<string>(), edited))).EnsureSuccessStatusCode();
+		(await File.ReadAllTextAsync(snapshot["path"]!.GetValue<string>())).Should().Contain("Bearer private-value").And.Contain("updated");
+	}
 }
