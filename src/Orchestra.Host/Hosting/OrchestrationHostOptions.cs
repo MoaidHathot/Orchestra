@@ -142,6 +142,7 @@ public class OrchestrationHostOptions
 	/// </summary>
 	public HostAgentDefaults ToHostAgentDefaults() => new()
 	{
+		Provider = Provider,
 		Model = DefaultModel,
 		ReasoningLevel = DefaultReasoningLevel,
 		MaxConcurrency = DefaultMaxConcurrency,

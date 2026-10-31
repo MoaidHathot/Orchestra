@@ -18,6 +18,7 @@ namespace Orchestra.Engine;
 /// </remarks>
 public sealed record HostAgentDefaults
 {
+	public string? Provider { get; init; }
 	/// <summary>Shared instance with no fallbacks (the engine's historical behaviour).</summary>
 	public static HostAgentDefaults None { get; } = new();
 

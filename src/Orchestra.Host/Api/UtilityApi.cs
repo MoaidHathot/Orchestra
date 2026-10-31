@@ -71,7 +71,7 @@ public static class UtilityApi
 				orchestrationCount = registry.Count,
 				activeTriggers = triggers.Count(t => t.Config.Enabled),
 				runningExecutions = activeExecutions.Count,
-				defaultProvider = providerRegistry.DefaultProviderName,
+				defaultProvider = options.Provider ?? providerRegistry.DefaultProviderName,
 				providers = providerRegistry.ProviderNames,
 				// Back-compat: keep the singular `agentRuntime` (first provider) alongside the
 				// new `agentRuntimes` array so existing clients keep working.

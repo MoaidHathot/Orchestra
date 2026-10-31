@@ -13,10 +13,13 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
   and label Visual Builder clearly as an incomplete preview.
   Verified with 46 CLI/template tests (including execution of an APPROVED draft),
   43 Portal file/API tests, TypeScript checking, and directory-picker/builder UI tests.
-- [ ] **2. Workspace and configuration foundation.** Share template/scaffolding and validation
+- [x] **2. Workspace and configuration foundation.** Share template/scaffolding and validation
   mechanisms with the host. Add idempotent starter installation, durable workspace-aware
   saving, configuration provenance and validated, conflict-aware settings persistence.
   Preserve unknown settings and existing file/environment/argument precedence.
+  Shared writers retain CLI compatibility facades. JSONC editing preserves comments and
+  unknown fields; revisions detect stale saves. Verified with workspace/configuration API
+  integrations, JSONC round trips, and 436 CLI scaffolding/validation regressions.
 - [ ] **3. Provider setup.** Add provider-neutral readiness, installation/login jobs, model
   discovery, and connection checks backed by the existing provider adapters. Bootstrap
   remains usable before authentication. Jobs are bounded, cancellable and host-owned.

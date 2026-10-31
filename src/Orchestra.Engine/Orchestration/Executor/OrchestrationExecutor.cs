@@ -106,7 +106,7 @@ public partial class OrchestrationExecutor
 		HostAgentDefaults? hostDefaults = null)
 	{
 		_scheduler = scheduler;
-		_providerRegistry = providerRegistry;
+		_providerRegistry = string.IsNullOrWhiteSpace(hostDefaults?.Provider) ? providerRegistry : new DefaultAgentProviderRegistry(providerRegistry, hostDefaults.Provider);
 		_reporter = reporter;
 		_promptFormatter = promptFormatter ?? DefaultPromptFormatter.Instance;
 		_loggerFactory = loggerFactory;

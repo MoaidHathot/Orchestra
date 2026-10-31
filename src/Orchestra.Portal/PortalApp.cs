@@ -7,6 +7,8 @@ using Orchestra.Host.Extensions;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Logging;
 using Orchestra.Host.McpServer;
+using Orchestra.Host.Api;
+using Orchestra.Host.Workspaces;
 
 namespace Orchestra.Portal;
 
@@ -88,10 +90,14 @@ internal static class PortalApp
 		builder.Services.AddOrchestraTelemetry(orchestraConfig);
 		builder.Services.AddOrchestraHostCors();
 		builder.Services.AddSingleton<PortalStatusService>();
+		builder.Services.AddPortalWorkspace();
 
 		await using var app = builder.Build();
 
 		await app.Services.InitializeOrchestraHostAsync();
+		_ = app.Services.GetRequiredService<WorkspaceSettingsStore>(); // Capture config provenance in the host's startup context.
+		if (!app.Environment.IsEnvironment("Testing"))
+			await app.Services.GetRequiredService<PortalWorkspaceService>().InitializeAsync(app.Lifetime.ApplicationStopping);
 
 		var startupLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger(loggerCategoryType);
 		var resolvedDataPath = app.Services.GetRequiredService<OrchestrationHostOptions>().DataPath;
@@ -103,6 +109,7 @@ internal static class PortalApp
 		app.UseStaticFiles();
 		app.MapOrchestraHostEndpoints();
 		app.MapOrchestraMcpEndpoints();
+		app.MapWorkspaceApi();
 		MapPortalEndpoints(app);
 
 		if (onStarted is not null)

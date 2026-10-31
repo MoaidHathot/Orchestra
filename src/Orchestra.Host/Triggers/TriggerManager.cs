@@ -35,8 +35,8 @@ public partial class TriggerManager : BackgroundService
 	private readonly IHumanInputWaiter? _humanInputWaiter;
 	private readonly string _dataPath;
 	private readonly string? _serverUrl;
-	private readonly string? _defaultModel;
-	private readonly HostAgentDefaults _hostDefaults;
+	private HostAgentDefaults _hostDefaults;
+	public void UpdateAgentDefaults(HostAgentDefaults defaults) => Volatile.Write(ref _hostDefaults, defaults);
 	private readonly HookDefinition[] _globalHooks;
 	private readonly JsonSerializerOptions _jsonOptions;
 	private readonly IChildOrchestrationLauncher _launcher;
@@ -161,7 +161,6 @@ public partial class TriggerManager : BackgroundService
 		_pendingInputStore = pendingInputStore;
 		_humanInputWaiter = humanInputWaiter;
 		_serverUrl = serverUrl;
-		_defaultModel = defaultModel;
 		_hostDefaults = new HostAgentDefaults { Model = defaultModel, ReasoningLevel = defaultReasoningLevel, MaxConcurrency = defaultMaxConcurrency };
 		_globalHooks = globalHooks ?? [];
 		Directory.CreateDirectory(_triggersDir);
@@ -1232,7 +1231,7 @@ public partial class TriggerManager : BackgroundService
 					var agent = await _providerRegistry.Resolve(null)
 						.BuildAgentAsync(new AgentBuildConfig
 						{
-							Model = capturedReg.Config.InputHandlerModel ?? _defaultModel ?? ModelDefaults.Model,
+							Model = capturedReg.Config.InputHandlerModel ?? _hostDefaults.Model ?? ModelDefaults.Model,
 							SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
 							Mcps = [],
 						}, ct);

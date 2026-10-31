@@ -44,6 +44,11 @@
 
   <!-- Collect portal source files for incremental build detection -->
   <ItemGroup>
+    <Content Include="..\..\templates\*.yaml" Link="templates\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\schemas\**\*.json" Link="schemas\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="..\..\skills\**\*.md" Link="skills\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <PortalSourceFiles Include="$(SpaRoot)src\**\*" />
     <PortalSourceFiles Include="$(SpaRoot)package.json" />
     <PortalSourceFiles Include="$(SpaRoot)package-lock.json" />
