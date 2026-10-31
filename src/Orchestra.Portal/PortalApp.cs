@@ -93,6 +93,10 @@ internal static class PortalApp
 		builder.Services.AddPortalWorkspace();
 		builder.Services.AddSingleton<IProviderSetupBackend, ProviderSetupBackend>();
 		builder.Services.AddSingleton<ProviderSetupJobs>();
+		builder.Services.AddSingleton(sp => EngineToolRegistry.CreateDefault()
+			.Register(new WorkspaceValidationTool(() => sp.GetRequiredService<PortalWorkspaceService>()))
+			.Register(new WorkspaceInspectionTool(() => sp.GetRequiredService<WorkspaceSettingsStore>(), () => sp.GetRequiredService<Host.Registry.OrchestrationRegistry>()))
+			.Register(new WorkspaceSettingsValidationTool(() => sp.GetRequiredService<WorkspaceSettingsStore>())));
 
 		await using var app = builder.Build();
 

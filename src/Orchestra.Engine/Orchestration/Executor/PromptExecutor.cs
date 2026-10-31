@@ -1008,7 +1008,8 @@ public partial class PromptExecutor : Executor<PromptOrchestrationStep>
 	/// </summary>
 	private IReadOnlyCollection<IEngineTool> BuildEngineToolsForStep(IReadOnlyCollection<string> enabledOptInTools, bool structuredOutput)
 	{
-		var alwaysOn = _engineToolRegistry.GetAll();
+		IReadOnlyCollection<IEngineTool> alwaysOn = _engineToolRegistry.GetAll()
+			.Where(tool => tool is not IOptInEngineTool optional || enabledOptInTools.Contains(optional.OptInName, StringComparer.OrdinalIgnoreCase)).ToArray();
 		if (structuredOutput)
 		{
 			// These two tools terminate before the provider can emit its final JSON.

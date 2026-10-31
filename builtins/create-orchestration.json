@@ -1,0 +1,20 @@
+{
+  "name": "orchestra-author",
+  "description": "Describe a workflow. Orchestra drafts, validates and saves it into your workspace, ready to run.",
+  "defaultModel": "claude-opus-4.8",
+  "timeoutSeconds": 1200,
+  "tags": ["built-in", "authoring"],
+  "inputs": { "description": { "type": "string", "required": true, "multiline": true, "description": "What should the new workflow do? Include inputs, integrations and desired output." } },
+  "steps": [
+    {
+      "name": "draft",
+      "type": "Prompt",
+      "humanInput": true,
+      "enableTools": ["validate_orchestration", "inspect_configuration"],
+      "systemPrompt": "You create Orchestra workflows using the orchestration-authoring skill. First use orchestra_inspect_configuration to learn workspace defaults, existing names and available integrations. Ask native questions if important requirements are unclear. Prefer deterministic steps where suitable. Use a unique kebab-case name, typed inputs and inline prompts/scripts. Use the selected workspace provider/model as defaults. Do not write files or register workflows yourself. Call orchestra_validate_orchestration with the full JSON candidate, fix all reported errors and validate again. Return ONLY the final orchestration JSON object. The next deterministic step validates and saves it. Use only registered global MCP names or explicitly declared inline MCPs. Never include credentials; use environment references.",
+      "userPrompt": "Create this workflow:\n\n{{param.description}}",
+      "responseSchema": { "type": "object", "properties": { "name": { "type": "string" }, "description": { "type": "string" }, "steps": { "type": "array", "items": { "type": "object" } } }, "required": ["name", "description", "steps"], "additionalProperties": true }
+    },
+    { "name": "save", "type": "Http", "dependsOn": ["draft"], "method": "POST", "url": "{{server.url}}/api/workspace/orchestrations", "body": "{{draft.output}}", "contentType": "application/json" }
+  ]
+}

@@ -154,7 +154,7 @@
       "description": "Opt-in engine tool names enabled by default for every Prompt step that does not specify its own enableTools. Currently supports 'request_user_input'.",
       "items": {
         "type": "string",
-        "enum": ["request_user_input"]
+        "enum": ["request_user_input", "validate_orchestration", "inspect_configuration", "validate_configuration"]
       },
       "default": []
     },
@@ -574,7 +574,7 @@
           "description": "Opt-in engine tool names this Prompt step grants the agent access to. Currently supports 'request_user_input' (the LLM-decided human-in-the-loop tool). Falls back to the orchestration's defaultEnableTools when null.",
           "items": {
             "type": "string",
-            "enum": ["request_user_input"]
+            "enum": ["request_user_input", "validate_orchestration", "inspect_configuration", "validate_configuration"]
           }
         }
       },

@@ -89,6 +89,16 @@ public sealed partial class WorkspaceSettingsStore
 		finally { _gate.Release(); }
 	}
 
+	public object Preview(SettingsUpdate update)
+	{
+		ArgumentNullException.ThrowIfNull(update.Changes);
+		Validate(update.Changes);
+		if (Get().Revision != update.Revision) throw new WorkspaceConflictException("Configuration changed. Inspect it again before proposing changes.");
+		var restart = update.Changes.Select(p => p.Key).Where(RestartFields.Contains).ToArray();
+		return new { message = update.Changes.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) +
+			(restart.Length > 0 ? "\nRestart required for: " + string.Join(", ", restart) : "\nApplies to new runs."), restartRequired = restart };
+	}
+
 	public static void Validate(JsonObject changes)
 	{
 		foreach (var (key, node) in changes)

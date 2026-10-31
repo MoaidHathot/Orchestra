@@ -1,0 +1,22 @@
+{
+  "name": "orchestra-configure",
+  "description": "Explain the configuration change you want. Review the proposed changes in Portal and apply them through the shared settings service.",
+  "defaultModel": "claude-opus-4.8",
+  "timeoutSeconds": 1200,
+  "tags": ["built-in", "configuration"],
+  "inputs": { "description": { "type": "string", "required": true, "multiline": true, "description": "What would you like to configure?" } },
+  "steps": [
+    {
+      "name": "draft",
+      "type": "Prompt",
+      "humanInput": true,
+      "enableTools": ["inspect_configuration", "validate_configuration"],
+      "systemPrompt": "Help configure Orchestra. Use orchestra_inspect_configuration to read safe settings, revision and supported fields. Ask native questions for unclear requirements. Produce only requested changes. Never edit files or run configuration commands. Use orchestra_validate_configuration on your candidate, correct errors, then return JSON with revision (exact current revision) and changes (object). Allowed top-level changes: defaultProvider, defaultModel, defaultReasoningLevel, defaultMaxConcurrency, retention, scan, dataPath, urls, enableScheduler, logLevel. Provider is copilot or opencode. Retention fields: maxRunsPerOrchestration, maxRunAgeDays; scan fields: directory, recursive, watch. Credentials/provider login are managed in Portal Settings, not this patch. Omit unrelated settings. The next steps preview the patch and ask the user to apply it.",
+      "userPrompt": "Requested configuration change:\n\n{{param.description}}",
+      "responseSchema": { "type": "object", "properties": { "revision": { "type": "string" }, "changes": { "type": "object" } }, "required": ["revision", "changes"], "additionalProperties": false }
+    },
+    { "name": "preview", "type": "Http", "dependsOn": ["draft"], "method": "POST", "url": "{{server.url}}/api/workspace/settings/preview", "body": "{{draft.output}}", "contentType": "application/json" },
+    { "name": "confirm", "type": "Approval", "dependsOn": ["preview"], "prompt": "Apply these changes?\n\n{{preview.output.message}}", "choices": ["Apply", "Cancel"] },
+    { "name": "apply", "type": "Http", "dependsOn": ["confirm"], "when": "'{{confirm.output}}' == 'Apply'", "method": "POST", "url": "{{server.url}}/api/workspace/settings", "body": "{{draft.output}}", "contentType": "application/json" }
+  ]
+}

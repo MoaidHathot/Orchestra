@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Orchestra.Host.Hosting;
 using Orchestra.Host.Workspaces;
 
@@ -29,6 +31,7 @@ public static class WorkspaceApi
 		services.TryAddSingleton<WorkspaceSettingsStore>();
 		services.TryAddSingleton<PortalWorkspaceService>();
 		services.TryAddSingleton<WorkspaceIntegrations>();
+		services.TryAddSingleton<WorkspaceAssistants>();
 		return services;
 	}
 
@@ -38,6 +41,9 @@ public static class WorkspaceApi
 		group.MapGet("", (PortalWorkspaceService workspace) => Results.Ok(workspace.Status()));
 		group.MapPost("/dismiss", async (PortalWorkspaceService workspace, CancellationToken token) => { await workspace.DismissAsync(token); return Results.Ok(); });
 		group.MapGet("/settings", (WorkspaceSettingsStore settings) => Results.Ok(settings.Get()));
+		group.MapPost("/settings/preview", async (SettingsUpdate update, WorkspaceSettingsStore settings) => await Guard(() => Task.FromResult<IResult>(Results.Ok(settings.Preview(update)))));
+		group.MapPost("/assistants/{kind}", async (string kind, IServer server, WorkspaceAssistants assistants, CancellationToken token) =>
+			await Guard(async () => Entry(await assistants.PrepareAsync(kind, LocalAddress(server), token))));
 		group.MapGet("/integrations", (WorkspaceIntegrations integrations) => integrations.Get());
 		group.MapPost("/integrations", async (IntegrationUpdate update, WorkspaceIntegrations integrations, CancellationToken token) =>
 			await Guard(async () => Results.Ok(await integrations.SaveAsync(update, token))));
@@ -73,6 +79,15 @@ public static class WorkspaceApi
 		catch (WorkspaceConflictException ex) { return Results.Problem(ex.Message, statusCode: 409); }
 		catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException)
 		{ return Results.Problem(ex.Message, statusCode: 400); }
+	}
+	private static string LocalAddress(IServer server)
+	{
+		// Use the listener, not an untrusted Host header, for deterministic local API steps.
+		var address = server.Features.Get<IServerAddressesFeature>()?.Addresses.FirstOrDefault();
+		if (address is null) return "http://localhost"; // in-process TestServer
+		var uri = new UriBuilder(address.Replace("+", "localhost").Replace("*", "localhost"));
+		if (uri.Host is "0.0.0.0" or "[::]" or "::") uri.Host = "localhost";
+		return uri.Uri.ToString().TrimEnd('/');
 	}
 	public sealed record DocumentContent(string Content);
 	public sealed record CodeSubmission(string Code);

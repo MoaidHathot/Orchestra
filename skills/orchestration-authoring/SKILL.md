@@ -729,6 +729,18 @@ Differences from the declarative `Approval` step:
 
 Both paths emit the `step.awaitingInput` hook event with the same payload structure, both persist a `PendingInputRecord`, and both route through `POST /api/orchestrations/{name}/runs/{runId}/respond?step={stepName}`.
 
+## Portal workspace tools
+
+The Portal host provides three read-only opt-in engine capabilities through `enableTools`:
+`validate_orchestration`, `inspect_configuration`, and `validate_configuration`. Their callable
+names are `orchestra_validate_orchestration`, `orchestra_inspect_configuration`, and
+`orchestra_validate_configuration`. They support the bundled Portal assistants; other embedded
+hosts must register the corresponding tools to offer them. Validation tools accept a `content`
+string containing the complete proposed JSON/YAML document (or settings update). Inspection
+returns safe configuration, its revision, registered workflow names, and integration names.
+The normal workspace API performs the final deterministic validation and save. Provider
+sign-in and credentials belong in Portal Settings, not generated orchestration files.
+
 ## Loop Configuration (Checker Pattern)
 
 A Prompt step with `loop` acts as a checker for iterative refinement.

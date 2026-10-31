@@ -27,10 +27,14 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
   servers. Native OpenCode installation verifies npm integrity. Job/API tests cover
   cancellation, duplicate starts, credentials, and models; live probes against both
   installed providers passed. MCP sidecar edits and redaction round trips are covered.
-- [ ] **4. Built-in assistants.** Ship normal orchestrations for authoring and configuration,
+- [x] **4. Built-in assistants.** Ship normal orchestrations for authoring and configuration,
   reusing human-input, reporting, validation, registry and execution mechanisms. Validate
   generated artifacts in process, register saved workflows immediately, and use the
   configured provider/model. Basic authoring must not require PowerShell or external MCPs.
+  Bundled authoring uses Prompt plus a deterministic HTTP workspace save; configuration
+  uses native preview/Approval/apply steps. Read-only tools are opt-in. Normal-engine
+  integration tests cover successful creation/run, invalid-artifact rejection and settings
+  flow/default selection. The authoring save goes through the existing registry.
 - [ ] **5. Portal onboarding and Settings.** Welcome/demo/starter/assistant entry points;
   provider setup and model selection; workspace, integration, execution and retention
   settings; actionable readiness and restart feedback. Preserve normal dashboard behavior

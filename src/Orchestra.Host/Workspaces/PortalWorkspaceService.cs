@@ -54,6 +54,16 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 			if (existing is not null) return existing;
 			var result = InitScaffolder.Scaffold(new InitPlan(Root, template, null, null, false, true, false, true),
 				Path.Combine(AssetsDirectory, "schemas"), Path.Combine(AssetsDirectory, "skills"));
+			if (result.Files.Any(f => f.Path == result.OrchestrationPath && f.Outcome == InitFileOutcome.Written))
+			{
+				var body = await File.ReadAllTextAsync(result.OrchestrationPath, token);
+				if (body.Contains("defaultModel:"))
+				{
+					body = System.Text.RegularExpressions.Regex.Replace(body, @"(?m)^defaultModel:[^\r\n]*", "defaultModel: " + JsonSerializer.Serialize(host.DefaultModel ?? ModelDefaults.Model));
+					if (host.Provider is { } provider) body += "\ndefaultProvider: " + JsonSerializer.Serialize(provider) + "\n";
+					await WorkspaceSettingsStore.WriteAtomicAsync(result.OrchestrationPath, body, token);
+				}
+			}
 			return Register(result.OrchestrationPath);
 		}
 		finally { _gate.Release(); }
@@ -91,13 +101,13 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 			var path = Path.Combine(directory, name + ".json");
 			if (File.Exists(path) || File.Exists(Path.ChangeExtension(path, ".yaml")) || File.Exists(Path.ChangeExtension(path, ".yml")))
 				throw new WorkspaceConflictException($"A workflow file named '{name}' already exists.");
-			// CreateNew gives simultaneous saves a single winner, including other processes.
-			await using (var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, true))
+			var temporary = path + $".{Guid.NewGuid():N}.tmp";
+			try
 			{
-				var bytes = System.Text.Encoding.UTF8.GetBytes(json.ReplaceLineEndings("\n"));
-				try { await file.WriteAsync(bytes, token); }
-				catch { await file.DisposeAsync(); File.Delete(path); throw; }
+				await File.WriteAllTextAsync(temporary, json.ReplaceLineEndings("\n"), token);
+				File.Move(temporary, path, overwrite: false); // Watchers see only the complete artifact.
 			}
+			finally { if (File.Exists(temporary)) File.Delete(temporary); }
 			var entry = Register(path);
 			LogCreated(entry.Id, path);
 			return entry;
