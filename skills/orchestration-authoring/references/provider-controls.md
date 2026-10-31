@@ -70,6 +70,12 @@ Prose prefixes, Markdown fences, missing fields, wrong types, and forbidden extr
 fail validation. This checks the data contract, not the truth of the answer; use deterministic
 verification for correctness.
 
+Copilot requests native strict generation for closed-object schemas whose properties are
+all required. Open-ended documents, dictionaries, optional fields and other incompatible
+shapes use non-strict native generation with the original schema. The engine enforces the
+complete `responseSchema` in either case; it never closes your objects or drops fields to
+fit a provider's strict subset.
+
 **No special completion prompt, tool call, or marker is required from authors.** Orchestra
 internally filters immediate-stop tools (`orchestra_set_status`, `orchestra_complete`) for
 structured/autopilot steps. Do not add internal markers to your schema. Branch on JSON fields

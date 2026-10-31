@@ -75,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -118,14 +118,34 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Pack and verify a fresh Portal tool installation
+        shell: pwsh
+        run: |
+          dotnet pack src/Orchestra.Cli/Orchestra.Cli.csproj --no-build --no-restore --configuration Release -p:PackageVersion=0.0.0-ci.verify -o artifacts/package-smoke
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./scripts/verify-portal-package.ps1 -Version 0.0.0-ci.verify -Source artifacts/package-smoke -EvidenceDirectory artifacts/package-smoke/evidence
+
+      - name: Upload package verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-smoke-${{ matrix.os }}
+          path: artifacts/package-smoke/evidence
+          if-no-files-found: ignore
+          retention-days: 7
+
   # ── Portal E2E (Playwright) ───────────────────────────────────────────────────────────────
   # Slow and browser-dependent, so it runs on pushes to main and on demand rather than on
   # every pull request. The fixture starts `dotnet run --project src/Orchestra.Portal --no-build`.
   e2e:
-    name: Portal E2E (Playwright)
+    name: Portal E2E (${{ matrix.os }})
     if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run-e2e)
     needs: [dotnet, portal]
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -161,7 +181,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-results
+          name: e2e-results-${{ matrix.os }}
           path: '**/TestResults/*.trx'
           if-no-files-found: ignore
           retention-days: 7

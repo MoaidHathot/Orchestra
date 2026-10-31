@@ -79,5 +79,49 @@ public class WorkspaceApiTests
 		edited["endpoint"] = "https://example.test/updated";
 		(await client.PostAsJsonAsync("/api/workspace/integrations", new IntegrationUpdate(snapshot["revision"]!.GetValue<string>(), edited))).EnsureSuccessStatusCode();
 		(await File.ReadAllTextAsync(snapshot["path"]!.GetValue<string>())).Should().Contain("Bearer private-value").And.Contain("updated");
+		edited["headers"] = new System.Text.Json.Nodes.JsonObject();
+		var latest = await client.GetFromJsonAsync<JsonElement>("/api/workspace/integrations");
+		var cleared = await client.PostAsJsonAsync("/api/workspace/integrations", new IntegrationUpdate(latest.GetProperty("revision").GetString()!, edited));
+		cleared.EnsureSuccessStatusCode();
+		(await File.ReadAllTextAsync(snapshot["path"]!.GetValue<string>())).Should().NotContain("private-value");
+		var ready = await cleared.Content.ReadFromJsonAsync<JsonElement>();
+		(await client.PostAsJsonAsync("/api/workspace/integrations/example/remove", new IntegrationRemoval(ready.GetProperty("revision").GetString()!))).EnsureSuccessStatusCode();
+		var removed = await client.GetFromJsonAsync<JsonElement>("/api/workspace/integrations");
+		removed.GetProperty("definitions").GetArrayLength().Should().Be(0);
+	}
+
+	[Fact]
+	public async Task NewDocument_ResolvesPromptFilesRelativeToItsFutureSourcePath()
+	{
+		using var factory = new PortalWebApplicationFactory();
+		using var client = factory.CreateClient();
+		var root = factory.Services.GetRequiredService<PortalWorkspaceService>().Root;
+		Directory.CreateDirectory(Path.Combine(root, "orchestrations", "prompts"));
+		await File.WriteAllTextAsync(Path.Combine(root, "orchestrations", "prompts", "system.md"), "Source-relative instruction");
+		var saved = await client.PostAsJsonAsync("/api/workspace/orchestrations", new
+		{
+			name = "with-prompt-file",
+			description = "Source-relative",
+			defaultModel = "test",
+			steps = new[] { new { name = "answer", type = "Prompt", systemPromptFile = "prompts/system.md", userPrompt = "answer" } },
+		});
+		saved.EnsureSuccessStatusCode();
+		var definition = factory.Services.GetRequiredService<OrchestrationRegistry>().GetByIdOrName("with-prompt-file")!.Orchestration;
+		((Orchestra.Engine.PromptOrchestrationStep)definition.Steps.Single()).SystemPrompt.Should().Be("Source-relative instruction");
+	}
+
+	[Fact]
+	public async Task UnwritableWorkspace_DoesNotPreventOnboardingOrSettings()
+	{
+		using var factory = new PortalWebApplicationFactory();
+		using var client = factory.CreateClient();
+		var file = Path.Combine(factory.TestDataPath, "not-a-directory");
+		await File.WriteAllTextAsync(file, "existing user file");
+		factory.Services.GetRequiredService<OrchestrationHostOptions>().Scan = new() { Directory = file };
+		await factory.Services.GetRequiredService<PortalWorkspaceService>().InitializeAsync(CancellationToken.None);
+		var status = await client.GetFromJsonAsync<JsonElement>("/api/workspace");
+		status.GetProperty("initializationError").GetString().Should().Contain("Could not install");
+		(await File.ReadAllTextAsync(file)).Should().Be("existing user file");
+		(await client.GetAsync("/api/workspace/settings")).EnsureSuccessStatusCode();
 	}
 }

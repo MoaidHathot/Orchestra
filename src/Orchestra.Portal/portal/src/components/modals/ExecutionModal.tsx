@@ -300,6 +300,8 @@ interface Props {
   onViewChildRun?: (orchestrationName: string, executionId: string) => void;
   /** Invoked after the run's annotation changes, so lists can refresh. */
   onAnnotationChanged?: () => void;
+  awaitingInput?: boolean;
+  onRequestInput?: () => void;
 }
 
 export default function ExecutionModal({
@@ -334,6 +336,8 @@ export default function ExecutionModal({
   onViewSourceRun,
   onViewChildRun,
   onAnnotationChanged,
+  awaitingInput,
+  onRequestInput,
 }: Props): React.JSX.Element {
   const trapRef = useFocusTrap<HTMLDivElement>(open, onClose);
   const dagRef = useRef<HTMLDivElement | null>(null);
@@ -1136,6 +1140,9 @@ export default function ExecutionModal({
             </button>
           </div>
         </div>
+        {awaitingInput && onRequestInput && <div role="status" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', color: 'var(--warning)' }}>
+          This workflow needs your input. <button className="btn btn-primary" onClick={onRequestInput}>Respond to workflow</button>
+        </div>}
         <div className="modal-body" style={{ padding: 0 }}>
           {historicalRun && annotationOpen && (
             <div className="run-annotation-panel">

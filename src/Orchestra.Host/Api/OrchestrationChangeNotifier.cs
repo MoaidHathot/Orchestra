@@ -25,7 +25,8 @@ public sealed partial class OrchestrationChangeNotifier : IDisposable
 	private readonly ILogger<OrchestrationChangeNotifier> _logger;
 	private readonly Lock _gate = new();
 	private readonly TimeSpan _window;
-	private Timer? _timer;
+	private readonly TimeProvider _timeProvider;
+	private ITimer? _timer;
 	private string? _pendingReason;
 	private bool _started;
 	private bool _disposed;
@@ -44,13 +45,15 @@ public sealed partial class OrchestrationChangeNotifier : IDisposable
 		TriggerManager triggerManager,
 		DashboardEventBroadcaster broadcaster,
 		ILogger<OrchestrationChangeNotifier> logger,
-		TimeSpan coalesceWindow)
+		TimeSpan coalesceWindow,
+		TimeProvider? timeProvider = null)
 	{
 		_registry = registry;
 		_triggerManager = triggerManager;
 		_broadcaster = broadcaster;
 		_logger = logger;
 		_window = coalesceWindow;
+		_timeProvider = timeProvider ?? TimeProvider.System;
 	}
 
 	/// <summary>Subscribes to both sources. Idempotent.</summary>
@@ -61,10 +64,9 @@ public sealed partial class OrchestrationChangeNotifier : IDisposable
 			if (_started || _disposed)
 				return;
 			_started = true;
+			_registry.Changed += OnRegistryChanged;
+			_triggerManager.TriggersChanged += OnTriggersChanged;
 		}
-
-		_registry.Changed += OnRegistryChanged;
-		_triggerManager.TriggersChanged += OnTriggersChanged;
 	}
 
 	private void OnRegistryChanged(string reason) => Schedule($"registry:{reason}");
@@ -81,7 +83,7 @@ public sealed partial class OrchestrationChangeNotifier : IDisposable
 			// Keep the first reason of a burst; it names what started the change.
 			_pendingReason ??= reason;
 			if (_timer is null)
-				_timer = new Timer(_ => Flush(), null, _window, Timeout.InfiniteTimeSpan);
+				_timer = _timeProvider.CreateTimer(_ => Flush(), null, _window, Timeout.InfiniteTimeSpan);
 			else
 				_timer.Change(_window, Timeout.InfiniteTimeSpan);
 		}

@@ -204,9 +204,49 @@ internal sealed class CopilotSdkSessionAdapter : ICopilotSession, ICopilotPlanSe
 		{
 			Name = "orchestra_response",
 			Schema = schema.Clone(),
-			Strict = true,
+			// Open-ended objects (including workflow steps and settings patches) are valid
+			// Orchestra contracts, but not valid native strict schemas. Keep the author's
+			// schema intact and let the engine validate the final response in both modes.
+			Strict = SupportsStrictSchema(schema),
 		},
 	};
+
+	internal static bool SupportsStrictSchema(System.Text.Json.JsonElement schema, bool isRoot = true)
+	{
+		if (schema.ValueKind != System.Text.Json.JsonValueKind.Object)
+			return false;
+		if (isRoot && (!schema.TryGetProperty("type", out var rootType) || rootType.ValueKind != System.Text.Json.JsonValueKind.String || rootType.GetString() != "object" || schema.TryGetProperty("anyOf", out _)))
+			return false;
+		if (!schema.TryGetProperty("type", out _) && !schema.TryGetProperty("$ref", out _) && !schema.TryGetProperty("anyOf", out _))
+			return false;
+		if (schema.TryGetProperty("type", out var type) &&
+			(type.ValueKind == System.Text.Json.JsonValueKind.String && type.GetString() == "object" ||
+			 type.ValueKind == System.Text.Json.JsonValueKind.Array && type.EnumerateArray().Any(t => t.GetString() == "object")) ||
+			schema.TryGetProperty("properties", out _))
+		{
+			if (!schema.TryGetProperty("additionalProperties", out var additional) || additional.ValueKind != System.Text.Json.JsonValueKind.False)
+				return false;
+			if (schema.TryGetProperty("properties", out var properties))
+			{
+				var required = schema.TryGetProperty("required", out var list) && list.ValueKind == System.Text.Json.JsonValueKind.Array
+					? list.EnumerateArray().Select(p => p.GetString()).ToHashSet(StringComparer.Ordinal) : [];
+				if (properties.EnumerateObject().Any(p => !required.Contains(p.Name) || !SupportsStrictSchema(p.Value, false)))
+					return false;
+			}
+		}
+		foreach (var property in schema.EnumerateObject())
+		{
+			if (property.Name is "oneOf" or "allOf" or "not" or "if" or "then" or "else" or "patternProperties" or "dependentSchemas")
+				return false;
+			if (property.Name is "$defs" or "definitions" && property.Value.EnumerateObject().Any(p => !SupportsStrictSchema(p.Value, false)))
+				return false;
+			if (property.Name == "items" && !SupportsStrictSchema(property.Value, false))
+				return false;
+			if (property.Name == "anyOf" && property.Value.EnumerateArray().Any(p => !SupportsStrictSchema(p, false)))
+				return false;
+		}
+		return true;
+	}
 
 	public async Task ApplySandboxAsync(Orchestra.Engine.SandboxPolicy policy, CancellationToken cancellationToken)
 	{

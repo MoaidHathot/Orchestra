@@ -46,6 +46,14 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
   paths, settings round trips/restarts, bundled assets, authoring and registration, provider
   jobs, cancellation and all affected backend/UI tests. Run full CI and isolated browser
   tests. Revisit every item and document evidence and any necessary corrections.
+  Local review added full-browser clean-profile and existing-workspace journeys, including
+  configuration approval with comments and restart persistence. Real authoring completed
+  against Copilot and OpenCode; that test exposed and verified a fix for open-ended Copilot
+  response schemas. Further regressions cover stable assistant refresh, source-relative
+  validation, concurrent registry/config publication, bad settings, MCP removal and import
+  races. Fresh packed-tool installation, bundled-assembly hashes, credential-free demo,
+  saved workflows, settings, history, and assistant refresh across restart passed locally.
+  The three-OS CI matrix also runs this package check.
 
 Each numbered step is tested and committed before proceeding. Add meaningful regression
 coverage for observed defects and integration/browser coverage for the complete journey.

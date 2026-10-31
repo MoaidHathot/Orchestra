@@ -20,8 +20,9 @@ export default function IntegrationSetupPanel(): React.JSX.Element {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [editingName, setEditingName] = useState<string | null>(null);
   useEffect(() => { const controller = new AbortController(); void workspaceRequest<Snapshot>('/integrations', undefined, controller.signal).then(setSnapshot).catch(e => { if (!controller.signal.aborted) setError(describeError(e)); }); return () => controller.abort(); }, []);
-  const edit = (definition: Definition) => { setDraft({ ...definition }); setPairs(lines(definition.type.toLowerCase() === 'remote' ? definition.headers : definition.environment)); setArgs((definition.arguments || []).join('\n')); setMessage(''); };
+  const edit = (definition: Definition) => { setEditingName(definition.name || null); setDraft({ ...definition }); setPairs(lines(definition.type.toLowerCase() === 'remote' ? definition.headers : definition.environment)); setArgs((definition.arguments || []).join('\n')); setMessage(''); };
   const save = async (event: React.FormEvent) => {
     event.preventDefault(); if (!snapshot) return;
     setBusy(true); setError(''); setMessage('');
@@ -41,6 +42,14 @@ export default function IntegrationSetupPanel(): React.JSX.Element {
     try { const result = await workspaceRequest<{ toolCount: number }>(`/integrations/${encodeURIComponent(name)}/test`, {}); setMessage(`Connected: ${result.toolCount} tools available. Restart Portal to activate saved configuration changes.`); }
     catch (e) { setMessage(''); setError(describeError(e)); } finally { setBusy(false); }
   };
+  const remove = async () => {
+    if (!snapshot || !editingName) return;
+    setBusy(true); setError('');
+    try {
+      setSnapshot(await workspaceRequest<Snapshot>(`/integrations/${encodeURIComponent(editingName)}/remove`, { revision: snapshot.revision }));
+      edit(blank); setMessage('Connection removed from the sidecar. Restart Portal to apply the change.');
+    } catch (e) { setError(describeError(e)); } finally { setBusy(false); }
+  };
   return <section>
     <h2>MCP connections</h2><p className="text-muted">Optional tools for your workflows. Basic authoring works without an MCP connection.</p>
     {snapshot && <p className="workspace-path">Saved in <code>{snapshot.path}</code></p>}
@@ -50,7 +59,7 @@ export default function IntegrationSetupPanel(): React.JSX.Element {
       {snapshot?.definitions.map(d => <span className="workspace-connection" key={d.name}><button className="btn" onClick={() => edit({ ...d, type: d.type.toLowerCase() === 'local' ? 'Local' : 'Remote' })}>{d.name}</button><button className="btn" disabled={busy} onClick={() => { void test(d.name); }} aria-label={`Test ${d.name}`}>Test</button></span>)}
     </div>
     <form onSubmit={e => { void save(e); }}>
-      <label className="workspace-field">Connection name<input className="form-input" value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} required /></label>
+      <label className="workspace-field">Connection name<input className="form-input" value={draft.name} disabled={editingName !== null} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} required /></label>
       <label className="workspace-field">Transport<select className="form-input" value={draft.type} onChange={e => { setDraft({ name: draft.name, type: e.target.value }); setPairs(''); }}><option>Remote</option><option>Local</option></select></label>
       {draft.type === 'Remote'
         ? <label className="workspace-field">MCP endpoint<input className="form-input" type="url" required value={draft.endpoint || ''} onChange={e => setDraft(d => ({ ...d, endpoint: e.target.value }))} placeholder="https://example.com/mcp" /></label>
@@ -61,6 +70,7 @@ export default function IntegrationSetupPanel(): React.JSX.Element {
       </label>
       <p className="text-muted">Environment references are resolved on the host. Existing redacted values are retained when you save.</p>
       <button className="btn btn-primary" disabled={busy || !snapshot} type="submit">Save connection</button>
+      {editingName && <button className="btn" disabled={busy} type="button" onClick={() => { void remove(); }}>Remove connection</button>}
     </form>
   </section>;
 }

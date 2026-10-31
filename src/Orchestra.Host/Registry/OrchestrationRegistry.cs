@@ -20,6 +20,7 @@ public partial class OrchestrationRegistry
 	private readonly ILogger<OrchestrationRegistry> _logger;
 	private readonly IOrchestrationVersionStore? _versionStore;
 	private readonly JsonSerializerOptions _jsonOptions;
+	private readonly Lock _fileGate = new();
 
 	public OrchestrationRegistry(string? persistPath = null, ILogger<OrchestrationRegistry>? logger = null, IOrchestrationVersionStore? versionStore = null, string? dataPath = null)
 	{
@@ -226,8 +227,10 @@ public partial class OrchestrationRegistry
 	/// </summary>
 	public OrchestrationEntry? GetByIdOrName(string idOrName)
 	{
-		if (string.IsNullOrWhiteSpace(idOrName)) return null;
-		if (_entries.TryGetValue(idOrName, out var byId)) return byId;
+		if (string.IsNullOrWhiteSpace(idOrName))
+			return null;
+		if (_entries.TryGetValue(idOrName, out var byId))
+			return byId;
 		return _entries.Values.FirstOrDefault(e => string.Equals(e.Orchestration.Name, idOrName, StringComparison.OrdinalIgnoreCase));
 	}
 
@@ -265,6 +268,12 @@ public partial class OrchestrationRegistry
 	/// </summary>
 	public void SaveToDisk()
 	{
+		lock (_fileGate)
+			SaveToDiskCore();
+	}
+
+	private void SaveToDiskCore()
+	{
 		try
 		{
 			var dir = Path.GetDirectoryName(_persistPath);
@@ -278,7 +287,7 @@ public partial class OrchestrationRegistry
 			}).ToList();
 
 			var json = JsonSerializer.Serialize(data, _jsonOptions);
-			File.WriteAllText(_persistPath, json);
+			WriteAtomic(_persistPath, json);
 			LogOrchestrationsPersistedToDisk(data.Count, _persistPath);
 		}
 		catch (Exception ex)
@@ -500,9 +509,18 @@ public partial class OrchestrationRegistry
 	{
 		var fileName = $"{SanitizePath(name)}-{id.Split('-').Last()}.json";
 		var managedPath = Path.Combine(_managedOrchestrationsPath!, fileName);
-		File.WriteAllText(managedPath, jsonContent);
+		lock (_fileGate)
+			WriteAtomic(managedPath, jsonContent);
 		LogOrchestrationCopiedToManaged(name, managedPath);
 		return managedPath;
+	}
+
+	private static void WriteAtomic(string path, string content)
+	{
+		var temporary = path + $".{Guid.NewGuid():N}.tmp";
+		try
+		{ File.WriteAllText(temporary, content); File.Move(temporary, path, true); }
+		finally { if (File.Exists(temporary)) File.Delete(temporary); }
 	}
 
 	/// <summary>

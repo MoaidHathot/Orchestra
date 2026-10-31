@@ -14,7 +14,7 @@ inputs ─▶ ┌─ research ─┐                       orchestra init
 
 ## Highlights
 
-- **Zero to running in two commands.** `orchestra init` scaffolds a working workspace; `orchestra doctor` verifies your machine before the first run instead of failing mid-run.
+- **Start in your browser.** `dnx Orchestra -- portal --open` opens a guided workspace with a credential-free demo, provider setup, workflow authoring, and Settings.
 - **One file, one DAG.** Steps (`Prompt`, `Command`, `Script`, `Http`, `Transform`, `Approval`, nested `Orchestration`) wired by `dependsOn`, with template expressions (`{{param.x}}`, `{{step.output}}`).
 - **Pluggable agents.** Run any Prompt step on `copilot` or `opencode`, selectable per step or per orchestration.
 - **MCP-native.** Attach Model Context Protocol servers to steps, and expose your orchestrations *as* an MCP server.
@@ -41,6 +41,23 @@ Running `orchestra` with no command prints the help. `orchestra <command> --help
 
 ## Quick start
 
+With the **.NET 10 SDK or later** installed:
+
+```bash
+dnx Orchestra -- portal --open
+```
+
+Choose **Try the demo** for a first successful run, then **Connect an agent** to install/sign in,
+discover models, and test your choice. Describe a workflow in **Get started**: the bundled
+assistant validates and saves it into your workspace, ready to run. **Settings** manages provider
+defaults, workspace paths, MCP connections, concurrency, retention, and diagnostics.
+
+Existing configurations and registered workflows keep their current locations. New files use
+your configured scan workspace, or `<dataPath>/workspace` when none is configured. See the
+[Portal onboarding guide](docs/portal-onboarding.md) for storage and restart behavior.
+
+The CLI remains available for scripts and terminal workflows:
+
 ```bash
 orchestra init             # scaffold a workspace with a runnable example
 orchestra doctor           # verify prerequisites before the first run
@@ -61,7 +78,7 @@ pass any of those as flags to skip the prompt, or `--yes` to accept every defaul
 orchestra init ./my-workflows --template research --provider copilot --yes
 ```
 
-Five templates ship with the tool, and every one runs with **no arguments**:
+Six templates ship with the tool, each with defaults for its inputs:
 
 | Template | Demonstrates |
 |---|---|

@@ -917,6 +917,11 @@
           },
           "default": []
         },
+        "preferChoice": {
+          "type": "boolean",
+          "default": false,
+          "description": "Use the selected choice as output even when a free-text reply/comment accompanies it. Default false preserves reply-first behavior."
+        },
         "onTimeout": {
           "type": "string",
           "description": "Behavior when timeoutSeconds fires without a response. 'fail' marks the step Failed; 'defaultResponse' uses the configured defaultResponse as the answer; 'cancel' cancels the entire orchestration.",

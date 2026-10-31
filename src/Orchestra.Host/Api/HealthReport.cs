@@ -39,7 +39,7 @@ public sealed record HealthReport(
 		var checks = new List<HealthCheck>
 		{
 			CheckDataPath(options.DataPath),
-			CheckProviders(providerRegistry),
+			CheckProviders(providerRegistry, options.Provider),
 			new("orchestrations", Healthy, $"{registry.Count} registered"),
 			new("scheduler", options.EnableScheduler ? Healthy : Degraded, options.EnableScheduler ? "running" : "disabled (enableScheduler=false); triggers will not fire"),
 			new("fileLogging", Healthy, options.FileLogging.Enabled
@@ -74,12 +74,12 @@ public sealed record HealthReport(
 		}
 	}
 
-	private static HealthCheck CheckProviders(IAgentProviderRegistry providerRegistry)
+	private static HealthCheck CheckProviders(IAgentProviderRegistry providerRegistry, string? configuredDefault)
 	{
 		var names = providerRegistry.ProviderNames;
 		return names.Count == 0
 			? new HealthCheck("agentProviders", Degraded, "no agent provider registered; Prompt steps cannot run")
-			: new HealthCheck("agentProviders", Healthy, $"{string.Join(", ", names)} (default: {providerRegistry.DefaultProviderName})");
+			: new HealthCheck("agentProviders", Healthy, $"{string.Join(", ", names)} (default: {configuredDefault ?? providerRegistry.DefaultProviderName})");
 	}
 }
 

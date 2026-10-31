@@ -313,7 +313,8 @@ public partial class TriggerManager : BackgroundService
 			var sidecarPath = GetSidecarPath(reg.OrchestrationPath);
 			if (File.Exists(sidecarPath))
 			{
-				try { File.Delete(sidecarPath); }
+				try
+				{ File.Delete(sidecarPath); }
 				catch (Exception ex) { LogSidecarDeleteFailed(sidecarPath, ex); }
 			}
 
@@ -687,7 +688,9 @@ public partial class TriggerManager : BackgroundService
 
 				_activeExecutions.TryRemove(executionId, out _);
 				_backgroundTasks.TryRemove(taskId, out _);
-				try { cts.Dispose(); } catch (ObjectDisposedException) { }
+				try
+				{ cts.Dispose(); }
+				catch (ObjectDisposedException) { }
 
 				// Update status and remove after a short delay (matching ExecuteOrchestrationCoreAsync behavior)
 				if (_activeExecutionInfos.TryGetValue(executionId, out var resumeInfo))
@@ -720,7 +723,8 @@ public partial class TriggerManager : BackgroundService
 				if (info.Reporter is SseReporter sseReporter)
 					sseReporter.ReportStatusChange(HostExecutionStatus.Cancelling);
 			}
-			try { cts.Cancel(); }
+			try
+			{ cts.Cancel(); }
 			catch (ObjectDisposedException) { /* CTS was disposed by a completing execution */ }
 			return true;
 		}
@@ -741,7 +745,8 @@ public partial class TriggerManager : BackgroundService
 			{
 				var json = File.ReadAllText(file);
 				var data = JsonSerializer.Deserialize<PersistedTrigger>(json, _jsonOptions);
-				if (data == null) continue;
+				if (data == null)
+					continue;
 
 				// Verify the orchestration file still exists
 				if (!File.Exists(data.OrchestrationPath))
@@ -947,13 +952,16 @@ public partial class TriggerManager : BackgroundService
 
 		foreach (var reg in _triggers.Values)
 		{
-			if (reg.OrchestrationName is null) continue;
-			if (!stats.TryGetValue(reg.OrchestrationName, out var s)) continue;
+			if (reg.OrchestrationName is null)
+				continue;
+			if (!stats.TryGetValue(reg.OrchestrationName, out var s))
+				continue;
 
 			// Never move counters backwards: a trigger that fired in-process before
 			// seeding (rare but possible if registration happens after another
 			// orchestration completes very quickly) already has higher values.
-			if (s.Count > reg.RunCount) reg.RunCount = s.Count;
+			if (s.Count > reg.RunCount)
+				reg.RunCount = s.Count;
 			var storeLastFire = s.LastStartedAt.UtcDateTime;
 			if (reg.LastFireTime is not { } existingLastFire || storeLastFire > existingLastFire)
 			{
@@ -983,8 +991,10 @@ public partial class TriggerManager : BackgroundService
 		// schedulers (overdue -> fire now; not yet due -> arm NextFireTime).
 		foreach (var reg in loopAutoResumes)
 		{
-			if (cancellationToken.IsCancellationRequested) break;
-			if (reg.Config is not LoopTriggerConfig loop) continue;
+			if (cancellationToken.IsCancellationRequested)
+				break;
+			if (reg.Config is not LoopTriggerConfig loop)
+				continue;
 
 			var lastFire = reg.LastFireTime;
 			var now = DateTime.UtcNow;
@@ -1040,10 +1050,13 @@ public partial class TriggerManager : BackgroundService
 
 		foreach (var reg in _triggers.Values)
 		{
-			if (stoppingToken.IsCancellationRequested) break;
+			if (stoppingToken.IsCancellationRequested)
+				break;
 
-			if (reg.Status != TriggerStatus.Waiting) continue;
-			if (!reg.Config.Enabled) continue;
+			if (reg.Status != TriggerStatus.Waiting)
+				continue;
+			if (!reg.Config.Enabled)
+				continue;
 
 			if (reg.Config is SchedulerTriggerConfig schedulerConfig)
 			{
@@ -1220,6 +1233,7 @@ public partial class TriggerManager : BackgroundService
 		{
 			var capturedParameters = parameters;
 			var capturedReg = reg;
+			var defaults = Volatile.Read(ref _hostDefaults);
 			inputHandlerTransform = async ct =>
 			{
 				try
@@ -1228,23 +1242,28 @@ public partial class TriggerManager : BackgroundService
 					var fullPrompt = $"{capturedReg.Config.InputHandlerPrompt}\n\nRaw input:\n{rawInputJson}";
 
 					// Trigger input-handler transforms run on the host default agent provider.
-					var agent = await _providerRegistry.Resolve(null)
+					var agent = await _providerRegistry.Resolve(defaults.Provider)
 						.BuildAgentAsync(new AgentBuildConfig
 						{
-							Model = capturedReg.Config.InputHandlerModel ?? _hostDefaults.Model ?? ModelDefaults.Model,
+							Model = capturedReg.Config.InputHandlerModel ?? defaults.Model ?? ModelDefaults.Model,
 							SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
 							Mcps = [],
+							CapturePlans = false,
 						}, ct);
 
-					var task = agent.SendAsync(fullPrompt);
-					var result = await task.GetResultAsync();
+					var task = agent.SendAsync(fullPrompt, ct);
+					await foreach (var _ in task.WithCancellation(ct))
+					{ }
+					var result = await task.GetResultAsync().WaitAsync(ct);
 
 					var content = result.Content.Trim();
 					if (content.StartsWith("```"))
 					{
 						var firstNewline = content.IndexOf('\n');
-						if (firstNewline >= 0) content = content[(firstNewline + 1)..];
-						if (content.EndsWith("```")) content = content[..^3].TrimEnd();
+						if (firstNewline >= 0)
+							content = content[(firstNewline + 1)..];
+						if (content.EndsWith("```"))
+							content = content[..^3].TrimEnd();
 					}
 
 					var transformed = JsonSerializer.Deserialize<Dictionary<string, string>>(content, _jsonOptions);
@@ -1255,6 +1274,7 @@ public partial class TriggerManager : BackgroundService
 					}
 					return null;
 				}
+				catch (OperationCanceledException) { throw; }
 				catch (Exception ex)
 				{
 					LogInputHandlerFailed(ex, capturedReg.Id);
@@ -1490,7 +1510,8 @@ public partial class TriggerManager : BackgroundService
 		var overridePath = GetJsonTriggerOverridePath(triggerId);
 		if (File.Exists(overridePath))
 		{
-			try { File.Delete(overridePath); }
+			try
+			{ File.Delete(overridePath); }
 			catch (Exception ex) { LogOverrideDeleteFailed(overridePath, ex); }
 		}
 	}
@@ -1613,16 +1634,16 @@ public partial class TriggerManager : BackgroundService
 				ContinueOnFailure = l.ContinueOnFailure,
 				AutoResume = l.AutoResume,
 			},
-		WebhookTriggerConfig w => new WebhookTriggerConfig
-		{
-			Type = w.Type,
-			Enabled = enabled,
-			InputHandlerPrompt = w.InputHandlerPrompt,
-			InputHandlerModel = w.InputHandlerModel,
-			Secret = w.Secret,
-			MaxConcurrent = w.MaxConcurrent,
-			Response = w.Response,
-		},
+			WebhookTriggerConfig w => new WebhookTriggerConfig
+			{
+				Type = w.Type,
+				Enabled = enabled,
+				InputHandlerPrompt = w.InputHandlerPrompt,
+				InputHandlerModel = w.InputHandlerModel,
+				Secret = w.Secret,
+				MaxConcurrent = w.MaxConcurrent,
+				Response = w.Response,
+			},
 			ManualTriggerConfig m => new ManualTriggerConfig
 			{
 				Type = m.Type,
@@ -1682,18 +1703,18 @@ public partial class TriggerManager : BackgroundService
 				ContinueOnFailure = element.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
 				AutoResume = element.TryGetProperty("autoResume", out var autoResume) && autoResume.GetBoolean(),
 			},
-		TriggerType.Webhook => new WebhookTriggerConfig
-		{
-			Type = TriggerType.Webhook,
-			Enabled = enabled,
-			InputHandlerPrompt = inputHandlerPrompt,
-			InputHandlerModel = inputHandlerModel,
-			Secret = element.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
-			MaxConcurrent = element.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
-			Response = element.TryGetProperty("response", out var responseProp)
-				? DeserializeWebhookResponseConfig(responseProp)
-				: null,
-		},
+			TriggerType.Webhook => new WebhookTriggerConfig
+			{
+				Type = TriggerType.Webhook,
+				Enabled = enabled,
+				InputHandlerPrompt = inputHandlerPrompt,
+				InputHandlerModel = inputHandlerModel,
+				Secret = element.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
+				MaxConcurrent = element.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
+				Response = element.TryGetProperty("response", out var responseProp)
+					? DeserializeWebhookResponseConfig(responseProp)
+					: null,
+			},
 			TriggerType.Manual => new ManualTriggerConfig
 			{
 				Type = TriggerType.Manual,

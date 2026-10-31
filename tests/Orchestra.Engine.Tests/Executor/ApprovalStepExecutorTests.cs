@@ -37,8 +37,10 @@ public class ApprovalStepExecutorTests
 		result.Content.Should().Be("approve");
 	}
 
-	[Fact]
-	public async Task ExecuteAsync_PrefersReplyOverChoice()
+	[Theory]
+	[InlineData(false, "go but with caveats")]
+	[InlineData(true, "approve")]
+	public async Task ExecuteAsync_RespectsChoicePreferenceWithoutDroppingComments(bool preferChoice, string expected)
 	{
 		var store = new TestPendingInputStore();
 		var waiter = new TestHumanInputWaiter();
@@ -48,6 +50,7 @@ public class ApprovalStepExecutorTests
 			Name = "review",
 			Type = OrchestrationStepType.Approval,
 			Prompt = "Notes?",
+			PreferChoice = preferChoice,
 		};
 		var context = BuildContext("test", "r");
 
@@ -64,7 +67,7 @@ public class ApprovalStepExecutorTests
 
 		var result = await executor.ExecuteAsync(step, context);
 
-		result.Content.Should().Be("go but with caveats");
+		result.Content.Should().Be(expected);
 	}
 
 	[Fact]

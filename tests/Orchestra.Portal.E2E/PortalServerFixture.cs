@@ -18,7 +18,7 @@ public class PortalServerFixture : IAsyncLifetime
 	private readonly List<string> _serverOutput = new();
 	private readonly List<string> _serverErrors = new();
 	private readonly string _testDataPath;
-	
+
 	public string BaseUrl { get; private set; } = null!;
 	public bool IsRunning { get; private set; }
 	public string? StartupError { get; private set; }
@@ -29,6 +29,8 @@ public class PortalServerFixture : IAsyncLifetime
 		// Create isolated test data directory
 		_testDataPath = Path.Combine(Path.GetTempPath(), "Orchestra.Portal.E2E", Guid.NewGuid().ToString("N"));
 		Directory.CreateDirectory(_testDataPath);
+		File.WriteAllText(Path.Combine(_testDataPath, "orchestra.json"), "{}");
+		File.WriteAllText(Path.Combine(_testDataPath, "portal-onboarding.json"), "{\"showWelcome\":false}");
 		Console.WriteLine($"E2E Test data directory: {_testDataPath}");
 	}
 
@@ -43,13 +45,13 @@ public class PortalServerFixture : IAsyncLifetime
 		Console.WriteLine($"Starting Portal server from: {projectPath}");
 		Console.WriteLine($"Using isolated test data path: {_testDataPath}");
 		Console.WriteLine($"Using dynamic port: {port}");
-		
+
 		_serverProcess = new Process
 		{
 			StartInfo = new ProcessStartInfo
 			{
 				FileName = "dotnet",
-				Arguments = $"run --project \"{projectPath}\" --urls {BaseUrl} --no-build",
+				Arguments = $"run --project \"{projectPath}\" --no-launch-profile --no-build -- --urls {BaseUrl}",
 				UseShellExecute = false,
 				RedirectStandardOutput = true,
 				RedirectStandardError = true,
@@ -57,9 +59,11 @@ public class PortalServerFixture : IAsyncLifetime
 				WorkingDirectory = projectPath
 			}
 		};
-		
+
 		// Set environment variable for test data isolation
 		_serverProcess.StartInfo.EnvironmentVariables["ORCHESTRA_PORTAL_DATA_PATH"] = _testDataPath;
+		_serverProcess.StartInfo.EnvironmentVariables["ORCHESTRA_CONFIG_PATH"] = Path.Combine(_testDataPath, "orchestra.json");
+		_serverProcess.StartInfo.EnvironmentVariables.Remove("ORCHESTRA_ORCHESTRATIONS_PATH");
 
 		_serverProcess.OutputDataReceived += (_, e) =>
 		{
@@ -96,7 +100,7 @@ public class PortalServerFixture : IAsyncLifetime
 		for (var i = 0; i < maxRetries; i++)
 		{
 			await Task.Delay(1000);
-			
+
 			// Check if process exited unexpectedly
 			if (_serverProcess.HasExited)
 			{
@@ -104,7 +108,7 @@ public class PortalServerFixture : IAsyncLifetime
 				Console.WriteLine(StartupError);
 				return;
 			}
-			
+
 			if (await CheckServerRunning())
 			{
 				IsRunning = true;
@@ -147,7 +151,7 @@ public class PortalServerFixture : IAsyncLifetime
 			}
 			_serverProcess.Dispose();
 		}
-		
+
 		// Clean up test data directory
 		if (Directory.Exists(_testDataPath))
 		{
@@ -164,7 +168,7 @@ public class PortalServerFixture : IAsyncLifetime
 				// Don't fail the test for cleanup issues
 			}
 		}
-		
+
 		return Task.CompletedTask;
 	}
 

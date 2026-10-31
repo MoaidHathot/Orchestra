@@ -211,4 +211,20 @@ public class CopilotAgentSessionTuningTests
 		format.JsonSchema.Schema.GetProperty("properties").GetProperty("count").GetProperty("type").GetString().Should().Be("integer");
 #pragma warning restore GHCP001
 	}
+
+	[Theory]
+	[InlineData("{\"type\":\"object\",\"properties\":{\"content\":{\"type\":\"string\"}},\"required\":[\"content\"],\"additionalProperties\":true}")]
+	[InlineData("{\"type\":\"array\",\"items\":{\"type\":\"string\"}}")]
+	[InlineData("{\"type\":\"object\",\"properties\":{\"value\":{}},\"required\":[\"value\"],\"additionalProperties\":false}")]
+	[InlineData("{\"type\":\"object\",\"properties\":{\"optional\":{\"type\":\"string\"}},\"additionalProperties\":false}")]
+	[InlineData("{\"type\":\"object\",\"properties\":{\"steps\":{\"type\":\"array\",\"items\":{\"type\":\"object\"}}},\"required\":[\"steps\"],\"additionalProperties\":false}")]
+	public void OpenEndedContracts_DoNotRequestUnsupportedNativeStrictMode(string json)
+	{
+#pragma warning disable GHCP001
+		using var schema = System.Text.Json.JsonDocument.Parse(json);
+		var format = CopilotSdkSessionAdapter.BuildResponseFormat(schema.RootElement);
+		format.JsonSchema.Strict.Should().BeFalse();
+		format.JsonSchema.Schema.GetRawText().Should().Be(json, "the engine still validates the original contract");
+#pragma warning restore GHCP001
+	}
 }

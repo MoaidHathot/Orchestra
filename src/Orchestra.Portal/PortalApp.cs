@@ -152,6 +152,7 @@ internal static class PortalApp
 
 			try
 			{
+				directory = Path.GetFullPath(directory);
 				var entries = new List<object>();
 
 				var parent = Directory.GetParent(directory);
@@ -194,6 +195,7 @@ internal static class PortalApp
 				return Results.Json(new
 				{
 					currentDirectory = directory,
+					roots = OperatingSystem.IsWindows() ? Directory.GetLogicalDrives() : ["/"],
 					entries
 				});
 			}

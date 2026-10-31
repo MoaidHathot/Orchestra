@@ -54,6 +54,9 @@ public class ApprovalOrchestrationStep : OrchestrationStep
 	/// </summary>
 	public string[] Choices { get; init; } = [];
 
+	/// <summary>Use the selected choice as output when a reply/comment is also supplied. Default false preserves reply-first behavior.</summary>
+	public bool PreferChoice { get; init; }
+
 	/// <summary>
 	/// What to do when the per-step / per-orchestration timeout fires before a response
 	/// arrives. Default is <see cref="ApprovalTimeoutBehavior.Fail"/>. Only takes effect

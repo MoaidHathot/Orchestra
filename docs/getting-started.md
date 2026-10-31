@@ -15,11 +15,27 @@ team.
 
 | Requirement | Why |
 |---|---|
-| .NET 10 runtime | Orchestra is a .NET tool. The SDK is only needed if you build from source. |
-| An agent provider | **GitHub Copilot** (subscription required) or **OpenCode** (installed and on `PATH`). |
+| .NET 10 SDK or later | Provides the `dnx` launcher and `dotnet tool` commands, plus the runtime. |
+| An agent provider for AI steps | **GitHub Copilot** access or a configured **OpenCode** model provider. Portal can install the runtimes and guide sign-in. |
 
-Nothing else. Orchestra downloads the Copilot CLI itself on first use — see
-[the first run](#the-first-run-and-the-100-mb-download) below.
+The Portal UI, schemas, starters and authoring skill ship in the package. The demo requires
+no agent credentials. Individual workflows may need additional programs (for example Git
+for code review or PowerShell for the legacy CLI `generate` template).
+
+## Recommended: start with Portal
+
+```bash
+dnx Orchestra -- portal --open
+```
+
+The `--` forwards the following arguments to Orchestra; `--open` opens the listening address
+in your browser. In an empty library, the welcome screen offers a demo, provider setup,
+workflow authoring and examples. Use **Settings** to connect a provider, choose/test a model,
+and configure the workspace. The authoring assistant validates and registers its output
+without requiring a CLI validation command or PowerShell.
+
+Read [Portal onboarding](portal-onboarding) for the complete browser journey. The following
+sections describe the equivalent CLI workflows, which continue to work.
 
 ## Install
 

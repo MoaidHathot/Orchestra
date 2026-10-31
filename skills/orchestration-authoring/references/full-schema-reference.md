@@ -650,12 +650,13 @@ If an Orchestration step input handler returns invalid JSON or an empty object, 
 
 Pauses the orchestration and waits for human input. The step persists a `PendingInputRecord` to disk under `{DataPath}/pending/{orchestrationName}/{runId}/{stepName}.json`, transitions to `ExecutionStatus.AwaitingInput`, fires the `step.awaitingInput` hook event, and blocks until a user responds via the host's HumanInput API.
 
-The user's response (`reply` or `choice`, with `reply` winning when both are supplied) becomes the step's content via `{{stepName.output}}`. Approval steps survive host restarts: the persisted record is preserved across process bounces, and on resume the step re-attaches to the still-outstanding wait.
+The user's response (`reply` or `choice`, with `reply` winning when both are supplied) becomes the step's content via `{{stepName.output}}`. Set `preferChoice: true` when downstream conditions must branch on the choice even if the user also adds a comment; the complete response is still retained for audit. Approval steps survive host restarts: the persisted record is preserved across process bounces, and on resume the step re-attaches to the still-outstanding wait.
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `prompt` | `string` | **Yes** | -- | Human-readable prompt presented to the user. Supports template expressions resolved at execution time (e.g., `{{param.x}}`, `{{vars.x}}`, `{{stepName.output}}`). |
 | `choices` | `string[]` | No | `[]` | Allowed responses. When non-empty, the response endpoint validates that the supplied `choice` is one of these (case-insensitive). When empty, free-form replies are accepted. |
+| `preferChoice` | `bool` | No | `false` | Export the selected choice even when a comment/reply accompanies it. Useful for choice-based branches; the complete response remains in the audit record. |
 | `timeoutSeconds` | `int` | No | `null` | Per-step timeout. When elapsed without a response, behavior is governed by `onTimeout`. When null, the wait runs indefinitely (subject to the orchestration timeout, which by default pauses during waits per `pauseTimeoutDuringWait`). |
 | `onTimeout` | `string` | No | `"fail"` | Behavior when `timeoutSeconds` fires. One of: `"fail"` (mark step Failed with `ErrorCategory.Timeout`), `"defaultResponse"` (use `defaultResponse` as the answer and continue), `"cancel"` (cancel the entire orchestration). |
 | `defaultResponse` | `string` | No | `null` | Required when `onTimeout: "defaultResponse"`. The fallback content used as the step's output. |

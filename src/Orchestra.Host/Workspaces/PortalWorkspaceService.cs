@@ -13,6 +13,7 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 	OrchestrationHostOptions host, OrchestrationRegistry registry, TriggerManager triggers, ILogger<PortalWorkspaceService> logger)
 {
 	private readonly SemaphoreSlim _gate = new(1, 1);
+	private string? _initializationError;
 	public string Root => configuration.WorkspaceDirectory;
 	public string AssetsDirectory => settings.AssetsDirectory;
 	private string Marker => Path.Combine(host.DataPath, "portal-onboarding.json");
@@ -25,22 +26,34 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 		workflowDirectory = Path.Combine(Root, "orchestrations"),
 		hasOrchestrations = registry.Count > 0,
 		showWelcome = !File.Exists(Marker) || ReadWelcome(),
-		templates = Templates.Select(t => new { t.Id, t.Title, t.Summary, requiresAgent = t.Id is not ("smoke-test" or "approval"), requiresPowerShell = t.Id == "generate" }),
+		initializationError = _initializationError,
+		templates = Templates.Select(t => new { t.Id, t.Title, t.Summary, requiresAgent = t.Id != "smoke-test", requiresPowerShell = t.Id == "generate" }),
 		defaultProvider = host.Provider ?? "copilot",
 		defaultModel = host.DefaultModel ?? ModelDefaults.Model,
 	};
 	private bool ReadWelcome()
 	{
-		try { return JsonNode.Parse(File.ReadAllText(Marker))?["showWelcome"]?.GetValue<bool>() ?? true; }
+		try
+		{ return JsonNode.Parse(File.ReadAllText(Marker))?["showWelcome"]?.GetValue<bool>() ?? true; }
 		catch (Exception ex) when (ex is IOException or JsonException) { return true; }
 	}
 	public Task DismissAsync(CancellationToken token) => WorkspaceSettingsStore.WriteAtomicAsync(Marker, "{\"showWelcome\":false}\n", token);
 
 	public async Task InitializeAsync(CancellationToken token)
 	{
-		if (File.Exists(Marker)) return;
+		if (File.Exists(Marker))
+			return;
 		var existing = registry.Count > 0;
-		if (!existing && Templates.Any(t => t.Id == "smoke-test")) await InstallTemplateAsync("smoke-test", token);
+		if (!existing && Templates.Any(t => t.Id == "smoke-test"))
+		{
+			try
+			{ await InstallTemplateAsync("smoke-test", token); }
+			catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+			{
+				_initializationError = $"Could not install the demo in '{Root}': {ex.Message}. Choose a writable workspace in Settings, then try the demo again.";
+				LogInitializationFailed(Root, ex);
+			}
+		}
 		await WorkspaceSettingsStore.WriteAtomicAsync(Marker, JsonSerializer.Serialize(new { showWelcome = !existing }), token);
 	}
 
@@ -51,7 +64,8 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 		try
 		{
 			var existing = registry.GetByIdOrName(id);
-			if (existing is not null) return existing;
+			if (existing is not null)
+				return existing;
 			var result = InitScaffolder.Scaffold(new InitPlan(Root, template, null, null, false, true, false, true),
 				Path.Combine(AssetsDirectory, "schemas"), Path.Combine(AssetsDirectory, "skills"));
 			if (result.Files.Any(f => f.Path == result.OrchestrationPath && f.Outcome == InitFileOutcome.Written))
@@ -60,7 +74,8 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 				if (body.Contains("defaultModel:"))
 				{
 					body = System.Text.RegularExpressions.Regex.Replace(body, @"(?m)^defaultModel:[^\r\n]*", "defaultModel: " + JsonSerializer.Serialize(host.DefaultModel ?? ModelDefaults.Model));
-					if (host.Provider is { } provider) body += "\ndefaultProvider: " + JsonSerializer.Serialize(provider) + "\n";
+					if (host.Provider is { } provider)
+						body += "\ndefaultProvider: " + JsonSerializer.Serialize(provider) + "\n";
 					await WorkspaceSettingsStore.WriteAtomicAsync(result.OrchestrationPath, body, token);
 				}
 			}
@@ -75,11 +90,14 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 		{
 			var json = OrchestrationDocuments.Normalize(content);
 			var errors = OrchestrationSchemaValidator.ValidateJson(json, Path.Combine(AssetsDirectory, "schemas", "orchestration.schema.json")).ToList();
-			if (errors.Count > 0) return errors;
-			var preview = OrchestrationDocuments.Preview(json);
-			errors.AddRange(preview.Errors);
-			var definition = OrchestrationParser.ParseOrchestration(json, registry.GlobalMcps);
-			if (!InitScaffolder.OrchestrationNamePattern.IsMatch(definition.Name)) errors.Add("Use a kebab-case orchestration name.");
+			if (errors.Count > 0)
+				return errors;
+			var name = JsonNode.Parse(json)!["name"]!.GetValue<string>();
+			if (!InitScaffolder.OrchestrationNamePattern.IsMatch(name))
+				return ["Use a kebab-case orchestration name."];
+			var definition = OrchestrationParser.ParseOrchestrationDocument(json, Path.Combine(Root, "orchestrations", name + ".json"), registry.GlobalMcps);
+			new OrchestrationScheduler().Schedule(definition);
+			errors.AddRange(TemplateExpressionValidator.ValidateOrchestration(definition).Errors.Select(e => e.Message));
 			return errors;
 		}
 		catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException or IOException or YamlDotNet.Core.YamlException)
@@ -89,13 +107,15 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 	public async Task<OrchestrationEntry> SaveAsync(string content, CancellationToken token)
 	{
 		var errors = Validate(content);
-		if (errors.Count > 0) throw new ArgumentException(string.Join("\n", errors));
+		if (errors.Count > 0)
+			throw new ArgumentException(string.Join("\n", errors));
 		var json = OrchestrationDocuments.Normalize(content);
 		var name = JsonNode.Parse(json)!["name"]!.GetValue<string>();
 		await _gate.WaitAsync(token);
 		try
 		{
-			if (registry.GetByIdOrName(name) is not null) throw new WorkspaceConflictException($"An orchestration named '{name}' already exists. Choose another name.");
+			if (registry.GetByIdOrName(name) is not null)
+				throw new WorkspaceConflictException($"An orchestration named '{name}' already exists. Choose another name.");
 			var directory = Path.Combine(Root, "orchestrations");
 			Directory.CreateDirectory(directory);
 			var path = Path.Combine(directory, name + ".json");
@@ -125,4 +145,7 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 
 	[LoggerMessage(Level = LogLevel.Information, Message = "Created orchestration {Id} at {Path}")]
 	private partial void LogCreated(string id, string path);
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Could not initialize Portal workspace at {Path}")]
+	private partial void LogInitializationFailed(string path, Exception exception);
 }

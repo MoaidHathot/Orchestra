@@ -7,6 +7,7 @@ namespace Orchestra.Host.Hosting;
 /// </summary>
 public class OrchestrationHostOptions
 {
+	private readonly Lock _agentDefaultsGate = new();
 	/// <summary>
 	/// The root data path for all Orchestra data (runs, triggers, registry, etc.)
 	/// Default: %LOCALAPPDATA%/OrchestraHost
@@ -140,13 +141,23 @@ public class OrchestrationHostOptions
 	/// <see cref="DefaultReasoningLevel"/> and <see cref="DefaultMaxConcurrency"/>, in the shape
 	/// the engine consumes.
 	/// </summary>
-	public HostAgentDefaults ToHostAgentDefaults() => new()
+	public HostAgentDefaults ToHostAgentDefaults()
 	{
-		Provider = Provider,
-		Model = DefaultModel,
-		ReasoningLevel = DefaultReasoningLevel,
-		MaxConcurrency = DefaultMaxConcurrency,
-	};
+		lock (_agentDefaultsGate)
+			return new() { Provider = Provider, Model = DefaultModel, ReasoningLevel = DefaultReasoningLevel, MaxConcurrency = DefaultMaxConcurrency };
+	}
+
+	/// <summary>Publishes a complete set of new-run defaults while active executors retain their snapshot.</summary>
+	internal void UpdateAgentDefaults(HostAgentDefaults defaults)
+	{
+		lock (_agentDefaultsGate)
+		{
+			Provider = defaults.Provider;
+			DefaultModel = defaults.Model;
+			DefaultReasoningLevel = defaults.ReasoningLevel;
+			DefaultMaxConcurrency = defaults.MaxConcurrency;
+		}
+	}
 
 	/// <summary>
 	/// Default provider-neutral agent worker pool settings applied when an

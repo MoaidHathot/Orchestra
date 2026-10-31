@@ -217,6 +217,17 @@ if (typeof window !== 'undefined') {
   });
 }
 
+/** Immediate form operations: no hidden offline queue or automatic mutation retry. */
+export async function requestJson<T>(url: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await fetch(url, {
+    method: body === undefined ? 'GET' : 'POST', signal, cache: 'no-store',
+    ...(body !== undefined ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}),
+  });
+  if (!response.ok) throw await toApiError(response, url);
+  const text = await response.text();
+  return text ? JSON.parse(text) as T : undefined as T;
+}
+
 export const api = {
   /**
    * GET with retry and caching.

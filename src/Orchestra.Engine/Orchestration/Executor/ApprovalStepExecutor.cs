@@ -98,7 +98,7 @@ public sealed partial class ApprovalStepExecutor : IStepExecutor
 			shouldCleanupRecord = true;
 			_reporter.ReportInputReceived(orchestrationName, runId, step.Name, response);
 
-			var content = response.ResolveContent();
+			var content = approval.PreferChoice ? response.Choice ?? response.ResolveContent() : response.ResolveContent();
 			return ExecutionResult.Succeeded(content, rawDependencyOutputs: ToMutable(rawDependencyOutputs));
 		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

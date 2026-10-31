@@ -112,19 +112,30 @@ public class OrchestrationChangeNotifierTests : IDisposable
 	}
 
 	[Fact]
-	public async Task Burst_IsCoalescedIntoOneEvent_NamedAfterTheFirstChange()
+	public void Burst_IsCoalescedIntoOneEvent_NamedAfterTheFirstChange()
 	{
 		var reader = _broadcaster.Subscribe()!;
-		using var notifier = CreateNotifier(TimeSpan.FromMilliseconds(150));
+		var time = Substitute.For<TimeProvider>();
+		TimerCallback? publish = null;
+		time.CreateTimer(Arg.Any<TimerCallback>(), Arg.Any<object?>(), Arg.Any<TimeSpan>(), Arg.Any<TimeSpan>())
+			.Returns(call => { publish = call.ArgAt<TimerCallback>(0); return Substitute.For<ITimer>(); });
+		using var notifier = new OrchestrationChangeNotifier(_registry, _triggerManager, _broadcaster,
+			NullLogger<OrchestrationChangeNotifier>.Instance, TimeSpan.FromMilliseconds(150), time);
 		notifier.Start();
 
 		for (var i = 0; i < 5; i++)
 			_registry.Register(WriteOrchestration($"burst-{i}"), persist: false);
 		_registry.Remove(_registry.GetAll().First().Id);
 
-		var events = await DrainAsync(reader, TimeSpan.FromMilliseconds(800));
-		events.Where(e => e.Type == "orchestrations-changed").Should().ContainSingle("six mutations inside the window yield one event")
-			.Which.Data.Should().Contain("registry:registered");
+		// File I/O and parallel-suite load must not determine whether this is one burst.
+		reader.TryRead(out _).Should().BeFalse();
+		publish.Should().NotBeNull();
+		publish!(null);
+		reader.TryRead(out var notification).Should().BeTrue();
+		notification!.Type.Should().Be("orchestrations-changed");
+		notification.Data.Should().Contain("registry:registered");
+		publish(null);
+		reader.TryRead(out _).Should().BeFalse("one elapsed coalescing window publishes the six mutations once");
 	}
 
 	[Fact]

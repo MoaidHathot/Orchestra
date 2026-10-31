@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { api } from '../../api';
+import { requestJson } from '../../api';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { Icons } from '../../icons';
 import { renderMermaidDag } from '../../mermaid';
@@ -95,6 +95,7 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<'browse' | 'paste'>('browse');
   const [path, setPath] = useState('');
   const [files, setFiles] = useState<ScannedFile[]>([]);
+  const [hasScanned, setHasScanned] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [jsonContent, setJsonContent] = useState('');
   const [loading, setLoading] = useState(false);
@@ -107,26 +108,35 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
   const [exportModal, setExportModal] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
   const previewRequest = useRef(0);
-  useEffect(() => { if (!open) { previewRequest.current++; setPickingFolder(false); } }, [open]);
+  const scanRequest = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!open) { previewRequest.current++; scanRequest.current?.abort(); setPickingFolder(false); setLoading(false); setPreviewFile(null); setPreviewOrch(null); }
+    return () => { previewRequest.current++; scanRequest.current?.abort(); };
+  }, [open]);
 
   // Open folder browser dialog
   const openFolderDialog = () => setPickingFolder(true);
 
   const browseFolder = async () => {
     if (!path) return;
+    scanRequest.current?.abort();
+    const controller = new AbortController();
+    scanRequest.current = controller;
     setLoading(true);
     setError('');
     try {
-      const data = await api.post<ScanResponse>('/api/folder/scan', { directory: path });
+      const data = await requestJson<ScanResponse>('/api/folder/scan', { directory: path }, controller.signal);
+      if (controller.signal.aborted) return;
       setFiles(data.orchestrations || []);
+      setHasScanned(true);
       previewRequest.current++;
       setPreviewFile(null);
       setPreviewOrch(null);
       setSelectedFiles([]);
     } catch (err) {
-      setError((err as Error).message);
+      if (!controller.signal.aborted) setError((err as Error).message);
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   };
 
@@ -141,10 +151,11 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
     if (!file.valid) return;
     setPreviewFile(file);
     setPreviewOrch(null);
+    setPreviewJson('');
     setError('');
     const request = ++previewRequest.current;
     try {
-      const data = await api.post<{ json: string; definition: PreviewOrchestration; errors: string[] }>('/api/orchestrations/preview', { path: file.path });
+      const data = await requestJson<{ json: string; definition: PreviewOrchestration; errors: string[] }>('/api/orchestrations/preview', { path: file.path });
       if (request !== previewRequest.current) return;
       setPreviewJson(data.json);
       setPreviewOrch(data.definition);
@@ -173,18 +184,20 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
     setError('');
     try {
       if (activeTab === 'browse') {
-        const result = await api.post<{ addedCount: number; errors: { path: string; error: string }[] }>('/api/orchestrations', { paths: selectedFiles });
+        const result = await requestJson<{ addedCount: number; errors: { path: string; error: string }[] }>('/api/orchestrations', { paths: selectedFiles });
         if (result.errors?.length > 0) {
           const errorMsg = result.errors.map(e => `${e.path}: ${e.error}`).join('\n');
           if (result.addedCount === 0) {
             setError(errorMsg);
             return;
           }
-          // Partial success — still close but log
-          console.warn('Some orchestrations failed to add:', result.errors);
+          onAdded();
+          setSelectedFiles(result.errors.map(item => item.path));
+          setError(`${result.addedCount} workflow(s) added. These files still need attention:\n${errorMsg}`);
+          return;
         }
       } else {
-        await api.post('/api/orchestrations/json', { json: jsonContent });
+        await requestJson('/api/orchestrations/json', { json: jsonContent });
       }
       onAdded();
       onClose();
@@ -234,14 +247,14 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
             <button className="modal-close" onClick={onClose} aria-label="Close"><Icons.X /></button>
           </div>
         </div>
-        <div className="tabs">
-          <div className={`tab ${activeTab === 'browse' ? 'active' : ''}`} onClick={() => setActiveTab('browse')}>Browse Files</div>
-          <div className={`tab ${activeTab === 'paste' ? 'active' : ''}`} onClick={() => setActiveTab('paste')}>Paste JSON / YAML</div>
+        <div className="tabs" role="tablist" aria-label="Import method">
+          <button type="button" role="tab" aria-selected={activeTab === 'browse'} className={`tab ${activeTab === 'browse' ? 'active' : ''}`} onClick={() => setActiveTab('browse')}>Browse Files</button>
+          <button type="button" role="tab" aria-selected={activeTab === 'paste'} className={`tab ${activeTab === 'paste' ? 'active' : ''}`} onClick={() => setActiveTab('paste')}>Paste JSON / YAML</button>
         </div>
         <div className="modal-body">
-          {pickingFolder && <DirectoryPicker initialPath={path} onCancel={() => setPickingFolder(false)} onSelect={selected => { setPath(selected); setPickingFolder(false); setFiles([]); setPreviewFile(null); setPreviewOrch(null); }} />}
+          {pickingFolder && <DirectoryPicker initialPath={path} onCancel={() => setPickingFolder(false)} onSelect={selected => { scanRequest.current?.abort(); previewRequest.current++; setLoading(false); setHasScanned(false); setPath(selected); setPickingFolder(false); setFiles([]); setSelectedFiles([]); setPreviewFile(null); setPreviewOrch(null); }} />}
           {error && (
-            <div style={{ background: 'rgba(248, 81, 73, 0.15)', border: '1px solid var(--error)', borderRadius: '6px', padding: '12px', marginBottom: '16px', color: 'var(--error)' }}>
+            <div role="alert" style={{ background: 'rgba(248, 81, 73, 0.15)', border: '1px solid var(--error)', borderRadius: '6px', padding: '12px', marginBottom: '16px', color: 'var(--error)', whiteSpace: 'pre-wrap' }}>
               {error}
             </div>
           )}
@@ -251,10 +264,11 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
               {/* Left side: file browser */}
               <div style={{ flex: previewFile ? '0 0 300px' : '1', minWidth: 0 }}>
                 <div className="form-group">
-                  <label className="form-label">Folder Path</label>
+                  <label className="form-label" htmlFor="import-folder">Folder Path</label>
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <input
                       type="text"
+                      id="import-folder"
                       className="form-input"
                       placeholder="Enter folder path..."
                       value={path}
@@ -271,13 +285,19 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
                   </div>
                 </div>
 
+                {hasScanned && files.length === 0 && !loading && <p role="status">No JSON or YAML orchestration files found in this folder.</p>}
                 {files.length > 0 && (
                   <div className="form-group">
                     <label className="form-label">Select Orchestration Files ({selectedFiles.length} selected)</label>
                     <div className="file-browser" style={{ maxHeight: '300px' }}>
-                      {files.map((file, i) => (
+                      {files.map(file => (
                         <div
-                          key={i}
+                          key={file.path}
+                          role="checkbox"
+                          aria-checked={selectedFiles.includes(file.path)}
+                          aria-disabled={!file.valid}
+                          tabIndex={file.valid ? 0 : -1}
+                          onKeyDown={event => { if (file.valid && (event.key === ' ' || event.key === 'Enter')) { event.preventDefault(); toggleFile(file.path); void loadPreview(file); } }}
                           className={`file-item ${selectedFiles.includes(file.path) ? 'selected' : ''} ${!file.valid ? 'invalid' : ''} ${previewFile?.path === file.path ? 'previewing' : ''}`}
                           onClick={() => {
                             if (file.valid) {
@@ -478,10 +498,11 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
 
           {activeTab === 'paste' && (
             <div className="form-group">
-              <label className="form-label">Orchestration JSON</label>
+              <label className="form-label" htmlFor="import-document">Orchestration JSON / YAML</label>
               <textarea
+                id="import-document"
                 className="form-textarea"
-                placeholder="Paste your orchestration JSON here..."
+                placeholder="Paste your orchestration JSON or YAML here..."
                 value={jsonContent}
                 onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) => setJsonContent(e.target.value)}
                 style={{ minHeight: '300px' }}

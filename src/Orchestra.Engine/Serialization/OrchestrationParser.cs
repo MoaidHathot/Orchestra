@@ -95,6 +95,19 @@ public static class OrchestrationParser
 		return ParseOrchestrationFileCore(path, sourcePath: null, availableMcps, s_defaultParserRegistry);
 	}
 
+	/// <summary>Parses a prospective document with the same source-relative semantics as a file.</summary>
+	public static Orchestration ParseOrchestrationDocument(string json, string sourcePath, Mcp[] availableMcps)
+	{
+		var baseDirectory = GetBaseDirectory(sourcePath, null);
+		var context = new StepParseContext(BaseDirectory: baseDirectory, Variables: ExtractVariables(json));
+		var result = JsonSerializer.Deserialize<Orchestration>(json, CreateOptions(s_defaultParserRegistry, context))
+			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
+		ApplySourcePath(result, sourcePath, null);
+		HookDefinitionResolver.ApplyBaseDirectory(result.Hooks, baseDirectory);
+		ResolveStepMcps(result, availableMcps);
+		return result;
+	}
+
 	/// <summary>
 	/// Parses an orchestration file while resolving relative references from an original source path.
 	/// Use this when <paramref name="path"/> points at a managed copy of an orchestration file.
@@ -357,7 +370,8 @@ public static class OrchestrationParser
 				if (ts.ValueKind == JsonValueKind.Number)
 				{
 					var seconds = ts.GetDouble();
-					if (seconds > 0) timeout = TimeSpan.FromSeconds(seconds);
+					if (seconds > 0)
+						timeout = TimeSpan.FromSeconds(seconds);
 				}
 				else if (ts.ValueKind == JsonValueKind.String)
 				{
@@ -567,44 +581,44 @@ public static class OrchestrationParser
 					ContinueOnFailure = root.TryGetProperty("continueOnFailure", out var cof) && cof.GetBoolean(),
 					AutoResume = root.TryGetProperty("autoResume", out var autoResume) && autoResume.GetBoolean(),
 				},
-		TriggerType.Webhook => new WebhookTriggerConfig
-		{
-			Type = TriggerType.Webhook,
-			Enabled = enabled,
-			InputHandlerPrompt = inputHandlerPrompt,
-			InputHandlerModel = inputHandlerModel,
-			Secret = root.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
-			MaxConcurrent = root.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
-			Response = root.TryGetProperty("response", out var responseProp)
-				? ParseWebhookResponseConfig(responseProp)
-				: null,
-		},
-			TriggerType.Manual => new ManualTriggerConfig
-			{
-				Type = TriggerType.Manual,
-				Enabled = enabled,
-				InputHandlerPrompt = inputHandlerPrompt,
-				InputHandlerModel = inputHandlerModel,
-			},
-			TriggerType.Watcher => new WatcherTriggerConfig
-			{
-				Type = TriggerType.Watcher,
-				Enabled = enabled,
-				InputHandlerPrompt = inputHandlerPrompt,
-				InputHandlerModel = inputHandlerModel,
-				Watcher = root.TryGetProperty("watcher", out var watcherProp) ? watcherProp.GetString() : null,
-				Definition = root.TryGetProperty("definition", out var definitionProp)
-					? ParseWatcherDefinition(definitionProp)
-					: null,
-				MaxConcurrent = root.TryGetProperty("maxConcurrent", out var watcherMaxConc) ? watcherMaxConc.GetInt32() : 1,
-				Catchup = root.TryGetProperty("catchup", out var catchupProp)
-					? ParseWatcherCatchup(catchupProp)
-					: WatcherCatchupMode.FromNow,
-				Parameters = root.TryGetProperty("parameters", out var watcherParams)
-					? ParseWatcherParameters(watcherParams)
-					: null,
-			},
-			_ => throw new JsonException($"Unknown trigger type: '{type}'."),
+				TriggerType.Webhook => new WebhookTriggerConfig
+				{
+					Type = TriggerType.Webhook,
+					Enabled = enabled,
+					InputHandlerPrompt = inputHandlerPrompt,
+					InputHandlerModel = inputHandlerModel,
+					Secret = root.TryGetProperty("secret", out var secret) ? secret.GetString() : null,
+					MaxConcurrent = root.TryGetProperty("maxConcurrent", out var maxConc) ? maxConc.GetInt32() : 1,
+					Response = root.TryGetProperty("response", out var responseProp)
+						? ParseWebhookResponseConfig(responseProp)
+						: null,
+				},
+				TriggerType.Manual => new ManualTriggerConfig
+				{
+					Type = TriggerType.Manual,
+					Enabled = enabled,
+					InputHandlerPrompt = inputHandlerPrompt,
+					InputHandlerModel = inputHandlerModel,
+				},
+				TriggerType.Watcher => new WatcherTriggerConfig
+				{
+					Type = TriggerType.Watcher,
+					Enabled = enabled,
+					InputHandlerPrompt = inputHandlerPrompt,
+					InputHandlerModel = inputHandlerModel,
+					Watcher = root.TryGetProperty("watcher", out var watcherProp) ? watcherProp.GetString() : null,
+					Definition = root.TryGetProperty("definition", out var definitionProp)
+						? ParseWatcherDefinition(definitionProp)
+						: null,
+					MaxConcurrent = root.TryGetProperty("maxConcurrent", out var watcherMaxConc) ? watcherMaxConc.GetInt32() : 1,
+					Catchup = root.TryGetProperty("catchup", out var catchupProp)
+						? ParseWatcherCatchup(catchupProp)
+						: WatcherCatchupMode.FromNow,
+					Parameters = root.TryGetProperty("parameters", out var watcherParams)
+						? ParseWatcherParameters(watcherParams)
+						: null,
+				},
+				_ => throw new JsonException($"Unknown trigger type: '{type}'."),
 			};
 		}
 

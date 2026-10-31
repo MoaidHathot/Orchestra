@@ -51,9 +51,9 @@ export default function WorkspaceModal({ initialTab, onClose, onRun, onImport, o
   };
   const change = (key: string, next: unknown) => setChanges(c => ({ ...c, [key]: next }));
   const changeNested = (key: string, field: string, next: unknown) => setChanges(c => ({ ...c, [key]: { ...(c[key] as object || {}), [field]: next } }));
-  const saved = (snapshot: SettingsSnapshot) => {
-    setSettings(snapshot); setChanges({}); setMessage('Settings saved. Execution defaults apply to new runs.'); onChanged();
-    setWorkspace(w => w ? { ...w, defaultProvider: String(snapshot.effective.defaultProvider), defaultModel: String(snapshot.effective.defaultModel) } : w);
+  const saved = (snapshot: SettingsSnapshot, clearChanges = true) => {
+    setSettings(snapshot); if (clearChanges) setChanges({}); setMessage('Settings saved. Execution defaults apply to new runs.'); onChanged();
+    setWorkspace(w => w ? { ...w, defaultProvider: String(snapshot.effective.defaultProvider), defaultModel: String(snapshot.effective.defaultModel ?? snapshot.suggestedModel ?? w.defaultModel) } : w);
   };
   const save = async () => {
     if (!settings) return;
@@ -84,9 +84,11 @@ export default function WorkspaceModal({ initialTab, onClose, onRun, onImport, o
     catch (e) { setError(describeError(e)); } finally { setBusy(false); }
   };
   const close = () => { void workspaceRequest('/dismiss', {}).catch(() => {}); onClose(); };
-  const textField = (label: string, key: string, placeholder?: string) => <label className="workspace-field">{label}
-    <input className="form-input" value={text(key)} placeholder={placeholder} onChange={e => change(key, e.target.value || null)} />
-  </label>;
+  const textField = (label: string, key: string, placeholder?: string) => <div className="workspace-field">
+    <label htmlFor={`workspace-${key}`}>{label}</label>
+    <input id={`workspace-${key}`} aria-describedby={`workspace-${key}-source`} className="form-input" value={text(key)} placeholder={placeholder} onChange={e => change(key, e.target.value || null)} />
+    <small id={`workspace-${key}-source`} className="text-muted">{settings?.sources?.[key]}{value(key) !== settings?.effective[key] && settings?.effective[key] != null ? ` · In use: ${String(settings.effective[key])}` : ''}</small>
+  </div>;
 
   return <div className="modal-overlay visible" ref={trap}>
     <div className="modal workspace-modal" role="dialog" aria-modal="true" aria-label="Orchestra workspace">
@@ -106,13 +108,14 @@ export default function WorkspaceModal({ initialTab, onClose, onRun, onImport, o
         {(!workspace || !settings) && !error && <p role="status">Loading workspace…</p>}
         {workspace && settings && <>
           {settings.error && <div role="alert" className="workspace-error">Configuration could not be parsed: {settings.error}<br />File: {settings.configPath}</div>}
+          {workspace.initializationError && <div role="alert" className="workspace-error">{workspace.initializationError}</div>}
           {tab === 'welcome' && <>
             <section className="workspace-hero"><h2>From an idea to a running workflow</h2><p>Start with a demo, connect an agent, then describe what you want Orchestra to do.</p>
               <div className="workspace-actions"><button className="btn btn-primary" disabled={busy} onClick={() => { void start('demo'); }}>Try the demo</button><button className="btn" onClick={() => setTab('providers')}>Connect an agent</button><button className="btn" onClick={onImport}>Import a workflow</button></div>
               <small>The demo uses your installed .NET runtime and runs without agent credentials.</small>
             </section>
             <section className="workspace-card"><h3>Create with an assistant</h3>
-              <p className="text-muted">Your agent can ask clarifying questions in Portal. A deterministic check validates and saves the result into your workspace.</p>
+              <p className="text-muted">Your agent can ask clarifying questions in Portal. Orchestra checks the result and saves it into your workspace, ready to run.</p>
               <label className="workspace-field">What would you like to do?<textarea className="form-input" rows={4} value={description} onChange={e => setDescription(e.target.value)} placeholder="Create a workflow that fetches a JSON API, summarizes it, and asks me to approve the result…" /></label>
               <div className="workspace-actions"><button className="btn btn-primary" disabled={busy || !description.trim()} onClick={() => { void start('create-orchestration'); }}>Create workflow</button><button className="btn" disabled={busy || !description.trim()} onClick={() => { void start('configure-orchestra'); }}>Help configure Orchestra</button></div>
               <p className="text-muted">Using {workspace.defaultProvider} · {workspace.defaultModel}. <button className="workspace-link" onClick={() => setTab('providers')}>Check or change provider</button></p>
@@ -120,7 +123,7 @@ export default function WorkspaceModal({ initialTab, onClose, onRun, onImport, o
             <details className="workspace-card"><summary>Start from an example</summary><div className="workspace-template-grid">{workspace.templates.map(template => <article key={template.id}><h4>{template.id}</h4><p>{template.summary}</p><small>{template.requiresAgent ? 'Agent required' : 'No agent required'}{template.requiresPowerShell ? ' · PowerShell required' : ''}</small><button className="btn" disabled={busy} onClick={() => { void addTemplate(template.id); }}>Add {template.id}</button></article>)}</div></details>
             <p className="workspace-path">Workflows: <code>{workspace.workflowDirectory}</code></p>
           </>}
-          {tab === 'providers' && <ProviderSetupPanel settings={settings} onSaved={saved} />}
+          {tab === 'providers' && <ProviderSetupPanel settings={settings} onSaved={snapshot => saved(snapshot, false)} />}
           {tab === 'integrations' && <IntegrationSetupPanel />}
           {['workspace', 'execution', 'history'].includes(tab) && <form onSubmit={e => { e.preventDefault(); void save(); }}>
             <p className="workspace-path">Configuration: <code>{settings.configPath}</code><br /><span className="text-muted">Source: {settings.source}. Unrelated configuration and comments are preserved.</span></p>
@@ -129,7 +132,7 @@ export default function WorkspaceModal({ initialTab, onClose, onRun, onImport, o
               <h2>Workspace and storage</h2><p className="text-muted">Currently saving workflows under {workspace.workflowDirectory}. Directory and listener changes take effect after a restart.</p>
               <label className="workspace-field">Workspace root (contains orchestrations/)<input className="form-input" value={String(nested('scan', 'directory') ?? '')} onChange={e => changeNested('scan', 'directory', e.target.value)} /></label>
               <button className="btn" type="button" onClick={() => setPicking(!picking)}>Choose workspace folder</button>
-              {picking && <DirectoryPicker initialPath={String(nested('scan', 'directory') ?? '')} onCancel={() => setPicking(false)} onSelect={path => { changeNested('scan', 'directory', path); setPicking(false); }} />}
+              {picking && <DirectoryPicker initialPath={workspace.workspaceDirectory} onCancel={() => setPicking(false)} onSelect={path => { changeNested('scan', 'directory', path); setPicking(false); }} />}
               <label className="workspace-check"><input type="checkbox" checked={Boolean(nested('scan', 'recursive'))} onChange={e => changeNested('scan', 'recursive', e.target.checked)} /> Include subfolders</label>
               <label className="workspace-check"><input type="checkbox" checked={Boolean(nested('scan', 'watch'))} onChange={e => changeNested('scan', 'watch', e.target.checked)} /> Watch workflow files for changes</label>
               {textField('Run history and registry directory', 'dataPath')}{textField('Portal listening URL(s)', 'urls', 'http://localhost:5000')}

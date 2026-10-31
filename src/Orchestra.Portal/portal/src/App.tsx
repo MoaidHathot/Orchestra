@@ -259,6 +259,7 @@ function App(): React.JSX.Element {
   }, []);
   const [profilesModal, setProfilesModal] = useState(false);
   const [waitingInputsModal, setWaitingInputsModal] = useState(false);
+  const returnFromInput = useRef<string | null>(null);
   const [hostModal, setHostModal] = useState(false);
 
   // Tracks orchestration runs paused on human input. State is owned here so the
@@ -2555,6 +2556,12 @@ function App(): React.JSX.Element {
       />
       <ExecutionModal
         {...executionModal}
+        awaitingInput={pendingInputs.list.some(record => record.runId === executionModal.executionId)}
+        onRequestInput={() => {
+          returnFromInput.current = executionModal.executionId;
+          setExecutionModal(previous => ({ ...previous, open: false }));
+          setWaitingInputsModal(true);
+        }}
         onClose={() => {
           if (eventSourceRef.current) {
             eventSourceRef.current.close();
@@ -2646,11 +2653,20 @@ function App(): React.JSX.Element {
       />
       <WaitingInputsModal
         open={waitingInputsModal}
-        onClose={() => setWaitingInputsModal(false)}
+        onClose={() => {
+          setWaitingInputsModal(false);
+          if (returnFromInput.current) setExecutionModal(previous => ({ ...previous, open: true }));
+          returnFromInput.current = null;
+        }}
         records={pendingInputs.list}
         loading={pendingInputs.loading}
         onResponded={(orchestrationName, runId, stepName) => {
           pendingInputs.removeLocal(orchestrationName, runId, stepName);
+          if (returnFromInput.current === runId) {
+            setWaitingInputsModal(false);
+            setExecutionModal(previous => ({ ...previous, open: true }));
+            returnFromInput.current = null;
+          }
         }}
       />
       <ActiveModal

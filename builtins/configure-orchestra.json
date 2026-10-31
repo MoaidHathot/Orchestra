@@ -16,7 +16,7 @@
       "responseSchema": { "type": "object", "properties": { "revision": { "type": "string" }, "changes": { "type": "object" } }, "required": ["revision", "changes"], "additionalProperties": false }
     },
     { "name": "preview", "type": "Http", "dependsOn": ["draft"], "method": "POST", "url": "{{server.url}}/api/workspace/settings/preview", "body": "{{draft.output}}", "contentType": "application/json" },
-    { "name": "confirm", "type": "Approval", "dependsOn": ["preview"], "prompt": "Apply these changes?\n\n{{preview.output.message}}", "choices": ["Apply", "Cancel"] },
-    { "name": "apply", "type": "Http", "dependsOn": ["confirm"], "when": "'{{confirm.output}}' == 'Apply'", "method": "POST", "url": "{{server.url}}/api/workspace/settings", "body": "{{draft.output}}", "contentType": "application/json" }
+    { "name": "confirm", "type": "Approval", "dependsOn": ["preview"], "prompt": "Apply these changes?\n\n{{preview.output.message}}", "choices": ["Apply", "Cancel"], "preferChoice": true },
+    { "name": "apply", "type": "Http", "dependsOn": ["confirm"], "when": "{{confirm.output}} == 'Apply'", "method": "POST", "url": "{{server.url}}/api/workspace/settings", "body": "{{draft.output}}", "contentType": "application/json" }
   ]
 }

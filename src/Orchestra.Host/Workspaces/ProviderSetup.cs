@@ -42,15 +42,19 @@ public sealed partial class ProviderSetupJobs(IProviderSetupBackend backend, IHo
 	public SetupJob? Get(string id) => _jobs.TryGetValue(id, out var job) ? Volatile.Read(ref job.State) : null;
 	public SetupJob Start(string provider, ProviderOperation operation)
 	{
-		if (provider is not ("copilot" or "opencode")) throw new ArgumentException("Unknown provider.");
-		if (operation.Action is not ("check" or "install" or "login" or "test")) throw new ArgumentException("Unknown setup operation.");
+		if (provider is not ("copilot" or "opencode"))
+			throw new ArgumentException("Unknown provider.");
+		if (operation.Action is not ("check" or "install" or "login" or "test"))
+			throw new ArgumentException("Unknown setup operation.");
 		lock (_gate)
 		{
 			ObjectDisposedException.ThrowIf(_disposed, this);
 			var active = _jobs.Values.FirstOrDefault(j => j.State.Provider == provider && !j.Work.IsCompleted);
-			if (active is not null) return active.State;
+			if (active is not null)
+				return active.State;
 			foreach (var old in _jobs.Values.Where(j => j.Work.IsCompleted).OrderByDescending(j => j.State.FinishedAt).Skip(15).ToArray())
-				if (_jobs.TryRemove(old.State.Id, out _)) old.Cancellation.Dispose();
+				if (_jobs.TryRemove(old.State.Id, out _))
+					old.Cancellation.Dispose();
 			var cts = CancellationTokenSource.CreateLinkedTokenSource(lifetime.ApplicationStopping);
 			cts.CancelAfter(operation.Action == "login" ? TimeSpan.FromMinutes(10) : TimeSpan.FromMinutes(3));
 			var state = new SetupJob(Guid.NewGuid().ToString("N"), provider, operation.Action, "running", new("Starting…"));
@@ -70,28 +74,42 @@ public sealed partial class ProviderSetupJobs(IProviderSetupBackend backend, IHo
 				catch (Exception ex)
 				{
 					var message = operation.Key is { Length: > 0 } key ? ex.Message.Replace(key, "[redacted]") : ex.Message;
-					running.State = running.State with { State = "failed", Progress = new(message), FinishedAt = DateTimeOffset.UtcNow };
+					running.State = running.State with { State = "failed", Result = backend.Inspect().FirstOrDefault(p => p.Provider == provider), Progress = new(message), FinishedAt = DateTimeOffset.UtcNow };
 					LogFailed(provider, operation.Action); // Never log credentials or raw provider payloads.
 				}
 			});
 			return state;
 		}
 	}
-	public bool SubmitCode(string id, string code) => _jobs.TryGetValue(id, out var job) && job.State.Progress.RequiresCode && job.Code.TrySetResult(code);
+	public bool SubmitCode(string id, string code)
+	{
+		if (string.IsNullOrWhiteSpace(code))
+			return false;
+		lock (_gate)
+		{
+			if (_disposed || !_jobs.TryGetValue(id, out var job) || job.State.State != "running" || !job.State.Progress.RequiresCode)
+				return false;
+			return job.Code.TrySetResult(code.Trim());
+		}
+	}
 	public bool Cancel(string id)
 	{
-		lock (_gate) { if (!_jobs.TryGetValue(id, out var job)) return false; job.Cancellation.Cancel(); return true; }
+		lock (_gate)
+		{ if (_disposed || !_jobs.TryGetValue(id, out var job)) return false; job.Cancellation.Cancel(); return true; }
 	}
 	public ValueTask DisposeAsync()
 	{
-		lock (_gate) { _disposed = true; return new(_stopping ??= StopAsync()); }
+		lock (_gate)
+		{ _disposed = true; return new(_stopping ??= StopAsync()); }
 	}
 	private async Task StopAsync()
 	{
 		Running[] jobs;
-		lock (_gate) { jobs = _jobs.Values.ToArray(); foreach (var job in jobs) job.Cancellation.Cancel(); }
+		lock (_gate)
+		{ jobs = _jobs.Values.ToArray(); foreach (var job in jobs) job.Cancellation.Cancel(); }
 		await Task.WhenAll(jobs.Select(j => j.Work));
-		foreach (var job in jobs) job.Cancellation.Dispose();
+		foreach (var job in jobs)
+			job.Cancellation.Dispose();
 	}
 	[LoggerMessage(Level = LogLevel.Warning, Message = "Provider setup failed: {Provider}, {Operation}")]
 	private partial void LogFailed(string provider, string operation);

@@ -47,7 +47,8 @@ public class WorkspaceAssistantTests
 			var run = await new OrchestrationExecutor(new OrchestrationScheduler(), agent, NullOrchestrationReporter.Instance, NullLoggerFactory.Instance).ExecuteAsync(created.Orchestration);
 			run.Results["answer"].Content.Should().Be("Created!");
 		}
-		else created.Should().BeNull();
+		else
+			created.Should().BeNull();
 		agent.Tools.Should().Contain("orchestra_validate_orchestration");
 	}
 
@@ -57,7 +58,8 @@ public class WorkspaceAssistantTests
 		using var factory = new PortalWebApplicationFactory();
 		using var client = factory.CreateClient();
 		var options = factory.Services.GetRequiredService<OrchestrationHostOptions>();
-		options.Provider = "opencode"; options.DefaultModel = "provider/chosen-model";
+		options.Provider = "opencode";
+		options.DefaultModel = "provider/chosen-model";
 		var response = await client.PostAsync("/api/workspace/assistants/configure-orchestra", null);
 		response.EnsureSuccessStatusCode();
 		var id = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
@@ -67,6 +69,22 @@ public class WorkspaceAssistantTests
 		definition.Steps.Should().Contain(s => s.Type == OrchestrationStepType.Approval);
 		new OrchestrationScheduler().Schedule(definition);
 		TemplateExpressionValidator.ValidateOrchestration(definition).IsValid.Should().BeTrue();
+	}
+
+	[Fact]
+	public async Task SavingDefaults_RefreshesAlreadyRegisteredAssistantsForLibraryRuns()
+	{
+		using var factory = new PortalWebApplicationFactory();
+		using var client = factory.CreateClient();
+		(await client.PostAsync("/api/workspace/assistants/create-orchestration", null)).EnsureSuccessStatusCode();
+		var registry = factory.Services.GetRequiredService<OrchestrationRegistry>();
+		var original = registry.GetByIdOrName("orchestra-author")!;
+		var settings = await client.GetFromJsonAsync<Orchestra.Host.Workspaces.SettingsSnapshot>("/api/workspace/settings");
+		(await client.PostAsJsonAsync("/api/workspace/settings", new Orchestra.Host.Workspaces.SettingsUpdate(settings!.Revision, new() { ["defaultModel"] = "new-model", ["defaultProvider"] = "opencode" }))).EnsureSuccessStatusCode();
+		var updated = registry.Get(original.Id)!;
+		updated.Orchestration.DefaultProvider.Should().Be("opencode");
+		updated.Orchestration.DefaultModel.Should().Be("new-model");
+		original.Orchestration.DefaultModel.Should().NotBe("new-model", "an in-flight run retains its definition snapshot");
 	}
 
 	private sealed class DraftBuilder(string content) : AgentBuilder
@@ -83,7 +101,8 @@ public class WorkspaceAssistantTests
 		{
 			public AgentTask SendAsync(string prompt, CancellationToken cancellationToken = default)
 			{
-				var events = Channel.CreateUnbounded<AgentEvent>(); events.Writer.TryComplete();
+				var events = Channel.CreateUnbounded<AgentEvent>();
+				events.Writer.TryComplete();
 				return new(events.Reader, Task.FromResult(new AgentResult { Content = content }));
 			}
 		}
@@ -93,7 +112,8 @@ public class WorkspaceAssistantTests
 		protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
 		{
 			var copy = new HttpRequestMessage(request.Method, request.RequestUri!.PathAndQuery);
-			if (request.Content is not null) copy.Content = new StringContent(await request.Content.ReadAsStringAsync(cancellationToken), System.Text.Encoding.UTF8, "application/json");
+			if (request.Content is not null)
+				copy.Content = new StringContent(await request.Content.ReadAsStringAsync(cancellationToken), System.Text.Encoding.UTF8, "application/json");
 			return await client.SendAsync(copy, cancellationToken);
 		}
 	}

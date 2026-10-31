@@ -52,6 +52,7 @@ public sealed class ApprovalStepTypeParser : IStepTypeParser
 			Parameters = StepBaseFields.ParseParameterNames(root),
 			Prompt = prompt,
 			Choices = choices,
+			PreferChoice = root.TryGetProperty("preferChoice", out var preferChoice) && preferChoice.GetBoolean(),
 			OnTimeout = onTimeout,
 			DefaultResponse = defaultResponse,
 		};
