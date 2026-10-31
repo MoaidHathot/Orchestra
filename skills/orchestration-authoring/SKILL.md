@@ -739,7 +739,7 @@ A Prompt step with `loop` acts as a checker for iterative refinement.
 | `maxIterations` | int (1-10) | Yes |
 | `exitPattern` | string | Yes |
 
-The checker evaluates the target's output. If `exitPattern` is NOT found (case-insensitive), the target re-runs with checker feedback. Repeats up to `maxIterations`.
+The checker evaluates the target's output. The target must be a Prompt step listed directly in the checker's `dependsOn`. If `exitPattern` is NOT found (case-insensitive), the target re-runs with checker feedback. Repeats up to `maxIterations`. Invalid targets, iteration limits, and empty exit patterns are rejected before execution.
 
 Each target/checker iteration honors the step's retry policy, per-attempt timeout, and the run's `maxConcurrency` limit. Retry back-off releases its slot, and target retries retain the checker feedback. Iterations emit normal completion events and step hooks, with separate history records. A failed target blocks the checker's dependents; `onStepFailure: stop` and `orchestra_complete` also apply to iteration results. Downstream steps wait for the entire checker loop to settle.
 

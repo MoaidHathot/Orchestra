@@ -35,6 +35,20 @@ public class OrchestrationScheduler : IScheduler
 				dependents[dep].Add(step.Name);
 				inDegree[step.Name]++;
 			}
+
+			if (step is PromptOrchestrationStep { Loop: { } loop })
+			{
+				if (string.IsNullOrWhiteSpace(loop.Target) || !stepsByName.TryGetValue(loop.Target, out var target))
+					throw new InvalidOperationException($"Step '{step.Name}' has a loop target '{loop.Target}' that does not exist.");
+				if (!step.DependsOn.Contains(loop.Target, StringComparer.Ordinal))
+					throw new InvalidOperationException($"Step '{step.Name}': loop target '{loop.Target}' must be a direct dependency.");
+				if (target is not PromptOrchestrationStep)
+					throw new InvalidOperationException($"Step '{step.Name}': loop target '{loop.Target}' must be a Prompt step.");
+				if (loop.MaxIterations is < 1 or > 10)
+					throw new InvalidOperationException($"Step '{step.Name}': loop maxIterations must be between 1 and 10.");
+				if (string.IsNullOrWhiteSpace(loop.ExitPattern))
+					throw new InvalidOperationException($"Step '{step.Name}': loop exitPattern must not be empty.");
+			}
 		}
 
 		// Kahn's algorithm — layer by layer

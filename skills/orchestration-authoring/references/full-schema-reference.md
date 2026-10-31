@@ -726,7 +726,7 @@ A loop (or "checker") pattern allows a Prompt step to iteratively refine the out
 
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `target` | `string` | **Yes** | -- | Name of the step to re-run when the exit condition is not met. Must be a dependency of the checker step. |
+| `target` | `string` | **Yes** | -- | Name of the Prompt step to re-run when the exit condition is not met. Must be a direct dependency of the checker step. |
 | `maxIterations` | `int` | **Yes** | -- | Maximum number of loop iterations (1-10). |
 | `exitPattern` | `string` | **Yes** | -- | Case-insensitive string to search for in the checker's output. When found, the loop exits. |
 

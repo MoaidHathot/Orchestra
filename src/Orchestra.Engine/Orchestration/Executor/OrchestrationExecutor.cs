@@ -770,9 +770,9 @@ public partial class OrchestrationExecutor
 					// the cancelled steps carry a StepFailureStop cause.
 					if (result.Status == ExecutionStatus.Failed
 						&& orchestration.OnStepFailure == StepFailurePolicy.Stop
-						&& !orchestrationCompleteCts.IsCancellationRequested)
+						&& !orchestrationCompleteCts.IsCancellationRequested
+						&& Interlocked.CompareExchange(ref stopTriggeredByStep, resultStepName, null) is null)
 					{
-						Interlocked.CompareExchange(ref stopTriggeredByStep, resultStepName, null);
 						LogStepFailureStop(resultStepName, result.ErrorMessage ?? "(no message)");
 						try
 						{ orchestrationCompleteCts.Cancel(); }
@@ -799,11 +799,13 @@ public partial class OrchestrationExecutor
 					}
 
 					// Check if this step requested orchestration completion
-					if (result.OrchestrationCompleteRequested)
+					if (result.OrchestrationCompleteRequested
+						&& Interlocked.CompareExchange(ref orchestrationCompleteStepName, resultStepName, null) is null)
 					{
+						// The first signal owns the terminal metadata. A late provider response
+						// after cancellation must not replace its reason/status with another pair.
 						orchestrationCompleteStatus = result.OrchestrationCompleteStatus;
 						orchestrationCompleteReason = result.OrchestrationCompleteReason;
-						orchestrationCompleteStepName = resultStepName;
 						LogOrchestrationCompleteRequested(resultStepName, orchestrationCompleteReason ?? "No reason provided");
 
 						// Cancel all remaining steps by triggering the linked CTS.

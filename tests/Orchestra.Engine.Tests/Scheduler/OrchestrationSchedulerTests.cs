@@ -7,6 +7,53 @@ public class OrchestrationSchedulerTests
 {
 	private readonly OrchestrationScheduler _scheduler = new();
 
+	[Theory]
+	[InlineData("missing", 1, "PASS", "does not exist")]
+	[InlineData("other", 1, "PASS", "direct dependency")]
+	[InlineData("draft", 0, "PASS", "maxIterations")]
+	[InlineData("draft", 11, "PASS", "maxIterations")]
+	[InlineData("draft", 1, "", "exitPattern")]
+	public void Schedule_InvalidCheckerLoop_IsRejectedBeforeAnyExecution(string target, int iterations, string pattern, string error)
+	{
+		var definition = new Orchestration
+		{
+			Name = "invalid-loop", Description = "Validate refinement edges", Steps =
+			[
+				TestOrchestrations.CreatePromptStep("draft"), TestOrchestrations.CreatePromptStep("other"),
+				new PromptOrchestrationStep
+				{
+					Name = "check", Type = OrchestrationStepType.Prompt, SystemPrompt = "", UserPrompt = "check", Model = "test", DependsOn = ["draft"],
+					Loop = new() { Target = target, MaxIterations = iterations, ExitPattern = pattern },
+				},
+			],
+		};
+
+		var schedule = () => _scheduler.Schedule(definition);
+
+		schedule.Should().Throw<InvalidOperationException>().WithMessage($"*{error}*");
+	}
+
+	[Fact]
+	public void Schedule_NonPromptLoopTarget_IsRejected()
+	{
+		var definition = new Orchestration
+		{
+			Name = "invalid-loop-type", Description = "Only Prompt targets can be refined", Steps =
+			[
+				new TransformOrchestrationStep { Name = "draft", Type = OrchestrationStepType.Transform, Template = "value" },
+				new PromptOrchestrationStep
+				{
+					Name = "check", Type = OrchestrationStepType.Prompt, SystemPrompt = "", UserPrompt = "check", Model = "test", DependsOn = ["draft"],
+					Loop = new() { Target = "draft", MaxIterations = 1, ExitPattern = "PASS" },
+				},
+			],
+		};
+
+		var schedule = () => _scheduler.Schedule(definition);
+
+		schedule.Should().Throw<InvalidOperationException>().WithMessage("*Prompt*");
+	}
+
 	#region Valid DAG Tests
 
 	[Fact]

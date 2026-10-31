@@ -172,6 +172,59 @@ public class DagSchedulingTests
 		saved.StepRecords["slow"].ErrorMessage.Should().Contain("cancelled by caller");
 	}
 
+	[Fact]
+	public async Task LateCompletionSignal_CannotReplaceTheSignalThatAlreadyStoppedTheRun()
+	{
+		var lateStarted = Gate();
+		var cancellationObserved = Gate();
+		var releaseLate = Gate();
+		var executor = Executor(async (step, _, token) =>
+		{
+			if (step.Name == "late")
+			{
+				using var registration = token.Register(() => cancellationObserved.TrySetResult());
+				lateStarted.TrySetResult();
+				await releaseLate.Task; // An already in-flight provider response settles after cancellation.
+			}
+			else
+			{
+				await lateStarted.Task.WaitAsync(token);
+			}
+			return ExecutionResult.Succeeded(step.Name) with
+			{
+				OrchestrationCompleteRequested = true, OrchestrationCompleteStatus = ExecutionStatus.Succeeded,
+				OrchestrationCompleteReason = step.Name,
+			};
+		});
+		var run = executor.ExecuteAsync(Definition(Step("first"), Step("late")));
+		try
+		{
+			await cancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+		}
+		finally
+		{
+			releaseLate.TrySetResult();
+			await run.WaitAsync(TimeSpan.FromSeconds(5));
+		}
+		(await run).CompletedByStep.Should().Be("first");
+		(await run).CompletionReason.Should().Be("first");
+	}
+
+	[Fact]
+	public async Task ValidatedCaseInsensitiveStepReferences_ResolveAtRuntime()
+	{
+		var executor = new OrchestrationExecutor(new OrchestrationScheduler(), new MockAgentBuilder(),
+			NullOrchestrationReporter.Instance, NullLoggerFactory.Instance);
+		var definition = Definition(
+			new TransformOrchestrationStep { Name = "source", Type = OrchestrationStepType.Transform, Template = "{\"value\":42}" },
+			new TransformOrchestrationStep { Name = "result", Type = OrchestrationStepType.Transform, DependsOn = ["source"], Template = "{{SOURCE.output.value}} / {{SOURCE.status}}" });
+
+		TemplateExpressionValidator.ValidateOrchestration(definition).IsValid.Should().BeTrue();
+		var result = await executor.ExecuteAsync(definition);
+
+		result.StepResults["result"].Content.Should().Be("42 / succeeded");
+	}
+
 	[Theory]
 	[InlineData(false)]
 	[InlineData(true)]

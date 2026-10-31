@@ -163,7 +163,7 @@ public class OrchestrationExecutionContext
 	/// </summary>
 	public Action<string, string>? OnInputResolved { get; init; }
 
-	private readonly ConcurrentDictionary<string, ExecutionResult> _results = new();
+	private readonly ConcurrentDictionary<string, ExecutionResult> _results = new(StringComparer.OrdinalIgnoreCase);
 	private readonly ConcurrentDictionary<string, string> _loopFeedback = new();
 
 	public void AddResult(string stepName, ExecutionResult result)
