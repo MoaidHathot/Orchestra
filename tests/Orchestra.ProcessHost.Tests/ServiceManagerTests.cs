@@ -247,6 +247,32 @@ public class ServiceManagerTests : IAsyncLifetime
 		_manager.RunCommandCalls.Count.Should().Be(firstCallCount, "second StopAsync should be a no-op");
 	}
 
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task ConcurrentShutdown_WaitsForCleanupBeforeReturningOrDisposing(bool dispose)
+	{
+		var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		_manager.CommandBlockers["cleanup"] = release.Task;
+		await _manager.InitializeAsync([CreateCommandHook("cleanup", HookPhase.AfterStop)]);
+		var firstStop = _manager.StopAsync();
+		await _manager.WaitForCommandCallsAsync(1);
+		var second = dispose ? _manager.DisposeAsync().AsTask() : _manager.StopAsync();
+		try
+		{
+			second.IsCompleted.Should().BeFalse("an in-progress shutdown must finish before another caller returns or releases its resources");
+			_manager.RunCommandCalls.Should().ContainSingle();
+		}
+		finally
+		{
+			release.TrySetResult();
+			await Task.WhenAll(firstStop, second).WaitAsync(TimeSpan.FromSeconds(5));
+		}
+		await _manager.StopAsync();
+		await _manager.DisposeAsync();
+		_manager.RunCommandCalls.Should().ContainSingle();
+	}
+
 	#endregion
 
 	#region Helpers

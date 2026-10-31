@@ -17,6 +17,7 @@ public partial class ServiceManager : IAsyncDisposable
 	private readonly ConcurrentDictionary<string, Task> _restartLoops = new();
 	private readonly List<CommandHook> _beforeStartHooks = [];
 	private readonly List<CommandHook> _afterStopHooks = [];
+	private readonly SemaphoreSlim _stopGate = new(1, 1);
 	private CancellationTokenSource? _shutdownCts;
 	private bool _initialized;
 	private bool _stopped;
@@ -417,9 +418,23 @@ public partial class ServiceManager : IAsyncDisposable
 	}
 
 	/// <summary>
-	/// Stops all managed processes and runs afterStop hooks.
+	/// Stops all managed processes and runs afterStop hooks. Concurrent callers wait
+	/// for the ongoing shutdown before returning or disposing its resources.
 	/// </summary>
 	public async Task StopAsync(CancellationToken cancellationToken = default)
+	{
+		await _stopGate.WaitAsync().ConfigureAwait(false);
+		try
+		{
+			await StopCoreAsync(cancellationToken).ConfigureAwait(false);
+		}
+		finally
+		{
+			_stopGate.Release();
+		}
+	}
+
+	private async Task StopCoreAsync(CancellationToken cancellationToken)
 	{
 		if (_stopped || !_initialized)
 			return;
@@ -500,10 +515,10 @@ public partial class ServiceManager : IAsyncDisposable
 
 	public async ValueTask DisposeAsync()
 	{
-		if (!_stopped)
-			await StopAsync();
-
-		_shutdownCts?.Dispose();
+		// _stopped means shutdown began, not that it finished. Always join it before
+		// disposing the token source, even if another host shutdown path got here first.
+		await StopAsync().ConfigureAwait(false);
+		Interlocked.Exchange(ref _shutdownCts, null)?.Dispose();
 	}
 
 	#region Source-Generated Logging
