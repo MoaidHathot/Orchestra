@@ -101,6 +101,15 @@ public sealed partial class ApprovalStepExecutor : IStepExecutor
 			var content = approval.PreferChoice ? response.Choice ?? response.ResolveContent() : response.ResolveContent();
 			return ExecutionResult.Succeeded(content, rawDependencyOutputs: ToMutable(rawDependencyOutputs));
 		}
+		catch (OperationCanceledException) when (context.RunCancellationToken.IsCancellationRequested)
+		{
+			// A host shutdown or a cancelled run is not an approval timeout. It must never
+			// choose defaultResponse or turn a recoverable shutdown into a failed run.
+			shouldCleanupRecord = context.ResolveExternalCancellationCause?.Invoke()?.Kind != CancellationCauseKind.HostShutdown;
+			context.OnInputResolved?.Invoke(runId, step.Name);
+			endedClock = true;
+			throw;
+		}
 		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
 		{
 			// Timeout / external cancellation. Apply the configured onTimeout behavior.

@@ -13,7 +13,7 @@ namespace Orchestra.Host.Api;
 
 public static class WorkspaceApi
 {
-	public static IServiceCollection AddPortalWorkspace(this IServiceCollection services)
+	public static IServiceCollection AddPortalWorkspace(this IServiceCollection services, string? urlsOverrideSource = null)
 	{
 		services.TryAddSingleton(sp =>
 		{
@@ -24,10 +24,16 @@ public static class WorkspaceApi
 				overrides["dataPath"] = "--data-path / host configuration";
 			else if (Environment.GetEnvironmentVariable("ORCHESTRA_PORTAL_DATA_PATH") is not null)
 				overrides["dataPath"] = "ORCHESTRA_PORTAL_DATA_PATH";
+			else if (config["executions-path"] is not null)
+				overrides["dataPath"] = "--executions-path / host configuration";
 			if (Environment.GetEnvironmentVariable("ORCHESTRA_ORCHESTRATIONS_PATH") is not null)
 				overrides["scan"] = "ORCHESTRA_ORCHESTRATIONS_PATH";
 			else if (config["orchestrations-path"] is not null)
 				overrides["scan"] = "--orchestrations-path / host configuration";
+			if (urlsOverrideSource is not null)
+				overrides["urls"] = urlsOverrideSource;
+			else if (!string.IsNullOrWhiteSpace(config["urls"]) && config["urls"] != OrchestraConfigLoader.Load()?.Urls)
+				overrides["urls"] = "Host configuration";
 			return new PortalWorkspaceOptions { ConfigPath = info.Path ?? OrchestraConfigLoader.GetDefaultConfigPath(), ConfigSource = info.Source.ToString(), Overrides = overrides };
 		});
 		services.TryAddSingleton<WorkspaceSettingsStore>();

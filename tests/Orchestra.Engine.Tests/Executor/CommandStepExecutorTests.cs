@@ -22,17 +22,17 @@ public class CommandStepExecutorTests
 		bool includeStdErr = false,
 		string[]? dependsOn = null,
 		string[]? parameters = null) => new()
-	{
-		Name = name,
-		Type = OrchestrationStepType.Command,
-		DependsOn = dependsOn ?? [],
-		Parameters = parameters ?? [],
-		Command = command,
-		Arguments = arguments ?? [],
-		WorkingDirectory = workingDirectory,
-		Environment = environment ?? [],
-		IncludeStdErr = includeStdErr,
-	};
+		{
+			Name = name,
+			Type = OrchestrationStepType.Command,
+			DependsOn = dependsOn ?? [],
+			Parameters = parameters ?? [],
+			Command = command,
+			Arguments = arguments ?? [],
+			WorkingDirectory = workingDirectory,
+			Environment = environment ?? [],
+			IncludeStdErr = includeStdErr,
+		};
 
 	#region Success Scenarios
 
@@ -524,6 +524,9 @@ public class CommandStepExecutorTests
 		// is what Process.Kill(entireProcessTree: true) emits) bypasses it.
 		var marker = NewMarkerPath();
 		var executor = CreateExecutor();
+		var started = new TaskCompletionSource<StepProcessInfo>(TaskCreationOptions.RunContinuationsAsynchronously);
+		_reporter.When(r => r.ReportStepProcessStarted(Arg.Any<string>(), Arg.Any<StepProcessInfo>()))
+			.Do(call => started.TrySetResult(call.ArgAt<StepProcessInfo>(1)));
 
 		// The inner process writes its own PID and its parent's PID (the
 		// executor-spawned shell wrapper) to a marker file, then sleeps long
@@ -573,8 +576,16 @@ public class CommandStepExecutorTests
 			// Both the inner command process and the executor-spawned shell
 			// wrapper must be dead (kill walked the whole tree).
 			var (innerPid, wrapperPid) = await ReadPidPairAsync(marker);
+			var spawnedPid = (await started.Task.WaitAsync(TimeSpan.FromSeconds(5))).ProcessId;
+			if (wrapperPid != spawnedPid)
+			{
+				// Some POSIX shells exec their last command in-place. Its parent is then
+				// the test host, not another shell that the executor should terminate.
+				innerPid.Should().Be(spawnedPid);
+				wrapperPid.Should().Be(Environment.ProcessId);
+			}
 			await AssertProcessExitedAsync(innerPid);
-			await AssertProcessExitedAsync(wrapperPid);
+			await AssertProcessExitedAsync(spawnedPid);
 		}
 		finally
 		{
@@ -635,7 +646,8 @@ public class CommandStepExecutorTests
 		{
 			if (File.Exists(path))
 			{
-				try { raw = await File.ReadAllTextAsync(path); break; }
+				try
+				{ raw = await File.ReadAllTextAsync(path); break; }
 				catch (IOException) { /* writer not fully flushed; retry */ }
 			}
 			await Task.Delay(25);
@@ -688,7 +700,8 @@ public class CommandStepExecutorTests
 
 	private static void SafeDelete(string path)
 	{
-		try { File.Delete(path); }
+		try
+		{ File.Delete(path); }
 		catch { /* best effort */ }
 	}
 

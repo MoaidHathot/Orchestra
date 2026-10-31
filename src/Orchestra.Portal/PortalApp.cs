@@ -41,6 +41,10 @@ internal static class PortalApp
 			})
 			: WebApplication.CreateBuilder(args);
 
+		var urlsOverrideSource = string.IsNullOrWhiteSpace(builder.Configuration["urls"]) ? null
+			: args.Contains("--urls", StringComparer.OrdinalIgnoreCase) ? "--urls"
+			: Environment.GetEnvironmentVariable("ASPNETCORE_URLS") is not null ? "ASPNETCORE_URLS"
+			: Environment.GetEnvironmentVariable("DOTNET_URLS") is not null ? "DOTNET_URLS" : "Host configuration";
 		builder.Configuration.ApplyOrchestraUrls(orchestraConfig);
 
 		// Make orchestra.json's logLevel the authoritative default minimum level (overrides
@@ -90,7 +94,7 @@ internal static class PortalApp
 		builder.Services.AddOrchestraTelemetry(orchestraConfig);
 		builder.Services.AddOrchestraHostCors();
 		builder.Services.AddSingleton<PortalStatusService>();
-		builder.Services.AddPortalWorkspace();
+		builder.Services.AddPortalWorkspace(urlsOverrideSource);
 		builder.Services.AddSingleton<IProviderSetupBackend, ProviderSetupBackend>();
 		builder.Services.AddSingleton<ProviderSetupJobs>();
 		builder.Services.AddSingleton(sp => EngineToolRegistry.CreateDefault()

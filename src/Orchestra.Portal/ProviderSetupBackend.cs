@@ -89,6 +89,7 @@ internal sealed class ProviderSetupBackend(OrchestrationHostOptions options, Por
 			if (string.IsNullOrWhiteSpace(operation.Model))
 				throw new ArgumentException("Choose a model to test.");
 			progress(new("Testing the selected model with a short request…"));
+			Directory.CreateDirectory(workspace.Root);
 			var builder = providers.Resolve(provider);
 			var scopeTask = builder.CreateRunScopeAsync(cancellationToken: token);
 			await using var scope = await scopeTask;
@@ -105,13 +106,15 @@ internal sealed class ProviderSetupBackend(OrchestrationHostOptions options, Por
 		return result;
 	}
 
-	private static async Task LoginCopilotAsync(string path, Action<SetupProgress> progress, CancellationToken token)
+	internal static async Task LoginCopilotAsync(string path, Action<SetupProgress> progress, CancellationToken token,
+		Action<ProcessStartInfo>? configureProcess = null)
 	{
 		using var process = new Process { StartInfo = new(path) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true, RedirectStandardInput = true, CreateNoWindow = true } };
 		process.StartInfo.ArgumentList.Add("login");
 		process.StartInfo.ArgumentList.Add("--device-code");
 		process.StartInfo.Environment["BROWSER"] = "echo";
 		process.StartInfo.Environment["GH_BROWSER"] = "echo";
+		configureProcess?.Invoke(process.StartInfo);
 		process.Start();
 		process.StandardInput.Close();
 		string? url = null, code = null;

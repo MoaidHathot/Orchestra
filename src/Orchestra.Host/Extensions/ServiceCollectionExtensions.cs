@@ -255,7 +255,8 @@ public static class ServiceCollectionExtensions
 			sp.GetRequiredService<ConcurrentDictionary<string, CancellationTokenSource>>(),
 			sp.GetRequiredService<ConcurrentDictionary<string, ActiveExecutionInfo>>(),
 			sp.GetRequiredService<IPendingInputStore>(),
-			sp.GetRequiredService<IHumanInputWaiter>()));
+			sp.GetRequiredService<IHumanInputWaiter>(),
+			sp.GetRequiredService<ICheckpointStore>()));
 
 		// ServiceManager: manages external processes and hooks from orchestra.services.json
 		services.AddSingleton<ProcessTracker>(sp =>
@@ -783,8 +784,21 @@ public static class ServiceProviderExtensions
 
 			_ = Task.Run(async () =>
 			{
-				await CleanupOrphanedEngineToolWaitsAsync();
-				await ResumePersistedCheckpointsAsync();
+				try
+				{
+					// Hosted startup hooks refresh app-owned definitions after the listener binds.
+					// A resumed HTTP step must see that final address, rather than an old port
+					// captured before a restart (or a server that is not listening yet).
+					if (lifetime is not null)
+					{
+						var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+						using var registration = lifetime.ApplicationStarted.Register(() => started.TrySetResult());
+						await started.Task.WaitAsync(shutdownToken);
+					}
+					await CleanupOrphanedEngineToolWaitsAsync();
+					await ResumePersistedCheckpointsAsync();
+				}
+				catch (OperationCanceledException) when (shutdownToken.IsCancellationRequested) { }
 			});
 		}
 

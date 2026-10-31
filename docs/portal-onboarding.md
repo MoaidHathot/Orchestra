@@ -64,6 +64,11 @@ PowerShell dependency and needs no external MCP connection.
 preview, Approval, then apply. Settings revisions prevent a proposal from overwriting an edit
 made while the user was reviewing it.
 
+If the host stops while configuration approval is pending, the checkpoint and approval
+survive. After restart the workflow reattaches to that approval and uses the current Portal
+listener when applying the reviewed patch. Host shutdown never selects an approval's
+timeout default response.
+
 ## Workspace and configuration compatibility
 
 - Source files go under the configured `scan.directory/orchestrations`, or under

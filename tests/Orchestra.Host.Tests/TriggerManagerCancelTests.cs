@@ -14,6 +14,38 @@ namespace Orchestra.Host.Tests;
 /// </summary>
 public class TriggerManagerCancelTests
 {
+	[Fact]
+	public async Task Shutdown_JoinsLauncherExecutionsBeforeTheirStoresAreDisposed()
+	{
+		using var cancellation = new CancellationTokenSource();
+		var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var cancelled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		using var registration = cancellation.Token.Register(() => cancelled.TrySetResult());
+		var active = new ConcurrentDictionary<string, CancellationTokenSource>();
+		var infos = new ConcurrentDictionary<string, ActiveExecutionInfo>();
+		active["api-run"] = cancellation;
+		infos["api-run"] = new()
+		{
+			ExecutionId = "api-run",
+			OrchestrationId = "workflow",
+			OrchestrationName = "workflow",
+			StartedAt = DateTimeOffset.UtcNow,
+			TriggeredBy = "manual",
+			CancellationTokenSource = cancellation,
+			Reporter = NullOrchestrationReporter.Instance,
+			ExecutionTask = finished.Task,
+		};
+		using var manager = CreateTriggerManager(active, infos);
+		var stop = manager.StopAsync(CancellationToken.None);
+		try
+		{
+			await cancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+			stop.IsCompleted.Should().BeFalse("the shared launcher's persistence work is still in flight");
+			infos["api-run"].CancellationCauseOverride!.Kind.Should().Be(CancellationCauseKind.HostShutdown);
+		}
+		finally { finished.TrySetResult(); await stop.WaitAsync(TimeSpan.FromSeconds(5)); }
+	}
+
 	/// <summary>
 	/// Creates a TriggerManager instance with minimal wiring for cancel tests.
 	/// We inject pre-populated activeExecutions and activeExecutionInfos dictionaries

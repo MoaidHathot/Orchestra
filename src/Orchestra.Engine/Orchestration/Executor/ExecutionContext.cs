@@ -4,6 +4,9 @@ namespace Orchestra.Engine;
 
 public class OrchestrationExecutionContext
 {
+	/// <summary>The run-wide token, separate from individual step deadlines.</summary>
+	public CancellationToken RunCancellationToken { get; init; }
+	public ResolveCancellationCauseDelegate? ResolveExternalCancellationCause { get; init; }
 	public bool DefaultCapturePlans { get; init; } = true;
 	public PlanRunIdentity? PlanRun { get; internal set; }
 	internal ConcurrentDictionary<string, int> PlanLoopIterations { get; } = new();

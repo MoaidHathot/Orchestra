@@ -54,6 +54,11 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
   races. Fresh packed-tool installation, bundled-assembly hashes, credential-free demo,
   saved workflows, settings, history, and assistant refresh across restart passed locally.
   The three-OS CI matrix also runs this package check.
+  Final local backend suite: 5,213 passed. Portal unit suite: 493 passed. Native setup
+  verification includes model tests, device-login cancellation, and downloading/launching
+  OpenCode without npm. Restart coverage now includes an interrupted configuration Approval;
+  it caught and fixed checkpoint injection, cancellation classification and shutdown drain
+  gaps in the shared launcher. See [the requirement review](../research/portal-onboarding-verification.md).
 
 Each numbered step is tested and committed before proceeding. Add meaningful regression
 coverage for observed defects and integration/browser coverage for the complete journey.

@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.Extensions.Logging;
 using Orchestra.Engine;
 using Orchestra.Engine.Serialization;
@@ -24,6 +26,7 @@ public sealed partial class WorkspaceSettingsStore
 	private readonly OrchestrationHostOptions _host;
 	private readonly TriggerManager? _triggers;
 	private readonly ILogger<WorkspaceSettingsStore> _logger;
+	private readonly IServer? _server;
 	private readonly SemaphoreSlim _gate;
 	private static readonly ConcurrentDictionary<string, SemaphoreSlim> FileGates = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 	private readonly Dictionary<string, string?> _startup = [];
@@ -31,12 +34,13 @@ public sealed partial class WorkspaceSettingsStore
 	private static readonly string[] Fields = ["defaultProvider", "defaultModel", "defaultReasoningLevel", "defaultMaxConcurrency", "retention", "scan", "dataPath", "urls", "enableScheduler", "logLevel"];
 	internal static readonly JsonDocumentOptions ReadOptions = new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
-	public WorkspaceSettingsStore(PortalWorkspaceOptions workspace, OrchestrationHostOptions host, ILogger<WorkspaceSettingsStore> logger, TriggerManager? triggers = null)
+	public WorkspaceSettingsStore(PortalWorkspaceOptions workspace, OrchestrationHostOptions host, ILogger<WorkspaceSettingsStore> logger, TriggerManager? triggers = null, IServer? server = null)
 	{
 		_workspace = workspace;
 		_host = host;
 		_logger = logger;
 		_triggers = triggers;
+		_server = server;
 		_gate = GateFor(workspace.ConfigPath);
 		try
 		{ var values = ReadObject(ReadText()); foreach (var key in RestartFields) _startup[key] = values[key]?.ToJsonString(); }
@@ -58,13 +62,14 @@ public sealed partial class WorkspaceSettingsStore
 		{
 			var raw = ReadObject(text);
 			foreach (var key in Fields)
-			if (raw.ContainsKey(key))
-				values[key] = raw[key]?.DeepClone();
+				if (raw.ContainsKey(key))
+					values[key] = raw[key]?.DeepClone();
 			if (raw["provider"] is { } alias)
 				values["defaultProvider"] = alias.DeepClone();
 		}
 		catch (JsonException ex) { error = ex.Message; }
 		var defaults = _host.ToHostAgentDefaults();
+		var listeners = _server?.Features.Get<IServerAddressesFeature>()?.Addresses;
 		var effective = new JsonObject
 		{
 			["defaultProvider"] = defaults.Provider ?? "copilot",
@@ -72,7 +77,7 @@ public sealed partial class WorkspaceSettingsStore
 			["defaultReasoningLevel"] = defaults.ReasoningLevel?.ToString(),
 			["defaultMaxConcurrency"] = defaults.MaxConcurrency,
 			["dataPath"] = _host.DataPath,
-			["urls"] = _host.HostBaseUrl,
+			["urls"] = listeners is { Count: > 0 } ? string.Join(';', listeners) : _host.HostBaseUrl,
 			["enableScheduler"] = _host.EnableScheduler,
 			["logLevel"] = _host.LogLevel,
 			["scan"] = new JsonObject { ["directory"] = WorkspaceDirectory, ["recursive"] = _host.Scan?.Recursive ?? true, ["watch"] = _host.Scan?.Watch ?? false },

@@ -95,6 +95,8 @@ public class OnboardingUiTests
 				var settings = await client.GetFromJsonAsync<SettingsSnapshot>("/api/workspace/settings");
 				settings!.Effective["defaultModel"]!.GetValue<string>().Should().Be("test-model");
 				settings.Effective["defaultMaxConcurrency"]!.GetValue<int>().Should().Be(3);
+				settings.Effective["urls"]!.GetValue<string>().Should().Be(client.BaseAddress!.ToString().TrimEnd('/'));
+				settings.Overrides.Should().ContainKey("urls");
 				restarted.Services.GetRequiredService<OrchestrationRegistry>().GetByIdOrName("browser-created").Should().NotBeNull();
 				var assistant = restarted.Services.GetRequiredService<OrchestrationRegistry>().GetByIdOrName("orchestra-author")!.Orchestration;
 				assistant.DefaultModel.Should().Be("test-model");
@@ -152,6 +154,59 @@ public class OnboardingUiTests
 			{ Directory.Delete(directory, true); return; }
 			catch (IOException) when (attempt < 20) { await Task.Delay(100); }
 		}
+	}
+
+	[Fact]
+	public async Task PendingConfigurationApproval_ResumesAgainstTheNewListenerAfterRestart()
+	{
+		var directory = Directory.CreateTempSubdirectory("orchestra-approval-restart-").FullName;
+		try
+		{
+			await File.WriteAllTextAsync(Path.Combine(directory, "orchestra.json"), "{\"defaultModel\":\"test-model\",\"defaultMaxConcurrency\":2}");
+			string runId;
+			await using (var first = new BrowserFactory(directory))
+			{
+				first.UseKestrel(0);
+				using var client = first.CreateClient();
+				await first.Services.GetRequiredService<PortalWorkspaceService>().DismissAsync(CancellationToken.None);
+				var response = await client.PostAsync("/api/workspace/assistants/configure-orchestra", null);
+				response.EnsureSuccessStatusCode();
+				var id = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString()!;
+				var handle = await first.Services.GetRequiredService<IChildOrchestrationLauncher>().LaunchAsync(new()
+				{
+					OrchestrationId = id,
+					Mode = ChildLaunchMode.Sync,
+					Parameters = new() { ["description"] = "Set concurrency to 3" },
+				}, CancellationToken.None);
+				runId = handle.ExecutionId;
+				var pending = first.Services.GetRequiredService<IPendingInputStore>();
+				using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+				while (!(await pending.ListAsync(cancellationToken: deadline.Token)).Any(record => record.RunId == runId && record.StepName == "confirm"))
+					await Task.Delay(50, deadline.Token);
+				(await first.Services.GetRequiredService<ICheckpointStore>().ListCheckpointsAsync(cancellationToken: deadline.Token)).Should().Contain(checkpoint => checkpoint.RunId == runId);
+			}
+			await using (var restarted = new BrowserFactory(directory))
+			{
+				restarted.UseKestrel(0);
+				using var client = restarted.CreateClient();
+				using var playwright = await Playwright.CreateAsync();
+				await using var browser = await playwright.Chromium.LaunchAsync(new() { Headless = true });
+				var page = await browser.NewPageAsync();
+				await page.GotoAsync(client.BaseAddress!.ToString());
+				await page.GetByRole(AriaRole.Button, new() { NameRegex = new System.Text.RegularExpressions.Regex("Waiting for input", System.Text.RegularExpressions.RegexOptions.IgnoreCase) }).ClickAsync();
+				await page.GetByLabel("Apply", new() { Exact = true }).CheckAsync();
+				await page.GetByRole(AriaRole.Button, new() { Name = "Submit response", Exact = true }).ClickAsync();
+				using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+				while (true)
+				{
+					var settings = await client.GetFromJsonAsync<SettingsSnapshot>("/api/workspace/settings", deadline.Token);
+					if (settings!.Effective["defaultMaxConcurrency"]!.GetValue<int>() == 3)
+						break;
+					await Task.Delay(50, deadline.Token);
+				}
+			}
+		}
+		finally { await DeleteDirectoryAsync(directory); }
 	}
 
 	private static Task CaptureAsync(IPage page, string name)

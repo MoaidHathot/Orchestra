@@ -9,6 +9,34 @@ namespace Orchestra.Engine.Tests.Executor;
 /// </summary>
 public class ApprovalStepExecutorTests
 {
+	[Theory]
+	[InlineData(ApprovalTimeoutBehavior.Fail, true)]
+	[InlineData(ApprovalTimeoutBehavior.DefaultResponse, true)]
+	[InlineData(ApprovalTimeoutBehavior.Cancel, true)]
+	[InlineData(ApprovalTimeoutBehavior.Fail, false)]
+	[InlineData(ApprovalTimeoutBehavior.DefaultResponse, false)]
+	[InlineData(ApprovalTimeoutBehavior.Cancel, false)]
+	public async Task RunCancellation_DoesNotApplyTimeoutBehavior_AndPreservesShutdownWaits(ApprovalTimeoutBehavior behavior, bool shutdown)
+	{
+		var store = new TestPendingInputStore();
+		var waiter = new TestHumanInputWaiter();
+		using var cancellation = new CancellationTokenSource();
+		var context = new OrchestrationExecutionContext
+		{
+			OrchestrationInfo = new("approval-test", "1.0", "run-1", DateTimeOffset.UtcNow),
+			RunCancellationToken = cancellation.Token,
+			ResolveExternalCancellationCause = () => shutdown ? CancellationDetails.HostShutdown("test shutdown") : CancellationDetails.External("test cancellation"),
+		};
+		var executor = new ApprovalStepExecutor(store, waiter, NullOrchestrationReporter.Instance, NullLogger<ApprovalStepExecutor>.Instance);
+		var step = new ApprovalOrchestrationStep { Name = "gate", Type = OrchestrationStepType.Approval, Prompt = "Proceed?", TimeoutSeconds = 60, OnTimeout = behavior, DefaultResponse = "approve" };
+		var work = executor.ExecuteAsync(step, context, cancellation.Token);
+		await waiter.WaitForRegistration().WaitAsync(TimeSpan.FromSeconds(5));
+		cancellation.Cancel();
+		var complete = () => work;
+		await complete.Should().ThrowAsync<OperationCanceledException>();
+		store.GetAll().Any().Should().Be(shutdown, "only a host shutdown retains the pending record for restart recovery");
+	}
+
 	[Fact]
 	public async Task ExecuteAsync_ReturnsSucceededWithReply_WhenWaiterResolves()
 	{

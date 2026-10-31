@@ -266,7 +266,8 @@ public static partial class CopilotPreflight
 		{
 			if (client is not null)
 			{
-				try { await client.DisposeAsync().ConfigureAwait(false); }
+				try
+				{ await client.DisposeAsync().ConfigureAwait(false); }
 				catch { /* best-effort teardown of a diagnostic client */ }
 			}
 		}

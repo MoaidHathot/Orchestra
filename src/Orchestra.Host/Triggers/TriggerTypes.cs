@@ -180,6 +180,9 @@ public class ActiveExecutionInfo
 	public required CancellationTokenSource CancellationTokenSource { get; init; }
 	public required IOrchestrationReporter Reporter { get; init; }
 
+	/// <summary>Host-owned execution/persistence work that must finish before dependencies are disposed.</summary>
+	internal Task? ExecutionTask { get; init; }
+
 	/// <summary>
 	/// Parameters passed to the orchestration when it was started.
 	/// </summary>

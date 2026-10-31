@@ -14,6 +14,60 @@ namespace Orchestra.Portal.Tests;
 [Collection(PortalHostEnvironmentCollection.Name)]
 public class ProviderSetupLiveTests
 {
+	[Fact]
+	public async Task NativeCopilotDeviceLogin_ProvidesBrowserInstructionsAndCancelsCleanly()
+	{
+		var directory = Directory.CreateTempSubdirectory("orchestra-device-login-").FullName;
+		try
+		{
+			using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+			var prompt = new TaskCompletionSource<SetupProgress>(TaskCreationOptions.RunContinuationsAsynchronously);
+			var path = Orchestra.Copilot.CopilotPreflight.Inspect().Path ?? throw new InvalidOperationException("This live test requires an installed Copilot runtime.");
+			var login = ProviderSetupBackend.LoginCopilotAsync(path, progress =>
+			{
+				if (progress.AuthorizationUrl is not null && progress.UserCode is not null)
+					prompt.TrySetResult(progress);
+			}, cancellation.Token, info =>
+			{
+				info.Environment["COPILOT_HOME"] = directory;
+				info.Environment["COPILOT_DISABLE_KEYTAR"] = "1";
+				info.Environment["GH_CONFIG_DIR"] = Path.Combine(directory, "gh");
+				foreach (var key in new[] { "GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN" })
+					info.Environment.Remove(key);
+			});
+			try
+			{
+				var completed = await Task.WhenAny(prompt.Task, login).WaitAsync(cancellation.Token);
+				if (completed == login)
+					await login;
+				var instructions = await prompt.Task.WaitAsync(cancellation.Token);
+				instructions.AuthorizationUrl.Should().StartWith("https://");
+				instructions.UserCode.Should().MatchRegex("^[A-Z0-9]{4}-[A-Z0-9]{4}$");
+			}
+			finally
+			{
+				cancellation.Cancel();
+				try
+				{ await login; }
+				catch (OperationCanceledException) { }
+			}
+		}
+		finally { Directory.Delete(directory, true); }
+	}
+
+	[Theory]
+	[InlineData("copilot", "gpt-6-astra")]
+	[InlineData("opencode", "github-copilot/gpt-6-astra")]
+	public async Task SelectedModelTest_PerformsARealGenerationAndClosesItsScope(string provider, string model)
+	{
+		await using var factory = new PortalWebApplicationFactory();
+		using var client = factory.CreateClient();
+		using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(2));
+		var result = await factory.Services.GetRequiredService<IProviderSetupBackend>().ExecuteAsync(provider, new("test", Model: model), _ => { }, _ => throw new NotSupportedException(), timeout.Token);
+		result.Ready.Should().BeTrue();
+		result.Detail.Should().Contain("Model test succeeded");
+	}
+
 	[Theory]
 	[InlineData("copilot", "gpt-6-astra")]
 	[InlineData("opencode", "github-copilot/gpt-6-astra")]

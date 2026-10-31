@@ -16,6 +16,8 @@ public class ExecutionWorkingDirectoryTests
 		{
 			Directory.CreateDirectory(Path.Combine(root, "nested"));
 			var expected = configured is null ? root : Path.Combine(root, configured);
+			var marker = Guid.NewGuid().ToString("N");
+			await File.WriteAllTextAsync(Path.Combine(expected, marker), marker);
 			var context = new OrchestrationExecutionContext { OrchestrationInfo = new("cwd", "1", "run", DateTimeOffset.UtcNow, SourceDirectory: root) };
 			var builder = new MockAgentBuilder().WithResponse("ok");
 			var prompt = new PromptExecutor(builder, NullOrchestrationReporter.Instance, DefaultPromptFormatter.Instance, NullLogger<PromptExecutor>.Instance);
@@ -26,11 +28,11 @@ public class ExecutionWorkingDirectoryTests
 			var command = new CommandStepExecutor(NullOrchestrationReporter.Instance, NullLogger<CommandStepExecutor>.Instance);
 			var cr = await command.ExecuteAsync(new CommandOrchestrationStep { Name = "command", Type = OrchestrationStepType.Command, Command = "pwsh", Arguments = ["-NoProfile", "-Command", "(Get-Location).Path"], WorkingDirectory = configured }, context);
 			cr.Status.Should().Be(ExecutionStatus.Succeeded, cr.ErrorMessage);
-			cr.Content.Trim().Should().Be(expected);
+			(await File.ReadAllTextAsync(Path.Combine(cr.Content.Trim(), marker))).Should().Be(marker, "the child must use the same directory, including when macOS resolves /var to /private/var");
 			var script = new ScriptStepExecutor(NullOrchestrationReporter.Instance, NullLogger<ScriptStepExecutor>.Instance);
 			var sr = await script.ExecuteAsync(new ScriptOrchestrationStep { Name = "script", Type = OrchestrationStepType.Script, Shell = "pwsh", Script = "(Get-Location).Path", WorkingDirectory = configured }, context);
 			sr.Status.Should().Be(ExecutionStatus.Succeeded, sr.ErrorMessage);
-			sr.Content.Trim().Should().Be(expected);
+			(await File.ReadAllTextAsync(Path.Combine(sr.Content.Trim(), marker))).Should().Be(marker);
 		}
 		finally { Directory.Delete(root, true); }
 	}

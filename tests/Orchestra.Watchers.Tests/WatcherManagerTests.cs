@@ -35,7 +35,9 @@ public class WatcherManagerTests : IAsyncDisposable
 	public async ValueTask DisposeAsync()
 	{
 		await _manager.StopAsync(CancellationToken.None);
-		try { Directory.Delete(_root, recursive: true); } catch { }
+		try
+		{ Directory.Delete(_root, recursive: true); }
+		catch { }
 	}
 
 	private static WatcherLibrary Library(params WatcherEntry[] entries)
@@ -273,7 +275,8 @@ public class WatcherManagerTests : IAsyncDisposable
 		var inbox = Path.Combine(orchestrationDir, "inbox");
 		Directory.CreateDirectory(inbox);
 		File.Copy(TestEntries.Fixture("folder-fetch.ps1"), Path.Combine(orchestrationDir, "fetch.ps1"));
-		await File.WriteAllTextAsync(Path.Combine(inbox, "hello.txt"), "hi");
+		var marker = Guid.NewGuid().ToString("N");
+		await File.WriteAllTextAsync(Path.Combine(inbox, "hello.txt"), marker);
 
 		var manager = new WatcherManager(new WatcherSubscriptionRegistry(), _store, new WatcherFetcherFactory(), new WatcherOutputValidator(), _dispatcher, _logs);
 		var definition = JsonNode.Parse("""
@@ -296,7 +299,8 @@ public class WatcherManagerTests : IAsyncDisposable
 
 			var dispatch = _dispatcher.Dispatches.Single();
 			dispatch.Parameters["name"].Should().Be("hello.txt");
-			dispatch.Parameters["path"].Should().BeEquivalentTo(Path.Combine(inbox, "hello.txt"), "case-insensitive: pwsh reports the on-disk casing");
+			Path.IsPathFullyQualified(dispatch.Parameters["path"]).Should().BeTrue();
+			(await File.ReadAllTextAsync(dispatch.Parameters["path"])).Should().Be(marker, "pwsh may canonicalize casing or macOS /var symlinks, but must identify the same file");
 			dispatch.Watcher.Name.Should().Be("local-folder");
 
 			var loop = manager.GetLoop("local-folder")!;

@@ -892,8 +892,10 @@ public partial class TriggerManager : BackgroundService
 			}
 		}
 
-		// 3. Await all tracked background tasks with timeout
-		var allTasks = _backgroundTasks.Values.ToArray();
+		// 3. API/MCP launches use the shared launcher rather than this manager's task
+		// dictionary. Join their engine/persistence work too, before the host disposes stores.
+		var allTasks = _backgroundTasks.Values.Concat(_activeExecutionInfos.Values
+			.Select(info => info.ExecutionTask).OfType<Task>()).Distinct().ToArray();
 		if (allTasks.Length > 0)
 		{
 			try

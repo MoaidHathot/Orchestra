@@ -16,11 +16,10 @@ public static class OrchestrationDocuments
 	public static DocumentPreview Preview(string content, string? sourcePath = null)
 	{
 		var json = Normalize(content);
-		var orchestration = sourcePath is null
-			? OrchestrationParser.ParseOrchestrationMetadataOnly(json)
-			: OrchestrationParser.ParseOrchestrationFileMetadataOnly(sourcePath);
+		var orchestration = OrchestrationParser.ParseOrchestrationMetadataOnly(json, sourcePath);
 		var errors = new List<string>();
-		try { new OrchestrationScheduler().Schedule(orchestration); }
+		try
+		{ new OrchestrationScheduler().Schedule(orchestration); }
 		catch (InvalidOperationException ex) { errors.Add(ex.Message); }
 		errors.AddRange(TemplateExpressionValidator.ValidateOrchestration(orchestration).Errors.Select(e => e.Message));
 		using var document = JsonDocument.Parse(json);

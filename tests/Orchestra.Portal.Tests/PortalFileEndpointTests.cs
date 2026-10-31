@@ -50,7 +50,8 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		_client.Dispose();
 		if (Directory.Exists(_tempDir))
 		{
-			try { Directory.Delete(_tempDir, recursive: true); }
+			try
+			{ Directory.Delete(_tempDir, recursive: true); }
 			catch { /* ignore cleanup errors */ }
 		}
 	}
@@ -117,6 +118,17 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 		var response = await _client.PostAsJsonAsync("/api/orchestrations/json", new { json = $"name: {name}\ndescription: Pasted\nsteps:\n  - name: render\n    type: Transform\n    template: hello\n" });
 		response.EnsureSuccessStatusCode();
 		_factory.Services.GetRequiredService<OrchestrationRegistry>().GetByIdOrName(name).Should().NotBeNull();
+	}
+
+	[Fact]
+	public void Preview_ValidatesTheCapturedContentRatherThanReopeningAMutatingFile()
+	{
+		var source = Path.Combine(_tempDir, "changing.json");
+		var snapshot = CreateValidOrchestrationJson("captured");
+		File.WriteAllText(source, "File is being rewritten by an editor");
+		var preview = Orchestra.Host.Services.OrchestrationDocuments.Preview(snapshot, source);
+		preview.Valid.Should().BeTrue();
+		preview.Definition.GetProperty("name").GetString().Should().Be("captured");
 	}
 
 	[Fact]

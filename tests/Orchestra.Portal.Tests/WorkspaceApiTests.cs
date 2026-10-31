@@ -124,4 +124,30 @@ public class WorkspaceApiTests
 		(await File.ReadAllTextAsync(file)).Should().Be("existing user file");
 		(await client.GetAsync("/api/workspace/settings")).EnsureSuccessStatusCode();
 	}
+
+	[Fact]
+	public async Task SavedMcp_CanConnectAndListTools_WithJsoncRetainedForHostStartup()
+	{
+		await using var factory = new PortalWebApplicationFactory();
+		factory.UseKestrel(0);
+		using var client = factory.CreateClient();
+		var initial = await client.GetFromJsonAsync<JsonElement>("/api/workspace/integrations");
+		var path = initial.GetProperty("path").GetString()!;
+		await File.WriteAllTextAsync(path, "{\n// Connection notes\n\"mcps\": [],\n}");
+		initial = await client.GetFromJsonAsync<JsonElement>("/api/workspace/integrations");
+		var definition = new System.Text.Json.Nodes.JsonObject
+		{
+			["name"] = "local-portal",
+			["type"] = "Remote",
+			["endpoint"] = new Uri(client.BaseAddress!, "mcp/data").ToString(),
+		};
+		(await client.PostAsJsonAsync("/api/workspace/integrations", new IntegrationUpdate(initial.GetProperty("revision").GetString()!, definition))).EnsureSuccessStatusCode();
+		var connected = await client.PostAsync("/api/workspace/integrations/local-portal/test", null);
+		connected.EnsureSuccessStatusCode();
+		var result = await connected.Content.ReadFromJsonAsync<JsonElement>();
+		result.GetProperty("connected").GetBoolean().Should().BeTrue();
+		result.GetProperty("toolCount").GetInt32().Should().BeGreaterThan(0);
+		Orchestra.Engine.OrchestrationParser.ParseMcpFile(path).Should().ContainSingle(m => m.Name == "local-portal");
+		(await File.ReadAllTextAsync(path)).Should().Contain("// Connection notes");
+	}
 }

@@ -23,6 +23,11 @@ public static class OrchestrationParser
 	private static readonly StepParseContext s_defaultContext = new(BaseDirectory: null);
 
 	private static readonly JsonSerializerOptions s_options = CreateOptions(s_defaultParserRegistry, s_defaultContext);
+	private static readonly JsonSerializerOptions s_mcpOptions = new(s_options)
+	{
+		ReadCommentHandling = JsonCommentHandling.Skip,
+		AllowTrailingCommas = true,
+	};
 
 	/// <summary>
 	/// Creates a <see cref="StepTypeParserRegistry"/> pre-populated with all built-in step type parsers.
@@ -160,14 +165,21 @@ public static class OrchestrationParser
 	/// Useful for metadata extraction (e.g., folder scan) where MCP configs are unavailable.
 	/// </summary>
 	public static Orchestration ParseOrchestrationMetadataOnly(string json)
+		=> ParseOrchestrationMetadataOnly(json, sourcePath: null);
+
+	/// <summary>Parses a captured document without reopening its source file or resolving MCP names.</summary>
+	public static Orchestration ParseOrchestrationMetadataOnly(string json, string? sourcePath)
 	{
-		var context = new StepParseContext(BaseDirectory: null, MetadataOnly: true);
+		var baseDirectory = sourcePath is null ? null : GetBaseDirectory(sourcePath, null);
+		var context = new StepParseContext(BaseDirectory: baseDirectory, MetadataOnly: true);
 		var options = CreateOptions(s_defaultParserRegistry, context);
 
 		var orchestration = JsonSerializer.Deserialize<Orchestration>(json, options)
 			?? throw new InvalidOperationException("Failed to deserialize orchestration JSON.");
 
-		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory: null);
+		if (sourcePath is not null)
+			ApplySourcePath(orchestration, sourcePath, null);
+		HookDefinitionResolver.ApplyBaseDirectory(orchestration.Hooks, baseDirectory);
 		return orchestration;
 	}
 
@@ -208,7 +220,7 @@ public static class OrchestrationParser
 
 	public static Mcp[] ParseMcps(string json)
 	{
-		var doc = JsonSerializer.Deserialize<McpConfigDocument>(json, s_options)
+		var doc = JsonSerializer.Deserialize<McpConfigDocument>(json, s_mcpOptions)
 			?? throw new InvalidOperationException("Failed to deserialize MCP JSON.");
 
 		return doc.Mcps;

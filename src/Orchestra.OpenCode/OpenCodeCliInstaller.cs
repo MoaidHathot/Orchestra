@@ -20,32 +20,47 @@ public static class OpenCodeCliInstaller
 	}
 	public static async Task<string> EnsureAsync(Action<string> progress, CancellationToken token)
 	{
+		using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+		http.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.npm.install-v1+json");
+		return await EnsureAsync(CachePath, Registries(), http, progress, token);
+	}
+
+	internal static async Task<string> EnsureAsync(string path, IEnumerable<string> registries, HttpClient http, Action<string> progress, CancellationToken token)
+	{
 		await Gate.WaitAsync(token);
 		try
 		{
-			var path = CachePath;
-			if (File.Exists(path)) return path;
-			using var http = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+			if (File.Exists(path))
+				return path;
 			var package = "cli-" + PackagePlatform();
 			var errors = new List<string>();
-			foreach (var registry in Registries())
+			foreach (var registry in registries)
 			{
 				var archive = Path.Combine(Path.GetTempPath(), $"orchestra-opencode-{Guid.NewGuid():N}.tgz");
-				var staged = path + $".{Guid.NewGuid():N}.tmp";
 				try
 				{
 					progress($"Downloading OpenCode {Version}…");
-					using var metadata = JsonDocument.Parse(await http.GetStringAsync($"{registry}/@opencode/{package}/{Version}", token));
-					var integrity = metadata.RootElement.GetProperty("dist").GetProperty("integrity").GetString()!;
-					using var response = await http.GetAsync($"{registry}/@opencode/{package}/-/{package}-{Version}.tgz", HttpCompletionOption.ResponseHeadersRead, token);
+					// npm mirrors commonly support package metadata but not /package/version.
+					// Follow the mirror's distribution URL, which may use a separate artifact host.
+					using var metadata = JsonDocument.Parse(await http.GetStringAsync($"{registry}/{Uri.EscapeDataString("@opencode/" + package)}", token));
+					if (!metadata.RootElement.TryGetProperty("versions", out var versions) || !versions.TryGetProperty(Version, out var version))
+						throw new IOException($"OpenCode {Version} was not found in the package registry.");
+					var distribution = version.GetProperty("dist");
+					var integrity = distribution.GetProperty("integrity").GetString()!;
+					var archiveUrl = distribution.GetProperty("tarball").GetString()!;
+					if (!Uri.TryCreate(archiveUrl, UriKind.Absolute, out var archiveUri) || archiveUri.Scheme is not ("http" or "https"))
+						throw new IOException("The registry returned an invalid OpenCode distribution URL.");
+					using var response = await http.GetAsync(archiveUri, HttpCompletionOption.ResponseHeadersRead, token);
 					response.EnsureSuccessStatusCode();
-					await using (var file = File.Create(archive)) { await response.Content.CopyToAsync(file, token); }
+					await using (var file = File.Create(archive))
+					{ await response.Content.CopyToAsync(file, token); }
 					progress("Verifying and extracting OpenCode…");
 					await InstallArchiveAsync(archive, path, integrity, token);
 					return path;
 				}
-				catch (Exception ex) when (ex is HttpRequestException or IOException) { errors.Add(ex.Message); }
-				finally { File.Delete(archive); File.Delete(staged); }
+				catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException) { errors.Add(ex.Message); }
+				catch (OperationCanceledException) when (!token.IsCancellationRequested) { errors.Add($"Download from {registry} timed out."); }
+				finally { File.Delete(archive); }
 			}
 			throw new IOException("Could not install OpenCode. Set ORCHESTRA_OPENCODE_NPM_REGISTRY to a reachable npm mirror. " + string.Join("; ", errors));
 		}
@@ -54,7 +69,8 @@ public static class OpenCodeCliInstaller
 	internal static async Task InstallArchiveAsync(string archive, string path, string integrity, CancellationToken token)
 	{
 		await using (var file = File.OpenRead(archive))
-			if (integrity != "sha512-" + Convert.ToBase64String(await SHA512.HashDataAsync(file, token))) throw new IOException("OpenCode archive integrity check failed.");
+			if (integrity != "sha512-" + Convert.ToBase64String(await SHA512.HashDataAsync(file, token)))
+				throw new IOException("OpenCode archive integrity check failed.");
 		Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 		var staged = path + $".{Guid.NewGuid():N}.tmp";
 		try
@@ -64,10 +80,14 @@ public static class OpenCodeCliInstaller
 			using var tar = new TarReader(gzip);
 			while (await tar.GetNextEntryAsync(cancellationToken: token) is { } entry)
 			{
-				if (Path.GetFileName(entry.Name) != Path.GetFileName(path) || entry.DataStream is null) continue;
-				await using (var binary = File.Create(staged)) { await entry.DataStream.CopyToAsync(binary, token); }
-				if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(staged, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-				try { File.Move(staged, path, overwrite: false); }
+				if (Path.GetFileName(entry.Name) != Path.GetFileName(path) || entry.DataStream is null)
+					continue;
+				await using (var binary = File.Create(staged))
+				{ await entry.DataStream.CopyToAsync(binary, token); }
+				if (!OperatingSystem.IsWindows())
+					File.SetUnixFileMode(staged, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
+				try
+				{ File.Move(staged, path, overwrite: false); }
 				catch (IOException) when (File.Exists(path)) { }
 				return;
 			}
@@ -78,7 +98,8 @@ public static class OpenCodeCliInstaller
 	private static IEnumerable<string> Registries()
 	{
 		var explicitRegistry = Environment.GetEnvironmentVariable("ORCHESTRA_OPENCODE_NPM_REGISTRY");
-		if (!string.IsNullOrWhiteSpace(explicitRegistry)) return [explicitRegistry.TrimEnd('/')];
+		if (!string.IsNullOrWhiteSpace(explicitRegistry))
+			return [explicitRegistry.TrimEnd('/')];
 		var values = new List<string>();
 		var npmrc = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".npmrc");
 		if (File.Exists(npmrc))
@@ -86,11 +107,13 @@ public static class OpenCodeCliInstaller
 			foreach (var line in File.ReadLines(npmrc))
 			{
 				var parts = line.Split('=', 2);
-				if (parts.Length == 2 && parts[0].Trim() is "@opencode:registry" or "registry") values.Add(parts[1].Trim());
+				if (parts.Length == 2 && parts[0].Trim() is "@opencode:registry" or "registry")
+					values.Add(parts[1].Trim());
 			}
 		}
 		var environment = Environment.GetEnvironmentVariable("npm_config_registry");
-		if (!string.IsNullOrWhiteSpace(environment)) values.Insert(0, environment);
+		if (!string.IsNullOrWhiteSpace(environment))
+			values.Insert(0, environment);
 		values.Add("https://registry.npmjs.org");
 		return values.Where(v => Uri.TryCreate(v, UriKind.Absolute, out var uri) && uri.Scheme is "http" or "https").Select(v => v.TrimEnd('/')).Distinct();
 	}

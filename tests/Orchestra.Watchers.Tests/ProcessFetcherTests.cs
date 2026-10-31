@@ -18,7 +18,9 @@ public class ProcessFetcherTests : IDisposable
 
 	public void Dispose()
 	{
-		try { Directory.Delete(_tempDir, recursive: true); } catch { }
+		try
+		{ Directory.Delete(_tempDir, recursive: true); }
+		catch { }
 	}
 
 	private static WatcherFetchRequest Request(WatcherEntry entry, JsonNode? cursor = null)
@@ -167,6 +169,8 @@ public class ProcessFetcherTests : IDisposable
 	[Fact]
 	public async Task Script_InlineScript_RunsAndSeesEnvAndStdin()
 	{
+		var marker = Guid.NewGuid().ToString("N");
+		await File.WriteAllTextAsync(Path.Combine(_tempDir, marker), marker);
 		var entry = PwshScript(inline: "$r = [Console]::In.ReadToEnd() | ConvertFrom-Json; [Console]::Out.Write((@{ protocolVersion='1'; items=@(@{ env=$env:ORCHESTRA_WATCHER_TEST_ENV; watcher=$r.watcher; cwd=(Get-Location).Path }) } | ConvertTo-Json -Depth 5 -Compress))");
 
 		var result = await new ScriptWatcherFetcher().RunAsync(entry, Request(entry), CancellationToken.None);
@@ -175,8 +179,8 @@ public class ProcessFetcherTests : IDisposable
 		var item = result.Output!["items"]![0]!;
 		item["env"]!.GetValue<string>().Should().Be("env-value");
 		item["watcher"]!.GetValue<string>().Should().Be("script");
-		Path.GetFullPath(item["cwd"]!.GetValue<string>()).TrimEnd(Path.DirectorySeparatorChar)
-			.Should().Be(Path.GetFullPath(_tempDir).TrimEnd(Path.DirectorySeparatorChar), "the working directory defaults to the entry's base directory");
+		(await File.ReadAllTextAsync(Path.Combine(item["cwd"]!.GetValue<string>(), marker)))
+			.Should().Be(marker, "the working directory defaults to the entry's base directory, including symlinked macOS temp roots");
 	}
 
 	[Fact]

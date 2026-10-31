@@ -41,6 +41,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 	private readonly ILoggerFactory _loggerFactory;
 	private readonly ILogger<ChildOrchestrationLauncher> _logger;
 	private readonly FileSystemRunStore _runStore;
+	private readonly ICheckpointStore _checkpointStore;
 	private readonly OrchestrationHostOptions _hostOptions;
 	private readonly EngineToolRegistry _engineToolRegistry;
 	private readonly McpServerOptions _mcpOptions;
@@ -72,11 +73,12 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 		IPendingInputStore? pendingInputStore = null,
-		IHumanInputWaiter? humanInputWaiter = null)
+		IHumanInputWaiter? humanInputWaiter = null,
+		ICheckpointStore? checkpointStore = null)
 		: this(
 			registry, new SingleAgentProviderRegistry(agentBuilder), scheduler, loggerFactory, runStore,
 			hostOptions, engineToolRegistry, mcpOptions, reporterFactory, mcpManager, activeExecutions,
-			activeExecutionInfos, pendingInputStore, humanInputWaiter)
+			activeExecutionInfos, pendingInputStore, humanInputWaiter, checkpointStore)
 	{
 	}
 
@@ -94,7 +96,8 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		ConcurrentDictionary<string, CancellationTokenSource> activeExecutions,
 		ConcurrentDictionary<string, ActiveExecutionInfo> activeExecutionInfos,
 		IPendingInputStore? pendingInputStore = null,
-		IHumanInputWaiter? humanInputWaiter = null)
+		IHumanInputWaiter? humanInputWaiter = null,
+		ICheckpointStore? checkpointStore = null)
 	{
 		_registry = registry;
 		_providerRegistry = providerRegistry;
@@ -102,6 +105,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		_loggerFactory = loggerFactory;
 		_logger = loggerFactory.CreateLogger<ChildOrchestrationLauncher>();
 		_runStore = runStore;
+		_checkpointStore = checkpointStore ?? NullCheckpointStore.Instance;
 		_hostOptions = hostOptions;
 		_engineToolRegistry = engineToolRegistry;
 		_mcpOptions = mcpOptions;
@@ -207,8 +211,10 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			UserMetadata = request.UserMetadata ?? [],
 		};
 
+		var completionFinished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 		var executionInfo = new ActiveExecutionInfo
 		{
+			ExecutionTask = completionFinished.Task,
 			ExecutionId = executionId,
 			OrchestrationId = resolvedOrchestrationId,
 			OrchestrationName = orchestration.Name,
@@ -294,6 +300,7 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			reporter,
 			_loggerFactory,
 			runStore: _runStore,
+			checkpointStore: _checkpointStore,
 			engineToolRegistry: _engineToolRegistry,
 			mcpResolver: _mcpManager,
 			childLauncher: this, // Allow nested Orchestration steps to launch their own children
@@ -339,17 +346,16 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 		}
 
 		// 10. Build the completion task — runs the orchestration end-to-end and cleans up.
-		var completionTask = RunCompletionAsync(
-			executor,
-			orchestration,
-			request,
-			executionInfo,
-			reporter,
-			cts,
-			wrappedTransform,
-			startedAt,
-			externalTokenRegistration,
-			parentTokenRegistration);
+		async Task<ChildOrchestrationResult> CompleteOwnedExecutionAsync()
+		{
+			try
+			{
+				return await RunCompletionAsync(executor, orchestration, request, executionInfo,
+					reporter, cts, wrappedTransform, startedAt, externalTokenRegistration, parentTokenRegistration);
+			}
+			finally { completionFinished.TrySetResult(); }
+		}
+		var completionTask = CompleteOwnedExecutionAsync();
 
 		var handle = new ChildOrchestrationHandle
 		{
@@ -388,7 +394,8 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 
 	private static void WireProgressCallbacks(IOrchestrationReporter reporter, ActiveExecutionInfo info)
 	{
-		if (reporter is not SseReporter sse) return;
+		if (reporter is not SseReporter sse)
+			return;
 
 		// Only wire defaults when no callback has been set externally; otherwise we'd
 		// chain or shadow the caller's wiring unintentionally.
@@ -601,15 +608,21 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			// Always complete reporter and schedule cleanup so cancellation does not leak resources
 			if (reporter is SseReporter sseFinal)
 			{
-				try { sseFinal.Complete(); } catch { /* best-effort */ }
+				try
+				{ sseFinal.Complete(); }
+				catch { /* best-effort */ }
 			}
 
 			// Dispose source-token registrations to detach them from the source CTSs. This
 			// is important when the parent's CTS outlives this child (which it normally
 			// does for sync invokes): otherwise the parent CTS would hold a closure over
 			// our executionInfo for the parent's lifetime.
-			try { externalTokenRegistration.Dispose(); } catch { /* best-effort */ }
-			try { parentTokenRegistration.Dispose(); } catch { /* best-effort */ }
+			try
+			{ externalTokenRegistration.Dispose(); }
+			catch { /* best-effort */ }
+			try
+			{ parentTokenRegistration.Dispose(); }
+			catch { /* best-effort */ }
 
 			syncTimeoutCts?.Dispose();
 
@@ -651,7 +664,8 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			.Where(kvp => kvp.Value.Status == ExecutionStatus.Succeeded)
 			.Select(kvp => $"[{kvp.Key}]\n{kvp.Value.Content}")
 			.ToArray();
-		if (terminal.Length == 0) return null;
+		if (terminal.Length == 0)
+			return null;
 		return string.Join("\n---\n", terminal);
 	}
 
@@ -669,7 +683,9 @@ public sealed partial class ChildOrchestrationLauncher : IChildOrchestrationLaun
 			{
 				_activeExecutions.TryRemove(executionId, out _);
 				_activeExecutionInfos.TryRemove(executionId, out _);
-				try { cts.Dispose(); } catch (ObjectDisposedException) { }
+				try
+				{ cts.Dispose(); }
+				catch (ObjectDisposedException) { }
 			}
 		});
 	}

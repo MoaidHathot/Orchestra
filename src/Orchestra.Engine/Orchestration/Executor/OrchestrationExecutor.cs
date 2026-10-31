@@ -355,9 +355,11 @@ public partial class OrchestrationExecutor
 			foreach (var starting in runScopeStartTasks)
 			{
 				IAsyncDisposable scope;
-				try { scope = await starting.ConfigureAwait(false); }
+				try
+				{ scope = await starting.ConfigureAwait(false); }
 				catch { continue; } // Preserve the original startup failure.
-				try { await scope.DisposeAsync().ConfigureAwait(false); }
+				try
+				{ await scope.DisposeAsync().ConfigureAwait(false); }
 				catch (Exception ex) { LogRunScopeCleanupFailed(ex, runId); }
 			}
 			throw;
@@ -446,8 +448,13 @@ public partial class OrchestrationExecutor
 		if (stepConcurrencyLimiter is not null)
 			LogStepConcurrencyLimit(orchestration.Name, effectiveMaxConcurrency!.Value);
 
+		// Shared run cancellation also includes explicit completion / fail-fast signals.
+		using var orchestrationCompleteCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+		var effectiveStepToken = orchestrationCompleteCts.Token;
 		var context = new OrchestrationExecutionContext
 		{
+			RunCancellationToken = effectiveStepToken,
+			ResolveExternalCancellationCause = resolveExternalCancellationCause,
 			Parameters = effectiveParams,
 			OrchestrationInfo = new OrchestrationInfo(
 				orchestration.Name,
@@ -489,11 +496,6 @@ public partial class OrchestrationExecutor
 			},
 			OnInputResolved = clockPause is null ? null : (_, _) => clockPause.EndWait(),
 		};
-
-		// CancellationTokenSource for orchestration-complete signals.
-		// When a step calls orchestra_complete, this CTS is triggered to cancel all remaining steps.
-		using var orchestrationCompleteCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-		var effectiveStepToken = orchestrationCompleteCts.Token;
 
 		// Track orchestration-complete signal details (set by the step that triggers it)
 		ExecutionStatus? orchestrationCompleteStatus = null;
@@ -2334,7 +2336,8 @@ public partial class OrchestrationExecutor
 
 	private async Task<IAsyncDisposable> ObserveRunScopeStartupAsync(Task<IAsyncDisposable> starting, CancellationTokenSource cancellation, string runId)
 	{
-		try { return await starting.ConfigureAwait(false); }
+		try
+		{ return await starting.ConfigureAwait(false); }
 		catch
 		{
 			await CancelRunScopeStartupAsync(cancellation, runId).ConfigureAwait(false);
@@ -2344,7 +2347,8 @@ public partial class OrchestrationExecutor
 
 	private async Task CancelRunScopeStartupAsync(CancellationTokenSource cancellation, string runId)
 	{
-		try { await cancellation.CancelAsync().ConfigureAwait(false); }
+		try
+		{ await cancellation.CancelAsync().ConfigureAwait(false); }
 		catch (Exception ex) { LogRunScopeCleanupFailed(ex, runId); }
 	}
 
