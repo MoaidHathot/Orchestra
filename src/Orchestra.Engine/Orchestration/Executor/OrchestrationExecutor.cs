@@ -661,6 +661,11 @@ public partial class OrchestrationExecutor
 		}
 
 		var totalSteps = orchestration.Steps.Length;
+		// Readiness is separate from visible output: a step may publish intermediate loop
+		// results while its hooks/checkpoint are still running. Count each settled edge once
+		// instead of repeatedly scanning every dependency of a wide join.
+		var remainingDependencies = orchestration.Steps.ToDictionary(
+			s => s.Name, s => new RemainingDependencies(s.DependsOn.Count(dep => !completionSources[dep].Task.IsCompleted)));
 
 		// Guards against launching the same step twice when multiple
 		// dependencies complete simultaneously and both try to launch it.
@@ -679,14 +684,16 @@ public partial class OrchestrationExecutor
 				return;
 
 			LogStepLaunchScheduled(stepName, Environment.CurrentManagedThreadId);
-			LogAsyncLocalDiagnostic("before-StartNew", RunScopedClientDiagnostics(), Environment.CurrentManagedThreadId);
+			if (_logger.IsEnabled(LogLevel.Debug))
+				LogAsyncLocalDiagnostic("before-TaskRun", RunScopedClientDiagnostics(), Environment.CurrentManagedThreadId);
 
-			var stepWorker = Task.Factory.StartNew(async () =>
+			StartStepWorker(async () =>
 			{
 				LogStepTaskStarted(stepName, Environment.CurrentManagedThreadId);
-				LogAsyncLocalDiagnostic("inside-StartNew", RunScopedClientDiagnostics(), Environment.CurrentManagedThreadId);
+				if (_logger.IsEnabled(LogLevel.Debug))
+					LogAsyncLocalDiagnostic("inside-TaskRun", RunScopedClientDiagnostics(), Environment.CurrentManagedThreadId);
 				var step = allSteps[stepName];
-				var stepExecutor = _stepExecutorRegistry.Resolve(step.Type);
+				_stepExecutorRegistry.TryResolve(step.Type, out var stepExecutor);
 				var stepStartedAt = DateTimeOffset.UtcNow;
 
 				// True when a fail-fast (onStepFailure=stop), orchestra_complete or external-cancel
@@ -705,11 +712,6 @@ public partial class OrchestrationExecutor
 
 					if (result.Status == ExecutionStatus.Cancelled && CancellationAlreadyRecorded())
 					{
-						if (!context.PlanTrackers.TryGetValue(step.Name, out var tracker) || tracker.Latest.Count == 0)
-						{
-							completionSources[step.Name].TrySetResult(stepResults[step.Name]);
-							return;
-						}
 						result = result with { ErrorMessage = stepResults[step.Name].ErrorMessage };
 					}
 
@@ -836,7 +838,7 @@ public partial class OrchestrationExecutor
 				{
 					if (CancellationAlreadyRecorded())
 					{
-						if (ex is StepExecutionCanceledException partial && context.PlanTrackers.TryGetValue(step.Name, out var tracker) && tracker.Latest.Count > 0)
+						if (ex is StepExecutionCanceledException partial)
 						{
 							var cancelled = EnrichResultTrace(step, context, partial.PartialResult) with { ErrorMessage = stepResults[step.Name].ErrorMessage };
 							context.AddResult(step.Name, cancelled);
@@ -882,10 +884,7 @@ public partial class OrchestrationExecutor
 				{
 					foreach (var dependent in dependents[stepName])
 					{
-						var allDepsComplete = allSteps[dependent].DependsOn
-							.All(dep => stepResults.ContainsKey(dep));
-
-						if (allDepsComplete)
+						if (Interlocked.Decrement(ref remainingDependencies[dependent].Count) == 0)
 						{
 							TryLaunchStep(dependent);
 						}
@@ -915,11 +914,7 @@ public partial class OrchestrationExecutor
 						}
 					}
 				}
-				// Use LongRunning so step threads don't compete with the thread pool
-				// that ASP.NET Core needs for incoming HTTP requests (e.g., self-referential
-				// MCP data-plane calls). Unwrap() converts Task<Task> to Task.
-			}, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default).Unwrap();
-			stepWorkers.Add(stepWorker);
+			}, completionSources[stepName], stepWorkers);
 		}
 
 		// Start all steps that have zero dependencies (or whose deps are all already complete from checkpoint)
@@ -928,8 +923,7 @@ public partial class OrchestrationExecutor
 			if (stepResults.ContainsKey(step.Name))
 				continue; // Already restored from checkpoint
 
-			var allDepsComplete = step.DependsOn.Length == 0 ||
-				step.DependsOn.All(dep => stepResults.ContainsKey(dep));
+			var allDepsComplete = Volatile.Read(ref remainingDependencies[step.Name].Count) == 0;
 
 			if (allDepsComplete)
 			{
@@ -940,11 +934,17 @@ public partial class OrchestrationExecutor
 
 		// Wait for all steps to complete
 		await Task.WhenAll(completionSources.Values.Select(tcs => tcs.Task));
-		if (orchestrationCompleteCts.IsCancellationRequested && context.PlanTrackers.Values.Any(t => t.CaptureStarted))
+		// A cancellation placeholder is not worker termination. Every step type may still
+		// be collecting partial output or stopping a process, regardless of plan capture.
+		if (orchestrationCompleteCts.IsCancellationRequested)
 		{
 			try
 			{ await Task.WhenAll(stepWorkers).WaitAsync(TimeSpan.FromSeconds(15)).ConfigureAwait(false); }
-			catch (Exception ex) { LogPlanSettlementIncomplete(ex, runId); }
+			catch (Exception ex) { LogStepSettlementIncomplete(ex, runId); }
+		}
+		else
+		{
+			await Task.WhenAll(stepWorkers).ConfigureAwait(false);
 		}
 		// Early-cancellation placeholders can precede provider teardown. Always preserve the
 		// last observed plan in the terminal record as well as the already-durable journal.
@@ -1071,7 +1071,7 @@ public partial class OrchestrationExecutor
 
 		var orchestrationResult = OrchestrationResult.From(
 			orchestration,
-			stepResults,
+			stepResults.ToArray().ToDictionary(kv => kv.Key, kv => kv.Value),
 			orchestrationCompleteStatus,
 			orchestrationCompleteReason,
 			orchestrationCompleteStepName,
@@ -1110,8 +1110,8 @@ public partial class OrchestrationExecutor
 			TriggeredBy = resolvedTriggeredBy,
 			RetriedFromRunId = retryMetadata?.RetriedFromRunId,
 			RetryMode = retryMetadata?.RetryMode,
-			StepRecords = stepRecords,
-			AllStepRecords = allStepRecords,
+			StepRecords = stepRecords.ToArray().ToDictionary(kv => kv.Key, kv => kv.Value),
+			AllStepRecords = allStepRecords.ToArray().ToDictionary(kv => kv.Key, kv => kv.Value),
 			FinalContent = finalContent,
 			SavedFiles = orchestrationResult.SavedFiles,
 			CompletionReason = orchestrationResult.CompletionReason,
@@ -1270,6 +1270,9 @@ public partial class OrchestrationExecutor
 		string? triggerId,
 		CancellationToken cancellationToken)
 	{
+		if (_checkpointStore is NullCheckpointStore)
+			return;
+
 		try
 		{
 			var checkpointData = new CheckpointData
@@ -1306,6 +1309,11 @@ public partial class OrchestrationExecutor
 		int totalSteps,
 		CancellationToken cancellationToken)
 	{
+		// Without persistence, repeatedly cloning every completed result costs O(N²)
+		// allocations across a run while producing no durable data at all.
+		if (_checkpointStore is NullCheckpointStore)
+			return;
+
 		try
 		{
 			var completedSteps = new Dictionary<string, CheckpointStepResult>();
@@ -1463,7 +1471,7 @@ public partial class OrchestrationExecutor
 	/// </summary>
 	private async Task<ExecutionResult> ExecuteWithRetryAsync(
 		OrchestrationStep step,
-		IStepExecutor executor,
+		IStepExecutor? executor,
 		OrchestrationExecutionContext context,
 		ConcurrentDictionary<string, ExecutionResult> stepResults,
 		CancellationToken cancellationToken)
@@ -1568,7 +1576,7 @@ public partial class OrchestrationExecutor
 
 	private async Task<ExecutionResult> ExecuteOrSkipStepAsync(
 		OrchestrationStep step,
-		IStepExecutor executor,
+		IStepExecutor? executor,
 		OrchestrationExecutionContext context,
 		ConcurrentDictionary<string, ExecutionResult> stepResults,
 		CancellationToken cancellationToken)
@@ -1742,7 +1750,7 @@ public partial class OrchestrationExecutor
 
 	private async Task<ExecutionResult> ExecuteStepWithTimeoutAsync(
 		OrchestrationStep step,
-		IStepExecutor executor,
+		IStepExecutor? executor,
 		OrchestrationExecutionContext context,
 		CancellationToken cancellationToken)
 	{
@@ -1772,6 +1780,9 @@ public partial class OrchestrationExecutor
 
 		try
 		{
+			// Resolve after cancellation/skip checks, inside the normal error boundary. A
+			// missing plugin used to fault an unobserved worker and leave its DAG TCS open.
+			executor ??= _stepExecutorRegistry.Resolve(step.Type);
 			var result = await executor.ExecuteAsync(step, context, effectiveToken);
 			result = EnrichResultTrace(step, context, result);
 
@@ -1803,6 +1814,14 @@ public partial class OrchestrationExecutor
 			LogStepTimedOut(step.Name, effectiveStepTimeout!.Value);
 			_reporter.ReportStepError(step.Name, message);
 			return EnrichResultTrace(step, context, BuildTimeoutResult(message, partialResult: null));
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			// Plugin exceptions have the same retry and fail-fast semantics as a returned
+			// Failed result. Keep orchestration cancellation on its separate unwind path.
+			LogStepFailed(step.Name, ex.Message);
+			_reporter.ReportStepError(step.Name, ex.Message);
+			return ExecutionResult.Failed(ex.Message);
 		}
 		finally
 		{
@@ -2310,8 +2329,36 @@ public partial class OrchestrationExecutor
 		ChildStatus = record.ChildStatus,
 	};
 
-	[LoggerMessage(Level = LogLevel.Warning, Message = "Plan-producing steps did not fully settle before finalizing run {RunId}")]
-	private partial void LogPlanSettlementIncomplete(Exception exception, string runId);
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Cancelled step workers did not fully settle before finalizing run {RunId}")]
+	private partial void LogStepSettlementIncomplete(Exception exception, string runId);
+
+	private sealed class RemainingDependencies(int count)
+	{
+		public int Count = count;
+	}
+
+	private static void StartStepWorker(
+		Func<Task> execute, TaskCompletionSource<ExecutionResult> completion, ConcurrentBag<Task> workers)
+	{
+		// Register before scheduling: a very fast worker can finish before Task.Run returns.
+		var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		workers.Add(settled.Task);
+		_ = Task.Run(async () =>
+		{
+			try
+			{
+				await execute().ConfigureAwait(false);
+			}
+			catch (Exception ex)
+			{
+				completion.TrySetException(ex);
+			}
+			finally
+			{
+				settled.TrySetResult();
+			}
+		});
+	}
 
 	private static string BuildFinalContent(OrchestrationResult orchestrationResult)
 	{
