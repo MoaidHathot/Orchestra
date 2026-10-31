@@ -732,6 +732,8 @@ A loop (or "checker") pattern allows a Prompt step to iteratively refine the out
 
 The checker evaluates the target's output. If `exitPattern` is NOT found (case-insensitive), the target re-runs with checker feedback. Repeats up to `maxIterations`.
 
+Iterations use the ordinary step execution policies: retries (including feedback on target retries), per-attempt timeouts, and the orchestration's concurrency cap. Each iteration publishes completion events, step hooks, and its own history record. Failed target revisions block the checker's dependents. Fail-fast and early-completion signals are honored from either the target or the checker. Dependents start only after the checker loop has settled. Reaching `maxIterations` with successful calls still returns the last output.
+
 ---
 
 ## Subagents

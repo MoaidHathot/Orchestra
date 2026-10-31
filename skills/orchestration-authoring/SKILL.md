@@ -739,6 +739,8 @@ A Prompt step with `loop` acts as a checker for iterative refinement.
 
 The checker evaluates the target's output. If `exitPattern` is NOT found (case-insensitive), the target re-runs with checker feedback. Repeats up to `maxIterations`.
 
+Each target/checker iteration honors the step's retry policy, per-attempt timeout, and the run's `maxConcurrency` limit. Retry back-off releases its slot, and target retries retain the checker feedback. Iterations emit normal completion events and step hooks, with separate history records. A failed target blocks the checker's dependents; `onStepFailure: stop` and `orchestra_complete` also apply to iteration results. Downstream steps wait for the entire checker loop to settle.
+
 **Three traps, all of which fail silently:**
 
 1. **`exitPattern` is a SUBSTRING match.** `"INVALID".Contains("VALID")` is true, so `exitPattern: VALID` treats every rejection as approval and the loop never iterates. Choose markers with no substring overlap — `APPROVED` / `NEEDS_WORK`, not `VALID` / `INVALID`.

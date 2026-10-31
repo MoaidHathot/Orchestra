@@ -672,6 +672,21 @@ public partial class OrchestrationExecutor
 		var launchedSteps = new ConcurrentDictionary<string, byte>();
 		var stepWorkers = new ConcurrentBag<Task>();
 
+		async Task RecordStepResultAsync(OrchestrationStep step, ExecutionResult result, DateTimeOffset startedAt, int? iteration)
+		{
+			context.AddResult(step.Name, result);
+			stepResults[step.Name] = result;
+			var record = BuildStepRecord(step, result, effectiveParams, startedAt, iteration);
+			stepRecords[step.Name] = record;
+			var key = iteration is { } number ? $"{step.Name}:iteration-{number}" : step.Name;
+			allStepRecords[key] = record;
+			_reporter.PublishStepRecord(step.Name, record);
+			if (key != step.Name)
+				_reporter.PublishStepRecord(key, record);
+			await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
+			ReportStepCompletion(step, result);
+		}
+
 		// Launch a step when all its dependencies are complete
 		void TryLaunchStep(string stepName)
 		{
@@ -715,45 +730,14 @@ public partial class OrchestrationExecutor
 						result = result with { ErrorMessage = stepResults[step.Name].ErrorMessage };
 					}
 
-					context.AddResult(step.Name, result);
-					stepResults[step.Name] = result;
-
-					var record = BuildStepRecord(step, result, effectiveParams, stepStartedAt);
-					stepRecords[step.Name] = record;
-					allStepRecords[step.Name] = record;
-					// Publish so data-plane MCP tools (get_orchestration_step) can serve this
-					// step's content mid-run, before the orchestration finalizes its run.json.
-					_reporter.PublishStepRecord(step.Name, record);
-					await ExecuteStepHooksAsync(hookRuntime, hooks, orchestration, context, runId, runStartedAt, triggerId, stepRecords, allSteps, record, hookExecutions, finalContent: null, cancellationToken: CancellationToken.None).ConfigureAwait(false);
-
-					// Report full step output as soon as the step completes so non-streaming steps
-					// (especially Command) are viewable while downstream steps are still running.
-					if (result.Status == ExecutionStatus.Succeeded)
-					{
-						_reporter.ReportStepOutput(step.Name, result.Content);
-					}
-
-					// Report step completed/failed/no-action to the reporter so the UI
-					// can update step status immediately (not just at orchestration-done).
-					// This centralised call ensures all step types (Prompt, Command, HTTP, Transform)
-					// emit step-completed events with their step type for correct UI display.
-					if (result.Status == ExecutionStatus.Succeeded || result.Status == ExecutionStatus.NoAction)
-					{
-						_reporter.ReportStepCompleted(step.Name, new AgentResult
-						{
-							Content = result.Content,
-							ActualModel = result.ActualModel,
-							SelectedModel = result.SelectedModel,
-							RequestedModelInfo = result.RequestedModelInfo,
-							SelectedModelInfo = result.SelectedModelInfo,
-							ActualModelInfo = result.ActualModelInfo,
-						}, step.Type);
-					}
+					await RecordStepResultAsync(step, result, stepStartedAt, iteration: null);
+					var resultStepName = step.Name;
 
 					// Handle loop if configured (loop is a Prompt-only feature)
-					if (step is PromptOrchestrationStep promptStep && promptStep.Loop is not null && result.Status == ExecutionStatus.Succeeded)
+					if (step is PromptOrchestrationStep promptStep && promptStep.Loop is not null
+						&& result.Status == ExecutionStatus.Succeeded && !result.OrchestrationCompleteRequested)
 					{
-						await HandleLoopAsync(promptStep, allSteps, context, stepResults, stepRecords, allStepRecords, effectiveParams, effectiveStepToken);
+						(resultStepName, result) = await HandleLoopAsync(promptStep, allSteps, context, stepResults, RecordStepResultAsync, effectiveStepToken);
 					}
 
 					// Save checkpoint before signaling completion so the checkpoint
@@ -771,13 +755,13 @@ public partial class OrchestrationExecutor
 						&& orchestration.OnStepFailure == StepFailurePolicy.Stop
 						&& !orchestrationCompleteCts.IsCancellationRequested)
 					{
-						Interlocked.CompareExchange(ref stopTriggeredByStep, step.Name, null);
-						LogStepFailureStop(step.Name, result.ErrorMessage ?? "(no message)");
+						Interlocked.CompareExchange(ref stopTriggeredByStep, resultStepName, null);
+						LogStepFailureStop(resultStepName, result.ErrorMessage ?? "(no message)");
 						try
 						{ orchestrationCompleteCts.Cancel(); }
 						catch (ObjectDisposedException) { }
 
-						var stopReason = $"Cancelled: step '{step.Name}' failed and onStepFailure is 'stop'";
+						var stopReason = $"Cancelled: step '{resultStepName}' failed and onStepFailure is 'stop'";
 						foreach (var (name, tcs) in completionSources)
 						{
 							if (!stepResults.ContainsKey(name))
@@ -802,8 +786,8 @@ public partial class OrchestrationExecutor
 					{
 						orchestrationCompleteStatus = result.OrchestrationCompleteStatus;
 						orchestrationCompleteReason = result.OrchestrationCompleteReason;
-						orchestrationCompleteStepName = step.Name;
-						LogOrchestrationCompleteRequested(step.Name, orchestrationCompleteReason ?? "No reason provided");
+						orchestrationCompleteStepName = resultStepName;
+						LogOrchestrationCompleteRequested(resultStepName, orchestrationCompleteReason ?? "No reason provided");
 
 						// Cancel all remaining steps by triggering the linked CTS.
 						// Steps already running will observe the cancellation token;
@@ -960,7 +944,11 @@ public partial class OrchestrationExecutor
 					continue;
 				// A cancelled loop iteration must not overwrite a previous iteration's record.
 				if (record.LoopIteration != tracker.LoopIteration)
+				{
+					if ((record.LoopIteration ?? 0) > (tracker.LoopIteration ?? 0))
+						continue; // A later, skipped iteration must not inherit an earlier session's plan.
 					record = BuildStepRecord(allSteps[name], ExecutionResult.Cancelled(), effectiveParams, tracker.StartedAt, tracker.LoopIteration);
+				}
 				var trace = (record.Trace ?? new StepExecutionTrace()).WithPlans(latest);
 				stepRecords[name] = CloneRecordWithError(record, record.ErrorMessage, trace);
 				var key = record.LoopIteration is { } iteration ? $"{name}:iteration-{iteration}" : name;
@@ -1118,7 +1106,7 @@ public partial class OrchestrationExecutor
 			CompletedByStep = orchestrationResult.CompletedByStep,
 			IsIncomplete = orchestrationResult.IsIncomplete,
 			Cancellation = orchestrationResult.Cancellation,
-			TotalUsage = AggregateTokenUsage(stepRecords.Values),
+			TotalUsage = AggregateTokenUsage(allStepRecords.Values),
 			HookExecutions = hookExecutions.OrderBy(h => h.StartedAt).ToArray(),
 			ParentExecutionId = parentContext?.ParentExecutionId,
 			ParentStepName = parentContext?.ParentStepName,
@@ -1474,9 +1462,12 @@ public partial class OrchestrationExecutor
 		IStepExecutor? executor,
 		OrchestrationExecutionContext context,
 		ConcurrentDictionary<string, ExecutionResult> stepResults,
-		CancellationToken cancellationToken)
+		CancellationToken cancellationToken,
+		string? loopFeedback = null)
 	{
 		var retryPolicy = step.Retry ?? context.DefaultRetryPolicy;
+		if (loopFeedback is not null)
+			context.SetLoopFeedback(step.Name, loopFeedback);
 
 		// No retry policy — execute once
 		if (retryPolicy is null || retryPolicy.MaxRetries <= 0)
@@ -1528,6 +1519,8 @@ public partial class OrchestrationExecutor
 
 			await Task.Delay(delay, cancellationToken);
 
+			if (loopFeedback is not null)
+				context.SetLoopFeedback(step.Name, loopFeedback);
 			result = await ExecuteOrSkipStepAsync(step, executor, context, stepResults, cancellationToken);
 
 			if (result.Status != ExecutionStatus.Failed)
@@ -1829,14 +1822,12 @@ public partial class OrchestrationExecutor
 		}
 	}
 
-	private async Task HandleLoopAsync(
+	private async Task<(string StepName, ExecutionResult Result)> HandleLoopAsync(
 		PromptOrchestrationStep checkerStep,
 		Dictionary<string, OrchestrationStep> allStepsByName,
 		OrchestrationExecutionContext context,
 		ConcurrentDictionary<string, ExecutionResult> stepResults,
-		ConcurrentDictionary<string, StepRunRecord> stepRecords,
-		ConcurrentDictionary<string, StepRunRecord> allStepRecords,
-		Dictionary<string, string> effectiveParams,
+		Func<OrchestrationStep, ExecutionResult, DateTimeOffset, int?, Task> recordIteration,
 		CancellationToken cancellationToken)
 	{
 		var loop = checkerStep.Loop!;
@@ -1844,29 +1835,23 @@ public partial class OrchestrationExecutor
 		if (!allStepsByName.TryGetValue(loop.Target, out var targetStepBase))
 		{
 			LogLoopTargetNotFound(loop.Target, checkerStep.Name);
-			return;
+			return (checkerStep.Name, context.GetResult(checkerStep.Name));
 		}
 
 		if (targetStepBase is not PromptOrchestrationStep targetStep)
 		{
 			LogLoopTargetNotFound(loop.Target, checkerStep.Name);
-			return;
+			return (checkerStep.Name, context.GetResult(checkerStep.Name));
 		}
 
 		var targetExecutor = _stepExecutorRegistry.Resolve(targetStep.Type);
 		var checkerExecutor = _stepExecutorRegistry.Resolve(checkerStep.Type);
 
-		void PreserveCancelledIteration(PromptOrchestrationStep step, OperationCanceledException error, DateTimeOffset startedAt, int iteration)
+		async Task PreserveCancelledIterationAsync(PromptOrchestrationStep step, OperationCanceledException error, DateTimeOffset startedAt, int iteration)
 		{
 			var cancelled = error is StepExecutionCanceledException partial ? partial.PartialResult : ExecutionResult.Cancelled();
 			cancelled = EnrichResultTrace(step, context, cancelled);
-			context.AddResult(step.Name, cancelled);
-			stepResults[step.Name] = cancelled;
-			var record = BuildStepRecord(step, cancelled, effectiveParams, startedAt, iteration);
-			stepRecords[step.Name] = record;
-			allStepRecords[$"{step.Name}:iteration-{iteration}"] = record;
-			_reporter.PublishStepRecord(step.Name, record);
-			_reporter.PublishStepRecord($"{step.Name}:iteration-{iteration}", record);
+			await recordIteration(step, cancelled, startedAt, iteration);
 			_reporter.ReportStepCancelled(step.Name);
 		}
 
@@ -1878,47 +1863,48 @@ public partial class OrchestrationExecutor
 			if (checkerResult.Content.Contains(loop.ExitPattern, StringComparison.OrdinalIgnoreCase))
 			{
 				LogLoopExitConditionMet(checkerStep.Name, iteration - 1);
-				return;
+				return (checkerStep.Name, checkerResult);
 			}
 
 			LogLoopIteration(checkerStep.Name, iteration, loop.MaxIterations, loop.Target);
 			_reporter.ReportLoopIteration(checkerStep.Name, loop.Target, iteration, loop.MaxIterations);
 
 			// Inject checker's feedback into the target step's context
-			context.SetLoopFeedback(loop.Target, checkerResult.Content);
 			context.ClearResult(loop.Target);
 
 			// Re-execute the target step
 			context.PlanLoopIterations[loop.Target] = iteration;
 			var targetStartedAt = DateTimeOffset.UtcNow;
-			_reporter.ReportStepStarted(loop.Target);
 			ExecutionResult targetResult;
 			try
-			{ targetResult = await targetExecutor.ExecuteAsync(targetStep, context, cancellationToken); }
+			{ targetResult = await ExecuteWithRetryAsync(targetStep, targetExecutor, context, stepResults, cancellationToken, checkerResult.Content); }
 			catch (OperationCanceledException ex)
 			{
-				PreserveCancelledIteration(targetStep, ex, targetStartedAt, iteration);
+				await PreserveCancelledIterationAsync(targetStep, ex, targetStartedAt, iteration);
 				// The loop runs on the checker's worker. Do not attribute the target's partial
 				// response and plan to that checker when unwinding the worker's cancellation.
 				throw new OperationCanceledException(ex.Message, ex, cancellationToken);
 			}
-			targetResult = EnrichResultTrace(targetStep, context, targetResult);
-
-			context.AddResult(loop.Target, targetResult);
-			stepResults[loop.Target] = targetResult;
-
-			var targetRecord = BuildStepRecord(targetStep, targetResult, effectiveParams, targetStartedAt, iteration);
-			stepRecords[loop.Target] = targetRecord;
-			allStepRecords[$"{loop.Target}:iteration-{iteration}"] = targetRecord;
-			// Publish under BOTH keys so callers can drill into either the canonical
-			// (latest-iteration) record or a specific iteration by its iteration suffix.
-			_reporter.PublishStepRecord(loop.Target, targetRecord);
-			_reporter.PublishStepRecord($"{loop.Target}:iteration-{iteration}", targetRecord);
+			await recordIteration(targetStep, targetResult, targetStartedAt, iteration);
+			if (targetResult.OrchestrationCompleteRequested)
+				return (targetStep.Name, targetResult);
 
 			if (targetResult.Status != ExecutionStatus.Succeeded)
 			{
 				LogLoopTargetFailed(loop.Target, iteration);
-				return;
+				// The initial checker result is no longer valid once its revised input fails.
+				// Block its dependents, retaining the original successful checker in history.
+				var blocked = targetResult.Status == ExecutionStatus.Cancelled
+					? ExecutionResult.Cancelled($"Loop target '{loop.Target}' was cancelled.")
+					: ExecutionResult.Skipped(targetResult.Status == ExecutionStatus.NoAction
+						? $"{NoActionSkipReasonPrefix} [{loop.Target}]"
+						: $"Skipped because loop target '{loop.Target}' ended with status {targetResult.Status}.");
+				await recordIteration(checkerStep, blocked, DateTimeOffset.UtcNow, iteration);
+				if (blocked.Status == ExecutionStatus.Cancelled)
+					_reporter.ReportStepCancelled(checkerStep.Name);
+				else
+					_reporter.ReportStepSkipped(checkerStep.Name, blocked.ErrorMessage!);
+				return (targetStep.Name, targetResult);
 			}
 
 			// Re-execute the checker step
@@ -1926,30 +1912,22 @@ public partial class OrchestrationExecutor
 			context.ClearResult(checkerStep.Name);
 
 			var checkerStartedAt = DateTimeOffset.UtcNow;
-			_reporter.ReportStepStarted(checkerStep.Name);
 			ExecutionResult newCheckerResult;
 			try
-			{ newCheckerResult = await checkerExecutor.ExecuteAsync(checkerStep, context, cancellationToken); }
+			{ newCheckerResult = await ExecuteWithRetryAsync(checkerStep, checkerExecutor, context, stepResults, cancellationToken); }
 			catch (OperationCanceledException ex)
 			{
-				PreserveCancelledIteration(checkerStep, ex, checkerStartedAt, iteration);
+				await PreserveCancelledIterationAsync(checkerStep, ex, checkerStartedAt, iteration);
 				throw new OperationCanceledException(ex.Message, ex, cancellationToken);
 			}
-			newCheckerResult = EnrichResultTrace(checkerStep, context, newCheckerResult);
-
-			context.AddResult(checkerStep.Name, newCheckerResult);
-			stepResults[checkerStep.Name] = newCheckerResult;
-
-			var checkerRecord = BuildStepRecord(checkerStep, newCheckerResult, effectiveParams, checkerStartedAt, iteration);
-			stepRecords[checkerStep.Name] = checkerRecord;
-			allStepRecords[$"{checkerStep.Name}:iteration-{iteration}"] = checkerRecord;
-			_reporter.PublishStepRecord(checkerStep.Name, checkerRecord);
-			_reporter.PublishStepRecord($"{checkerStep.Name}:iteration-{iteration}", checkerRecord);
+			await recordIteration(checkerStep, newCheckerResult, checkerStartedAt, iteration);
+			if (newCheckerResult.OrchestrationCompleteRequested)
+				return (checkerStep.Name, newCheckerResult);
 
 			if (newCheckerResult.Status != ExecutionStatus.Succeeded)
 			{
 				LogLoopCheckerFailed(checkerStep.Name, iteration);
-				return;
+				return (checkerStep.Name, newCheckerResult);
 			}
 		}
 
@@ -1963,6 +1941,25 @@ public partial class OrchestrationExecutor
 		else
 		{
 			LogLoopExhausted(checkerStep.Name, loop.MaxIterations);
+		}
+		return (checkerStep.Name, finalResult);
+	}
+
+	private void ReportStepCompletion(OrchestrationStep step, ExecutionResult result)
+	{
+		if (result.Status == ExecutionStatus.Succeeded)
+			_reporter.ReportStepOutput(step.Name, result.Content);
+		if (result.Status is ExecutionStatus.Succeeded or ExecutionStatus.NoAction)
+		{
+			_reporter.ReportStepCompleted(step.Name, new AgentResult
+			{
+				Content = result.Content,
+				ActualModel = result.ActualModel,
+				SelectedModel = result.SelectedModel,
+				RequestedModelInfo = result.RequestedModelInfo,
+				SelectedModelInfo = result.SelectedModelInfo,
+				ActualModelInfo = result.ActualModelInfo,
+			}, step.Type);
 		}
 	}
 
