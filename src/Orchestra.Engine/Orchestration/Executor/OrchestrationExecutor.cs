@@ -164,10 +164,11 @@ public partial class OrchestrationExecutor
 	/// not require a scope here. Pure non-agent orchestrations open zero scopes.
 	/// Reference-distinct so aliases collapse to one scope.
 	/// </summary>
-	private List<AgentBuilder> ResolveRunScopeBuilders(Orchestration orchestration, bool needsHostDefaultProvider)
+	private List<AgentBuilder> ResolveRunScopeBuilders(Orchestration orchestration, bool needsHostDefaultProvider, CheckpointData? checkpoint)
 	{
-		var seen = new HashSet<AgentBuilder>();
+		var seen = new HashSet<AgentBuilder>(ReferenceEqualityComparer.Instance);
 		var builders = new List<AgentBuilder>();
+		var prompts = orchestration.Steps.OfType<PromptOrchestrationStep>().ToDictionary(s => s.Name);
 
 		void Add(string? providerName)
 		{
@@ -176,10 +177,15 @@ public partial class OrchestrationExecutor
 				builders.Add(builder);
 		}
 
-		foreach (var step in orchestration.Steps)
+		foreach (var prompt in prompts.Values)
 		{
-			if (step is PromptOrchestrationStep prompt)
-				Add(prompt.Provider ?? orchestration.DefaultProvider);
+			if (!prompt.Enabled || checkpoint?.CompletedSteps.ContainsKey(prompt.Name) == true)
+				continue;
+			Add(prompt.Provider ?? orchestration.DefaultProvider);
+			// A pending checker may revise an already checkpointed target. Its provider is
+			// still needed, even though the target's initial DAG execution will be restored.
+			if (prompt.Loop is { } loop && prompts.TryGetValue(loop.Target, out var target) && target.Enabled)
+				Add(target.Provider ?? orchestration.DefaultProvider);
 		}
 
 		// Trigger / child-orchestration input-handler transforms run inside THIS scope on the
@@ -309,9 +315,13 @@ public partial class OrchestrationExecutor
 		ResolveCancellationCauseDelegate? resolveExternalCancellationCause = null,
 		string? triggeredBy = null)
 	{
+		var attemptStartedAt = DateTimeOffset.UtcNow;
 		var runId = retryMetadata?.OverrideRunId ?? checkpoint?.RunId ?? executionIdOverride ?? Guid.NewGuid().ToString("N")[..12];
-		var runStartedAt = checkpoint?.StartedAt ?? DateTimeOffset.UtcNow;
+		var runStartedAt = checkpoint?.StartedAt ?? attemptStartedAt;
 		OrchestraDiagnostics.TagCurrentRun(runId);
+		var effectiveMaxConcurrency = orchestration.MaxConcurrency ?? _hostDefaults.MaxConcurrency;
+		if (effectiveMaxConcurrency is <= 0)
+			throw new InvalidOperationException($"Orchestration '{orchestration.Name}' has an invalid maxConcurrency of {effectiveMaxConcurrency}; it must be a positive integer.");
 
 		// Create run-scoped agent pools for isolation: each orchestration run gets its own
 		// per-provider worker pool(s). All steps within this run share the pool for their
@@ -324,14 +334,34 @@ public partial class OrchestrationExecutor
 		// nested async helper would lose the holder. We therefore start all scopes synchronously,
 		// collect their hot tasks, and only then await them together.
 		LogRunScopeAboutToCreate(runId, Environment.CurrentManagedThreadId);
-		var runScopeBuilders = ResolveRunScopeBuilders(orchestration, needsHostDefaultProvider: preExecutionParameterTransform is not null);
+		var runScopeBuilders = ResolveRunScopeBuilders(orchestration, needsHostDefaultProvider: preExecutionParameterTransform is not null, checkpoint);
+		using var runScopeStartupCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 		var runScopeStartTasks = new List<Task<IAsyncDisposable>>(runScopeBuilders.Count);
-		foreach (var scopeBuilder in runScopeBuilders)
+		IAsyncDisposable[] openedRunScopes;
+		try
 		{
-			// Synchronous call installs the builder's AsyncLocal holder in THIS execution context.
-			runScopeStartTasks.Add(scopeBuilder.CreateRunScopeAsync(orchestration.AgentPool, cancellationToken));
+			foreach (var scopeBuilder in runScopeBuilders)
+			{
+				// Keep this call in THIS execution context: moving it into an async helper
+				// would lose the builder's AsyncLocal holder before step workers inherit it.
+				var starting = scopeBuilder.CreateRunScopeAsync(orchestration.AgentPool, runScopeStartupCts.Token);
+				runScopeStartTasks.Add(ObserveRunScopeStartupAsync(starting, runScopeStartupCts, runId));
+			}
+			openedRunScopes = await Task.WhenAll(runScopeStartTasks).ConfigureAwait(false);
 		}
-		var openedRunScopes = await Task.WhenAll(runScopeStartTasks).ConfigureAwait(false);
+		catch
+		{
+			await CancelRunScopeStartupAsync(runScopeStartupCts, runId).ConfigureAwait(false);
+			foreach (var starting in runScopeStartTasks)
+			{
+				IAsyncDisposable scope;
+				try { scope = await starting.ConfigureAwait(false); }
+				catch { continue; } // Preserve the original startup failure.
+				try { await scope.DisposeAsync().ConfigureAwait(false); }
+				catch (Exception ex) { LogRunScopeCleanupFailed(ex, runId); }
+			}
+			throw;
+		}
 		await using var runScope = new CompositeAsyncDisposable(openedRunScopes);
 		LogRunScopeReady(runId, Environment.CurrentManagedThreadId);
 
@@ -404,7 +434,7 @@ public partial class OrchestrationExecutor
 		var clockPause = orchestration.PauseTimeoutDuringWait
 			&& orchestrationTimeoutCts is not null
 			&& orchestration.TimeoutSeconds is > 0
-			? new ClockPauseTracker(orchestrationTimeoutCts, orchestration.TimeoutSeconds.Value, runStartedAt)
+			? new ClockPauseTracker(orchestrationTimeoutCts, orchestration.TimeoutSeconds.Value, attemptStartedAt)
 			: null;
 
 		// Per-run step concurrency cap: orchestration value, else host default, else unbounded.
@@ -412,9 +442,6 @@ public partial class OrchestrationExecutor
 		// resolves pending step TCSs while steps are still in flight, so this method can return
 		// before a running step's finally-block Release(); a SemaphoreSlim without a wait handle
 		// owns no unmanaged resources, so leaving it to the GC is the correct choice.
-		var effectiveMaxConcurrency = orchestration.MaxConcurrency ?? _hostDefaults.MaxConcurrency;
-		if (effectiveMaxConcurrency is <= 0)
-			throw new InvalidOperationException($"Orchestration '{orchestration.Name}' has an invalid maxConcurrency of {effectiveMaxConcurrency}; it must be a positive integer.");
 		var stepConcurrencyLimiter = effectiveMaxConcurrency is { } cap ? new SemaphoreSlim(cap, cap) : null;
 		if (stepConcurrencyLimiter is not null)
 			LogStepConcurrencyLimit(orchestration.Name, effectiveMaxConcurrency!.Value);
@@ -532,35 +559,8 @@ public partial class OrchestrationExecutor
 				// Build a step record for the restored step
 				if (allSteps.TryGetValue(stepName, out var step))
 				{
-					var record = new StepRunRecord
-					{
-						StepName = stepName,
-						Status = result.Status,
-						StartedAt = checkpoint.StartedAt,
-						CompletedAt = checkpoint.CheckpointedAt,
-						Content = result.Content,
-						RawContent = result.RawContent,
-						ErrorMessage = result.ErrorMessage,
-						Parameters = step.Parameters
-							.Where(p => effectiveParams.ContainsKey(p))
-							.ToDictionary(p => p, p => effectiveParams[p]),
-						RawDependencyOutputs = result.RawDependencyOutputs,
-						PromptSent = result.PromptSent,
-						ActualModel = result.ActualModel,
-						RequestedModelInfo = result.RequestedModelInfo,
-						SelectedModelInfo = result.SelectedModelInfo,
-						ActualModelInfo = result.ActualModelInfo,
-						ConfiguredProvider = result.Trace?.ConfiguredProvider,
-						ActualProvider = result.Trace?.ActualProvider,
-						SavedFiles = result.SavedFiles,
-						// Preserve child-orchestration lineage through restore so the
-						// retry's own run.json carries the pointer triple — symmetric
-						// with how OrchestrationStepExecutor populates these on fresh
-						// runs.
-						ChildExecutionId = stepCheckpoint.ChildExecutionId,
-						ChildOrchestrationName = stepCheckpoint.ChildOrchestrationName,
-						ChildStatus = stepCheckpoint.ChildStatus,
-					};
+					var record = BuildStepRecord(step, result, effectiveParams, checkpoint.StartedAt,
+						completedAt: checkpoint.CheckpointedAt, restored: stepCheckpoint);
 					stepRecords[stepName] = record;
 					allStepRecords[stepName] = record;
 					// Publish restored checkpoint records so resumed runs surface their
@@ -1206,7 +1206,7 @@ public partial class OrchestrationExecutor
 	{
 		LogResumingOrchestration(orchestration.Name, checkpoint.RunId);
 
-		_ = ValidateAndApplyDefaults(orchestration, checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null);
+		var parameters = ValidateAndApplyDefaults(orchestration, checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null);
 
 		// Scheduler validates the DAG (detects cycles, missing deps)
 		_ = _scheduler.Schedule(orchestration);
@@ -1235,7 +1235,7 @@ public partial class OrchestrationExecutor
 		{
 			var result = await ExecuteCoreAsync(
 				orchestration,
-				checkpoint.Parameters.Count > 0 ? checkpoint.Parameters : null,
+				parameters,
 				checkpoint.TriggerId,
 				effectiveCancellationToken,
 				cancellationToken,
@@ -1996,7 +1996,9 @@ public partial class OrchestrationExecutor
 		ExecutionResult result,
 		Dictionary<string, string> allParams,
 		DateTimeOffset startedAt,
-		int? loopIteration = null)
+		int? loopIteration = null,
+		DateTimeOffset? completedAt = null,
+		CheckpointStepResult? restored = null)
 	{
 		// Extract only the parameters relevant to this step
 		var stepParams = new Dictionary<string, string>();
@@ -2013,7 +2015,7 @@ public partial class OrchestrationExecutor
 			StepName = step.Name,
 			Status = result.Status,
 			StartedAt = startedAt,
-			CompletedAt = DateTimeOffset.UtcNow,
+			CompletedAt = completedAt ?? DateTimeOffset.UtcNow,
 			Content = result.Content,
 			RawContent = result.RawContent,
 			ErrorMessage = result.ErrorMessage,
@@ -2040,9 +2042,9 @@ public partial class OrchestrationExecutor
 			Condition = step.When,
 			// Persist only the minimal child reference; the child's full per-step content
 			// lives on its own run.json (avoid bloating the parent's record).
-			ChildExecutionId = result.ChildOrchestrationInfo?.ExecutionId,
-			ChildOrchestrationName = result.ChildOrchestrationInfo?.OrchestrationName,
-			ChildStatus = result.ChildOrchestrationInfo?.Status,
+			ChildExecutionId = result.ChildOrchestrationInfo?.ExecutionId ?? restored?.ChildExecutionId,
+			ChildOrchestrationName = result.ChildOrchestrationInfo?.OrchestrationName ?? restored?.ChildOrchestrationName,
+			ChildStatus = result.ChildOrchestrationInfo?.Status ?? restored?.ChildStatus,
 		};
 	}
 
@@ -2327,6 +2329,25 @@ public partial class OrchestrationExecutor
 	{
 		public int Count = count;
 	}
+
+	private async Task<IAsyncDisposable> ObserveRunScopeStartupAsync(Task<IAsyncDisposable> starting, CancellationTokenSource cancellation, string runId)
+	{
+		try { return await starting.ConfigureAwait(false); }
+		catch
+		{
+			await CancelRunScopeStartupAsync(cancellation, runId).ConfigureAwait(false);
+			throw;
+		}
+	}
+
+	private async Task CancelRunScopeStartupAsync(CancellationTokenSource cancellation, string runId)
+	{
+		try { await cancellation.CancelAsync().ConfigureAwait(false); }
+		catch (Exception ex) { LogRunScopeCleanupFailed(ex, runId); }
+	}
+
+	[LoggerMessage(Level = LogLevel.Warning, Message = "Failed to clean up a provider scope after startup failure for run {RunId}")]
+	private partial void LogRunScopeCleanupFailed(Exception exception, string runId);
 
 	private static void StartStepWorker(
 		Func<Task> execute, TaskCompletionSource<ExecutionResult> completion, ConcurrentBag<Task> workers)
