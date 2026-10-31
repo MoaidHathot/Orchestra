@@ -273,4 +273,121 @@ public class FileSystemCheckpointStoreTests : IDisposable
 		loaded.CompletedSteps["step-b"].Content.Should().Be("B");
 		loaded.CompletedSteps["step-c"].Content.Should().Be("C");
 	}
+
+	[Fact]
+	public async Task ConcurrentSavesAndReads_AlwaysPublishCompleteDocumentsAndLeaveNoTemporaryFiles()
+	{
+		var values = Enumerable.Range(0, 24).Select(i => $"revision-{i}:" + new string((char)('a' + i), 128 * 1024)).ToArray();
+		await _store.SaveCheckpointAsync(CreateTestCheckpoint(runId: "parallel", completedSteps: new()
+		{
+			["step"] = new() { Status = ExecutionStatus.Succeeded, Content = values[0] },
+		}));
+		var writes = values.Select(value => _store.SaveCheckpointAsync(CreateTestCheckpoint(runId: "parallel", completedSteps: new()
+		{
+			["step"] = new() { Status = ExecutionStatus.Succeeded, Content = value },
+		}))).ToArray();
+		var reads = Task.Run(async () =>
+		{
+			for (var i = 0; i < 24; i++)
+			{
+				var loaded = await _store.LoadCheckpointAsync("test-orchestration", "parallel");
+				loaded.Should().NotBeNull("atomic replacement never removes the committed file");
+				values.Should().Contain(loaded!.CompletedSteps["step"].Content, "readers see a complete revision");
+			}
+		});
+
+		await Task.WhenAll(writes.Append(reads));
+		Directory.GetFiles(_store.RootPath, "*.tmp", SearchOption.AllDirectories).Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task FailedReplacement_PreservesDestinationAndCleansTemporaryFile()
+	{
+		var directory = Path.Combine(_store.RootPath, "test-orchestration", "blocked", "checkpoint.json");
+		Directory.CreateDirectory(directory);
+		var sentinel = Path.Combine(directory, "keep.txt");
+		await File.WriteAllTextAsync(sentinel, "original");
+		var save = () => _store.SaveCheckpointAsync(CreateTestCheckpoint(runId: "blocked"));
+
+		await save.Should().ThrowAsync<Exception>();
+
+		(await File.ReadAllTextAsync(sentinel)).Should().Be("original");
+		Directory.GetFiles(_store.RootPath, "*.tmp", SearchOption.AllDirectories).Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task ReadAndList_PropagateCallerCancellation()
+	{
+		await _store.SaveCheckpointAsync(CreateTestCheckpoint(runId: "cancel"));
+		using var cancellation = new CancellationTokenSource();
+		await cancellation.CancelAsync();
+
+		var read = () => _store.LoadCheckpointAsync("test-orchestration", "cancel", cancellation.Token);
+		var list = () => _store.ListCheckpointsAsync(cancellationToken: cancellation.Token);
+		await read.Should().ThrowAsync<OperationCanceledException>();
+		await list.Should().ThrowAsync<OperationCanceledException>();
+	}
+
+	[Fact]
+	public async Task ParallelRun_HostShutdownAndResume_PreserveEveryDurableResult()
+	{
+		const int count = 48;
+		var parked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+		var work = new CheckpointWork(parked);
+		var executor = new OrchestrationExecutor(new OrchestrationScheduler(), new UnusedAgentBuilder(),
+			NullOrchestrationReporter.Instance, NullLoggerFactory.Instance, checkpointStore: _store,
+			stepExecutorRegistry: new StepExecutorRegistry().Register(work));
+		var names = Enumerable.Range(0, count).Select(i => $"s{i}").ToArray();
+		var definition = new Orchestration
+		{
+			Name = "parallel-resume", Description = "Real checkpoint storage under parallel completion", TimeoutSeconds = null,
+			Steps = names.Select(name => (OrchestrationStep)new TransformOrchestrationStep
+			{
+				Name = name, Type = OrchestrationStepType.Transform, Template = name,
+			}).Append(new TransformOrchestrationStep
+			{
+				Name = "park", Type = OrchestrationStepType.Transform, Template = "done", DependsOn = names,
+			}).ToArray(),
+		};
+		using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+		var running = executor.ExecuteAsync(definition, executionIdOverride: "resume-run", cancellationToken: cancellation.Token,
+			resolveExternalCancellationCause: () => CancellationDetails.HostShutdown());
+		await parked.Task.WaitAsync(cancellation.Token);
+		await cancellation.CancelAsync();
+		(await running.WaitAsync(TimeSpan.FromSeconds(5))).Status.Should().Be(ExecutionStatus.Cancelled);
+
+		var checkpoint = await _store.LoadCheckpointAsync(definition.Name, "resume-run");
+		checkpoint!.CompletedSteps.Keys.Should().BeEquivalentTo(names);
+		checkpoint.CompletedSteps.Should().AllSatisfy(entry => entry.Value.Content.Should().Be(entry.Key));
+		var resumed = await executor.ResumeAsync(definition, checkpoint).WaitAsync(TimeSpan.FromSeconds(10));
+
+		resumed.Status.Should().Be(ExecutionStatus.Succeeded);
+		work.Calls["park"].Should().Be(2);
+		foreach (var name in names)
+			work.Calls[name].Should().Be(1, "checkpointed steps must not execute again");
+		(await _store.LoadCheckpointAsync(definition.Name, "resume-run")).Should().BeNull();
+	}
+
+	private sealed class CheckpointWork(TaskCompletionSource parked) : IStepExecutor
+	{
+		public OrchestrationStepType StepType => OrchestrationStepType.Transform;
+		public System.Collections.Concurrent.ConcurrentDictionary<string, int> Calls { get; } = new();
+		public async Task<ExecutionResult> ExecuteAsync(OrchestrationStep step, OrchestrationExecutionContext context, CancellationToken cancellationToken = default)
+		{
+			if (Calls.AddOrUpdate(step.Name, 1, (_, count) => count + 1) == 1 && step.Name == "park")
+			{
+				parked.TrySetResult();
+				await Task.Delay(Timeout.Infinite, cancellationToken);
+			}
+			await Task.Yield();
+			return ExecutionResult.Succeeded(step.Name);
+		}
+	}
+
+	private sealed class UnusedAgentBuilder : AgentBuilder
+	{
+		public override AgentProviderCapabilities GetCapabilities() => AgentProviderCapabilities.All("unused");
+		public override Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+		public override Task<IAgent> BuildAgentAsync(AgentBuildConfig config, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+	}
 }

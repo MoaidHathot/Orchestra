@@ -633,6 +633,19 @@ public partial class OrchestrationExecutor
 			}
 		}
 
+		await using var checkpointWriter = _checkpointStore is NullCheckpointStore ? null : new RunCheckpointWriter(
+			checkpoint?.CompletedSteps,
+			(completed, token) => _checkpointStore.SaveCheckpointAsync(new CheckpointData
+			{
+				RunId = runId,
+				OrchestrationName = orchestration.Name,
+				StartedAt = runStartedAt,
+				CheckpointedAt = DateTimeOffset.UtcNow,
+				Parameters = effectiveParams,
+				TriggerId = triggerId,
+				CompletedSteps = completed,
+			}, token));
+
 		// Track completion via TaskCompletionSource per step
 		var completionSources = new Dictionary<string, TaskCompletionSource<ExecutionResult>>();
 		foreach (var step in orchestration.Steps)
@@ -732,19 +745,23 @@ public partial class OrchestrationExecutor
 
 					await RecordStepResultAsync(step, result, stepStartedAt, iteration: null);
 					var resultStepName = step.Name;
+					KeyValuePair<string, ExecutionResult>? revisedTarget = null;
 
 					// Handle loop if configured (loop is a Prompt-only feature)
 					if (step is PromptOrchestrationStep promptStep && promptStep.Loop is not null
 						&& result.Status == ExecutionStatus.Succeeded && !result.OrchestrationCompleteRequested)
 					{
 						(resultStepName, result) = await HandleLoopAsync(promptStep, allSteps, context, stepResults, RecordStepResultAsync, effectiveStepToken);
+						if (stepResults.TryGetValue(promptStep.Loop.Target, out var targetResult))
+							revisedTarget = new(promptStep.Loop.Target, targetResult);
 					}
 
 					// Save checkpoint before signaling completion so the checkpoint
 					// is durable before dependents or WhenAll observers proceed.
-					if (result.Status == ExecutionStatus.Succeeded)
+					if (checkpointWriter is not null)
 					{
-						await SaveCheckpointAfterStepAsync(runId, orchestration, runStartedAt, effectiveParams, triggerId, stepResults, step.Name, totalSteps, externalCancellationToken);
+						await SaveCheckpointAfterStepAsync(checkpointWriter, runId, orchestration.Name,
+							step.Name, stepResults[step.Name], revisedTarget, totalSteps, externalCancellationToken);
 					}
 
 					// Fail fast: with onStepFailure=stop, the first Failed step cancels everything
@@ -930,6 +947,8 @@ public partial class OrchestrationExecutor
 		{
 			await Task.WhenAll(stepWorkers).ConfigureAwait(false);
 		}
+		if (checkpointWriter is not null)
+			await checkpointWriter.CloseAsync().ConfigureAwait(false);
 		// Early-cancellation placeholders can precede provider teardown. Always preserve the
 		// last observed plan in the terminal record as well as the already-durable journal.
 		if (orchestrationCompleteCts.IsCancellationRequested)
@@ -1287,52 +1306,27 @@ public partial class OrchestrationExecutor
 	/// Saves a checkpoint after a step completes successfully.
 	/// </summary>
 	private async Task SaveCheckpointAfterStepAsync(
+		RunCheckpointWriter writer,
 		string runId,
-		Orchestration orchestration,
-		DateTimeOffset runStartedAt,
-		Dictionary<string, string> parameters,
-		string? triggerId,
-		ConcurrentDictionary<string, ExecutionResult> stepResults,
+		string orchestrationName,
 		string completedStepName,
+		ExecutionResult result,
+		KeyValuePair<string, ExecutionResult>? revisedTarget,
 		int totalSteps,
 		CancellationToken cancellationToken)
 	{
-		// Without persistence, repeatedly cloning every completed result costs O(N²)
-		// allocations across a run while producing no durable data at all.
-		if (_checkpointStore is NullCheckpointStore)
-			return;
-
 		try
 		{
-			var completedSteps = new Dictionary<string, CheckpointStepResult>();
-			foreach (var (name, result) in stepResults)
+			var count = await writer.SaveAsync(completedStepName, result, revisedTarget, cancellationToken).ConfigureAwait(false);
+			if (count is { } completedCount)
 			{
-				// Only checkpoint succeeded steps — failed/skipped steps will be re-evaluated on resume
-				if (result.Status == ExecutionStatus.Succeeded)
-				{
-					completedSteps[name] = CheckpointStepResult.FromExecutionResult(result);
-				}
+				LogCheckpointSaved(orchestrationName, runId, completedStepName, completedCount, totalSteps);
+				_reporter.ReportCheckpointSaved(runId, completedStepName, completedCount, totalSteps);
 			}
-
-			var checkpointData = new CheckpointData
-			{
-				RunId = runId,
-				OrchestrationName = orchestration.Name,
-				StartedAt = runStartedAt,
-				CheckpointedAt = DateTimeOffset.UtcNow,
-				Parameters = parameters,
-				TriggerId = triggerId,
-				CompletedSteps = completedSteps,
-			};
-
-			await _checkpointStore.SaveCheckpointAsync(checkpointData, cancellationToken);
-
-			LogCheckpointSaved(orchestration.Name, runId, completedStepName, completedSteps.Count, totalSteps);
-			_reporter.ReportCheckpointSaved(runId, completedStepName, completedSteps.Count, totalSteps);
 		}
 		catch (Exception ex)
 		{
-			LogCheckpointSaveFailed(ex, orchestration.Name, runId, completedStepName);
+			LogCheckpointSaveFailed(ex, orchestrationName, runId, completedStepName);
 		}
 	}
 
