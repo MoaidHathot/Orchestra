@@ -35,10 +35,13 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
   uses native preview/Approval/apply steps. Read-only tools are opt-in. Normal-engine
   integration tests cover successful creation/run, invalid-artifact rejection and settings
   flow/default selection. The authoring save goes through the existing registry.
-- [ ] **5. Portal onboarding and Settings.** Welcome/demo/starter/assistant entry points;
+- [x] **5. Portal onboarding and Settings.** Welcome/demo/starter/assistant entry points;
   provider setup and model selection; workspace, integration, execution and retention
   settings; actionable readiness and restart feedback. Preserve normal dashboard behavior
   for existing users and address related accessibility, stale-state and request-race issues.
+  Welcome and Settings are lazy-loaded; existing dashboards retain their normal view.
+  Forms send only edited fields, surface conflicts/restarts and reconnect to active setup
+  jobs. All 488 Portal tests and TypeScript checking passed before this commit.
 - [ ] **6. End-to-end verification and review.** Exercise clean-profile and existing-workspace
   paths, settings round trips/restarts, bundled assets, authoring and registration, provider
   jobs, cancellation and all affected backend/UI tests. Run full CI and isolated browser

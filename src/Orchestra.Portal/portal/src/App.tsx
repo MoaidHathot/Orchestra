@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { Suspense, lazy, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './App.css';
 import { api } from './api';
 import { mergePlanRevision } from './agentPlans';
@@ -47,7 +47,10 @@ import AddModal from './components/modals/AddModal';
 import RunModal from './components/modals/RunModal';
 import ExecutionModal from './components/modals/ExecutionModal';
 import McpsModal from './components/modals/McpsModal';
-import BuilderModal from './components/modals/BuilderModal';
+const BuilderModal = lazy(() => import('./components/modals/BuilderModal'));
+const WorkspaceModal = lazy(() => import('./components/modals/WorkspaceModal'));
+import type { WorkspaceTab } from './components/modals/WorkspaceModal';
+import { workspaceRequest, type WorkspaceInfo } from './workspaceApi';
 import ProfilesModal from './components/modals/ProfilesModal';
 import WaitingInputsModal from './components/modals/WaitingInputsModal';
 import HostModal from './components/modals/HostModal';
@@ -245,6 +248,15 @@ function App(): React.JSX.Element {
   const [mcpsModal, setMcpsModal] = useState<McpsModalState>({ open: false });
   const [activeModal, setActiveModal] = useState<ActiveModalState>({ open: false, data: null, loading: false });
   const [builderModal, setBuilderModal] = useState(false);
+  const [builderError, setBuilderError] = useState('');
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab | null>(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    void workspaceRequest<WorkspaceInfo>('', undefined, controller.signal).then(info => {
+      if (!controller.signal.aborted && info.showWelcome && !window.location.hash) setWorkspaceTab('welcome');
+    }).catch(() => {}); // An older host still supports the existing dashboard.
+    return () => controller.abort();
+  }, []);
   const [profilesModal, setProfilesModal] = useState(false);
   const [waitingInputsModal, setWaitingInputsModal] = useState(false);
   const [hostModal, setHostModal] = useState(false);
@@ -1385,7 +1397,7 @@ function App(): React.JSX.Element {
 
   // ── Run orchestration ─────────────────────────────────────────────────────
 
-  const runOrchestration = async (id: string | undefined, params: Record<string, string> = {}): Promise<void> => {
+  const runOrchestration = async (id: string | undefined, params: Record<string, string> = {}, prepared?: Orchestration): Promise<void> => {
     if (!id) return;
 
     // Close any existing EventSource before opening a new one
@@ -1394,7 +1406,7 @@ function App(): React.JSX.Element {
       eventSourceRef.current = null;
     }
 
-    const orchestration = orchestrations.find(o => o.id === id);
+    const orchestration = prepared || orchestrations.find(o => o.id === id);
     const initialStatuses = buildInitialStatuses(orchestration);
 
     setExecutionModal({
@@ -2030,12 +2042,16 @@ function App(): React.JSX.Element {
             </button>
           </div>
           <div className="header-btn-row">
-            <button className="btn" onClick={() => { setBuilderModal(true); setSidebarOpen(false); }}>
+            <button className="btn" onClick={() => { setBuilderError(''); setBuilderModal(true); setSidebarOpen(false); }}>
               <Icons.Steps aria-hidden="true" /> Visual Builder
             </button>
             <button className="btn" onClick={() => { setMcpsModal({ open: true }); setSidebarOpen(false); }}>
               <Icons.Tool /> MCP Tools
             </button>
+          </div>
+          <div className="header-btn-row">
+            <button className="btn" onClick={() => { setWorkspaceTab('welcome'); setSidebarOpen(false); }}>Get started</button>
+            <button className="btn" onClick={() => { setWorkspaceTab('providers'); setSidebarOpen(false); }}>Settings</button>
           </div>
           <div className="header-btn-row">
             <button
@@ -2360,8 +2376,12 @@ function App(): React.JSX.Element {
               <div className="empty-text">
                 {hasActiveOrchestrationFilters
                   ? 'No orchestrations match the current search or filters.'
-                  : 'Add orchestrations to get started.'}
+                  : 'Try a demo, create a workflow with an assistant, or import your own.'}
               </div>
+              {!hasActiveOrchestrationFilters && <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                <button className="btn btn-primary" onClick={() => setWorkspaceTab('welcome')}>Get started</button>
+                <button className="btn" onClick={() => setAddModal({ open: true })}>Import workflow</button>
+              </div>}
               {hasActiveOrchestrationFilters && (
                 <button
                   className="btn btn-sm"
@@ -2665,19 +2685,30 @@ function App(): React.JSX.Element {
           }
         }}
       />
-      <BuilderModal
+      {builderModal && <Suspense fallback={<div role="status">Loading Visual Builder…</div>}><BuilderModal
         open={builderModal}
+        error={builderError}
         onClose={() => setBuilderModal(false)}
         onSave={async (json: string) => {
           try {
+            setBuilderError('');
             await api.post('/api/orchestrations/json', { json, mcpJson: null });
             setBuilderModal(false);
             loadData();
           } catch (err) {
             console.error('Failed to save orchestration from builder:', err);
+            setBuilderError(err instanceof Error ? err.message : 'Could not save the workflow.');
           }
         }}
-      />
+      /></Suspense>}
+      {workspaceTab && <Suspense fallback={<div role="status">Loading workspace…</div>}><WorkspaceModal
+        initialTab={workspaceTab}
+        onClose={() => setWorkspaceTab(null)}
+        onChanged={() => { api.clearCache(); void loadData(); }}
+        onImport={() => { setWorkspaceTab(null); setAddModal({ open: true }); }}
+        onDiagnostics={() => { setWorkspaceTab(null); setHostModal(true); }}
+        onRun={(orchestration, parameters) => { setWorkspaceTab(null); void runOrchestration(orchestration.id, parameters, orchestration); }}
+      /></Suspense>}
       <ProfilesModal
         open={profilesModal}
         onClose={() => { setProfilesModal(false); loadProfiles(); }}

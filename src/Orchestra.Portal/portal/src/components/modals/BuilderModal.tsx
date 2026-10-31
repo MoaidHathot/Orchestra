@@ -11,6 +11,7 @@ interface Props {
   open: boolean;
   onClose: () => void;
   onSave: (json: string) => void;
+  error?: string;
 }
 
 interface BuilderStep {
@@ -484,7 +485,7 @@ const BUILDER_CSS = `
 /*  Component                                                          */
 /* ------------------------------------------------------------------ */
 
-function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
+function BuilderModal({ open, onClose, onSave, error }: Props): React.JSX.Element {
   // No Escape-to-close — the builder holds substantial unsaved orchestration state. Explicit close only.
   const modalRef = useFocusTrap<HTMLDivElement>(open);
 
@@ -1391,8 +1392,8 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
             >
               <Icons.Tool />
             </button>
-            <button className="btn btn-sm btn-primary" onClick={exportJson} title="Export JSON">
-              <Icons.Download /> Export
+            <button className="btn btn-sm btn-primary" onClick={exportJson} title="Save workflow">
+              <Icons.Download /> Save workflow
             </button>
             <button
               className="modal-close"
@@ -1409,6 +1410,7 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
           <strong>Visual Builder — Preview.</strong> Its functionality is incomplete. It currently supports Prompt, HTTP, and Transform steps only.
           Use the authoring assistant or import JSON/YAML for the full Orchestra feature set.
         </div>
+        {error && <div role="alert" style={{ padding: '12px 16px', color: 'var(--error)' }}>{error}</div>}
         {/* ===== BODY ===== */}
         <div className="builder-body">
           {/* --- Left palette --- */}

@@ -30,8 +30,10 @@ public sealed class WorkspaceIntegrations(PortalWorkspaceOptions options)
 			var list = json["mcps"]?.AsArray() ?? new JsonArray();
 			var name = update.Definition["name"]?.GetValue<string>();
 			if (string.IsNullOrWhiteSpace(name)) throw new ArgumentException("MCP name is required.");
-			var index = Enumerable.Range(0, list.Count).FirstOrDefault(i => list[i]?["name"]?.GetValue<string>() == name, -1);
+			var index = Enumerable.Range(0, list.Count).FirstOrDefault(i => string.Equals(list[i]?["name"]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase), -1);
 			var merged = RestoreRedactions(update.Definition, index >= 0 ? list[index] : null).AsObject();
+			var remote = string.Equals(merged["type"]?.GetValue<string>(), "remote", StringComparison.OrdinalIgnoreCase);
+			foreach (var field in remote ? new[] { "command", "arguments", "environment", "workingDirectory" } : new[] { "endpoint", "headers" }) merged.Remove(field);
 			var candidate = new JsonObject { ["mcps"] = new JsonArray(merged.DeepClone()) }.ToJsonString();
 			var errors = OrchestrationSchemaValidator.ValidateJson(candidate, Path.Combine(options.AssetsDirectory, "schemas", "orchestra.mcp.schema.json"));
 			if (errors.Count > 0) throw new ArgumentException(string.Join("\n", errors));

@@ -39,7 +39,7 @@ public sealed partial class PortalWorkspaceService(PortalWorkspaceOptions settin
 	public async Task InitializeAsync(CancellationToken token)
 	{
 		if (File.Exists(Marker)) return;
-		var existing = registry.Count > 0 || File.Exists(settings.ConfigPath);
+		var existing = registry.Count > 0;
 		if (!existing && Templates.Any(t => t.Id == "smoke-test")) await InstallTemplateAsync("smoke-test", token);
 		await WorkspaceSettingsStore.WriteAtomicAsync(Marker, JsonSerializer.Serialize(new { showWelcome = !existing }), token);
 	}
