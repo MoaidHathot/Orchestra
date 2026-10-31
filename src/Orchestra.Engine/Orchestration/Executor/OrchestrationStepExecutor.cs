@@ -145,15 +145,7 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 
 		// Build the input handler delegate (if configured). The delegate is invoked inside the
 		// CHILD orchestration's run scope so its agent build shares the child's CLI process.
-		Func<CancellationToken, Task<Dictionary<string, string>?>>? inputHandlerTransform = null;
-		if (!string.IsNullOrWhiteSpace(invocationStep.InputHandlerPrompt) && resolvedParameters.Count > 0)
-		{
-			var capturedParams = resolvedParameters;
-			var capturedStep = invocationStep;
-			var defaultModel = context.DefaultModel;
-			inputHandlerTransform = async ct =>
-				await RunInputHandlerAsync(capturedStep, capturedParams, defaultModel, ct);
-		}
+		var inputHandlerTransform = CreateInputHandler(invocationStep, resolvedParameters, context.DefaultModel);
 
 		var parentContext = new ParentExecutionContext
 		{
@@ -241,7 +233,23 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 		ChildOrchestrationResult terminal;
 		try
 		{
-			terminal = await handle.Completion;
+			terminal = await handle.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+			cancellationToken.ThrowIfCancellationRequested();
+		}
+		catch (OperationCanceledException ex) when (cancellationToken.IsCancellationRequested)
+		{
+			var partial = ExecutionResult.Cancelled() with
+			{
+				RawDependencyOutputs = rawDependencyOutputs,
+				Trace = BuildTrace(invocationStep, resolvedOrchestrationId, resolvedParameters, handle.ExecutionId, "Cancelled"),
+				ChildOrchestrationInfo = new ChildOrchestrationInfo
+				{
+					ExecutionId = handle.ExecutionId, OrchestrationId = handle.OrchestrationId,
+					OrchestrationName = handle.OrchestrationName, Status = ExecutionStatus.Cancelled,
+					StartedAt = handle.StartedAt,
+				},
+			};
+			throw new StepExecutionCanceledException("Cancelled while awaiting child orchestration.", partial, ex, cancellationToken);
 		}
 		catch (Exception ex)
 		{
@@ -365,6 +373,7 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 		}
 
 		LogForEachStarted(step.Name, items.Count, resolvedOrchestrationId, step.MaxConcurrency ?? 0, step.Mode.ToString());
+		var startedAt = DateTimeOffset.UtcNow;
 
 		// Empty array: succeed deterministically with an empty rollup.
 		if (items.Count == 0)
@@ -383,31 +392,29 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 		}
 
 		// Concurrency throttle: null/0 = unbounded.
-		var concurrencyLimit = step.MaxConcurrency is > 0 ? step.MaxConcurrency.Value : items.Count;
-		using var semaphore = new SemaphoreSlim(concurrencyLimit, concurrencyLimit);
-
-		// One task per item. Each task acquires the semaphore, launches the child, and
-		// waits for its terminal state (sync mode) or returns immediately (async mode).
-		var perItemTasks = new List<Task<ForEachItemOutcome>>(items.Count);
-		for (var i = 0; i < items.Count; i++)
+		var concurrencyLimit = step.MaxConcurrency is > 0 ? Math.Min(step.MaxConcurrency.Value, items.Count) : items.Count;
+		var outcomes = new ForEachItemOutcome[items.Count];
+		var nextItem = -1;
+		async Task RunWorkerAsync()
 		{
-			var index = i;
-			var item = items[i];
-			perItemTasks.Add(LaunchForEachItemAsync(
-				step,
-				resolvedOrchestrationId,
-				resolvedStaticParameters,
-				item,
-				index,
-				semaphore,
-				context,
-				cancellationToken));
+			while (true)
+			{
+				var index = Interlocked.Increment(ref nextItem);
+				if (index >= items.Count)
+					return;
+				cancellationToken.ThrowIfCancellationRequested();
+				outcomes[index] = await LaunchForEachItemAsync(step, resolvedOrchestrationId, resolvedStaticParameters,
+					items[index], index, context, cancellationToken).ConfigureAwait(false);
+			}
 		}
 
-		// Wait on every task. Per-item failures are captured into the outcome — they do not
-		// propagate as exceptions. This guarantees we surface every child's result rather
-		// than dropping siblings when one fails.
-		var outcomes = await Task.WhenAll(perItemTasks);
+		// A bounded fan-out needs only O(maxConcurrency) worker tasks, rather than one
+		// suspended task and semaphore waiter per input item. Results retain input order.
+		var workers = new Task[concurrencyLimit];
+		for (var i = 0; i < workers.Length; i++)
+			workers[i] = RunWorkerAsync();
+		await Task.WhenAll(workers).ConfigureAwait(false);
+		cancellationToken.ThrowIfCancellationRequested();
 
 		var succeeded = 0;
 		var failed = 0;
@@ -452,7 +459,7 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			Status = failed == 0 ? ExecutionStatus.Succeeded : ExecutionStatus.Failed,
 			ErrorMessage = failed == 0 ? null : $"{failed} of {outcomes.Length} child invocations failed.",
 			FinalContent = rollupJson,
-			StartedAt = DateTimeOffset.UtcNow,
+			StartedAt = startedAt,
 			CompletedAt = DateTimeOffset.UtcNow,
 		};
 
@@ -477,112 +484,110 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 		Dictionary<string, string> staticParameters,
 		JsonElement item,
 		int index,
-		SemaphoreSlim semaphore,
 		OrchestrationExecutionContext context,
 		CancellationToken cancellationToken)
 	{
-		await semaphore.WaitAsync(cancellationToken);
+		var itemJson = item.GetRawText();
+		var perItemParams = new Dictionary<string, string>(staticParameters, StringComparer.Ordinal) { [step.ItemParameter!] = itemJson };
+		var request = new ChildLaunchRequest
+		{
+			OrchestrationId = resolvedOrchestrationId,
+			Parameters = perItemParams,
+			Mode = step.Mode == OrchestrationInvocationMode.Async ? ChildLaunchMode.Async : ChildLaunchMode.Sync,
+			TimeoutSeconds = step.Mode == OrchestrationInvocationMode.Sync ? step.TimeoutSeconds : null,
+			TriggeredBy = $"orchestration:{context.OrchestrationInfo.RunId}",
+			Origin = ChildLaunchOrigin.OrchestrationStep,
+			ParentContext = new() { ParentExecutionId = context.OrchestrationInfo.RunId, ParentStepName = step.Name },
+			PreExecutionParameterTransform = CreateInputHandler(step, perItemParams, context.DefaultModel),
+		};
+
+		ChildOrchestrationHandle handle;
 		try
 		{
-			// Per-child parameter map: static params + item bound to step.ItemParameter.
-			var itemJson = item.GetRawText();
-			var perItemParams = new Dictionary<string, string>(staticParameters, StringComparer.Ordinal)
+			handle = await _launcher.LaunchAsync(request, cancellationToken);
+		}
+		catch (ChildOrchestrationLaunchException ex)
+		{
+			LogLaunchFailed(step.Name, ex.ErrorCode, ex.Message);
+			return new ForEachItemOutcome
 			{
-				[step.ItemParameter!] = itemJson,
+				Index = index,
+				ExecutionId = string.Empty,
+				OrchestrationName = resolvedOrchestrationId,
+				Status = ExecutionStatus.Failed,
+				ErrorMessage = ex.Message,
+				InputItemJson = itemJson,
+				StartedAt = DateTimeOffset.UtcNow,
+				CompletedAt = DateTimeOffset.UtcNow,
 			};
-
-			var parentContext = new ParentExecutionContext
+		}
+		catch (Exception ex) when (ex is not OperationCanceledException)
+		{
+			LogChildLaunchThrew(step.Name, index, ex);
+			return new ForEachItemOutcome
 			{
-				ParentExecutionId = context.OrchestrationInfo.RunId,
-				ParentStepName = step.Name,
+				Index = index,
+				ExecutionId = string.Empty,
+				OrchestrationName = resolvedOrchestrationId,
+				Status = ExecutionStatus.Failed,
+				ErrorMessage = ex.Message,
+				InputItemJson = itemJson,
+				StartedAt = DateTimeOffset.UtcNow,
+				CompletedAt = DateTimeOffset.UtcNow,
 			};
-
-			var request = new ChildLaunchRequest
-			{
-				OrchestrationId = resolvedOrchestrationId,
-				Parameters = perItemParams,
-				Mode = step.Mode == OrchestrationInvocationMode.Async ? ChildLaunchMode.Async : ChildLaunchMode.Sync,
-				TimeoutSeconds = step.Mode == OrchestrationInvocationMode.Sync ? step.TimeoutSeconds : null,
-				TriggeredBy = $"orchestration:{context.OrchestrationInfo.RunId}",
-				Origin = ChildLaunchOrigin.OrchestrationStep,
-				ParentContext = parentContext,
-			};
-
-			ChildOrchestrationHandle handle;
-			try
-			{
-				handle = await _launcher.LaunchAsync(request, cancellationToken);
-			}
-			catch (ChildOrchestrationLaunchException ex)
-			{
-				LogLaunchFailed(step.Name, ex.ErrorCode, ex.Message);
-				return new ForEachItemOutcome
-				{
-					Index = index,
-					ExecutionId = string.Empty,
-					OrchestrationName = resolvedOrchestrationId,
-					Status = ExecutionStatus.Failed,
-					ErrorMessage = ex.Message,
-					InputItemJson = itemJson,
-					StartedAt = DateTimeOffset.UtcNow,
-					CompletedAt = DateTimeOffset.UtcNow,
-				};
-			}
-
-			LogChildLaunched(step.Name, handle.ExecutionId, handle.OrchestrationName, step.Mode.ToString());
-
-			if (step.Mode == OrchestrationInvocationMode.Async)
-			{
-				return new ForEachItemOutcome
-				{
-					Index = index,
-					ExecutionId = handle.ExecutionId,
-					OrchestrationName = handle.OrchestrationName,
-					Status = ExecutionStatus.Pending,
-					InputItemJson = itemJson,
-					StartedAt = handle.StartedAt,
-				};
-			}
-
-			ChildOrchestrationResult terminal;
-			try
-			{
-				terminal = await handle.Completion;
-			}
-			catch (Exception ex)
-			{
-				LogChildCompletionThrew(step.Name, handle.ExecutionId, ex);
-				return new ForEachItemOutcome
-				{
-					Index = index,
-					ExecutionId = handle.ExecutionId,
-					OrchestrationName = handle.OrchestrationName,
-					Status = ExecutionStatus.Failed,
-					ErrorMessage = ex.Message,
-					InputItemJson = itemJson,
-					StartedAt = handle.StartedAt,
-					CompletedAt = DateTimeOffset.UtcNow,
-				};
-			}
-
+		}
+		LogChildLaunched(step.Name, handle.ExecutionId, handle.OrchestrationName, step.Mode.ToString());
+		if (step.Mode == OrchestrationInvocationMode.Async)
+		{
 			return new ForEachItemOutcome
 			{
 				Index = index,
 				ExecutionId = handle.ExecutionId,
 				OrchestrationName = handle.OrchestrationName,
-				Status = terminal.Status,
-				ErrorMessage = terminal.ErrorMessage,
-				FinalContent = terminal.FinalContent,
+				Status = ExecutionStatus.Pending,
 				InputItemJson = itemJson,
-				StartedAt = terminal.StartedAt,
-				CompletedAt = terminal.CompletedAt,
+				StartedAt = handle.StartedAt,
 			};
 		}
-		finally
+
+		ChildOrchestrationResult terminal;
+		try
 		{
-			semaphore.Release();
+			terminal = await handle.Completion.WaitAsync(cancellationToken).ConfigureAwait(false);
+			cancellationToken.ThrowIfCancellationRequested();
 		}
+		catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+		catch (Exception ex)
+		{
+			LogChildCompletionThrew(step.Name, handle.ExecutionId, ex);
+			return new ForEachItemOutcome
+			{
+				Index = index,
+				ExecutionId = handle.ExecutionId,
+				OrchestrationName = handle.OrchestrationName,
+				Status = ExecutionStatus.Failed,
+				ErrorMessage = ex.Message,
+				InputItemJson = itemJson,
+				StartedAt = handle.StartedAt,
+				CompletedAt = DateTimeOffset.UtcNow,
+			};
+		}
+		return new ForEachItemOutcome
+		{
+			Index = index,
+			ExecutionId = handle.ExecutionId,
+			OrchestrationName = handle.OrchestrationName,
+			Status = terminal.Status,
+			ErrorMessage = terminal.ErrorMessage,
+			FinalContent = terminal.FinalContent,
+			InputItemJson = itemJson,
+			StartedAt = terminal.StartedAt,
+			CompletedAt = terminal.CompletedAt,
+		};
 	}
+
+	[LoggerMessage(Level = LogLevel.Error, Message = "Step '{StepName}' failed to launch child item {Index}")]
+	private partial void LogChildLaunchThrew(string stepName, int index, Exception exception);
 
 	/// <summary>
 	/// Extracts a JSON array from a resolved forEach template. Supports:
@@ -687,6 +692,12 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 		};
 	}
 
+	private Func<CancellationToken, Task<Dictionary<string, string>?>>? CreateInputHandler(
+		OrchestrationInvocationStep step, Dictionary<string, string> parameters, string? defaultModel)
+		=> !string.IsNullOrWhiteSpace(step.InputHandlerPrompt) && parameters.Count > 0
+			? token => RunInputHandlerAsync(step, parameters, defaultModel, token)
+			: null;
+
 	private async Task<Dictionary<string, string>?> RunInputHandlerAsync(
 		OrchestrationInvocationStep step,
 		Dictionary<string, string> resolvedParameters,
@@ -707,10 +718,14 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 					Model = step.InputHandlerModel ?? defaultModel ?? ModelDefaults.Model,
 					SystemPrompt = "You are a parameter transformer. Given a prompt and raw input, respond with ONLY a valid JSON object mapping parameter names to string values. No markdown, no explanation — just the JSON object.",
 					Mcps = [],
+					CapturePlans = false,
 				}, cancellationToken);
 
-			var task = agent.SendAsync(fullPrompt);
-			var result = await task.GetResultAsync();
+			var task = agent.SendAsync(fullPrompt, cancellationToken);
+			// Drain while the agent produces events: a bounded provider channel cannot
+			// complete its result until a consumer makes room for the remaining events.
+			await foreach (var _ in task.WithCancellation(cancellationToken).ConfigureAwait(false)) { }
+			var result = await task.GetResultAsync().WaitAsync(cancellationToken).ConfigureAwait(false);
 
 			var content = result.Content.Trim();
 			if (content.StartsWith("```"))
@@ -729,6 +744,7 @@ public sealed partial class OrchestrationStepExecutor : IStepExecutor
 			LogInputHandlerEmpty(step.Name);
 			return null;
 		}
+		catch (OperationCanceledException) { throw; }
 		catch (Exception ex)
 		{
 			LogInputHandlerFailed(step.Name, ex);

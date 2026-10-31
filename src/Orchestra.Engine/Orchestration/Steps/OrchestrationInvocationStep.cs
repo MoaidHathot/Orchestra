@@ -68,6 +68,7 @@ public class OrchestrationInvocationStep : OrchestrationStep
 	/// is JSON-serialized and passed to a one-shot LLM agent along with this prompt; the LLM is
 	/// expected to return a transformed JSON object that replaces the raw parameters before the
 	/// child orchestration runs. Mirrors the trigger-side <c>inputHandlerPrompt</c> mechanism.
+	/// In forEach mode, runs separately for each item's resolved parameter map.
 	/// On parse failure or empty result, the original parameters are used.
 	/// </summary>
 	public string? InputHandlerPrompt { get; init; }
@@ -114,8 +115,8 @@ public class OrchestrationInvocationStep : OrchestrationStep
 	/// In forEach + Sync mode, controls how child failures propagate. When true (default),
 	/// every dispatched child is awaited and its result captured into the step output even
 	/// if some failed; the step succeeds as long as the launcher itself did not error.
-	/// When false, the first failed child causes the step to fail (other children still run
-	/// to completion in the background but their results are not surfaced).
+	/// When false, any failed child fails the step after all item outcomes have been collected.
+	/// Caller cancellation propagates regardless of this option.
 	/// </summary>
 	public bool ContinueOnItemFailure { get; init; } = true;
 }

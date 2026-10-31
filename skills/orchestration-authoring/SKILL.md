@@ -621,7 +621,7 @@ Invokes another registered orchestration. Use this when a flow should delegate t
 
 `parameters` maps child input names to values. Values support template expressions and are passed as strings at runtime.
 
-`inputHandlerPrompt` can reshape child parameters before launch. It must return a JSON object mapping parameter names to string values. If handler parsing fails, runtime falls back to the original parameters, so use Script validation for hard guarantees.
+`inputHandlerPrompt` can reshape child parameters inside the child's run scope, before its steps execute. It must return a JSON object mapping parameter names to string values. If handler parsing fails, runtime falls back to the original parameters, so use Script validation for hard guarantees. Cancellation interrupts the handler and propagates to the run.
 
 #### Fan-Out (`forEach`)
 
@@ -631,6 +631,8 @@ Invokes another registered orchestration. Use this when a flow should delegate t
 - `forEachPath` extracts the array when the template resolves to an *object* rather than an array. If a prior step emits `{"meetingsToProcess":[...]}`, set `forEachPath: meetingsToProcess`.
 - `maxConcurrency` caps parallel children; it is honored in `sync` mode only. Default is unbounded.
 - `continueOnItemFailure` defaults to `true`: the step succeeds even when some children fail, and the rollup carries per-item status. Set it to `false` to fail the step on any failed child.
+- `inputHandlerPrompt` applies separately to each child, using that item's payload plus the static `parameters`. The handler executes inside that child's provider scope.
+- Rollup entries retain input order even when children finish out of order. A bounded fan-out schedules only `maxConcurrency` workers. Caller cancellation stops queued launches and cancels the parent step, regardless of `continueOnItemFailure`.
 
 ```yaml
   - name: process-each-meeting
