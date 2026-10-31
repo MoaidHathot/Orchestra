@@ -15,8 +15,7 @@ public partial class FileSystemRunStore : IPlanHistoryStore
 		var run = revision.Run;
 		ValidatePlanRunId(run.RunId);
 		var directory = ResolveRunDirectory(run.OrchestrationName, run.OrchestrationVersion, run.TriggeredBy, run.StartedAt, run.RunId);
-		var gate = _fileWriteLocks.GetOrAdd(run.OrchestrationName, _ => new SemaphoreSlim(1, 1));
-		await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+		var gate = await _fileWriteLocks.AcquireAsync(directory, cancellationToken).ConfigureAwait(false);
 		try
 		{
 			Directory.CreateDirectory(directory);
@@ -31,7 +30,7 @@ public partial class FileSystemRunStore : IPlanHistoryStore
 			await stream.WriteAsync(bytes, cancellationToken).ConfigureAwait(false);
 			await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
 		}
-		finally { gate.Release(); }
+		finally { gate.Dispose(); }
 	}
 
 	public async Task<PlanHistoryPage> ReadPlansAsync(string runId, string? stepName = null, long after = 0, int limit = 100, CancellationToken cancellationToken = default)

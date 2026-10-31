@@ -143,8 +143,9 @@ public static partial class TemplateExpressionValidator
 				allParamNames.Add(key);
 		}
 
-		// Build reachability map: for each step, what steps can it reach via DependsOn (transitive)
-		var reachability = BuildReachabilityMap(orchestration);
+		// Resolve only the reachability questions actually asked by template expressions.
+		// Eager transitive sets cost O(N²) memory for a chain even with no step references.
+		var reachability = new DependencyReachability(orchestration);
 
 		// 1. Validate orchestration-level variable values (static-only context)
 		foreach (var (varName, varValue) in orchestration.Variables)
@@ -266,7 +267,7 @@ public static partial class TemplateExpressionValidator
 		Dictionary<string, string> variables,
 		HashSet<string> stepNames,
 		Dictionary<string, OrchestrationStepType> stepTypes,
-		Dictionary<string, HashSet<string>> reachability,
+		DependencyReachability reachability,
 		bool isStaticOnlyContext)
 	{
 		if (string.IsNullOrEmpty(value))
@@ -299,7 +300,7 @@ public static partial class TemplateExpressionValidator
 		Dictionary<string, string> variables,
 		HashSet<string> stepNames,
 		Dictionary<string, OrchestrationStepType> stepTypes,
-		Dictionary<string, HashSet<string>> reachability,
+		DependencyReachability reachability,
 		bool isStaticOnlyContext)
 	{
 		var fullExpr = $"{{{{{expr}}}}}";
@@ -423,8 +424,7 @@ public static partial class TemplateExpressionValidator
 				}
 
 				// Step must be reachable via DependsOn (direct or transitive)
-				if (stepName is not null && reachability.TryGetValue(stepName, out var reachable) &&
-					!reachable.Contains(refStepName))
+				if (stepName is not null && !reachability.CanReach(stepName, refStepName))
 				{
 					result.Errors.Add(new TemplateValidationError(
 						$"Step '{refStepName}' is not reachable via DependsOn from step '{stepName}'. " +
@@ -521,7 +521,7 @@ public static partial class TemplateExpressionValidator
 		Dictionary<string, string> variables,
 		HashSet<string> stepNames,
 		Dictionary<string, OrchestrationStepType> stepTypes,
-		Dictionary<string, HashSet<string>> reachability)
+		DependencyReachability reachability)
 	{
 		foreach (var (fieldName, value) in GetStepFields(step))
 		{
@@ -597,7 +597,7 @@ public static partial class TemplateExpressionValidator
 		Dictionary<string, string> variables,
 		HashSet<string> stepNames,
 		Dictionary<string, OrchestrationStepType> stepTypes,
-		Dictionary<string, HashSet<string>> reachability)
+		DependencyReachability reachability)
 	{
 		foreach (var (fieldName, value) in GetMcpFields(mcp))
 		{
@@ -679,35 +679,43 @@ public static partial class TemplateExpressionValidator
 	}
 
 	/// <summary>
-	/// Builds a transitive reachability map from DependsOn relationships.
-	/// For each step, computes the set of all steps reachable via DependsOn (direct + transitive).
+	/// Memoizes individual reachability queries within one validation. Direct references
+	/// take the fast path; transitive searches stop as soon as the referenced ancestor is found.
 	/// </summary>
-	private static Dictionary<string, HashSet<string>> BuildReachabilityMap(Orchestration orchestration)
+	private sealed class DependencyReachability(Orchestration orchestration)
 	{
-		var directDeps = orchestration.Steps.ToDictionary(
+		private readonly Dictionary<string, string[]> _directDeps = orchestration.Steps.ToDictionary(
 			s => s.Name,
 			s => s.DependsOn,
 			StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, Dictionary<string, bool>> _queries = new(StringComparer.OrdinalIgnoreCase);
 
-		var result = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
-
-		foreach (var step in orchestration.Steps)
+		public bool CanReach(string from, string target)
 		{
-			var reachable = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-			var queue = new Queue<string>(step.DependsOn);
+			if (!_directDeps.TryGetValue(from, out var dependencies))
+				return false;
+			if (dependencies.Contains(target, StringComparer.OrdinalIgnoreCase))
+				return true;
+			if (!_queries.TryGetValue(from, out var queries))
+				_queries[from] = queries = new(StringComparer.OrdinalIgnoreCase);
+			if (queries.TryGetValue(target, out var cached))
+				return cached;
+
+			var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var queue = new Queue<string>(dependencies);
 			while (queue.Count > 0)
 			{
 				var dep = queue.Dequeue();
-				if (reachable.Add(dep) && directDeps.TryGetValue(dep, out var transitiveDeps))
+				if (string.Equals(dep, target, StringComparison.OrdinalIgnoreCase))
+					return queries[target] = true;
+				if (visited.Add(dep) && _directDeps.TryGetValue(dep, out var transitiveDeps))
 				{
 					foreach (var td in transitiveDeps)
 						queue.Enqueue(td);
 				}
 			}
-			result[step.Name] = reachable;
+			return queries[target] = false;
 		}
-
-		return result;
 	}
 
 	/// <summary>

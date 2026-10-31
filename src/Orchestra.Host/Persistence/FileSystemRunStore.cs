@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
@@ -24,7 +23,7 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 	private readonly JsonSerializerOptions _jsonOptions;
 	private readonly ILogger<FileSystemRunStore> _logger;
 
-	private readonly ConcurrentDictionary<string, SemaphoreSlim> _fileWriteLocks = new();
+	private readonly KeyedAsyncLock _fileWriteLocks = new();
 	private volatile bool _indexLoaded;
 	private readonly SemaphoreSlim _indexLoadLock = new(1, 1);
 
@@ -96,10 +95,9 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 
 		var runDir = ResolveRunDirectory(record.OrchestrationName, record.OrchestrationVersion, record.TriggeredBy, record.StartedAt, record.RunId);
 
-		// Serialize file writes per orchestration to avoid Windows file locking conflicts
-		// when multiple concurrent saves target the same orchestration directory.
-		var writeLock = _fileWriteLocks.GetOrAdd(record.OrchestrationName, _ => new SemaphoreSlim(1, 1));
-		await writeLock.WaitAsync(cancellationToken);
+		// Only writers of the same run share files. A large save must not stall other
+		// executions (or their live plan journals) merely because their workflow matches.
+		var writeLock = await _fileWriteLocks.AcquireAsync(runDir, cancellationToken).ConfigureAwait(false);
 		try
 		{
 			Directory.CreateDirectory(runDir);
@@ -170,12 +168,18 @@ public partial class FileSystemRunStore : IRunStore, IDisposable
 			{
 				await File.WriteAllTextAsync(Path.Combine(runDir, "result.md"), resultContent, cancellationToken);
 			}
+			// Keep file publication and its index update ordered under the same run gate.
+			// Otherwise an earlier save can overwrite a later save's index projection.
+			UpdateRunIndex(record, runDir);
 		}
 		finally
 		{
-			writeLock.Release();
+			writeLock.Dispose();
 		}
+	}
 
+	private void UpdateRunIndex(OrchestrationRunRecord record, string runDir)
+	{
 		// Update in-memory index — thread-safe
 		var (failedStep, errorMsg) = ExtractFailureInfo(record);
 		var index = new RunIndex

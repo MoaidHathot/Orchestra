@@ -4,6 +4,35 @@ namespace Orchestra.Engine.Tests.Executor;
 
 public class TemplateExpressionValidatorTests
 {
+	[Fact]
+	public void DeepGraph_ValidatesDirectAndTransitiveReferencesWithoutLosingReachabilityChecks()
+	{
+		var steps = Enumerable.Range(0, 2048).Select(i => (OrchestrationStep)CreateTransformStep($"s{i}",
+			i < 2 ? "constant" : $"{{{{s{i - 2}.output}}}} / {{{{s{i - 1}.status}}}}", i == 0 ? [] : [$"s{i - 1}"])).ToArray();
+		TemplateExpressionValidator.ValidateOrchestration(CreateOrchestration(steps)).IsValid.Should().BeTrue();
+
+		var unreachable = steps.Append(CreateTransformStep("peer", "{{s0.output}} / {{s0.status}}")).ToArray();
+		var invalid = TemplateExpressionValidator.ValidateOrchestration(CreateOrchestration(unreachable));
+		invalid.Errors.Should().HaveCount(2);
+		invalid.Errors.Should().OnlyContain(error => error.Message.Contains("not reachable"));
+	}
+
+	[Fact]
+	public void ReachabilityMemoization_IsScopedToTheDefinitionBeingValidated()
+	{
+		var valid = CreateOrchestration([
+			CreateTransformStep("a", "value"), CreateTransformStep("b", "value", ["a"]),
+			CreateTransformStep("c", "{{a.output}} / {{a.status}}", ["b"]),
+		]);
+		var invalid = CreateOrchestration([
+			CreateTransformStep("a", "value"), CreateTransformStep("b", "value"),
+			CreateTransformStep("c", "{{a.output}} / {{a.status}}", ["b"]),
+		]);
+		TemplateExpressionValidator.ValidateOrchestration(valid).IsValid.Should().BeTrue();
+		TemplateExpressionValidator.ValidateOrchestration(invalid).IsValid.Should().BeFalse();
+		TemplateExpressionValidator.ValidateOrchestration(valid).IsValid.Should().BeTrue();
+	}
+
 	#region Helper Methods
 
 	private static Orchestration CreateOrchestration(
