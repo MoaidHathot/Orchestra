@@ -252,7 +252,7 @@ public static class InitScaffolder
 		body = s_nameLine.Replace(body, $"name: {name}", count: 1);
 		body = s_descriptionBlock.Replace(
 			body,
-			$"description: >{Environment.NewLine}  Describe what {name} does. Created from the '{template.Id}' template.",
+			$"description: >\n  Describe what {name} does. Created from the '{template.Id}' template.",
 			count: 1);
 
 		var path = Path.Combine(orchestrationsDir, $"{name}.yaml");
@@ -300,6 +300,9 @@ public static class InitScaffolder
 	/// </summary>
 	internal static string RewriteSchemaDirective(string yaml, bool schemasCopied)
 	{
+		// Git may check out the bundled templates as CRLF on Windows. Normalize before
+		// applying line-anchored metadata rewrites: regex '$' does not consume '\r'.
+		yaml = yaml.ReplaceLineEndings("\n");
 		var target = schemasCopied
 			? $"../{Host.Hosting.OrchestraConfigLoader.ProjectDirectoryName}/schemas/orchestration.schema.json"
 			: $"{RemoteSchemaBaseUrl}/orchestration.schema.json";
@@ -308,7 +311,7 @@ public static class InitScaffolder
 
 		return s_schemaDirective.IsMatch(yaml)
 			? s_schemaDirective.Replace(yaml, directive, count: 1)
-			: directive + Environment.NewLine + yaml;
+			: directive + "\n" + yaml;
 	}
 
 	/// <summary>

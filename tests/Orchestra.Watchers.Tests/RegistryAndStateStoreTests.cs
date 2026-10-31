@@ -45,7 +45,7 @@ public class WatcherSubscriptionRegistryTests
 	}
 
 	[Fact]
-	public void Snapshot_IsAStableCopy_UnderConcurrentMutation()
+	public async Task Snapshot_IsAStableCopy_UnderConcurrentMutation()
 	{
 		var registry = new WatcherSubscriptionRegistry();
 		using var stop = new CancellationTokenSource(TimeSpan.FromSeconds(1));
@@ -73,7 +73,7 @@ public class WatcherSubscriptionRegistryTests
 		});
 
 		var act = () => Task.WhenAll(writer, reader);
-		act.Should().NotThrowAsync();
+		await act.Should().NotThrowAsync();
 	}
 }
 
@@ -152,22 +152,53 @@ public class FileWatcherStateStoreTests : IDisposable
 	}
 
 	[Fact]
-	public async Task Write_WhenTargetIsLocked_LeavesOldContentIntact_AndNoTempFile()
+	public async Task Write_WhenTargetIsOpen_RespectsPlatformAtomicReplaceSemantics()
 	{
 		var store = NewStore();
 		await store.WriteSharedAsync(new SharedWatcherState { Watcher = "w", Cursor = JsonValue.Create("v1") }, CancellationToken.None);
 		var path = store.GetSharedPath("w");
 		var before = await File.ReadAllTextAsync(path);
 
-		using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+		using (var openFile = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
 		{
 			var act = () => store.WriteSharedAsync(new SharedWatcherState { Watcher = "w", Cursor = JsonValue.Create("v2") }, CancellationToken.None);
-			// Windows reports a locked destination as UnauthorizedAccessException, other platforms as IOException.
-			(await act.Should().ThrowAsync<Exception>()).Which.Should().Match(e => e is IOException || e is UnauthorizedAccessException);
+			if (OperatingSystem.IsWindows())
+			{
+				// Without FileShare.Delete, Windows denies replacing the directory entry.
+				(await act.Should().ThrowAsync<Exception>()).Which.Should().Match(e => e is IOException || e is UnauthorizedAccessException);
+			}
+			else
+			{
+				// Unix permits rename over an open file. Existing readers keep the old inode,
+				// while a new reader observes the complete replacement document.
+				await act();
+				(await store.ReadSharedAsync("w", CancellationToken.None)).Cursor!.GetValue<string>().Should().Be("v2");
+			}
+			using var reader = new StreamReader(openFile, leaveOpen: true);
+			(await reader.ReadToEndAsync()).Should().Be(before);
 		}
 
-		(await File.ReadAllTextAsync(path)).Should().Be(before);
-		Directory.GetFiles(_root, "*.tmp").Should().BeEmpty("the temp file is cleaned up after a failed move");
+		if (OperatingSystem.IsWindows())
+			(await File.ReadAllTextAsync(path)).Should().Be(before);
+		Directory.GetFiles(_root, "*.tmp").Should().BeEmpty();
+	}
+
+	[Fact]
+	public async Task Write_WhenReplacementFails_PreservesDestinationAndRemovesTempFile()
+	{
+		var store = NewStore();
+		// Replacing a nonempty directory with a file fails on both Windows and Unix,
+		// independently of permissions or whether the test runs with elevated privileges.
+		var destination = store.GetSharedPath("w");
+		Directory.CreateDirectory(destination);
+		var sentinel = Path.Combine(destination, "keep.txt");
+		await File.WriteAllTextAsync(sentinel, "original content");
+
+		var act = () => store.WriteSharedAsync(new SharedWatcherState { Watcher = "w", Cursor = JsonValue.Create("v2") }, CancellationToken.None);
+		(await act.Should().ThrowAsync<Exception>()).Which.Should().Match(e => e is IOException || e is UnauthorizedAccessException);
+
+		(await File.ReadAllTextAsync(sentinel)).Should().Be("original content");
+		Directory.GetFiles(_root, "*.tmp").Should().BeEmpty("failed atomic replacements clean up the temporary file");
 	}
 
 	[Fact]

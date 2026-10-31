@@ -40,27 +40,36 @@ public sealed class NewOrchestrationTests : IDisposable
 		return template!;
 	}
 
-	public static TheoryData<string> TemplateIds()
+	public static TheoryData<string, string> TemplateVariants()
 	{
-		var data = new TheoryData<string>();
+		var data = new TheoryData<string, string>();
 		foreach (var t in InitTemplateCatalog.Discover(TemplatesDirectory))
-			data.Add(t.Id);
+		{
+			data.Add(t.Id, "\n");
+			data.Add(t.Id, "\r\n");
+		}
 		return data;
 	}
 
 	[Theory]
-	[MemberData(nameof(TemplateIds))]
-	public void NewOrchestration_FromEveryTemplate_ParsesAndValidates(string templateId)
+	[MemberData(nameof(TemplateVariants))]
+	public void NewOrchestration_FromEveryTemplate_ParsesAndValidates(string templateId, string lineEnding)
 	{
 		var workspace = Path.Combine(_root, templateId);
+		var original = Template(templateId);
+		var source = Path.Combine(_root, "source.yaml");
+		// Exercise both checkout conventions on every OS. A developer's LF checkout
+		// must not hide failures caused by Git's default CRLF checkout on Windows CI.
+		File.WriteAllText(source, File.ReadAllText(original.SourcePath).ReplaceLineEndings(lineEnding));
 
-		var result = InitScaffolder.NewOrchestration(workspace, "my-thing", Template(templateId), force: false, SkillsDirectory);
+		var result = InitScaffolder.NewOrchestration(workspace, "my-thing", original with { SourcePath = source }, force: false, SkillsDirectory);
 
 		var orchestration = OrchestrationParser.ParseOrchestrationFile(result.OrchestrationPath, availableMcps: []);
 		orchestration.Name.Should().Be("my-thing", "the copy must be independently runnable by its new name");
 
 		var validation = TemplateExpressionValidator.ValidateOrchestration(orchestration);
 		validation.IsValid.Should().BeTrue($"renamed '{templateId}' has invalid expressions:\n{validation.FormatErrors()}");
+		File.ReadAllText(result.OrchestrationPath).Should().NotContain("\r", "generated YAML uses consistent LF line endings");
 	}
 
 	[Fact]

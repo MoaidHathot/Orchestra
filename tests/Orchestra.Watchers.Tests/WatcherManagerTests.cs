@@ -96,7 +96,11 @@ public class WatcherManagerTests : IAsyncDisposable
 		await _manager.StartAsync(CancellationToken.None);
 
 		_manager.Subscribe(Reference("orch-a", "lib"));
-		_manager.Subscribe(Reference("orch-b", "lib"));
+		await _dispatcher.WaitForCountAsync(1);
+		// The manager is already running, so the first subscriber can consume i1 before
+		// the second subscribes. This lifecycle test explicitly requests that backlog;
+		// FromNow is covered separately and correctly skips previously observed items.
+		_manager.Subscribe(Reference("orch-b", "lib", WatcherCatchupMode.All));
 		await _dispatcher.WaitForCountAsync(2);
 		var loop = _manager.GetLoop("lib")!;
 
@@ -114,7 +118,7 @@ public class WatcherManagerTests : IAsyncDisposable
 		_manager.Subscribe(Reference("orch-b", "lib"));
 		var restarted = _manager.GetLoop("lib");
 		restarted.Should().NotBeNull().And.NotBeSameAs(loop);
-		await WaitUntilAsync(() => restarted!.TickCount >= 1, "the restarted loop ticks");
+		await WaitUntilAsync(() => restarted!.TickCount >= 2, "the restarted loop completes its first tick");
 
 		_dispatcher.Count.Should().Be(dispatchesBefore, "state files survive the stop/start, so i1 is still seen for orch-b");
 		File.Exists(_store.GetSubscriberPath("lib", "orch-b")).Should().BeTrue();
