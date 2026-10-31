@@ -342,6 +342,17 @@ public static class OrchestrationsApi
 			}, jsonOptions);
 		});
 
+		group.MapPost("/preview", (PreviewDocumentRequest request) =>
+		{
+			try
+			{
+				var content = request.Path is { Length: > 0 } ? File.ReadAllText(request.Path) : request.Content ?? "";
+				return Results.Json(Services.OrchestrationDocuments.Preview(content, request.Path), jsonOptions);
+			}
+			catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or JsonException or IOException or YamlDotNet.Core.YamlException)
+			{ return ProblemDetailsHelpers.BadRequest(ex.Message); }
+		});
+
 		// POST /api/orchestrations - Add orchestrations from files
 		group.MapPost("", (AddOrchestrationsRequest request, OrchestrationRegistry registry, TriggerManager triggerManager) =>
 		{
@@ -396,7 +407,7 @@ public static class OrchestrationsApi
 				if (string.IsNullOrWhiteSpace(request.Json))
 					return ProblemDetailsHelpers.BadRequest("JSON content is required.");
 
-				var entry = registry.RegisterFromJson(request.Json);
+				var entry = registry.RegisterFromJson(Services.OrchestrationDocuments.Normalize(request.Json));
 
 				// Register trigger for this orchestration
 				if (entry.Orchestration.Trigger.Enabled)

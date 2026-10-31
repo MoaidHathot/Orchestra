@@ -1405,6 +1405,10 @@ function BuilderModal({ open, onClose, onSave }: Props): React.JSX.Element {
           </div>
         </div>
 
+        <div role="note" style={{ padding: '12px 16px', background: 'var(--bg-secondary)', color: 'var(--warning)', borderBottom: '1px solid var(--border)' }}>
+          <strong>Visual Builder — Preview.</strong> Its functionality is incomplete. It currently supports Prompt, HTTP, and Transform steps only.
+          Use the authoring assistant or import JSON/YAML for the full Orchestra feature set.
+        </div>
         {/* ===== BODY ===== */}
         <div className="builder-body">
           {/* --- Left palette --- */}

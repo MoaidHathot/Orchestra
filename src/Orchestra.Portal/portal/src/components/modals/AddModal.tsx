@@ -5,6 +5,7 @@ import { Icons } from '../../icons';
 import { renderMermaidDag } from '../../mermaid';
 import type { Orchestration } from '../../types';
 import ExportModal from './ExportModal';
+import DirectoryPicker from '../DirectoryPicker';
 
 /** Shape of a scanned file entry returned by /api/folder/scan. */
 interface ScannedFile {
@@ -18,11 +19,6 @@ interface ScannedFile {
 
 interface ScanResponse {
   orchestrations: ScannedFile[];
-}
-
-interface BrowseResponse {
-  cancelled: boolean;
-  path?: string;
 }
 
 /**
@@ -109,28 +105,12 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
   const [previewTab, setPreviewTab] = useState<'details' | 'graph' | 'json'>('details');
   const previewDagRef = useRef<HTMLDivElement>(null);
   const [exportModal, setExportModal] = useState(false);
+  const [pickingFolder, setPickingFolder] = useState(false);
+  const previewRequest = useRef(0);
+  useEffect(() => { if (!open) { previewRequest.current++; setPickingFolder(false); } }, [open]);
 
   // Open folder browser dialog
-  const openFolderDialog = async () => {
-    setLoading(true);
-    setError('');
-    try {
-      const result = await api.get<BrowseResponse>('/api/folder/browse');
-      if (!result.cancelled && result.path) {
-        setPath(result.path);
-        // Auto-scan the selected folder
-        const data = await api.post<ScanResponse>('/api/folder/scan', { directory: result.path });
-        setFiles(data.orchestrations || []);
-        setPreviewFile(null);
-        setPreviewOrch(null);
-        setSelectedFiles([]);
-      }
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const openFolderDialog = () => setPickingFolder(true);
 
   const browseFolder = async () => {
     if (!path) return;
@@ -139,6 +119,7 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
     try {
       const data = await api.post<ScanResponse>('/api/folder/scan', { directory: path });
       setFiles(data.orchestrations || []);
+      previewRequest.current++;
       setPreviewFile(null);
       setPreviewOrch(null);
       setSelectedFiles([]);
@@ -160,24 +141,16 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
     if (!file.valid) return;
     setPreviewFile(file);
     setPreviewOrch(null);
+    setError('');
+    const request = ++previewRequest.current;
     try {
-      const response = await fetch(
-        file.path.startsWith('http') ? file.path : `/api/file/read?path=${encodeURIComponent(file.path)}`
-      );
-      if (response.ok) {
-        const text = await response.text();
-        setPreviewJson(text);
-        try {
-          const parsed = JSON.parse(text) as PreviewOrchestration;
-          setPreviewOrch(parsed);
-        } catch (parseErr) {
-          console.error('Failed to parse orchestration JSON:', parseErr);
-        }
-      } else {
-        setPreviewJson(JSON.stringify(file, null, 2));
-      }
-    } catch {
-      setPreviewJson(JSON.stringify(file, null, 2));
+      const data = await api.post<{ json: string; definition: PreviewOrchestration; errors: string[] }>('/api/orchestrations/preview', { path: file.path });
+      if (request !== previewRequest.current) return;
+      setPreviewJson(data.json);
+      setPreviewOrch(data.definition);
+      if (data.errors.length) setError(data.errors.join('\n'));
+    } catch (err) {
+      if (request === previewRequest.current) { setError((err as Error).message); setPreviewFile(null); }
     }
   };
 
@@ -263,9 +236,10 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
         </div>
         <div className="tabs">
           <div className={`tab ${activeTab === 'browse' ? 'active' : ''}`} onClick={() => setActiveTab('browse')}>Browse Files</div>
-          <div className={`tab ${activeTab === 'paste' ? 'active' : ''}`} onClick={() => setActiveTab('paste')}>Paste JSON</div>
+          <div className={`tab ${activeTab === 'paste' ? 'active' : ''}`} onClick={() => setActiveTab('paste')}>Paste JSON / YAML</div>
         </div>
         <div className="modal-body">
+          {pickingFolder && <DirectoryPicker initialPath={path} onCancel={() => setPickingFolder(false)} onSelect={selected => { setPath(selected); setPickingFolder(false); setFiles([]); setPreviewFile(null); setPreviewOrch(null); }} />}
           {error && (
             <div style={{ background: 'rgba(248, 81, 73, 0.15)', border: '1px solid var(--error)', borderRadius: '6px', padding: '12px', marginBottom: '16px', color: 'var(--error)' }}>
               {error}
@@ -288,7 +262,7 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
                       onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => e.key === 'Enter' && browseFolder()}
                       style={{ flex: 1 }}
                     />
-                    <button className="btn" onClick={openFolderDialog} disabled={loading} title="Open folder dialog">
+                    <button className="btn" onClick={openFolderDialog} disabled={loading} title="Choose a folder" aria-label="Choose a folder">
                       <Icons.Folder />
                     </button>
                     <button className="btn btn-primary" onClick={browseFolder} disabled={loading || !path}>
@@ -333,7 +307,7 @@ function AddModal({ open, onClose, onAdded }: Props): React.JSX.Element {
                 <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid var(--border)', paddingLeft: '16px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
                     <div style={{ fontWeight: 600, fontSize: '14px' }}>{previewFile.name}</div>
-                    <button className="btn-icon" onClick={() => { setPreviewFile(null); setPreviewOrch(null); }} title="Close preview">
+                    <button className="btn-icon" onClick={() => { previewRequest.current++; setPreviewFile(null); setPreviewOrch(null); }} title="Close preview">
                       <Icons.X />
                     </button>
                   </div>

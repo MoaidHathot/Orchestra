@@ -95,11 +95,10 @@ steps:
     script: |
       $ErrorActionPreference = 'Stop'
 
-      # The reviewer may wrap the YAML in fences or prefix its verdict; strip both.
+      # The final draft is the artifact; an approving reviewer returns only APPROVED.
       $content = @'
-      {{review.output}}
+      {{draft.output}}
       '@
-      $content = $content -replace '(?m)^\s*(APPROVED|NEEDS_WORK)\s*$', ''
       if ($content -match '(?s)```(?:yaml)?\s*(.+?)\s*```') { $content = $Matches[1] }
       $content = $content.Trim()
 

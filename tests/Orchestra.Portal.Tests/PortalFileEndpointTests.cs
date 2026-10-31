@@ -94,6 +94,31 @@ public class PortalFileEndpointTests : IClassFixture<PortalWebApplicationFactory
 
 	#region GET /api/browse
 
+	[Theory]
+	[InlineData("json")]
+	[InlineData("yaml")]
+	public async Task Preview_NormalizesDocumentsWithoutRegisteringThem(string format)
+	{
+		var name = $"preview-{Guid.NewGuid():N}";
+		var content = format == "json" ? CreateValidOrchestrationJson(name) : $"name: {name}\ndescription: Preview\nsteps:\n  - name: render\n    type: Transform\n    template: hello\n";
+		WriteFile($"draft.{format}", content);
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/preview", new { path = Path.Combine(_tempDir, $"draft.{format}") });
+		response.EnsureSuccessStatusCode();
+		var preview = await response.Content.ReadFromJsonAsync<JsonElement>();
+		preview.GetProperty("definition").GetProperty("name").GetString().Should().Be(name);
+		preview.GetProperty("valid").GetBoolean().Should().BeTrue();
+		_factory.Services.GetRequiredService<OrchestrationRegistry>().GetByIdOrName(name).Should().BeNull();
+	}
+
+	[Fact]
+	public async Task PasteYaml_RegistersWithTheNormalRegistry()
+	{
+		var name = $"yaml-{Guid.NewGuid():N}";
+		var response = await _client.PostAsJsonAsync("/api/orchestrations/json", new { json = $"name: {name}\ndescription: Pasted\nsteps:\n  - name: render\n    type: Transform\n    template: hello\n" });
+		response.EnsureSuccessStatusCode();
+		_factory.Services.GetRequiredService<OrchestrationRegistry>().GetByIdOrName(name).Should().NotBeNull();
+	}
+
 	[Fact]
 	public async Task Browse_WithValidDirectory_ReturnsDirectoryEntries()
 	{

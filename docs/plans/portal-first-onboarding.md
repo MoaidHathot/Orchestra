@@ -8,9 +8,11 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
 
 ## Implementation sequence
 
-- [ ] **1. Repair the starting experience.** Fix the generator's approved-result contract,
+- [x] **1. Repair the starting experience.** Fix the generator's approved-result contract,
   provide JSON/YAML preview through the real parser, add a cross-platform folder browser,
   and label Visual Builder clearly as an incomplete preview.
+  Verified with 46 CLI/template tests (including execution of an APPROVED draft),
+  43 Portal file/API tests, TypeScript checking, and directory-picker/builder UI tests.
 - [ ] **2. Workspace and configuration foundation.** Share template/scaffolding and validation
   mechanisms with the host. Add idempotent starter installation, durable workspace-aware
   saving, configuration provenance and validated, conflict-aware settings persistence.
