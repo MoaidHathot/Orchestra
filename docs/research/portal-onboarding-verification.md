@@ -4,6 +4,27 @@ Implementation was split into commits following
 [`portal-first-onboarding.md`](../plans/portal-first-onboarding.md). The browser-facing
 guide is [`portal-onboarding.md`](../portal-onboarding.md).
 
+## Verified result — November 1, 2026
+
+[CI run 41247868046](https://github.com/MoaidHathot/Orchestra/actions/runs/41247868046)
+passed against implementation commit `2428382ddb2157001ab3db4e04920eb4d5e2b204`.
+Downloaded test records and package-verification artifacts confirm:
+
+| Platform | Backend tests | Playwright tests | Fresh package / restart |
+| --- | --- | --- | --- |
+| Windows | 5,213 passed | 13 passed | Passed |
+| Linux | 5,210 passed; 3 Windows-only tests skipped | 13 passed | Passed |
+| macOS | 5,210 passed; 3 Windows-only tests skipped | 13 passed | Passed |
+
+The three skips are the Windows job-object process-guard cases. The Portal job passed
+**493 unit tests**, TypeScript checking and the production build. Separate local live tests
+verified Copilot/OpenCode authoring and model requests, Copilot device-login cancellation,
+and the native OpenCode download/integrity/version path.
+
+The final local smoke package, `Orchestra.0.12.2-onboarding.final.nupkg`, was an internal
+verification artifact. Fresh installation verified its bundled assemblies/assets and the
+demo, saved workflow, configuration, history and assistant refresh across a restart.
+
 ## Requirement review
 
 | Requirement | Implementation and evidence |
@@ -98,5 +119,6 @@ skill/built-in assets, runs the demo, creates a workflow, edits settings, restar
 checks workflow/history/assistant persistence. It owns and stops both test processes.
 CI runs backend, package and Playwright checks on Windows, Linux and macOS.
 
-Local test records and package evidence are under `artifacts/onboarding/`. Final CI
-results are recorded with the completed implementation plan.
+Local test records and package evidence are under `artifacts/onboarding/`. Downloaded CI
+records are in `artifacts/onboarding/ci-final-artifacts/`, with a compact summary in
+`artifacts/onboarding/ci-artifact-summary.json`.

@@ -42,7 +42,7 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
   Welcome and Settings are lazy-loaded; existing dashboards retain their normal view.
   Forms send only edited fields, surface conflicts/restarts and reconnect to active setup
   jobs. All 488 Portal tests and TypeScript checking passed before this commit.
-- [ ] **6. End-to-end verification and review.** Exercise clean-profile and existing-workspace
+- [x] **6. End-to-end verification and review.** Exercise clean-profile and existing-workspace
   paths, settings round trips/restarts, bundled assets, authoring and registration, provider
   jobs, cancellation and all affected backend/UI tests. Run full CI and isolated browser
   tests. Revisit every item and document evidence and any necessary corrections.
@@ -59,6 +59,11 @@ source paths, registry IDs, run history, and CLI workflows remain compatible.
   OpenCode without npm. Restart coverage now includes an interrupted configuration Approval;
   it caught and fixed checkpoint injection, cancellation classification and shutdown drain
   gaps in the shared launcher. See [the requirement review](../research/portal-onboarding-verification.md).
+  Final [CI run 41247868046](https://github.com/MoaidHathot/Orchestra/actions/runs/41247868046)
+  passed for implementation commit `2428382ddb2157001ab3db4e04920eb4d5e2b204`:
+  Windows 5,213 backend passes; Linux/macOS 5,210 passes each with the three Windows job-object
+  tests skipped; all three platforms passed 13 browser tests and fresh-package verification.
+  The Portal job passed all 493 unit tests, type checking and the production build.
 
 Each numbered step is tested and committed before proceeding. Add meaningful regression
 coverage for observed defects and integration/browser coverage for the complete journey.
