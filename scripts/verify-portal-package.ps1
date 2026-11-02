@@ -6,7 +6,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$Source = [IO.Path]::GetFullPath($Source)
+$sourceUri = $null
+if (-not [Uri]::TryCreate($Source, [UriKind]::Absolute, [ref]$sourceUri) -or $sourceUri.Scheme -notin @('http', 'https')) {
+  $Source = [IO.Path]::GetFullPath($Source)
+}
 $evidence = [IO.Path]::GetFullPath($EvidenceDirectory)
 $temporaryBase = if ($IsWindows -and (Test-Path "$env:LOCALAPPDATA/Temp/opencode")) { "$env:LOCALAPPDATA/Temp/opencode" } else { [IO.Path]::GetTempPath() }
 $root = Join-Path $temporaryBase "orchestra-package-$([Guid]::NewGuid().ToString('N'))"
