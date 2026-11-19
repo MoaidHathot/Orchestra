@@ -104,11 +104,11 @@ Run **`orchestra doctor`** to see which file is actually in effect and whether i
 
 ### Global MCP startup
 
-Execution hosts, including `orchestra portal`, **validate every global MCP before startup
-completes**. Startup proceeds in this order:
+Execution hosts, including `orchestra portal`, validate global MCPs before startup completes,
+except for delegated Entra connections, which authenticate silently on first use. Startup proceeds in this order:
 
 1. Start managed services and wait for their configured readiness checks.
-2. Connect each global MCP and perform `tools/list` where supported. This also checks backends
+2. Connect each non-delegated global MCP and perform `tools/list` where supported. This also checks backends
    behind another proxy that defers authentication until discovery.
 3. Start serving the portal and executing orchestrations.
 
@@ -260,6 +260,48 @@ Both default to false. Orchestration `defaultEnableConfigDiscovery` /
 per-step values override both. Discovery uses the agent working directory and runtime rules;
 explicit `skillDirectories` / `instructionDirectories` use the orchestration file as their
 relative-path base. See [Copilot discovery and session controls](copilot.md#discovery-and-explicit-directories).
+
+### Hosted Work IQ and other delegated Entra MCPs
+
+Declare the connection once in `orchestra.mcp.json` beside the effective `orchestra.json`.
+For Work IQ, set `WORKIQ_CLIENT_ID` to your authorized **public** client ID and
+`WORKIQ_TENANT_ID` to the work tenant GUID. Use the loopback redirect registered for that client.
+
+```json
+{
+  "mcps": [{
+    "name": "workiq",
+    "type": "remote",
+    "endpoint": "https://workiq.svc.cloud.microsoft/mcp",
+    "auth": {
+      "type": "entra",
+      "clientId": "${WORKIQ_CLIENT_ID}",
+      "tenantId": "${WORKIQ_TENANT_ID}",
+      "redirectUri": "http://localhost:12798/",
+      "scopes": ["fdcc1f02-fc51-4226-8753-f668596af7f7/WorkIQAgent.Ask"]
+    },
+    "allowedTools": ["ask", "retrieve"]
+  }]
+}
+```
+
+Run `orchestra mcp connect workiq` once as the OS user that runs Orchestra. Then run
+`orchestra mcp test workiq` from a new terminal/process: it should list `ask` and `retrieve`
+without opening a browser. Steps and subagents use `mcps: [workiq]`; do not redeclare the
+connection inline. No external MCP proxy or manually refreshed bearer header is needed.
+
+The host connects to the HTTPS upstream with an SDK credential on each HTTP request; agents
+receive only Orchestra's existing per-server loopback route. Startup defers delegated connections
+so an unavailable work account does not block unrelated workflows. Background calls never start
+interactive sign-in. If the account needs consent or reauthentication, use `mcp connect` again;
+restart the host after switching accounts. `allowedTools` is an optional, case-sensitive, exact-name allowlist
+for both discovery and invocation. `auth` and `allowedTools` are host-level remote settings.
+
+The OS-protected token cache is isolated by endpoint, public client, tenant, scopes and redirect.
+The non-token SDK account-selection record lives in the user's local application data under
+`Orchestra/mcp-auth`. Hosts need a supported OS credential store (e.g. a user keyring on Linux);
+there is no plaintext token fallback. `scripts/test-workiq-entra.ps1` exercises silent discovery
+and a real read-only retrieval through an isolated agent run (use `-Connect` for initial sign-in).
 
 ### Copilot MCP-startup timeout
 

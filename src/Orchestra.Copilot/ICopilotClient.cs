@@ -59,7 +59,7 @@ internal interface ICopilotSession : IAsyncDisposable
 	Task ApplySandboxAsync(Orchestra.Engine.SandboxPolicy policy, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
-internal sealed class CopilotSdkClientAdapter : ICopilotClient
+internal sealed partial class CopilotSdkClientAdapter : ICopilotClient, Orchestra.Engine.IDecisionProvider
 {
 	private readonly CopilotClient _client;
 	private readonly bool _ownsClient;
@@ -325,9 +325,18 @@ internal sealed class CopilotSdkClientFactory : ICopilotClientFactory
 
 		// SDK 1.0.0 replaced CopilotClientOptions.CliPath with the RuntimeConnection abstraction;
 		// stdio (child-process) is what we used before, so this is a like-for-like translation.
+		var connection = RuntimeConnection.ForStdio(cliPath);
+		// This SDK option replaces the inherited environment. Keep PATH, auth and other feature flags
+		// on the shared worker; never change process-wide flags in a multi-run host.
+		var environment = Environment.GetEnvironmentVariables().Cast<System.Collections.DictionaryEntry>().ToDictionary(
+			e => (string)e.Key, e => (string)e.Value!, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+		const string flagsKey = "COPILOT_CLI_ENABLED_FEATURE_FLAGS";
+		var flags = (environment.GetValueOrDefault(flagsKey) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+		environment[flagsKey] = string.Join(',', flags.Append("DECISIONS_API").Distinct(StringComparer.Ordinal));
+		connection.Environment = environment;
 		var options = new CopilotClientOptions
 		{
-			Connection = RuntimeConnection.ForStdio(cliPath),
+			Connection = connection,
 		};
 
 		// Optional: BaseDirectory routes Copilot's per-session state (COPILOT_HOME) to a

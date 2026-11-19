@@ -15,7 +15,7 @@ inputs ─▶ ┌─ research ─┐                       orchestra init
 ## Highlights
 
 - **Start in your browser.** `dnx Orchestra -- portal --open` opens a guided workspace with a credential-free demo, provider setup, workflow authoring, and Settings.
-- **One file, one DAG.** Steps (`Prompt`, `Command`, `Script`, `Http`, `Transform`, `Approval`, nested `Orchestration`) wired by `dependsOn`, with template expressions (`{{param.x}}`, `{{step.output}}`).
+- **One file, one DAG.** Steps (`Prompt`, `Decision`, `Command`, `Script`, `Http`, `Transform`, `Approval`, nested `Orchestration`) wired by `dependsOn`, with template expressions (`{{param.x}}`, `{{step.output}}`).
 - **Pluggable agents.** Run any Prompt step on `copilot` or `opencode`, selectable per step or per orchestration.
 - **MCP-native.** Attach Model Context Protocol servers to steps, and expose your orchestrations *as* an MCP server.
 - **Agent Skills.** Drop `SKILL.md` directories onto a step so the agent gains specialized, on-demand workflows.
@@ -183,6 +183,7 @@ verbs (`orchestra list`, `get`, `register`, `attach`, `runs`, `triggers`, `profi
 | Type | Purpose |
 |------|---------|
 | `Prompt` | Run a coding agent (Copilot/OpenCode) with a system/user prompt, optional MCPs, subagents, skills, attachments. |
+| [`Decision`](docs/decisions.md) | Ask Copilot for booleans, choices, and scores in one call. Branch on named answers, e.g. `{{triage.output.answers.team.value}}`. [Runnable example](examples/copilot-decision-triage.yaml). |
 | `Command` | Execute a shell/CLI command and capture its output. |
 | `Script` | Run an inline PowerShell/bash/python/node script. Can deterministically set its status or halt the run (`orchestra_complete`/`set_status` equivalent) via the control channel. |
 | `Http` | Make an HTTP request (templated URL/headers/body). |

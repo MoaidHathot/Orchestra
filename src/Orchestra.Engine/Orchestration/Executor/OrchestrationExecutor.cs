@@ -135,6 +135,7 @@ public partial class OrchestrationExecutor
 				planHistory: _runStore as IPlanHistoryStore);
 			_stepExecutorRegistry = new StepExecutorRegistry()
 				.Register(new PromptStepExecutor(promptExecutor))
+				.Register(new DecisionStepExecutor(_providerRegistry, reporter, loggerFactory.CreateLogger<DecisionStepExecutor>()))
 				.Register(new HttpStepExecutor(reporter, loggerFactory.CreateLogger<HttpStepExecutor>()))
 				.Register(new TransformStepExecutor(loggerFactory.CreateLogger<TransformStepExecutor>(), reporter))
 				.Register(new CommandStepExecutor(reporter, loggerFactory.CreateLogger<CommandStepExecutor>()))
@@ -156,7 +157,7 @@ public partial class OrchestrationExecutor
 
 	/// <summary>
 	/// Resolves the distinct set of agent builders whose run scopes must be opened for this
-	/// run: one per provider referenced by a Prompt step, plus the host default provider when
+	/// run: one per provider referenced by a Prompt or Decision step, plus the host default provider when
 	/// this executor will itself run a transform agent (a trigger input handler, or a
 	/// parent-supplied child-orchestration input handler — both arrive as
 	/// <c>preExecutionParameterTransform</c> and execute inside this run scope). Child
@@ -170,9 +171,13 @@ public partial class OrchestrationExecutor
 		var builders = new List<AgentBuilder>();
 		var prompts = orchestration.Steps.OfType<PromptOrchestrationStep>().ToDictionary(s => s.Name);
 
-		void Add(string? providerName)
+		void Add(string? providerName, bool forDecision = false)
 		{
 			var builder = _providerRegistry.Resolve(providerName);
+			// A single-provider registry resolves every name to its sole builder. Don't launch
+			// an unrelated worker; the Decision executor reports the unsupported step if it runs.
+			if (forDecision && builder is not IDecisionProvider)
+				return;
 			if (seen.Add(builder))
 				builders.Add(builder);
 		}
@@ -187,6 +192,9 @@ public partial class OrchestrationExecutor
 			if (prompt.Loop is { } loop && prompts.TryGetValue(loop.Target, out var target) && target.Enabled)
 				Add(target.Provider ?? orchestration.DefaultProvider);
 		}
+		// Decisions lease the same Copilot worker pool as prompts, including in otherwise all-OpenCode runs.
+		if (orchestration.Steps.OfType<DecisionOrchestrationStep>().Any(s => s.Enabled && checkpoint?.CompletedSteps.ContainsKey(s.Name) != true))
+			Add(DecisionOrchestrationStep.ProviderName, forDecision: true);
 
 		// Trigger / child-orchestration input-handler transforms run inside THIS scope on the
 		// host default provider (a small JSON-shaping call). We do NOT open the default scope

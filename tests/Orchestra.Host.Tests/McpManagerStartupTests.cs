@@ -235,6 +235,21 @@ public class McpManagerStartupTests
 		await connect.Should().ThrowAsync<SocketException>("failed startup must release its listener");
 	}
 
+	[Fact]
+	public async Task GlobalRemoteHeaders_AreSentToBackendForDiscoveryAndCalls_NotToAgent()
+	{
+		using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+		await using var backend = new HttpBackend { RequireHeader = true };
+		await backend.StartAsync(timeout.Token);
+		await using var manager = CreateManager();
+		var server = new RemoteMcp { Name = "header-test", Type = McpType.Remote, Endpoint = backend.Endpoint, Headers = new() { ["X-Workspace-Test"] = "fixture" } };
+		await manager.InitializeAsync([server], timeout.Token);
+		((RemoteMcp)manager.Resolve([server]).Single()).Headers.Should().BeEmpty();
+		await using var client = await ConnectAsync(manager, server, timeout.Token);
+		(await client.ListToolsAsync(cancellationToken: timeout.Token)).Should().ContainSingle();
+		(await client.CallToolAsync("echo", cancellationToken: timeout.Token)).IsError.Should().NotBe(true);
+	}
+
 	private static McpManager CreateManager(int startupTimeoutSeconds = 10) => new(NullLogger<McpManager>.Instance,
 		new McpServerOptions
 		{
@@ -299,6 +314,11 @@ public class McpManagerStartupTests
 			_app.Use(async (context, next) =>
 			{
 				Interlocked.Increment(ref _requestCount);
+				if (RequireHeader && context.Request.Headers["X-Workspace-Test"] != "fixture")
+				{
+					context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+					return;
+				}
 				var hasSession = context.Request.Headers.ContainsKey("Mcp-Session-Id");
 				if (HttpMethods.IsPost(context.Request.Method) && !hasSession)
 				{
@@ -328,6 +348,7 @@ public class McpManagerStartupTests
 		public TaskCompletionSource DiscoveryStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 		public bool RejectDiscovery { get; init; }
 		public bool BlockInitialization { get; init; }
+		public bool RequireHeader { get; init; }
 		public bool BlockDiscovery { get; init; }
 		public bool RejectSessionRequests { set => _rejectSessionRequests = value; }
 		public Task StartAsync(CancellationToken cancellationToken) => _app.StartAsync(cancellationToken);

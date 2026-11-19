@@ -525,6 +525,20 @@ Makes an HTTP request, captures response body.
 | `contentType` | string | No | `"application/json"` |
 | `maxOutputBytes` | int | No | 10485760 (10 MiB); 0 = no cap |
 
+### Decision Step (type: "Decision")
+
+For classification or scoring, use one sessionless Copilot request with shared `context` and named `questions`. Its default model is `microsoft-decision-1` (observed upstream: `microsoft-decision-1.1`), independent of Prompt defaults. Do not put a decision model in a Prompt step. Use `contextFormat: json` for an upstream JSON object or array of objects.
+
+```yaml
+- name: classify
+  type: Decision
+  context: "{{param.ticket}}"
+  questions:
+    - { name: refund, kind: boolean, instructions: "Is a refund requested?", threshold: 0.85 }
+```
+
+Branch with `when: "{{classify.output.answers.refund.value}}"`. `choice` takes 2–10 `{value, description}` options; `score` takes 2–10 ordered `{label, description}` levels and optional `range: {min, max}`. Read the raw probability/score as well as `value`. See [the full schema reference](references/full-schema-reference.md#decision-step) for the output shapes.
+
 ### Transform Step (type: "Transform")
 
 Pure string interpolation (no LLM, no I/O).
@@ -646,7 +660,7 @@ Invokes another registered orchestration. Use this when a flow should delegate t
     continueOnItemFailure: true
 ```
 
-To fan out over something that is *not* a child orchestration, generate the array in an earlier step and wrap the per-item work in its own orchestration. There is no `forEach` on `Prompt`, `Command`, `Script`, `Http`, `Transform`, or `Approval` steps.
+To fan out over something that is *not* a child orchestration, generate the array in an earlier step and wrap the per-item work in its own orchestration. Only `Orchestration` steps have `forEach`.
 
 **Drill-in template bindings.** For every step whose `type` is `Orchestration`, dependants can read the child run's per-step data via these template accessors. The data is populated on every terminal branch (success, failure, cancellation) and is in-process / untruncated — no MCP round-trip needed.
 

@@ -174,6 +174,13 @@ public class Program
 			.WithExample("validate", "./draft.yaml", "--format", "json");
 
 		// ── Configuration (branch) ───────────────────────────────────────────────
+		config.AddBranch("mcp", branch =>
+		{
+			branch.SetDescription("Authenticate and test remote MCP connections.");
+			branch.AddCommand<McpConnectCommand>("connect").WithDescription("Sign in to a configured Entra MCP using a browser.");
+			branch.AddCommand<McpTestCommand>("test").WithDescription("Check remote MCP tool discovery without prompting for sign-in.");
+		});
+
 		config.AddBranch("config", branch =>
 		{
 			branch.SetDescription("Inspect the configuration in effect.");

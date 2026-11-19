@@ -10,6 +10,7 @@ controls fail before inference; adapters must not silently discard them.
 | Default working directory | Definition directory | Definition directory |
 | Normal tool loop/internal planning | Native | Native |
 | Independent Prompt sessions | Yes | Yes |
+| [Decision steps](decisions.md) | Sessionless Decisions RPC | — |
 | Explicit skills/instructions | Native directory controls | Native skill paths/instruction files |
 | Ambient/nested discovery | Independently configurable | Enabled; explicit false rejected |
 | Human input | Native question/elicitation callbacks | Native forms and permission replies |

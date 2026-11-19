@@ -40,6 +40,8 @@ function getStepType(step: LooseStep | Step | string): string {
  */
 function getTypeBadge(stepType: string): string {
   switch (stepType) {
+    case 'decision':
+      return '\u25C7'; // ◇ — decision
     case 'http':
       return '\u2197'; // ↗  — request going out
     case 'command':
@@ -71,6 +73,7 @@ function buildMetadataLine(step: LooseStep | Step | string): string | null {
   const stepType = getStepType(step);
 
   switch (stepType) {
+    case 'decision':
     case 'prompt': {
       const model = s.model as string | undefined;
       if (model) {

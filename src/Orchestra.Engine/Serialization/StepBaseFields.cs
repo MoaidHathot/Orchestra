@@ -4,8 +4,7 @@ namespace Orchestra.Engine;
 
 /// <summary>
 /// The fields every step type shares (<see cref="OrchestrationStep"/>), parsed once here so the
-/// seven <see cref="IStepTypeParser"/> implementations cannot drift — adding a base field such as
-/// <c>when</c> is a single edit instead of seven.
+/// <see cref="IStepTypeParser"/> implementations agree on how to read fields such as <c>when</c>.
 /// </summary>
 /// <remarks>
 /// <see cref="Parameters"/> is intentionally not included: the Orchestration step type uses the

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/MoaidHathot/orchestra/main/schemas/orchestration.schema.json",
   "title": "Orchestra Orchestration",
-  "description": "Schema for Orchestra orchestration definition files (.json and .yaml). Defines a DAG of steps (Prompt, Http, Transform, Command, Script, Orchestration) with triggers, MCP servers, subagents, retry policies, and template expressions.",
+  "description": "Schema for Orchestra orchestration definition files (.json and .yaml). Defines a DAG of steps (Prompt, Decision, Http, Transform, Command, Script, Orchestration, Approval) with triggers, MCP servers, subagents, retry policies, and template expressions.",
   "$comment": "Template expressions use the {{namespace.property}} syntax. Recognized namespaces: param.<name>, vars.<name>, env.<VAR>, orchestration.{name|version|runId|startedAt|tempDir|sourcePath|sourceDirectory}, step.{name|type}, server.url, and <stepName>.{output|rawOutput|files|files[N]}. For steps of type Orchestration the referenced step additionally supports: <stepName>.{executionId|status|errorMessage|completionReason|childResult|steps} and <stepName>.steps.<childStepName>.{output|rawOutput|error|status|files|files[N]}. This schema cannot semantically validate template targets (e.g., that the referenced step exists or is reachable via DependsOn); the C# TemplateExpressionValidator does that at orchestration registration time. See docs/engine.md#template-expressions for the authoritative reference.",
   "type": "object",
   "required": ["name", "description", "steps"],
@@ -181,7 +181,7 @@
         "type": {
           "type": "string",
           "description": "Step type determining execution behavior.",
-          "enum": ["Prompt", "Http", "Transform", "Command", "Script", "Orchestration", "Approval", "prompt", "http", "transform", "command", "script", "orchestration", "approval"]
+          "enum": ["Prompt", "Decision", "Http", "Transform", "Command", "Script", "Orchestration", "Approval", "prompt", "decision", "http", "transform", "command", "script", "orchestration", "approval"]
         },
         "dependsOn": {
           "type": "array",
@@ -235,6 +235,10 @@
         }
       },
       "allOf": [
+        {
+          "if": { "properties": { "type": { "enum": ["Decision", "decision"] } } },
+          "then": { "$ref": "#/$defs/decisionStepProperties" }
+        },
         {
           "if": {
             "properties": {
@@ -661,6 +665,71 @@
           "description": "Maximum bytes of output the step keeps (stdout and stderr combined for Command/Script; the response body for Http). Omit for the engine default of 10485760 (10 MiB); 0 disables the cap. Output beyond the cap is dropped, a '[output truncated: ...]' marker is appended and an 'output-truncated' session warning is reported."
         }
       }
+    },
+
+    "decisionStepProperties": {
+      "type": "object",
+      "description": "One sessionless Copilot Decisions request. Answers are keyed by question name in the step's JSON output.",
+      "required": ["context", "questions"],
+      "properties": {
+        "provider": { "const": "copilot" },
+        "model": { "type": "string", "minLength": 1, "default": "microsoft-decision-1", "description": "Decision catalog ID, independent of defaultModel. Supports templates." },
+        "context": { "type": "string", "minLength": 1, "description": "Shared evidence. Supports {{param.x}} and {{step.output}}." },
+        "contextFormat": { "enum": ["text", "json"], "default": "text", "description": "For json, the resolved context must parse as an object or an array of objects." },
+        "questions": { "type": "array", "minItems": 1, "maxItems": 32, "items": { "$ref": "#/$defs/decisionQuestion" } }
+      }
+    },
+    "decisionQuestion": {
+      "type": "object",
+      "required": ["name", "kind", "instructions"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$", "description": "Unique output key." },
+        "instructions": { "type": "string", "minLength": 1 }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "kind": { "const": "boolean" },
+            "whenTrue": { "type": "string" }, "whenFalse": { "type": "string" },
+            "threshold": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.5, "description": "value is true if probability >= threshold." }
+          }
+        },
+        {
+          "required": ["options"],
+          "properties": {
+            "kind": { "const": "choice" },
+            "options": {
+              "type": "array", "minItems": 2, "maxItems": 10,
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["value", "description"],
+                "properties": {
+                  "value": { "type": "string", "pattern": "^[A-Za-z0-9._:/@-]{1,64}$" },
+                  "description": { "type": "string", "minLength": 1 }
+                }
+              }
+            }
+          }
+        },
+        {
+          "required": ["levels"],
+          "properties": {
+            "kind": { "const": "score" },
+            "levels": {
+              "type": "array", "minItems": 2, "maxItems": 10, "description": "Ordered rubric, lowest to highest.",
+              "items": {
+                "type": "object", "additionalProperties": false, "required": ["label", "description"],
+                "properties": { "label": { "type": "string", "minLength": 1 }, "description": { "type": "string", "minLength": 1 } }
+              }
+            },
+            "range": {
+              "type": "object", "additionalProperties": false, "required": ["min", "max"],
+              "description": "Optional application scale (min < max). value is rescaled; score remains the raw expected level index.",
+              "properties": { "min": { "type": "number" }, "max": { "type": "number" } }
+            }
+          }
+        }
+      ],
+      "unevaluatedProperties": false
     },
 
     "transformStepProperties": {

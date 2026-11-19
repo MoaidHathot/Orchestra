@@ -90,6 +90,24 @@
                 "description": "Remote MCP server endpoint URL.",
                 "minLength": 1
               },
+              "auth": {
+                "type": "object",
+                "description": "Host-owned delegated Entra sign-in. Use orchestra mcp connect <name> before unattended runs.",
+                "additionalProperties": false,
+                "required": ["type", "clientId", "tenantId", "scopes"],
+                "properties": {
+                  "type": { "const": "entra" },
+                  "clientId": { "type": "string", "minLength": 1 },
+                  "tenantId": { "type": "string", "minLength": 1 },
+                  "scopes": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+                  "redirectUri": { "type": "string", "description": "Registered HTTP loopback redirect URI; defaults to http://localhost/." }
+                }
+              },
+              "allowedTools": {
+                "type": "array", "minItems": 1, "uniqueItems": true,
+                "description": "Exact tool names permitted for discovery and invocation on this connection.",
+                "items": { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,128}$" }
+              },
               "headers": {
                 "type": "object",
                 "description": "HTTP headers to include when connecting to the remote MCP server.",

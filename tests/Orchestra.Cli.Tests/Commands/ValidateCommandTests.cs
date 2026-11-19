@@ -218,6 +218,25 @@ public sealed class ValidateCommandTests : IDisposable
 	}
 
 	[Fact]
+	public void ValidateSchema_AcceptsDecisionRubric_ButRejectsChatOnlyFields()
+	{
+		const string decision = """
+			name: validate-decision
+			description: Decision schema
+			steps:
+			  - name: route
+			    type: Decision
+			    context: Is this a refund?
+			    questions: [{ name: refund, kind: boolean, instructions: Check for a refund., threshold: 0.9 }]
+			""";
+		var good = NewTester().Run("validate", WriteFile("decision.yaml", decision), "--schema");
+		good.ExitCode.Should().Be(0, good.Output);
+		var bad = NewTester().Run("validate", WriteFile("decision-chat.yaml", decision + "\n    userPrompt: mistaken chat prompt\n"), "--schema");
+		bad.ExitCode.Should().Be(1);
+		bad.Output.Should().Contain("userPrompt");
+	}
+
+	[Fact]
 	public void ValidateSchema_TypoInTopLevelKey_IsCaught_WhereThePlainParserIsSilent()
 	{
 		// The deserializer ignores unknown keys, so `maxConcurency` silently means "unbounded".

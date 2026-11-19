@@ -11,18 +11,11 @@ public static class OrchestrationParser
 	/// <summary>
 	/// Default step type parser registry with built-in step types.
 	/// </summary>
-	private static readonly StepTypeParserRegistry s_defaultParserRegistry = new StepTypeParserRegistry()
-		.Register(new PromptStepTypeParser())
-		.Register(new HttpStepTypeParser())
-		.Register(new TransformStepTypeParser())
-		.Register(new CommandStepTypeParser())
-		.Register(new ScriptStepTypeParser())
-		.Register(new OrchestrationStepTypeParser())
-		.Register(new ApprovalStepTypeParser());
+	private static readonly StepTypeParserRegistry s_defaultParserRegistry = CreateDefaultParserRegistry();
 
 	private static readonly StepParseContext s_defaultContext = new(BaseDirectory: null);
 
-	private static readonly JsonSerializerOptions s_options = CreateOptions(s_defaultParserRegistry, s_defaultContext);
+	private static readonly JsonSerializerOptions s_options = CreateOptions(s_defaultParserRegistry, s_defaultContext, globalMcps: true);
 	private static readonly JsonSerializerOptions s_mcpOptions = new(s_options)
 	{
 		ReadCommentHandling = JsonCommentHandling.Skip,
@@ -37,6 +30,7 @@ public static class OrchestrationParser
 	{
 		return new StepTypeParserRegistry()
 			.Register(new PromptStepTypeParser())
+			.Register(new DecisionStepTypeParser())
 			.Register(new HttpStepTypeParser())
 			.Register(new TransformStepTypeParser())
 			.Register(new CommandStepTypeParser())
@@ -45,7 +39,7 @@ public static class OrchestrationParser
 			.Register(new ApprovalStepTypeParser());
 	}
 
-	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry, StepParseContext context)
+	private static JsonSerializerOptions CreateOptions(StepTypeParserRegistry parserRegistry, StepParseContext context, bool globalMcps = false)
 	{
 		return new JsonSerializerOptions
 		{
@@ -54,7 +48,7 @@ public static class OrchestrationParser
 			{
 				new OrchestrationStepConverter(parserRegistry, context),
 				new AgentPoolConfigConverter(),
-				new McpConverter(context),
+				new McpConverter(context, globalMcps),
 				new TriggerConfigConverter(),
 				new HookEventTypeJsonConverter(),
 				new HookStepSelectionJsonConverter(),
@@ -238,6 +232,16 @@ public static class OrchestrationParser
 		return ParseMcps(json);
 	}
 
+	/// <summary>Connection diagnostics should not require credentials or environment variables for unrelated servers.</summary>
+	public static Mcp ParseNamedMcpFile(string path, string name)
+	{
+		using var document = JsonDocument.Parse(File.ReadAllText(path), new() { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+		var entries = document.RootElement.GetProperty("mcps").EnumerateArray().Where(e => e.TryGetProperty("name", out var n)
+			&& string.Equals(n.GetString(), name, StringComparison.OrdinalIgnoreCase)).ToArray();
+		if (entries.Length != 1) throw new ArgumentException($"Expected one MCP named '{name}' in {path}, found {entries.Length}.");
+		return ParseMcps(EnvironmentVariableExpander.Expand("{\"mcps\":[" + entries[0].GetRawText() + "]}", path)).Single();
+	}
+
 	private sealed class McpConfigDocument
 	{
 		public required Mcp[] Mcps { get; init; }
@@ -343,15 +347,8 @@ public static class OrchestrationParser
 		return resolved;
 	}
 
-	private sealed class McpConverter : JsonConverter<Mcp>
+	private sealed class McpConverter(StepParseContext context, bool globalMcps) : JsonConverter<Mcp>
 	{
-		private readonly StepParseContext _context;
-
-		public McpConverter(StepParseContext context)
-		{
-			_context = context;
-		}
-
 		public override Mcp Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
 		{
 			using var doc = JsonDocument.ParseValue(ref reader);
@@ -362,6 +359,10 @@ public static class OrchestrationParser
 				: throw new JsonException("Missing 'type' property on MCP entry.");
 
 			var name = root.GetProperty("name").GetString()!;
+			var hasAuth = root.TryGetProperty("auth", out var auth);
+			var hasTools = root.TryGetProperty("allowedTools", out var tools);
+			if ((hasAuth || hasTools) && (!globalMcps || type != McpType.Remote))
+				throw new JsonException($"MCP '{name}': auth and allowedTools belong on a remote connection in orchestra.mcp.json. Reference it by name in the workflow.");
 
 			// Optional per-server timeout (seconds). Allows YAML authors to configure long
 			// timeouts for MCP servers that host long-running tools (e.g., orchestra MCP's
@@ -415,7 +416,7 @@ public static class OrchestrationParser
 				}
 			}
 
-			return type switch
+			Mcp result = type switch
 			{
 				McpType.Local => new LocalMcp
 				{
@@ -425,7 +426,7 @@ public static class OrchestrationParser
 					Arguments = root.TryGetProperty("arguments", out var args)
 						? args.EnumerateArray().Select(e => e.GetString()!).ToArray()
 						: [],
-					WorkingDirectory = ResolveWorkingDirectory(root, _context),
+					WorkingDirectory = ResolveWorkingDirectory(root, context),
 					Environment = ReadEnvironment(root, name),
 					Timeout = timeout,
 					TimeoutTemplate = timeoutTemplate,
@@ -435,6 +436,8 @@ public static class OrchestrationParser
 					Name = name,
 					Type = McpType.Remote,
 					Endpoint = root.GetProperty("endpoint").GetString()!,
+					Auth = hasAuth ? auth.Deserialize<EntraMcpAuth>(options) ?? throw new JsonException("auth cannot be null.") : null,
+					AllowedTools = hasTools ? tools.Deserialize<string[]>(options) ?? throw new JsonException("allowedTools cannot be null.") : null,
 					Headers = root.TryGetProperty("headers", out var headers)
 						? headers.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.GetString()!)
 						: [],
@@ -443,6 +446,8 @@ public static class OrchestrationParser
 				},
 				_ => throw new JsonException($"Unknown MCP type: '{type}'."),
 			};
+			if (result is RemoteMcp remote) EntraMcpAuth.ValidateManagedConnection(remote);
+			return result;
 		}
 
 		public override void Write(Utf8JsonWriter writer, Mcp value, JsonSerializerOptions options)

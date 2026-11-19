@@ -357,6 +357,7 @@ Every command supports `--help`. The summaries here are the same text Spectre pr
 | `orchestra init [DIRECTORY] [-t ID] [-p PROVIDER] [-m MODEL] [--no-config] [--no-schemas] [-f] [-y]` | Scaffold a workspace: starter orchestration, JSON schemas, and `orchestra.json`. |
 | `orchestra new <NAME> [-t ID] [-f]` / `orchestra new --list` | Add another orchestration to the workspace from a template, renamed to `<NAME>`. |
 | `orchestra login [-p PROVIDER] [--device-code]` | Sign in to the agent provider by running `copilot login` or `opencode auth login`. |
+| `orchestra mcp connect <name>` / `orchestra mcp test <name>` | Sign in to a global Entra MCP, or test remote tool discovery silently. See [hosted Work IQ](host.md#hosted-work-iq-and-other-delegated-entra-mcps). |
 | `orchestra doctor [--format text\|json] [-p PROVIDER] [--fix] [--offline]` | Check prerequisites: config, data path, agent CLI, credentials, server. |
 | `orchestra config show [--format text\|json]` | Show which `orchestra.json` is in effect, where it came from, its sidecars and the resolved settings. |
 | `orchestra schemas [-o DIR] [-f]` | Copy the bundled JSON schemas into a local directory (default `./.orchestra/schemas`). |

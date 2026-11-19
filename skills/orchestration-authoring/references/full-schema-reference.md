@@ -13,6 +13,7 @@ This is the complete property-level reference for every field, step type, trigge
   - [Base Step Properties](#base-step-properties)
   - [Prompt Step](#prompt-step)
   - [Http Step](#http-step)
+  - [Decision Step](#decision-step)
   - [Transform Step](#transform-step)
   - [Command Step](#command-step)
   - [Script Step](#script-step)
@@ -286,7 +287,7 @@ These properties are shared by **all** step types.
 | Property | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `name` | `string` | **Yes** | -- | Unique name within the orchestration. Used to reference this step in `dependsOn` and template expressions. |
-| `type` | `string` | **Yes** | -- | Step type. One of: `"Prompt"`, `"Http"`, `"Transform"`, `"Command"`, `"Script"`, `"Orchestration"`, `"Approval"` (case-insensitive). |
+| `type` | `string` | **Yes** | -- | Step type. One of: `"Prompt"`, `"Decision"`, `"Http"`, `"Transform"`, `"Command"`, `"Script"`, `"Orchestration"`, `"Approval"` (case-insensitive). |
 | `dependsOn` | `string[]` | No | `[]` | Names of steps that must complete before this step runs. Defines the DAG edges. |
 | `parameters` | `string[]` or `object` | No | `[]` | For most step types, parameter names this step expects. For Orchestration steps, child parameter values keyed by child input name. |
 | `enabled` | `bool` | No | `true` | When `false`, the step is skipped during execution (recorded as an empty success; dependents see `""`). Static switch. |
@@ -526,6 +527,18 @@ Makes an HTTP request and captures the response body as output. No LLM is involv
 | `maxOutputBytes` | `int` | No | `10485760` (10 MiB) | Maximum bytes of the response body kept. The body is read from the network only up to the cap; the rest is discarded, `[output truncated: ...]` is appended and an `output-truncated` session warning is reported. `0` disables the cap. |
 
 ---
+
+### Decision Step
+
+`type: Decision` batches 1–32 named questions about the same evidence. `context` is a required template string; optional `contextFormat` is `text` (default) or `json` (object or array of objects). `model` defaults to `microsoft-decision-1` and `provider` is `copilot`. Chat defaults do not apply.
+
+Each item in `questions` has a unique `name`, `kind` and `instructions`:
+
+- `boolean`: optional `whenTrue`, `whenFalse` and `threshold` (default 0.5). Answer: `probability`, `threshold`, Boolean `value`.
+- `choice`: `options` is an array of 2–10 `{value, description}` objects. Answer: selected `value`, `tied`, `confidence`, `probabilities` by value.
+- `score`: `levels` is an ordered array of 2–10 `{label, description}` objects. Answer: `level`, raw expected zero-based `score`, `confidence`, `probabilities` by label, and numeric `value`. Optional `range: {min, max}` rescales `value`.
+
+Read `{{stepName.output.answers.questionName.value}}` or branch on the answer's `kind` (`refused` has no value). `model`, optional `upstreamModel`, `latencyMs`, and optional `usage` are siblings of `answers` in the output.
 
 ### Transform Step
 
@@ -937,7 +950,7 @@ Runtime file-writing steps should receive absolute paths. Build paths relative t
 ## Enums Reference
 
 ### Step Types
-`Prompt`, `Http`, `Transform`, `Command`, `Script`, `Orchestration`, `Approval` (case-insensitive)
+`Prompt`, `Decision`, `Http`, `Transform`, `Command`, `Script`, `Orchestration`, `Approval` (case-insensitive)
 
 ### System Prompt Mode
 `Append` (adds to SDK built-in prompts), `Replace` (removes SDK built-in prompts), `Customize` (selectively override individual sections)

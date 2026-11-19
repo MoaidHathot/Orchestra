@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Orchestra.Copilot\Orchestra.Copilot.csproj" />
+    <None Include="..\..\examples\copilot-decision-triage.yaml" Link="examples\copilot-decision-triage.yaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

@@ -1740,6 +1740,7 @@ public partial class CopilotAgent : IAgent
 					break;
 
 				case RemoteMcp remote:
+					remote.EnsureAgentReady();
 					servers[mcp.Name] = new McpHttpServerConfig
 					{
 						Url = remote.Endpoint,

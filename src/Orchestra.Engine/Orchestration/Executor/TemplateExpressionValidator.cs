@@ -753,6 +753,7 @@ public static partial class TemplateExpressionValidator
 		IEnumerable<(string, string)> typeSpecific = step switch
 		{
 			PromptOrchestrationStep ps => GetPromptStepFields(ps),
+			DecisionOrchestrationStep ds => [("Context", ds.Context), ("Model", ds.Model)],
 			CommandOrchestrationStep cs => GetCommandStepFields(cs),
 			ScriptOrchestrationStep ss => GetScriptStepFields(ss),
 			HttpOrchestrationStep hs => GetHttpStepFields(hs),

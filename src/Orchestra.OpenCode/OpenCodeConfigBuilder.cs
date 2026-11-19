@@ -173,6 +173,7 @@ internal static class OpenCodeConfigBuilder
 						entry["cwd"] = local.WorkingDirectory;
 					break;
 				case RemoteMcp remote:
+					remote.EnsureAgentReady();
 					entry["type"] = "remote";
 					entry["url"] = remote.Endpoint;
 					if (remote.Headers is { Count: > 0 })

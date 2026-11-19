@@ -86,6 +86,19 @@ public sealed class ValidateGlobalMcpTests : IDisposable
 	}
 
 	[Fact]
+	public void McpConnect_SelectsOneConnectionWithoutResolvingOtherServersSecrets()
+	{
+		PointDiscoveryAt("""
+			{"mcps":[{"name":"other","type":"remote","endpoint":"${ORCHESTRA_TEST_UNSET_OTHER_MCP_ENDPOINT}"},
+			{"name":"foo","type":"remote","endpoint":"https://example.test/mcp","allowedTools":["ask"],
+			"auth":{"type":"entra","clientId":"10000000-0000-0000-0000-000000000001","tenantId":"11111111-2222-3333-4444-555555555555","scopes":["resource/read"]}}]}
+			""");
+		var connection = new McpConnectionSettings { Name = "FOO" }.GetConnection();
+		connection.Auth!.Scopes.Should().ContainSingle("resource/read");
+		connection.AllowedTools.Should().ContainSingle("ask");
+	}
+
+	[Fact]
 	public void Validate_WithoutTheGlobalMcp_StillReportsTheMissingReference_AndReachesWhenChecks()
 	{
 		var path = PointDiscoveryAt("""{ "mcps": [] }""");

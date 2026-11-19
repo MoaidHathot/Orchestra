@@ -23,7 +23,7 @@ dotnet build scripts/copilot-parity/ParityRunner.csproj -p:CopilotSkipCliDownloa
 python -m unittest discover -s scripts/copilot-parity -p test_parity.py -v
 
 # Use the exact same executable for every arm, matching the checked-out SDK/runtime pair.
-$cli = "$env:LOCALAPPDATA/Orchestra/copilot-cli/1.0.105/win-x64/copilot.exe"
+$cli = "$env:LOCALAPPDATA/Orchestra/copilot-cli/1.0.112/win-x64/copilot.exe"
 
 python scripts/copilot-parity/run.py --cli $cli --model claude-sonnet-5 `
   --output artifacts/copilot-parity/my-run --repeats 2
@@ -32,7 +32,7 @@ python scripts/copilot-parity/analyze.py artifacts/copilot-parity/my-run
 ```
 
 The original October 29 baseline used SDK 1.0.14 and CLI 1.0.85, as recorded in the report.
-Current-source runs use SDK 1.0.28 and CLI 1.0.105; use the report's source revision and
+Current-source runs use SDK 1.0.34 and CLI 1.0.112; use the report's source revision and
 version pair when reproducing the historical baseline rather than comparing different pins.
 The example command records the model actually used in the October 29 investigation.
 The driver's default is `claude-opus-4.8`; preflight deliberately fails if the requested

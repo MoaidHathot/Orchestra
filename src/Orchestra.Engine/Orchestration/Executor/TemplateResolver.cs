@@ -224,6 +224,8 @@ public static partial class TemplateResolver
 			{
 				Name = remote.Name,
 				Type = remote.Type,
+				Auth = remote.Auth,
+				AllowedTools = remote.AllowedTools,
 				Endpoint = ResolveStatic(remote.Endpoint, parameters, context),
 				Headers = remote.Headers
 					.ToDictionary(h => h.Key, h => ResolveStatic(h.Value, parameters, context)),

@@ -70,7 +70,7 @@ steps:
 
 ## Features
 
-- **One file, one DAG.** `Prompt`, `Command`, `Script`, `Http`, `Transform`, `Approval`, and
+- **One file, one DAG.** `Prompt`, [`Decision`](decisions), `Command`, `Script`, `Http`, `Transform`, `Approval`, and
   nested `Orchestration` steps wired by `dependsOn`, with template expressions.
 - **Pluggable agents.** Run any Prompt step on `copilot` or `opencode`, chosen per step or per
   orchestration. The engine fails a step fast if it uses a feature the provider lacks, rather
@@ -103,6 +103,7 @@ steps:
 | [Getting Started](getting-started) | Install, first run, workspace layout, team rollout |
 | [CLI](cli) | Every command, flag, and exit code |
 | [Engine](engine) | Step types, triggers, hooks, checkpointing, template expressions |
+| [Decision steps](decisions) | Classify, score, and route with Copilot; verified Microsoft model IDs |
 | [Host](host) | Configuration reference, REST API, MCP server, retention |
 | [Agent providers](copilot) | Copilot vs OpenCode, per-step controls, capability matrix |
 | [API reference](api-reference) | Complete REST API |

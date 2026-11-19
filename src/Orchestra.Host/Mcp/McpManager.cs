@@ -18,7 +18,7 @@ namespace Orchestra.Host.Mcp;
 /// <summary>
 /// Manages globally shared MCP servers defined in the global orchestra.mcp.json file.
 /// Uses the McpProxy SDK to host an in-process proxy with isolated Streamable HTTP
-/// routes for global MCP servers. Backends are validated at startup and shared
+/// routes for global MCP servers. Backends are validated at startup (delegated Entra connections on first use) and shared
 /// across steps. Steps that reference global MCPs have their configurations
 /// transparently replaced with a <see cref="RemoteMcp"/> pointing to that server's route.
 /// </summary>
@@ -41,6 +41,9 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 	private readonly ILogger<McpManager> _logger;
 	private readonly McpServerOptions _mcpServerOptions;
+	// An explicit connection test must return the actual backend error. Ordinary startup leaves
+	// delegated sign-in until first use so an expired work account doesn't block unrelated runs.
+	internal bool ProbeDelegatedAtStartup { get; init; }
 
 	/// <summary>
 	/// The names of global MCP servers managed by this instance.
@@ -95,7 +98,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 	/// <summary>
 	/// Initializes the MCP proxy with the given global MCPs from orchestra.mcp.json.
-	/// Connects and validates every backend before starting the proxy. A failed
+	/// Connects and validates non-delegated backends before starting the proxy. A failed
 	/// backend aborts initialization and disposes all connections already opened.
 	/// </summary>
 	public async Task InitializeAsync(Engine.Mcp[] globalMcps, CancellationToken cancellationToken = default)
@@ -183,6 +186,8 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		foreach (var mcp in mcps)
 		{
 			Engine.Mcp current = mcp;
+			if (mcp is RemoteMcp { RequiresHost: true } && (!_globalMcpNames.Contains(mcp.Name) || _proxyBaseUrl is null))
+				throw new InvalidOperationException($"Managed MCP '{mcp.Name}' requires an initialized Orchestra host connection.");
 
 			// Step 1 — replace global MCPs (defined in orchestra.mcp.json) with a
 			// RemoteMcp pointing at the per-server proxy route.
@@ -913,9 +918,27 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 						break;
 
 					case RemoteMcp remote:
+						EntraMcpAuth.ValidateManagedConnection(remote);
 						var serverBuilder = proxy.AddHttpServer(mcp.Name, remote.Endpoint)
 							.WithTitle(mcp.Name)
 							.WithDeferConnection();
+						if (remote.Auth is {} auth)
+						{
+							var credential = new EntraMcpCredentials().OpenSilent(remote);
+							serverBuilder.WithBackendAuth(BackendAuthType.AzureDefaultCredential, ad =>
+							{
+								ad.TokenCredential = credential;
+								ad.Scopes = auth.Scopes;
+							});
+						}
+						if (remote.AllowedTools is {} tools)
+						{
+							var allowed = tools.ToHashSet(StringComparer.Ordinal);
+							serverBuilder.AllowTools(tools).OnPreInvoke(ctx =>
+							{
+								if (!allowed.Contains(ctx.ToolName)) throw new McpException($"Tool is not permitted on MCP '{remote.Name}'.");
+							});
+						}
 						if (remote.Headers.Count > 0)
 						{
 							serverBuilder.WithHeaders(remote.Headers.ToDictionary(
@@ -936,6 +959,10 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 			.WithSdkProxyHandlers();
 
 		_proxyApp = builder.Build();
+		// The SDK's default AllowList compares names case-insensitively. MCP tools and our invoke gate are exact-case.
+		var config = _proxyApp.Services.GetRequiredService<ProxyConfiguration>();
+		foreach (var remote in globalMcps.OfType<RemoteMcp>().Where(r => r.AllowedTools is not null))
+			config.Mcp[remote.Name].Tools.Filter.CaseInsensitive = false;
 
 		// Register deferred backends and configure SingleServerProxy hook pipelines.
 		await _proxyApp.InitializeMcpProxyAsync(cancellationToken);
@@ -965,6 +992,7 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 		// startup, and stop immediately on the first failure. Services are already ready.
 		foreach (var mcp in globalMcps)
 		{
+			if (mcp is RemoteMcp { Auth: not null } && !ProbeDelegatedAtStartup) continue;
 			var target = mcp is RemoteMcp remote ? remote.Endpoint : ((LocalMcp)mcp).Command;
 			using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 			timeout.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
@@ -972,6 +1000,8 @@ public partial class McpManager : IMcpResolver, IAsyncDisposable
 
 			try
 			{
+				if (mcp is RemoteMcp { Headers.Count: > 0 } withHeaders)
+					await ConnectWithHeadersAsync(app.Services, clients, withHeaders, timeout.Token);
 				if (!await clients.EnsureDeferredClientConnectedAsync(mcp.Name, timeout.Token))
 					throw new InvalidOperationException("The backend did not establish an MCP session.");
 

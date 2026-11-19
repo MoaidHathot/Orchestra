@@ -33,11 +33,11 @@ internal static partial class CopilotCliBootstrap
 {
 	/// <summary>
 	/// Mirrors <c>$(CopilotCliVersion)</c> in <c>GitHub.Copilot.SDK.props</c> shipped
-	/// with the SDK NuGet (currently 1.0.105 in SDK 1.0.28). When bumping
+	/// with the SDK NuGet. When bumping
 	/// <c>GitHub.Copilot.SDK</c> in <c>Directory.Packages.props</c>, update this constant
 	/// to match.
 	/// </summary>
-	public const string CopilotCliVersion = "1.0.105";
+	public const string CopilotCliVersion = "1.0.112";
 
 	private const string DefaultNpmRegistry = "https://registry.npmjs.org";
 

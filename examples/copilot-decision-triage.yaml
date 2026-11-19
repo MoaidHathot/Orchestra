@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=../schemas/orchestration.schema.json
+name: copilot-decision-triage
+description: Route a ticket and score its urgency with one Copilot decision call.
+defaultModel: claude-opus-4.8
+inputs:
+  ticket:
+    type: string
+    required: false
+    default: "I was charged twice for my order. Please refund the duplicate charge."
+
+steps:
+  - name: triage
+    type: Decision
+    model: microsoft-decision-1
+    context: "{{param.ticket}}"
+    questions:
+      - name: refund
+        kind: boolean
+        instructions: Does the customer request a refund?
+        threshold: 0.85
+      - name: team
+        kind: choice
+        instructions: Which team should handle this ticket?
+        options:
+          - { value: billing, description: "Payments, invoices and refunds" }
+          - { value: support, description: "Product questions and technical support" }
+      - name: severity
+        kind: score
+        instructions: How severe is this issue?
+        levels:
+          - { label: Low, description: "Minor inconvenience" }
+          - { label: Medium, description: "Significant issue for one customer" }
+          - { label: High, description: "Critical issue affecting many customers" }
+        range: { min: 0, max: 100 }
+
+  - name: billing-refund
+    type: Transform
+    dependsOn: [triage]
+    when: "{{triage.output.answers.refund.value}} && {{triage.output.answers.team.value}} == 'billing' && !{{triage.output.answers.team.tied}}"
+    template: "Queue for billing review. Priority: {{triage.output.answers.severity.value}}/100 ({{triage.output.answers.severity.level}})."
+
+  - name: general-review
+    type: Transform
+    dependsOn: [billing-refund]
+    when: "{{billing-refund.status}} == 'skipped' && {{triage.status}} == 'succeeded'"
+    template: "Queue for general review."
+
+  - name: summary
+    type: Transform
+    dependsOn: [billing-refund, general-review]
+    template: "{{billing-refund.output}}{{general-review.output}}"

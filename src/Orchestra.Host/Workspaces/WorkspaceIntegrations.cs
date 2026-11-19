@@ -3,6 +3,7 @@ using ModelContextProtocol.Client;
 using Orchestra.Engine;
 using Orchestra.Engine.Serialization;
 using Orchestra.Host.Hosting;
+using Orchestra.Host.Mcp;
 
 namespace Orchestra.Host.Workspaces;
 
@@ -38,13 +39,13 @@ public sealed class WorkspaceIntegrations(PortalWorkspaceOptions options)
 			var index = Enumerable.Range(0, list.Count).FirstOrDefault(i => string.Equals(list[i]?["name"]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase), -1);
 			var merged = RestoreRedactions(update.Definition, index >= 0 ? list[index] : null).AsObject();
 			var remote = string.Equals(merged["type"]?.GetValue<string>(), "remote", StringComparison.OrdinalIgnoreCase);
-			foreach (var field in remote ? new[] { "command", "arguments", "environment", "workingDirectory" } : new[] { "endpoint", "headers" })
+			foreach (var field in remote ? new[] { "command", "arguments", "environment", "workingDirectory" } : new[] { "endpoint", "headers", "auth", "allowedTools" })
 				merged.Remove(field);
 			var candidate = new JsonObject { ["mcps"] = new JsonArray(merged.DeepClone()) }.ToJsonString();
 			var errors = OrchestrationSchemaValidator.ValidateJson(candidate, Path.Combine(options.AssetsDirectory, "schemas", "orchestra.mcp.schema.json"));
 			if (errors.Count > 0)
 				throw new ArgumentException(string.Join("\n", errors));
-			_ = OrchestrationParser.ParseMcps(candidate);
+			_ = OrchestrationParser.ParseMcps(merged["auth"] is null ? candidate : EnvironmentVariableExpander.Expand(candidate, PathName));
 			if (index >= 0)
 				list[index] = merged;
 			else
@@ -75,10 +76,13 @@ public sealed class WorkspaceIntegrations(PortalWorkspaceOptions options)
 	{
 		using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
 		deadline.CancelAfter(TimeSpan.FromSeconds(45));
-		var raw = WorkspaceSettingsStore.ReadObject(Read())["mcps"]?.AsArray()
-			.SingleOrDefault(item => string.Equals(item?["name"]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase)) ?? throw new ArgumentException("MCP not found.");
-		var selected = new JsonObject { ["mcps"] = new JsonArray(raw.DeepClone()) }.ToJsonString();
-		var definition = OrchestrationParser.ParseMcps(EnvironmentVariableExpander.Expand(selected, PathName)).Single();
+		if (!File.Exists(PathName)) throw new ArgumentException("MCP not found.");
+		var definition = OrchestrationParser.ParseNamedMcpFile(PathName, name);
+		if (definition is RemoteMcp { RequiresHost: true } managed)
+		{
+			var names = await ManagedMcpProbe.ListToolsAsync(managed, deadline.Token);
+			return new { connected = true, toolCount = names.Length, restartRequired = true };
+		}
 		IClientTransport transport = definition switch
 		{
 			LocalMcp local => new StdioClientTransport(new()

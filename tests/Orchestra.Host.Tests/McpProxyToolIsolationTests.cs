@@ -152,6 +152,29 @@ public class McpProxyToolIsolationTests
 	}
 
 	// ── Helpers ──────────────────────────────────────────────────────────
+	[Theory]
+	[InlineData(false)]
+	[InlineData(true)]
+	public async Task AllowedTools_FiltersDiscoveryAndBlocksDirectCalls(bool unified)
+	{
+		var port = GetAvailablePort();
+		await using var backend = BuildTestMcpServer(port, ["ask", "retrieve", "FETCH", "other"]);
+		await backend.StartAsync();
+		try
+		{
+			await using var manager = new McpManager(NullLogger<McpManager>.Instance);
+			var server = new RemoteMcp { Name = "work", Type = McpType.Remote, Endpoint = $"http://localhost:{port}/mcp", Headers = [], AllowedTools = ["ask", "retrieve", "fetch"] };
+			await manager.InitializeAsync([server]);
+			var url = ((RemoteMcp)manager.Resolve([server])[0]).Endpoint;
+			if (unified) url = url[..url.LastIndexOf('/')];
+			await using var client = await McpClient.CreateAsync(new HttpClientTransport(new() { Endpoint = new Uri(url) }));
+			(await client.ListToolsAsync()).Select(t => t.Name).Should().BeEquivalentTo(["ask", "retrieve"]);
+			(await client.CallToolAsync("retrieve")).IsError.Should().NotBe(true);
+			try { (await client.CallToolAsync("other")).IsError.Should().BeTrue(); }
+			catch (ModelContextProtocol.McpProtocolException ex) { ex.Message.Should().NotBeNullOrEmpty(); }
+		}
+		finally { await backend.StopAsync(); }
+	}
 
 	private static LocalMcp CreateLocalMcp(string name) => new()
 	{

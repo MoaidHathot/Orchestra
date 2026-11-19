@@ -75,6 +75,22 @@ public class RunScopeLifecycleTests
 	}
 
 	[Fact]
+	public async Task Decision_DoesNotStartAnUnrelatedSingleProviderWorker()
+	{
+		var unrelated = new StartingBuilder(_ => throw new InvalidOperationException("unexpected worker startup"));
+		var definition = Definition(new DecisionOrchestrationStep
+		{
+			Name = "route", Type = OrchestrationStepType.Decision, Context = "Evidence",
+			Questions = [new BooleanQuestion("refund", "Is a refund requested?")],
+		});
+		var executor = new OrchestrationExecutor(new OrchestrationScheduler(), unrelated, NullOrchestrationReporter.Instance, NullLoggerFactory.Instance);
+		var result = await executor.ExecuteAsync(definition);
+		unrelated.Starts.Should().Be(0);
+		result.StepResults["route"].ErrorCategory.Should().Be(StepErrorCategory.ValidationError);
+		result.StepResults["route"].ErrorMessage.Should().Contain("Copilot provider");
+	}
+
+	[Fact]
 	public async Task RestoredPrompts_DoNotReopenUnusedProviders()
 	{
 		var unavailable = new StartingBuilder(_ => throw new InvalidOperationException("unavailable provider"));

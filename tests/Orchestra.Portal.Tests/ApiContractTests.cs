@@ -210,6 +210,30 @@ public class ApiContractTests : IClassFixture<PortalWebApplicationFactory>, IDis
 	#region 1. GET /api/orchestrations — List all orchestrations
 
 	[Fact]
+	public async Task DecisionDefinition_RoundTripsItsModelEvidenceAndRubricThroughThePortalApi()
+	{
+		var name = $"Decision-{Guid.NewGuid():N}";
+		var definition = new { name, description = "Portal decision test", steps = new[] { new
+		{
+			name = "route", type = "Decision", context = "{{env.TICKET}}",
+			questions = new[] { new { kind = "choice", name = "team", instructions = "Which team?", options = new[]
+			{
+				new { value = "billing", description = "Payments" }, new { value = "support", description = "Other help" },
+			} } },
+		} } };
+		using var registered = await _client.PostAsJsonAsync("/api/orchestrations/json", new { json = JsonSerializer.Serialize(definition) });
+		registered.EnsureSuccessStatusCode();
+		var id = (await registered.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetString();
+		var details = await _client.GetFromJsonAsync<JsonElement>($"/api/orchestrations/{id}");
+		var step = details.GetProperty("steps")[0];
+		step.GetProperty("model").GetString().Should().Be("microsoft-decision-1");
+		step.GetProperty("provider").GetString().Should().Be("copilot");
+		step.GetProperty("context").GetString().Should().Be("{{env.TICKET}}");
+		step.GetProperty("questions")[0].GetProperty("kind").GetString().Should().Be("choice");
+		step.GetProperty("questions")[0].GetProperty("options")[0].GetProperty("value").GetString().Should().Be("billing");
+	}
+
+	[Fact]
 	public async Task Contract_GetOrchestrations_ReturnsJsonWithOrchestrationsList()
 	{
 		var response = await _client.GetAsync("/api/orchestrations");

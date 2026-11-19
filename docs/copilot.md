@@ -13,6 +13,8 @@ Orchestra.Copilot provides a GitHub Copilot SDK implementation of the agent inte
 
 This package bridges Orchestra with GitHub Copilot, enabling orchestrations to leverage Copilot's AI capabilities. It implements the `IAgent` and `AgentBuilder` abstractions, handling all the complexity of communicating with the Copilot SDK.
 
+[Decision steps](decisions.md) share the run's Copilot worker pool and authentication. They call the sessionless Decisions RPC for booleans, named choices, and ordered scores.
+
 ## Copilot CLI parity
 
 The SDK drives the real Copilot runtime: one Prompt step can perform multiple model calls,
@@ -470,8 +472,8 @@ timeoutSeconds: 300
 
 Omission selects `standard`: the ordinary full agent/tool loop with non-interactive guidance
 unless `humanInput` overrides it. `autopilot` additionally lets the runtime continue after
-an otherwise finished turn when the task is not complete. It uses Copilot SDK **1.0.28** and
-the pinned CLI **1.0.105**, native session mode, and native continuation options.
+an otherwise finished turn when the task is not complete. It uses native Copilot session mode
+and native continuation options.
 
 `maxContinues` defaults to 5 and accepts non-negative integers; 0 permits the initial
 agent/tool loop but no automatic continuations. This is a continuation limit, not a tool-call
@@ -657,5 +659,5 @@ Console.WriteLine($"Tokens: {result.Usage?.InputTokens} in, {result.Usage?.Outpu
 
 - **Target Framework**: .NET 10.0
 - **Project Reference**: `Orchestra.Engine`
-- **Package Reference**: `GitHub.Copilot.SDK` (v1.0.28)
+- **Package Reference**: `GitHub.Copilot.SDK` (v1.0.34; matched CLI 1.0.112)
 {% endraw %}

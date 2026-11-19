@@ -4,7 +4,7 @@ using Orchestra.Engine;
 
 namespace Orchestra.Copilot;
 
-public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
+public partial class CopilotAgentBuilder : AgentBuilder, IDecisionProvider, IAsyncDisposable
 {
 	private readonly ILoggerFactory _loggerFactory;
 	private readonly ILogger<CopilotAgentBuilder> _logger;
@@ -48,7 +48,7 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 
 	/// <summary>
 	/// Creates a run-scoped pool for an orchestration run.
-	/// Prompt steps within the run acquire leases from this pool.
+	/// Prompt and Decision steps within the run acquire leases from this pool.
 	/// The pool is disposed when the returned scope is disposed.
 	/// </summary>
 	public override Task<IAsyncDisposable> CreateRunScopeAsync(
@@ -182,15 +182,22 @@ public partial class CopilotAgentBuilder : AgentBuilder, IAsyncDisposable
 		{
 			LogBuildAgentOutsideScope(Environment.CurrentManagedThreadId, Environment.StackTrace);
 			throw new InvalidOperationException(
-				"BuildAgentAsync was called outside an active CreateRunScopeAsync. " +
-				"Every Copilot agent build must happen inside a per-orchestration run scope " +
-				"so each orchestration gets its own CLI process. " +
+				"The Copilot provider was called outside an active CreateRunScopeAsync. " +
 				"Open a scope with `await using var scope = await builder.CreateRunScopeAsync(...)` " +
-				"or call BuildAgentAsync from within OrchestrationExecutor.ExecuteAsync.");
+				"or run the step through OrchestrationExecutor.ExecuteAsync.");
 		}
 
 		LogActiveClientResolved("run-scoped", pool.Diagnostic, Environment.CurrentManagedThreadId);
 		return Task.FromResult<ICopilotClientPool>(pool);
+	}
+
+	public async Task<DecisionResult> AskAsync(DecisionRequest request, CancellationToken cancellationToken)
+	{
+		var pool = await GetActivePoolAsync(cancellationToken).ConfigureAwait(false);
+		await using var lease = await pool.AcquireAsync(cancellationToken).ConfigureAwait(false);
+		if (lease.Client is not IDecisionProvider decisions)
+			throw new NotSupportedException("This Copilot client does not implement the Decisions API.");
+		return await decisions.AskAsync(request, cancellationToken).ConfigureAwait(false);
 	}
 
 	public override async Task<IAgent> BuildAgentAsync(CancellationToken cancellationToken = default)

@@ -131,7 +131,16 @@ public class OnboardingUiTests
 			(await File.ReadAllTextAsync(Path.Combine(library, "existing.yaml"))).Should().Be(definition);
 			await page.GetByRole(AriaRole.Button, new() { Name = "Visual Builder", Exact = true }).ClickAsync();
 			await page.GetByRole(AriaRole.Note).GetByText("Visual Builder — Preview.", new() { Exact = true }).WaitForAsync();
-			await page.GetByRole(AriaRole.Dialog, new() { Name = "Visual Orchestration Builder" }).GetByRole(AriaRole.Button, new() { Name = "Close", Exact = true }).ClickAsync();
+			var builder = page.GetByRole(AriaRole.Dialog, new() { Name = "Visual Orchestration Builder" });
+			await builder.GetByLabel("Orchestration name").FillAsync("browser-decision");
+			await builder.GetByRole(AriaRole.Button, new() { Name = "Decision", Exact = true }).ClickAsync();
+			await builder.GetByLabel("Context", new() { Exact = true }).FillAsync("The ticket requests a refund.");
+			await builder.GetByRole(AriaRole.Button, new() { Name = "Save workflow" }).ClickAsync();
+			await page.GetByRole(AriaRole.Button, new() { Name = "Run browser-decision", Exact = true }).First.WaitForAsync();
+			var saved = factory.Services.GetRequiredService<OrchestrationRegistry>().GetByIdOrName("browser-decision")!;
+			var decision = saved.Orchestration.Steps.Single().Should().BeOfType<DecisionOrchestrationStep>().Which;
+			decision.Model.Should().Be("microsoft-decision-1", "Decision steps have their own default on a chat-configured host");
+			decision.Questions.Single().Should().BeOfType<BooleanQuestion>();
 			await page.GetByRole(AriaRole.Button, new() { Name = "Get started", Exact = true }).First.ClickAsync();
 			await page.GetByRole(AriaRole.Button, new() { Name = "Import a workflow", Exact = true }).ClickAsync();
 			var import = page.GetByRole(AriaRole.Dialog, new() { Name = "Orchestrations", Exact = true });

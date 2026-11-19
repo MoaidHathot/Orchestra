@@ -137,7 +137,7 @@ Hooks are different from Prompt step handlers:
 
 ### Steps
 
-Steps are the building blocks of orchestrations. Each step has a type that determines its executor: `PromptOrchestrationStep` for LLM calls, `CommandOrchestrationStep` for shell commands, `ScriptOrchestrationStep` for inline/file scripts, `HttpOrchestrationStep` for REST requests, and `TransformOrchestrationStep` for string interpolation.
+Steps are the building blocks of orchestrations. Each step has a type that determines its executor: `PromptOrchestrationStep` for agent calls, [`DecisionOrchestrationStep`](decisions.md) for bounded classifications and scores, `CommandOrchestrationStep` for shell commands, `ScriptOrchestrationStep` for inline/file scripts, `HttpOrchestrationStep` for REST requests, and `TransformOrchestrationStep` for string interpolation.
 
 Prompt-heavy orchestrations can request provider worker-pool capacity with top-level `agentPool`. Providers map these neutral settings to their own resources; the Copilot provider maps instances to CLI clients. `maxInstances` is a ceiling, not a static count: workers are created on demand up to the ceiling, and idle workers above `minInstances` are stopped after `idleTimeoutSeconds`.
 
@@ -455,7 +455,7 @@ Available via `{{step.property}}`:
 | Property | Type | Description |
 |----------|------|-------------|
 | `name` | string | The current step's name |
-| `type` | string | The current step's type (`Prompt`, `Command`, `Script`, `Transform`, `Http`) |
+| `type` | string | The current step's type (`Prompt`, `Decision`, `Command`, `Script`, `Transform`, `Http`, `Orchestration`, `Approval`) |
 
 #### Template Resolution
 

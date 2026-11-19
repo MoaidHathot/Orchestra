@@ -69,6 +69,7 @@ public static class OrchestrationsApi
 						steps = o.Orchestration.Steps.Select(s =>
 						{
 							var ps = s as PromptOrchestrationStep;
+							var ds = s as DecisionOrchestrationStep;
 							var hs = s as HttpOrchestrationStep;
 							var cs = s as CommandOrchestrationStep;
 							var ts = s as TransformOrchestrationStep;
@@ -83,7 +84,8 @@ public static class OrchestrationsApi
 								// Per-step timeout as authored (null = inherit defaultStepTimeoutSeconds, 0 = explicitly none).
 								timeoutSeconds = s.TimeoutSeconds,
 								condition = s.When,
-								model = ps?.Model,
+								model = ps?.Model ?? ds?.Model,
+								provider = ds is null ? ps?.Provider : DecisionOrchestrationStep.ProviderName,
 								mcps = ps?.Mcps.Select(m => new
 								{
 									name = m.Name,
@@ -148,8 +150,7 @@ public static class OrchestrationsApi
 						mcps = o.Orchestration.Mcps.Select(m => new { name = m.Name, type = m.Type.ToString() }).ToArray(),
 						hooks = BuildCombinedHookInfo(hostOptions.Hooks, o.Orchestration.Hooks),
 						models = o.Orchestration.Steps
-						.OfType<PromptOrchestrationStep>()
-							.Select(s => s.Model)
+							.Select(s => s switch { PromptOrchestrationStep p => p.Model, DecisionOrchestrationStep d => d.Model, _ => null })
 							.Where(m => !string.IsNullOrEmpty(m))
 							.Distinct()
 							.ToArray()
@@ -203,6 +204,7 @@ public static class OrchestrationsApi
 			var steps = o.Steps.Select(s =>
 			{
 				var ps = s as PromptOrchestrationStep;
+				var ds = s as DecisionOrchestrationStep;
 				var hs = s as HttpOrchestrationStep;
 				var cs = s as CommandOrchestrationStep;
 				var ts = s as TransformOrchestrationStep;
@@ -217,7 +219,11 @@ public static class OrchestrationsApi
 					// Per-step timeout as authored (null = inherit defaultStepTimeoutSeconds, 0 = explicitly none).
 					timeoutSeconds = s.TimeoutSeconds,
 					condition = s.When,
-					model = ps?.Model,
+					model = ps?.Model ?? ds?.Model,
+					provider = ds is null ? ps?.Provider : DecisionOrchestrationStep.ProviderName,
+					context = ds?.Context,
+					contextFormat = ds?.ContextFormat.ToString().ToLowerInvariant(),
+					questions = ds?.Questions,
 					reasoningLevel = ps?.ReasoningLevel?.ToString(),
 					systemPromptMode = ps?.SystemPromptMode?.ToString(),
 					systemPrompt = ps?.SystemPrompt,
@@ -827,6 +833,11 @@ public static class OrchestrationsApi
 							Scan(arg);
 					}
 				}
+			}
+			else if (step is DecisionOrchestrationStep ds)
+			{
+				Scan(ds.Model);
+				Scan(ds.Context);
 			}
 			else if (step is HttpOrchestrationStep hs)
 			{

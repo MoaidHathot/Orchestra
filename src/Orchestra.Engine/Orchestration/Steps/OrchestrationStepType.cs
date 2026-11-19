@@ -23,4 +23,7 @@ public enum OrchestrationStepType
 	/// existing checkpoint/resume mechanism.
 	/// </summary>
 	Approval,
+
+	/// <summary>Ask bounded questions about shared evidence in a sessionless model call.</summary>
+	Decision,
 }

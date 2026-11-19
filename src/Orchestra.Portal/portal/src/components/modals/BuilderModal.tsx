@@ -17,7 +17,7 @@ interface Props {
 interface BuilderStep {
   id: string;
   name: string;
-  type: 'Prompt' | 'Http' | 'Transform';
+  type: 'Prompt' | 'Decision' | 'Http' | 'Transform';
   dependsOn: string[];
   x: number;
   y: number;
@@ -25,6 +25,10 @@ interface BuilderStep {
   systemPrompt?: string;
   userPrompt?: string;
   model?: string;
+  // Decision fields
+  context?: string;
+  contextFormat?: 'text' | 'json';
+  questionsJson?: string;
   // Http fields
   method?: string;
   url?: string;
@@ -77,6 +81,7 @@ const DEFAULT_CONFIG: OrchestrationConfig = {
 
 const TYPE_COLORS: Record<BuilderStep['type'], string> = {
   Prompt: 'var(--accent)',
+  Decision: 'var(--success)',
   Http: 'var(--orange)',
   Transform: 'var(--purple)',
 };
@@ -89,6 +94,15 @@ let stepCounter = 0;
 function nextStepId(): string {
   stepCounter += 1;
   return `step_${Date.now()}_${stepCounter}`;
+}
+
+function parseQuestions(text: string): unknown[] | null {
+  try {
+    const value: unknown = JSON.parse(text);
+    return Array.isArray(value) && value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 function nextStepName(existing: BuilderStep[]): string {
@@ -529,6 +543,9 @@ function BuilderModal({ open, onClose, onSave, error }: Props): React.JSX.Elemen
     [steps],
   );
 
+  const invalidDecision = steps.find(s => s.type === 'Decision' &&
+    (!s.context?.trim() || !parseQuestions(s.questionsJson ?? '')));
+
   /* ---- helpers ---- */
   const svgPoint = useCallback(
     (clientX: number, clientY: number): { x: number; y: number } => {
@@ -566,6 +583,10 @@ function BuilderModal({ open, onClose, onSave, error }: Props): React.JSX.Elemen
         x: Math.round(cx),
         y: Math.round(cy),
         ...(type === 'Prompt' ? { model: getDefaultModel(), systemPrompt: '', userPrompt: '' } : {}),
+        ...(type === 'Decision' ? {
+          context: 'Please refund the duplicate charge.',
+          questionsJson: JSON.stringify([{ name: 'refund', kind: 'boolean', instructions: 'Does the customer request a refund?' }], null, 2),
+        } : {}),
         ...(type === 'Http' ? { method: 'GET', url: '', body: '' } : {}),
         ...(type === 'Transform' ? { template: '' } : {}),
       };
@@ -788,6 +809,12 @@ function BuilderModal({ open, onClose, onSave, error }: Props): React.JSX.Elemen
         base.method = s.method || 'GET';
         base.url = s.url || '';
         if (s.body) base.body = s.body;
+      }
+      if (s.type === 'Decision') {
+        if (s.model) base.model = s.model;
+        base.context = s.context;
+        if (s.contextFormat === 'json') base.contextFormat = s.contextFormat;
+        base.questions = parseQuestions(s.questionsJson ?? '');
       }
       if (s.type === 'Transform') {
         base.template = s.template || '';
@@ -1069,6 +1096,34 @@ function BuilderModal({ open, onClose, onSave, error }: Props): React.JSX.Elemen
                     rows={3}
                   />
                 </div>
+              </>
+            )}
+
+            {selected.type === 'Decision' && (
+              <>
+                <div className="builder-field">
+                  <label className="builder-field-label" htmlFor="decision-model">Decision model</label>
+                  <input id="decision-model" className="builder-field-input" placeholder="microsoft-decision-1" value={selected.model ?? ''}
+                    onChange={e => updateStep(selected.id, { model: e.target.value })} />
+                </div>
+                <div className="builder-field">
+                  <label className="builder-field-label" htmlFor="decision-context">Context</label>
+                  <textarea id="decision-context" className="builder-field-textarea" rows={3} value={selected.context ?? ''}
+                    onChange={e => updateStep(selected.id, { context: e.target.value })} />
+                </div>
+                <div className="builder-field">
+                  <label className="builder-field-label" htmlFor="decision-format">Context format</label>
+                  <select id="decision-format" className="builder-field-select" value={selected.contextFormat ?? 'text'}
+                    onChange={e => updateStep(selected.id, { contextFormat: e.target.value === 'json' ? 'json' : 'text' })}>
+                    <option value="text">Text</option><option value="json">JSON object or array of objects</option>
+                  </select>
+                </div>
+                <div className="builder-field">
+                  <label className="builder-field-label" htmlFor="decision-questions">Questions (JSON array)</label>
+                  <textarea id="decision-questions" className="builder-field-textarea" rows={8} value={selected.questionsJson ?? ''}
+                    onChange={e => updateStep(selected.id, { questionsJson: e.target.value })} />
+                </div>
+                <small>Use boolean, choice (with options), or score (with ordered levels).</small>
               </>
             )}
 
@@ -1392,7 +1447,7 @@ function BuilderModal({ open, onClose, onSave, error }: Props): React.JSX.Elemen
             >
               <Icons.Tool />
             </button>
-            <button className="btn btn-sm btn-primary" onClick={exportJson} title="Save workflow">
+            <button className="btn btn-sm btn-primary" onClick={exportJson} disabled={!!invalidDecision} title="Save workflow">
               <Icons.Download /> Save workflow
             </button>
             <button
@@ -1407,10 +1462,11 @@ function BuilderModal({ open, onClose, onSave, error }: Props): React.JSX.Elemen
         </div>
 
         <div role="note" style={{ padding: '12px 16px', background: 'var(--bg-secondary)', color: 'var(--warning)', borderBottom: '1px solid var(--border)' }}>
-          <strong>Visual Builder — Preview.</strong> Its functionality is incomplete. It currently supports Prompt, HTTP, and Transform steps only.
+          <strong>Visual Builder — Preview.</strong> Its functionality is incomplete. It currently supports Prompt, Decision, HTTP, and Transform steps only.
           Use the authoring assistant or import JSON/YAML for the full Orchestra feature set.
         </div>
         {error && <div role="alert" style={{ padding: '12px 16px', color: 'var(--error)' }}>{error}</div>}
+        {invalidDecision && <div role="alert">{invalidDecision.name}: enter context and a non-empty JSON array of questions.</div>}
         {/* ===== BODY ===== */}
         <div className="builder-body">
           {/* --- Left palette --- */}
@@ -1423,6 +1479,10 @@ function BuilderModal({ open, onClose, onSave, error }: Props): React.JSX.Elemen
             >
               <span className="builder-palette-dot" style={{ background: TYPE_COLORS.Prompt }} />
               Prompt
+            </button>
+            <button type="button" className="builder-palette-btn" onClick={() => addStep('Decision')}>
+              <span className="builder-palette-dot" style={{ background: TYPE_COLORS.Decision }} />
+              Decision
             </button>
             <button
               type="button"
