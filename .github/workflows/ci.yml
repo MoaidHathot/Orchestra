@@ -144,7 +144,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # The pinned Playwright driver supports Ubuntu 24.04; ubuntu-latest can resolve to 26.04.
+        os: [ubuntu-24.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
