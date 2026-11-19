@@ -23,12 +23,7 @@ public class ClockPauseTrackerTests
 		using var cts = new CancellationTokenSource();
 		var tracker = CreateTracker(cts, timeoutSeconds: 60);
 
-		tracker.BeginWait();
-		await Task.Delay(50);
-		tracker.EndWait();
-
-		tracker.TotalWaitElapsed.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(40));
-		tracker.TotalWaitElapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(500));
+		await AssertSingleWaitIntervalAsync(tracker, () => Task.Delay(50));
 	}
 
 	[Fact]
@@ -37,18 +32,15 @@ public class ClockPauseTrackerTests
 		using var cts = new CancellationTokenSource();
 		var tracker = CreateTracker(cts, timeoutSeconds: 60);
 
-		tracker.BeginWait();
-		await Task.Delay(20);
-		tracker.BeginWait();   // Second wait starts while first is still active
-		await Task.Delay(20);
-		tracker.EndWait();      // First end leaves us with one active wait
-		await Task.Delay(20);
-		tracker.EndWait();      // Last end accumulates the full ~60ms
-
-		// Three sequential 20ms phases should total ~60ms regardless of overlapping waits.
-		// Allow generous bounds for OS scheduling.
-		tracker.TotalWaitElapsed.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(40));
-		tracker.TotalWaitElapsed.Should().BeLessThan(TimeSpan.FromMilliseconds(500));
+		await AssertSingleWaitIntervalAsync(tracker, async () =>
+		{
+			await Task.Delay(20);
+			tracker.BeginWait();
+			await Task.Delay(20);
+			tracker.EndWait();
+			tracker.TotalWaitElapsed.Should().Be(TimeSpan.Zero, "one wait is still active");
+			await Task.Delay(20);
+		});
 	}
 
 	[Fact]
@@ -83,6 +75,22 @@ public class ClockPauseTrackerTests
 		// Verify the cts is NOT yet cancelled.
 		cts.IsCancellationRequested.Should().BeFalse();
 		tracker.TotalWaitElapsed.Should().BeGreaterThanOrEqualTo(TimeSpan.FromMilliseconds(250));
+	}
+
+	private static async Task AssertSingleWaitIntervalAsync(ClockPauseTracker tracker, Func<Task> whileWaiting)
+	{
+		// Task.Delay is a minimum, not a deadline. Bracket the start/end calls so the bounds
+		// measure one real outer interval, even if a busy runner schedules the continuation late.
+		var beforeBegin = DateTimeOffset.UtcNow;
+		tracker.BeginWait();
+		var afterBegin = DateTimeOffset.UtcNow;
+		await whileWaiting();
+		var beforeEnd = DateTimeOffset.UtcNow;
+		tracker.EndWait();
+		var afterEnd = DateTimeOffset.UtcNow;
+
+		tracker.TotalWaitElapsed.Should().BeGreaterThanOrEqualTo(beforeEnd - afterBegin)
+			.And.BeLessThanOrEqualTo(afterEnd - beforeBegin);
 	}
 
 	private static ClockPauseTracker CreateTracker(CancellationTokenSource cts, int timeoutSeconds)
